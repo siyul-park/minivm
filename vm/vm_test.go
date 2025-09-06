@@ -19,7 +19,6 @@ var tests = []struct {
 		program: program.New(instr.New(instr.NOP)),
 		values:  nil,
 	},
-
 	{
 		program: program.New(instr.New(instr.I32_CONST, 42), instr.New(instr.DROP)),
 		values:  nil,
@@ -31,6 +30,14 @@ var tests = []struct {
 	{
 		program: program.New(instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.SWAP)),
 		values:  []types.Value{types.I32(1), types.I32(2)},
+	},
+	{
+		program: program.New(instr.New(instr.JMP, 5), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2)),
+		values:  []types.Value{types.I32(2)},
+	},
+	{
+		program: program.New(instr.New(instr.I32_CONST, 1), instr.New(instr.JMP_IF, 5), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3)),
+		values:  []types.Value{types.I32(3)},
 	},
 
 	{

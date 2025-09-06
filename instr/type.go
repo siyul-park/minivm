@@ -8,10 +8,11 @@ type Type struct {
 var types = map[Opcode]Type{
 	NOP:         {"nop", []int{}},
 	UNREACHABLE: {"unreachable", []int{}},
-
-	DROP: {"drop", []int{}},
-	DUP:  {"dup", []int{}},
-	SWAP: {"swap", []int{}},
+	DROP:        {"drop", []int{}},
+	DUP:         {"dup", []int{}},
+	SWAP:        {"swap", []int{}},
+	JMP:         {"jmp", []int{4}},
+	JMP_IF:      {"jmp_if", []int{4}},
 
 	I32_CONST: {"i32.const", []int{4}},
 	I32_ADD:   {"i32.add", []int{}},

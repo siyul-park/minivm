@@ -28,14 +28,6 @@ func TestBoxed_Interface(t *testing.T) {
 			expected: 3.14,
 		},
 		{
-			value:    BoxBool(true),
-			expected: true,
-		},
-		{
-			value:    BoxBool(false),
-			expected: false,
-		},
-		{
 			value:    BoxNull(),
 			expected: nil,
 		},

@@ -5,10 +5,11 @@ type Opcode byte
 const (
 	NOP Opcode = iota
 	UNREACHABLE
-
 	DROP
 	DUP
 	SWAP
+	JMP
+	JMP_IF
 
 	I32_CONST
 	I32_ADD

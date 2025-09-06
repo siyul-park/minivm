@@ -135,6 +135,22 @@ func (vm *VM) Run() error {
 			}
 			frame.ip++
 
+		case instr.JMP:
+			v := int(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
+			frame.ip += v + 5
+
+		case instr.JMP_IF:
+			v1 := int(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if v2 != 0 {
+				frame.ip += v1 + 5
+			} else {
+				frame.ip += 5
+			}
+
 		case instr.I32_CONST:
 			v := types.I32(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
 			if err := vm.pushI32(v); err != nil {
