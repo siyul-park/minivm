@@ -21,8 +21,8 @@ type VM struct {
 	code   []byte
 	stack  []types.Boxed
 	heap   []types.Value
-	refs   []int
 	frees  []int
+	hits   []int
 	frames []Frame
 	sp     int
 	fp     int
@@ -54,7 +54,7 @@ func New(prog *program.Program, opts ...Option) *VM {
 		code:   prog.Code,
 		stack:  make([]types.Boxed, stack),
 		heap:   make([]types.Value, 0, heap),
-		refs:   make([]int, 0, heap),
+		hits:   make([]int, 0, heap),
 		frees:  make([]int, 0, heap),
 		frames: make([]Frame, frame),
 		sp:     -1,
@@ -191,7 +191,7 @@ func (vm *VM) alloc(val types.Value) int {
 		return addr
 	}
 	vm.heap = append(vm.heap, val)
-	vm.refs = append(vm.refs, 0)
+	vm.hits = append(vm.hits, 0)
 	return len(vm.heap) - 1
 }
 
@@ -200,21 +200,31 @@ func (vm *VM) free(addr int) {
 		return
 	}
 	vm.heap[addr] = nil
-	vm.refs[addr] = 0
+	vm.hits[addr] = 0
+
 	vm.frees = append(vm.frees, addr)
+
+	for addr == len(vm.heap)-1 && len(vm.heap) > 0 {
+		vm.heap = vm.heap[:len(vm.heap)-1]
+		vm.hits = vm.hits[:len(vm.hits)-1]
+		if len(vm.frees) > 0 && vm.frees[len(vm.frees)-1] == addr {
+			vm.frees = vm.frees[:len(vm.frees)-1]
+		}
+		addr = len(vm.heap) - 1
+	}
 }
 
 func (vm *VM) retain(addr int) {
-	if addr < 0 || addr >= len(vm.refs) {
+	if addr < 0 || addr >= len(vm.hits) {
 		return
 	}
-	vm.refs[addr]++
+	vm.hits[addr]++
 }
 
 func (vm *VM) release(addr int) bool {
-	if addr < 0 || addr >= len(vm.refs) {
+	if addr < 0 || addr >= len(vm.hits) {
 		return false
 	}
-	vm.refs[addr]--
-	return vm.refs[addr] <= 0
+	vm.hits[addr]--
+	return vm.hits[addr] <= 0
 }
