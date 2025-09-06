@@ -1,10 +1,12 @@
 package vm
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
@@ -15,6 +17,7 @@ type Option struct {
 	Stack int
 	Heap  int
 	Frame int
+	Yield int
 }
 
 type VM struct {
@@ -26,19 +29,22 @@ type VM struct {
 	frames []Frame
 	sp     int
 	fp     int
+	yield  int
 }
 
 var (
-	ErrStackOverflow  = errors.New("stack overflow")
-	ErrStackUnderflow = errors.New("stack underflow")
-	ErrFrameOverflow  = errors.New("frame overflow")
-	ErrUnknownOpcode  = errors.New("unknown opcode")
+	ErrStackOverflow       = errors.New("stack overflow")
+	ErrStackUnderflow      = errors.New("stack underflow")
+	ErrFrameOverflow       = errors.New("frame overflow")
+	ErrUnreachableExecuted = errors.New("unreachable executed")
+	ErrUnknownOpcode       = errors.New("unknown opcode")
 )
 
 func New(prog *program.Program, opts ...Option) *VM {
 	stack := 1024
 	heap := 64
 	frame := 64
+	yield := 128
 	for _, opt := range opts {
 		if opt.Stack > 0 {
 			stack = opt.Stack
@@ -49,6 +55,9 @@ func New(prog *program.Program, opts ...Option) *VM {
 		if opt.Frame > 0 {
 			frame = opt.Frame
 		}
+		if opt.Yield > 0 {
+			yield = opt.Yield
+		}
 	}
 	return &VM{
 		code:   prog.Code,
@@ -58,24 +67,48 @@ func New(prog *program.Program, opts ...Option) *VM {
 		frees:  make([]int, 0, heap),
 		frames: make([]Frame, frame),
 		sp:     -1,
-		fp:     -1,
+		fp:     0,
+		yield:  yield,
+	}
+}
+
+func (vm *VM) RunWithContext(ctx context.Context) error {
+	instrs := program.New(vm.code).Instructions()
+	injects := make([]instr.Instruction, 0, len(instrs)+len(instrs)/vm.yield+1)
+	for i, op := range instrs {
+		if i > 0 && i%vm.yield == 0 {
+			injects = append(injects, instr.New(instr.UNREACHABLE))
+		}
+		injects = append(injects, op)
+	}
+	vm.code = program.New(injects...).Code
+
+	for {
+		err := vm.Run()
+		if err != nil && errors.Is(err, ErrUnreachableExecuted) {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(0):
+				continue
+			}
+		}
+		return err
 	}
 }
 
 func (vm *VM) Run() error {
-	vm.fp++
-	if vm.fp >= len(vm.frames) {
-		return fmt.Errorf("%w: fp=%d", ErrFrameOverflow, vm.fp)
-	}
-
 	frame := &vm.frames[vm.fp]
-	frame.ip = 0
 
 	for frame.ip < len(vm.code) {
 		opcode := instr.Opcode(vm.code[frame.ip])
 		switch opcode {
 		case instr.NOP:
 			frame.ip++
+
+		case instr.UNREACHABLE:
+			frame.ip++
+			return fmt.Errorf("%w: at ip=%d", ErrUnreachableExecuted, frame.ip)
 
 		case instr.I32_CONST:
 			v := types.I32(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))

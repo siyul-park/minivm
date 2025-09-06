@@ -6,7 +6,8 @@ type Type struct {
 }
 
 var types = map[Opcode]Type{
-	NOP: {"nop", []int{}},
+	NOP:         {"nop", []int{}},
+	UNREACHABLE: {"unreachable", []int{}},
 
 	I32_CONST: {"i32.const", []int{4}},
 	I64_CONST: {"i64.const", []int{8}},
