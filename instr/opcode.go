@@ -13,6 +13,9 @@ const (
 	JMP
 	JMP_IF
 
+	GLOBAL_GET
+	GLOBAL_SET
+
 	I32_CONST
 
 	I32_ADD

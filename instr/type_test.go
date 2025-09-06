@@ -39,6 +39,9 @@ func TestTypeOf(t *testing.T) {
 		{opcode: I32_GE_S},
 		{opcode: I32_GE_U},
 
+		{opcode: GLOBAL_GET},
+		{opcode: GLOBAL_SET},
+
 		{opcode: I64_CONST},
 
 		{opcode: I64_ADD},

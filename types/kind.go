@@ -3,7 +3,8 @@ package types
 type Kind byte
 
 const (
-	KindI32 Kind = iota
+	_ Kind = iota
+	KindI32
 	KindI64
 	KindF32
 	KindF64

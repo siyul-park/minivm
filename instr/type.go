@@ -16,6 +16,9 @@ var types = map[Opcode]Type{
 	JMP:    {"jmp", []int{4}},
 	JMP_IF: {"jmp_if", []int{4}},
 
+	GLOBAL_GET: {"global.get", []int{4}},
+	GLOBAL_SET: {"global.set", []int{4}},
+
 	I32_CONST: {"i32.const", []int{4}},
 
 	I32_ADD:   {"i32.add", []int{}},

@@ -11,9 +11,10 @@ import (
 )
 
 type Option struct {
-	Stack int
-	Heap  int
-	Frame int
+	Stack  int
+	Heap   int
+	Global int
+	Frame  int
 }
 
 type VM struct {
@@ -22,6 +23,7 @@ type VM struct {
 	heap   []types.Value
 	frees  []int
 	hits   []int
+	global []types.Boxed
 	frames []Frame
 	sp     int
 	fp     int
@@ -30,6 +32,7 @@ type VM struct {
 var (
 	ErrUnknownOpcode       = errors.New("unknown opcode")
 	ErrUnreachableExecuted = errors.New("unreachable executed")
+	ErrReferenceNotFound   = errors.New("reference not found")
 	ErrStackOverflow       = errors.New("stack overflow")
 	ErrStackUnderflow      = errors.New("stack underflow")
 	ErrFrameOverflow       = errors.New("frame overflow")
@@ -39,6 +42,7 @@ var (
 func New(prog *program.Program, opts ...Option) *VM {
 	stack := 1024
 	heap := 64
+	global := 128
 	frame := 64
 	for _, opt := range opts {
 		if opt.Stack > 0 {
@@ -46,6 +50,9 @@ func New(prog *program.Program, opts ...Option) *VM {
 		}
 		if opt.Heap > 0 {
 			heap = opt.Heap
+		}
+		if opt.Global > 0 {
+			global = opt.Global
 		}
 		if opt.Frame > 0 {
 			frame = opt.Frame
@@ -57,6 +64,7 @@ func New(prog *program.Program, opts ...Option) *VM {
 		heap:   make([]types.Value, 0, heap),
 		hits:   make([]int, 0, heap),
 		frees:  make([]int, 0, heap),
+		global: make([]types.Boxed, 0, global),
 		frames: make([]Frame, frame),
 		sp:     -1,
 		fp:     -1,
@@ -120,6 +128,28 @@ func (vm *VM) Run() error {
 			} else {
 				frame.ip += 5
 			}
+
+		case instr.GLOBAL_GET:
+			v1 := int(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
+			v2, err := vm.globalGet(v1)
+			if err != nil {
+				return err
+			}
+			if err := vm.push(v2); err != nil {
+				return err
+			}
+			frame.ip += 5
+
+		case instr.GLOBAL_SET:
+			v1 := int(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
+			v2, err := vm.pop()
+			if err != nil {
+				return err
+			}
+			if err := vm.globalSet(v1, v2); err != nil {
+				return err
+			}
+			frame.ip += 5
 
 		case instr.I32_CONST:
 			v := types.I32(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
@@ -941,8 +971,13 @@ func (vm *VM) Push(val types.Value) error {
 	case types.Boxed:
 		return vm.push(val)
 	default:
-		addr := vm.alloc(val)
-		vm.retain(addr)
+		addr, err := vm.alloc(val)
+		if err != nil {
+			return err
+		}
+		if err := vm.retain(addr); err != nil {
+			return err
+		}
 		return vm.push(types.BoxRef(addr))
 	}
 }
@@ -956,8 +991,12 @@ func (vm *VM) Pop() (types.Value, error) {
 	if box.Kind() == types.KindRef {
 		addr := box.Ref()
 		val := vm.heap[addr]
-		if vm.release(addr) {
-			vm.free(addr)
+		if ok, err := vm.release(addr); err != nil {
+			return nil, err
+		} else if ok {
+			if err := vm.free(addr); err != nil {
+				return nil, err
+			}
 		}
 		return val, nil
 	}
@@ -984,6 +1023,50 @@ func (vm *VM) Clear() {
 	vm.frees = vm.frees[:0]
 }
 
+func (vm *VM) globalGet(idx int) (types.Boxed, error) {
+	if idx < 0 || idx >= len(vm.global) {
+		return 0, ErrReferenceNotFound
+	}
+	val := vm.global[idx]
+	if val.Kind() == types.KindRef {
+		if err := vm.retain(val.Ref()); err != nil {
+			return 0, err
+		}
+	}
+	return val, nil
+}
+
+func (vm *VM) globalSet(idx int, val types.Boxed) error {
+	if idx < 0 {
+		return ErrReferenceNotFound
+	}
+	if idx >= cap(vm.global) {
+		global := make([]types.Boxed, len(vm.global), (idx+1)*2)
+		copy(global, vm.global)
+		vm.global = global
+	}
+	if idx >= len(vm.global) {
+		vm.global = vm.global[:idx+1]
+	}
+	old := vm.global[idx]
+	if old.Kind() == types.KindRef {
+		if ok, err := vm.release(old.Ref()); err != nil {
+			return err
+		} else if ok {
+			if err := vm.free(old.Ref()); err != nil {
+				return err
+			}
+		}
+	}
+	if val.Kind() == types.KindRef {
+		if err := vm.retain(val.Ref()); err != nil {
+			return err
+		}
+	}
+	vm.global[idx] = val
+	return nil
+}
+
 func (vm *VM) pushI32(val types.I32) error {
 	return vm.push(types.BoxI32(int32(val)))
 }
@@ -993,8 +1076,13 @@ func (vm *VM) pushI64(val types.I64) error {
 	if types.IsBoxable(uint64(val)) {
 		box = types.BoxI64(int64(val))
 	} else {
-		addr := vm.alloc(val)
-		vm.retain(addr)
+		addr, err := vm.alloc(val)
+		if err != nil {
+			return err
+		}
+		if err := vm.retain(addr); err != nil {
+			return err
+		}
 		box = types.BoxRef(addr)
 	}
 	return vm.push(box)
@@ -1024,8 +1112,12 @@ func (vm *VM) popI64() (types.I64, error) {
 	if box.Kind() == types.KindRef {
 		addr := box.Ref()
 		val := vm.heap[addr]
-		if vm.release(addr) {
-			vm.free(addr)
+		if ok, err := vm.release(addr); err != nil {
+			return 0, err
+		} else if ok {
+			if err := vm.free(addr); err != nil {
+				return 0, err
+			}
 		}
 		v, _ := val.(types.I64)
 		return v, nil
@@ -1082,21 +1174,21 @@ func (vm *VM) swap() error {
 	return nil
 }
 
-func (vm *VM) alloc(val types.Value) int {
+func (vm *VM) alloc(val types.Value) (int, error) {
 	if len(vm.frees) > 0 {
 		addr := vm.frees[len(vm.frees)-1]
 		vm.frees = vm.frees[:len(vm.frees)-1]
 		vm.heap[addr] = val
-		return addr
+		return addr, nil
 	}
 	vm.heap = append(vm.heap, val)
 	vm.hits = append(vm.hits, 0)
-	return len(vm.heap) - 1
+	return len(vm.heap) - 1, nil
 }
 
-func (vm *VM) free(addr int) {
+func (vm *VM) free(addr int) error {
 	if addr < 0 || addr >= len(vm.heap) {
-		return
+		return ErrReferenceNotFound
 	}
 	vm.heap[addr] = nil
 	vm.hits[addr] = 0
@@ -1111,19 +1203,22 @@ func (vm *VM) free(addr int) {
 		}
 		addr = len(vm.heap) - 1
 	}
+
+	return nil
 }
 
-func (vm *VM) retain(addr int) {
+func (vm *VM) retain(addr int) error {
 	if addr < 0 || addr >= len(vm.hits) {
-		return
+		return ErrReferenceNotFound
 	}
 	vm.hits[addr]++
+	return nil
 }
 
-func (vm *VM) release(addr int) bool {
+func (vm *VM) release(addr int) (bool, error) {
 	if addr < 0 || addr >= len(vm.hits) {
-		return false
+		return false, ErrReferenceNotFound
 	}
 	vm.hits[addr]--
-	return vm.hits[addr] <= 0
+	return vm.hits[addr] <= 0, nil
 }

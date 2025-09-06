@@ -64,6 +64,22 @@ var tests = []struct {
 
 	{
 		program: program.New(
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.GLOBAL_SET, 0),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.GLOBAL_GET, 0),
+		),
+		values: []types.Value{types.I32(0)},
+	},
+
+	{
+		program: program.New(
 			instr.New(instr.I32_CONST, 42),
 		),
 		values: []types.Value{types.I32(42)},
