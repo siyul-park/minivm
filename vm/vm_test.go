@@ -512,3 +512,50 @@ func BenchmarkVM_Run(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkVM_Fibonacci(b *testing.B) {
+	vm := New(program.New(
+		instr.New(instr.I32_CONST, 0),
+		instr.New(instr.GLOBAL_SET, 0),
+		instr.New(instr.I32_CONST, 1),
+		instr.New(instr.GLOBAL_SET, 1),
+		instr.New(instr.I32_CONST, 2),
+		instr.New(instr.GLOBAL_SET, 2),
+
+		instr.New(instr.GLOBAL_GET, 2),
+		instr.New(instr.I32_CONST, 47),
+		instr.New(instr.I32_GE_S),
+		instr.New(instr.JMP_IF, 57),
+
+		instr.New(instr.GLOBAL_GET, 0),
+		instr.New(instr.GLOBAL_GET, 1),
+		instr.New(instr.I32_ADD),
+		instr.New(instr.GLOBAL_SET, 3),
+
+		instr.New(instr.GLOBAL_GET, 1),
+		instr.New(instr.GLOBAL_SET, 0),
+
+		instr.New(instr.GLOBAL_GET, 3),
+		instr.New(instr.GLOBAL_SET, 1),
+
+		instr.New(instr.GLOBAL_GET, 2),
+		instr.New(instr.I32_CONST, 1),
+		instr.New(instr.I32_ADD),
+		instr.New(instr.GLOBAL_SET, 2),
+
+		instr.New(instr.JMP, uint64(^uint64(73))+1),
+
+		instr.New(instr.GLOBAL_GET, 1),
+	))
+
+	for n := 0; n < b.N; n++ {
+		vm.Clear()
+
+		err := vm.Run()
+		require.NoError(b, err)
+
+		res, err := vm.Pop()
+		require.NoError(b, err)
+		require.Equal(b, int32(1836311903), res.Interface())
+	}
+}

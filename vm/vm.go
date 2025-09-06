@@ -114,11 +114,11 @@ func (vm *VM) Run() error {
 			frame.ip++
 
 		case instr.JMP:
-			v := int(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
+			v := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
 			frame.ip += v + 5
 
 		case instr.JMP_IF:
-			v1 := int(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
+			v1 := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
 			v2, err := vm.popI32()
 			if err != nil {
 				return err
@@ -130,7 +130,7 @@ func (vm *VM) Run() error {
 			}
 
 		case instr.GLOBAL_GET:
-			v1 := int(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
+			v1 := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
 			v2, err := vm.globalGet(v1)
 			if err != nil {
 				return err
@@ -141,7 +141,7 @@ func (vm *VM) Run() error {
 			frame.ip += 5
 
 		case instr.GLOBAL_SET:
-			v1 := int(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
+			v1 := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
 			v2, err := vm.pop()
 			if err != nil {
 				return err
@@ -152,7 +152,7 @@ func (vm *VM) Run() error {
 			frame.ip += 5
 
 		case instr.GLOBAL_TEE:
-			v1 := int(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
+			v1 := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
 			v2, err := vm.peek()
 			if err != nil {
 				return err
@@ -1032,6 +1032,7 @@ func (vm *VM) Clear() {
 	vm.heap = vm.heap[:0]
 	vm.hits = vm.hits[:0]
 	vm.frees = vm.frees[:0]
+	vm.global = vm.global[:0]
 }
 
 func (vm *VM) globalGet(idx int) (types.Boxed, error) {
@@ -1084,7 +1085,7 @@ func (vm *VM) pushI32(val types.I32) error {
 
 func (vm *VM) pushI64(val types.I64) error {
 	var box types.Boxed
-	if types.IsBoxable(uint64(val)) {
+	if types.IsBoxable(int64(val)) {
 		box = types.BoxI64(int64(val))
 	} else {
 		addr, err := vm.alloc(val)

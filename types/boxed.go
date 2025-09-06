@@ -13,8 +13,8 @@ const (
 	payloadBits = 52 - tagBits
 )
 
-func IsBoxable(payload uint64) bool {
-	return payload < (1 << payloadBits)
+func IsBoxable(v int64) bool {
+	return v >= int64(-(1<<(payloadBits-1))) && v <= int64((1<<(payloadBits-1))-1)
 }
 
 func BoxI32(v int32) Boxed {
@@ -22,7 +22,7 @@ func BoxI32(v int32) Boxed {
 }
 
 func BoxI64(v int64) Boxed {
-	return box(uint64(v), KindI64)
+	return box(uint64(v&((1<<payloadBits)-1)), KindI64)
 }
 
 func BoxF32(f float32) Boxed {
@@ -62,7 +62,11 @@ func (v Boxed) I32() int32 {
 }
 
 func (v Boxed) I64() int64 {
-	return int64(uint64(v) & ((1 << payloadBits) - 1))
+	payload := int64(uint64(v) & ((1 << payloadBits) - 1))
+	if payload>>(payloadBits-1) != 0 {
+		payload |= ^((1 << payloadBits) - 1)
+	}
+	return payload
 }
 
 func (v Boxed) F32() float32 {
