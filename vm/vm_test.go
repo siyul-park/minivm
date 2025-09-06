@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"context"
 	"math"
 	"testing"
 
@@ -149,25 +148,6 @@ var tests = []struct {
 	},
 }
 
-func TestVM_RunWithContext(t *testing.T) {
-	for _, tt := range tests {
-		t.Run(tt.program.String(), func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.TODO())
-			defer cancel()
-
-			vm := New(tt.program)
-			err := vm.RunWithContext(ctx)
-			require.NoError(t, err)
-
-			for _, val := range tt.values {
-				v, err := vm.Pop()
-				require.NoError(t, err)
-				require.Equal(t, val.Interface(), v.Interface())
-			}
-		})
-	}
-}
-
 func TestVM_Run(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.program.String(), func(t *testing.T) {
@@ -179,25 +159,6 @@ func TestVM_Run(t *testing.T) {
 				v, err := vm.Pop()
 				require.NoError(t, err)
 				require.Equal(t, val.Interface(), v.Interface())
-			}
-		})
-	}
-}
-
-func BenchmarkVM_RunWithContext(b *testing.B) {
-	for _, tt := range tests {
-		b.Run(tt.program.String(), func(b *testing.B) {
-			ctx, cancel := context.WithCancel(context.TODO())
-			defer cancel()
-
-			vm := New(tt.program)
-			err := vm.RunWithContext(ctx)
-			require.NoError(b, err)
-
-			for _, val := range tt.values {
-				v, err := vm.Pop()
-				require.NoError(b, err)
-				require.Equal(b, val.Interface(), v.Interface())
 			}
 		})
 	}

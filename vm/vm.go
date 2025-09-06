@@ -1,22 +1,18 @@
 package vm
 
 import (
-	"context"
 	"encoding/binary"
 	"errors"
-	"math"
-	"time"
-
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
+	"math"
 )
 
 type Option struct {
 	Stack int
 	Heap  int
 	Frame int
-	Yield int
 }
 
 type VM struct {
@@ -28,7 +24,6 @@ type VM struct {
 	frames []Frame
 	sp     int
 	fp     int
-	yield  int
 }
 
 var (
@@ -44,7 +39,6 @@ func New(prog *program.Program, opts ...Option) *VM {
 	stack := 1024
 	heap := 64
 	frame := 64
-	yield := 128
 	for _, opt := range opts {
 		if opt.Stack > 0 {
 			stack = opt.Stack
@@ -54,9 +48,6 @@ func New(prog *program.Program, opts ...Option) *VM {
 		}
 		if opt.Frame > 0 {
 			frame = opt.Frame
-		}
-		if opt.Yield > 0 {
-			yield = opt.Yield
 		}
 	}
 	return &VM{
@@ -68,32 +59,6 @@ func New(prog *program.Program, opts ...Option) *VM {
 		frames: make([]Frame, frame),
 		sp:     -1,
 		fp:     0,
-		yield:  yield,
-	}
-}
-
-func (vm *VM) RunWithContext(ctx context.Context) error {
-	instrs := instr.Unmarshal(vm.code)
-	injects := make([]instr.Instruction, 0, len(instrs)+len(instrs)/vm.yield+1)
-	for i, op := range instrs {
-		if i > 0 && i%vm.yield == 0 {
-			injects = append(injects, instr.New(instr.UNREACHABLE))
-		}
-		injects = append(injects, op)
-	}
-	vm.code = instr.Marshal(injects)
-
-	for {
-		err := vm.Run()
-		if err != nil && errors.Is(err, ErrUnreachableExecuted) {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(0):
-				continue
-			}
-		}
-		return err
 	}
 }
 
