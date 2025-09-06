@@ -2,14 +2,15 @@ package types
 
 import (
 	"fmt"
+	"github.com/siyul-park/minivm/instr"
 	"strings"
 )
 
 type Function struct {
 	Code    []byte
 	Params  int
-	Locals  int
 	Returns int
+	Locals  int
 }
 
 type Closure struct {
@@ -20,6 +21,15 @@ type Closure struct {
 var _ Value = (*Function)(nil)
 var _ Value = (*Closure)(nil)
 
+func NewFunction(instrs []instr.Instruction, params, returns, locals int) *Function {
+	return &Function{
+		Code:    instr.Marshal(instrs),
+		Params:  params,
+		Returns: returns,
+		Locals:  locals,
+	}
+}
+
 func (f Function) Interface() any {
 	return f
 }
@@ -28,8 +38,8 @@ func (f Function) String() string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("\t.params %d\n", f.Params))
-	sb.WriteString(fmt.Sprintf("\t.locals: %d\n", f.Locals))
 	sb.WriteString(fmt.Sprintf("\t.returns %d\n", f.Returns))
+	sb.WriteString(fmt.Sprintf("\t.locals: %d\n", f.Locals))
 
 	ip := 0
 	for _, b := range f.Code {

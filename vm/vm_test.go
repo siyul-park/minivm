@@ -82,18 +82,18 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.FN_CONST, 0),
 				instr.New(instr.CALL),
 			},
 			[]types.Value{
-				&types.Function{
-					Code: instr.Marshal([]instr.Instruction{
+				types.NewFunction(
+					[]instr.Instruction{
 						instr.New(instr.I32_CONST, 1),
-					}),
-					Params:  0,
-					Locals:  0,
-					Returns: 0,
-				},
+					},
+					0,
+					0,
+					0,
+				),
 			},
 		),
 		values: []types.Value{types.I32(1)},
@@ -119,6 +119,16 @@ var tests = []struct {
 			nil,
 		),
 		values: []types.Value{types.I32(0)},
+	},
+
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.FN_CONST, 0),
+			},
+			[]types.Value{types.NewFunction(nil, 0, 0, 0)},
+		),
+		values: []types.Value{types.NewFunction(nil, 0, 0, 0)},
 	},
 
 	{

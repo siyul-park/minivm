@@ -32,7 +32,7 @@ type VM struct {
 var (
 	ErrUnknownOpcode       = errors.New("unknown opcode")
 	ErrUnreachableExecuted = errors.New("unreachable executed")
-	ErrReferenceNotFound   = errors.New("reference not found")
+	ErrReferenceInvalid    = errors.New("reference invalid")
 	ErrStackOverflow       = errors.New("stack overflow")
 	ErrStackUnderflow      = errors.New("stack underflow")
 	ErrFrameOverflow       = errors.New("frame overflow")
@@ -136,19 +136,11 @@ func (vm *VM) Run() error {
 			}
 
 		case instr.CALL:
-			v1, err := vm.popI32()
+			v1, err := vm.popFn()
 			if err != nil {
 				return err
 			}
-			v2, err := vm.constantsGet(int(v1))
-			if err != nil {
-				return err
-			}
-			fn, ok := v2.(*types.Function)
-			if !ok {
-				return ErrReferenceNotFound
-			}
-			if err := vm.call(fn); err != nil {
+			if err := vm.call(v1); err != nil {
 				return err
 			}
 			frame.ip++
@@ -184,6 +176,21 @@ func (vm *VM) Run() error {
 				return err
 			}
 			if err := vm.globalSet(p, v); err != nil {
+				return err
+			}
+			frame.ip += 5
+
+		case instr.FN_CONST:
+			p := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
+			v2, err := vm.constGet(p)
+			if err != nil {
+				return err
+			}
+			fn, ok := v2.(*types.Function)
+			if !ok {
+				return ErrReferenceInvalid
+			}
+			if err := vm.pushFn(fn); err != nil {
 				return err
 			}
 			frame.ip += 5
@@ -1110,6 +1117,17 @@ func (vm *VM) pushF64(val types.F64) error {
 	return vm.push(types.BoxF64(float64(val)))
 }
 
+func (vm *VM) pushFn(val *types.Function) error {
+	addr, err := vm.alloc(val)
+	if err != nil {
+		return err
+	}
+	if err := vm.retain(addr); err != nil {
+		return err
+	}
+	return vm.push(types.BoxRef(addr))
+}
+
 func (vm *VM) popI32() (types.I32, error) {
 	box, err := vm.pop()
 	if err != nil {
@@ -1133,7 +1151,10 @@ func (vm *VM) popI64() (types.I64, error) {
 				return 0, err
 			}
 		}
-		v, _ := val.(types.I64)
+		v, ok := val.(types.I64)
+		if !ok {
+			return 0, ErrReferenceInvalid
+		}
 		return v, nil
 	}
 	return types.I64(box.I64()), nil
@@ -1153,6 +1174,27 @@ func (vm *VM) popF64() (types.F64, error) {
 		return 0, err
 	}
 	return types.F64(box.F64()), nil
+}
+
+func (vm *VM) popFn() (*types.Function, error) {
+	box, err := vm.pop()
+	if err != nil {
+		return nil, err
+	}
+	addr := box.Ref()
+	val := vm.heap[addr]
+	if ok, err := vm.release(addr); err != nil {
+		return nil, err
+	} else if ok {
+		if err := vm.free(addr); err != nil {
+			return nil, err
+		}
+	}
+	v, ok := val.(*types.Function)
+	if !ok {
+		return nil, ErrReferenceInvalid
+	}
+	return v, nil
 }
 
 func (vm *VM) push(val types.Boxed) error {
@@ -1188,16 +1230,16 @@ func (vm *VM) swap() error {
 	return nil
 }
 
-func (vm *VM) constantsGet(idx int) (types.Value, error) {
+func (vm *VM) constGet(idx int) (types.Value, error) {
 	if idx < 0 || idx >= len(vm.constants) {
-		return nil, ErrReferenceNotFound
+		return nil, ErrReferenceInvalid
 	}
 	return vm.constants[idx], nil
 }
 
 func (vm *VM) globalGet(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(vm.global) {
-		return 0, ErrReferenceNotFound
+		return 0, ErrReferenceInvalid
 	}
 	val := vm.global[idx]
 	if val.Kind() == types.KindRef {
@@ -1210,7 +1252,7 @@ func (vm *VM) globalGet(idx int) (types.Boxed, error) {
 
 func (vm *VM) globalSet(idx int, val types.Boxed) error {
 	if idx < 0 {
-		return ErrReferenceNotFound
+		return ErrReferenceInvalid
 	}
 	if idx >= cap(vm.global) {
 		global := make([]types.Boxed, len(vm.global), (idx+1)*2)
@@ -1265,7 +1307,7 @@ func (vm *VM) alloc(val types.Value) (int, error) {
 
 func (vm *VM) free(addr int) error {
 	if addr < 0 || addr >= len(vm.heap) {
-		return ErrReferenceNotFound
+		return ErrReferenceInvalid
 	}
 	vm.heap[addr] = nil
 	vm.hits[addr] = 0
@@ -1285,7 +1327,7 @@ func (vm *VM) free(addr int) error {
 
 func (vm *VM) retain(addr int) error {
 	if addr < 0 || addr >= len(vm.hits) {
-		return ErrReferenceNotFound
+		return ErrReferenceInvalid
 	}
 	vm.hits[addr]++
 	return nil
@@ -1293,7 +1335,7 @@ func (vm *VM) retain(addr int) error {
 
 func (vm *VM) release(addr int) (bool, error) {
 	if addr < 0 || addr >= len(vm.hits) {
-		return false, ErrReferenceNotFound
+		return false, ErrReferenceInvalid
 	}
 	vm.hits[addr]--
 	return vm.hits[addr] <= 0, nil

@@ -18,6 +18,8 @@ const (
 	GLOBAL_SET
 	GLOBAL_TEE
 
+	FN_CONST
+
 	I32_CONST
 
 	I32_ADD
