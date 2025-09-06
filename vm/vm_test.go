@@ -46,7 +46,7 @@ var tests = []struct {
 
 	{
 		program: program.New(
-			instr.New(instr.JMP, 5),
+			instr.New(instr.BR, 5),
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.I32_CONST, 2),
 		),
@@ -55,7 +55,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.JMP_IF, 5),
+			instr.New(instr.BR_IF, 5),
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_CONST, 3),
 		),

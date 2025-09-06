@@ -13,8 +13,8 @@ var types = map[Opcode]Type{
 	DUP:  {"dup", []int{}},
 	SWAP: {"swap", []int{}},
 
-	JMP:    {"jmp", []int{4}},
-	JMP_IF: {"jmp_if", []int{4}},
+	BR:    {"br", []int{4}},
+	BR_IF: {"br_if", []int{4}},
 
 	GLOBAL_GET: {"global.get", []int{4}},
 	GLOBAL_SET: {"global.set", []int{4}},
