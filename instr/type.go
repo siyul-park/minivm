@@ -15,3 +15,11 @@ func TypeOf(op Opcode) Type {
 	}
 	return Type{}
 }
+
+func (t *Type) Size() int {
+	size := 1
+	for _, w := range t.Widths {
+		size += w
+	}
+	return size
+}
