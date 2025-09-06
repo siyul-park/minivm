@@ -35,14 +35,6 @@ func BoxF64(f float64) Boxed {
 	return Boxed(math.Float64bits(f))
 }
 
-func BoxBool(b bool) Boxed {
-	var v uint64
-	if b {
-		v = 1
-	}
-	return box(v, KindBool)
-}
-
 func BoxNull() Boxed {
 	return box(0, KindNull)
 }
@@ -99,8 +91,6 @@ func (v Boxed) Interface() any {
 		return v.F32()
 	case KindF64:
 		return v.F64()
-	case KindBool:
-		return v.Bool()
 	case KindRef:
 		return v.Ref()
 	case KindNull:
@@ -116,8 +106,6 @@ func (v Boxed) String() string {
 		return fmt.Sprintf("%d", v.Interface())
 	case KindF32, KindF64:
 		return fmt.Sprintf("%f", v.Interface())
-	case KindBool:
-		return fmt.Sprintf("%t", v.Interface())
 	case KindRef:
 		return fmt.Sprintf("ref(%v)", v.Interface())
 	case KindNull:

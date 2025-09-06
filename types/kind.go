@@ -7,7 +7,6 @@ const (
 	KindI64
 	KindF32
 	KindF64
-	KindBool
 	KindRef
 	KindNull
 )
@@ -22,8 +21,6 @@ func (k Kind) String() string {
 		return "f32"
 	case KindF64:
 		return "f64"
-	case KindBool:
-		return "bool"
 	case KindRef:
 		return "ref"
 	case KindNull:
