@@ -41,7 +41,7 @@ func TestBoxed_Interface(t *testing.T) {
 		},
 		{
 			value:    BoxRef(0x12345678),
-			expected: uintptr(0x12345678),
+			expected: 0x12345678,
 		},
 	}
 

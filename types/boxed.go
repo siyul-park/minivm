@@ -14,7 +14,7 @@ const (
 )
 
 func IsBoxable(payload uint64) bool {
-	return payload >= (1 << payloadBits)
+	return payload < (1 << payloadBits)
 }
 
 func BoxI32(v int32) Boxed {
@@ -47,8 +47,8 @@ func BoxNull() Boxed {
 	return box(0, KindNull)
 }
 
-func BoxRef(ptr uintptr) Boxed {
-	return box(uint64(ptr), KindRef)
+func BoxRef(addr int) Boxed {
+	return box(uint64(addr), KindRef)
 }
 
 func box(payload uint64, kind Kind) Boxed {
@@ -85,8 +85,8 @@ func (v Boxed) Bool() bool {
 	return (uint64(v) & ((1 << payloadBits) - 1)) != 0
 }
 
-func (v Boxed) Ref() uintptr {
-	return uintptr(uint64(v) & ((1 << payloadBits) - 1))
+func (v Boxed) Ref() int {
+	return int(uint64(v) & ((1 << payloadBits) - 1))
 }
 
 func (v Boxed) Interface() any {

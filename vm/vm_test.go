@@ -13,7 +13,7 @@ import (
 func TestVM_Run(t *testing.T) {
 	tests := []struct {
 		program *program.Program
-		values  []types.Boxed
+		values  []types.Value
 	}{
 		{
 			program: program.New(instr.New(instr.NOP)),
@@ -21,19 +21,19 @@ func TestVM_Run(t *testing.T) {
 		},
 		{
 			program: program.New(instr.New(instr.I32_CONST, 42)),
-			values:  []types.Boxed{types.BoxI32(42)},
+			values:  []types.Value{types.I32(42)},
 		},
 		{
 			program: program.New(instr.New(instr.I64_CONST, 123456789)),
-			values:  []types.Boxed{types.BoxI64(123456789)},
+			values:  []types.Value{types.I64(123456789)},
 		},
 		{
 			program: program.New(instr.New(instr.F32_CONST, uint64(math.Float32bits(3.14)))),
-			values:  []types.Boxed{types.BoxF32(3.14)},
+			values:  []types.Value{types.F32(3.14)},
 		},
 		{
 			program: program.New(instr.New(instr.F64_CONST, math.Float64bits(3.14))),
-			values:  []types.Boxed{types.BoxF64(3.14)},
+			values:  []types.Value{types.F64(3.14)},
 		},
 	}
 
@@ -55,7 +55,7 @@ func TestVM_Run(t *testing.T) {
 func BenchmarkVM_Run(b *testing.B) {
 	tests := []struct {
 		program *program.Program
-		values  []types.Boxed
+		values  []types.Value
 	}{
 		{
 			program: program.New(instr.New(instr.NOP)),
@@ -63,19 +63,19 @@ func BenchmarkVM_Run(b *testing.B) {
 		},
 		{
 			program: program.New(instr.New(instr.I32_CONST, 42)),
-			values:  []types.Boxed{types.BoxI32(42)},
+			values:  []types.Value{types.I32(42)},
 		},
 		{
 			program: program.New(instr.New(instr.I64_CONST, 123456789)),
-			values:  []types.Boxed{types.BoxI64(123456789)},
+			values:  []types.Value{types.I64(123456789)},
 		},
 		{
 			program: program.New(instr.New(instr.F32_CONST, uint64(math.Float32bits(3.14)))),
-			values:  []types.Boxed{types.BoxF32(3.14)},
+			values:  []types.Value{types.F32(3.14)},
 		},
 		{
 			program: program.New(instr.New(instr.F64_CONST, math.Float64bits(3.14))),
-			values:  []types.Boxed{types.BoxF64(3.14)},
+			values:  []types.Value{types.F64(3.14)},
 		},
 	}
 
