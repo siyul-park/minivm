@@ -12,44 +12,13 @@ type Program struct {
 }
 
 func New(instrs ...instr.Instruction) *Program {
-	var code []byte
-	for _, inst := range instrs {
-		code = append(code, inst...)
-	}
-	return &Program{Code: code}
-}
-
-func (p *Program) Instruction(ip int) instr.Instruction {
-	if ip < 0 || ip >= len(p.Code) {
-		return nil
-	}
-	op := instr.Opcode(p.Code[ip])
-	typ := instr.TypeOf(op)
-	size := typ.Size()
-	if ip+size > len(p.Code) {
-		return nil
-	}
-	return p.Code[ip : ip+size]
-}
-
-func (p *Program) Instructions() []instr.Instruction {
-	instrs := make([]instr.Instruction, 0, len(p.Code)/2)
-	for ip := 0; ip < len(p.Code); {
-		inst := p.Instruction(ip)
-		if inst == nil {
-			break
-		}
-		instrs = append(instrs, inst)
-		ip += len(inst)
-	}
-	return instrs
+	return &Program{Code: instr.Marshal(instrs)}
 }
 
 func (p *Program) String() string {
 	var sb strings.Builder
 	ip := 0
-	for ip < len(p.Code) {
-		inst := p.Instruction(ip)
+	for _, inst := range instr.Unmarshal(p.Code) {
 		if inst == nil {
 			sb.WriteString(fmt.Sprintf("%04d: <invalid>\n", ip))
 			break

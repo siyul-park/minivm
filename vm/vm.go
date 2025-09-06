@@ -73,7 +73,7 @@ func New(prog *program.Program, opts ...Option) *VM {
 }
 
 func (vm *VM) RunWithContext(ctx context.Context) error {
-	instrs := program.New(vm.code).Instructions()
+	instrs := instr.Unmarshal(vm.code)
 	injects := make([]instr.Instruction, 0, len(instrs)+len(instrs)/vm.yield+1)
 	for i, op := range instrs {
 		if i > 0 && i%vm.yield == 0 {
@@ -81,7 +81,7 @@ func (vm *VM) RunWithContext(ctx context.Context) error {
 		}
 		injects = append(injects, op)
 	}
-	vm.code = program.New(injects...).Code
+	vm.code = instr.Marshal(injects)
 
 	for {
 		err := vm.Run()

@@ -8,6 +8,35 @@ import (
 
 type Instruction []byte
 
+func Unmarshal(code []byte) []Instruction {
+	var instrs []Instruction
+	for ip := 0; ip < len(code); {
+		op := Opcode(code[ip])
+		typ, ok := types[op]
+		if !ok {
+			break
+		}
+		size := 1
+		for _, w := range typ.Widths {
+			size += w
+		}
+		if ip+size > len(code) {
+			break
+		}
+		instrs = append(instrs, code[ip:ip+size])
+		ip += size
+	}
+	return instrs
+}
+
+func Marshal(instrs []Instruction) []byte {
+	var code []byte
+	for _, instr := range instrs {
+		code = append(code, instr...)
+	}
+	return code
+}
+
 func New(op Opcode, operands ...uint64) Instruction {
 	typ, ok := types[op]
 	if !ok {
