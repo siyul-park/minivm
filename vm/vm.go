@@ -78,39 +78,29 @@ func (vm *VM) Run() error {
 			frame.ip++
 
 		case instr.I32_CONST:
-			v1 := types.BoxI32(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
-			if err := vm.push(v1); err != nil {
+			v := types.I32(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
+			if err := vm.pushI32(v); err != nil {
 				return err
 			}
 			frame.ip += 5
 
 		case instr.I64_CONST:
-			u1 := binary.BigEndian.Uint64(vm.code[frame.ip+1:])
-			var v1 types.Boxed
-			if types.IsBoxable(u1) {
-				v1 = types.BoxI64(int64(u1))
-			} else {
-				addr := vm.alloc(types.I64(u1))
-				vm.retain(addr)
-				v1 = types.BoxRef(addr)
-			}
-			if err := vm.push(v1); err != nil {
+			v := types.I64(binary.BigEndian.Uint64(vm.code[frame.ip+1:]))
+			if err := vm.pushI64(v); err != nil {
 				return err
 			}
 			frame.ip += 9
 
 		case instr.F32_CONST:
-			bits := binary.BigEndian.Uint32(vm.code[frame.ip+1:])
-			v := types.BoxF32(math.Float32frombits(bits))
-			if err := vm.push(v); err != nil {
+			v := types.F32(math.Float32frombits(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
+			if err := vm.pushF32(v); err != nil {
 				return err
 			}
 			frame.ip += 5
 
 		case instr.F64_CONST:
-			bits := binary.BigEndian.Uint64(vm.code[frame.ip+1:])
-			v := types.BoxF64(math.Float64frombits(bits))
-			if err := vm.push(v); err != nil {
+			v := types.F64(math.Float64frombits(binary.BigEndian.Uint64(vm.code[frame.ip+1:])))
+			if err := vm.pushF64(v); err != nil {
 				return err
 			}
 			frame.ip += 9
@@ -156,6 +146,71 @@ func (vm *VM) Len() int {
 
 func (vm *VM) Clear() {
 	vm.sp = -1
+}
+
+func (vm *VM) pushI32(val types.I32) error {
+	return vm.push(types.BoxI32(int32(val)))
+}
+
+func (vm *VM) pushI64(val types.I64) error {
+	var box types.Boxed
+	if types.IsBoxable(uint64(val)) {
+		box = types.BoxI64(int64(val))
+	} else {
+		addr := vm.alloc(val)
+		vm.retain(addr)
+		box = types.BoxRef(addr)
+	}
+	return vm.push(box)
+}
+
+func (vm *VM) pushF32(val types.F32) error {
+	return vm.push(types.BoxF32(float32(val)))
+}
+
+func (vm *VM) pushF64(val types.F64) error {
+	return vm.push(types.BoxF64(float64(val)))
+}
+
+func (vm *VM) popI32() (types.I32, error) {
+	box, err := vm.pop()
+	if err != nil {
+		return 0, err
+	}
+	return types.I32(box.I32()), nil
+}
+
+func (vm *VM) popI64() (types.I64, error) {
+	box, err := vm.pop()
+	if err != nil {
+		return 0, err
+	}
+	if box.Kind() == types.KindRef {
+		addr := box.Ref()
+		val := vm.heap[addr]
+		if vm.release(addr) {
+			vm.free(addr)
+		}
+		v, _ := val.(types.I64)
+		return v, nil
+	}
+	return types.I64(box.I64()), nil
+}
+
+func (vm *VM) popF32() (types.F32, error) {
+	box, err := vm.pop()
+	if err != nil {
+		return 0, err
+	}
+	return types.F32(box.F32()), nil
+}
+
+func (vm *VM) popF64() (types.F64, error) {
+	box, err := vm.pop()
+	if err != nil {
+		return 0, err
+	}
+	return types.F64(box.F64()), nil
 }
 
 func (vm *VM) push(val types.Boxed) error {
