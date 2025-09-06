@@ -131,7 +131,7 @@ func (vm *VM) Run() error {
 
 		case instr.GLOBAL_GET:
 			v1 := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
-			v2, err := vm.globalGet(v1)
+			v2, err := vm.gget(v1)
 			if err != nil {
 				return err
 			}
@@ -146,7 +146,7 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
-			if err := vm.globalSet(v1, v2); err != nil {
+			if err := vm.gset(v1, v2); err != nil {
 				return err
 			}
 			frame.ip += 5
@@ -157,7 +157,7 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
-			if err := vm.globalSet(v1, v2); err != nil {
+			if err := vm.gset(v1, v2); err != nil {
 				return err
 			}
 			frame.ip += 5
@@ -1035,50 +1035,6 @@ func (vm *VM) Clear() {
 	vm.global = vm.global[:0]
 }
 
-func (vm *VM) globalGet(idx int) (types.Boxed, error) {
-	if idx < 0 || idx >= len(vm.global) {
-		return 0, ErrReferenceNotFound
-	}
-	val := vm.global[idx]
-	if val.Kind() == types.KindRef {
-		if err := vm.retain(val.Ref()); err != nil {
-			return 0, err
-		}
-	}
-	return val, nil
-}
-
-func (vm *VM) globalSet(idx int, val types.Boxed) error {
-	if idx < 0 {
-		return ErrReferenceNotFound
-	}
-	if idx >= cap(vm.global) {
-		global := make([]types.Boxed, len(vm.global), (idx+1)*2)
-		copy(global, vm.global)
-		vm.global = global
-	}
-	if idx >= len(vm.global) {
-		vm.global = vm.global[:idx+1]
-	}
-	old := vm.global[idx]
-	if old.Kind() == types.KindRef {
-		if ok, err := vm.release(old.Ref()); err != nil {
-			return err
-		} else if ok {
-			if err := vm.free(old.Ref()); err != nil {
-				return err
-			}
-		}
-	}
-	if val.Kind() == types.KindRef {
-		if err := vm.retain(val.Ref()); err != nil {
-			return err
-		}
-	}
-	vm.global[idx] = val
-	return nil
-}
-
 func (vm *VM) pushI32(val types.I32) error {
 	return vm.push(types.BoxI32(int32(val)))
 }
@@ -1186,12 +1142,68 @@ func (vm *VM) swap() error {
 	return nil
 }
 
+func (vm *VM) gget(idx int) (types.Boxed, error) {
+	if idx < 0 || idx >= len(vm.global) {
+		return 0, ErrReferenceNotFound
+	}
+	val := vm.global[idx]
+	if val.Kind() == types.KindRef {
+		if err := vm.retain(val.Ref()); err != nil {
+			return 0, err
+		}
+	}
+	return val, nil
+}
+
+func (vm *VM) gset(idx int, val types.Boxed) error {
+	if idx < 0 {
+		return ErrReferenceNotFound
+	}
+	if idx >= cap(vm.global) {
+		global := make([]types.Boxed, len(vm.global), (idx+1)*2)
+		copy(global, vm.global)
+		vm.global = global
+	}
+	if idx >= len(vm.global) {
+		vm.global = vm.global[:idx+1]
+	}
+	old := vm.global[idx]
+	if old.Kind() == types.KindRef {
+		if ok, err := vm.release(old.Ref()); err != nil {
+			return err
+		} else if ok {
+			if err := vm.free(old.Ref()); err != nil {
+				return err
+			}
+		}
+	}
+	if val.Kind() == types.KindRef {
+		if err := vm.retain(val.Ref()); err != nil {
+			return err
+		}
+	}
+	vm.global[idx] = val
+	return nil
+}
+
 func (vm *VM) alloc(val types.Value) (int, error) {
 	if len(vm.frees) > 0 {
 		addr := vm.frees[len(vm.frees)-1]
 		vm.frees = vm.frees[:len(vm.frees)-1]
 		vm.heap[addr] = val
 		return addr, nil
+	}
+	if len(vm.heap) == cap(vm.heap) {
+		c := 2 * cap(vm.heap)
+		if c == 0 {
+			c = 1
+		}
+		heap := make([]types.Value, len(vm.heap), c)
+		copy(heap, vm.heap)
+		vm.heap = heap
+		hits := make([]int, len(vm.hits), c)
+		copy(hits, vm.hits)
+		vm.hits = hits
 	}
 	vm.heap = append(vm.heap, val)
 	vm.hits = append(vm.hits, 0)
@@ -1215,7 +1227,6 @@ func (vm *VM) free(addr int) error {
 		}
 		addr = len(vm.heap) - 1
 	}
-
 	return nil
 }
 
