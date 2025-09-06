@@ -10,6 +10,13 @@ var _ Value = I64(0)
 var _ Value = F32(0)
 var _ Value = F64(0)
 
+func Bool(b bool) I32 {
+	if b {
+		return I32(1)
+	}
+	return I32(0)
+}
+
 func (i I32) Kind() Kind {
 	return KindI32
 }

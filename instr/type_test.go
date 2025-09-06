@@ -19,6 +19,7 @@ func TestTypeOf(t *testing.T) {
 		{opcode: SWAP},
 
 		{opcode: I32_CONST},
+
 		{opcode: I32_ADD},
 		{opcode: I32_SUB},
 		{opcode: I32_MUL},
@@ -27,7 +28,19 @@ func TestTypeOf(t *testing.T) {
 		{opcode: I32_REM_S},
 		{opcode: I32_REM_U},
 
+		{opcode: I32_EQ},
+		{opcode: I32_NE},
+		{opcode: I32_LT_S},
+		{opcode: I32_LT_U},
+		{opcode: I32_GT_S},
+		{opcode: I32_GT_U},
+		{opcode: I32_LE_S},
+		{opcode: I32_LE_U},
+		{opcode: I32_GE_S},
+		{opcode: I32_GE_U},
+
 		{opcode: I64_CONST},
+
 		{opcode: I64_ADD},
 		{opcode: I64_SUB},
 		{opcode: I64_MUL},
@@ -36,17 +49,44 @@ func TestTypeOf(t *testing.T) {
 		{opcode: I64_REM_S},
 		{opcode: I64_REM_U},
 
+		{opcode: I64_EQ},
+		{opcode: I64_NE},
+		{opcode: I64_LT_S},
+		{opcode: I64_LT_U},
+		{opcode: I64_GT_S},
+		{opcode: I64_GT_U},
+		{opcode: I64_LE_S},
+		{opcode: I64_LE_U},
+		{opcode: I64_GE_S},
+		{opcode: I64_GE_U},
+
 		{opcode: F32_CONST},
+
 		{opcode: F32_ADD},
 		{opcode: F32_SUB},
 		{opcode: F32_MUL},
 		{opcode: F32_DIV},
 
+		{opcode: F32_EQ},
+		{opcode: F32_NE},
+		{opcode: F32_LT},
+		{opcode: F32_GT},
+		{opcode: F32_LE},
+		{opcode: F32_GE},
+
 		{opcode: F64_CONST},
+
 		{opcode: F64_ADD},
 		{opcode: F64_SUB},
 		{opcode: F64_MUL},
 		{opcode: F64_DIV},
+
+		{opcode: F64_EQ},
+		{opcode: F64_NE},
+		{opcode: F64_LT},
+		{opcode: F64_GT},
+		{opcode: F64_LE},
+		{opcode: F64_GE},
 	}
 
 	for _, tt := range tests {

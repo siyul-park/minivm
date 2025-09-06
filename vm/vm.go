@@ -3,10 +3,11 @@ package vm
 import (
 	"encoding/binary"
 	"errors"
+	"math"
+
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
-	"math"
 )
 
 type Option struct {
@@ -58,11 +59,15 @@ func New(prog *program.Program, opts ...Option) *VM {
 		frees:  make([]int, 0, heap),
 		frames: make([]Frame, frame),
 		sp:     -1,
-		fp:     0,
+		fp:     -1,
 	}
 }
 
 func (vm *VM) Run() error {
+	if vm.fp+1 >= len(vm.frames) {
+		return ErrFrameOverflow
+	}
+	vm.fp++
 	frame := &vm.frames[vm.fp]
 
 	for frame.ip < len(vm.code) {
@@ -233,6 +238,146 @@ func (vm *VM) Run() error {
 			}
 			frame.ip++
 
+		case instr.I32_EQ:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 == v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I32_NE:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 != v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I32_LT_S:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 < v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I32_LT_U:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(uint32(v2) < uint32(v1))); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I32_GT_S:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 > v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I32_GT_U:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(uint32(v2) > uint32(v1))); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I32_LE_S:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 <= v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I32_LE_U:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(uint32(v2) <= uint32(v1))); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I32_GE_S:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 >= v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I32_GE_U:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(uint32(v2) >= uint32(v1))); err != nil {
+				return err
+			}
+			frame.ip++
+
 		case instr.I64_CONST:
 			v := types.I64(binary.BigEndian.Uint64(vm.code[frame.ip+1:]))
 			if err := vm.pushI64(v); err != nil {
@@ -350,6 +495,146 @@ func (vm *VM) Run() error {
 			}
 			frame.ip++
 
+		case instr.I64_EQ:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 == v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I64_NE:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 != v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I64_LT_S:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 < v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I64_LT_U:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(uint32(v2) < uint32(v1))); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I64_GT_S:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 > v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I64_GT_U:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(uint32(v2) > uint32(v1))); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I64_LE_S:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 <= v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I64_LE_U:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(uint32(v2) <= uint32(v1))); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I64_GE_S:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 >= v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I64_GE_U:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(uint32(v2) >= uint32(v1))); err != nil {
+				return err
+			}
+			frame.ip++
+
 		case instr.F32_CONST:
 			v := types.F32(math.Float32frombits(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
 			if err := vm.pushF32(v); err != nil {
@@ -409,6 +694,90 @@ func (vm *VM) Run() error {
 				return err
 			}
 			if err := vm.pushF32(v2 / v1); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F32_EQ:
+			v1, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 == v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F32_NE:
+			v1, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 != v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F32_LT:
+			v1, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 < v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F32_GT:
+			v1, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 > v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F32_LE:
+			v1, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 <= v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F32_GE:
+			v1, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 >= v1)); err != nil {
 				return err
 			}
 			frame.ip++
@@ -476,6 +845,90 @@ func (vm *VM) Run() error {
 			}
 			frame.ip++
 
+		case instr.F64_EQ:
+			v1, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 == v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F64_NE:
+			v1, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 != v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F64_LT:
+			v1, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 < v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F64_GT:
+			v1, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 > v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F64_LE:
+			v1, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 <= v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F64_GE:
+			v1, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(types.Bool(v2 >= v1)); err != nil {
+				return err
+			}
+			frame.ip++
+
 		default:
 			return ErrUnknownOpcode
 		}
@@ -516,7 +969,19 @@ func (vm *VM) Len() int {
 }
 
 func (vm *VM) Clear() {
-	vm.sp = -1
+	for vm.sp >= 0 {
+		vm.stack[vm.sp] = 0
+		vm.sp--
+	}
+
+	for vm.fp >= 0 {
+		vm.frames[vm.fp] = Frame{}
+		vm.fp--
+	}
+
+	vm.heap = vm.heap[:0]
+	vm.hits = vm.hits[:0]
+	vm.frees = vm.frees[:0]
 }
 
 func (vm *VM) pushI32(val types.I32) error {

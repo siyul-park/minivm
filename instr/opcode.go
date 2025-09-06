@@ -5,13 +5,16 @@ type Opcode byte
 const (
 	NOP Opcode = iota
 	UNREACHABLE
+
 	DROP
 	DUP
 	SWAP
+
 	JMP
 	JMP_IF
 
 	I32_CONST
+
 	I32_ADD
 	I32_SUB
 	I32_MUL
@@ -20,7 +23,19 @@ const (
 	I32_REM_S
 	I32_REM_U
 
+	I32_EQ
+	I32_NE
+	I32_LT_S
+	I32_LT_U
+	I32_GT_S
+	I32_GT_U
+	I32_LE_S
+	I32_LE_U
+	I32_GE_S
+	I32_GE_U
+
 	I64_CONST
+
 	I64_ADD
 	I64_SUB
 	I64_MUL
@@ -29,15 +44,42 @@ const (
 	I64_REM_S
 	I64_REM_U
 
+	I64_EQ
+	I64_NE
+	I64_LT_S
+	I64_LT_U
+	I64_GT_S
+	I64_GT_U
+	I64_LE_S
+	I64_LE_U
+	I64_GE_S
+	I64_GE_U
+
 	F32_CONST
+
 	F32_ADD
 	F32_SUB
 	F32_MUL
 	F32_DIV
 
+	F32_EQ
+	F32_NE
+	F32_LT
+	F32_GT
+	F32_LE
+	F32_GE
+
 	F64_CONST
+
 	F64_ADD
 	F64_SUB
 	F64_MUL
 	F64_DIV
+
+	F64_EQ
+	F64_NE
+	F64_LT
+	F64_GT
+	F64_LE
+	F64_GE
 )
