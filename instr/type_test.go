@@ -18,6 +18,14 @@ func TestTypeOf(t *testing.T) {
 		{opcode: DUP},
 		{opcode: SWAP},
 
+		{opcode: BR},
+		{opcode: BR_IF},
+		{opcode: CALL},
+
+		{opcode: GLOBAL_GET},
+		{opcode: GLOBAL_SET},
+		{opcode: GLOBAL_TEE},
+
 		{opcode: I32_CONST},
 
 		{opcode: I32_ADD},
@@ -38,10 +46,6 @@ func TestTypeOf(t *testing.T) {
 		{opcode: I32_LE_U},
 		{opcode: I32_GE_S},
 		{opcode: I32_GE_U},
-
-		{opcode: GLOBAL_GET},
-		{opcode: GLOBAL_SET},
-		{opcode: GLOBAL_TEE},
 
 		{opcode: I64_CONST},
 

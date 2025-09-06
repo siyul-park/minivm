@@ -18,15 +18,15 @@ type Option struct {
 }
 
 type VM struct {
-	code   []byte
-	stack  []types.Boxed
-	heap   []types.Value
-	frees  []int
-	hits   []int
-	global []types.Boxed
-	frames []Frame
-	sp     int
-	fp     int
+	constants []types.Value
+	stack     []types.Boxed
+	heap      []types.Value
+	frees     []int
+	hits      []int
+	global    []types.Boxed
+	frames    []Frame
+	sp        int
+	fp        int
 }
 
 var (
@@ -58,28 +58,32 @@ func New(prog *program.Program, opts ...Option) *VM {
 			frame = opt.Frame
 		}
 	}
-	return &VM{
-		code:   prog.Code,
-		stack:  make([]types.Boxed, stack),
-		heap:   make([]types.Value, 0, heap),
-		hits:   make([]int, 0, heap),
-		frees:  make([]int, 0, heap),
-		global: make([]types.Boxed, 0, global),
-		frames: make([]Frame, frame),
-		sp:     -1,
-		fp:     -1,
+	if frame <= 0 {
+		frame = 1
 	}
+
+	vm := &VM{
+		constants: prog.Constants,
+		stack:     make([]types.Boxed, stack),
+		heap:      make([]types.Value, 0, heap),
+		hits:      make([]int, 0, heap),
+		frees:     make([]int, 0, heap),
+		global:    make([]types.Boxed, 0, global),
+		frames:    make([]Frame, frame),
+		sp:        -1,
+		fp:        0,
+	}
+	vm.frames[0].closure = &types.Closure{Function: &types.Function{Code: prog.Code}}
+	vm.frames[0].bp = vm.sp
+	return vm
 }
 
 func (vm *VM) Run() error {
-	if vm.fp+1 >= len(vm.frames) {
-		return ErrFrameOverflow
-	}
-	vm.fp++
 	frame := &vm.frames[vm.fp]
+	code := frame.closure.Function.Code
 
-	for frame.ip < len(vm.code) {
-		opcode := instr.Opcode(vm.code[frame.ip])
+	for frame.ip < len(code) {
+		opcode := instr.Opcode(code[frame.ip])
 		switch opcode {
 		case instr.NOP:
 			frame.ip++
@@ -115,12 +119,12 @@ func (vm *VM) Run() error {
 			}
 			frame.ip++
 
-		case instr.JMP:
-			p := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
+		case instr.BR:
+			p := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 			frame.ip += p + 5
 
-		case instr.JMP_IF:
-			p := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
+		case instr.BR_IF:
+			p := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 			v, err := vm.popI32()
 			if err != nil {
 				return err
@@ -131,9 +135,29 @@ func (vm *VM) Run() error {
 				frame.ip += 5
 			}
 
+		case instr.CALL:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.constantsGet(int(v1))
+			if err != nil {
+				return err
+			}
+			fn, ok := v2.(*types.Function)
+			if !ok {
+				return ErrReferenceNotFound
+			}
+			if err := vm.call(fn); err != nil {
+				return err
+			}
+			frame.ip++
+			frame = &vm.frames[vm.fp]
+			code = frame.closure.Function.Code
+
 		case instr.GLOBAL_GET:
-			p := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
-			v, err := vm.gget(p)
+			p := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
+			v, err := vm.globalGet(p)
 			if err != nil {
 				return err
 			}
@@ -143,29 +167,29 @@ func (vm *VM) Run() error {
 			frame.ip += 5
 
 		case instr.GLOBAL_SET:
-			p := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
+			p := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 			v, err := vm.pop()
 			if err != nil {
 				return err
 			}
-			if err := vm.gset(p, v); err != nil {
+			if err := vm.globalSet(p, v); err != nil {
 				return err
 			}
 			frame.ip += 5
 
 		case instr.GLOBAL_TEE:
-			p := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
+			p := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 			v, err := vm.peek()
 			if err != nil {
 				return err
 			}
-			if err := vm.gset(p, v); err != nil {
+			if err := vm.globalSet(p, v); err != nil {
 				return err
 			}
 			frame.ip += 5
 
 		case instr.I32_CONST:
-			p := types.I32(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
+			p := types.I32(binary.BigEndian.Uint32(code[frame.ip+1:]))
 			if err := vm.pushI32(p); err != nil {
 				return err
 			}
@@ -422,7 +446,7 @@ func (vm *VM) Run() error {
 			frame.ip++
 
 		case instr.I64_CONST:
-			p := types.I64(binary.BigEndian.Uint64(vm.code[frame.ip+1:]))
+			p := types.I64(binary.BigEndian.Uint64(code[frame.ip+1:]))
 			if err := vm.pushI64(p); err != nil {
 				return err
 			}
@@ -679,7 +703,7 @@ func (vm *VM) Run() error {
 			frame.ip++
 
 		case instr.F32_CONST:
-			p := types.F32(math.Float32frombits(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
+			p := types.F32(math.Float32frombits(binary.BigEndian.Uint32(code[frame.ip+1:])))
 			if err := vm.pushF32(p); err != nil {
 				return err
 			}
@@ -826,7 +850,7 @@ func (vm *VM) Run() error {
 			frame.ip++
 
 		case instr.F64_CONST:
-			p := types.F64(math.Float64frombits(binary.BigEndian.Uint64(vm.code[frame.ip+1:])))
+			p := types.F64(math.Float64frombits(binary.BigEndian.Uint64(code[frame.ip+1:])))
 			if err := vm.pushF64(p); err != nil {
 				return err
 			}
@@ -1026,15 +1050,35 @@ func (vm *VM) Clear() {
 		vm.sp--
 	}
 
-	for vm.fp >= 0 {
+	for vm.fp > 0 {
 		vm.frames[vm.fp] = Frame{}
 		vm.fp--
 	}
+	vm.frames[vm.fp].bp = vm.sp
+	vm.frames[vm.fp].ip = 0
 
 	vm.heap = vm.heap[:0]
 	vm.hits = vm.hits[:0]
 	vm.frees = vm.frees[:0]
 	vm.global = vm.global[:0]
+}
+
+func (vm *VM) call(fn *types.Function) error {
+	if vm.fp+1 >= len(vm.frames) {
+		return ErrFrameOverflow
+	}
+
+	vm.fp++
+	vm.frames[vm.fp].closure = &types.Closure{Function: fn}
+	vm.frames[vm.fp].ip = 0
+	vm.frames[vm.fp].bp = vm.sp - fn.Params
+
+	sp := vm.frames[vm.fp].bp + fn.Locals
+	if sp >= len(vm.stack) {
+		return ErrStackOverflow
+	}
+	vm.sp = sp
+	return nil
 }
 
 func (vm *VM) pushI32(val types.I32) error {
@@ -1144,7 +1188,14 @@ func (vm *VM) swap() error {
 	return nil
 }
 
-func (vm *VM) gget(idx int) (types.Boxed, error) {
+func (vm *VM) constantsGet(idx int) (types.Value, error) {
+	if idx < 0 || idx >= len(vm.constants) {
+		return nil, ErrReferenceNotFound
+	}
+	return vm.constants[idx], nil
+}
+
+func (vm *VM) globalGet(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(vm.global) {
 		return 0, ErrReferenceNotFound
 	}
@@ -1157,7 +1208,7 @@ func (vm *VM) gget(idx int) (types.Boxed, error) {
 	return val, nil
 }
 
-func (vm *VM) gset(idx int, val types.Boxed) error {
+func (vm *VM) globalSet(idx int, val types.Boxed) error {
 	if idx < 0 {
 		return ErrReferenceNotFound
 	}

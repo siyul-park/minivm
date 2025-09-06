@@ -7,6 +7,8 @@ import (
 
 type Boxed uint64
 
+var _ Value = Boxed(0)
+
 const (
 	tagBits     = 3
 	tagMask     = (1 << tagBits) - 1
