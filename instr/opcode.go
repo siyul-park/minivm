@@ -10,8 +10,8 @@ const (
 	DUP
 	SWAP
 
-	BR
-	BR_IF
+	JMP
+	JMP_IF
 
 	GLOBAL_GET
 	GLOBAL_SET

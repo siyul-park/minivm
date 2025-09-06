@@ -113,11 +113,11 @@ func (vm *VM) Run() error {
 			}
 			frame.ip++
 
-		case instr.BR:
+		case instr.JMP:
 			v := int(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
 			frame.ip += v + 5
 
-		case instr.BR_IF:
+		case instr.JMP_IF:
 			v1 := int(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
 			v2, err := vm.popI32()
 			if err != nil {
