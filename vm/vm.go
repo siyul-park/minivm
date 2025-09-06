@@ -100,7 +100,9 @@ func (vm *VM) Run() error {
 				return err
 			}
 			if v.Kind() == types.KindRef {
-				vm.retain(v.Ref())
+				if err := vm.retain(v.Ref()); err != nil {
+					return err
+				}
 			}
 			if err := vm.push(v); err != nil {
 				return err
@@ -114,57 +116,57 @@ func (vm *VM) Run() error {
 			frame.ip++
 
 		case instr.JMP:
-			v := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
-			frame.ip += v + 5
+			p := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
+			frame.ip += p + 5
 
 		case instr.JMP_IF:
-			v1 := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
-			v2, err := vm.popI32()
+			p := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
+			v, err := vm.popI32()
 			if err != nil {
 				return err
 			}
-			if v2 != 0 {
-				frame.ip += v1 + 5
+			if v != 0 {
+				frame.ip += p + 5
 			} else {
 				frame.ip += 5
 			}
 
 		case instr.GLOBAL_GET:
-			v1 := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
-			v2, err := vm.gget(v1)
+			p := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
+			v, err := vm.gget(p)
 			if err != nil {
 				return err
 			}
-			if err := vm.push(v2); err != nil {
+			if err := vm.push(v); err != nil {
 				return err
 			}
 			frame.ip += 5
 
 		case instr.GLOBAL_SET:
-			v1 := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
-			v2, err := vm.pop()
+			p := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
+			v, err := vm.pop()
 			if err != nil {
 				return err
 			}
-			if err := vm.gset(v1, v2); err != nil {
+			if err := vm.gset(p, v); err != nil {
 				return err
 			}
 			frame.ip += 5
 
 		case instr.GLOBAL_TEE:
-			v1 := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
-			v2, err := vm.peek()
+			p := int(int32(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
+			v, err := vm.peek()
 			if err != nil {
 				return err
 			}
-			if err := vm.gset(v1, v2); err != nil {
+			if err := vm.gset(p, v); err != nil {
 				return err
 			}
 			frame.ip += 5
 
 		case instr.I32_CONST:
-			v := types.I32(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
-			if err := vm.pushI32(v); err != nil {
+			p := types.I32(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
+			if err := vm.pushI32(p); err != nil {
 				return err
 			}
 			frame.ip += 5
@@ -420,8 +422,8 @@ func (vm *VM) Run() error {
 			frame.ip++
 
 		case instr.I64_CONST:
-			v := types.I64(binary.BigEndian.Uint64(vm.code[frame.ip+1:]))
-			if err := vm.pushI64(v); err != nil {
+			p := types.I64(binary.BigEndian.Uint64(vm.code[frame.ip+1:]))
+			if err := vm.pushI64(p); err != nil {
 				return err
 			}
 			frame.ip += 9
@@ -677,8 +679,8 @@ func (vm *VM) Run() error {
 			frame.ip++
 
 		case instr.F32_CONST:
-			v := types.F32(math.Float32frombits(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
-			if err := vm.pushF32(v); err != nil {
+			p := types.F32(math.Float32frombits(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
+			if err := vm.pushF32(p); err != nil {
 				return err
 			}
 			frame.ip += 5
@@ -824,8 +826,8 @@ func (vm *VM) Run() error {
 			frame.ip++
 
 		case instr.F64_CONST:
-			v := types.F64(math.Float64frombits(binary.BigEndian.Uint64(vm.code[frame.ip+1:])))
-			if err := vm.pushF64(v); err != nil {
+			p := types.F64(math.Float64frombits(binary.BigEndian.Uint64(vm.code[frame.ip+1:])))
+			if err := vm.pushF64(p); err != nil {
 				return err
 			}
 			frame.ip += 9
