@@ -151,6 +151,17 @@ func (vm *VM) Run() error {
 			}
 			frame.ip += 5
 
+		case instr.GLOBAL_TEE:
+			v1 := int(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
+			v2, err := vm.peek()
+			if err != nil {
+				return err
+			}
+			if err := vm.globalSet(v1, v2); err != nil {
+				return err
+			}
+			frame.ip += 5
+
 		case instr.I32_CONST:
 			v := types.I32(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
 			if err := vm.pushI32(v); err != nil {

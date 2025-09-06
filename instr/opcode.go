@@ -15,6 +15,7 @@ const (
 
 	GLOBAL_GET
 	GLOBAL_SET
+	GLOBAL_TEE
 
 	I32_CONST
 
