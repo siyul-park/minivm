@@ -13,6 +13,9 @@ func TestTypeOf(t *testing.T) {
 	}{
 		{opcode: NOP},
 		{opcode: UNREACHABLE},
+		{opcode: DROP},
+		{opcode: DUP},
+		{opcode: SWAP},
 		{opcode: I32_CONST},
 		{opcode: I64_CONST},
 		{opcode: F32_CONST},

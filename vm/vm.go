@@ -110,6 +110,31 @@ func (vm *VM) Run() error {
 			frame.ip++
 			return fmt.Errorf("%w: at ip=%d", ErrUnreachableExecuted, frame.ip)
 
+		case instr.DROP:
+			if _, err := vm.pop(); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.DUP:
+			v, err := vm.peek()
+			if err != nil {
+				return err
+			}
+			if v.Kind() == types.KindRef {
+				vm.retain(v.Ref())
+			}
+			if err := vm.push(v); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.SWAP:
+			if err := vm.swap(); err != nil {
+				return err
+			}
+			frame.ip++
+
 		case instr.I32_CONST:
 			v := types.I32(binary.BigEndian.Uint32(vm.code[frame.ip+1:]))
 			if err := vm.pushI32(v); err != nil {
@@ -269,6 +294,14 @@ func (vm *VM) peek() (types.Boxed, error) {
 		return 0, ErrStackUnderflow
 	}
 	return vm.stack[vm.sp], nil
+}
+
+func (vm *VM) swap() error {
+	if vm.sp < 1 {
+		return ErrStackUnderflow
+	}
+	vm.stack[vm.sp], vm.stack[vm.sp-1] = vm.stack[vm.sp-1], vm.stack[vm.sp]
+	return nil
 }
 
 func (vm *VM) alloc(val types.Value) int {

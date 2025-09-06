@@ -20,6 +20,18 @@ var tests = []struct {
 		values:  nil,
 	},
 	{
+		program: program.New(instr.New(instr.I32_CONST, 42), instr.New(instr.DROP)),
+		values:  nil,
+	},
+	{
+		program: program.New(instr.New(instr.I32_CONST, 42), instr.New(instr.DUP)),
+		values:  []types.Value{types.I32(42), types.I32(42)},
+	},
+	{
+		program: program.New(instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.SWAP)),
+		values:  []types.Value{types.I32(1), types.I32(2)},
+	},
+	{
 		program: program.New(instr.New(instr.I32_CONST, 42)),
 		values:  []types.Value{types.I32(42)},
 	},
