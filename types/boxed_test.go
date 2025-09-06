@@ -12,35 +12,35 @@ func TestBoxed_Interface(t *testing.T) {
 		expected any
 	}{
 		{
-			value:    NewI32(42),
+			value:    BoxI32(42),
 			expected: int32(42),
 		},
 		{
-			value:    NewI64(42),
+			value:    BoxI64(42),
 			expected: int64(42),
 		},
 		{
-			value:    NewF32(3.14),
+			value:    BoxF32(3.14),
 			expected: float32(3.14),
 		},
 		{
-			value:    NewF64(3.14),
+			value:    BoxF64(3.14),
 			expected: 3.14,
 		},
 		{
-			value:    NewBool(true),
+			value:    BoxBool(true),
 			expected: true,
 		},
 		{
-			value:    NewBool(false),
+			value:    BoxBool(false),
 			expected: false,
 		},
 		{
-			value:    NewNull(),
+			value:    BoxNull(),
 			expected: nil,
 		},
 		{
-			value:    NewRef(0x12345678),
+			value:    BoxRef(0x12345678),
 			expected: uintptr(0x12345678),
 		},
 	}

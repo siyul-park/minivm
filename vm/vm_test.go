@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"math"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
@@ -12,11 +13,27 @@ import (
 func TestVM_Run(t *testing.T) {
 	tests := []struct {
 		program *program.Program
-		values  []types.Value
+		values  []types.Boxed
 	}{
 		{
 			program: program.New(instr.New(instr.NOP)),
 			values:  nil,
+		},
+		{
+			program: program.New(instr.New(instr.I32_CONST, 42)),
+			values:  []types.Boxed{types.BoxI32(42)},
+		},
+		{
+			program: program.New(instr.New(instr.I64_CONST, 123456789)),
+			values:  []types.Boxed{types.BoxI64(123456789)},
+		},
+		{
+			program: program.New(instr.New(instr.F32_CONST, uint64(math.Float32bits(3.14)))),
+			values:  []types.Boxed{types.BoxF32(3.14)},
+		},
+		{
+			program: program.New(instr.New(instr.F64_CONST, math.Float64bits(3.14))),
+			values:  []types.Boxed{types.BoxF64(3.14)},
 		},
 	}
 
@@ -29,7 +46,49 @@ func TestVM_Run(t *testing.T) {
 			for _, val := range tt.values {
 				v, err := vm.Pop()
 				require.NoError(t, err)
-				require.Equal(t, val, v)
+				require.Equal(t, val.Interface(), v.Interface())
+			}
+		})
+	}
+}
+
+func BenchmarkVM_Run(b *testing.B) {
+	tests := []struct {
+		program *program.Program
+		values  []types.Boxed
+	}{
+		{
+			program: program.New(instr.New(instr.NOP)),
+			values:  nil,
+		},
+		{
+			program: program.New(instr.New(instr.I32_CONST, 42)),
+			values:  []types.Boxed{types.BoxI32(42)},
+		},
+		{
+			program: program.New(instr.New(instr.I64_CONST, 123456789)),
+			values:  []types.Boxed{types.BoxI64(123456789)},
+		},
+		{
+			program: program.New(instr.New(instr.F32_CONST, uint64(math.Float32bits(3.14)))),
+			values:  []types.Boxed{types.BoxF32(3.14)},
+		},
+		{
+			program: program.New(instr.New(instr.F64_CONST, math.Float64bits(3.14))),
+			values:  []types.Boxed{types.BoxF64(3.14)},
+		},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.program.String(), func(b *testing.B) {
+			vm := New(tt.program)
+			err := vm.Run()
+			require.NoError(b, err)
+
+			for _, val := range tt.values {
+				v, err := vm.Pop()
+				require.NoError(b, err)
+				require.Equal(b, val.Interface(), v.Interface())
 			}
 		})
 	}

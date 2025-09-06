@@ -7,6 +7,11 @@ type Type struct {
 
 var types = map[Opcode]Type{
 	NOP: {"nop", []int{}},
+
+	I32_CONST: {"i32.const", []int{4}},
+	I64_CONST: {"i64.const", []int{8}},
+	F32_CONST: {"f32.const", []int{4}},
+	F64_CONST: {"f64.const", []int{8}},
 }
 
 func TypeOf(op Opcode) Type {

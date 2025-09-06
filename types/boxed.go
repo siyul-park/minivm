@@ -17,41 +17,41 @@ func IsBoxable(payload uint64) bool {
 	return payload >= (1 << payloadBits)
 }
 
-func NewI32(v int32) Boxed {
-	return boxed(uint64(v), KindI32)
+func BoxI32(v int32) Boxed {
+	return box(uint64(v), KindI32)
 }
 
-func NewI64(v int64) Boxed {
-	return boxed(uint64(v), KindI64)
+func BoxI64(v int64) Boxed {
+	return box(uint64(v), KindI64)
 }
 
-func NewF32(f float32) Boxed {
+func BoxF32(f float32) Boxed {
 	bits := math.Float32bits(f)
 	payload := uint64(bits)
-	return boxed(payload, KindF32)
+	return box(payload, KindF32)
 }
 
-func NewF64(f float64) Boxed {
+func BoxF64(f float64) Boxed {
 	return Boxed(math.Float64bits(f))
 }
 
-func NewBool(b bool) Boxed {
+func BoxBool(b bool) Boxed {
 	var v uint64
 	if b {
 		v = 1
 	}
-	return boxed(v, KindBool)
+	return box(v, KindBool)
 }
 
-func NewNull() Boxed {
-	return boxed(0, KindNull)
+func BoxNull() Boxed {
+	return box(0, KindNull)
 }
 
-func NewRef(ptr uintptr) Boxed {
-	return boxed(uint64(ptr), KindRef)
+func BoxRef(ptr uintptr) Boxed {
+	return box(uint64(ptr), KindRef)
 }
 
-func boxed(payload uint64, kind Kind) Boxed {
+func box(payload uint64, kind Kind) Boxed {
 	mantissa := (uint64(kind) << payloadBits) | payload
 	u := (uint64(0x7FF) << 52) | mantissa
 	return Boxed(u)
