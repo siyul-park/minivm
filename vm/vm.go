@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"math"
 	"time"
 
@@ -33,11 +32,12 @@ type VM struct {
 }
 
 var (
+	ErrUnknownOpcode       = errors.New("unknown opcode")
+	ErrUnreachableExecuted = errors.New("unreachable executed")
 	ErrStackOverflow       = errors.New("stack overflow")
 	ErrStackUnderflow      = errors.New("stack underflow")
 	ErrFrameOverflow       = errors.New("frame overflow")
-	ErrUnreachableExecuted = errors.New("unreachable executed")
-	ErrUnknownOpcode       = errors.New("unknown opcode")
+	ErrDivideByZero        = errors.New("divide by zero")
 )
 
 func New(prog *program.Program, opts ...Option) *VM {
@@ -108,7 +108,7 @@ func (vm *VM) Run() error {
 
 		case instr.UNREACHABLE:
 			frame.ip++
-			return fmt.Errorf("%w: at ip=%d", ErrUnreachableExecuted, frame.ip)
+			return ErrUnreachableExecuted
 
 		case instr.DROP:
 			if _, err := vm.pop(); err != nil {
@@ -142,12 +142,232 @@ func (vm *VM) Run() error {
 			}
 			frame.ip += 5
 
+		case instr.I32_ADD:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(v1 + v2); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I32_SUB:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(v2 - v1); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I32_MUL:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI32(v1 * v2); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I32_DIV_S:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if v1 == 0 {
+				return ErrDivideByZero
+			}
+			if err := vm.pushI32(v2 / v1); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I32_DIV_U:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if v1 == 0 {
+				return ErrDivideByZero
+			}
+			if err := vm.pushI32(types.I32(uint32(v2) / uint32(v1))); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I32_REM_S:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if v1 == 0 {
+				return ErrDivideByZero
+			}
+			if err := vm.pushI32(v2 % v1); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I32_REM_U:
+			v1, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			if v1 == 0 {
+				return ErrDivideByZero
+			}
+			if err := vm.pushI32(types.I32(uint32(v2) % uint32(v1))); err != nil {
+				return err
+			}
+			frame.ip++
+
 		case instr.I64_CONST:
 			v := types.I64(binary.BigEndian.Uint64(vm.code[frame.ip+1:]))
 			if err := vm.pushI64(v); err != nil {
 				return err
 			}
 			frame.ip += 9
+
+		case instr.I64_ADD:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI64(v1 + v2); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I64_SUB:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI64(v2 - v1); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I64_MUL:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushI64(v1 * v2); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I64_DIV_S:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if v1 == 0 {
+				return ErrDivideByZero
+			}
+			if err := vm.pushI64(v2 / v1); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I64_DIV_U:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if v1 == 0 {
+				return ErrDivideByZero
+			}
+			if err := vm.pushI64(types.I64(uint64(v2) / uint64(v1))); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I64_REM_S:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if v1 == 0 {
+				return ErrDivideByZero
+			}
+			if err := vm.pushI64(v2 % v1); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I64_REM_U:
+			v1, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popI64()
+			if err != nil {
+				return err
+			}
+			if v1 == 0 {
+				return ErrDivideByZero
+			}
+			if err := vm.pushI64(types.I64(uint64(v2) % uint64(v1))); err != nil {
+				return err
+			}
+			frame.ip++
 
 		case instr.F32_CONST:
 			v := types.F32(math.Float32frombits(binary.BigEndian.Uint32(vm.code[frame.ip+1:])))
@@ -156,6 +376,62 @@ func (vm *VM) Run() error {
 			}
 			frame.ip += 5
 
+		case instr.F32_ADD:
+			v1, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushF32(v1 + v2); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F32_SUB:
+			v1, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushF32(v2 - v1); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F32_MUL:
+			v1, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushF32(v1 * v2); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F32_DIV:
+			v1, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushF32(v2 / v1); err != nil {
+				return err
+			}
+			frame.ip++
+
 		case instr.F64_CONST:
 			v := types.F64(math.Float64frombits(binary.BigEndian.Uint64(vm.code[frame.ip+1:])))
 			if err := vm.pushF64(v); err != nil {
@@ -163,8 +439,64 @@ func (vm *VM) Run() error {
 			}
 			frame.ip += 9
 
+		case instr.F64_ADD:
+			v1, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushF64(v1 + v2); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F64_SUB:
+			v1, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushF64(v2 - v1); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F64_MUL:
+			v1, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushF64(v1 * v2); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F64_DIV:
+			v1, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			v2, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			if err := vm.pushF64(v2 / v1); err != nil {
+				return err
+			}
+			frame.ip++
+
 		default:
-			return fmt.Errorf("%w at ip=%d, opcode=0x%x", ErrUnknownOpcode, frame.ip, opcode)
+			return ErrUnknownOpcode
 		}
 	}
 	return nil

@@ -13,13 +13,40 @@ func TestTypeOf(t *testing.T) {
 	}{
 		{opcode: NOP},
 		{opcode: UNREACHABLE},
+
 		{opcode: DROP},
 		{opcode: DUP},
 		{opcode: SWAP},
+
 		{opcode: I32_CONST},
+		{opcode: I32_ADD},
+		{opcode: I32_SUB},
+		{opcode: I32_MUL},
+		{opcode: I32_DIV_S},
+		{opcode: I32_DIV_U},
+		{opcode: I32_REM_S},
+		{opcode: I32_REM_U},
+
 		{opcode: I64_CONST},
+		{opcode: I64_ADD},
+		{opcode: I64_SUB},
+		{opcode: I64_MUL},
+		{opcode: I64_DIV_S},
+		{opcode: I64_DIV_U},
+		{opcode: I64_REM_S},
+		{opcode: I64_REM_U},
+
 		{opcode: F32_CONST},
+		{opcode: F32_ADD},
+		{opcode: F32_SUB},
+		{opcode: F32_MUL},
+		{opcode: F32_DIV},
+
 		{opcode: F64_CONST},
+		{opcode: F64_ADD},
+		{opcode: F64_SUB},
+		{opcode: F64_MUL},
+		{opcode: F64_DIV},
 	}
 
 	for _, tt := range tests {
