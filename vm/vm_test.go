@@ -932,6 +932,7 @@ func BenchmarkFibonacci(b *testing.B) {
 
 	vm := New(prog)
 
+	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		err := vm.Run()
 		require.NoError(b, err)
