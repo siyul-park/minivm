@@ -43,11 +43,14 @@ func (f Function) String() string {
 	sb.WriteString(fmt.Sprintf("\t.locals: %d\n", f.Locals))
 
 	ip := 0
-	for _, b := range f.Code {
-		sb.WriteString(fmt.Sprintf("%04d:\t0x%02X\n", ip, b))
-		ip++
+	for _, inst := range instr.Unmarshal(f.Code) {
+		if inst == nil {
+			sb.WriteString(fmt.Sprintf("%04d: <invalid>\n", ip))
+			break
+		}
+		sb.WriteString(fmt.Sprintf("%04d:\t%s\n", ip, inst.String()))
+		ip += len(inst)
 	}
-
 	return sb.String()
 }
 

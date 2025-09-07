@@ -26,6 +26,10 @@ func TestTypeOf(t *testing.T) {
 		{opcode: GLOBAL_SET},
 		{opcode: GLOBAL_TEE},
 
+		{opcode: LOCAL_GET},
+		{opcode: LOCAL_SET},
+		{opcode: LOCAL_TEE},
+
 		{opcode: FN_CONST},
 
 		{opcode: I32_CONST},

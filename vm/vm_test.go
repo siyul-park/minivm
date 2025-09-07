@@ -102,7 +102,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.GLOBAL_SET, 0),
 			},
 			nil,
@@ -112,24 +112,87 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.GLOBAL_SET, 0),
 				instr.New(instr.GLOBAL_GET, 0),
 			},
 			nil,
 		),
-		values: []types.Value{types.I32(0)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.GLOBAL_TEE, 0),
 				instr.New(instr.GLOBAL_GET, 0),
 			},
 			nil,
 		),
-		values: []types.Value{types.I32(0), types.I32(0)},
+		values: []types.Value{types.I32(1), types.I32(1)},
+	},
+
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.FN_CONST, 0),
+				instr.New(instr.CALL),
+			},
+			[]types.Value{
+				types.NewFunction(
+					[]instr.Instruction{
+						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.LOCAL_SET, 0),
+					},
+					0,
+					0,
+					1,
+				),
+			},
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.FN_CONST, 0),
+				instr.New(instr.CALL),
+			},
+			[]types.Value{
+				types.NewFunction(
+					[]instr.Instruction{
+						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.LOCAL_SET, 0),
+						instr.New(instr.LOCAL_GET, 0),
+					},
+					0,
+					0,
+					1,
+				),
+			},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.FN_CONST, 0),
+				instr.New(instr.CALL),
+			},
+			[]types.Value{
+				types.NewFunction(
+					[]instr.Instruction{
+						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.LOCAL_TEE, 0),
+						instr.New(instr.LOCAL_GET, 0),
+					},
+					0,
+					0,
+					1,
+				),
+			},
+		),
+		values: []types.Value{types.I32(1), types.I32(1)},
 	},
 
 	{

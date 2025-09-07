@@ -149,7 +149,7 @@ func (vm *VM) Run() error {
 
 		case instr.GLOBAL_GET:
 			p := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
-			v, err := vm.globalGet(p)
+			v, err := vm.gload(p)
 			if err != nil {
 				return err
 			}
@@ -164,7 +164,7 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
-			if err := vm.globalSet(p, v); err != nil {
+			if err := vm.gstore(p, v); err != nil {
 				return err
 			}
 			frame.ip += 5
@@ -180,14 +180,52 @@ func (vm *VM) Run() error {
 					return err
 				}
 			}
-			if err := vm.globalSet(p, v); err != nil {
+			if err := vm.gstore(p, v); err != nil {
+				return err
+			}
+			frame.ip += 5
+
+		case instr.LOCAL_GET:
+			p := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
+			v, err := vm.lload(p)
+			if err != nil {
+				return err
+			}
+			if err := vm.push(v); err != nil {
+				return err
+			}
+			frame.ip += 5
+
+		case instr.LOCAL_SET:
+			p := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
+			v, err := vm.pop()
+			if err != nil {
+				return err
+			}
+			if err := vm.lstore(p, v); err != nil {
+				return err
+			}
+			frame.ip += 5
+
+		case instr.LOCAL_TEE:
+			p := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
+			v, err := vm.peek()
+			if err != nil {
+				return err
+			}
+			if v.Kind() == types.KindRef {
+				if err := vm.retain(v.Ref()); err != nil {
+					return err
+				}
+			}
+			if err := vm.lstore(p, v); err != nil {
 				return err
 			}
 			frame.ip += 5
 
 		case instr.FN_CONST:
 			p := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
-			v2, err := vm.constGet(p)
+			v2, err := vm.constant(p)
 			if err != nil {
 				return err
 			}
@@ -1205,24 +1243,6 @@ func (vm *VM) Clear() {
 	vm.global = vm.global[:0]
 }
 
-func (vm *VM) call(fn *types.Function) error {
-	if vm.fp+1 >= len(vm.frames) {
-		return ErrFrameOverflow
-	}
-
-	vm.fp++
-	vm.frames[vm.fp].closure = &types.Closure{Function: fn}
-	vm.frames[vm.fp].ip = 0
-	vm.frames[vm.fp].bp = vm.sp - fn.Params
-
-	sp := vm.frames[vm.fp].bp + fn.Locals
-	if sp >= len(vm.stack) {
-		return ErrStackOverflow
-	}
-	vm.sp = sp
-	return nil
-}
-
 func (vm *VM) pushI32(val types.I32) error {
 	return vm.push(types.BoxI32(int32(val)))
 }
@@ -1334,14 +1354,36 @@ func (vm *VM) popFn() (*types.Function, error) {
 	return v, nil
 }
 
-func (vm *VM) constGet(idx int) (types.Value, error) {
+func (vm *VM) call(fn *types.Function) error {
+	if vm.fp+1 >= len(vm.frames) {
+		return ErrFrameOverflow
+	}
+
+	vm.fp++
+	vm.frames[vm.fp].closure = &types.Closure{Function: fn}
+	vm.frames[vm.fp].ip = 0
+	vm.frames[vm.fp].bp = vm.sp - fn.Params
+
+	for i := fn.Params; i < fn.Locals; i++ {
+		vm.stack[vm.frames[vm.fp].bp+i+1] = 0
+	}
+
+	sp := vm.frames[vm.fp].bp + fn.Locals
+	if sp >= len(vm.stack) {
+		return ErrStackOverflow
+	}
+	vm.sp = sp
+	return nil
+}
+
+func (vm *VM) constant(idx int) (types.Value, error) {
 	if idx < 0 || idx >= len(vm.constants) {
 		return nil, ErrReferenceInvalid
 	}
 	return vm.constants[idx], nil
 }
 
-func (vm *VM) globalGet(idx int) (types.Boxed, error) {
+func (vm *VM) gload(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(vm.global) {
 		return 0, ErrReferenceInvalid
 	}
@@ -1354,7 +1396,7 @@ func (vm *VM) globalGet(idx int) (types.Boxed, error) {
 	return val, nil
 }
 
-func (vm *VM) globalSet(idx int, val types.Boxed) error {
+func (vm *VM) gstore(idx int, val types.Boxed) error {
 	if idx < 0 {
 		return ErrReferenceInvalid
 	}
@@ -1377,6 +1419,39 @@ func (vm *VM) globalSet(idx int, val types.Boxed) error {
 		}
 	}
 	vm.global[idx] = val
+	return nil
+}
+
+func (vm *VM) lload(idx int) (types.Boxed, error) {
+	frame := &vm.frames[vm.fp]
+	if idx < 0 || idx >= frame.closure.Function.Locals {
+		return 0, ErrReferenceInvalid
+	}
+	val := vm.stack[frame.bp+idx+1]
+	if val.Kind() == types.KindRef {
+		if err := vm.retain(val.Ref()); err != nil {
+			return 0, err
+		}
+	}
+	return val, nil
+}
+
+func (vm *VM) lstore(idx int, val types.Boxed) error {
+	frame := &vm.frames[vm.fp]
+	if idx < 0 || idx >= frame.closure.Function.Locals {
+		return ErrReferenceInvalid
+	}
+	old := vm.stack[frame.bp+idx+1]
+	if old.Kind() == types.KindRef {
+		if ok, err := vm.release(old.Ref()); err != nil {
+			return err
+		} else if ok {
+			if err := vm.free(old.Ref()); err != nil {
+				return err
+			}
+		}
+	}
+	vm.stack[frame.bp+idx+1] = val
 	return nil
 }
 
@@ -1410,8 +1485,8 @@ func (vm *VM) push(val types.Boxed) error {
 	if vm.sp+1 >= len(vm.stack) {
 		return ErrStackOverflow
 	}
-	vm.stack[vm.sp+1] = val
 	vm.sp++
+	vm.stack[vm.sp] = val
 	return nil
 }
 
