@@ -233,7 +233,13 @@ func (vm *VM) Run() error {
 			if !ok {
 				return ErrReferenceInvalid
 			}
-			if err := vm.pushFn(fn); err != nil {
+			cl := &types.Closure{Function: fn}
+			if fn.Captures > 0 {
+				cl.Captures = make([]types.Boxed, fn.Captures)
+				copy(cl.Captures, vm.stack[vm.sp-fn.Captures:vm.sp])
+				vm.sp -= fn.Captures
+			}
+			if err := vm.pushFn(cl); err != nil {
 				return err
 			}
 			frame.ip += 5
@@ -1276,7 +1282,7 @@ func (vm *VM) pushRef(val types.Ref) error {
 	return vm.push(types.BoxRef(int(val)))
 }
 
-func (vm *VM) pushFn(val *types.Function) error {
+func (vm *VM) pushFn(val *types.Closure) error {
 	addr, err := vm.alloc(val)
 	if err != nil {
 		return err
@@ -1338,7 +1344,7 @@ func (vm *VM) popRef() (types.Ref, error) {
 	return types.Ref(box.Ref()), nil
 }
 
-func (vm *VM) popFn() (*types.Function, error) {
+func (vm *VM) popFn() (*types.Closure, error) {
 	addr, err := vm.popRef()
 	if err != nil {
 		return nil, err
@@ -1347,28 +1353,28 @@ func (vm *VM) popFn() (*types.Function, error) {
 	if err != nil {
 		return nil, err
 	}
-	v, ok := val.(*types.Function)
+	v, ok := val.(*types.Closure)
 	if !ok {
 		return nil, ErrReferenceInvalid
 	}
 	return v, nil
 }
 
-func (vm *VM) call(fn *types.Function) error {
+func (vm *VM) call(cl *types.Closure) error {
 	if vm.fp+1 >= len(vm.frames) {
 		return ErrFrameOverflow
 	}
 
 	vm.fp++
-	vm.frames[vm.fp].closure = &types.Closure{Function: fn}
+	vm.frames[vm.fp].closure = cl
 	vm.frames[vm.fp].ip = 0
-	vm.frames[vm.fp].bp = vm.sp - fn.Params
+	vm.frames[vm.fp].bp = vm.sp - cl.Function.Params
 
-	for i := fn.Params; i < fn.Locals; i++ {
+	for i := cl.Function.Params; i < cl.Function.Locals; i++ {
 		vm.stack[vm.frames[vm.fp].bp+i+1] = 0
 	}
 
-	sp := vm.frames[vm.fp].bp + fn.Locals
+	sp := vm.frames[vm.fp].bp + cl.Function.Locals
 	if sp >= len(vm.stack) {
 		return ErrStackOverflow
 	}

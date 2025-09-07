@@ -8,27 +8,51 @@ import (
 )
 
 type Function struct {
-	Code    []byte
-	Params  int
-	Returns int
-	Locals  int
+	Code     []byte
+	Params   int
+	Returns  int
+	Locals   int
+	Captures int
 }
 
 type Closure struct {
 	Function *Function
-	Free     []Value
+	Captures []Boxed
 }
 
 var _ Value = (*Function)(nil)
 var _ Value = (*Closure)(nil)
 
-func NewFunction(instrs []instr.Instruction, params, returns, locals int) *Function {
-	return &Function{
-		Code:    instr.Marshal(instrs),
-		Params:  params,
-		Returns: returns,
-		Locals:  locals,
+func FunctionWithParams(val int) func(*Function) {
+	return func(function *Function) {
+		function.Params = val
 	}
+}
+
+func FunctionWithReturns(val int) func(*Function) {
+	return func(function *Function) {
+		function.Returns = val
+	}
+}
+
+func FunctionWithLocals(val int) func(*Function) {
+	return func(function *Function) {
+		function.Locals = val
+	}
+}
+
+func FunctionWithCaptures(val int) func(*Function) {
+	return func(function *Function) {
+		function.Captures = val
+	}
+}
+
+func NewFunction(instrs []instr.Instruction, opts ...func(*Function)) *Function {
+	fn := &Function{Code: instr.Marshal(instrs)}
+	for _, opt := range opts {
+		opt(fn)
+	}
+	return fn
 }
 
 func (f Function) Interface() any {
