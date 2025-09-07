@@ -29,9 +29,9 @@ type VM struct {
 
 func New(prog *program.Program, opts ...Option) *VM {
 	stack := 1024
-	heap := 64
+	heap := 128
 	global := 128
-	frame := 64
+	frame := 128
 	for _, opt := range opts {
 		if opt.Stack > 0 {
 			stack = opt.Stack
@@ -130,9 +130,6 @@ func (vm *VM) Len() int {
 }
 
 func (vm *VM) Clear() {
-	for i := range vm.stack {
-		vm.stack[i] = 0
-	}
 	vm.sp = -1
 
 	for vm.fp > 0 {

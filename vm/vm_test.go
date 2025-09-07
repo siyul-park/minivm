@@ -870,18 +870,119 @@ func TestVM_Run(t *testing.T) {
 	}
 }
 
+func TestFibonacci(t *testing.T) {
+	prog := program.New(
+		[]instr.Instruction{
+			instr.New(instr.FN_CONST, 0),
+			instr.New(instr.GLOBAL_SET, 0),
+
+			instr.New(instr.I32_CONST, 20),
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.CALL),
+		},
+		[]types.Value{
+			types.NewFunction(
+				[]instr.Instruction{
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.I32_LT_S),
+					instr.New(instr.BR_IF, 36),
+
+					instr.New(instr.LOCAL_GET, 0),  // +0
+					instr.New(instr.I32_CONST, 1),  // +5
+					instr.New(instr.I32_SUB),       // +10
+					instr.New(instr.GLOBAL_GET, 0), // +11
+					instr.New(instr.CALL),          // +16
+
+					instr.New(instr.LOCAL_GET, 0),  // 17
+					instr.New(instr.I32_CONST, 2),  //22
+					instr.New(instr.I32_SUB),       //27
+					instr.New(instr.GLOBAL_GET, 0), //28
+					instr.New(instr.CALL),          //33
+
+					instr.New(instr.I32_ADD), //34
+					instr.New(instr.RETURN),  //35
+
+					instr.New(instr.LOCAL_GET, 0), //36
+					instr.New(instr.RETURN),
+				},
+				types.FunctionWithParams(1),
+				types.FunctionWithReturns(1),
+				types.FunctionWithLocals(1),
+			),
+		},
+	)
+
+	vm := New(prog)
+
+	err := vm.Run()
+	require.NoError(t, err)
+
+	val, err := vm.Pop()
+	require.NoError(t, err)
+	require.Equal(t, int32(6765), val.Interface())
+}
+
+func TestFactorial(t *testing.T) {
+	prog := program.New(
+		[]instr.Instruction{
+			instr.New(instr.FN_CONST, 0),
+			instr.New(instr.GLOBAL_SET, 0),
+
+			instr.New(instr.I64_CONST, 10),
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.CALL),
+		},
+		[]types.Value{
+			types.NewFunction(
+				[]instr.Instruction{
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I64_CONST, 1),
+					instr.New(instr.I64_LE_S),
+					instr.New(instr.BR_IF, 28),
+
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I64_CONST, 1),
+					instr.New(instr.I64_SUB),
+					instr.New(instr.GLOBAL_GET, 0),
+					instr.New(instr.CALL),
+
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I64_MUL),
+
+					instr.New(instr.RETURN),
+
+					instr.New(instr.I64_CONST, 1),
+					instr.New(instr.RETURN),
+				},
+				types.FunctionWithParams(1),
+				types.FunctionWithReturns(1),
+				types.FunctionWithLocals(1),
+			),
+		},
+	)
+
+	vm := New(prog)
+
+	err := vm.Run()
+	require.NoError(t, err)
+
+	val, err := vm.Pop()
+	require.NoError(t, err)
+	require.Equal(t, int64(3628800), val.Interface()) // 10! = 3628800
+}
+
 func BenchmarkVM_Run(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.program.String(), func(b *testing.B) {
 			vm := New(tt.program)
 
+			b.ResetTimer()
 			for n := 0; n < b.N; n++ {
 				err := vm.Run()
 				require.NoError(b, err)
 
-				b.StopTimer()
 				vm.Clear()
-				b.StartTimer()
 			}
 		})
 	}
@@ -936,6 +1037,66 @@ func BenchmarkFibonacci(b *testing.B) {
 	for n := 0; n < b.N; n++ {
 		err := vm.Run()
 		require.NoError(b, err)
+
+		val, err := vm.Pop()
+		require.NoError(b, err)
+		require.Equal(b, int32(6765), val.Interface())
+
+		b.StopTimer()
+		vm.Clear()
+		b.StartTimer()
+	}
+}
+
+func BenchmarkFactorial(b *testing.B) {
+	prog := program.New(
+		[]instr.Instruction{
+			instr.New(instr.FN_CONST, 0),
+			instr.New(instr.GLOBAL_SET, 0),
+
+			instr.New(instr.I64_CONST, 10),
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.CALL),
+		},
+		[]types.Value{
+			types.NewFunction(
+				[]instr.Instruction{
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I64_CONST, 1),
+					instr.New(instr.I64_LE_S),
+					instr.New(instr.BR_IF, 28),
+
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I64_CONST, 1),
+					instr.New(instr.I64_SUB),
+					instr.New(instr.GLOBAL_GET, 0),
+					instr.New(instr.CALL),
+
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I64_MUL),
+
+					instr.New(instr.RETURN),
+
+					instr.New(instr.I64_CONST, 1),
+					instr.New(instr.RETURN),
+				},
+				types.FunctionWithParams(1),
+				types.FunctionWithReturns(1),
+				types.FunctionWithLocals(1),
+			),
+		},
+	)
+
+	vm := New(prog)
+
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		err := vm.Run()
+		require.NoError(b, err)
+
+		val, err := vm.Pop()
+		require.NoError(b, err)
+		require.Equal(b, int64(3628800), val.Interface())
 
 		b.StopTimer()
 		vm.Clear()

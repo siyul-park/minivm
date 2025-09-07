@@ -74,6 +74,9 @@ var dispatch = [256]func(vm *VM) error{
 		if vm.sp < 0 {
 			return ErrStackUnderflow
 		}
+		if vm.fp+1 >= len(vm.frames) {
+			return ErrFrameOverflow
+		}
 
 		addr := vm.stack[vm.sp].Ref()
 		vm.sp--
@@ -81,10 +84,6 @@ var dispatch = [256]func(vm *VM) error{
 		cl, ok := vm.heap[addr].(*types.Closure)
 		if !ok {
 			return ErrSegmentationFault
-		}
-
-		if vm.fp+1 >= len(vm.frames) {
-			return ErrFrameOverflow
 		}
 
 		frame := &vm.frames[vm.fp+1]
