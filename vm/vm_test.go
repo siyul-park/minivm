@@ -852,6 +852,50 @@ var tests = []struct {
 		),
 		values: []types.Value{types.Bool(true)},
 	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.FN_CONST, 0),
+				instr.New(instr.GLOBAL_SET, 0),
+
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.CALL),
+			},
+			[]types.Value{
+				types.NewFunction(
+					[]instr.Instruction{
+						instr.New(instr.LOCAL_GET, 0),
+						instr.New(instr.I32_CONST, 2),
+						instr.New(instr.I32_LT_S),
+						instr.New(instr.BR_IF, 36),
+
+						instr.New(instr.LOCAL_GET, 0),  // +0
+						instr.New(instr.I32_CONST, 1),  // +5
+						instr.New(instr.I32_SUB),       // +10
+						instr.New(instr.GLOBAL_GET, 0), // +11
+						instr.New(instr.CALL),          // +16
+
+						instr.New(instr.LOCAL_GET, 0),  // 17
+						instr.New(instr.I32_CONST, 2),  //22
+						instr.New(instr.I32_SUB),       //27
+						instr.New(instr.GLOBAL_GET, 0), //28
+						instr.New(instr.CALL),          //33
+
+						instr.New(instr.I32_ADD), //34
+						instr.New(instr.RETURN),  //35
+
+						instr.New(instr.LOCAL_GET, 0), //36
+						instr.New(instr.RETURN),
+					},
+					types.FunctionWithParams(1),
+					types.FunctionWithReturns(1),
+					types.FunctionWithLocals(1),
+				),
+			},
+		),
+		values: nil,
+	},
 }
 
 func TestVM_Run(t *testing.T) {
@@ -876,61 +920,11 @@ func BenchmarkVM_Run(b *testing.B) {
 			vm := New(tt.program)
 
 			for n := 0; n < b.N; n++ {
-				vm.Clear()
-
 				err := vm.Run()
 				require.NoError(b, err)
+
+				vm.Clear()
 			}
 		})
-	}
-}
-
-func BenchmarkVM_Fibonacci(b *testing.B) {
-	vm := New(program.New(
-		[]instr.Instruction{
-			instr.New(instr.I32_CONST, 0),
-			instr.New(instr.GLOBAL_SET, 0),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.GLOBAL_SET, 1),
-			instr.New(instr.I32_CONST, 2),
-			instr.New(instr.GLOBAL_SET, 2),
-
-			instr.New(instr.GLOBAL_GET, 2),
-			instr.New(instr.I32_CONST, 47),
-			instr.New(instr.I32_GE_S),
-			instr.New(instr.BR_IF, 57),
-
-			instr.New(instr.GLOBAL_GET, 0),
-			instr.New(instr.GLOBAL_GET, 1),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.GLOBAL_SET, 3),
-
-			instr.New(instr.GLOBAL_GET, 1),
-			instr.New(instr.GLOBAL_SET, 0),
-
-			instr.New(instr.GLOBAL_GET, 3),
-			instr.New(instr.GLOBAL_SET, 1),
-
-			instr.New(instr.GLOBAL_GET, 2),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.GLOBAL_SET, 2),
-
-			instr.New(instr.BR, uint64(^uint64(73))+1),
-
-			instr.New(instr.GLOBAL_GET, 1),
-		},
-		nil,
-	))
-
-	for n := 0; n < b.N; n++ {
-		vm.Clear()
-
-		err := vm.Run()
-		require.NoError(b, err)
-
-		res, err := vm.Pop()
-		require.NoError(b, err)
-		require.Equal(b, int32(1836311903), res.Interface())
 	}
 }

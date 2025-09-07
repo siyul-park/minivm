@@ -32,7 +32,7 @@ type VM struct {
 var (
 	ErrUnknownOpcode       = errors.New("unknown opcode")
 	ErrUnreachableExecuted = errors.New("unreachable executed")
-	ErrReferenceInvalid    = errors.New("reference invalid")
+	ErrSegmentationFault   = errors.New("segmentation fault")
 	ErrStackOverflow       = errors.New("stack overflow")
 	ErrStackUnderflow      = errors.New("stack underflow")
 	ErrFrameOverflow       = errors.New("frame overflow")
@@ -152,8 +152,6 @@ func (vm *VM) Run() error {
 			if err := vm.ret(); err != nil {
 				return err
 			}
-
-			frame.ip++
 			frame = &vm.frames[vm.fp]
 			code = frame.cl.Function.Code
 
@@ -241,7 +239,7 @@ func (vm *VM) Run() error {
 			}
 			fn, ok := v2.(*types.Function)
 			if !ok {
-				return ErrReferenceInvalid
+				return ErrSegmentationFault
 			}
 			cl := &types.Closure{Function: fn}
 			if fn.Captures > 0 {
@@ -272,7 +270,7 @@ func (vm *VM) Run() error {
 			}
 			i, ok := v.(types.I32)
 			if !ok {
-				return ErrReferenceInvalid
+				return ErrSegmentationFault
 			}
 			if err := vm.pushI32(i); err != nil {
 				return err
@@ -561,7 +559,7 @@ func (vm *VM) Run() error {
 			}
 			i, ok := v.(types.I64)
 			if !ok {
-				return ErrReferenceInvalid
+				return ErrSegmentationFault
 			}
 			if err := vm.pushI64(i); err != nil {
 				return err
@@ -852,7 +850,7 @@ func (vm *VM) Run() error {
 			}
 			f, ok := v.(types.F32)
 			if !ok {
-				return ErrReferenceInvalid
+				return ErrSegmentationFault
 			}
 			if err := vm.pushF32(f); err != nil {
 				return err
@@ -1031,7 +1029,7 @@ func (vm *VM) Run() error {
 			}
 			f, ok := v.(types.F64)
 			if !ok {
-				return ErrReferenceInvalid
+				return ErrSegmentationFault
 			}
 			if err := vm.pushF64(f); err != nil {
 				return err
@@ -1233,10 +1231,10 @@ func (vm *VM) Len() int {
 }
 
 func (vm *VM) Clear() {
-	for vm.sp >= 0 {
-		vm.stack[vm.sp] = 0
-		vm.sp--
+	for i := range vm.stack {
+		vm.stack[i] = 0
 	}
+	vm.sp = -1
 
 	for vm.fp > 0 {
 		vm.frames[vm.fp] = Frame{}
@@ -1245,6 +1243,18 @@ func (vm *VM) Clear() {
 	vm.frames[vm.fp].bp = vm.sp
 	vm.frames[vm.fp].ip = 0
 
+	for i := range vm.heap {
+		vm.heap[i] = nil
+	}
+	for i := range vm.hits {
+		vm.hits[i] = 0
+	}
+	for i := range vm.frees {
+		vm.frees[i] = 0
+	}
+	for i := range vm.global {
+		vm.global[i] = 0
+	}
 	vm.heap = vm.heap[:0]
 	vm.hits = vm.hits[:0]
 	vm.frees = vm.frees[:0]
@@ -1309,7 +1319,7 @@ func (vm *VM) popI64() (types.I64, error) {
 		}
 		v, ok := val.(types.I64)
 		if !ok {
-			return 0, ErrReferenceInvalid
+			return 0, ErrSegmentationFault
 		}
 		return v, nil
 	}
@@ -1351,7 +1361,7 @@ func (vm *VM) call(ref types.Ref) error {
 	}
 	cl, ok := v.(*types.Closure)
 	if !ok {
-		return ErrReferenceInvalid
+		return ErrSegmentationFault
 	}
 
 	vm.fp++
@@ -1359,10 +1369,6 @@ func (vm *VM) call(ref types.Ref) error {
 	vm.frames[vm.fp].ref = ref
 	vm.frames[vm.fp].ip = 0
 	vm.frames[vm.fp].bp = vm.sp - cl.Function.Params
-
-	for i := cl.Function.Params; i < cl.Function.Locals; i++ {
-		vm.stack[vm.frames[vm.fp].bp+i+1] = 0
-	}
 
 	sp := vm.frames[vm.fp].bp + cl.Function.Locals
 	if sp >= len(vm.stack) {
@@ -1396,14 +1402,14 @@ func (vm *VM) ret() error {
 
 func (vm *VM) constant(idx int) (types.Value, error) {
 	if idx < 0 || idx >= len(vm.constants) {
-		return nil, ErrReferenceInvalid
+		return nil, ErrSegmentationFault
 	}
 	return vm.constants[idx], nil
 }
 
 func (vm *VM) gload(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(vm.global) {
-		return 0, ErrReferenceInvalid
+		return 0, ErrSegmentationFault
 	}
 	val := vm.global[idx]
 	if val.Kind() == types.KindRef {
@@ -1416,7 +1422,7 @@ func (vm *VM) gload(idx int) (types.Boxed, error) {
 
 func (vm *VM) gstore(idx int, val types.Boxed) error {
 	if idx < 0 {
-		return ErrReferenceInvalid
+		return ErrSegmentationFault
 	}
 	if idx >= cap(vm.global) {
 		global := make([]types.Boxed, len(vm.global), (idx+1)*2)
@@ -1427,6 +1433,9 @@ func (vm *VM) gstore(idx int, val types.Boxed) error {
 		vm.global = vm.global[:idx+1]
 	}
 	old := vm.global[idx]
+	if old == val {
+		return nil
+	}
 	if old.Kind() == types.KindRef {
 		if err := vm.free(old.Ref()); err != nil {
 			return err
@@ -1439,7 +1448,7 @@ func (vm *VM) gstore(idx int, val types.Boxed) error {
 func (vm *VM) lload(idx int) (types.Boxed, error) {
 	frame := &vm.frames[vm.fp]
 	if idx < 0 || idx >= frame.cl.Function.Locals {
-		return 0, ErrReferenceInvalid
+		return 0, ErrSegmentationFault
 	}
 	val := vm.stack[frame.bp+idx+1]
 	if val.Kind() == types.KindRef {
@@ -1453,7 +1462,7 @@ func (vm *VM) lload(idx int) (types.Boxed, error) {
 func (vm *VM) lstore(idx int, val types.Boxed) error {
 	frame := &vm.frames[vm.fp]
 	if idx < 0 || idx >= frame.cl.Function.Locals {
-		return ErrReferenceInvalid
+		return ErrSegmentationFault
 	}
 	old := vm.stack[frame.bp+idx+1]
 	if old.Kind() == types.KindRef {
@@ -1467,14 +1476,14 @@ func (vm *VM) lstore(idx int, val types.Boxed) error {
 
 func (vm *VM) lookup(addr int) (types.Value, error) {
 	if addr < 0 || addr >= len(vm.heap) {
-		return nil, ErrReferenceInvalid
+		return nil, ErrSegmentationFault
 	}
 	return vm.heap[addr], nil
 }
 
 func (vm *VM) load(addr int) (types.Value, error) {
 	if addr < 0 || addr >= len(vm.heap) {
-		return nil, ErrReferenceInvalid
+		return nil, ErrSegmentationFault
 	}
 	val := vm.heap[addr]
 	if err := vm.free(addr); err != nil {
@@ -1513,6 +1522,7 @@ func (vm *VM) pop() (types.Boxed, error) {
 		return 0, ErrStackUnderflow
 	}
 	val := vm.stack[vm.sp]
+	vm.stack[vm.sp] = 0
 	vm.sp--
 	return val, nil
 }
@@ -1559,7 +1569,7 @@ func (vm *VM) alloc(val types.Value) (int, error) {
 
 func (vm *VM) free(addr int) error {
 	if addr < 0 || addr >= len(vm.heap) {
-		return ErrReferenceInvalid
+		return ErrSegmentationFault
 	}
 
 	stack := []int{addr}
@@ -1588,7 +1598,7 @@ func (vm *VM) free(addr int) error {
 
 func (vm *VM) retain(addr int) error {
 	if addr < 0 || addr >= len(vm.hits) {
-		return ErrReferenceInvalid
+		return ErrSegmentationFault
 	}
 	vm.hits[addr]++
 	return nil
