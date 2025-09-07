@@ -427,6 +427,45 @@ var dispatch = [256]func(vm *VM) error{
 		vm.frames[vm.fp].ip++
 		return nil
 	},
+	instr.I32_XOR: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+
+		v1 := vm.stack[vm.sp].I32()
+		v2 := vm.stack[vm.sp-1].I32()
+
+		vm.sp--
+		vm.stack[vm.sp] = types.BoxI32(v1 ^ v2)
+		vm.frames[vm.fp].ip++
+		return nil
+	},
+	instr.I32_AND: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+
+		v1 := vm.stack[vm.sp].I32()
+		v2 := vm.stack[vm.sp-1].I32()
+
+		vm.sp--
+		vm.stack[vm.sp] = types.BoxI32(v1 & v2)
+		vm.frames[vm.fp].ip++
+		return nil
+	},
+	instr.I32_OR: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+
+		v1 := vm.stack[vm.sp].I32()
+		v2 := vm.stack[vm.sp-1].I32()
+
+		vm.sp--
+		vm.stack[vm.sp] = types.BoxI32(v1 | v2)
+		vm.frames[vm.fp].ip++
+		return nil
+	},
 	instr.I32_EQ: func(vm *VM) error {
 		if vm.sp < 1 {
 			return ErrStackUnderflow

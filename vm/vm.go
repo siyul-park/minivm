@@ -126,7 +126,7 @@ func (vm *VM) Pop() (types.Value, error) {
 }
 
 func (vm *VM) Len() int {
-	return vm.sp + 1
+	return vm.sp
 }
 
 func (vm *VM) Clear() {

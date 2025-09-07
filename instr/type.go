@@ -33,6 +33,10 @@ var types = map[Opcode]Type{
 	I32_LOAD:  {"i32.load", []int{}},
 	I32_STORE: {"i32.store", []int{}},
 
+	I32_XOR: {"i32.xor", []int{}},
+	I32_AND: {"i32.and", []int{}},
+	I32_OR:  {"i32.or", []int{}},
+
 	I32_ADD:   {"i32.add", []int{}},
 	I32_SUB:   {"i32.sub", []int{}},
 	I32_MUL:   {"i32.mul", []int{}},

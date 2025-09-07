@@ -38,6 +38,10 @@ const (
 	I32_REM_S
 	I32_REM_U
 
+	I32_XOR
+	I32_AND
+	I32_OR
+
 	I32_EQ
 	I32_NE
 	I32_LT_S

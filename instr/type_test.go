@@ -38,6 +38,10 @@ func TestTypeOf(t *testing.T) {
 		{opcode: I32_LOAD},
 		{opcode: I32_STORE},
 
+		{opcode: I32_XOR},
+		{opcode: I32_AND},
+		{opcode: I32_OR},
+
 		{opcode: I32_ADD},
 		{opcode: I32_SUB},
 		{opcode: I32_MUL},

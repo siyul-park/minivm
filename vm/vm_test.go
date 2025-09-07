@@ -329,6 +329,40 @@ var tests = []struct {
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_XOR),
+			},
+			nil,
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_AND),
+			},
+			nil,
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_OR),
+			},
+			nil,
+		),
+		values: []types.Value{types.I32(1)},
+	},
+
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_EQ),
 			},
 			nil,
