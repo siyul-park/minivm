@@ -2,8 +2,9 @@ package types
 
 import (
 	"fmt"
-	"github.com/siyul-park/minivm/instr"
 	"strings"
+
+	"github.com/siyul-park/minivm/instr"
 )
 
 type Function struct {

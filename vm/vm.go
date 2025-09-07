@@ -175,6 +175,11 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
+			if v.Kind() == types.KindRef {
+				if err := vm.retain(v.Ref()); err != nil {
+					return err
+				}
+			}
 			if err := vm.globalSet(p, v); err != nil {
 				return err
 			}
@@ -201,6 +206,38 @@ func (vm *VM) Run() error {
 				return err
 			}
 			frame.ip += 5
+
+		case instr.I32_LOAD:
+			addr, err := vm.popRef()
+			if err != nil {
+				return err
+			}
+			v, err := vm.load(int(addr))
+			if err != nil {
+				return err
+			}
+			i, ok := v.(types.I32)
+			if !ok {
+				return ErrReferenceInvalid
+			}
+			if err := vm.pushI32(i); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I32_STORE:
+			v, err := vm.popI32()
+			if err != nil {
+				return err
+			}
+			addr, err := vm.store(v)
+			if err != nil {
+				return err
+			}
+			if err := vm.push(types.BoxRef(addr)); err != nil {
+				return err
+			}
+			frame.ip++
 
 		case instr.I32_ADD:
 			v1, err := vm.popI32()
@@ -459,6 +496,40 @@ func (vm *VM) Run() error {
 			}
 			frame.ip += 9
 
+		case instr.I64_LOAD:
+			addr, err := vm.popRef()
+			if err != nil {
+				return err
+			}
+			v, err := vm.load(int(addr))
+			if err != nil {
+				return err
+			}
+			i, ok := v.(types.I64)
+			if !ok {
+				return ErrReferenceInvalid
+			}
+			if err := vm.pushI64(i); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.I64_STORE:
+			v, err := vm.peek()
+			if err != nil {
+				return err
+			}
+			if v.Kind() != types.KindRef {
+				addr, err := vm.store(types.I64(v.I64()))
+				if err != nil {
+					return err
+				}
+				if err := vm.poke(types.BoxRef(addr)); err != nil {
+					return err
+				}
+			}
+			frame.ip++
+
 		case instr.I64_ADD:
 			v1, err := vm.popI64()
 			if err != nil {
@@ -716,6 +787,38 @@ func (vm *VM) Run() error {
 			}
 			frame.ip += 5
 
+		case instr.F32_LOAD:
+			addr, err := vm.popRef()
+			if err != nil {
+				return err
+			}
+			v, err := vm.load(int(addr))
+			if err != nil {
+				return err
+			}
+			f, ok := v.(types.F32)
+			if !ok {
+				return ErrReferenceInvalid
+			}
+			if err := vm.pushF32(f); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F32_STORE:
+			v, err := vm.popF32()
+			if err != nil {
+				return err
+			}
+			addr, err := vm.store(v)
+			if err != nil {
+				return err
+			}
+			if err := vm.push(types.BoxRef(addr)); err != nil {
+				return err
+			}
+			frame.ip++
+
 		case instr.F32_ADD:
 			v1, err := vm.popF32()
 			if err != nil {
@@ -862,6 +965,38 @@ func (vm *VM) Run() error {
 				return err
 			}
 			frame.ip += 9
+
+		case instr.F64_LOAD:
+			addr, err := vm.popRef()
+			if err != nil {
+				return err
+			}
+			v, err := vm.load(int(addr))
+			if err != nil {
+				return err
+			}
+			f, ok := v.(types.F64)
+			if !ok {
+				return ErrReferenceInvalid
+			}
+			if err := vm.pushF64(f); err != nil {
+				return err
+			}
+			frame.ip++
+
+		case instr.F64_STORE:
+			v, err := vm.popF64()
+			if err != nil {
+				return err
+			}
+			addr, err := vm.store(v)
+			if err != nil {
+				return err
+			}
+			if err := vm.push(types.BoxRef(addr)); err != nil {
+				return err
+			}
+			frame.ip++
 
 		case instr.F64_ADD:
 			v1, err := vm.popF64()
@@ -1117,6 +1252,10 @@ func (vm *VM) pushF64(val types.F64) error {
 	return vm.push(types.BoxF64(float64(val)))
 }
 
+func (vm *VM) pushRef(val types.Ref) error {
+	return vm.push(types.BoxRef(int(val)))
+}
+
 func (vm *VM) pushFn(val *types.Function) error {
 	addr, err := vm.alloc(val)
 	if err != nil {
@@ -1142,14 +1281,9 @@ func (vm *VM) popI64() (types.I64, error) {
 		return 0, err
 	}
 	if box.Kind() == types.KindRef {
-		addr := box.Ref()
-		val := vm.heap[addr]
-		if ok, err := vm.release(addr); err != nil {
+		val, err := vm.load(box.Ref())
+		if err != nil {
 			return 0, err
-		} else if ok {
-			if err := vm.free(addr); err != nil {
-				return 0, err
-			}
 		}
 		v, ok := val.(types.I64)
 		if !ok {
@@ -1176,58 +1310,28 @@ func (vm *VM) popF64() (types.F64, error) {
 	return types.F64(box.F64()), nil
 }
 
-func (vm *VM) popFn() (*types.Function, error) {
+func (vm *VM) popRef() (types.Ref, error) {
 	box, err := vm.pop()
+	if err != nil {
+		return 0, err
+	}
+	return types.Ref(box.Ref()), nil
+}
+
+func (vm *VM) popFn() (*types.Function, error) {
+	addr, err := vm.popRef()
 	if err != nil {
 		return nil, err
 	}
-	addr := box.Ref()
-	val := vm.heap[addr]
-	if ok, err := vm.release(addr); err != nil {
+	val, err := vm.load(int(addr))
+	if err != nil {
 		return nil, err
-	} else if ok {
-		if err := vm.free(addr); err != nil {
-			return nil, err
-		}
 	}
 	v, ok := val.(*types.Function)
 	if !ok {
 		return nil, ErrReferenceInvalid
 	}
 	return v, nil
-}
-
-func (vm *VM) push(val types.Boxed) error {
-	if vm.sp+1 >= len(vm.stack) {
-		return ErrStackOverflow
-	}
-	vm.stack[vm.sp+1] = val
-	vm.sp++
-	return nil
-}
-
-func (vm *VM) pop() (types.Boxed, error) {
-	if vm.sp < 0 {
-		return 0, ErrStackUnderflow
-	}
-	val := vm.stack[vm.sp]
-	vm.sp--
-	return val, nil
-}
-
-func (vm *VM) peek() (types.Boxed, error) {
-	if vm.sp < 0 {
-		return 0, ErrStackUnderflow
-	}
-	return vm.stack[vm.sp], nil
-}
-
-func (vm *VM) swap() error {
-	if vm.sp < 1 {
-		return ErrStackUnderflow
-	}
-	vm.stack[vm.sp], vm.stack[vm.sp-1] = vm.stack[vm.sp-1], vm.stack[vm.sp]
-	return nil
 }
 
 func (vm *VM) constGet(idx int) (types.Value, error) {
@@ -1272,12 +1376,74 @@ func (vm *VM) globalSet(idx int, val types.Boxed) error {
 			}
 		}
 	}
-	if val.Kind() == types.KindRef {
-		if err := vm.retain(val.Ref()); err != nil {
-			return err
+	vm.global[idx] = val
+	return nil
+}
+
+func (vm *VM) load(addr int) (types.Value, error) {
+	if addr < 0 || addr >= len(vm.heap) {
+		return nil, ErrReferenceInvalid
+	}
+	val := vm.heap[addr]
+	if ok, err := vm.release(addr); err != nil {
+		return nil, err
+	} else if ok {
+		if err := vm.free(addr); err != nil {
+			return nil, err
 		}
 	}
-	vm.global[idx] = val
+	return val, nil
+}
+
+func (vm *VM) store(val types.Value) (int, error) {
+	addr, err := vm.alloc(val)
+	if err != nil {
+		return 0, err
+	}
+	if err := vm.retain(addr); err != nil {
+		return 0, err
+	}
+	return addr, nil
+}
+
+func (vm *VM) push(val types.Boxed) error {
+	if vm.sp+1 >= len(vm.stack) {
+		return ErrStackOverflow
+	}
+	vm.stack[vm.sp+1] = val
+	vm.sp++
+	return nil
+}
+
+func (vm *VM) poke(val types.Boxed) error {
+	if vm.sp < 0 {
+		return ErrStackUnderflow
+	}
+	vm.stack[vm.sp] = val
+	return nil
+}
+
+func (vm *VM) pop() (types.Boxed, error) {
+	if vm.sp < 0 {
+		return 0, ErrStackUnderflow
+	}
+	val := vm.stack[vm.sp]
+	vm.sp--
+	return val, nil
+}
+
+func (vm *VM) peek() (types.Boxed, error) {
+	if vm.sp < 0 {
+		return 0, ErrStackUnderflow
+	}
+	return vm.stack[vm.sp], nil
+}
+
+func (vm *VM) swap() error {
+	if vm.sp < 1 {
+		return ErrStackUnderflow
+	}
+	vm.stack[vm.sp], vm.stack[vm.sp-1] = vm.stack[vm.sp-1], vm.stack[vm.sp]
 	return nil
 }
 

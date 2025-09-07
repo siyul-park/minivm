@@ -45,6 +45,25 @@ func BoxRef(addr int) Boxed {
 	return box(uint64(addr), KindRef)
 }
 
+func Unbox(v Boxed) Value {
+	switch v.Kind() {
+	case KindI32:
+		return I32(v.I32())
+	case KindI64:
+		return I64(v.I64())
+	case KindF32:
+		return F32(v.F32())
+	case KindF64:
+		return F64(v.F64())
+	case KindRef:
+		return Ref(v.Ref())
+	case KindNull:
+		return Null{}
+	default:
+		panic("unknown kind")
+	}
+}
+
 func box(payload uint64, kind Kind) Boxed {
 	mantissa := (uint64(kind) << payloadBits) | payload
 	u := (uint64(0x7FF) << 52) | mantissa

@@ -21,6 +21,8 @@ const (
 	FN_CONST
 
 	I32_CONST
+	I32_LOAD
+	I32_STORE
 
 	I32_ADD
 	I32_SUB
@@ -42,6 +44,8 @@ const (
 	I32_GE_U
 
 	I64_CONST
+	I64_LOAD
+	I64_STORE
 
 	I64_ADD
 	I64_SUB
@@ -63,6 +67,8 @@ const (
 	I64_GE_U
 
 	F32_CONST
+	F32_LOAD
+	F32_STORE
 
 	F32_ADD
 	F32_SUB
@@ -77,6 +83,8 @@ const (
 	F32_GE
 
 	F64_CONST
+	F64_LOAD
+	F64_STORE
 
 	F64_ADD
 	F64_SUB
