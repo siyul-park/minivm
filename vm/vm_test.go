@@ -852,50 +852,6 @@ var tests = []struct {
 		),
 		values: []types.Value{types.Bool(true)},
 	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.FN_CONST, 0),
-				instr.New(instr.GLOBAL_SET, 0),
-
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.GLOBAL_GET, 0),
-				instr.New(instr.CALL),
-			},
-			[]types.Value{
-				types.NewFunction(
-					[]instr.Instruction{
-						instr.New(instr.LOCAL_GET, 0),
-						instr.New(instr.I32_CONST, 2),
-						instr.New(instr.I32_LT_S),
-						instr.New(instr.BR_IF, 36),
-
-						instr.New(instr.LOCAL_GET, 0),  // +0
-						instr.New(instr.I32_CONST, 1),  // +5
-						instr.New(instr.I32_SUB),       // +10
-						instr.New(instr.GLOBAL_GET, 0), // +11
-						instr.New(instr.CALL),          // +16
-
-						instr.New(instr.LOCAL_GET, 0),  // 17
-						instr.New(instr.I32_CONST, 2),  //22
-						instr.New(instr.I32_SUB),       //27
-						instr.New(instr.GLOBAL_GET, 0), //28
-						instr.New(instr.CALL),          //33
-
-						instr.New(instr.I32_ADD), //34
-						instr.New(instr.RETURN),  //35
-
-						instr.New(instr.LOCAL_GET, 0), //36
-						instr.New(instr.RETURN),
-					},
-					types.FunctionWithParams(1),
-					types.FunctionWithReturns(1),
-					types.FunctionWithLocals(1),
-				),
-			},
-		),
-		values: nil,
-	},
 }
 
 func TestVM_Run(t *testing.T) {
@@ -923,8 +879,65 @@ func BenchmarkVM_Run(b *testing.B) {
 				err := vm.Run()
 				require.NoError(b, err)
 
+				b.StopTimer()
 				vm.Clear()
+				b.StartTimer()
 			}
 		})
+	}
+}
+
+func BenchmarkFibonacci(b *testing.B) {
+	prog := program.New(
+		[]instr.Instruction{
+			instr.New(instr.FN_CONST, 0),
+			instr.New(instr.GLOBAL_SET, 0),
+
+			instr.New(instr.I32_CONST, 20),
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.CALL),
+		},
+		[]types.Value{
+			types.NewFunction(
+				[]instr.Instruction{
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.I32_LT_S),
+					instr.New(instr.BR_IF, 36),
+
+					instr.New(instr.LOCAL_GET, 0),  // +0
+					instr.New(instr.I32_CONST, 1),  // +5
+					instr.New(instr.I32_SUB),       // +10
+					instr.New(instr.GLOBAL_GET, 0), // +11
+					instr.New(instr.CALL),          // +16
+
+					instr.New(instr.LOCAL_GET, 0),  // 17
+					instr.New(instr.I32_CONST, 2),  //22
+					instr.New(instr.I32_SUB),       //27
+					instr.New(instr.GLOBAL_GET, 0), //28
+					instr.New(instr.CALL),          //33
+
+					instr.New(instr.I32_ADD), //34
+					instr.New(instr.RETURN),  //35
+
+					instr.New(instr.LOCAL_GET, 0), //36
+					instr.New(instr.RETURN),
+				},
+				types.FunctionWithParams(1),
+				types.FunctionWithReturns(1),
+				types.FunctionWithLocals(1),
+			),
+		},
+	)
+
+	vm := New(prog)
+
+	for n := 0; n < b.N; n++ {
+		err := vm.Run()
+		require.NoError(b, err)
+
+		b.StopTimer()
+		vm.Clear()
+		b.StartTimer()
 	}
 }
