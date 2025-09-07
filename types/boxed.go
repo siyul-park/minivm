@@ -28,9 +28,7 @@ func BoxI64(v int64) Boxed {
 }
 
 func BoxF32(f float32) Boxed {
-	bits := math.Float32bits(f)
-	payload := uint64(bits)
-	return box(payload, KindF32)
+	return box(uint64(math.Float32bits(f)), KindF32)
 }
 
 func BoxF64(f float64) Boxed {
@@ -42,7 +40,7 @@ func BoxNull() Boxed {
 }
 
 func BoxRef(addr int) Boxed {
-	return box(uint64(addr), KindRef)
+	return box(uint64(uint32(addr)), KindRef)
 }
 
 func Unbox(v Boxed) Value {
