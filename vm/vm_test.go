@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"github.com/stretchr/testify/assert"
 	"math"
 	"testing"
 
@@ -1244,13 +1245,10 @@ func BenchmarkVM_Run(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.program.String(), func(b *testing.B) {
 			vm := New(tt.program)
-
 			b.ResetTimer()
 			for n := 0; n < b.N; n++ {
 				err := vm.Run()
-				require.NoError(b, err)
-
-				vm.Clear()
+				assert.NoError(b, err)
 			}
 		})
 	}
@@ -1310,9 +1308,7 @@ func BenchmarkFibonacci(b *testing.B) {
 		require.NoError(b, err)
 		require.Equal(b, int32(6765), val.Interface())
 
-		b.StopTimer()
 		vm.Clear()
-		b.StartTimer()
 	}
 }
 
@@ -1366,8 +1362,6 @@ func BenchmarkFactorial(b *testing.B) {
 		require.NoError(b, err)
 		require.Equal(b, int64(3628800), val.Interface())
 
-		b.StopTimer()
 		vm.Clear()
-		b.StartTimer()
 	}
 }
