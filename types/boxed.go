@@ -71,8 +71,7 @@ func box(payload uint64, kind Kind) Boxed {
 }
 
 func (v Boxed) Kind() Kind {
-	u := uint64(v)
-	if u >= 0x7FF0000000000001 {
+	if u := uint64(v); u>>52 == 0x7FF && u&0x000FFFFFFFFFFFFF != 0 {
 		return Kind((u >> payloadBits) & tagMask)
 	}
 	return KindF64

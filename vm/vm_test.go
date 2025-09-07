@@ -748,12 +748,93 @@ var tests = []struct {
 		),
 		values: []types.Value{types.F32(5.0)},
 	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(3.5))),
+				instr.New(instr.F32_NEG),
+			},
+			nil,
+		),
+		values: []types.Value{types.F32(-3.5)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(-7.2))),
+				instr.New(instr.F32_ABS),
+			},
+			nil,
+		),
+		values: []types.Value{types.F32(7.2)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(7.3))),
+				instr.New(instr.F32_CEIL),
+			},
+			nil,
+		),
+		values: []types.Value{types.F32(8.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(7.7))),
+				instr.New(instr.F32_FLOOR),
+			},
+			nil,
+		),
+		values: []types.Value{types.F32(7.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(7.9))),
+				instr.New(instr.F32_TRUNC),
+			},
+			nil,
+		),
+		values: []types.Value{types.F32(7.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(7.5))),
+				instr.New(instr.F32_NEAREST),
+			},
+			nil,
+		),
+		values: []types.Value{types.F32(8.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(9.0))),
+				instr.New(instr.F32_SQRT),
+			},
+			nil,
+		),
+		values: []types.Value{types.F32(3.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(3.5))),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(-1.0))),
+				instr.New(instr.F32_COPYSIGN),
+			},
+			nil,
+		),
+		values: []types.Value{types.F32(-3.5)},
+	},
 
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F32_CONST, 1.0),
-				instr.New(instr.F32_CONST, 1.0),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
 				instr.New(instr.F32_EQ),
 			},
 			nil,
@@ -763,8 +844,8 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F32_CONST, 2.0),
-				instr.New(instr.F32_CONST, 1.0),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
 				instr.New(instr.F32_NE),
 			},
 			nil,
@@ -774,8 +855,8 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F32_CONST, 1.0),
-				instr.New(instr.F32_CONST, 2.0),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
 				instr.New(instr.F32_LT),
 			},
 			nil,
@@ -785,8 +866,8 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F32_CONST, 3.0),
-				instr.New(instr.F32_CONST, 2.0),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(3.0))),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
 				instr.New(instr.F32_GT),
 			},
 			nil,
@@ -796,8 +877,8 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F32_CONST, 2.0),
-				instr.New(instr.F32_CONST, 2.0),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
 				instr.New(instr.F32_LE),
 			},
 			nil,
@@ -807,8 +888,8 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F32_CONST, 3.0),
-				instr.New(instr.F32_CONST, 2.0),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(3.0))),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
 				instr.New(instr.F32_GE),
 			},
 			nil,
@@ -891,12 +972,93 @@ var tests = []struct {
 		),
 		values: []types.Value{types.F64(5.0)},
 	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(3.5)),
+				instr.New(instr.F64_NEG),
+			},
+			nil,
+		),
+		values: []types.Value{types.F64(-3.5)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(-7.2)),
+				instr.New(instr.F64_ABS),
+			},
+			nil,
+		),
+		values: []types.Value{types.F64(7.2)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(7.3)),
+				instr.New(instr.F64_CEIL),
+			},
+			nil,
+		),
+		values: []types.Value{types.F64(8.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(7.7)),
+				instr.New(instr.F64_FLOOR),
+			},
+			nil,
+		),
+		values: []types.Value{types.F64(7.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(7.9)),
+				instr.New(instr.F64_TRUNC),
+			},
+			nil,
+		),
+		values: []types.Value{types.F64(7.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(7.5)),
+				instr.New(instr.F64_NEAREST),
+			},
+			nil,
+		),
+		values: []types.Value{types.F64(8.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(9.0)),
+				instr.New(instr.F64_SQRT),
+			},
+			nil,
+		),
+		values: []types.Value{types.F64(3.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(3.5)),  // x
+				instr.New(instr.F64_CONST, math.Float64bits(-1.0)), // y
+				instr.New(instr.F64_COPYSIGN),
+			},
+			nil,
+		),
+		values: []types.Value{types.F64(-3.5)},
+	},
 
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F64_CONST, 1.0),
-				instr.New(instr.F64_CONST, 1.0),
+				instr.New(instr.F64_CONST, math.Float64bits(1.0)),
+				instr.New(instr.F64_CONST, math.Float64bits(1.0)),
 				instr.New(instr.F64_EQ),
 			},
 			nil,
@@ -906,8 +1068,8 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F64_CONST, 2.0),
-				instr.New(instr.F64_CONST, 1.0),
+				instr.New(instr.F64_CONST, math.Float64bits(2.0)),
+				instr.New(instr.F64_CONST, math.Float64bits(1.0)),
 				instr.New(instr.F64_NE),
 			},
 			nil,
@@ -917,8 +1079,8 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F64_CONST, 1.0),
-				instr.New(instr.F64_CONST, 2.0),
+				instr.New(instr.F64_CONST, math.Float64bits(1.0)),
+				instr.New(instr.F64_CONST, math.Float64bits(2.0)),
 				instr.New(instr.F64_LT),
 			},
 			nil,
@@ -928,8 +1090,8 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F64_CONST, 3.0),
-				instr.New(instr.F64_CONST, 2.0),
+				instr.New(instr.F64_CONST, math.Float64bits(3.0)),
+				instr.New(instr.F64_CONST, math.Float64bits(2.0)),
 				instr.New(instr.F64_GT),
 			},
 			nil,
@@ -939,8 +1101,8 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F64_CONST, 2.0),
-				instr.New(instr.F64_CONST, 2.0),
+				instr.New(instr.F64_CONST, math.Float64bits(2.0)),
+				instr.New(instr.F64_CONST, math.Float64bits(2.0)),
 				instr.New(instr.F64_LE),
 			},
 			nil,
@@ -950,8 +1112,8 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F64_CONST, 3.0),
-				instr.New(instr.F64_CONST, 2.0),
+				instr.New(instr.F64_CONST, math.Float64bits(3.0)),
+				instr.New(instr.F64_CONST, math.Float64bits(2.0)),
 				instr.New(instr.F64_GE),
 			},
 			nil,
