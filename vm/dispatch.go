@@ -26,10 +26,12 @@ var dispatch = [256]func(vm *VM) error{
 		if vm.sp == 0 {
 			return ErrStackUnderflow
 		}
+
 		val := vm.stack[vm.sp-1]
 		if val.Kind() == types.KindRef {
 			vm.hits[val.Ref()]++
 		}
+
 		vm.stack[vm.sp] = val
 		vm.sp++
 		vm.frames[vm.fp-1].ip++
@@ -315,7 +317,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_ADD: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -328,7 +330,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_SUB: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -341,7 +343,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_MUL: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -354,7 +356,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_DIV_S: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -370,7 +372,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_DIV_U: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -386,7 +388,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_REM_S: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -402,7 +404,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_REM_U: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -417,8 +419,47 @@ var dispatch = [256]func(vm *VM) error{
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
+	instr.I32_SHL: func(vm *VM) error {
+		if vm.sp < 2 {
+			return ErrStackUnderflow
+		}
+
+		v1 := vm.stack[vm.sp-1].I32() & 0x1F
+		v2 := vm.stack[vm.sp-2].I32()
+
+		vm.sp--
+		vm.stack[vm.sp-1] = types.BoxI32(v2 << v1)
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.I32_SHR_S: func(vm *VM) error {
+		if vm.sp < 2 {
+			return ErrStackUnderflow
+		}
+
+		v1 := vm.stack[vm.sp-1].I32() & 0x1F
+		v2 := vm.stack[vm.sp-2].I32()
+
+		vm.sp--
+		vm.stack[vm.sp-1] = types.BoxI32(v2 >> v1)
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.I32_SHR_U: func(vm *VM) error {
+		if vm.sp < 2 {
+			return ErrStackUnderflow
+		}
+
+		v1 := vm.stack[vm.sp-1].I32() & 0x1F
+		v2 := uint32(vm.stack[vm.sp-2].I32())
+
+		vm.sp--
+		vm.stack[vm.sp-1] = types.BoxI32(int32(v2 >> v1))
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
 	instr.I32_XOR: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -431,7 +472,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_AND: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -444,7 +485,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_OR: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -457,7 +498,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_EQ: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -470,7 +511,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_NE: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -483,7 +524,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_LT_S: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -496,7 +537,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_LT_U: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -509,7 +550,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_GT_S: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -522,7 +563,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_GT_U: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -535,7 +576,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_LE_S: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -548,7 +589,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_LE_U: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -561,7 +602,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_GE_S: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -574,7 +615,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I32_GE_U: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -645,7 +686,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I64_ADD: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -668,7 +709,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I64_SUB: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -691,7 +732,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I64_MUL: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -714,7 +755,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I64_DIV_S: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -740,7 +781,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I64_DIV_U: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -766,7 +807,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I64_REM_S: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -792,7 +833,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I64_REM_U: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -817,8 +858,79 @@ var dispatch = [256]func(vm *VM) error{
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
+	instr.I64_SHL: func(vm *VM) error {
+		if vm.sp < 2 {
+			return ErrStackUnderflow
+		}
+
+		v1, err := vm.unboxI64(vm.stack[vm.sp-1])
+		if err != nil {
+			return err
+		}
+		v2, err := vm.unboxI64(vm.stack[vm.sp-2])
+		if err != nil {
+			return err
+		}
+		v3, err := vm.boxI64(types.I64(v2 << (v1 & 0x3F)))
+		if err != nil {
+			return err
+		}
+
+		vm.sp--
+		vm.stack[vm.sp-1] = v3
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+
+	instr.I64_SHR_S: func(vm *VM) error {
+		if vm.sp < 2 {
+			return ErrStackUnderflow
+		}
+
+		v1, err := vm.unboxI64(vm.stack[vm.sp-1])
+		if err != nil {
+			return err
+		}
+		v2, err := vm.unboxI64(vm.stack[vm.sp-2])
+		if err != nil {
+			return err
+		}
+		v3, err := vm.boxI64(types.I64(v2 >> (v1 & 0x3F)))
+		if err != nil {
+			return err
+		}
+
+		vm.sp--
+		vm.stack[vm.sp-1] = v3
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+
+	instr.I64_SHR_U: func(vm *VM) error {
+		if vm.sp < 2 {
+			return ErrStackUnderflow
+		}
+
+		v1, err := vm.unboxI64(vm.stack[vm.sp-1])
+		if err != nil {
+			return err
+		}
+		v2, err := vm.unboxI64(vm.stack[vm.sp-2])
+		if err != nil {
+			return err
+		}
+		v3, err := vm.boxI64(types.I64(uint64(v2) >> (v1 & 0x3F)))
+		if err != nil {
+			return err
+		}
+
+		vm.sp--
+		vm.stack[vm.sp-1] = v3
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
 	instr.I64_EQ: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -837,7 +949,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I64_NE: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -856,7 +968,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I64_LT_S: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -875,7 +987,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I64_LT_U: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -894,7 +1006,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I64_GT_S: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -913,7 +1025,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I64_GT_U: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -932,7 +1044,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I64_LE_S: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -951,7 +1063,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I64_LE_U: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -970,7 +1082,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I64_GE_S: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -989,7 +1101,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.I64_GE_U: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1059,7 +1171,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F32_ADD: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1072,7 +1184,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F32_SUB: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1085,7 +1197,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F32_MUL: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1098,7 +1210,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F32_DIV: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1114,7 +1226,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F32_EQ: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1127,7 +1239,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F32_NE: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1140,7 +1252,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F32_LT: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1153,7 +1265,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F32_GT: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1166,7 +1278,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F32_LE: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1179,7 +1291,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F32_GE: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1243,7 +1355,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F64_ADD: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1256,7 +1368,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F64_SUB: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1269,7 +1381,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F64_MUL: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1282,7 +1394,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F64_DIV: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1298,7 +1410,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F64_EQ: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1311,7 +1423,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F64_NE: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1324,7 +1436,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F64_LT: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1337,7 +1449,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F64_GT: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1350,7 +1462,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F64_LE: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 
@@ -1363,7 +1475,7 @@ var dispatch = [256]func(vm *VM) error{
 		return nil
 	},
 	instr.F64_GE: func(vm *VM) error {
-		if vm.sp == 0 {
+		if vm.sp < 2 {
 			return ErrStackUnderflow
 		}
 

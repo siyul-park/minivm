@@ -37,6 +37,9 @@ const (
 	I32_DIV_U
 	I32_REM_S
 	I32_REM_U
+	I32_SHL
+	I32_SHR_S
+	I32_SHR_U
 
 	I32_XOR
 	I32_AND
@@ -64,6 +67,9 @@ const (
 	I64_DIV_U
 	I64_REM_S
 	I64_REM_U
+	I64_SHL
+	I64_SHR_S
+	I64_SHR_U
 
 	I64_EQ
 	I64_NE

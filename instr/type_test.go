@@ -49,6 +49,9 @@ func TestTypeOf(t *testing.T) {
 		{opcode: I32_DIV_U},
 		{opcode: I32_REM_S},
 		{opcode: I32_REM_U},
+		{opcode: I32_SHL},
+		{opcode: I32_SHR_S},
+		{opcode: I32_SHR_U},
 
 		{opcode: I32_EQ},
 		{opcode: I32_NE},
@@ -72,6 +75,9 @@ func TestTypeOf(t *testing.T) {
 		{opcode: I64_DIV_U},
 		{opcode: I64_REM_S},
 		{opcode: I64_REM_U},
+		{opcode: I64_SHL},
+		{opcode: I64_SHR_S},
+		{opcode: I64_SHR_U},
 
 		{opcode: I64_EQ},
 		{opcode: I64_NE},

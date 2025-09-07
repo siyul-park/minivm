@@ -44,6 +44,9 @@ var types = map[Opcode]Type{
 	I32_DIV_U: {"i32.div_u", []int{}},
 	I32_REM_S: {"i32.rem_s", []int{}},
 	I32_REM_U: {"i32.rem_u", []int{}},
+	I32_SHL:   {"i32.shl", []int{}},
+	I32_SHR_S: {"i32.shr_s", []int{}},
+	I32_SHR_U: {"i32.shr_u", []int{}},
 
 	I32_EQ:   {"i32.eq", []int{}},
 	I32_NE:   {"i32.ne", []int{}},
@@ -67,6 +70,9 @@ var types = map[Opcode]Type{
 	I64_DIV_U: {"i64.div_u", []int{}},
 	I64_REM_S: {"i64.rem_s", []int{}},
 	I64_REM_U: {"i64.rem_u", []int{}},
+	I64_SHL:   {"i64.shl", []int{}},
+	I64_SHR_S: {"i64.shr_s", []int{}},
+	I64_SHR_U: {"i64.shr_u", []int{}},
 
 	I64_EQ:   {"i64.eq", []int{}},
 	I64_NE:   {"i64.ne", []int{}},

@@ -323,6 +323,42 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I32(1)},
 	},
+	{
+
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SHL),
+			},
+			nil,
+		),
+		values: []types.Value{types.I32(2)},
+	},
+	{
+
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SHR_S),
+			},
+			nil,
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SHR_U),
+			},
+			nil,
+		),
+		values: []types.Value{types.I32(1)},
+	},
 
 	{
 		program: program.New(
@@ -528,6 +564,42 @@ var tests = []struct {
 				instr.New(instr.I64_CONST, 10),
 				instr.New(instr.I64_CONST, 3),
 				instr.New(instr.I64_REM_U),
+			},
+			nil,
+		),
+		values: []types.Value{types.I64(1)},
+	},
+	{
+
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I64_SHL),
+			},
+			nil,
+		),
+		values: []types.Value{types.I64(2)},
+	},
+	{
+
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 2),
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I64_SHR_S),
+			},
+			nil,
+		),
+		values: []types.Value{types.I64(1)},
+	},
+	{
+
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 2),
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I64_SHR_U),
 			},
 			nil,
 		),
