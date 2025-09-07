@@ -79,6 +79,7 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I32(3)},
 	},
+
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -90,6 +91,24 @@ var tests = []struct {
 					[]instr.Instruction{
 						instr.New(instr.I32_CONST, 1),
 					},
+				),
+			},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.FN_CONST, 0),
+				instr.New(instr.CALL),
+			},
+			[]types.Value{
+				types.NewFunction(
+					[]instr.Instruction{
+						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.RETURN),
+					},
+					types.FunctionWithReturns(1),
 				),
 			},
 		),

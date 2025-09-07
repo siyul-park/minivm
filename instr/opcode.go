@@ -12,7 +12,9 @@ const (
 
 	BR
 	BR_IF
+
 	CALL
+	RETURN
 
 	GLOBAL_GET
 	GLOBAL_SET

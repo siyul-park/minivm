@@ -15,7 +15,9 @@ var types = map[Opcode]Type{
 
 	BR:    {"br", []int{4}},
 	BR_IF: {"br_if", []int{4}},
-	CALL:  {"call", []int{}},
+
+	CALL:   {"call", []int{}},
+	RETURN: {"return", []int{}},
 
 	GLOBAL_GET: {"global.get", []int{4}},
 	GLOBAL_SET: {"global.set", []int{4}},

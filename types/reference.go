@@ -21,7 +21,7 @@ type Closure struct {
 }
 
 var _ Value = (*Function)(nil)
-var _ Value = (*Closure)(nil)
+var _ Traceable = (*Closure)(nil)
 
 func FunctionWithParams(val int) func(*Function) {
 	return func(function *Function) {
@@ -84,4 +84,14 @@ func (c *Closure) Interface() any {
 
 func (c *Closure) String() string {
 	return c.Function.String()
+}
+
+func (c *Closure) Refs() []Ref {
+	refs := make([]Ref, 0, len(c.Captures))
+	for _, v := range c.Captures {
+		if v.Kind() == KindRef {
+			refs = append(refs, Ref(v.Ref()))
+		}
+	}
+	return refs
 }

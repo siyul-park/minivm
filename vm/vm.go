@@ -73,14 +73,15 @@ func New(prog *program.Program, opts ...Option) *VM {
 		sp:        -1,
 		fp:        0,
 	}
-	vm.frames[0].closure = &types.Closure{Function: &types.Function{Code: prog.Code}}
+	vm.frames[0].cl = &types.Closure{Function: &types.Function{Code: prog.Code}}
+	vm.frames[0].ref = -1
 	vm.frames[0].bp = vm.sp
 	return vm
 }
 
 func (vm *VM) Run() error {
 	frame := &vm.frames[vm.fp]
-	code := frame.closure.Function.Code
+	code := frame.cl.Function.Code
 
 	for frame.ip < len(code) {
 		opcode := instr.Opcode(code[frame.ip])
@@ -136,16 +137,25 @@ func (vm *VM) Run() error {
 			}
 
 		case instr.CALL:
-			v1, err := vm.popFn()
+			ref, err := vm.popRef()
 			if err != nil {
 				return err
 			}
-			if err := vm.call(v1); err != nil {
+			if err := vm.call(ref); err != nil {
 				return err
 			}
 			frame.ip++
 			frame = &vm.frames[vm.fp]
-			code = frame.closure.Function.Code
+			code = frame.cl.Function.Code
+
+		case instr.RETURN:
+			if err := vm.ret(); err != nil {
+				return err
+			}
+
+			frame.ip++
+			frame = &vm.frames[vm.fp]
+			code = frame.cl.Function.Code
 
 		case instr.GLOBAL_GET:
 			p := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
@@ -1198,9 +1208,6 @@ func (vm *VM) Push(val types.Value) error {
 		if err != nil {
 			return err
 		}
-		if err := vm.retain(addr); err != nil {
-			return err
-		}
 		return vm.push(types.BoxRef(addr))
 	}
 }
@@ -1210,16 +1217,11 @@ func (vm *VM) Pop() (types.Value, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	if box.Kind() == types.KindRef {
 		addr := box.Ref()
 		val := vm.heap[addr]
-		if ok, err := vm.release(addr); err != nil {
+		if err := vm.free(addr); err != nil {
 			return nil, err
-		} else if ok {
-			if err := vm.free(addr); err != nil {
-				return nil, err
-			}
 		}
 		return val, nil
 	}
@@ -1262,9 +1264,6 @@ func (vm *VM) pushI64(val types.I64) error {
 		if err != nil {
 			return err
 		}
-		if err := vm.retain(addr); err != nil {
-			return err
-		}
 		box = types.BoxRef(addr)
 	}
 	return vm.push(box)
@@ -1285,9 +1284,6 @@ func (vm *VM) pushRef(val types.Ref) error {
 func (vm *VM) pushFn(val *types.Closure) error {
 	addr, err := vm.alloc(val)
 	if err != nil {
-		return err
-	}
-	if err := vm.retain(addr); err != nil {
 		return err
 	}
 	return vm.push(types.BoxRef(addr))
@@ -1344,29 +1340,23 @@ func (vm *VM) popRef() (types.Ref, error) {
 	return types.Ref(box.Ref()), nil
 }
 
-func (vm *VM) popFn() (*types.Closure, error) {
-	addr, err := vm.popRef()
-	if err != nil {
-		return nil, err
-	}
-	val, err := vm.load(int(addr))
-	if err != nil {
-		return nil, err
-	}
-	v, ok := val.(*types.Closure)
-	if !ok {
-		return nil, ErrReferenceInvalid
-	}
-	return v, nil
-}
-
-func (vm *VM) call(cl *types.Closure) error {
+func (vm *VM) call(ref types.Ref) error {
 	if vm.fp+1 >= len(vm.frames) {
 		return ErrFrameOverflow
 	}
 
+	v, err := vm.lookup(int(ref))
+	if err != nil {
+		return err
+	}
+	cl, ok := v.(*types.Closure)
+	if !ok {
+		return ErrReferenceInvalid
+	}
+
 	vm.fp++
-	vm.frames[vm.fp].closure = cl
+	vm.frames[vm.fp].cl = cl
+	vm.frames[vm.fp].ref = ref
 	vm.frames[vm.fp].ip = 0
 	vm.frames[vm.fp].bp = vm.sp - cl.Function.Params
 
@@ -1379,6 +1369,28 @@ func (vm *VM) call(cl *types.Closure) error {
 		return ErrStackOverflow
 	}
 	vm.sp = sp
+	return nil
+}
+
+func (vm *VM) ret() error {
+	frame := &vm.frames[vm.fp]
+	fn := frame.cl.Function
+
+	if fn.Returns > 0 {
+		start := frame.bp + 1
+		end := start + fn.Returns
+		copy(vm.stack[start:end], vm.stack[vm.sp-fn.Returns+1:vm.sp+1])
+	}
+	vm.sp = frame.bp + fn.Returns
+
+	if frame.ref >= 0 {
+		if err := vm.free(int(frame.ref)); err != nil {
+			return err
+		}
+	}
+	frame.cl = nil
+
+	vm.fp--
 	return nil
 }
 
@@ -1416,12 +1428,8 @@ func (vm *VM) gstore(idx int, val types.Boxed) error {
 	}
 	old := vm.global[idx]
 	if old.Kind() == types.KindRef {
-		if ok, err := vm.release(old.Ref()); err != nil {
+		if err := vm.free(old.Ref()); err != nil {
 			return err
-		} else if ok {
-			if err := vm.free(old.Ref()); err != nil {
-				return err
-			}
 		}
 	}
 	vm.global[idx] = val
@@ -1430,7 +1438,7 @@ func (vm *VM) gstore(idx int, val types.Boxed) error {
 
 func (vm *VM) lload(idx int) (types.Boxed, error) {
 	frame := &vm.frames[vm.fp]
-	if idx < 0 || idx >= frame.closure.Function.Locals {
+	if idx < 0 || idx >= frame.cl.Function.Locals {
 		return 0, ErrReferenceInvalid
 	}
 	val := vm.stack[frame.bp+idx+1]
@@ -1444,21 +1452,24 @@ func (vm *VM) lload(idx int) (types.Boxed, error) {
 
 func (vm *VM) lstore(idx int, val types.Boxed) error {
 	frame := &vm.frames[vm.fp]
-	if idx < 0 || idx >= frame.closure.Function.Locals {
+	if idx < 0 || idx >= frame.cl.Function.Locals {
 		return ErrReferenceInvalid
 	}
 	old := vm.stack[frame.bp+idx+1]
 	if old.Kind() == types.KindRef {
-		if ok, err := vm.release(old.Ref()); err != nil {
+		if err := vm.free(old.Ref()); err != nil {
 			return err
-		} else if ok {
-			if err := vm.free(old.Ref()); err != nil {
-				return err
-			}
 		}
 	}
 	vm.stack[frame.bp+idx+1] = val
 	return nil
+}
+
+func (vm *VM) lookup(addr int) (types.Value, error) {
+	if addr < 0 || addr >= len(vm.heap) {
+		return nil, ErrReferenceInvalid
+	}
+	return vm.heap[addr], nil
 }
 
 func (vm *VM) load(addr int) (types.Value, error) {
@@ -1466,12 +1477,8 @@ func (vm *VM) load(addr int) (types.Value, error) {
 		return nil, ErrReferenceInvalid
 	}
 	val := vm.heap[addr]
-	if ok, err := vm.release(addr); err != nil {
+	if err := vm.free(addr); err != nil {
 		return nil, err
-	} else if ok {
-		if err := vm.free(addr); err != nil {
-			return nil, err
-		}
 	}
 	return val, nil
 }
@@ -1479,9 +1486,6 @@ func (vm *VM) load(addr int) (types.Value, error) {
 func (vm *VM) store(val types.Value) (int, error) {
 	addr, err := vm.alloc(val)
 	if err != nil {
-		return 0, err
-	}
-	if err := vm.retain(addr); err != nil {
 		return 0, err
 	}
 	return addr, nil
@@ -1548,7 +1552,8 @@ func (vm *VM) alloc(val types.Value) (int, error) {
 		vm.hits = hits
 	}
 	vm.heap = append(vm.heap, val)
-	vm.hits = append(vm.hits, 0)
+	vm.hits = append(vm.hits, 1)
+
 	return len(vm.heap) - 1, nil
 }
 
@@ -1556,18 +1561,27 @@ func (vm *VM) free(addr int) error {
 	if addr < 0 || addr >= len(vm.heap) {
 		return ErrReferenceInvalid
 	}
-	vm.heap[addr] = nil
-	vm.hits[addr] = 0
 
-	vm.frees = append(vm.frees, addr)
+	stack := []int{addr}
+	for len(stack) > 0 {
+		a := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
 
-	for addr == len(vm.heap)-1 && len(vm.heap) > 0 {
-		vm.heap = vm.heap[:len(vm.heap)-1]
-		vm.hits = vm.hits[:len(vm.hits)-1]
-		if len(vm.frees) > 0 && vm.frees[len(vm.frees)-1] == addr {
-			vm.frees = vm.frees[:len(vm.frees)-1]
+		vm.hits[a]--
+		if vm.hits[a] > 0 {
+			continue
 		}
-		addr = len(vm.heap) - 1
+
+		obj := vm.heap[a]
+		vm.heap[a] = nil
+		vm.hits[a] = 0
+		vm.frees = append(vm.frees, a)
+
+		if t, ok := obj.(types.Traceable); ok {
+			for _, ref := range t.Refs() {
+				stack = append(stack, int(ref))
+			}
+		}
 	}
 	return nil
 }
@@ -1578,12 +1592,4 @@ func (vm *VM) retain(addr int) error {
 	}
 	vm.hits[addr]++
 	return nil
-}
-
-func (vm *VM) release(addr int) (bool, error) {
-	if addr < 0 || addr >= len(vm.hits) {
-		return false, ErrReferenceInvalid
-	}
-	vm.hits[addr]--
-	return vm.hits[addr] <= 0, nil
 }
