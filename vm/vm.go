@@ -58,8 +58,8 @@ func New(prog *program.Program, opts ...Option) *VM {
 		frees:     make([]int, 0, heap),
 		global:    make([]types.Boxed, 0, global),
 		frames:    make([]Frame, frame),
-		sp:        -1,
-		fp:        0,
+		sp:        0,
+		fp:        1,
 	}
 	vm.frames[0].cl = &types.Closure{Function: &types.Function{Code: prog.Code}}
 	vm.frames[0].ref = -1
@@ -68,7 +68,7 @@ func New(prog *program.Program, opts ...Option) *VM {
 }
 
 func (vm *VM) Run() error {
-	frame := &vm.frames[vm.fp]
+	frame := &vm.frames[vm.fp-1]
 	code := frame.cl.Function.Code
 
 	for frame.ip < len(code) {
@@ -80,39 +80,38 @@ func (vm *VM) Run() error {
 		if err := fn(vm); err != nil {
 			return fmt.Errorf("%w: at=%d", err, frame.ip)
 		}
-		frame = &vm.frames[vm.fp]
+		frame = &vm.frames[vm.fp-1]
 		code = frame.cl.Function.Code
 	}
 	return nil
 }
 
 func (vm *VM) Push(val types.Value) error {
-	if vm.sp >= len(vm.stack)-1 {
+	if vm.sp == len(vm.stack) {
 		return ErrStackOverflow
 	}
 
-	vm.sp++
 	switch val := val.(type) {
 	case types.Boxed:
 		vm.stack[vm.sp] = val
 	default:
 		addr, err := vm.alloc(val)
 		if err != nil {
-			vm.sp--
 			return err
 		}
 		vm.stack[vm.sp] = types.BoxRef(addr)
 	}
+	vm.sp++
 	return nil
 }
 
 func (vm *VM) Pop() (types.Value, error) {
-	if vm.sp < 0 {
+	if vm.sp == 0 {
 		return nil, ErrStackUnderflow
 	}
 
-	val := vm.stack[vm.sp]
 	vm.sp--
+	val := vm.stack[vm.sp]
 
 	if val.Kind() == types.KindRef {
 		addr := val.Ref()
@@ -126,18 +125,18 @@ func (vm *VM) Pop() (types.Value, error) {
 }
 
 func (vm *VM) Len() int {
-	return vm.sp
+	return vm.sp - 1
 }
 
 func (vm *VM) Clear() {
-	vm.sp = -1
+	vm.sp = 0
 
-	for vm.fp > 0 {
+	for vm.fp > 1 {
 		vm.frames[vm.fp] = Frame{}
 		vm.fp--
 	}
-	vm.frames[vm.fp].bp = vm.sp
-	vm.frames[vm.fp].ip = 0
+	vm.frames[vm.fp-1].bp = vm.sp
+	vm.frames[vm.fp-1].ip = 0
 
 	for i := range vm.heap {
 		vm.heap[i] = nil
@@ -219,8 +218,8 @@ func (vm *VM) gstore(idx int, val types.Boxed) error {
 }
 
 func (vm *VM) lload(idx int) (types.Boxed, error) {
-	frame := &vm.frames[vm.fp]
-	addr := frame.bp + idx + 1
+	frame := &vm.frames[vm.fp-1]
+	addr := frame.bp + idx
 	if addr < 0 || addr > vm.sp {
 		return 0, ErrSegmentationFault
 	}
@@ -234,8 +233,8 @@ func (vm *VM) lload(idx int) (types.Boxed, error) {
 }
 
 func (vm *VM) lstore(idx int, val types.Boxed) error {
-	frame := &vm.frames[vm.fp]
-	addr := frame.bp + idx + 1
+	frame := &vm.frames[vm.fp-1]
+	addr := frame.bp + idx
 	if addr < 0 || addr > vm.sp {
 		return ErrSegmentationFault
 	}
@@ -263,6 +262,7 @@ func (vm *VM) alloc(val types.Value) (int, error) {
 		heap := make([]types.Value, len(vm.heap), c)
 		copy(heap, vm.heap)
 		vm.heap = heap
+
 		hits := make([]int, len(vm.hits), c)
 		copy(hits, vm.hits)
 		vm.hits = hits
