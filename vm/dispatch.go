@@ -79,6 +79,7 @@ var dispatch = [256]func(vm *VM) error{
 			return ErrSegmentationFault
 		}
 		frame := &vm.frames[vm.fp]
+		frame.addr = addr
 		frame.cl = cl
 		frame.ip = 0
 		frame.bp = vm.sp - cl.Function.Params
@@ -104,8 +105,8 @@ var dispatch = [256]func(vm *VM) error{
 			copy(vm.stack[frame.bp:frame.bp+fn.Returns], vm.stack[vm.sp-fn.Returns:vm.sp])
 		}
 		vm.sp = frame.bp + fn.Returns
-		if frame.cl.Address >= 0 {
-			if err := vm.release(frame.cl.Address); err != nil {
+		if frame.addr >= 0 {
+			if err := vm.release(frame.addr); err != nil {
 				return err
 			}
 		}
@@ -221,7 +222,6 @@ var dispatch = [256]func(vm *VM) error{
 		if err != nil {
 			return err
 		}
-		cl.Address = addr
 		vm.stack[vm.sp] = types.BoxRef(addr)
 		vm.sp++
 		frame.ip += 5
@@ -1072,80 +1072,6 @@ var dispatch = [256]func(vm *VM) error{
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
-	instr.F32_NEG: func(vm *VM) error {
-		if vm.sp < 1 {
-			return ErrStackUnderflow
-		}
-		v := vm.stack[vm.sp-1].F32()
-		vm.stack[vm.sp-1] = types.BoxF32(-v)
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F32_ABS: func(vm *VM) error {
-		if vm.sp < 1 {
-			return ErrStackUnderflow
-		}
-		v := vm.stack[vm.sp-1].F32()
-		vm.stack[vm.sp-1] = types.BoxF32(float32(math.Abs(float64(v))))
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F32_CEIL: func(vm *VM) error {
-		if vm.sp < 1 {
-			return ErrStackUnderflow
-		}
-		v := vm.stack[vm.sp-1].F32()
-		vm.stack[vm.sp-1] = types.BoxF32(float32(math.Ceil(float64(v))))
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F32_FLOOR: func(vm *VM) error {
-		if vm.sp < 1 {
-			return ErrStackUnderflow
-		}
-		v := vm.stack[vm.sp-1].F32()
-		vm.stack[vm.sp-1] = types.BoxF32(float32(math.Floor(float64(v))))
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F32_TRUNC: func(vm *VM) error {
-		if vm.sp < 1 {
-			return ErrStackUnderflow
-		}
-		v := vm.stack[vm.sp-1].F32()
-		vm.stack[vm.sp-1] = types.BoxF32(float32(math.Trunc(float64(v))))
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F32_NEAREST: func(vm *VM) error {
-		if vm.sp < 1 {
-			return ErrStackUnderflow
-		}
-		v := vm.stack[vm.sp-1].F32()
-		vm.stack[vm.sp-1] = types.BoxF32(float32(math.RoundToEven(float64(v))))
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F32_SQRT: func(vm *VM) error {
-		if vm.sp < 1 {
-			return ErrStackUnderflow
-		}
-		v := vm.stack[vm.sp-1].F32()
-		vm.stack[vm.sp-1] = types.BoxF32(float32(math.Sqrt(float64(v))))
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F32_COPYSIGN: func(vm *VM) error {
-		if vm.sp < 2 {
-			return ErrStackUnderflow
-		}
-		x := vm.stack[vm.sp-2].F32()
-		y := vm.stack[vm.sp-1].F32()
-		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxF32(float32(math.Copysign(float64(x), float64(y))))
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
 	instr.F32_EQ: func(vm *VM) error {
 		if vm.sp < 2 {
 			return ErrStackUnderflow
@@ -1300,80 +1226,6 @@ var dispatch = [256]func(vm *VM) error{
 		}
 		vm.sp--
 		vm.stack[vm.sp-1] = types.BoxF64(v2 / v1)
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F64_NEG: func(vm *VM) error {
-		if vm.sp < 1 {
-			return ErrStackUnderflow
-		}
-		v := vm.stack[vm.sp-1].F64()
-		vm.stack[vm.sp-1] = types.BoxF64(-v)
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F64_ABS: func(vm *VM) error {
-		if vm.sp < 1 {
-			return ErrStackUnderflow
-		}
-		v := vm.stack[vm.sp-1].F64()
-		vm.stack[vm.sp-1] = types.BoxF64(math.Abs(v))
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F64_CEIL: func(vm *VM) error {
-		if vm.sp < 1 {
-			return ErrStackUnderflow
-		}
-		v := vm.stack[vm.sp-1].F64()
-		vm.stack[vm.sp-1] = types.BoxF64(math.Ceil(v))
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F64_FLOOR: func(vm *VM) error {
-		if vm.sp < 1 {
-			return ErrStackUnderflow
-		}
-		v := vm.stack[vm.sp-1].F64()
-		vm.stack[vm.sp-1] = types.BoxF64(math.Floor(v))
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F64_TRUNC: func(vm *VM) error {
-		if vm.sp < 1 {
-			return ErrStackUnderflow
-		}
-		v := vm.stack[vm.sp-1].F64()
-		vm.stack[vm.sp-1] = types.BoxF64(math.Trunc(v))
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F64_NEAREST: func(vm *VM) error {
-		if vm.sp < 1 {
-			return ErrStackUnderflow
-		}
-		v := vm.stack[vm.sp-1].F64()
-		vm.stack[vm.sp-1] = types.BoxF64(math.RoundToEven(v))
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F64_SQRT: func(vm *VM) error {
-		if vm.sp < 1 {
-			return ErrStackUnderflow
-		}
-		v := vm.stack[vm.sp-1].F64()
-		vm.stack[vm.sp-1] = types.BoxF64(math.Sqrt(v))
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F64_COPYSIGN: func(vm *VM) error {
-		if vm.sp < 2 {
-			return ErrStackUnderflow
-		}
-		x := vm.stack[vm.sp-2].F64()
-		y := vm.stack[vm.sp-1].F64()
-		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxF64(math.Copysign(x, y))
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},

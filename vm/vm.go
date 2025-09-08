@@ -9,22 +9,22 @@ import (
 )
 
 type Option struct {
+	Frame  int
+	Global int
 	Stack  int
 	Heap   int
-	Global int
-	Frame  int
 }
 
 type VM struct {
+	frames    []Frame
 	constants []types.Value
+	global    []types.Boxed
 	stack     []types.Boxed
 	heap      []types.Value
 	frees     []int
 	rc        []int
-	global    []types.Boxed
-	frames    []Frame
-	sp        int
 	fp        int
+	sp        int
 }
 
 func New(prog *program.Program, opts ...Option) *VM {
@@ -51,20 +51,17 @@ func New(prog *program.Program, opts ...Option) *VM {
 	}
 
 	vm := &VM{
+		frames:    make([]Frame, frame),
 		constants: prog.Constants,
+		global:    make([]types.Boxed, 0, global),
 		stack:     make([]types.Boxed, stack),
 		heap:      make([]types.Value, 0, heap),
 		rc:        make([]int, 0, heap),
 		frees:     make([]int, 0, heap),
-		global:    make([]types.Boxed, 0, global),
-		frames:    make([]Frame, frame),
-		sp:        0,
 		fp:        1,
+		sp:        0,
 	}
-	vm.frames[0].cl = &types.Closure{
-		Function: &types.Function{Code: prog.Code},
-		Address:  -1,
-	}
+	vm.frames[0].cl = &types.Closure{Function: &types.Function{Code: prog.Code}}
 	vm.frames[0].bp = vm.sp
 	return vm
 }
