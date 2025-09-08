@@ -28,10 +28,6 @@ func TestBoxed_Interface(t *testing.T) {
 			expected: 3.14,
 		},
 		{
-			value:    BoxNull(),
-			expected: nil,
-		},
-		{
 			value:    BoxRef(0x12345678),
 			expected: 0x12345678,
 		},

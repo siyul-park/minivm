@@ -8,14 +8,12 @@ type I64 int64
 type F32 float32
 type F64 float64
 type Ref int32
-type Null struct{}
 
 var _ Value = I32(0)
 var _ Value = I64(0)
 var _ Value = F32(0)
 var _ Value = F64(0)
 var _ Value = Ref(0)
-var _ Value = Null{}
 
 func Bool(b bool) I32 {
 	if b {
@@ -62,12 +60,4 @@ func (r Ref) Interface() any {
 
 func (r Ref) String() string {
 	return fmt.Sprintf("%d", int32(r))
-}
-
-func (n Null) Interface() any {
-	return nil
-}
-
-func (n Null) String() string {
-	return "null"
 }

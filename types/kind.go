@@ -9,7 +9,6 @@ const (
 	KindF32
 	KindF64
 	KindRef
-	KindNull
 )
 
 func (k Kind) String() string {
@@ -24,8 +23,6 @@ func (k Kind) String() string {
 		return "f64"
 	case KindRef:
 		return "ref"
-	case KindNull:
-		return "null"
 	default:
 		return "unknown"
 	}

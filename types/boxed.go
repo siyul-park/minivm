@@ -35,10 +35,6 @@ func BoxF64(f float64) Boxed {
 	return Boxed(math.Float64bits(f))
 }
 
-func BoxNull() Boxed {
-	return box(0, KindNull)
-}
-
 func BoxRef(addr int) Boxed {
 	return box(uint64(uint32(addr)), KindRef)
 }
@@ -55,8 +51,6 @@ func Unbox(v Boxed) Value {
 		return F64(v.F64())
 	case KindRef:
 		return Ref(v.Ref())
-	case KindNull:
-		return Null{}
 	default:
 		panic("unknown kind")
 	}
@@ -115,8 +109,6 @@ func (v Boxed) Interface() any {
 		return v.F64()
 	case KindRef:
 		return v.Ref()
-	case KindNull:
-		return nil
 	default:
 		panic("unknown kind")
 	}
@@ -130,8 +122,6 @@ func (v Boxed) String() string {
 		return fmt.Sprintf("%f", v.Interface())
 	case KindRef:
 		return fmt.Sprintf("ref(%v)", v.Interface())
-	case KindNull:
-		return "null"
 	default:
 		return "<invalid>"
 	}
