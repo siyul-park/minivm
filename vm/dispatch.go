@@ -106,7 +106,7 @@ var dispatch = [256]func(vm *VM) error{
 		}
 		vm.sp = frame.bp + fn.Returns
 		if frame.ref >= 0 {
-			if err := vm.free(int(frame.ref)); err != nil {
+			if err := vm.release(int(frame.ref)); err != nil {
 				return err
 			}
 		}
@@ -251,7 +251,7 @@ var dispatch = [256]func(vm *VM) error{
 		if !ok {
 			return ErrSegmentationFault
 		}
-		if err := vm.free(addr); err != nil {
+		if err := vm.release(addr); err != nil {
 			return err
 		}
 		vm.stack[vm.sp-1] = types.BoxI32(int32(val))
@@ -564,7 +564,7 @@ var dispatch = [256]func(vm *VM) error{
 			return ErrSegmentationFault
 		}
 		if types.IsBoxable(int64(val)) {
-			if err := vm.free(addr); err != nil {
+			if err := vm.release(addr); err != nil {
 				return err
 			}
 			vm.stack[vm.sp-1] = types.BoxI64(int64(val))
@@ -1005,7 +1005,7 @@ var dispatch = [256]func(vm *VM) error{
 		if !ok {
 			return ErrSegmentationFault
 		}
-		if err := vm.free(addr); err != nil {
+		if err := vm.release(addr); err != nil {
 			return err
 		}
 		vm.stack[vm.sp-1] = types.BoxF32(float32(val))
@@ -1236,7 +1236,7 @@ var dispatch = [256]func(vm *VM) error{
 		if !ok {
 			return ErrSegmentationFault
 		}
-		if err := vm.free(addr); err != nil {
+		if err := vm.release(addr); err != nil {
 			return err
 		}
 		vm.stack[vm.sp-1] = types.BoxF64(float64(val))

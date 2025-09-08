@@ -116,7 +116,7 @@ func (vm *VM) Pop() (types.Value, error) {
 	if val.Kind() == types.KindRef {
 		addr := val.Ref()
 		v := vm.heap[addr]
-		if err := vm.free(addr); err != nil {
+		if err := vm.release(addr); err != nil {
 			return nil, err
 		}
 		return v, nil
@@ -176,7 +176,7 @@ func (vm *VM) unboxI64(val types.Boxed) (types.I64, error) {
 	if !ok {
 		return 0, ErrSegmentationFault
 	}
-	if err := vm.free(addr); err != nil {
+	if err := vm.release(addr); err != nil {
 		return 0, err
 	}
 	return v, nil
@@ -209,7 +209,7 @@ func (vm *VM) gstore(idx int, val types.Boxed) error {
 		}
 	}
 	if old := vm.global[idx]; old != val && old.Kind() == types.KindRef {
-		if err := vm.free(old.Ref()); err != nil {
+		if err := vm.release(old.Ref()); err != nil {
 			return err
 		}
 	}
@@ -239,7 +239,7 @@ func (vm *VM) lstore(idx int, val types.Boxed) error {
 		return ErrSegmentationFault
 	}
 	if old := vm.stack[addr]; old != val && old.Kind() == types.KindRef {
-		if err := vm.free(old.Ref()); err != nil {
+		if err := vm.release(old.Ref()); err != nil {
 			return err
 		}
 	}
@@ -273,7 +273,15 @@ func (vm *VM) alloc(val types.Value) (int, error) {
 	return len(vm.heap) - 1, nil
 }
 
-func (vm *VM) free(addr int) error {
+func (vm *VM) retain(addr int) error {
+	if addr < 0 || addr >= len(vm.hits) {
+		return ErrSegmentationFault
+	}
+	vm.hits[addr]++
+	return nil
+}
+
+func (vm *VM) release(addr int) error {
 	if addr < 0 || addr >= len(vm.heap) {
 		return ErrSegmentationFault
 	}
@@ -299,13 +307,5 @@ func (vm *VM) free(addr int) error {
 			}
 		}
 	}
-	return nil
-}
-
-func (vm *VM) retain(addr int) error {
-	if addr < 0 || addr >= len(vm.hits) {
-		return ErrSegmentationFault
-	}
-	vm.hits[addr]++
 	return nil
 }
