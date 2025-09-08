@@ -20,7 +20,7 @@ type VM struct {
 	stack     []types.Boxed
 	heap      []types.Value
 	frees     []int
-	hits      []int
+	rc        []int
 	global    []types.Boxed
 	frames    []Frame
 	sp        int
@@ -54,15 +54,17 @@ func New(prog *program.Program, opts ...Option) *VM {
 		constants: prog.Constants,
 		stack:     make([]types.Boxed, stack),
 		heap:      make([]types.Value, 0, heap),
-		hits:      make([]int, 0, heap),
+		rc:        make([]int, 0, heap),
 		frees:     make([]int, 0, heap),
 		global:    make([]types.Boxed, 0, global),
 		frames:    make([]Frame, frame),
 		sp:        0,
 		fp:        1,
 	}
-	vm.frames[0].cl = &types.Closure{Function: &types.Function{Code: prog.Code}}
-	vm.frames[0].ref = -1
+	vm.frames[0].cl = &types.Closure{
+		Function: &types.Function{Code: prog.Code},
+		Address:  -1,
+	}
 	vm.frames[0].bp = vm.sp
 	return vm
 }
@@ -141,8 +143,8 @@ func (vm *VM) Clear() {
 	for i := range vm.heap {
 		vm.heap[i] = nil
 	}
-	for i := range vm.hits {
-		vm.hits[i] = 0
+	for i := range vm.rc {
+		vm.rc[i] = 0
 	}
 	for i := range vm.frees {
 		vm.frees[i] = 0
@@ -151,7 +153,7 @@ func (vm *VM) Clear() {
 		vm.global[i] = 0
 	}
 	vm.heap = vm.heap[:0]
-	vm.hits = vm.hits[:0]
+	vm.rc = vm.rc[:0]
 	vm.frees = vm.frees[:0]
 	vm.global = vm.global[:0]
 }
@@ -263,21 +265,21 @@ func (vm *VM) alloc(val types.Value) (int, error) {
 		copy(heap, vm.heap)
 		vm.heap = heap
 
-		hits := make([]int, len(vm.hits), c)
-		copy(hits, vm.hits)
-		vm.hits = hits
+		hits := make([]int, len(vm.rc), c)
+		copy(hits, vm.rc)
+		vm.rc = hits
 	}
 	vm.heap = append(vm.heap, val)
-	vm.hits = append(vm.hits, 1)
+	vm.rc = append(vm.rc, 1)
 
 	return len(vm.heap) - 1, nil
 }
 
 func (vm *VM) retain(addr int) error {
-	if addr < 0 || addr >= len(vm.hits) {
+	if addr < 0 || addr >= len(vm.rc) {
 		return ErrSegmentationFault
 	}
-	vm.hits[addr]++
+	vm.rc[addr]++
 	return nil
 }
 
@@ -291,14 +293,14 @@ func (vm *VM) release(addr int) error {
 		a := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 
-		vm.hits[a]--
-		if vm.hits[a] > 0 {
+		vm.rc[a]--
+		if vm.rc[a] > 0 {
 			continue
 		}
 
 		obj := vm.heap[a]
 		vm.heap[a] = nil
-		vm.hits[a] = 0
+		vm.rc[a] = 0
 		vm.frees = append(vm.frees, a)
 
 		if t, ok := obj.(types.Traceable); ok {

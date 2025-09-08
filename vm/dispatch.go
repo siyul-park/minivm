@@ -28,7 +28,7 @@ var dispatch = [256]func(vm *VM) error{
 		}
 		val := vm.stack[vm.sp-1]
 		if val.Kind() == types.KindRef {
-			vm.hits[val.Ref()]++
+			vm.rc[val.Ref()]++
 		}
 		vm.stack[vm.sp] = val
 		vm.sp++
@@ -80,7 +80,6 @@ var dispatch = [256]func(vm *VM) error{
 		}
 		frame := &vm.frames[vm.fp]
 		frame.cl = cl
-		frame.ref = types.Ref(addr)
 		frame.ip = 0
 		frame.bp = vm.sp - cl.Function.Params
 		vm.fp++
@@ -105,8 +104,8 @@ var dispatch = [256]func(vm *VM) error{
 			copy(vm.stack[frame.bp:frame.bp+fn.Returns], vm.stack[vm.sp-fn.Returns:vm.sp])
 		}
 		vm.sp = frame.bp + fn.Returns
-		if frame.ref >= 0 {
-			if err := vm.release(int(frame.ref)); err != nil {
+		if frame.cl.Address >= 0 {
+			if err := vm.release(frame.cl.Address); err != nil {
 				return err
 			}
 		}
@@ -222,6 +221,7 @@ var dispatch = [256]func(vm *VM) error{
 		if err != nil {
 			return err
 		}
+		cl.Address = addr
 		vm.stack[vm.sp] = types.BoxRef(addr)
 		vm.sp++
 		frame.ip += 5

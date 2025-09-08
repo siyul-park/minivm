@@ -18,6 +18,7 @@ type Function struct {
 type Closure struct {
 	Function *Function
 	Captures []Boxed
+	Address  int
 }
 
 var _ Value = (*Function)(nil)
