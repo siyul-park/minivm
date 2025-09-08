@@ -59,6 +59,13 @@ var types = map[Opcode]Type{
 	I32_GE_S: {"i32.ge_s", []int{}},
 	I32_GE_U: {"i32.ge_u", []int{}},
 
+	I32_TO_I64_S: {"i32.to_i64_s", []int{}},
+	I32_TO_I64_U: {"i32.to_i64_u", []int{}},
+	I32_TO_F32_S: {"i32.to_f32_s", []int{}},
+	I32_TO_F32_U: {"i32.to_f32_u", []int{}},
+	I32_TO_F64_S: {"i32.to_f64_s", []int{}},
+	I32_TO_F64_U: {"i32.to_f64_u", []int{}},
+
 	I64_CONST: {"i64.const", []int{8}},
 	I64_LOAD:  {"i64.load", []int{}},
 	I64_STORE: {"i64.store", []int{}},
@@ -85,6 +92,12 @@ var types = map[Opcode]Type{
 	I64_GE_S: {"i64.ge_s", []int{}},
 	I64_GE_U: {"i64.ge_u", []int{}},
 
+	I64_TO_I32:   {"i64.to_i32", []int{}},
+	I64_TO_F32_S: {"i64.to_f32_s", []int{}},
+	I64_TO_F32_U: {"i64.to_f32_u", []int{}},
+	I64_TO_F64_S: {"i64.to_f64_s", []int{}},
+	I64_TO_F64_U: {"i64.to_f64_u", []int{}},
+
 	F32_CONST: {"f32.const", []int{4}},
 	F32_LOAD:  {"f32.load", []int{}},
 	F32_STORE: {"f32.store", []int{}},
@@ -101,6 +114,12 @@ var types = map[Opcode]Type{
 	F32_LE: {"f32.le", []int{}},
 	F32_GE: {"f32.ge", []int{}},
 
+	F32_TO_I32_S: {"f32.to_i32_s", []int{}},
+	F32_TO_I32_U: {"f32.to_i32_u", []int{}},
+	F32_TO_I64_S: {"f32.to_i64_s", []int{}},
+	F32_TO_I64_U: {"f32.to_i64_u", []int{}},
+	F32_TO_F64:   {"f32.to_f64", []int{}},
+
 	F64_CONST: {"f64.const", []int{8}},
 	F64_LOAD:  {"f64.load", []int{}},
 	F64_STORE: {"f64.store", []int{}},
@@ -116,6 +135,12 @@ var types = map[Opcode]Type{
 	F64_GT: {"f64.gt", []int{}},
 	F64_LE: {"f64.le", []int{}},
 	F64_GE: {"f64.ge", []int{}},
+
+	F64_TO_I32_S: {"f64.to_i32_s", []int{}},
+	F64_TO_I32_U: {"f64.to_i32_u", []int{}},
+	F64_TO_I64_S: {"f64.to_i64_s", []int{}},
+	F64_TO_I64_U: {"f64.to_i64_u", []int{}},
+	F64_TO_F32:   {"f64.to_f32", []int{}},
 }
 
 func TypeOf(op Opcode) Type {

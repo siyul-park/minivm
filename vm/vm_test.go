@@ -4,11 +4,10 @@ import (
 	"math"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,7 +24,6 @@ var tests = []struct {
 		),
 		values: nil,
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -57,7 +55,6 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I32(1), types.I32(2)},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -81,7 +78,6 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I32(3)},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -116,7 +112,6 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I32(1)},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -149,7 +144,6 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I32(1), types.I32(1)},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -206,7 +200,6 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I32(1), types.I32(1)},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -216,7 +209,6 @@ var tests = []struct {
 		),
 		values: []types.Value{&types.Closure{Function: types.NewFunction(nil)}},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -247,7 +239,6 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I32(42)},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -326,7 +317,6 @@ var tests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
-
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
@@ -338,7 +328,6 @@ var tests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
-
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 2),
@@ -350,7 +339,6 @@ var tests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
-
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 2),
@@ -361,7 +349,6 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I32(1)},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -395,7 +382,6 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I32(1)},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -462,7 +448,66 @@ var tests = []struct {
 		),
 		values: []types.Value{types.Bool(true)},
 	},
-
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_TO_I64_S),
+			},
+			nil,
+		),
+		values: []types.Value{types.I64(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_TO_I64_U),
+			},
+			nil,
+		),
+		values: []types.Value{types.I64(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_TO_F32_S),
+			},
+			nil,
+		),
+		values: []types.Value{types.F32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_TO_F32_U),
+			},
+			nil,
+		),
+		values: []types.Value{types.F32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_TO_F64_S),
+			},
+			nil,
+		),
+		values: []types.Value{types.F64(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_TO_F64_U),
+			},
+			nil,
+		),
+		values: []types.Value{types.F64(42)},
+	},
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -493,7 +538,6 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I64(42)},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -572,7 +616,6 @@ var tests = []struct {
 		values: []types.Value{types.I64(1)},
 	},
 	{
-
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I64_CONST, 1),
@@ -584,7 +627,6 @@ var tests = []struct {
 		values: []types.Value{types.I64(2)},
 	},
 	{
-
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I64_CONST, 2),
@@ -596,7 +638,6 @@ var tests = []struct {
 		values: []types.Value{types.I64(1)},
 	},
 	{
-
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I64_CONST, 2),
@@ -607,7 +648,6 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I64(1)},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -674,38 +714,86 @@ var tests = []struct {
 		),
 		values: []types.Value{types.Bool(true)},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F32_CONST, uint64(math.Float32bits(3.14))),
+				instr.New(instr.I64_CONST, 42),
+				instr.New(instr.I64_TO_I32),
 			},
 			nil,
 		),
-		values: []types.Value{types.F32(3.14)},
+		values: []types.Value{types.I32(42)},
 	},
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F32_CONST, uint64(math.Float32bits(3.14))),
+				instr.New(instr.I64_CONST, 42),
+				instr.New(instr.I64_TO_F32_S),
+			},
+			nil,
+		),
+		values: []types.Value{types.F32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 42),
+				instr.New(instr.I64_TO_F32_U),
+			},
+			nil,
+		),
+		values: []types.Value{types.F32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 42),
+				instr.New(instr.I64_TO_F64_S),
+			},
+			nil,
+		),
+		values: []types.Value{types.F64(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 42),
+				instr.New(instr.I64_TO_F64_U),
+			},
+			nil,
+		),
+		values: []types.Value{types.F64(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
+			},
+			nil,
+		),
+		values: []types.Value{types.F32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
 				instr.New(instr.F32_STORE),
 			},
 			nil,
 		),
-		values: []types.Value{types.F32(3.14)},
+		values: []types.Value{types.F32(42)},
 	},
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F32_CONST, uint64(math.Float32bits(3.14))),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
 				instr.New(instr.F32_STORE),
 				instr.New(instr.F32_LOAD),
 			},
 			nil,
 		),
-		values: []types.Value{types.F32(3.14)},
+		values: []types.Value{types.F32(42)},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -750,7 +838,6 @@ var tests = []struct {
 		),
 		values: []types.Value{types.F32(5.0)},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -817,38 +904,86 @@ var tests = []struct {
 		),
 		values: []types.Value{types.Bool(true)},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F64_CONST, math.Float64bits(3.14)),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
+				instr.New(instr.F32_TO_I32_S),
 			},
 			nil,
 		),
-		values: []types.Value{types.F64(3.14)},
+		values: []types.Value{types.I32(42)},
 	},
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F64_CONST, math.Float64bits(3.14)),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
+				instr.New(instr.F32_TO_I32_U),
+			},
+			nil,
+		),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
+				instr.New(instr.F32_TO_I64_S),
+			},
+			nil,
+		),
+		values: []types.Value{types.I64(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
+				instr.New(instr.F32_TO_I64_U),
+			},
+			nil,
+		),
+		values: []types.Value{types.I64(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
+				instr.New(instr.F32_TO_F64),
+			},
+			nil,
+		),
+		values: []types.Value{types.F64(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(42)),
+			},
+			nil,
+		),
+		values: []types.Value{types.F64(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(42)),
 				instr.New(instr.F64_STORE),
 			},
 			nil,
 		),
-		values: []types.Value{types.F64(3.14)},
+		values: []types.Value{types.F64(42)},
 	},
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F64_CONST, math.Float64bits(3.14)),
+				instr.New(instr.F64_CONST, math.Float64bits(42)),
 				instr.New(instr.F64_STORE),
 				instr.New(instr.F64_LOAD),
 			},
 			nil,
 		),
-		values: []types.Value{types.F64(3.14)},
+		values: []types.Value{types.F64(42)},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -893,7 +1028,6 @@ var tests = []struct {
 		),
 		values: []types.Value{types.F64(5.0)},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -960,6 +1094,56 @@ var tests = []struct {
 		),
 		values: []types.Value{types.Bool(true)},
 	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(42)),
+				instr.New(instr.F64_TO_I32_S),
+			},
+			nil,
+		),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(42)),
+				instr.New(instr.F64_TO_I32_U),
+			},
+			nil,
+		),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(42)),
+				instr.New(instr.F64_TO_I64_S),
+			},
+			nil,
+		),
+		values: []types.Value{types.I64(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(42)),
+				instr.New(instr.F64_TO_I64_U),
+			},
+			nil,
+		),
+		values: []types.Value{types.I64(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(42)),
+				instr.New(instr.F64_TO_F32),
+			},
+			nil,
+		),
+		values: []types.Value{types.F32(42)},
+	},
 }
 
 func TestVM_Run(t *testing.T) {
@@ -968,7 +1152,6 @@ func TestVM_Run(t *testing.T) {
 			vm := New(tt.program)
 			err := vm.Run()
 			require.NoError(t, err)
-
 			for _, val := range tt.values {
 				v, err := vm.Pop()
 				require.NoError(t, err)
@@ -983,7 +1166,6 @@ func TestFibonacci(t *testing.T) {
 		[]instr.Instruction{
 			instr.New(instr.FN_CONST, 0),
 			instr.New(instr.GLOBAL_SET, 0),
-
 			instr.New(instr.I32_CONST, 20),
 			instr.New(instr.GLOBAL_GET, 0),
 			instr.New(instr.CALL),
@@ -995,23 +1177,19 @@ func TestFibonacci(t *testing.T) {
 					instr.New(instr.I32_CONST, 2),
 					instr.New(instr.I32_LT_S),
 					instr.New(instr.BR_IF, 36),
-
-					instr.New(instr.LOCAL_GET, 0),  // +0
-					instr.New(instr.I32_CONST, 1),  // +5
-					instr.New(instr.I32_SUB),       // +10
-					instr.New(instr.GLOBAL_GET, 0), // +11
-					instr.New(instr.CALL),          // +16
-
-					instr.New(instr.LOCAL_GET, 0),  // 17
-					instr.New(instr.I32_CONST, 2),  //22
-					instr.New(instr.I32_SUB),       //27
-					instr.New(instr.GLOBAL_GET, 0), //28
-					instr.New(instr.CALL),          //33
-
-					instr.New(instr.I32_ADD), //34
-					instr.New(instr.RETURN),  //35
-
-					instr.New(instr.LOCAL_GET, 0), //36
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.I32_SUB),
+					instr.New(instr.GLOBAL_GET, 0),
+					instr.New(instr.CALL),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.I32_SUB),
+					instr.New(instr.GLOBAL_GET, 0),
+					instr.New(instr.CALL),
+					instr.New(instr.I32_ADD),
+					instr.New(instr.RETURN),
+					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.RETURN),
 				},
 				types.FunctionWithParams(1),
@@ -1020,12 +1198,9 @@ func TestFibonacci(t *testing.T) {
 			),
 		},
 	)
-
 	vm := New(prog)
-
 	err := vm.Run()
 	require.NoError(t, err)
-
 	val, err := vm.Pop()
 	require.NoError(t, err)
 	require.Equal(t, int32(6765), val.Interface())
@@ -1036,7 +1211,6 @@ func TestFactorial(t *testing.T) {
 		[]instr.Instruction{
 			instr.New(instr.FN_CONST, 0),
 			instr.New(instr.GLOBAL_SET, 0),
-
 			instr.New(instr.I64_CONST, 10),
 			instr.New(instr.GLOBAL_GET, 0),
 			instr.New(instr.CALL),
@@ -1048,18 +1222,14 @@ func TestFactorial(t *testing.T) {
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.I64_LE_S),
 					instr.New(instr.BR_IF, 28),
-
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.I64_SUB),
 					instr.New(instr.GLOBAL_GET, 0),
 					instr.New(instr.CALL),
-
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.I64_MUL),
-
 					instr.New(instr.RETURN),
-
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.RETURN),
 				},
@@ -1069,12 +1239,9 @@ func TestFactorial(t *testing.T) {
 			),
 		},
 	)
-
 	vm := New(prog)
-
 	err := vm.Run()
 	require.NoError(t, err)
-
 	val, err := vm.Pop()
 	require.NoError(t, err)
 	require.Equal(t, int64(3628800), val.Interface()) // 10! = 3628800
@@ -1098,7 +1265,6 @@ func BenchmarkFibonacci(b *testing.B) {
 		[]instr.Instruction{
 			instr.New(instr.FN_CONST, 0),
 			instr.New(instr.GLOBAL_SET, 0),
-
 			instr.New(instr.I32_CONST, 20),
 			instr.New(instr.GLOBAL_GET, 0),
 			instr.New(instr.CALL),
@@ -1110,23 +1276,19 @@ func BenchmarkFibonacci(b *testing.B) {
 					instr.New(instr.I32_CONST, 2),
 					instr.New(instr.I32_LT_S),
 					instr.New(instr.BR_IF, 36),
-
-					instr.New(instr.LOCAL_GET, 0),  // +0
-					instr.New(instr.I32_CONST, 1),  // +5
-					instr.New(instr.I32_SUB),       // +10
-					instr.New(instr.GLOBAL_GET, 0), // +11
-					instr.New(instr.CALL),          // +16
-
-					instr.New(instr.LOCAL_GET, 0),  // 17
-					instr.New(instr.I32_CONST, 2),  //22
-					instr.New(instr.I32_SUB),       //27
-					instr.New(instr.GLOBAL_GET, 0), //28
-					instr.New(instr.CALL),          //33
-
-					instr.New(instr.I32_ADD), //34
-					instr.New(instr.RETURN),  //35
-
-					instr.New(instr.LOCAL_GET, 0), //36
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.I32_SUB),
+					instr.New(instr.GLOBAL_GET, 0),
+					instr.New(instr.CALL),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.I32_SUB),
+					instr.New(instr.GLOBAL_GET, 0),
+					instr.New(instr.CALL),
+					instr.New(instr.I32_ADD),
+					instr.New(instr.RETURN),
+					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.RETURN),
 				},
 				types.FunctionWithParams(1),
@@ -1135,18 +1297,14 @@ func BenchmarkFibonacci(b *testing.B) {
 			),
 		},
 	)
-
 	vm := New(prog)
-
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		err := vm.Run()
 		require.NoError(b, err)
-
 		val, err := vm.Pop()
 		require.NoError(b, err)
 		require.Equal(b, int32(6765), val.Interface())
-
 		vm.Clear()
 	}
 }
@@ -1156,7 +1314,6 @@ func BenchmarkFactorial(b *testing.B) {
 		[]instr.Instruction{
 			instr.New(instr.FN_CONST, 0),
 			instr.New(instr.GLOBAL_SET, 0),
-
 			instr.New(instr.I64_CONST, 10),
 			instr.New(instr.GLOBAL_GET, 0),
 			instr.New(instr.CALL),
@@ -1168,18 +1325,14 @@ func BenchmarkFactorial(b *testing.B) {
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.I64_LE_S),
 					instr.New(instr.BR_IF, 28),
-
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.I64_SUB),
 					instr.New(instr.GLOBAL_GET, 0),
 					instr.New(instr.CALL),
-
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.I64_MUL),
-
 					instr.New(instr.RETURN),
-
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.RETURN),
 				},
@@ -1189,18 +1342,14 @@ func BenchmarkFactorial(b *testing.B) {
 			),
 		},
 	)
-
 	vm := New(prog)
-
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		err := vm.Run()
 		require.NoError(b, err)
-
 		val, err := vm.Pop()
 		require.NoError(b, err)
 		require.Equal(b, int64(3628800), val.Interface())
-
 		vm.Clear()
 	}
 }

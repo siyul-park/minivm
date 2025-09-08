@@ -536,13 +536,75 @@ var dispatch = [256]func(vm *VM) error{
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
+	instr.I32_TO_I64_S: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v := vm.stack[vm.sp-1].I32()
+		val, err := vm.boxI64(int64(v))
+		if err != nil {
+			return err
+		}
+		vm.stack[vm.sp-1] = val
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.I32_TO_I64_U: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v := uint32(vm.stack[vm.sp-1].I32())
+		val, err := vm.boxI64(int64(v))
+		if err != nil {
+			return err
+		}
+		vm.stack[vm.sp-1] = val
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.I32_TO_F32_S: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v := vm.stack[vm.sp-1].I32()
+		vm.stack[vm.sp-1] = types.BoxF32(float32(v))
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.I32_TO_F32_U: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v := vm.stack[vm.sp-1].I32()
+		vm.stack[vm.sp-1] = types.BoxF32(float32(uint32(v)))
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.I32_TO_F64_S: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v := vm.stack[vm.sp-1].I32()
+		vm.stack[vm.sp-1] = types.BoxF64(float64(v))
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.I32_TO_F64_U: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v := vm.stack[vm.sp-1].I32()
+		vm.stack[vm.sp-1] = types.BoxF64(float64(uint32(v)))
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
 	instr.I64_CONST: func(vm *VM) error {
 		frame := &vm.frames[vm.fp-1]
 		code := frame.cl.Function.Code
 		if vm.sp == len(vm.stack) {
 			return ErrStackOverflow
 		}
-		val, err := vm.boxI64(types.I64(binary.BigEndian.Uint64(code[frame.ip+1:])))
+		val, err := vm.boxI64(int64(binary.BigEndian.Uint64(code[frame.ip+1:])))
 		if err != nil {
 			return err
 		}
@@ -689,7 +751,7 @@ var dispatch = [256]func(vm *VM) error{
 		if v1 == 0 {
 			return ErrDivideByZero
 		}
-		v3, err := vm.boxI64(types.I64(uint64(v2) / uint64(v1)))
+		v3, err := vm.boxI64(int64(uint64(v2) / uint64(v1)))
 		if err != nil {
 			return err
 		}
@@ -737,7 +799,7 @@ var dispatch = [256]func(vm *VM) error{
 		if v1 == 0 {
 			return ErrDivideByZero
 		}
-		v3, err := vm.boxI64(types.I64(uint64(v2) % uint64(v1)))
+		v3, err := vm.boxI64(int64(uint64(v2) % uint64(v1)))
 		if err != nil {
 			return err
 		}
@@ -758,7 +820,7 @@ var dispatch = [256]func(vm *VM) error{
 		if err != nil {
 			return err
 		}
-		v3, err := vm.boxI64(types.I64(v2 << (v1 & 0x3F)))
+		v3, err := vm.boxI64(int64(v2 << (v1 & 0x3F)))
 		if err != nil {
 			return err
 		}
@@ -767,7 +829,6 @@ var dispatch = [256]func(vm *VM) error{
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
-
 	instr.I64_SHR_S: func(vm *VM) error {
 		if vm.sp < 2 {
 			return ErrStackUnderflow
@@ -780,7 +841,7 @@ var dispatch = [256]func(vm *VM) error{
 		if err != nil {
 			return err
 		}
-		v3, err := vm.boxI64(types.I64(v2 >> (v1 & 0x3F)))
+		v3, err := vm.boxI64(int64(v2 >> (v1 & 0x3F)))
 		if err != nil {
 			return err
 		}
@@ -789,7 +850,6 @@ var dispatch = [256]func(vm *VM) error{
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
-
 	instr.I64_SHR_U: func(vm *VM) error {
 		if vm.sp < 2 {
 			return ErrStackUnderflow
@@ -802,7 +862,7 @@ var dispatch = [256]func(vm *VM) error{
 		if err != nil {
 			return err
 		}
-		v3, err := vm.boxI64(types.I64(uint64(v2) >> (v1 & 0x3F)))
+		v3, err := vm.boxI64(int64(uint64(v2) >> (v1 & 0x3F)))
 		if err != nil {
 			return err
 		}
@@ -981,6 +1041,66 @@ var dispatch = [256]func(vm *VM) error{
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
+	instr.I64_TO_I32: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v, err := vm.unboxI64(vm.stack[vm.sp-1])
+		if err != nil {
+			return err
+		}
+		vm.stack[vm.sp-1] = types.BoxI32(int32(v))
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.I64_TO_F32_S: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v, err := vm.unboxI64(vm.stack[vm.sp-1])
+		if err != nil {
+			return err
+		}
+		vm.stack[vm.sp-1] = types.BoxF32(float32(v))
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.I64_TO_F32_U: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v, err := vm.unboxI64(vm.stack[vm.sp-1])
+		if err != nil {
+			return err
+		}
+		vm.stack[vm.sp-1] = types.BoxF32(float32(uint64(v)))
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.I64_TO_F64_S: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v, err := vm.unboxI64(vm.stack[vm.sp-1])
+		if err != nil {
+			return err
+		}
+		vm.stack[vm.sp-1] = types.BoxF64(float64(v))
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.I64_TO_F64_U: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v, err := vm.unboxI64(vm.stack[vm.sp-1])
+		if err != nil {
+			return err
+		}
+		vm.stack[vm.sp-1] = types.BoxF64(float64(uint64(v)))
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
 	instr.F32_CONST: func(vm *VM) error {
 		frame := &vm.frames[vm.fp-1]
 		code := frame.cl.Function.Code
@@ -1135,6 +1255,112 @@ var dispatch = [256]func(vm *VM) error{
 		v2 := vm.stack[vm.sp-2].F32()
 		vm.sp--
 		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 >= v1)))
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.F32_TO_I32_S: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v := vm.stack[vm.sp-1].F32()
+		vm.stack[vm.sp-1] = types.BoxI32(int32(v))
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.F32_TO_I32_U: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v := vm.stack[vm.sp-1].F32()
+		vm.stack[vm.sp-1] = types.BoxI32(int32(uint32(v)))
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.F32_TO_I64_S: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v := vm.stack[vm.sp-1].F32()
+		val, err := vm.boxI64(int64(v))
+		if err != nil {
+			return err
+		}
+		vm.stack[vm.sp-1] = val
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.F32_TO_I64_U: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v := vm.stack[vm.sp-1].F32()
+		val, err := vm.boxI64(int64(uint32(v)))
+		if err != nil {
+			return err
+		}
+		vm.stack[vm.sp-1] = val
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.F32_TO_F64: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v := vm.stack[vm.sp-1].F32()
+		vm.stack[vm.sp-1] = types.BoxF64(float64(v))
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.F64_TO_I32_S: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v := vm.stack[vm.sp-1].F64()
+		vm.stack[vm.sp-1] = types.BoxI32(int32(v))
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.F64_TO_I32_U: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v := vm.stack[vm.sp-1].F64()
+		vm.stack[vm.sp-1] = types.BoxI32(int32(uint32(v)))
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.F64_TO_I64_S: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v := vm.stack[vm.sp-1].F64()
+		val, err := vm.boxI64(int64(v))
+		if err != nil {
+			return err
+		}
+		vm.stack[vm.sp-1] = val
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.F64_TO_I64_U: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v := vm.stack[vm.sp-1].F64()
+		val, err := vm.boxI64(int64(uint64(v)))
+		if err != nil {
+			return err
+		}
+		vm.stack[vm.sp-1] = val
+		vm.frames[vm.fp-1].ip++
+		return nil
+	},
+	instr.F64_TO_F32: func(vm *VM) error {
+		if vm.sp < 1 {
+			return ErrStackUnderflow
+		}
+		v := vm.stack[vm.sp-1].F64()
+		vm.stack[vm.sp-1] = types.BoxF32(float32(v))
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},

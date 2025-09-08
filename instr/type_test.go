@@ -64,6 +64,13 @@ func TestTypeOf(t *testing.T) {
 		{opcode: I32_GE_S},
 		{opcode: I32_GE_U},
 
+		{opcode: I32_TO_I64_S},
+		{opcode: I32_TO_I64_U},
+		{opcode: I32_TO_F32_S},
+		{opcode: I32_TO_F32_U},
+		{opcode: I32_TO_F64_S},
+		{opcode: I32_TO_F64_U},
+
 		{opcode: I64_CONST},
 		{opcode: I64_LOAD},
 		{opcode: I64_STORE},
@@ -90,6 +97,12 @@ func TestTypeOf(t *testing.T) {
 		{opcode: I64_GE_S},
 		{opcode: I64_GE_U},
 
+		{opcode: I64_TO_I32},
+		{opcode: I64_TO_F32_S},
+		{opcode: I64_TO_F32_U},
+		{opcode: I64_TO_F64_S},
+		{opcode: I64_TO_F64_U},
+
 		{opcode: F32_CONST},
 		{opcode: F32_LOAD},
 		{opcode: F32_STORE},
@@ -105,6 +118,12 @@ func TestTypeOf(t *testing.T) {
 		{opcode: F32_GT},
 		{opcode: F32_LE},
 		{opcode: F32_GE},
+
+		{opcode: F32_TO_I32_S},
+		{opcode: F32_TO_I32_U},
+		{opcode: F32_TO_I64_S},
+		{opcode: F32_TO_I64_U},
+		{opcode: F32_TO_F64},
 
 		{opcode: F64_CONST},
 		{opcode: F64_LOAD},

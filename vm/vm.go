@@ -155,20 +155,20 @@ func (vm *VM) Clear() {
 	vm.global = vm.global[:0]
 }
 
-func (vm *VM) boxI64(val types.I64) (types.Boxed, error) {
-	if types.IsBoxable(int64(val)) {
-		return types.BoxI64(int64(val)), nil
+func (vm *VM) boxI64(val int64) (types.Boxed, error) {
+	if types.IsBoxable(val) {
+		return types.BoxI64(val), nil
 	}
-	addr, err := vm.alloc(val)
+	addr, err := vm.alloc(types.I64(val))
 	if err != nil {
 		return 0, err
 	}
 	return types.BoxRef(addr), nil
 }
 
-func (vm *VM) unboxI64(val types.Boxed) (types.I64, error) {
+func (vm *VM) unboxI64(val types.Boxed) (int64, error) {
 	if val.Kind() != types.KindRef {
-		return types.I64(val.I64()), nil
+		return val.I64(), nil
 	}
 	addr := val.Ref()
 	v, ok := vm.heap[addr].(types.I64)
@@ -178,7 +178,7 @@ func (vm *VM) unboxI64(val types.Boxed) (types.I64, error) {
 	if err := vm.release(addr); err != nil {
 		return 0, err
 	}
-	return v, nil
+	return int64(v), nil
 }
 
 func (vm *VM) gload(idx int) (types.Boxed, error) {
