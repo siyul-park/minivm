@@ -61,6 +61,10 @@ func New(prog *program.Program, opts ...Option) *VM {
 		fp:        1,
 		sp:        0,
 	}
+
+	vm.heap = append(vm.heap, nil)
+	vm.rc = append(vm.rc, 0)
+
 	vm.frames[0].cl = &types.Closure{Function: &types.Function{Code: prog.Code}}
 	vm.frames[0].bp = vm.sp
 	return vm
@@ -128,14 +132,19 @@ func (vm *VM) Len() int {
 }
 
 func (vm *VM) Clear() {
-	vm.sp = 0
-
 	for vm.fp > 1 {
 		vm.frames[vm.fp] = Frame{}
 		vm.fp--
 	}
 	vm.frames[vm.fp-1].bp = vm.sp
 	vm.frames[vm.fp-1].ip = 0
+
+	for i := range vm.global {
+		vm.global[i] = 0
+	}
+	vm.global = vm.global[:0]
+
+	vm.sp = 0
 
 	for i := range vm.heap {
 		vm.heap[i] = nil
@@ -146,13 +155,9 @@ func (vm *VM) Clear() {
 	for i := range vm.frees {
 		vm.frees[i] = 0
 	}
-	for i := range vm.global {
-		vm.global[i] = 0
-	}
-	vm.heap = vm.heap[:0]
-	vm.rc = vm.rc[:0]
+	vm.heap = vm.heap[:1]
+	vm.rc = vm.rc[:1]
 	vm.frees = vm.frees[:0]
-	vm.global = vm.global[:0]
 }
 
 func (vm *VM) boxI64(val int64) (types.Boxed, error) {
@@ -273,7 +278,7 @@ func (vm *VM) alloc(val types.Value) (int, error) {
 }
 
 func (vm *VM) retain(addr int) error {
-	if addr < 0 || addr >= len(vm.rc) {
+	if addr < 1 || addr >= len(vm.rc) {
 		return ErrSegmentationFault
 	}
 	vm.rc[addr]++
@@ -281,14 +286,14 @@ func (vm *VM) retain(addr int) error {
 }
 
 func (vm *VM) release(addr int) error {
-	if addr < 0 || addr >= len(vm.heap) {
-		return ErrSegmentationFault
-	}
-
 	stack := []int{addr}
 	for len(stack) > 0 {
 		a := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
+
+		if a < 1 || a >= len(vm.heap) {
+			return ErrSegmentationFault
+		}
 
 		vm.rc[a]--
 		if vm.rc[a] > 0 {

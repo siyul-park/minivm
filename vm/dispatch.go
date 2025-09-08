@@ -105,7 +105,7 @@ var dispatch = [256]func(vm *VM) error{
 			copy(vm.stack[frame.bp:frame.bp+fn.Returns], vm.stack[vm.sp-fn.Returns:vm.sp])
 		}
 		vm.sp = frame.bp + fn.Returns
-		if frame.addr >= 0 {
+		if frame.addr > 0 {
 			if err := vm.release(frame.addr); err != nil {
 				return err
 			}
