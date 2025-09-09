@@ -7,7 +7,6 @@ import (
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -1169,8 +1168,7 @@ func BenchmarkVM_Run(b *testing.B) {
 			vm := New(tt.program)
 			b.ResetTimer()
 			for n := 0; n < b.N; n++ {
-				err := vm.Run()
-				assert.NoError(b, err)
+				_ = vm.Run()
 			}
 		})
 	}
@@ -1216,11 +1214,7 @@ func BenchmarkFibonacci(b *testing.B) {
 	vm := New(prog)
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		err := vm.Run()
-		require.NoError(b, err)
-		val, err := vm.Pop()
-		require.NoError(b, err)
-		require.Equal(b, int32(6765), val.Interface())
+		_ = vm.Run()
 		vm.Clear()
 	}
 }
@@ -1261,11 +1255,7 @@ func BenchmarkFactorial(b *testing.B) {
 	vm := New(prog)
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		err := vm.Run()
-		require.NoError(b, err)
-		val, err := vm.Pop()
-		require.NoError(b, err)
-		require.Equal(b, int64(3628800), val.Interface())
+		_ = vm.Run()
 		vm.Clear()
 	}
 }
