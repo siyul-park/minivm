@@ -9,10 +9,10 @@ import (
 
 type Function struct {
 	Code     []byte
-	Params   int
-	Returns  int
-	Locals   int
-	Captures int
+	Params   []Kind
+	Returns  []Kind
+	Locals   []Kind
+	Captures []Kind
 }
 
 type Closure struct {
@@ -23,27 +23,27 @@ type Closure struct {
 var _ Value = (*Function)(nil)
 var _ Traceable = (*Closure)(nil)
 
-func FunctionWithParams(val int) func(*Function) {
+func FunctionWithParams(vals ...Kind) func(*Function) {
 	return func(function *Function) {
-		function.Params = val
+		function.Params = vals
 	}
 }
 
-func FunctionWithReturns(val int) func(*Function) {
+func FunctionWithReturns(vals ...Kind) func(*Function) {
 	return func(function *Function) {
-		function.Returns = val
+		function.Returns = vals
 	}
 }
 
-func FunctionWithLocals(val int) func(*Function) {
+func FunctionWithLocals(vals ...Kind) func(*Function) {
 	return func(function *Function) {
-		function.Locals = val
+		function.Locals = vals
 	}
 }
 
-func FunctionWithCaptures(val int) func(*Function) {
+func FunctionWithCaptures(vals ...Kind) func(*Function) {
 	return func(function *Function) {
-		function.Captures = val
+		function.Captures = vals
 	}
 }
 

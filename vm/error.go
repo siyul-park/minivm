@@ -10,5 +10,6 @@ var (
 	ErrStackUnderflow      = errors.New("stack underflow")
 	ErrFrameOverflow       = errors.New("frame overflow")
 	ErrFrameUnderflow      = errors.New("frame underflow")
+	ErrTypeMismatch        = errors.New("type mismatch")
 	ErrDivideByZero        = errors.New("divide by zero")
 )

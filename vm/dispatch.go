@@ -76,26 +76,40 @@ var dispatch = [256]func(vm *VM) error{
 		if vm.fp == len(vm.frames) {
 			return ErrFrameOverflow
 		}
+
 		vm.sp--
 		addr := vm.stack[vm.sp].Ref()
 		cl, ok := vm.heap[addr].(*types.Closure)
 		if !ok {
-			return ErrSegmentationFault
+			return ErrTypeMismatch
 		}
+		fn := cl.Function
+
+		if vm.sp < len(fn.Params) {
+			return ErrStackUnderflow
+		}
+		for i, k := range fn.Params {
+			if vm.kind(vm.stack[vm.sp-len(fn.Params)+i]) != k {
+				return ErrTypeMismatch
+			}
+		}
+
 		frame := &vm.frames[vm.fp]
 		frame.addr = addr
 		frame.cl = cl
 		frame.ip = 0
-		frame.bp = vm.sp - cl.Function.Params
+		frame.bp = vm.sp - len(fn.Params)
 		vm.fp++
-		for i := 0; i < cl.Function.Locals-cl.Function.Params; i++ {
-			vm.stack[frame.bp+i] = 0
+
+		for i := 0; i < len(fn.Locals); i++ {
+			vm.stack[frame.bp+len(fn.Params)+i] = 0
 		}
-		sp := frame.bp + cl.Function.Locals
+		sp := frame.bp + len(fn.Params) + len(fn.Locals)
 		if sp == len(vm.stack) {
 			return ErrStackOverflow
 		}
 		vm.sp = sp
+
 		vm.frames[vm.fp-2].ip++
 		return nil
 	},
@@ -103,16 +117,27 @@ var dispatch = [256]func(vm *VM) error{
 		if vm.fp == 1 {
 			return ErrFrameUnderflow
 		}
+
 		frame := &vm.frames[vm.fp-1]
 		fn := frame.cl.Function
-		if fn.Returns > 0 {
-			copy(vm.stack[frame.bp:frame.bp+fn.Returns], vm.stack[vm.sp-fn.Returns:vm.sp])
+
+		if vm.sp < len(fn.Returns) {
+			return ErrStackUnderflow
 		}
-		vm.sp = frame.bp + fn.Returns
+		for i, k := range fn.Returns {
+			val := vm.stack[vm.sp-len(fn.Returns)+i]
+			if vm.kind(val) != k {
+				return ErrTypeMismatch
+			}
+			vm.stack[frame.bp+i] = val
+		}
+		vm.sp = frame.bp + len(fn.Returns)
+
 		if frame.addr > 0 {
 			vm.release(frame.addr)
 		}
 		frame.cl = nil
+
 		vm.fp--
 		return nil
 	},
@@ -203,22 +228,36 @@ var dispatch = [256]func(vm *VM) error{
 	instr.FN_CONST: func(vm *VM) error {
 		frame := &vm.frames[vm.fp-1]
 		code := frame.cl.Function.Code
+
 		if vm.sp == len(vm.stack) {
 			return ErrStackOverflow
 		}
+
 		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 		if idx < 0 || idx >= len(vm.constants) {
 			return ErrSegmentationFault
 		}
 		fn, ok := vm.constants[idx].(*types.Function)
 		if !ok {
-			return ErrSegmentationFault
+			return ErrTypeMismatch
 		}
+
 		cl := &types.Closure{Function: fn}
-		if fn.Captures > 0 {
-			cl.Captures = make([]types.Boxed, fn.Captures)
-			copy(cl.Captures, vm.stack[vm.sp-fn.Captures:vm.sp])
-			vm.sp -= fn.Captures
+
+		if len(fn.Captures) > 0 {
+			if vm.sp < len(fn.Captures) {
+				return ErrStackUnderflow
+			}
+
+			cl.Captures = make([]types.Boxed, len(fn.Captures))
+			for i, k := range fn.Captures {
+				val := vm.stack[vm.sp-len(fn.Captures)+i]
+				if vm.kind(val) != k {
+					return ErrTypeMismatch
+				}
+				cl.Captures[i] = val
+			}
+			vm.sp -= len(fn.Captures)
 		}
 		addr := vm.alloc(cl)
 		vm.stack[vm.sp] = types.BoxRef(addr)

@@ -176,6 +176,19 @@ func (vm *VM) unboxI64(val types.Boxed) (int64, error) {
 	return int64(v), nil
 }
 
+func (vm *VM) kind(val types.Boxed) types.Kind {
+	kind := val.Kind()
+	if kind != types.KindRef {
+		return kind
+	}
+	switch vm.heap[val.Ref()].(type) {
+	case types.I64:
+		return types.KindI64
+	default:
+		return types.KindRef
+	}
+}
+
 func (vm *VM) gload(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(vm.global) {
 		return 0, ErrSegmentationFault
@@ -222,10 +235,26 @@ func (vm *VM) lload(idx int) (types.Boxed, error) {
 
 func (vm *VM) lstore(idx int, val types.Boxed) error {
 	frame := &vm.frames[vm.fp-1]
+	fn := frame.cl.Function
 	addr := frame.bp + idx
+
 	if addr < 0 || addr > vm.sp {
 		return ErrSegmentationFault
 	}
+	if idx < 0 || idx >= len(fn.Params)+len(fn.Locals) {
+		return ErrSegmentationFault
+	}
+
+	var kind types.Kind
+	if idx < len(frame.cl.Function.Params) {
+		kind = frame.cl.Function.Params[idx]
+	} else {
+		kind = frame.cl.Function.Locals[idx-len(frame.cl.Function.Params)]
+	}
+	if kind != vm.kind(val) {
+		return ErrTypeMismatch
+	}
+
 	if old := vm.stack[addr]; old != val && old.Kind() == types.KindRef {
 		vm.release(old.Ref())
 	}
