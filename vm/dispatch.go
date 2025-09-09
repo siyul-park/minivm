@@ -49,14 +49,14 @@ var dispatch = [256]func(vm *VM) error{
 	},
 	instr.BR: func(vm *VM) error {
 		frame := &vm.frames[vm.fp-1]
-		code := frame.cl.Function.Code
+		code := frame.fn.Code
 		offset := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 		frame.ip += offset + 5
 		return nil
 	},
 	instr.BR_IF: func(vm *VM) error {
 		frame := &vm.frames[vm.fp-1]
-		code := frame.cl.Function.Code
+		code := frame.fn.Code
 		if vm.sp == 0 {
 			return ErrStackUnderflow
 		}
@@ -73,77 +73,23 @@ var dispatch = [256]func(vm *VM) error{
 		if vm.sp == 0 {
 			return ErrStackUnderflow
 		}
-		if vm.fp == len(vm.frames) {
-			return ErrFrameOverflow
-		}
-
 		vm.sp--
 		addr := vm.stack[vm.sp].Ref()
-		cl, ok := vm.heap[addr].(*types.Closure)
-		if !ok {
-			return ErrTypeMismatch
+		if err := vm.call(addr); err != nil {
+			return err
 		}
-		fn := cl.Function
-
-		if vm.sp < len(fn.Params) {
-			return ErrStackUnderflow
-		}
-		for i, k := range fn.Params {
-			if vm.kind(vm.stack[vm.sp-len(fn.Params)+i]) != k {
-				return ErrTypeMismatch
-			}
-		}
-
-		frame := &vm.frames[vm.fp]
-		frame.addr = addr
-		frame.cl = cl
-		frame.ip = 0
-		frame.bp = vm.sp - len(fn.Params)
-		vm.fp++
-
-		for i := 0; i < len(fn.Locals); i++ {
-			vm.stack[frame.bp+len(fn.Params)+i] = 0
-		}
-		sp := frame.bp + len(fn.Params) + len(fn.Locals)
-		if sp == len(vm.stack) {
-			return ErrStackOverflow
-		}
-		vm.sp = sp
-
 		vm.frames[vm.fp-2].ip++
 		return nil
 	},
 	instr.RETURN: func(vm *VM) error {
-		if vm.fp == 1 {
-			return ErrFrameUnderflow
+		if err := vm.ret(); err != nil {
+			return err
 		}
-
-		frame := &vm.frames[vm.fp-1]
-		fn := frame.cl.Function
-
-		if vm.sp < len(fn.Returns) {
-			return ErrStackUnderflow
-		}
-		for i, k := range fn.Returns {
-			val := vm.stack[vm.sp-len(fn.Returns)+i]
-			if vm.kind(val) != k {
-				return ErrTypeMismatch
-			}
-			vm.stack[frame.bp+i] = val
-		}
-		vm.sp = frame.bp + len(fn.Returns)
-
-		if frame.addr > 0 {
-			vm.release(frame.addr)
-		}
-		frame.cl = nil
-
-		vm.fp--
 		return nil
 	},
 	instr.GLOBAL_GET: func(vm *VM) error {
 		frame := &vm.frames[vm.fp-1]
-		code := frame.cl.Function.Code
+		code := frame.fn.Code
 		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 		val, err := vm.gload(idx)
 		if err != nil {
@@ -159,7 +105,7 @@ var dispatch = [256]func(vm *VM) error{
 			return ErrStackUnderflow
 		}
 		frame := &vm.frames[vm.fp-1]
-		code := frame.cl.Function.Code
+		code := frame.fn.Code
 		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 		val := vm.stack[vm.sp-1]
 		if err := vm.gstore(idx, val); err != nil {
@@ -174,7 +120,7 @@ var dispatch = [256]func(vm *VM) error{
 			return ErrStackUnderflow
 		}
 		frame := &vm.frames[vm.fp-1]
-		code := frame.cl.Function.Code
+		code := frame.fn.Code
 		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 		val := vm.stack[vm.sp-1]
 		if err := vm.gstore(idx, val); err != nil {
@@ -185,7 +131,7 @@ var dispatch = [256]func(vm *VM) error{
 	},
 	instr.LOCAL_GET: func(vm *VM) error {
 		frame := &vm.frames[vm.fp-1]
-		code := frame.cl.Function.Code
+		code := frame.fn.Code
 		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 		val, err := vm.lload(idx)
 		if err != nil {
@@ -201,7 +147,7 @@ var dispatch = [256]func(vm *VM) error{
 			return ErrStackUnderflow
 		}
 		frame := &vm.frames[vm.fp-1]
-		code := frame.cl.Function.Code
+		code := frame.fn.Code
 		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 		val := vm.stack[vm.sp-1]
 		if err := vm.lstore(idx, val); err != nil {
@@ -216,7 +162,7 @@ var dispatch = [256]func(vm *VM) error{
 			return ErrStackUnderflow
 		}
 		frame := &vm.frames[vm.fp-1]
-		code := frame.cl.Function.Code
+		code := frame.fn.Code
 		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 		val := vm.stack[vm.sp-1]
 		if err := vm.lstore(idx, val); err != nil {
@@ -227,12 +173,10 @@ var dispatch = [256]func(vm *VM) error{
 	},
 	instr.FN_CONST: func(vm *VM) error {
 		frame := &vm.frames[vm.fp-1]
-		code := frame.cl.Function.Code
-
+		code := frame.fn.Code
 		if vm.sp == len(vm.stack) {
 			return ErrStackOverflow
 		}
-
 		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 		if idx < 0 || idx >= len(vm.constants) {
 			return ErrSegmentationFault
@@ -241,25 +185,7 @@ var dispatch = [256]func(vm *VM) error{
 		if !ok {
 			return ErrTypeMismatch
 		}
-
-		cl := &types.Closure{Function: fn}
-
-		if len(fn.Captures) > 0 {
-			if vm.sp < len(fn.Captures) {
-				return ErrStackUnderflow
-			}
-
-			cl.Captures = make([]types.Boxed, len(fn.Captures))
-			for i, k := range fn.Captures {
-				val := vm.stack[vm.sp-len(fn.Captures)+i]
-				if vm.kind(val) != k {
-					return ErrTypeMismatch
-				}
-				cl.Captures[i] = val
-			}
-			vm.sp -= len(fn.Captures)
-		}
-		addr := vm.alloc(cl)
+		addr := vm.alloc(fn)
 		vm.stack[vm.sp] = types.BoxRef(addr)
 		vm.sp++
 		frame.ip += 5
@@ -267,7 +193,7 @@ var dispatch = [256]func(vm *VM) error{
 	},
 	instr.I32_CONST: func(vm *VM) error {
 		frame := &vm.frames[vm.fp-1]
-		code := frame.cl.Function.Code
+		code := frame.fn.Code
 		if vm.sp == len(vm.stack) {
 			return ErrStackOverflow
 		}
@@ -606,7 +532,7 @@ var dispatch = [256]func(vm *VM) error{
 	},
 	instr.I64_CONST: func(vm *VM) error {
 		frame := &vm.frames[vm.fp-1]
-		code := frame.cl.Function.Code
+		code := frame.fn.Code
 		if vm.sp == len(vm.stack) {
 			return ErrStackOverflow
 		}
@@ -1073,7 +999,7 @@ var dispatch = [256]func(vm *VM) error{
 	},
 	instr.F32_CONST: func(vm *VM) error {
 		frame := &vm.frames[vm.fp-1]
-		code := frame.cl.Function.Code
+		code := frame.fn.Code
 		if vm.sp == len(vm.stack) {
 			return ErrStackOverflow
 		}
@@ -1304,7 +1230,7 @@ var dispatch = [256]func(vm *VM) error{
 	},
 	instr.F64_CONST: func(vm *VM) error {
 		frame := &vm.frames[vm.fp-1]
-		code := frame.cl.Function.Code
+		code := frame.fn.Code
 		if vm.sp == len(vm.stack) {
 			return ErrStackOverflow
 		}

@@ -65,14 +65,14 @@ func New(prog *program.Program, opts ...Option) *VM {
 	vm.heap = append(vm.heap, nil)
 	vm.rc = append(vm.rc, 0)
 
-	vm.frames[0].cl = &types.Closure{Function: &types.Function{Code: prog.Code}}
+	vm.frames[0].fn = &types.Function{Code: prog.Code}
 	vm.frames[0].bp = vm.sp
 	return vm
 }
 
 func (vm *VM) Run() error {
 	frame := &vm.frames[vm.fp-1]
-	code := frame.cl.Function.Code
+	code := frame.fn.Code
 
 	for frame.ip < len(code) {
 		opcode := instr.Opcode(code[frame.ip])
@@ -84,7 +84,7 @@ func (vm *VM) Run() error {
 			return fmt.Errorf("%w: at=%d", err, frame.ip)
 		}
 		frame = &vm.frames[vm.fp-1]
-		code = frame.cl.Function.Code
+		code = frame.fn.Code
 	}
 	return nil
 }
@@ -176,17 +176,70 @@ func (vm *VM) unboxI64(val types.Boxed) (int64, error) {
 	return int64(v), nil
 }
 
-func (vm *VM) kind(val types.Boxed) types.Kind {
-	kind := val.Kind()
-	if kind != types.KindRef {
-		return kind
+func (vm *VM) call(addr int) error {
+	if vm.fp == len(vm.frames) {
+		return ErrFrameOverflow
 	}
-	switch vm.heap[val.Ref()].(type) {
-	case types.I64:
-		return types.KindI64
-	default:
-		return types.KindRef
+
+	fn, ok := vm.heap[addr].(*types.Function)
+	if !ok {
+		return ErrTypeMismatch
 	}
+
+	if vm.sp < len(fn.Params) {
+		return ErrStackUnderflow
+	}
+	for i, k := range fn.Params {
+		if vm.kind(vm.stack[vm.sp-len(fn.Params)+i]) != k {
+			return ErrTypeMismatch
+		}
+	}
+
+	frame := &vm.frames[vm.fp]
+	frame.addr = addr
+	frame.fn = fn
+	frame.ip = 0
+	frame.bp = vm.sp - len(fn.Params)
+	vm.fp++
+
+	for i := 0; i < len(fn.Locals); i++ {
+		vm.stack[frame.bp+len(fn.Params)+i] = 0
+	}
+	sp := frame.bp + len(fn.Params) + len(fn.Locals)
+	if sp == len(vm.stack) {
+		return ErrStackOverflow
+	}
+	vm.sp = sp
+	return nil
+}
+
+func (vm *VM) ret() error {
+	if vm.fp == 1 {
+		return ErrFrameUnderflow
+	}
+
+	frame := &vm.frames[vm.fp-1]
+	fn := frame.fn
+
+	if vm.sp < len(fn.Returns) {
+		return ErrStackUnderflow
+	}
+	for i, k := range fn.Returns {
+		val := vm.stack[vm.sp-len(fn.Returns)+i]
+		if vm.kind(val) != k {
+			return ErrTypeMismatch
+		}
+		vm.stack[frame.bp+i] = val
+	}
+	vm.sp = frame.bp + len(fn.Returns)
+
+	if frame.addr > 0 {
+		vm.release(frame.addr)
+	}
+	frame.fn = nil
+
+	vm.fp--
+	return nil
 }
 
 func (vm *VM) gload(idx int) (types.Boxed, error) {
@@ -235,7 +288,7 @@ func (vm *VM) lload(idx int) (types.Boxed, error) {
 
 func (vm *VM) lstore(idx int, val types.Boxed) error {
 	frame := &vm.frames[vm.fp-1]
-	fn := frame.cl.Function
+	fn := frame.fn
 	addr := frame.bp + idx
 
 	if addr < 0 || addr > vm.sp {
@@ -246,10 +299,10 @@ func (vm *VM) lstore(idx int, val types.Boxed) error {
 	}
 
 	var kind types.Kind
-	if idx < len(frame.cl.Function.Params) {
-		kind = frame.cl.Function.Params[idx]
+	if idx < len(frame.fn.Params) {
+		kind = frame.fn.Params[idx]
 	} else {
-		kind = frame.cl.Function.Locals[idx-len(frame.cl.Function.Params)]
+		kind = frame.fn.Locals[idx-len(frame.fn.Params)]
 	}
 	if kind != vm.kind(val) {
 		return ErrTypeMismatch
@@ -260,6 +313,19 @@ func (vm *VM) lstore(idx int, val types.Boxed) error {
 	}
 	vm.stack[addr] = val
 	return nil
+}
+
+func (vm *VM) kind(val types.Boxed) types.Kind {
+	kind := val.Kind()
+	if kind != types.KindRef {
+		return kind
+	}
+	switch vm.heap[val.Ref()].(type) {
+	case types.I64:
+		return types.KindI64
+	default:
+		return types.KindRef
+	}
 }
 
 func (vm *VM) alloc(val types.Value) int {

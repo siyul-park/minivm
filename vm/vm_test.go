@@ -206,7 +206,7 @@ var tests = []struct {
 			},
 			[]types.Value{types.NewFunction(nil)},
 		),
-		values: []types.Value{&types.Closure{Function: types.NewFunction(nil)}},
+		values: []types.Value{types.NewFunction(nil)},
 	},
 	{
 		program: program.New(

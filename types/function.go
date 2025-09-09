@@ -8,20 +8,13 @@ import (
 )
 
 type Function struct {
-	Code     []byte
-	Params   []Kind
-	Returns  []Kind
-	Locals   []Kind
-	Captures []Kind
-}
-
-type Closure struct {
-	Function *Function
-	Captures []Boxed
+	Code    []byte
+	Params  []Kind
+	Returns []Kind
+	Locals  []Kind
 }
 
 var _ Value = (*Function)(nil)
-var _ Traceable = (*Closure)(nil)
 
 func FunctionWithParams(vals ...Kind) func(*Function) {
 	return func(function *Function) {
@@ -38,12 +31,6 @@ func FunctionWithReturns(vals ...Kind) func(*Function) {
 func FunctionWithLocals(vals ...Kind) func(*Function) {
 	return func(function *Function) {
 		function.Locals = vals
-	}
-}
-
-func FunctionWithCaptures(vals ...Kind) func(*Function) {
-	return func(function *Function) {
-		function.Captures = vals
 	}
 }
 
@@ -76,22 +63,4 @@ func (f Function) String() string {
 		ip += len(inst)
 	}
 	return sb.String()
-}
-
-func (c *Closure) Interface() any {
-	return c
-}
-
-func (c *Closure) String() string {
-	return c.Function.String()
-}
-
-func (c *Closure) Refs() []Ref {
-	refs := make([]Ref, 0, len(c.Captures))
-	for _, v := range c.Captures {
-		if v.Kind() == KindRef {
-			refs = append(refs, Ref(v.Ref()))
-		}
-	}
-	return refs
 }
