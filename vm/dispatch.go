@@ -238,33 +238,6 @@ var dispatch = [256]func(vm *VM) error{
 		frame.ip += 5
 		return nil
 	},
-	instr.I32_LOAD: func(vm *VM) error {
-		if vm.sp == 0 {
-			return ErrStackUnderflow
-		}
-		addr := vm.stack[vm.sp-1].Ref()
-		if addr < 1 || addr >= len(vm.heap) {
-			return ErrSegmentationFault
-		}
-		val, ok := vm.heap[addr].(types.I32)
-		if !ok {
-			return ErrSegmentationFault
-		}
-		vm.release(addr)
-		vm.stack[vm.sp-1] = types.BoxI32(int32(val))
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.I32_STORE: func(vm *VM) error {
-		if vm.sp == 0 {
-			return ErrStackUnderflow
-		}
-		val := vm.stack[vm.sp-1].I32()
-		addr := vm.alloc(types.I32(val))
-		vm.stack[vm.sp-1] = types.BoxRef(addr)
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
 	instr.I32_ADD: func(vm *VM) error {
 		if vm.sp < 2 {
 			return ErrStackUnderflow
@@ -605,37 +578,6 @@ var dispatch = [256]func(vm *VM) error{
 		vm.stack[vm.sp] = val
 		vm.sp++
 		frame.ip += 9
-		return nil
-	},
-	instr.I64_LOAD: func(vm *VM) error {
-		if vm.sp == 0 {
-			return ErrStackUnderflow
-		}
-		addr := vm.stack[vm.sp-1].Ref()
-		if addr < 1 || addr >= len(vm.heap) {
-			return ErrSegmentationFault
-		}
-		val, ok := vm.heap[addr].(types.I64)
-		if !ok {
-			return ErrSegmentationFault
-		}
-		if types.IsBoxable(int64(val)) {
-			vm.release(addr)
-			vm.stack[vm.sp-1] = types.BoxI64(int64(val))
-		}
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.I64_STORE: func(vm *VM) error {
-		if vm.sp == 0 {
-			return ErrStackUnderflow
-		}
-		val := vm.stack[vm.sp-1]
-		if val.Kind() != types.KindRef {
-			addr := vm.alloc(types.I64(val.I64()))
-			vm.stack[vm.sp-1] = types.BoxRef(addr)
-		}
-		vm.frames[vm.fp-1].ip++
 		return nil
 	},
 	instr.I64_ADD: func(vm *VM) error {
@@ -1102,33 +1044,6 @@ var dispatch = [256]func(vm *VM) error{
 		frame.ip += 5
 		return nil
 	},
-	instr.F32_LOAD: func(vm *VM) error {
-		if vm.sp == 0 {
-			return ErrStackUnderflow
-		}
-		addr := vm.stack[vm.sp-1].Ref()
-		if addr < 1 || addr >= len(vm.heap) {
-			return ErrSegmentationFault
-		}
-		val, ok := vm.heap[addr].(types.F32)
-		if !ok {
-			return ErrSegmentationFault
-		}
-		vm.release(addr)
-		vm.stack[vm.sp-1] = types.BoxF32(float32(val))
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F32_STORE: func(vm *VM) error {
-		if vm.sp == 0 {
-			return ErrStackUnderflow
-		}
-		val := vm.stack[vm.sp-1].F32()
-		addr := vm.alloc(types.F32(val))
-		vm.stack[vm.sp-1] = types.BoxRef(addr)
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
 	instr.F32_ADD: func(vm *VM) error {
 		if vm.sp < 2 {
 			return ErrStackUnderflow
@@ -1358,33 +1273,6 @@ var dispatch = [256]func(vm *VM) error{
 		vm.stack[vm.sp] = val
 		vm.sp++
 		frame.ip += 9
-		return nil
-	},
-	instr.F64_LOAD: func(vm *VM) error {
-		if vm.sp == 0 {
-			return ErrStackUnderflow
-		}
-		addr := vm.stack[vm.sp-1].Ref()
-		if addr < 1 || addr >= len(vm.heap) {
-			return ErrSegmentationFault
-		}
-		val, ok := vm.heap[addr].(types.F64)
-		if !ok {
-			return ErrSegmentationFault
-		}
-		vm.release(addr)
-		vm.stack[vm.sp-1] = types.BoxF64(float64(val))
-		vm.frames[vm.fp-1].ip++
-		return nil
-	},
-	instr.F64_STORE: func(vm *VM) error {
-		if vm.sp == 0 {
-			return ErrStackUnderflow
-		}
-		val := vm.stack[vm.sp-1].F64()
-		addr := vm.alloc(types.F64(val))
-		vm.stack[vm.sp-1] = types.BoxRef(addr)
-		vm.frames[vm.fp-1].ip++
 		return nil
 	},
 	instr.F64_ADD: func(vm *VM) error {

@@ -30,8 +30,6 @@ var types = map[Opcode]Type{
 	FN_CONST: {"fn_const", []int{4}},
 
 	I32_CONST: {"i32.const", []int{4}},
-	I32_LOAD:  {"i32.load", []int{}},
-	I32_STORE: {"i32.store", []int{}},
 
 	I32_XOR: {"i32.xor", []int{}},
 	I32_AND: {"i32.and", []int{}},
@@ -67,8 +65,6 @@ var types = map[Opcode]Type{
 	I32_TO_F64_U: {"i32.to_f64_u", []int{}},
 
 	I64_CONST: {"i64.const", []int{8}},
-	I64_LOAD:  {"i64.load", []int{}},
-	I64_STORE: {"i64.store", []int{}},
 
 	I64_ADD:   {"i64.add", []int{}},
 	I64_SUB:   {"i64.sub", []int{}},
@@ -99,8 +95,6 @@ var types = map[Opcode]Type{
 	I64_TO_F64_U: {"i64.to_f64_u", []int{}},
 
 	F32_CONST: {"f32.const", []int{4}},
-	F32_LOAD:  {"f32.load", []int{}},
-	F32_STORE: {"f32.store", []int{}},
 
 	F32_ADD: {"f32.add", []int{}},
 	F32_SUB: {"f32.sub", []int{}},
@@ -121,8 +115,6 @@ var types = map[Opcode]Type{
 	F32_TO_F64:   {"f32.to_f64", []int{}},
 
 	F64_CONST: {"f64.const", []int{8}},
-	F64_LOAD:  {"f64.load", []int{}},
-	F64_STORE: {"f64.store", []int{}},
 
 	F64_ADD: {"f64.add", []int{}},
 	F64_SUB: {"f64.sub", []int{}},

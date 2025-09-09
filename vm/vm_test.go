@@ -221,27 +221,6 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 42),
-				instr.New(instr.I32_STORE),
-			},
-			nil,
-		),
-		values: []types.Value{types.I32(42)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 42),
-				instr.New(instr.I32_STORE),
-				instr.New(instr.I32_LOAD),
-			},
-			nil,
-		),
-		values: []types.Value{types.I32(42)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_CONST, 2),
 				instr.New(instr.I32_ADD),
@@ -520,27 +499,6 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.I64_CONST, 42),
-				instr.New(instr.I64_STORE),
-			},
-			nil,
-		),
-		values: []types.Value{types.I64(42)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.I64_CONST, 42),
-				instr.New(instr.I64_STORE),
-				instr.New(instr.I64_LOAD),
-			},
-			nil,
-		),
-		values: []types.Value{types.I64(42)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
 				instr.New(instr.I64_CONST, 1),
 				instr.New(instr.I64_CONST, 2),
 				instr.New(instr.I64_ADD),
@@ -776,27 +734,6 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
-				instr.New(instr.F32_STORE),
-			},
-			nil,
-		),
-		values: []types.Value{types.F32(42)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
-				instr.New(instr.F32_STORE),
-				instr.New(instr.F32_LOAD),
-			},
-			nil,
-		),
-		values: []types.Value{types.F32(42)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
 				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))),
 				instr.New(instr.F32_CONST, uint64(math.Float32bits(2.5))),
 				instr.New(instr.F32_ADD),
@@ -958,27 +895,6 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.F64_CONST, math.Float64bits(42)),
-			},
-			nil,
-		),
-		values: []types.Value{types.F64(42)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.F64_CONST, math.Float64bits(42)),
-				instr.New(instr.F64_STORE),
-			},
-			nil,
-		),
-		values: []types.Value{types.F64(42)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.F64_CONST, math.Float64bits(42)),
-				instr.New(instr.F64_STORE),
-				instr.New(instr.F64_LOAD),
 			},
 			nil,
 		),
