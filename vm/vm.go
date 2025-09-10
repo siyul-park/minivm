@@ -155,177 +155,22 @@ func (vm *VM) Clear() {
 	vm.frees = vm.frees[:0]
 }
 
-func (vm *VM) boxI64(val int64) (types.Boxed, error) {
+func (vm *VM) boxI64(val int64) types.Boxed {
 	if types.IsBoxable(val) {
-		return types.BoxI64(val), nil
+		return types.BoxI64(val)
 	}
 	addr := vm.alloc(types.I64(val))
-	return types.BoxRef(addr), nil
+	return types.BoxRef(addr)
 }
 
-func (vm *VM) unboxI64(val types.Boxed) (int64, error) {
+func (vm *VM) unboxI64(val types.Boxed) int64 {
 	if val.Kind() != types.KindRef {
-		return val.I64(), nil
+		return val.I64()
 	}
 	addr := val.Ref()
-	v, ok := vm.heap[addr].(types.I64)
-	if !ok {
-		return 0, ErrSegmentationFault
-	}
+	v, _ := vm.heap[addr].(types.I64)
 	vm.release(addr)
-	return int64(v), nil
-}
-
-func (vm *VM) call(addr int) error {
-	if vm.fp == len(vm.frames) {
-		return ErrFrameOverflow
-	}
-
-	fn, ok := vm.heap[addr].(*types.Function)
-	if !ok {
-		return ErrTypeMismatch
-	}
-
-	if vm.sp < len(fn.Params) {
-		return ErrStackUnderflow
-	}
-	for i, k := range fn.Params {
-		if vm.kind(vm.stack[vm.sp-len(fn.Params)+i]) != k {
-			return ErrTypeMismatch
-		}
-	}
-
-	frame := &vm.frames[vm.fp]
-	frame.addr = addr
-	frame.fn = fn
-	frame.ip = 0
-	frame.bp = vm.sp - len(fn.Params)
-	vm.fp++
-
-	for i := 0; i < len(fn.Locals); i++ {
-		vm.stack[frame.bp+len(fn.Params)+i] = 0
-	}
-	sp := frame.bp + len(fn.Params) + len(fn.Locals)
-	if sp == len(vm.stack) {
-		return ErrStackOverflow
-	}
-	vm.sp = sp
-	return nil
-}
-
-func (vm *VM) ret() error {
-	if vm.fp == 1 {
-		return ErrFrameUnderflow
-	}
-
-	frame := &vm.frames[vm.fp-1]
-	fn := frame.fn
-
-	if vm.sp < len(fn.Returns) {
-		return ErrStackUnderflow
-	}
-	for i, k := range fn.Returns {
-		val := vm.stack[vm.sp-len(fn.Returns)+i]
-		if vm.kind(val) != k {
-			return ErrTypeMismatch
-		}
-		vm.stack[frame.bp+i] = val
-	}
-	vm.sp = frame.bp + len(fn.Returns)
-
-	if frame.addr > 0 {
-		vm.release(frame.addr)
-	}
-	frame.fn = nil
-
-	vm.fp--
-	return nil
-}
-
-func (vm *VM) gload(idx int) (types.Boxed, error) {
-	if idx < 0 || idx >= len(vm.global) {
-		return 0, ErrSegmentationFault
-	}
-	val := vm.global[idx]
-	if val.Kind() == types.KindRef {
-		vm.retain(val.Ref())
-	}
-	return val, nil
-}
-
-func (vm *VM) gstore(idx int, val types.Boxed) error {
-	if idx < 0 {
-		return ErrSegmentationFault
-	}
-	if idx >= len(vm.global) {
-		if cap(vm.global) > idx {
-			vm.global = vm.global[:idx+1]
-		} else {
-			global := make([]types.Boxed, idx*2)
-			copy(global, vm.global)
-			vm.global = global[:idx+1]
-		}
-	}
-	if old := vm.global[idx]; old != val && old.Kind() == types.KindRef {
-		vm.release(old.Ref())
-	}
-	vm.global[idx] = val
-	return nil
-}
-
-func (vm *VM) lload(idx int) (types.Boxed, error) {
-	frame := &vm.frames[vm.fp-1]
-	addr := frame.bp + idx
-	if addr < 0 || addr > vm.sp {
-		return 0, ErrSegmentationFault
-	}
-	val := vm.stack[addr]
-	if val.Kind() == types.KindRef {
-		vm.retain(val.Ref())
-	}
-	return val, nil
-}
-
-func (vm *VM) lstore(idx int, val types.Boxed) error {
-	frame := &vm.frames[vm.fp-1]
-	fn := frame.fn
-	addr := frame.bp + idx
-
-	if addr < 0 || addr > vm.sp {
-		return ErrSegmentationFault
-	}
-	if idx < 0 || idx >= len(fn.Params)+len(fn.Locals) {
-		return ErrSegmentationFault
-	}
-
-	var kind types.Kind
-	if idx < len(frame.fn.Params) {
-		kind = frame.fn.Params[idx]
-	} else {
-		kind = frame.fn.Locals[idx-len(frame.fn.Params)]
-	}
-	if kind != vm.kind(val) {
-		return ErrTypeMismatch
-	}
-
-	if old := vm.stack[addr]; old != val && old.Kind() == types.KindRef {
-		vm.release(old.Ref())
-	}
-	vm.stack[addr] = val
-	return nil
-}
-
-func (vm *VM) kind(val types.Boxed) types.Kind {
-	kind := val.Kind()
-	if kind != types.KindRef {
-		return kind
-	}
-	switch vm.heap[val.Ref()].(type) {
-	case types.I64:
-		return types.KindI64
-	default:
-		return types.KindRef
-	}
+	return int64(v)
 }
 
 func (vm *VM) alloc(val types.Value) int {

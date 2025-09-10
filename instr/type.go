@@ -21,11 +21,9 @@ var types = map[Opcode]Type{
 
 	GLOBAL_GET: {"global.get", []int{4}},
 	GLOBAL_SET: {"global.set", []int{4}},
-	GLOBAL_TEE: {"global.tee", []int{4}},
 
 	LOCAL_GET: {"local.get", []int{4}},
 	LOCAL_SET: {"local.set", []int{4}},
-	LOCAL_TEE: {"local.tee", []int{4}},
 
 	FN_CONST: {"fn_const", []int{4}},
 

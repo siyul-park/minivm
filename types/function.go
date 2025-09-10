@@ -9,28 +9,28 @@ import (
 
 type Function struct {
 	Code    []byte
-	Params  []Kind
-	Returns []Kind
-	Locals  []Kind
+	Params  int
+	Returns int
+	Locals  int
 }
 
 var _ Value = (*Function)(nil)
 
-func FunctionWithParams(vals ...Kind) func(*Function) {
+func FunctionWithParams(val int) func(*Function) {
 	return func(function *Function) {
-		function.Params = vals
+		function.Params = val
 	}
 }
 
-func FunctionWithReturns(vals ...Kind) func(*Function) {
+func FunctionWithReturns(val int) func(*Function) {
 	return func(function *Function) {
-		function.Returns = vals
+		function.Returns = val
 	}
 }
 
-func FunctionWithLocals(vals ...Kind) func(*Function) {
+func FunctionWithLocals(val int) func(*Function) {
 	return func(function *Function) {
-		function.Locals = vals
+		function.Locals = val
 	}
 }
 
