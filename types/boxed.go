@@ -7,13 +7,18 @@ import (
 
 type Boxed uint64
 
-var _ Value = Boxed(0)
+var (
+	BoxedFalse = BoxI32(0)
+	BoxedTrue  = BoxI32(1)
+)
 
 const (
 	tagBits     = 3
 	tagMask     = (1 << tagBits) - 1
 	payloadBits = 52 - tagBits
 )
+
+var _ Value = Boxed(0)
 
 func IsBoxable(v int64) bool {
 	return v >= int64(-(1<<(payloadBits-1))) && v <= int64((1<<(payloadBits-1))-1)
@@ -27,16 +32,23 @@ func BoxI64(v int64) Boxed {
 	return box(uint64(v&((1<<payloadBits)-1)), KindI64)
 }
 
-func BoxF32(f float32) Boxed {
-	return box(uint64(math.Float32bits(f)), KindF32)
+func BoxF32(v float32) Boxed {
+	return box(uint64(math.Float32bits(v)), KindF32)
 }
 
-func BoxF64(f float64) Boxed {
-	return Boxed(math.Float64bits(f))
+func BoxF64(v float64) Boxed {
+	return Boxed(math.Float64bits(v))
 }
 
-func BoxRef(addr int) Boxed {
-	return box(uint64(uint32(addr)), KindRef)
+func BoxRef(v int) Boxed {
+	return box(uint64(uint32(v)), KindRef)
+}
+
+func BoxBool(b bool) Boxed {
+	if b {
+		return BoxedTrue
+	}
+	return BoxedFalse
 }
 
 func Unbox(v Boxed) Value {

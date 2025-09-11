@@ -410,7 +410,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].I32()
 		v2 := vm.stack[vm.sp-2].I32()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 == v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 == v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -421,7 +421,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].I32()
 		v2 := vm.stack[vm.sp-2].I32()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 != v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 != v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -432,7 +432,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].I32()
 		v2 := vm.stack[vm.sp-2].I32()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 < v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 < v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -443,7 +443,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].I32()
 		v2 := vm.stack[vm.sp-2].I32()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(uint32(v2) < uint32(v1))))
+		vm.stack[vm.sp-1] = types.BoxBool(uint32(v2) < uint32(v1))
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -454,7 +454,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].I32()
 		v2 := vm.stack[vm.sp-2].I32()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 > v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 > v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -465,7 +465,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].I32()
 		v2 := vm.stack[vm.sp-2].I32()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(uint32(v2) > uint32(v1))))
+		vm.stack[vm.sp-1] = types.BoxBool(uint32(v2) > uint32(v1))
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -476,7 +476,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].I32()
 		v2 := vm.stack[vm.sp-2].I32()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 <= v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 <= v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -487,7 +487,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].I32()
 		v2 := vm.stack[vm.sp-2].I32()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(uint32(v2) <= uint32(v1))))
+		vm.stack[vm.sp-1] = types.BoxBool(uint32(v2) <= uint32(v1))
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -498,7 +498,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].I32()
 		v2 := vm.stack[vm.sp-2].I32()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 >= v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 >= v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -509,7 +509,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].I32()
 		v2 := vm.stack[vm.sp-2].I32()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(uint32(v2) >= uint32(v1))))
+		vm.stack[vm.sp-1] = types.BoxBool(uint32(v2) >= uint32(v1))
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -708,7 +708,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.unboxI64(vm.stack[vm.sp-1])
 		v2 := vm.unboxI64(vm.stack[vm.sp-2])
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 == v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 == v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -719,7 +719,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.unboxI64(vm.stack[vm.sp-1])
 		v2 := vm.unboxI64(vm.stack[vm.sp-2])
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 != v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 != v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -730,7 +730,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.unboxI64(vm.stack[vm.sp-1])
 		v2 := vm.unboxI64(vm.stack[vm.sp-2])
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 < v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 < v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -741,7 +741,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.unboxI64(vm.stack[vm.sp-1])
 		v2 := vm.unboxI64(vm.stack[vm.sp-2])
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(uint64(v2) < uint64(v1))))
+		vm.stack[vm.sp-1] = types.BoxBool(uint64(v2) < uint64(v1))
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -752,7 +752,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.unboxI64(vm.stack[vm.sp-1])
 		v2 := vm.unboxI64(vm.stack[vm.sp-2])
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 > v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 > v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -763,7 +763,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.unboxI64(vm.stack[vm.sp-1])
 		v2 := vm.unboxI64(vm.stack[vm.sp-2])
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(uint64(v2) > uint64(v1))))
+		vm.stack[vm.sp-1] = types.BoxBool(uint64(v2) > uint64(v1))
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -774,7 +774,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.unboxI64(vm.stack[vm.sp-1])
 		v2 := vm.unboxI64(vm.stack[vm.sp-2])
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 <= v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 <= v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -785,7 +785,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.unboxI64(vm.stack[vm.sp-1])
 		v2 := vm.unboxI64(vm.stack[vm.sp-2])
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(uint64(v2) <= uint64(v1))))
+		vm.stack[vm.sp-1] = types.BoxBool(uint64(v2) <= uint64(v1))
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -796,7 +796,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.unboxI64(vm.stack[vm.sp-1])
 		v2 := vm.unboxI64(vm.stack[vm.sp-2])
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 >= v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 >= v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -807,7 +807,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.unboxI64(vm.stack[vm.sp-1])
 		v2 := vm.unboxI64(vm.stack[vm.sp-2])
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(uint64(v2) >= uint64(v1))))
+		vm.stack[vm.sp-1] = types.BoxBool(uint64(v2) >= uint64(v1))
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -922,7 +922,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].F32()
 		v2 := vm.stack[vm.sp-2].F32()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 == v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 == v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -933,7 +933,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].F32()
 		v2 := vm.stack[vm.sp-2].F32()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 != v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 != v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -944,7 +944,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].F32()
 		v2 := vm.stack[vm.sp-2].F32()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 < v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 < v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -955,7 +955,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].F32()
 		v2 := vm.stack[vm.sp-2].F32()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 > v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 > v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -966,7 +966,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].F32()
 		v2 := vm.stack[vm.sp-2].F32()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 <= v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 <= v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -977,7 +977,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].F32()
 		v2 := vm.stack[vm.sp-2].F32()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 >= v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 >= v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -1137,7 +1137,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].F64()
 		v2 := vm.stack[vm.sp-2].F64()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 == v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 == v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -1148,7 +1148,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].F64()
 		v2 := vm.stack[vm.sp-2].F64()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 != v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 != v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -1159,7 +1159,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].F64()
 		v2 := vm.stack[vm.sp-2].F64()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 < v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 < v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -1170,7 +1170,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].F64()
 		v2 := vm.stack[vm.sp-2].F64()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 > v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 > v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -1181,7 +1181,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].F64()
 		v2 := vm.stack[vm.sp-2].F64()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 <= v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 <= v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},
@@ -1192,7 +1192,7 @@ var dispatch = [256]func(vm *VM) error{
 		v1 := vm.stack[vm.sp-1].F64()
 		v2 := vm.stack[vm.sp-2].F64()
 		vm.sp--
-		vm.stack[vm.sp-1] = types.BoxI32(int32(types.Bool(v2 >= v1)))
+		vm.stack[vm.sp-1] = types.BoxBool(v2 >= v1)
 		vm.frames[vm.fp-1].ip++
 		return nil
 	},

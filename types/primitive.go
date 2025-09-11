@@ -9,6 +9,11 @@ type F32 float32
 type F64 float64
 type Ref int32
 
+var (
+	False = I32(0)
+	True  = I32(1)
+)
+
 var _ Value = I32(0)
 var _ Value = I64(0)
 var _ Value = F32(0)
