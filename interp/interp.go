@@ -1,4 +1,4 @@
-package vm
+package interp
 
 import (
 	"fmt"
@@ -15,7 +15,7 @@ type Option struct {
 	Heap   int
 }
 
-type VM struct {
+type Interpreter struct {
 	frames    []Frame
 	constants []types.Value
 	global    []types.Boxed
@@ -27,7 +27,7 @@ type VM struct {
 	sp        int
 }
 
-func New(prog *program.Program, opts ...Option) *VM {
+func New(prog *program.Program, opts ...Option) *Interpreter {
 	stack := 1024
 	heap := 128
 	global := 128
@@ -50,7 +50,7 @@ func New(prog *program.Program, opts ...Option) *VM {
 		frame = 1
 	}
 
-	vm := &VM{
+	i := &Interpreter{
 		frames:    make([]Frame, frame),
 		constants: prog.Constants,
 		global:    make([]types.Boxed, 0, global),
@@ -62,16 +62,16 @@ func New(prog *program.Program, opts ...Option) *VM {
 		sp:        0,
 	}
 
-	vm.heap = append(vm.heap, nil)
-	vm.rc = append(vm.rc, 0)
+	i.heap = append(i.heap, nil)
+	i.rc = append(i.rc, 0)
 
-	vm.frames[0].fn = &types.Function{Code: prog.Code}
-	vm.frames[0].bp = vm.sp
-	return vm
+	i.frames[0].fn = &types.Function{Code: prog.Code}
+	i.frames[0].bp = i.sp
+	return i
 }
 
-func (vm *VM) Run() error {
-	frame := &vm.frames[vm.fp-1]
+func (i *Interpreter) Run() error {
+	frame := &i.frames[i.fp-1]
 	code := frame.fn.Code
 
 	for frame.ip < len(code) {
@@ -80,145 +80,145 @@ func (vm *VM) Run() error {
 		if fn == nil {
 			return fmt.Errorf("%w: at=%d", ErrUnknownOpcode, frame.ip)
 		}
-		if err := fn(vm); err != nil {
+		if err := fn(i); err != nil {
 			return fmt.Errorf("%w: at=%d", err, frame.ip)
 		}
-		frame = &vm.frames[vm.fp-1]
+		frame = &i.frames[i.fp-1]
 		code = frame.fn.Code
 	}
 	return nil
 }
 
-func (vm *VM) Push(val types.Value) error {
-	if vm.sp == len(vm.stack) {
+func (i *Interpreter) Push(val types.Value) error {
+	if i.sp == len(i.stack) {
 		return ErrStackOverflow
 	}
 
 	switch val := val.(type) {
 	case types.Boxed:
-		vm.stack[vm.sp] = val
+		i.stack[i.sp] = val
 	default:
-		addr := vm.alloc(val)
-		vm.stack[vm.sp] = types.BoxRef(addr)
+		addr := i.alloc(val)
+		i.stack[i.sp] = types.BoxRef(addr)
 	}
-	vm.sp++
+	i.sp++
 	return nil
 }
 
-func (vm *VM) Pop() (types.Value, error) {
-	if vm.sp == 0 {
+func (i *Interpreter) Pop() (types.Value, error) {
+	if i.sp == 0 {
 		return nil, ErrStackUnderflow
 	}
 
-	vm.sp--
-	val := vm.stack[vm.sp]
+	i.sp--
+	val := i.stack[i.sp]
 
 	if val.Kind() == types.KindRef {
 		addr := val.Ref()
-		v := vm.heap[addr]
-		vm.release(addr)
+		v := i.heap[addr]
+		i.release(addr)
 		return v, nil
 	}
 	return val, nil
 }
 
-func (vm *VM) Len() int {
-	return vm.sp - 1
+func (i *Interpreter) Len() int {
+	return i.sp - 1
 }
 
-func (vm *VM) Clear() {
-	for vm.fp > 1 {
-		vm.frames[vm.fp] = Frame{}
-		vm.fp--
+func (i *Interpreter) Clear() {
+	for i.fp > 1 {
+		i.frames[i.fp] = Frame{}
+		i.fp--
 	}
-	vm.frames[vm.fp-1].bp = vm.sp
-	vm.frames[vm.fp-1].ip = 0
+	i.frames[i.fp-1].bp = i.sp
+	i.frames[i.fp-1].ip = 0
 
-	for i := range vm.global {
-		vm.global[i] = 0
+	for idx := range i.global {
+		i.global[idx] = 0
 	}
-	vm.global = vm.global[:0]
+	i.global = i.global[:0]
 
-	vm.sp = 0
+	i.sp = 0
 
-	for i := range vm.heap {
-		vm.heap[i] = nil
+	for idx := range i.heap {
+		i.heap[idx] = nil
 	}
-	for i := range vm.rc {
-		vm.rc[i] = 0
+	for idx := range i.rc {
+		i.rc[idx] = 0
 	}
-	for i := range vm.frees {
-		vm.frees[i] = 0
+	for idx := range i.frees {
+		i.frees[idx] = 0
 	}
-	vm.heap = vm.heap[:1]
-	vm.rc = vm.rc[:1]
-	vm.frees = vm.frees[:0]
+	i.heap = i.heap[:1]
+	i.rc = i.rc[:1]
+	i.frees = i.frees[:0]
 }
 
-func (vm *VM) boxI64(val int64) types.Boxed {
+func (i *Interpreter) boxI64(val int64) types.Boxed {
 	if types.IsBoxable(val) {
 		return types.BoxI64(val)
 	}
-	addr := vm.alloc(types.I64(val))
+	addr := i.alloc(types.I64(val))
 	return types.BoxRef(addr)
 }
 
-func (vm *VM) unboxI64(val types.Boxed) int64 {
+func (i *Interpreter) unboxI64(val types.Boxed) int64 {
 	if val.Kind() != types.KindRef {
 		return val.I64()
 	}
 	addr := val.Ref()
-	v, _ := vm.heap[addr].(types.I64)
-	vm.release(addr)
+	v, _ := i.heap[addr].(types.I64)
+	i.release(addr)
 	return int64(v)
 }
 
-func (vm *VM) alloc(val types.Value) int {
-	if len(vm.frees) > 0 {
-		addr := vm.frees[len(vm.frees)-1]
-		vm.frees = vm.frees[:len(vm.frees)-1]
-		vm.heap[addr] = val
+func (i *Interpreter) alloc(val types.Value) int {
+	if len(i.frees) > 0 {
+		addr := i.frees[len(i.frees)-1]
+		i.frees = i.frees[:len(i.frees)-1]
+		i.heap[addr] = val
 		return addr
 	}
 
-	if len(vm.heap) == cap(vm.heap) {
-		c := 2 * cap(vm.heap)
+	if len(i.heap) == cap(i.heap) {
+		c := 2 * cap(i.heap)
 		if c == 0 {
 			c = 1
 		}
-		heap := make([]types.Value, len(vm.heap), c)
-		copy(heap, vm.heap)
-		vm.heap = heap
+		heap := make([]types.Value, len(i.heap), c)
+		copy(heap, i.heap)
+		i.heap = heap
 
-		hits := make([]int, len(vm.rc), c)
-		copy(hits, vm.rc)
-		vm.rc = hits
+		hits := make([]int, len(i.rc), c)
+		copy(hits, i.rc)
+		i.rc = hits
 	}
 
-	vm.heap = append(vm.heap, val)
-	vm.rc = append(vm.rc, 1)
-	return len(vm.heap) - 1
+	i.heap = append(i.heap, val)
+	i.rc = append(i.rc, 1)
+	return len(i.heap) - 1
 }
 
-func (vm *VM) retain(addr int) {
-	vm.rc[addr]++
+func (i *Interpreter) retain(addr int) {
+	i.rc[addr]++
 }
 
-func (vm *VM) release(addr int) {
+func (i *Interpreter) release(addr int) {
 	stack := []int{addr}
 	for len(stack) > 0 {
 		a := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 
-		vm.rc[a]--
-		if vm.rc[a] > 0 {
+		i.rc[a]--
+		if i.rc[a] > 0 {
 			continue
 		}
 
-		obj := vm.heap[a]
-		vm.heap[a] = nil
-		vm.rc[a] = 0
-		vm.frees = append(vm.frees, a)
+		obj := i.heap[a]
+		i.heap[a] = nil
+		i.rc[a] = 0
+		i.frees = append(i.frees, a)
 
 		if t, ok := obj.(types.Traceable); ok {
 			for _, ref := range t.Refs() {

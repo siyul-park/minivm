@@ -1,4 +1,4 @@
-package vm
+package interp
 
 import (
 	"math"
@@ -1031,14 +1031,14 @@ var tests = []struct {
 	},
 }
 
-func TestVM_Run(t *testing.T) {
+func TestInterpreter_Run(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.program.String(), func(t *testing.T) {
-			vm := New(tt.program)
-			err := vm.Run()
+			i := New(tt.program)
+			err := i.Run()
 			require.NoError(t, err)
 			for _, val := range tt.values {
-				v, err := vm.Pop()
+				v, err := i.Pop()
 				require.NoError(t, err)
 				require.Equal(t, val.Interface(), v.Interface())
 			}
@@ -1082,10 +1082,10 @@ func TestFibonacci(t *testing.T) {
 			),
 		},
 	)
-	vm := New(prog)
-	err := vm.Run()
+	i := New(prog)
+	err := i.Run()
 	require.NoError(t, err)
-	val, err := vm.Pop()
+	val, err := i.Pop()
 	require.NoError(t, err)
 	require.Equal(t, int32(6765), val.Interface())
 }
@@ -1122,21 +1122,21 @@ func TestFactorial(t *testing.T) {
 			),
 		},
 	)
-	vm := New(prog)
-	err := vm.Run()
+	i := New(prog)
+	err := i.Run()
 	require.NoError(t, err)
-	val, err := vm.Pop()
+	val, err := i.Pop()
 	require.NoError(t, err)
 	require.Equal(t, int64(3628800), val.Interface()) // 10! = 3628800
 }
 
-func BenchmarkVM_Run(b *testing.B) {
+func BenchmarkInterpreter_Run(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.program.String(), func(b *testing.B) {
-			vm := New(tt.program)
+			i := New(tt.program)
 			b.ResetTimer()
 			for n := 0; n < b.N; n++ {
-				_ = vm.Run()
+				_ = i.Run()
 			}
 		})
 	}
@@ -1178,11 +1178,11 @@ func BenchmarkFibonacci(b *testing.B) {
 			),
 		},
 	)
-	vm := New(prog)
+	i := New(prog)
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		_ = vm.Run()
-		vm.Clear()
+		_ = i.Run()
+		i.Clear()
 	}
 }
 
@@ -1218,10 +1218,10 @@ func BenchmarkFactorial(b *testing.B) {
 			),
 		},
 	)
-	vm := New(prog)
+	i := New(prog)
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		_ = vm.Run()
-		vm.Clear()
+		_ = i.Run()
+		i.Clear()
 	}
 }
