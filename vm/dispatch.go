@@ -74,24 +74,29 @@ var dispatch = [256]func(vm *VM) error{
 			return ErrStackUnderflow
 		}
 		vm.sp--
-		addr := vm.stack[vm.sp].Ref()
 		if vm.fp == len(vm.frames) {
 			return ErrFrameOverflow
 		}
+
+		addr := vm.stack[vm.sp].Ref()
 		fn, ok := vm.heap[addr].(*types.Function)
 		if !ok {
 			return ErrTypeMismatch
 		}
+		params := len(fn.Params)
+		locals := len(fn.Locals)
+
 		frame := &vm.frames[vm.fp]
 		frame.addr = addr
 		frame.fn = fn
 		frame.ip = 0
-		frame.bp = vm.sp - fn.Params
+		frame.bp = vm.sp - params
+
 		vm.fp++
-		for i := 0; i < fn.Locals-fn.Params; i++ {
-			vm.stack[frame.bp+fn.Params+i] = 0
+		for i := 0; i < locals; i++ {
+			vm.stack[frame.bp+params+i] = 0
 		}
-		sp := frame.bp + fn.Params + fn.Locals - fn.Params
+		sp := frame.bp + params + locals
 		if sp == len(vm.stack) {
 			return ErrStackOverflow
 		}
@@ -103,13 +108,17 @@ var dispatch = [256]func(vm *VM) error{
 		if vm.fp == 1 {
 			return ErrFrameUnderflow
 		}
+
 		frame := &vm.frames[vm.fp-1]
 		fn := frame.fn
-		if vm.sp < fn.Returns {
+		returns := len(fn.Returns)
+		if vm.sp < returns {
 			return ErrStackUnderflow
 		}
-		copy(vm.stack[frame.bp:frame.bp+fn.Returns], vm.stack[vm.sp-fn.Returns:vm.sp])
-		vm.sp = frame.bp + fn.Returns
+
+		copy(vm.stack[frame.bp:frame.bp+returns], vm.stack[vm.sp-returns:vm.sp])
+		vm.sp = frame.bp + returns
+
 		if frame.addr > 0 {
 			vm.release(frame.addr)
 		}
@@ -124,10 +133,12 @@ var dispatch = [256]func(vm *VM) error{
 		if idx < 0 || idx >= len(vm.global) {
 			return ErrSegmentationFault
 		}
+
 		val := vm.global[idx]
 		if val.Kind() == types.KindRef {
 			vm.retain(val.Ref())
 		}
+
 		vm.stack[vm.sp] = val
 		vm.sp++
 		frame.ip += 5
@@ -143,6 +154,7 @@ var dispatch = [256]func(vm *VM) error{
 		if idx < 0 {
 			return ErrSegmentationFault
 		}
+
 		val := vm.stack[vm.sp-1]
 		if idx >= len(vm.global) {
 			if cap(vm.global) > idx {
@@ -153,9 +165,11 @@ var dispatch = [256]func(vm *VM) error{
 				vm.global = global[:idx+1]
 			}
 		}
+
 		if old := vm.global[idx]; old != val && old.Kind() == types.KindRef {
 			vm.release(old.Ref())
 		}
+
 		vm.global[idx] = val
 		vm.sp--
 		frame.ip += 5
@@ -186,7 +200,7 @@ var dispatch = [256]func(vm *VM) error{
 		fn := frame.fn
 		code := fn.Code
 		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
-		if idx < 0 || idx >= fn.Locals {
+		if idx < 0 || idx >= len(fn.Params)+len(fn.Locals) {
 			return ErrSegmentationFault
 		}
 		val := vm.stack[vm.sp-1]
