@@ -24,15 +24,7 @@ func New(instrs []instr.Instruction, consts []types.Value) *Program {
 func (p *Program) String() string {
 	var sb strings.Builder
 
-	ip := 0
-	for _, inst := range instr.Unmarshal(p.Code) {
-		if inst == nil {
-			sb.WriteString(fmt.Sprintf("%04d: <invalid>\n", ip))
-			break
-		}
-		sb.WriteString(fmt.Sprintf("%04d:\t%s\n", ip, inst.String()))
-		ip += len(inst)
-	}
+	sb.WriteString(instr.Disassemble(p.Code))
 
 	if len(p.Constants) > 0 {
 		sb.WriteString("\n")

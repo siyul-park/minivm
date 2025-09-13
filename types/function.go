@@ -49,14 +49,6 @@ func (f Function) Interface() any {
 func (f Function) String() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf(".params %v, .returns %v, .locals: %v\n", f.Params, f.Returns, f.Locals))
-	ip := 0
-	for _, inst := range instr.Unmarshal(f.Code) {
-		if inst == nil {
-			sb.WriteString(fmt.Sprintf("%04d: <invalid>\n", ip))
-			break
-		}
-		sb.WriteString(fmt.Sprintf("%04d:\t%s\n", ip, inst.String()))
-		ip += len(inst)
-	}
+	sb.WriteString(instr.Disassemble(f.Code))
 	return sb.String()
 }
