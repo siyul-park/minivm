@@ -25,15 +25,15 @@ func IsBoxable(v int64) bool {
 }
 
 func BoxI32(v int32) Boxed {
-	return box(uint64(uint32(v)), KindI32)
+	return Box(uint64(uint32(v)), KindI32)
 }
 
 func BoxI64(v int64) Boxed {
-	return box(uint64(v&((1<<payloadBits)-1)), KindI64)
+	return Box(uint64(v&((1<<payloadBits)-1)), KindI64)
 }
 
 func BoxF32(v float32) Boxed {
-	return box(uint64(math.Float32bits(v)), KindF32)
+	return Box(uint64(math.Float32bits(v)), KindF32)
 }
 
 func BoxF64(v float64) Boxed {
@@ -41,7 +41,7 @@ func BoxF64(v float64) Boxed {
 }
 
 func BoxRef(v int) Boxed {
-	return box(uint64(uint32(v)), KindRef)
+	return Box(uint64(uint32(v)), KindRef)
 }
 
 func BoxBool(b bool) Boxed {
@@ -49,6 +49,12 @@ func BoxBool(b bool) Boxed {
 		return BoxedTrue
 	}
 	return BoxedFalse
+}
+
+func Box(v uint64, kind Kind) Boxed {
+	mantissa := (uint64(kind) << payloadBits) | v
+	u := (uint64(0x7FF) << 52) | mantissa
+	return Boxed(u)
 }
 
 func Unbox(v Boxed) Value {
@@ -66,12 +72,6 @@ func Unbox(v Boxed) Value {
 	default:
 		panic("unknown kind")
 	}
-}
-
-func box(payload uint64, kind Kind) Boxed {
-	mantissa := (uint64(kind) << payloadBits) | payload
-	u := (uint64(0x7FF) << 52) | mantissa
-	return Boxed(u)
 }
 
 func (v Boxed) Kind() Kind {
