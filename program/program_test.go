@@ -9,5 +9,5 @@ import (
 
 func TestProgram_String(t *testing.T) {
 	prog := New([]instr.Instruction{instr.New(instr.NOP)}, nil)
-	require.Equal(t, ".text\nmain:\n0000:\tnop\n\n.data\n", prog.String())
+	require.Equal(t, "0000:\tnop\n", prog.String())
 }

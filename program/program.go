@@ -24,17 +24,6 @@ func New(instrs []instr.Instruction, consts []types.Value) *Program {
 func (p *Program) String() string {
 	var sb strings.Builder
 
-	var fns []*types.Function
-	var idx []int
-	for i, c := range p.Constants {
-		if fn, ok := c.(*types.Function); ok {
-			fns = append(fns, fn)
-			idx = append(idx, i)
-		}
-	}
-
-	sb.WriteString(".text\n")
-	sb.WriteString("main:\n")
 	ip := 0
 	for _, inst := range instr.Unmarshal(p.Code) {
 		if inst == nil {
@@ -44,18 +33,19 @@ func (p *Program) String() string {
 		sb.WriteString(fmt.Sprintf("%04d:\t%s\n", ip, inst.String()))
 		ip += len(inst)
 	}
-	for i, fn := range fns {
-		sb.WriteString(fmt.Sprintf("%04d:\n", idx[i]))
-		sb.WriteString(fn.String())
-	}
-	sb.WriteString("\n")
 
-	sb.WriteString(".data\n")
-	for i, c := range p.Constants {
-		if _, ok := c.(*types.Function); !ok {
-			sb.WriteString(fmt.Sprintf("%04d: %s\n", i, c.String()))
+	if len(p.Constants) > 0 {
+		sb.WriteString("\n")
+
+		for i, c := range p.Constants {
+			lines := strings.Split(c.String(), "\n")
+			if len(lines) > 0 {
+				sb.WriteString(fmt.Sprintf("%04d:\t%s\n", i, lines[0]))
+				for _, line := range lines[1:] {
+					sb.WriteString(fmt.Sprintf("\t%s\n", line))
+				}
+			}
 		}
 	}
-
 	return sb.String()
 }
