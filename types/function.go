@@ -42,6 +42,10 @@ func NewFunction(instrs []instr.Instruction, opts ...func(*Function)) *Function 
 	return fn
 }
 
+func (f Function) Kind() Kind {
+	return KindRef
+}
+
 func (f Function) Interface() any {
 	return f
 }

@@ -74,6 +74,9 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp == 0 {
 			return ErrStackUnderflow
 		}
+		if i.sp == len(i.stack) {
+			return ErrStackOverflow
+		}
 		val := i.stack[i.sp-1]
 		if val.Kind() == types.KindRef {
 			i.retain(val.Ref())
@@ -122,14 +125,20 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 
 		i.sp--
-
 		addr := i.stack[i.sp].Ref()
 		fn, ok := i.heap[addr].(*types.Function)
 		if !ok {
 			return ErrTypeMismatch
 		}
+
 		params := len(fn.Params)
 		locals := len(fn.Locals)
+		if i.sp < params {
+			return ErrStackUnderflow
+		}
+		if i.sp+locals >= len(i.stack) {
+			return ErrStackOverflow
+		}
 
 		frame := &i.frames[i.fp]
 		frame.addr = addr
@@ -142,9 +151,6 @@ var dispatch = [256]func(i *Interpreter) error{
 			i.stack[frame.bp+params+idx] = 0
 		}
 		sp := frame.bp + params + locals
-		if sp == len(i.stack) {
-			return ErrStackOverflow
-		}
 		i.sp = sp
 		i.frames[i.fp-2].ip++
 		return nil
@@ -172,6 +178,10 @@ var dispatch = [256]func(i *Interpreter) error{
 		return nil
 	},
 	instr.GLOBAL_GET: func(i *Interpreter) error {
+		if i.sp == len(i.stack) {
+			return ErrStackOverflow
+		}
+
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
@@ -193,6 +203,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp == 0 {
 			return ErrStackUnderflow
 		}
+
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
@@ -221,6 +232,10 @@ var dispatch = [256]func(i *Interpreter) error{
 		return nil
 	},
 	instr.LOCAL_GET: func(i *Interpreter) error {
+		if i.sp == len(i.stack) {
+			return ErrStackOverflow
+		}
+
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
@@ -228,10 +243,12 @@ var dispatch = [256]func(i *Interpreter) error{
 		if addr < 0 || addr > i.sp {
 			return ErrSegmentationFault
 		}
+
 		val := i.stack[addr]
 		if val.Kind() == types.KindRef {
 			i.retain(val.Ref())
 		}
+
 		i.stack[i.sp] = val
 		i.sp++
 		frame.ip += 5
@@ -241,6 +258,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp == 0 {
 			return ErrStackUnderflow
 		}
+
 		frame := &i.frames[i.fp-1]
 		fn := frame.fn
 		code := fn.Code
@@ -248,6 +266,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		if idx < 0 || idx >= len(fn.Params)+len(fn.Locals) {
 			return ErrSegmentationFault
 		}
+
 		val := i.stack[i.sp-1]
 		addr := frame.bp + idx
 		if addr < 0 || addr > i.sp {
@@ -256,17 +275,18 @@ var dispatch = [256]func(i *Interpreter) error{
 		if old := i.stack[addr]; old != val && old.Kind() == types.KindRef {
 			i.release(old.Ref())
 		}
+
 		i.stack[addr] = val
 		i.sp--
 		frame.ip += 5
 		return nil
 	},
 	instr.FN_CONST: func(i *Interpreter) error {
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
 		if i.sp == len(i.stack) {
 			return ErrStackOverflow
 		}
+		frame := &i.frames[i.fp-1]
+		code := frame.fn.Code
 		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 		if idx < 0 || idx >= len(i.constants) {
 			return ErrSegmentationFault
@@ -282,11 +302,11 @@ var dispatch = [256]func(i *Interpreter) error{
 		return nil
 	},
 	instr.I32_CONST: func(i *Interpreter) error {
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
 		if i.sp == len(i.stack) {
 			return ErrStackOverflow
 		}
+		frame := &i.frames[i.fp-1]
+		code := frame.fn.Code
 		val := types.BoxI32(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 		i.stack[i.sp] = val
 		i.sp++
@@ -613,11 +633,11 @@ var dispatch = [256]func(i *Interpreter) error{
 		return nil
 	},
 	instr.I64_CONST: func(i *Interpreter) error {
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
 		if i.sp == len(i.stack) {
 			return ErrStackOverflow
 		}
+		frame := &i.frames[i.fp-1]
+		code := frame.fn.Code
 		val := i.boxI64(int64(binary.BigEndian.Uint64(code[frame.ip+1:])))
 		i.stack[i.sp] = val
 		i.sp++
@@ -902,11 +922,11 @@ var dispatch = [256]func(i *Interpreter) error{
 		return nil
 	},
 	instr.F32_CONST: func(i *Interpreter) error {
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
 		if i.sp == len(i.stack) {
 			return ErrStackOverflow
 		}
+		frame := &i.frames[i.fp-1]
+		code := frame.fn.Code
 		val := types.BoxF32(math.Float32frombits(binary.BigEndian.Uint32(code[frame.ip+1:])))
 		i.stack[i.sp] = val
 		i.sp++
@@ -1117,11 +1137,11 @@ var dispatch = [256]func(i *Interpreter) error{
 		return nil
 	},
 	instr.F64_CONST: func(i *Interpreter) error {
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
 		if i.sp == len(i.stack) {
 			return ErrStackOverflow
 		}
+		frame := &i.frames[i.fp-1]
+		code := frame.fn.Code
 		val := types.BoxF64(math.Float64frombits(binary.BigEndian.Uint64(code[frame.ip+1:])))
 		i.stack[i.sp] = val
 		i.sp++

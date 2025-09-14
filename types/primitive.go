@@ -27,12 +27,20 @@ func Bool(b bool) I32 {
 	return I32(0)
 }
 
+func (i I32) Kind() Kind {
+	return KindI32
+}
+
 func (i I32) Interface() any {
 	return int32(i)
 }
 
 func (i I32) String() string {
 	return fmt.Sprintf("%d", int32(i))
+}
+
+func (i I64) Kind() Kind {
+	return KindI64
 }
 
 func (i I64) Interface() any {
@@ -43,6 +51,10 @@ func (i I64) String() string {
 	return fmt.Sprintf("%d", int64(i))
 }
 
+func (f F32) Kind() Kind {
+	return KindF32
+}
+
 func (f F32) Interface() any {
 	return float32(f)
 }
@@ -51,12 +63,20 @@ func (f F32) String() string {
 	return fmt.Sprintf("%f", float32(f))
 }
 
+func (f F64) Kind() Kind {
+	return KindF64
+}
+
 func (f F64) Interface() any {
 	return float64(f)
 }
 
 func (f F64) String() string {
 	return fmt.Sprintf("%f", float64(f))
+}
+
+func (r Ref) Kind() Kind {
+	return KindRef
 }
 
 func (r Ref) Interface() any {

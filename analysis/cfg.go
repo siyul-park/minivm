@@ -10,10 +10,10 @@ import (
 )
 
 type CFG struct {
-	Blocks []*BasicBlock
+	Blocks []*Block
 }
 
-type BasicBlock struct {
+type Block struct {
 	Start int
 	End   int
 	Succs []int
@@ -62,7 +62,7 @@ func BuildCFG(code []byte) (*CFG, error) {
 		if i+1 < len(starts) {
 			end = starts[i+1]
 		}
-		cfg.Blocks = append(cfg.Blocks, &BasicBlock{
+		cfg.Blocks = append(cfg.Blocks, &Block{
 			Start: start,
 			End:   end,
 		})
@@ -75,6 +75,9 @@ func BuildCFG(code []byte) (*CFG, error) {
 			typ := instr.TypeOf(op)
 			last = ip
 			ip += typ.Size()
+		}
+		if last == b.End {
+			continue
 		}
 
 		op := instr.Opcode(code[last])

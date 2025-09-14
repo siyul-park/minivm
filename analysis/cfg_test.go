@@ -17,7 +17,7 @@ func TestBuildCFG(t *testing.T) {
 				instr.New(instr.NOP),
 			}),
 			cfg: &CFG{
-				Blocks: []*BasicBlock{
+				Blocks: []*Block{
 					{
 						Start: 0,
 						End:   1,
@@ -32,7 +32,7 @@ func TestBuildCFG(t *testing.T) {
 				instr.New(instr.UNREACHABLE),
 			}),
 			cfg: &CFG{
-				Blocks: []*BasicBlock{
+				Blocks: []*Block{
 					{
 						Start: 0,
 						End:   1,
@@ -47,7 +47,7 @@ func TestBuildCFG(t *testing.T) {
 				instr.New(instr.RETURN),
 			}),
 			cfg: &CFG{
-				Blocks: []*BasicBlock{
+				Blocks: []*Block{
 					{
 						Start: 0,
 						End:   1,
@@ -64,7 +64,7 @@ func TestBuildCFG(t *testing.T) {
 				instr.New(instr.I32_CONST, 2),
 			}),
 			cfg: &CFG{
-				Blocks: []*BasicBlock{
+				Blocks: []*Block{
 					{
 						Start: 0,
 						End:   5,
@@ -94,7 +94,7 @@ func TestBuildCFG(t *testing.T) {
 				instr.New(instr.I32_CONST, 3),
 			}),
 			cfg: &CFG{
-				Blocks: []*BasicBlock{
+				Blocks: []*Block{
 					{
 						Start: 0,
 						End:   10,
