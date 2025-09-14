@@ -70,7 +70,7 @@ func Unbox(v Boxed) Value {
 	case KindRef:
 		return Ref(v.Ref())
 	default:
-		panic("unknown kind")
+		return nil
 	}
 }
 
@@ -79,6 +79,23 @@ func (v Boxed) Kind() Kind {
 		return Kind((u >> payloadBits) & tagMask)
 	}
 	return KindF64
+}
+
+func (v Boxed) Type() Type {
+	switch v.Kind() {
+	case KindI32:
+		return TypeI32
+	case KindI64:
+		return TypeI64
+	case KindF32:
+		return TypeF32
+	case KindF64:
+		return TypeF64
+	case KindRef:
+		return TypeRef
+	default:
+		return nil
+	}
 }
 
 func (v Boxed) I32() int32 {

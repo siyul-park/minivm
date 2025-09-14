@@ -102,15 +102,14 @@ var dispatch = [256]func(i *Interpreter) error{
 		return nil
 	},
 	instr.BR_IF: func(i *Interpreter) error {
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
 		if i.sp == 0 {
 			return ErrStackUnderflow
 		}
+		frame := &i.frames[i.fp-1]
 		i.sp--
 		cond := i.stack[i.sp].I32()
 		if cond != 0 {
-			offset := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
+			offset := int(int32(binary.BigEndian.Uint32(frame.fn.Code[frame.ip+1:])))
 			frame.ip += offset
 		}
 		frame.ip += 5
@@ -130,28 +129,25 @@ var dispatch = [256]func(i *Interpreter) error{
 		if !ok {
 			return ErrTypeMismatch
 		}
-
-		params := len(fn.Params)
-		locals := len(fn.Locals)
-		if i.sp < params {
+		if i.sp < fn.Params {
 			return ErrStackUnderflow
 		}
-		if i.sp+locals >= len(i.stack) {
+		if i.sp+fn.Locals-fn.Params >= len(i.stack) {
 			return ErrStackOverflow
+		}
+
+		for idx := 0; idx < fn.Locals-fn.Params; idx++ {
+			i.stack[i.sp+idx] = 0
 		}
 
 		frame := &i.frames[i.fp]
 		frame.addr = addr
 		frame.fn = fn
 		frame.ip = 0
-		frame.bp = i.sp - params
-
+		frame.bp = i.sp - fn.Params
 		i.fp++
-		for idx := 0; idx < locals; idx++ {
-			i.stack[frame.bp+params+idx] = 0
-		}
-		sp := frame.bp + params + locals
-		i.sp = sp
+
+		i.sp = frame.bp + fn.Locals
 		i.frames[i.fp-2].ip++
 		return nil
 	},
@@ -162,13 +158,12 @@ var dispatch = [256]func(i *Interpreter) error{
 
 		frame := &i.frames[i.fp-1]
 		fn := frame.fn
-		returns := len(fn.Returns)
-		if i.sp < returns {
+		if i.sp < fn.Returns {
 			return ErrStackUnderflow
 		}
 
-		copy(i.stack[frame.bp:frame.bp+returns], i.stack[i.sp-returns:i.sp])
-		i.sp = frame.bp + returns
+		copy(i.stack[frame.bp:frame.bp+fn.Returns], i.stack[i.sp-fn.Returns:i.sp])
+		i.sp = frame.bp + fn.Returns
 
 		if frame.addr > 0 {
 			i.release(frame.addr)
@@ -263,15 +258,12 @@ var dispatch = [256]func(i *Interpreter) error{
 		fn := frame.fn
 		code := fn.Code
 		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
-		if idx < 0 || idx >= len(fn.Params)+len(fn.Locals) {
-			return ErrSegmentationFault
-		}
-
-		val := i.stack[i.sp-1]
 		addr := frame.bp + idx
 		if addr < 0 || addr > i.sp {
 			return ErrSegmentationFault
 		}
+
+		val := i.stack[i.sp-1]
 		if old := i.stack[addr]; old != val && old.Kind() == types.KindRef {
 			i.release(old.Ref())
 		}
@@ -285,16 +277,19 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp == len(i.stack) {
 			return ErrStackOverflow
 		}
+
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 		if idx < 0 || idx >= len(i.constants) {
 			return ErrSegmentationFault
 		}
+
 		fn, ok := i.constants[idx].(*types.Function)
 		if !ok {
 			return ErrTypeMismatch
 		}
+
 		addr := i.alloc(fn)
 		i.stack[i.sp] = types.BoxRef(addr)
 		i.sp++

@@ -8,51 +8,113 @@ import (
 )
 
 type Function struct {
+	Typ     *FunctionType
+	Params  int
+	Returns int
+	Locals  int
 	Code    []byte
-	Params  []Kind
-	Returns []Kind
-	Locals  []Kind
+}
+
+type FunctionType struct {
+	Params  []Type
+	Returns []Type
 }
 
 var _ Value = (*Function)(nil)
+var _ Type = (*FunctionType)(nil)
 
-func FunctionWithParams(kinds ...Kind) func(*Function) {
-	return func(function *Function) {
-		function.Params = kinds
+func FunctionWithParams(types ...Type) func(*Function) {
+	return func(fn *Function) {
+		fn.Typ.Params = append(fn.Typ.Params, types...)
+		fn.Params += len(types)
+		fn.Locals += len(types)
 	}
 }
 
-func FunctionWithReturns(kinds ...Kind) func(*Function) {
-	return func(function *Function) {
-		function.Returns = kinds
+func FunctionWithReturns(types ...Type) func(*Function) {
+	return func(fn *Function) {
+		fn.Typ.Returns = append(fn.Typ.Returns, types...)
+		fn.Returns += len(types)
 	}
 }
 
-func FunctionWithLocals(kinds ...Kind) func(*Function) {
+func FunctionWithLocals(types ...Type) func(*Function) {
 	return func(function *Function) {
-		function.Locals = kinds
+		function.Locals += len(types)
 	}
 }
 
 func NewFunction(instrs []instr.Instruction, opts ...func(*Function)) *Function {
-	fn := &Function{Code: instr.Marshal(instrs)}
+	fn := &Function{
+		Typ:  &FunctionType{},
+		Code: instr.Marshal(instrs),
+	}
 	for _, opt := range opts {
 		opt(fn)
 	}
 	return fn
 }
 
-func (f Function) Kind() Kind {
+func (f *Function) Type() Type {
+	return f.Typ
+}
+
+func (f *Function) Kind() Kind {
 	return KindRef
 }
 
-func (f Function) Interface() any {
+func (f *Function) Interface() any {
 	return f
 }
 
-func (f Function) String() string {
+func (f *Function) String() string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf(".params %v, .returns %v, .locals: %v\n", f.Params, f.Returns, f.Locals))
+	sb.WriteString(fmt.Sprintf("%s\n", f.Typ.String()))
 	sb.WriteString(instr.Disassemble(f.Code))
 	return sb.String()
+}
+
+func (f *FunctionType) Kind() Kind {
+	return KindRef
+}
+
+func (f *FunctionType) String() string {
+	var params []string
+	for _, p := range f.Params {
+		params = append(params, p.String())
+	}
+
+	var returns []string
+	for _, r := range f.Returns {
+		returns = append(returns, r.String())
+	}
+
+	return fmt.Sprintf("func(%s) (%s)", strings.Join(params, ", "), strings.Join(returns, ", "))
+}
+
+func (f *FunctionType) Equals(other Type) bool {
+	if other == nil {
+		return false
+	}
+
+	o, ok := other.(*FunctionType)
+	if !ok {
+		return false
+	}
+
+	if len(f.Params) != len(o.Params) || len(f.Returns) != len(o.Returns) {
+		return false
+	}
+
+	for i := range f.Params {
+		if !f.Params[i].Equals(o.Params[i]) {
+			return false
+		}
+	}
+	for i := range f.Returns {
+		if !f.Returns[i].Equals(o.Returns[i]) {
+			return false
+		}
+	}
+	return true
 }
