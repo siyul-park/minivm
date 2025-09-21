@@ -22,7 +22,7 @@ const (
 	LOCAL_GET
 	LOCAL_SET
 
-	FN_CONST
+	CONST_GET
 
 	I32_CONST
 

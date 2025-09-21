@@ -273,25 +273,18 @@ var dispatch = [256]func(i *Interpreter) error{
 		frame.ip += 5
 		return nil
 	},
-	instr.FN_CONST: func(i *Interpreter) error {
+	instr.CONST_GET: func(i *Interpreter) error {
 		if i.sp == len(i.stack) {
 			return ErrStackOverflow
 		}
-
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
 		if idx < 0 || idx >= len(i.constants) {
 			return ErrSegmentationFault
 		}
-
-		fn, ok := i.constants[idx].(*types.Function)
-		if !ok {
-			return ErrTypeMismatch
-		}
-
-		addr := i.alloc(fn)
-		i.stack[i.sp] = types.BoxRef(addr)
+		val := i.constants[idx]
+		i.stack[i.sp] = i.box(val)
 		i.sp++
 		frame.ip += 5
 		return nil
@@ -1384,6 +1377,21 @@ func (i *Interpreter) Clear() {
 	i.heap = i.heap[:1]
 	i.rc = i.rc[:1]
 	i.free = i.free[:0]
+}
+
+func (i *Interpreter) box(val types.Value) types.Boxed {
+	switch v := val.(type) {
+	case types.I32:
+		return types.BoxI32(int32(v))
+	case types.I64:
+		return i.boxI64(int64(v))
+	case types.F32:
+		return types.BoxF32(float32(v))
+	case types.F64:
+		return types.BoxF64(float64(v))
+	default:
+		return types.BoxRef(i.alloc(v))
+	}
 }
 
 func (i *Interpreter) boxI64(val int64) types.Boxed {

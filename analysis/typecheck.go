@@ -187,7 +187,7 @@ var typeCheck = [256]func(f *frame, operands []uint64) error{
 		f.sp--
 		return nil
 	},
-	instr.FN_CONST: func(f *frame, operands []uint64) error {
+	instr.CONST_GET: func(f *frame, operands []uint64) error {
 		if f.sp == len(f.stack) {
 			return ErrStackOverflow
 		}
@@ -195,11 +195,7 @@ var typeCheck = [256]func(f *frame, operands []uint64) error{
 		if idx < 0 || idx >= len(f.constants) {
 			return ErrSegmentationFault
 		}
-		fn, ok := f.constants[idx].(*types.Function)
-		if !ok {
-			return ErrTypeMismatch
-		}
-		f.stack[f.sp] = fn.Typ
+		f.stack[f.sp] = f.constants[idx].Type()
 		f.sp++
 		return nil
 	},

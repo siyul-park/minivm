@@ -25,7 +25,7 @@ var types = map[Opcode]Type{
 	LOCAL_GET: {"local.get", []int{4}},
 	LOCAL_SET: {"local.set", []int{4}},
 
-	FN_CONST: {"fn_const", []int{4}},
+	CONST_GET: {"const.get", []int{4}},
 
 	I32_CONST: {"i32.const", []int{4}},
 

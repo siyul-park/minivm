@@ -30,7 +30,7 @@ func TestTypeOf(t *testing.T) {
 		{opcode: LOCAL_GET},
 		{opcode: LOCAL_SET},
 
-		{opcode: FN_CONST},
+		{opcode: CONST_GET},
 
 		{opcode: I32_CONST},
 

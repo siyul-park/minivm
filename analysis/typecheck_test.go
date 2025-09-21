@@ -74,7 +74,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 		{
 			program: program.New(
 				[]instr.Instruction{
-					instr.New(instr.FN_CONST, 0),
+					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.CALL),
 				},
 				[]types.Value{
@@ -89,7 +89,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 		{
 			program: program.New(
 				[]instr.Instruction{
-					instr.New(instr.FN_CONST, 0),
+					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.CALL),
 				},
 				[]types.Value{
@@ -125,7 +125,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 		{
 			program: program.New(
 				[]instr.Instruction{
-					instr.New(instr.FN_CONST, 0),
+					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.CALL),
 				},
 				[]types.Value{
@@ -142,7 +142,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 		{
 			program: program.New(
 				[]instr.Instruction{
-					instr.New(instr.FN_CONST, 0),
+					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.CALL),
 				},
 				[]types.Value{
@@ -160,7 +160,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 		{
 			program: program.New(
 				[]instr.Instruction{
-					instr.New(instr.FN_CONST, 0),
+					instr.New(instr.CONST_GET, 0),
 				},
 				[]types.Value{types.NewFunction(nil)},
 			),
@@ -939,7 +939,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 		{
 			program: program.New(
 				[]instr.Instruction{
-					instr.New(instr.FN_CONST, 0),
+					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.GLOBAL_SET, 0),
 					instr.New(instr.I32_CONST, 20),
 					instr.New(instr.GLOBAL_GET, 0),
@@ -976,7 +976,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 		{
 			program: program.New(
 				[]instr.Instruction{
-					instr.New(instr.FN_CONST, 0),
+					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.GLOBAL_SET, 0),
 					instr.New(instr.I64_CONST, 10),
 					instr.New(instr.GLOBAL_GET, 0),
