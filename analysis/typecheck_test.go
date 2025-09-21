@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestVerifier_Verify(t *testing.T) {
+func TestTypeCheckPass_Run(t *testing.T) {
 	tests := []struct {
 		program *program.Program
 	}{
@@ -1009,9 +1009,14 @@ func TestVerifier_Verify(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		p := NewTypeCheckPass()
+
 		t.Run(tt.program.String(), func(t *testing.T) {
-			v := NewVerifier(tt.program)
-			err := v.Verify()
+			b := NewModuleBuilder(tt.program)
+			m, err := b.Build()
+			require.NoError(t, err)
+
+			err = p.Run(m)
 			require.NoError(t, err)
 		})
 	}
