@@ -1029,6 +1029,93 @@ var tests = []struct {
 		),
 		values: []types.Value{types.F32(42)},
 	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.STRING_LEN),
+			},
+			[]types.Value{types.String("foo")},
+		),
+		values: []types.Value{types.I32(3)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.STRING_CONCAT),
+			},
+			[]types.Value{types.String("foo"), types.String("bar")},
+		),
+		values: []types.Value{types.String("foobar")},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.STRING_EQ),
+			},
+			[]types.Value{types.String("foo")},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.STRING_NE),
+			},
+			[]types.Value{types.String("foo")},
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.STRING_LT),
+			},
+			[]types.Value{types.String("foo"), types.String("bar")},
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.STRING_GT),
+			},
+			[]types.Value{types.String("foo"), types.String("bar")},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.STRING_LE),
+			},
+			[]types.Value{types.String("foo"), types.String("bar")},
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.STRING_GE),
+			},
+			[]types.Value{types.String("foo"), types.String("bar")},
+		),
+		values: []types.Value{types.I32(1)},
+	},
 }
 
 func TestInterpreter_Run(t *testing.T) {

@@ -131,6 +131,16 @@ var types = map[Opcode]Type{
 	F64_TO_I64_S: {"f64.to_i64_s", []int{}},
 	F64_TO_I64_U: {"f64.to_i64_u", []int{}},
 	F64_TO_F32:   {"f64.to_f32", []int{}},
+
+	STRING_LEN:    {"string.len", []int{}},
+	STRING_CONCAT: {"string.concat", []int{}},
+
+	STRING_EQ: {"string.eq", []int{}},
+	STRING_NE: {"string.ne", []int{}},
+	STRING_LT: {"string.lt", []int{}},
+	STRING_GT: {"string.gt", []int{}},
+	STRING_LE: {"string.le", []int{}},
+	STRING_GE: {"string.ge", []int{}},
 }
 
 func TypeOf(op Opcode) Type {

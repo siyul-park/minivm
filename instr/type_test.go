@@ -130,6 +130,16 @@ func TestTypeOf(t *testing.T) {
 		{opcode: F64_GT},
 		{opcode: F64_LE},
 		{opcode: F64_GE},
+
+		{opcode: STRING_LEN},
+		{opcode: STRING_CONCAT},
+
+		{opcode: STRING_EQ},
+		{opcode: STRING_NE},
+		{opcode: STRING_LT},
+		{opcode: STRING_GT},
+		{opcode: STRING_LE},
+		{opcode: STRING_GE},
 	}
 
 	for _, tt := range tests {

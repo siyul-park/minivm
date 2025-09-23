@@ -1249,6 +1249,92 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.frames[i.fp-1].ip++
 		return nil
 	},
+	instr.STRING_LEN: func(i *Interpreter) error {
+		if i.sp == 0 {
+			return ErrStackUnderflow
+		}
+		v := i.unboxString(i.stack[i.sp-1])
+		i.stack[i.sp-1] = types.BoxI32(int32(len(v)))
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.STRING_CONCAT: func(i *Interpreter) error {
+		if i.sp < 2 {
+			return ErrStackUnderflow
+		}
+		v1 := i.unboxString(i.stack[i.sp-1])
+		v2 := i.unboxString(i.stack[i.sp-2])
+		i.sp--
+		i.stack[i.sp-1] = i.box(types.String(v2 + v1))
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.STRING_EQ: func(i *Interpreter) error {
+		if i.sp < 2 {
+			return ErrStackUnderflow
+		}
+		v1 := i.unboxString(i.stack[i.sp-1])
+		v2 := i.unboxString(i.stack[i.sp-2])
+		i.sp--
+		i.stack[i.sp-1] = types.BoxBool(v2 == v1)
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.STRING_NE: func(i *Interpreter) error {
+		if i.sp < 2 {
+			return ErrStackUnderflow
+		}
+		v1 := i.unboxString(i.stack[i.sp-1])
+		v2 := i.unboxString(i.stack[i.sp-2])
+		i.sp--
+		i.stack[i.sp-1] = types.BoxBool(v2 != v1)
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.STRING_LT: func(i *Interpreter) error {
+		if i.sp < 2 {
+			return ErrStackUnderflow
+		}
+		v1 := i.unboxString(i.stack[i.sp-1])
+		v2 := i.unboxString(i.stack[i.sp-2])
+		i.sp--
+		i.stack[i.sp-1] = types.BoxBool(v2 < v1)
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.STRING_GT: func(i *Interpreter) error {
+		if i.sp < 2 {
+			return ErrStackUnderflow
+		}
+		v1 := i.unboxString(i.stack[i.sp-1])
+		v2 := i.unboxString(i.stack[i.sp-2])
+		i.sp--
+		i.stack[i.sp-1] = types.BoxBool(v2 > v1)
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.STRING_LE: func(i *Interpreter) error {
+		if i.sp < 2 {
+			return ErrStackUnderflow
+		}
+		v1 := i.unboxString(i.stack[i.sp-1])
+		v2 := i.unboxString(i.stack[i.sp-2])
+		i.sp--
+		i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.STRING_GE: func(i *Interpreter) error {
+		if i.sp < 2 {
+			return ErrStackUnderflow
+		}
+		v1 := i.unboxString(i.stack[i.sp-1])
+		v2 := i.unboxString(i.stack[i.sp-2])
+		i.sp--
+		i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
+		i.frames[i.fp-1].ip++
+		return nil
+	},
 }
 
 func New(prog *program.Program, opts ...Option) *Interpreter {
@@ -1410,6 +1496,13 @@ func (i *Interpreter) unboxI64(val types.Boxed) int64 {
 	v, _ := i.heap[addr].(types.I64)
 	i.release(addr)
 	return int64(v)
+}
+
+func (i *Interpreter) unboxString(val types.Boxed) string {
+	addr := val.Ref()
+	v, _ := i.heap[addr].(types.String)
+	i.release(addr)
+	return string(v)
 }
 
 func (i *Interpreter) alloc(val types.Value) int {
