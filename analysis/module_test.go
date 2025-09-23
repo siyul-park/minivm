@@ -146,7 +146,7 @@ func TestModuleBuilder_Build(t *testing.T) {
 									Preds: nil,
 								},
 								{
-									Offset: 5,
+									Offset: 3,
 									Code: instr.Marshal([]instr.Instruction{
 										instr.New(instr.I32_CONST, 1),
 									}),
@@ -155,7 +155,7 @@ func TestModuleBuilder_Build(t *testing.T) {
 								},
 
 								{
-									Offset: 10,
+									Offset: 8,
 									Code: instr.Marshal([]instr.Instruction{
 										instr.New(instr.I32_CONST, 2),
 									}),
@@ -200,7 +200,7 @@ func TestModuleBuilder_Build(t *testing.T) {
 									Preds: nil,
 								},
 								{
-									Offset: 5,
+									Offset: 3,
 									Code: instr.Marshal([]instr.Instruction{
 										instr.New(instr.I32_CONST, 1),
 									}),
@@ -209,7 +209,7 @@ func TestModuleBuilder_Build(t *testing.T) {
 								},
 
 								{
-									Offset: 10,
+									Offset: 8,
 									Code: instr.Marshal([]instr.Instruction{
 										instr.New(instr.I32_CONST, 2),
 									}),
@@ -257,7 +257,7 @@ func TestModuleBuilder_Build(t *testing.T) {
 									Preds: nil,
 								},
 								{
-									Offset: 10,
+									Offset: 8,
 									Code: instr.Marshal([]instr.Instruction{
 										instr.New(instr.I32_CONST, 2),
 									}),
@@ -266,7 +266,7 @@ func TestModuleBuilder_Build(t *testing.T) {
 								},
 
 								{
-									Offset: 15,
+									Offset: 13,
 									Code: instr.Marshal([]instr.Instruction{
 										instr.New(instr.I32_CONST, 3),
 									}),

@@ -97,8 +97,8 @@ var dispatch = [256]func(i *Interpreter) error{
 	instr.BR: func(i *Interpreter) error {
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		offset := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
-		frame.ip += offset + 5
+		offset := int(int32(binary.BigEndian.Uint16(code[frame.ip+1:])))
+		frame.ip += offset + 3
 		return nil
 	},
 	instr.BR_IF: func(i *Interpreter) error {
@@ -109,10 +109,10 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.sp--
 		cond := i.stack[i.sp].I32()
 		if cond != 0 {
-			offset := int(int32(binary.BigEndian.Uint32(frame.fn.Code[frame.ip+1:])))
+			offset := int(int32(binary.BigEndian.Uint16(frame.fn.Code[frame.ip+1:])))
 			frame.ip += offset
 		}
-		frame.ip += 5
+		frame.ip += 3
 		return nil
 	},
 	instr.CALL: func(i *Interpreter) error {
@@ -179,7 +179,7 @@ var dispatch = [256]func(i *Interpreter) error{
 
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
+		idx := int(int32(binary.BigEndian.Uint16(code[frame.ip+1:])))
 		if idx < 0 || idx >= len(i.global) {
 			return ErrSegmentationFault
 		}
@@ -191,7 +191,7 @@ var dispatch = [256]func(i *Interpreter) error{
 
 		i.stack[i.sp] = val
 		i.sp++
-		frame.ip += 5
+		frame.ip += 3
 		return nil
 	},
 	instr.GLOBAL_SET: func(i *Interpreter) error {
@@ -201,7 +201,7 @@ var dispatch = [256]func(i *Interpreter) error{
 
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
+		idx := int(int32(binary.BigEndian.Uint16(code[frame.ip+1:])))
 		if idx < 0 {
 			return ErrSegmentationFault
 		}
@@ -223,7 +223,7 @@ var dispatch = [256]func(i *Interpreter) error{
 
 		i.global[idx] = val
 		i.sp--
-		frame.ip += 5
+		frame.ip += 3
 		return nil
 	},
 	instr.LOCAL_GET: func(i *Interpreter) error {
@@ -233,7 +233,7 @@ var dispatch = [256]func(i *Interpreter) error{
 
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
+		idx := int(int32(code[frame.ip+1]))
 		addr := frame.bp + idx
 		if addr < 0 || addr > i.sp {
 			return ErrSegmentationFault
@@ -246,7 +246,7 @@ var dispatch = [256]func(i *Interpreter) error{
 
 		i.stack[i.sp] = val
 		i.sp++
-		frame.ip += 5
+		frame.ip += 2
 		return nil
 	},
 	instr.LOCAL_SET: func(i *Interpreter) error {
@@ -257,7 +257,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		frame := &i.frames[i.fp-1]
 		fn := frame.fn
 		code := fn.Code
-		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
+		idx := int(int32(code[frame.ip+1]))
 		addr := frame.bp + idx
 		if addr < 0 || addr > i.sp {
 			return ErrSegmentationFault
@@ -270,7 +270,7 @@ var dispatch = [256]func(i *Interpreter) error{
 
 		i.stack[addr] = val
 		i.sp--
-		frame.ip += 5
+		frame.ip += 2
 		return nil
 	},
 	instr.CONST_GET: func(i *Interpreter) error {
@@ -279,14 +279,14 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
+		idx := int(int32(binary.BigEndian.Uint16(code[frame.ip+1:])))
 		if idx < 0 || idx >= len(i.constants) {
 			return ErrSegmentationFault
 		}
 		val := i.constants[idx]
 		i.stack[i.sp] = i.box(val)
 		i.sp++
-		frame.ip += 5
+		frame.ip += 3
 		return nil
 	},
 	instr.I32_CONST: func(i *Interpreter) error {

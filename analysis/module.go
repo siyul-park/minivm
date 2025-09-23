@@ -77,7 +77,7 @@ func (b *ModuleBuilder) buildCFG(fn *types.Function) (*CFG, error) {
 	offsets := []int{0}
 	for ip := 0; ip < len(code); {
 		op := instr.Opcode(code[ip])
-		typ := instr.TypeOf(op)
+		typ := instr.TypeOf(instr.Opcode(code[ip]))
 		next := ip + typ.Size()
 
 		switch op {
@@ -86,8 +86,11 @@ func (b *ModuleBuilder) buildCFG(fn *types.Function) (*CFG, error) {
 				offsets = append(offsets, next)
 			}
 		case instr.BR, instr.BR_IF:
-			offset := int(int32(binary.BigEndian.Uint32(code[ip+1:])))
+			offset := int(int32(binary.BigEndian.Uint16(code[ip+1:])))
 			target := ip + typ.Size() + offset
+			if target < 0 || target >= len(code) {
+				return nil, fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
+			}
 			offsets = append(offsets, target)
 			if next < len(code) {
 				offsets = append(offsets, next)
@@ -130,7 +133,7 @@ func (b *ModuleBuilder) buildCFG(fn *types.Function) (*CFG, error) {
 		switch op {
 		case instr.UNREACHABLE, instr.RETURN:
 		case instr.BR, instr.BR_IF:
-			offset := int(int32(binary.BigEndian.Uint32(blk.Code[ip+1:])))
+			offset := int(int32(binary.BigEndian.Uint16(blk.Code[ip+1:])))
 			target := ip + typ.Size() + offset
 
 			found := false

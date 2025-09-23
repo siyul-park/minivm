@@ -13,19 +13,19 @@ var types = map[Opcode]Type{
 	DUP:  {"dup", []int{}},
 	SWAP: {"swap", []int{}},
 
-	BR:    {"br", []int{4}},
-	BR_IF: {"br_if", []int{4}},
+	BR:    {"br", []int{2}},
+	BR_IF: {"br_if", []int{2}},
 
 	CALL:   {"call", []int{}},
 	RETURN: {"return", []int{}},
 
-	GLOBAL_GET: {"global.get", []int{4}},
-	GLOBAL_SET: {"global.set", []int{4}},
+	GLOBAL_GET: {"global.get", []int{2}},
+	GLOBAL_SET: {"global.set", []int{2}},
 
-	LOCAL_GET: {"local.get", []int{4}},
-	LOCAL_SET: {"local.set", []int{4}},
+	LOCAL_GET: {"local.get", []int{1}},
+	LOCAL_SET: {"local.set", []int{1}},
 
-	CONST_GET: {"const.get", []int{4}},
+	CONST_GET: {"const.get", []int{2}},
 
 	I32_CONST: {"i32.const", []int{4}},
 
