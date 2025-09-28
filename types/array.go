@@ -37,39 +37,51 @@ func (a *Array) Get(idx int) (Boxed, bool) {
 		return 0, false
 	}
 
+	ptr := &a.bytes[offset]
 	switch a.width {
 	case 1:
-		return Box(uint64(a.bytes[offset]), a.kind), true
+		return Box(uint64(*ptr), a.kind), true
 	case 2:
-		return Box(uint64(*(*uint16)(unsafe.Pointer(&a.bytes[offset]))), a.kind), true
+		return Box(uint64(*(*uint16)(unsafe.Pointer(ptr))), a.kind), true
 	case 4:
-		return Box(uint64(*(*uint32)(unsafe.Pointer(&a.bytes[offset]))), a.kind), true
+		return Box(uint64(*(*uint32)(unsafe.Pointer(ptr))), a.kind), true
 	case 8:
-		return Boxed(*(*uint64)(unsafe.Pointer(&a.bytes[offset]))), true
+		return Boxed(*(*uint64)(unsafe.Pointer(ptr))), true
 	default:
 		return 0, false
 	}
 }
 
-func (a *Array) Set(idx int, val Boxed) bool {
+func (a *Array) Set(idx int, val Boxed) (Boxed, bool) {
 	offset := idx * a.width
 	if offset < 0 || offset+a.width > len(a.bytes) {
-		return false
+		return 0, false
 	}
 
+	ptr := &a.bytes[offset]
 	switch a.width {
 	case 1:
+		old := Box(uint64(*ptr), a.kind)
 		a.bytes[offset] = byte(val)
+		return old, true
 	case 2:
-		*(*uint16)(unsafe.Pointer(&a.bytes[offset])) = uint16(val)
+		r := (*uint16)(unsafe.Pointer(ptr))
+		old := Box(uint64(*r), a.kind)
+		*r = uint16(val)
+		return old, true
 	case 4:
-		*(*uint32)(unsafe.Pointer(&a.bytes[offset])) = uint32(val)
+		r := (*uint32)(unsafe.Pointer(ptr))
+		old := Box(uint64(*r), a.kind)
+		*r = uint32(val)
+		return old, true
 	case 8:
-		*(*uint64)(unsafe.Pointer(&a.bytes[offset])) = uint64(val)
+		r := (*uint64)(unsafe.Pointer(ptr))
+		old := Boxed(*r)
+		*r = uint64(val)
+		return old, true
 	default:
-		return false
+		return 0, false
 	}
-	return true
 }
 
 func (a *Array) Len() int {

@@ -22,7 +22,7 @@ func TestArray_Set(t *testing.T) {
 		t.Run(tt.typ.String(), func(t *testing.T) {
 			a := NewArray(tt.typ, 3)
 
-			ok := a.Set(0, tt.value)
+			_, ok := a.Set(0, tt.value)
 			require.True(t, ok)
 
 			actual, ok := a.Get(0)

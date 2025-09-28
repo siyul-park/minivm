@@ -1397,6 +1397,9 @@ var dispatch = [256]func(i *Interpreter) error{
 		if !ok {
 			return ErrIndexOutOfRange
 		}
+		if val.Kind() == types.KindRef {
+			i.retain(val.Ref())
+		}
 		i.sp--
 		i.stack[i.sp-1] = val
 		i.frames[i.fp-1].ip++
@@ -1418,8 +1421,12 @@ var dispatch = [256]func(i *Interpreter) error{
 			return ErrTypeMismatch
 		}
 		i.release(addr)
-		if ok := arr.Set(idx, val); !ok {
+		old, ok := arr.Set(idx, val)
+		if !ok {
 			return ErrIndexOutOfRange
+		}
+		if old.Kind() == types.KindRef {
+			i.release(old.Ref())
 		}
 		i.sp -= 3
 		i.frames[i.fp-1].ip++
