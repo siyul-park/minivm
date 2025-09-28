@@ -48,6 +48,7 @@ var (
 	ErrFrameUnderflow      = errors.New("frame underflow")
 	ErrTypeMismatch        = errors.New("type mismatch")
 	ErrDivideByZero        = errors.New("divide by zero")
+	ErrIndexOutOfRange     = errors.New("index out of range")
 )
 
 var dispatch = [256]func(i *Interpreter) error{
@@ -1391,9 +1392,9 @@ var dispatch = [256]func(i *Interpreter) error{
 			return ErrTypeMismatch
 		}
 		i.release(addr)
-		val, err := arr.Get(idx)
-		if err != nil {
-			return err
+		val, ok := arr.Get(idx)
+		if !ok {
+			return ErrIndexOutOfRange
 		}
 		i.sp--
 		i.stack[i.sp-1] = val
@@ -1416,8 +1417,8 @@ var dispatch = [256]func(i *Interpreter) error{
 			return ErrTypeMismatch
 		}
 		i.release(addr)
-		if err := arr.Set(idx, val); err != nil {
-			return err
+		if ok := arr.Set(idx, val); !ok {
+			return ErrIndexOutOfRange
 		}
 		i.sp -= 3
 		i.frames[i.fp-1].ip++

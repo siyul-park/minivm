@@ -2,7 +2,6 @@ package types
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -20,8 +19,6 @@ type ArrayType struct {
 	width int
 }
 
-var ErrIndexOutOfRange = errors.New("index out of range")
-
 var _ Traceable = (*Array)(nil)
 var _ Type = (*ArrayType)(nil)
 
@@ -34,42 +31,46 @@ func NewArray(typ *ArrayType, len int) *Array {
 	}
 }
 
-func (a *Array) Get(idx int) (Boxed, error) {
-	if idx < 0 || idx >= a.Len() {
-		return 0, ErrIndexOutOfRange
-	}
+func (a *Array) Get(idx int) (Boxed, bool) {
 	offset := idx * a.width
+	if offset < 0 || offset >= len(a.bytes) {
+		return 0, false
+	}
 	switch a.width {
 	case 1:
-		return Box(uint64(a.bytes[offset]), a.kind), nil
+		return Box(uint64(a.bytes[offset]), a.kind), true
 	case 2:
-		return Box(uint64(binary.BigEndian.Uint16(a.bytes[offset:])), a.kind), nil
+		return Box(uint64(binary.BigEndian.Uint16(a.bytes[offset:])), a.kind), true
 	case 4:
-		return Box(uint64(binary.BigEndian.Uint32(a.bytes[offset:])), a.kind), nil
+		return Box(uint64(binary.BigEndian.Uint32(a.bytes[offset:])), a.kind), true
 	case 8:
-		return Boxed(binary.BigEndian.Uint64(a.bytes[offset:])), nil
+		return Boxed(binary.BigEndian.Uint64(a.bytes[offset:])), true
 	default:
-		return 0, nil
+		return 0, false
 	}
 }
 
-func (a *Array) Set(idx int, val Boxed) error {
-	if idx < 0 || idx >= a.Len() {
-		return ErrIndexOutOfRange
-	}
+func (a *Array) Set(idx int, val Boxed) bool {
 	offset := idx * a.width
+	if offset < 0 || offset >= len(a.bytes) {
+		return false
+	}
 	switch a.width {
 	case 1:
 		a.bytes[offset] = byte(val)
+		return true
 	case 2:
 		binary.BigEndian.PutUint16(a.bytes[offset:], uint16(val))
+		return true
 	case 4:
 		binary.BigEndian.PutUint32(a.bytes[offset:], uint32(val))
+		return true
 	case 8:
 		binary.BigEndian.PutUint64(a.bytes[offset:], uint64(val))
+		return true
 	default:
+		return false
 	}
-	return nil
 }
 
 func (a *Array) Len() int {
@@ -88,7 +89,7 @@ func (a *Array) Interface() any {
 	length := a.Len()
 	value := make([]any, length)
 	for i := 0; i < length; i++ {
-		if v, err := a.Get(i); err == nil {
+		if v, ok := a.Get(i); ok {
 			value[i] = v.Interface()
 		}
 	}
@@ -104,8 +105,8 @@ func (a *Array) String() string {
 		if i > 0 {
 			sb.WriteString(", ")
 		}
-		val, err := a.Get(i)
-		if err != nil {
+		val, ok := a.Get(i)
+		if !ok {
 			sb.WriteString("<err>")
 			continue
 		}
@@ -127,7 +128,7 @@ func (a *Array) Refs() []Ref {
 			continue
 		}
 		if ref := v.Ref(); ref > 0 {
-			refs = append(refs, Ref(v.Ref()))
+			refs = append(refs, Ref(ref))
 		}
 	}
 	return refs

@@ -22,11 +22,11 @@ func TestArray_Set(t *testing.T) {
 		t.Run(tt.typ.String(), func(t *testing.T) {
 			a := NewArray(tt.typ, 3)
 
-			err := a.Set(0, tt.value)
-			require.NoError(t, err)
+			ok := a.Set(0, tt.value)
+			require.True(t, ok)
 
-			actual, err := a.Get(0)
-			require.NoError(t, err)
+			actual, ok := a.Get(0)
+			require.True(t, ok)
 			require.Equal(t, tt.value, actual)
 		})
 	}

@@ -33,7 +33,7 @@ func (r *RTT) String() string {
 }
 
 func (r *RTT) Cast(other Type) bool {
-	return r.Elem.Cast(other)
+	return r.Equals(other)
 }
 
 func (r *RTT) Equals(other Type) bool {
@@ -48,7 +48,7 @@ func (rttType) String() string {
 	return "rtt"
 }
 
-func (t rttType) Cast(other Type) bool {
+func (rttType) Cast(other Type) bool {
 	return other == TypeRTT
 }
 
