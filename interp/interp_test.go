@@ -1075,6 +1075,78 @@ var tests = []struct {
 		),
 		values: nil,
 	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.I32_CONST, 20),
+				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(
+				types.NewFunction(
+					[]instr.Instruction{
+						instr.New(instr.LOCAL_GET, 0),
+						instr.New(instr.I32_CONST, 2),
+						instr.New(instr.I32_LT_S),
+						instr.New(instr.BR_IF, 26),
+						instr.New(instr.LOCAL_GET, 0),
+						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.I32_SUB),
+						instr.New(instr.GLOBAL_GET, 0),
+						instr.New(instr.CALL),
+						instr.New(instr.LOCAL_GET, 0),
+						instr.New(instr.I32_CONST, 2),
+						instr.New(instr.I32_SUB),
+						instr.New(instr.GLOBAL_GET, 0),
+						instr.New(instr.CALL),
+						instr.New(instr.I32_ADD),
+						instr.New(instr.RETURN),
+						instr.New(instr.LOCAL_GET, 0),
+						instr.New(instr.RETURN),
+					},
+					types.FunctionWithParams(types.TypeI64),
+					types.FunctionWithReturns(types.TypeI64),
+				),
+			),
+		),
+		values: []types.Value{types.I32(6765)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.I64_CONST, 10),
+				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(
+				types.NewFunction(
+					[]instr.Instruction{
+						instr.New(instr.LOCAL_GET, 0),
+						instr.New(instr.I64_CONST, 1),
+						instr.New(instr.I64_LE_S),
+						instr.New(instr.BR_IF, 16),
+						instr.New(instr.LOCAL_GET, 0),
+						instr.New(instr.I64_CONST, 1),
+						instr.New(instr.I64_SUB),
+						instr.New(instr.GLOBAL_GET, 0),
+						instr.New(instr.CALL),
+						instr.New(instr.LOCAL_GET, 0),
+						instr.New(instr.I64_MUL),
+						instr.New(instr.RETURN),
+						instr.New(instr.I64_CONST, 1),
+						instr.New(instr.RETURN),
+					},
+					types.FunctionWithParams(types.TypeI64),
+					types.FunctionWithReturns(types.TypeI64),
+				),
+			),
+		),
+		values: []types.Value{types.I64(3628800)},
+	},
 }
 
 func TestInterpreter_Run(t *testing.T) {
@@ -1092,90 +1164,6 @@ func TestInterpreter_Run(t *testing.T) {
 	}
 }
 
-func TestFibonacci(t *testing.T) {
-	prog := program.New(
-		[]instr.Instruction{
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.GLOBAL_SET, 0),
-			instr.New(instr.I32_CONST, 20),
-			instr.New(instr.GLOBAL_GET, 0),
-			instr.New(instr.CALL),
-		},
-		program.WithConstants(
-			types.NewFunction(
-				[]instr.Instruction{
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.I32_LT_S),
-					instr.New(instr.BR_IF, 26),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.I32_SUB),
-					instr.New(instr.GLOBAL_GET, 0),
-					instr.New(instr.CALL),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.I32_SUB),
-					instr.New(instr.GLOBAL_GET, 0),
-					instr.New(instr.CALL),
-					instr.New(instr.I32_ADD),
-					instr.New(instr.RETURN),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.RETURN),
-				},
-				types.FunctionWithParams(types.TypeI64),
-				types.FunctionWithReturns(types.TypeI64),
-			),
-		),
-	)
-	i := New(prog)
-	err := i.Run()
-	require.NoError(t, err)
-	val, err := i.Pop()
-	require.NoError(t, err)
-	require.Equal(t, int32(6765), val.Interface())
-}
-
-func TestFactorial(t *testing.T) {
-	prog := program.New(
-		[]instr.Instruction{
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.GLOBAL_SET, 0),
-			instr.New(instr.I64_CONST, 10),
-			instr.New(instr.GLOBAL_GET, 0),
-			instr.New(instr.CALL),
-		},
-		program.WithConstants(
-			types.NewFunction(
-				[]instr.Instruction{
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I64_CONST, 1),
-					instr.New(instr.I64_LE_S),
-					instr.New(instr.BR_IF, 16),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I64_CONST, 1),
-					instr.New(instr.I64_SUB),
-					instr.New(instr.GLOBAL_GET, 0),
-					instr.New(instr.CALL),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I64_MUL),
-					instr.New(instr.RETURN),
-					instr.New(instr.I64_CONST, 1),
-					instr.New(instr.RETURN),
-				},
-				types.FunctionWithParams(types.TypeI32),
-				types.FunctionWithReturns(types.TypeI32),
-			),
-		),
-	)
-	i := New(prog)
-	err := i.Run()
-	require.NoError(t, err)
-	val, err := i.Pop()
-	require.NoError(t, err)
-	require.Equal(t, int64(3628800), val.Interface()) // 10! = 3628800
-}
-
 func BenchmarkInterpreter_Run(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.program.String(), func(b *testing.B) {
@@ -1183,91 +1171,8 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			b.ResetTimer()
 			for n := 0; n < b.N; n++ {
 				_ = i.Run()
+				i.Clear()
 			}
 		})
-	}
-}
-
-func BenchmarkFibonacci(b *testing.B) {
-	prog := program.New(
-		[]instr.Instruction{
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.GLOBAL_SET, 0),
-			instr.New(instr.I32_CONST, 20),
-			instr.New(instr.GLOBAL_GET, 0),
-			instr.New(instr.CALL),
-		},
-		program.WithConstants(
-			types.NewFunction(
-				[]instr.Instruction{
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.I32_LT_S),
-					instr.New(instr.BR_IF, 26),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.I32_SUB),
-					instr.New(instr.GLOBAL_GET, 0),
-					instr.New(instr.CALL),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.I32_SUB),
-					instr.New(instr.GLOBAL_GET, 0),
-					instr.New(instr.CALL),
-					instr.New(instr.I32_ADD),
-					instr.New(instr.RETURN),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.RETURN),
-				},
-				types.FunctionWithParams(types.TypeI32),
-				types.FunctionWithReturns(types.TypeI32),
-			),
-		),
-	)
-	i := New(prog)
-	b.ResetTimer()
-	for n := 0; n < b.N; n++ {
-		_ = i.Run()
-		i.Clear()
-	}
-}
-
-func BenchmarkFactorial(b *testing.B) {
-	prog := program.New(
-		[]instr.Instruction{
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.GLOBAL_SET, 0),
-			instr.New(instr.I64_CONST, 10),
-			instr.New(instr.GLOBAL_GET, 0),
-			instr.New(instr.CALL),
-		},
-		program.WithConstants(
-			types.NewFunction(
-				[]instr.Instruction{
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I64_CONST, 1),
-					instr.New(instr.I64_LE_S),
-					instr.New(instr.BR_IF, 16),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I64_CONST, 1),
-					instr.New(instr.I64_SUB),
-					instr.New(instr.GLOBAL_GET, 0),
-					instr.New(instr.CALL),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I64_MUL),
-					instr.New(instr.RETURN),
-					instr.New(instr.I64_CONST, 1),
-					instr.New(instr.RETURN),
-				},
-				types.FunctionWithParams(types.TypeI64),
-				types.FunctionWithReturns(types.TypeI64),
-			),
-		),
-	)
-	i := New(prog)
-	b.ResetTimer()
-	for n := 0; n < b.N; n++ {
-		_ = i.Run()
-		i.Clear()
 	}
 }
