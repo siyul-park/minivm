@@ -13,7 +13,10 @@ type F32Array []F32
 
 type F64Array []F64
 
-type RefArray []Boxed
+type Array struct {
+	Typ   *ArrayType
+	Elems []Boxed
+}
 
 type ArrayType struct {
 	Elem Type
@@ -31,7 +34,7 @@ var _ Value = I32Array(nil)
 var _ Value = I64Array(nil)
 var _ Value = F32Array(nil)
 var _ Value = F64Array(nil)
-var _ Traceable = RefArray(nil)
+var _ Traceable = (*Array)(nil)
 var _ Type = (*ArrayType)(nil)
 
 func (a I32Array) Kind() Kind {
@@ -150,26 +153,26 @@ func (a F64Array) String() string {
 	return sb.String()
 }
 
-func (a RefArray) Kind() Kind {
+func (a *Array) Kind() Kind {
 	return KindRef
 }
 
-func (a RefArray) Type() Type {
-	return TypeRefArray
+func (a *Array) Type() Type {
+	return a.Typ
 }
 
-func (a RefArray) Interface() any {
-	v := make([]any, len(a))
-	for j, e := range a {
+func (a *Array) Interface() any {
+	v := make([]any, len(a.Elems))
+	for j, e := range a.Elems {
 		v[j] = e.Interface()
 	}
 	return v
 }
 
-func (a RefArray) String() string {
+func (a *Array) String() string {
 	var sb strings.Builder
 	sb.WriteByte('{')
-	for j, e := range a {
+	for j, e := range a.Elems {
 		if j > 0 {
 			sb.WriteString(", ")
 		}
@@ -179,9 +182,9 @@ func (a RefArray) String() string {
 	return sb.String()
 }
 
-func (a RefArray) Refs() []Ref {
-	refs := make([]Ref, 0, len(a))
-	for _, e := range a {
+func (a *Array) Refs() []Ref {
+	refs := make([]Ref, 0, len(a.Elems))
+	for _, e := range a.Elems {
 		if e.Kind() == KindRef {
 			refs = append(refs, Ref(e.Ref()))
 		}

@@ -1384,7 +1384,10 @@ var dispatch = [256]func(i *Interpreter) error{
 		case types.KindF64:
 			arr = make(types.F64Array, length)
 		default:
-			arr = make(types.RefArray, length)
+			arr = &types.Array{
+				Typ:   typ,
+				Elems: make([]types.Boxed, length),
+			}
 		}
 		i.sp--
 		i.stack[i.sp-1] = i.box(arr)
@@ -1423,11 +1426,11 @@ var dispatch = [256]func(i *Interpreter) error{
 				return ErrIndexOutOfRange
 			}
 			val = types.BoxF64(float64(arr[idx]))
-		case types.RefArray:
-			if idx < 0 || idx >= len(arr) {
+		case *types.Array:
+			if idx < 0 || idx >= len(arr.Elems) {
 				return ErrIndexOutOfRange
 			}
-			elem := arr[idx]
+			elem := arr.Elems[idx]
 			if elem.Kind() == types.KindRef {
 				i.retain(elem.Ref())
 			}
@@ -1473,12 +1476,12 @@ var dispatch = [256]func(i *Interpreter) error{
 				return ErrIndexOutOfRange
 			}
 			arr[idx] = types.F64(val.F64())
-		case types.RefArray:
-			if idx < 0 || idx >= len(arr) {
+		case *types.Array:
+			if idx < 0 || idx >= len(arr.Elems) {
 				return ErrIndexOutOfRange
 			}
-			elem := arr[idx]
-			arr[idx] = val
+			elem := arr.Elems[idx]
+			arr.Elems[idx] = val
 			if elem.Kind() == types.KindRef {
 				i.release(elem.Ref())
 			}
