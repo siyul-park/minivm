@@ -8,6 +8,6 @@ import (
 )
 
 func TestProgram_String(t *testing.T) {
-	prog := New([]instr.Instruction{instr.New(instr.NOP)}, nil)
+	prog := New([]instr.Instruction{instr.New(instr.NOP)})
 	require.Equal(t, "0000:\tnop\n", prog.String())
 }

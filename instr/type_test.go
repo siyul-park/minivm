@@ -32,6 +32,8 @@ func TestTypeOf(t *testing.T) {
 
 		{opcode: CONST_GET},
 
+		{opcode: RTT_CANON},
+
 		{opcode: I32_CONST},
 
 		{opcode: I32_XOR},
@@ -140,6 +142,12 @@ func TestTypeOf(t *testing.T) {
 		{opcode: STRING_GT},
 		{opcode: STRING_LE},
 		{opcode: STRING_GE},
+
+		{opcode: ARRAY_NEW},
+
+		{opcode: ARRAY_LEN},
+		{opcode: ARRAY_GET},
+		{opcode: ARRAY_SET},
 	}
 
 	for _, tt := range tests {

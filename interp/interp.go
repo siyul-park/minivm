@@ -21,6 +21,7 @@ type Option struct {
 type Interpreter struct {
 	frames    []frame
 	constants []types.Value
+	types     []types.Type
 	global    []types.Boxed
 	stack     []types.Boxed
 	heap      []types.Value
@@ -285,6 +286,22 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		val := i.constants[idx]
 		i.stack[i.sp] = i.box(val)
+		i.sp++
+		frame.ip += 3
+		return nil
+	},
+	instr.RTT_CANON: func(i *Interpreter) error {
+		if i.sp == len(i.stack) {
+			return ErrStackOverflow
+		}
+		frame := &i.frames[i.fp-1]
+		code := frame.fn.Code
+		idx := int(int32(binary.BigEndian.Uint16(code[frame.ip+1:])))
+		if idx < 0 || idx >= len(i.types) {
+			return ErrSegmentationFault
+		}
+		typ := i.types[idx]
+		i.stack[i.sp] = i.box(types.NewRTT(typ))
 		i.sp++
 		frame.ip += 3
 		return nil
@@ -1335,6 +1352,77 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.frames[i.fp-1].ip++
 		return nil
 	},
+	instr.ARRAY_NEW: func(i *Interpreter) error {
+		if i.sp < 2 {
+			return ErrStackUnderflow
+		}
+		length := i.stack[i.sp-1].I32()
+		ref := i.stack[i.sp-2]
+		if ref.Kind() != types.KindRef {
+			return ErrTypeMismatch
+		}
+		addr := ref.Ref()
+		rtt, ok := i.heap[addr].(*types.RTT)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		i.release(addr)
+		typ, ok := rtt.Elem.(*types.ArrayType)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		i.sp--
+		i.stack[i.sp-1] = i.box(types.NewArray(typ, int(length)))
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.ARRAY_GET: func(i *Interpreter) error {
+		if i.sp < 2 {
+			return ErrStackUnderflow
+		}
+		idx := int(i.stack[i.sp-1].I32())
+		ref := i.stack[i.sp-2]
+		if ref.Kind() != types.KindRef {
+			return ErrTypeMismatch
+		}
+		addr := ref.Ref()
+		arr, ok := i.heap[addr].(*types.Array)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		i.release(addr)
+		val, err := arr.Get(idx)
+		if err != nil {
+			return err
+		}
+		i.sp--
+		i.stack[i.sp-1] = val
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.ARRAY_SET: func(i *Interpreter) error {
+		if i.sp < 3 {
+			return ErrStackUnderflow
+		}
+		val := i.stack[i.sp-1]
+		idx := int(i.stack[i.sp-2].I32())
+		ref := i.stack[i.sp-3]
+		if ref.Kind() != types.KindRef {
+			return ErrTypeMismatch
+		}
+		addr := ref.Ref()
+		arr, ok := i.heap[addr].(*types.Array)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		i.release(addr)
+		if err := arr.Set(idx, val); err != nil {
+			return err
+		}
+		i.sp -= 3
+		i.frames[i.fp-1].ip++
+		return nil
+	},
 }
 
 func New(prog *program.Program, opts ...Option) *Interpreter {
@@ -1363,6 +1451,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	i := &Interpreter{
 		frames:    make([]frame, f),
 		constants: prog.Constants,
+		types:     prog.Types,
 		global:    make([]types.Boxed, 0, g),
 		stack:     make([]types.Boxed, s),
 		heap:      make([]types.Value, 0, h),
@@ -1381,20 +1470,20 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 }
 
 func (i *Interpreter) Run() error {
-	frame := &i.frames[i.fp-1]
-	code := frame.fn.Code
+	f := &i.frames[i.fp-1]
+	code := f.fn.Code
 
-	for frame.ip < len(code) {
-		opcode := instr.Opcode(code[frame.ip])
+	for f.ip < len(code) {
+		opcode := instr.Opcode(code[f.ip])
 		fn := dispatch[opcode]
 		if fn == nil {
-			return fmt.Errorf("%w: at=%d", ErrUnknownOpcode, frame.ip)
+			return fmt.Errorf("%w: at=%d", ErrUnknownOpcode, f.ip)
 		}
 		if err := fn(i); err != nil {
-			return fmt.Errorf("%w: at=%d", err, frame.ip)
+			return fmt.Errorf("%w: at=%d", err, f.ip)
 		}
-		frame = &i.frames[i.fp-1]
-		code = frame.fn.Code
+		f = &i.frames[i.fp-1]
+		code = f.fn.Code
 	}
 	return nil
 }
@@ -1423,13 +1512,15 @@ func (i *Interpreter) Pop() (types.Value, error) {
 	i.sp--
 	val := i.stack[i.sp]
 
-	if val.Kind() == types.KindRef {
+	switch val.Kind() {
+	case types.KindRef:
 		addr := val.Ref()
 		v := i.heap[addr]
 		i.release(addr)
 		return v, nil
+	default:
+		return types.Unbox(val), nil
 	}
-	return val, nil
 }
 
 func (i *Interpreter) Len() int {
@@ -1467,6 +1558,8 @@ func (i *Interpreter) Clear() {
 
 func (i *Interpreter) box(val types.Value) types.Boxed {
 	switch v := val.(type) {
+	case types.Boxed:
+		return v
 	case types.I32:
 		return types.BoxI32(int32(v))
 	case types.I64:
@@ -1499,6 +1592,9 @@ func (i *Interpreter) unboxI64(val types.Boxed) int64 {
 }
 
 func (i *Interpreter) unboxString(val types.Boxed) string {
+	if val.Kind() != types.KindRef {
+		return ""
+	}
 	addr := val.Ref()
 	v, _ := i.heap[addr].(types.String)
 	i.release(addr)

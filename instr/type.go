@@ -27,6 +27,8 @@ var types = map[Opcode]Type{
 
 	CONST_GET: {"const.get", []int{2}},
 
+	RTT_CANON: {"rtt.canon", []int{2}},
+
 	I32_CONST: {"i32.const", []int{4}},
 
 	I32_XOR: {"i32.xor", []int{}},
@@ -141,6 +143,12 @@ var types = map[Opcode]Type{
 	STRING_GT: {"string.gt", []int{}},
 	STRING_LE: {"string.le", []int{}},
 	STRING_GE: {"string.ge", []int{}},
+
+	ARRAY_NEW: {"array.new", []int{}},
+
+	ARRAY_GET: {"array.get", []int{}},
+	ARRAY_SET: {"array.set", []int{}},
+	ARRAY_LEN: {"array.len", []int{}},
 }
 
 func TypeOf(op Opcode) Type {

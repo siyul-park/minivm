@@ -22,7 +22,6 @@ func TestModuleBuilder_Build(t *testing.T) {
 						instr.New(instr.NOP),
 					}),
 				},
-				nil,
 			),
 			module: &Module{
 				Functions: []*Function{
@@ -55,7 +54,6 @@ func TestModuleBuilder_Build(t *testing.T) {
 						instr.New(instr.UNREACHABLE),
 					}),
 				},
-				nil,
 			),
 			module: &Module{
 				Functions: []*Function{
@@ -88,7 +86,6 @@ func TestModuleBuilder_Build(t *testing.T) {
 						instr.New(instr.RETURN),
 					}),
 				},
-				nil,
 			),
 			module: &Module{
 				Functions: []*Function{
@@ -123,7 +120,6 @@ func TestModuleBuilder_Build(t *testing.T) {
 						instr.New(instr.I32_CONST, 2),
 					}),
 				},
-				nil,
 			),
 			module: &Module{
 				Functions: []*Function{
@@ -177,7 +173,6 @@ func TestModuleBuilder_Build(t *testing.T) {
 						instr.New(instr.I32_CONST, 2),
 					}),
 				},
-				nil,
 			),
 			module: &Module{
 				Functions: []*Function{
@@ -232,7 +227,6 @@ func TestModuleBuilder_Build(t *testing.T) {
 						instr.New(instr.I32_CONST, 3),
 					}),
 				},
-				nil,
 			),
 			module: &Module{
 				Functions: []*Function{

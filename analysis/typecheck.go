@@ -23,6 +23,7 @@ type frame struct {
 	fn        *types.FunctionType
 	block     int
 	constants []types.Value
+	types     []types.Type
 	global    []types.Type
 	stack     []types.Type
 	sp        int
@@ -199,6 +200,19 @@ var typeCheck = [256]func(f *frame, operands []uint64) error{
 		f.sp++
 		return nil
 	},
+	instr.RTT_CANON: func(f *frame, operands []uint64) error {
+		if f.sp == len(f.stack) {
+			return ErrStackOverflow
+		}
+		idx := int(int32(operands[0]))
+		if idx < 0 || idx >= len(f.types) {
+			return ErrSegmentationFault
+		}
+		typ := f.types[idx]
+		f.stack[f.sp] = types.NewRTT(typ)
+		f.sp++
+		return nil
+	},
 	instr.I32_CONST:     pushType(types.TypeI32),
 	instr.I32_ADD:       popAndPushType([]types.Type{types.TypeI32, types.TypeI32}, []types.Type{types.TypeI32}),
 	instr.I32_SUB:       popAndPushType([]types.Type{types.TypeI32, types.TypeI32}, []types.Type{types.TypeI32}),
@@ -295,6 +309,58 @@ var typeCheck = [256]func(f *frame, operands []uint64) error{
 	instr.STRING_GT:     popAndPushType([]types.Type{types.TypeString, types.TypeString}, []types.Type{types.TypeI32}),
 	instr.STRING_LE:     popAndPushType([]types.Type{types.TypeString, types.TypeString}, []types.Type{types.TypeI32}),
 	instr.STRING_GE:     popAndPushType([]types.Type{types.TypeString, types.TypeString}, []types.Type{types.TypeI32}),
+	instr.ARRAY_NEW: func(f *frame, operands []uint64) error {
+		if f.sp < 2 {
+			return ErrStackUnderflow
+		}
+		if f.stack[f.sp-1] != types.TypeI32 {
+			return ErrTypeMismatch
+		}
+		rtt, ok := f.stack[f.sp-2].(*types.RTT)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		typ, ok := rtt.Elem.(*types.ArrayType)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		f.sp--
+		f.stack[f.sp-1] = typ
+		return nil
+	},
+	instr.ARRAY_GET: func(f *frame, operands []uint64) error {
+		if f.sp < 2 {
+			return ErrStackUnderflow
+		}
+		if f.stack[f.sp-1] != types.TypeI32 {
+			return ErrTypeMismatch
+		}
+		arr, ok := f.stack[f.sp-2].(*types.ArrayType)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		f.sp--
+		f.stack[f.sp-1] = arr.Elem
+		return nil
+	},
+	instr.ARRAY_SET: func(f *frame, operands []uint64) error {
+		if f.sp < 3 {
+			return ErrStackUnderflow
+		}
+		val := f.stack[f.sp-1]
+		if f.stack[f.sp-2] != types.TypeI32 {
+			return ErrTypeMismatch
+		}
+		arr, ok := f.stack[f.sp-3].(*types.ArrayType)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		if !arr.Elem.Cast(val) {
+			return ErrTypeMismatch
+		}
+		f.sp -= 3
+		return nil
+	},
 }
 
 func pushType(typ types.Type) func(*frame, []uint64) error {
@@ -363,6 +429,7 @@ func (p *TypeCheckPass) Run(m *Module) error {
 			fn:        fn.Typ,
 			block:     0,
 			constants: m.Constants,
+			types:     m.Types,
 			global:    global,
 			stack:     make([]types.Type, p.stack),
 		}

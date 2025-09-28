@@ -14,11 +14,13 @@ import (
 type ModuleBuilder struct {
 	code      []byte
 	constants []types.Value
+	types     []types.Type
 }
 
 type Module struct {
 	Functions []*Function
 	Constants []types.Value
+	Types     []types.Type
 }
 
 type Function struct {
@@ -43,6 +45,7 @@ func NewModuleBuilder(prog *program.Program) *ModuleBuilder {
 	return &ModuleBuilder{
 		code:      prog.Code,
 		constants: prog.Constants,
+		types:     prog.Types,
 	}
 }
 
@@ -57,6 +60,7 @@ func (b *ModuleBuilder) Build() (*Module, error) {
 	m := &Module{
 		Functions: make([]*Function, len(fns)),
 		Constants: b.constants,
+		Types:     b.types,
 	}
 	for i, fn := range fns {
 		cfg, err := b.buildCFG(fn)

@@ -19,7 +19,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 				[]instr.Instruction{
 					instr.New(instr.NOP),
 				},
-				nil,
 			),
 		},
 		{
@@ -28,7 +27,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 42),
 					instr.New(instr.DROP),
 				},
-				nil,
 			),
 		},
 		{
@@ -37,7 +35,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 42),
 					instr.New(instr.DUP),
 				},
-				nil,
 			),
 		},
 		{
@@ -47,7 +44,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 2),
 					instr.New(instr.SWAP),
 				},
-				nil,
 			),
 		},
 		{
@@ -57,7 +53,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.I32_CONST, 2),
 				},
-				nil,
 			),
 		},
 		{
@@ -68,7 +63,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 2),
 					instr.New(instr.I32_CONST, 3),
 				},
-				nil,
 			),
 		},
 		{
@@ -77,13 +71,13 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.CALL),
 				},
-				[]types.Value{
+				program.WithConstants(
 					types.NewFunction(
 						[]instr.Instruction{
 							instr.New(instr.I32_CONST, 1),
 						},
 					),
-				},
+				),
 			),
 		},
 		{
@@ -92,7 +86,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.CALL),
 				},
-				[]types.Value{
+				program.WithConstants(
 					types.NewFunction(
 						[]instr.Instruction{
 							instr.New(instr.I32_CONST, 1),
@@ -100,7 +94,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 						},
 						types.FunctionWithReturns(types.TypeI32),
 					),
-				},
+				),
 			),
 		},
 		{
@@ -109,7 +103,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.GLOBAL_SET, 0),
 				},
-				nil,
 			),
 		},
 		{
@@ -119,7 +112,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.GLOBAL_SET, 0),
 					instr.New(instr.GLOBAL_GET, 0),
 				},
-				nil,
 			),
 		},
 		{
@@ -128,7 +120,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.CALL),
 				},
-				[]types.Value{
+				program.WithConstants(
 					types.NewFunction(
 						[]instr.Instruction{
 							instr.New(instr.I32_CONST, 1),
@@ -136,7 +128,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 						},
 						types.FunctionWithLocals(types.TypeI32),
 					),
-				},
+				),
 			),
 		},
 		{
@@ -145,7 +137,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.CALL),
 				},
-				[]types.Value{
+				program.WithConstants(
 					types.NewFunction(
 						[]instr.Instruction{
 							instr.New(instr.I32_CONST, 1),
@@ -154,7 +146,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 						},
 						types.FunctionWithLocals(types.TypeI32),
 					),
-				},
+				),
 			),
 		},
 		{
@@ -162,7 +154,15 @@ func TestTypeCheckPass_Run(t *testing.T) {
 				[]instr.Instruction{
 					instr.New(instr.CONST_GET, 0),
 				},
-				[]types.Value{types.NewFunction(nil)},
+				program.WithConstants(types.NewFunction(nil)),
+			),
+		},
+		{
+			program: program.New(
+				[]instr.Instruction{
+					instr.New(instr.RTT_CANON, 0),
+				},
+				program.WithTypes(types.TypeI32),
 			),
 		},
 		{
@@ -170,7 +170,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 				[]instr.Instruction{
 					instr.New(instr.I32_CONST, 42),
 				},
-				nil,
 			),
 		},
 		{
@@ -180,7 +179,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 2),
 					instr.New(instr.I32_ADD),
 				},
-				nil,
 			),
 		},
 		{
@@ -190,7 +188,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 3),
 					instr.New(instr.I32_SUB),
 				},
-				nil,
 			),
 		},
 		{
@@ -200,7 +197,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 3),
 					instr.New(instr.I32_MUL),
 				},
-				nil,
 			),
 		},
 		{
@@ -210,7 +206,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 2),
 					instr.New(instr.I32_DIV_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -220,7 +215,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 3),
 					instr.New(instr.I32_DIV_U),
 				},
-				nil,
 			),
 		},
 		{
@@ -230,7 +224,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 3),
 					instr.New(instr.I32_REM_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -240,7 +233,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 3),
 					instr.New(instr.I32_REM_U),
 				},
-				nil,
 			),
 		},
 		{
@@ -250,7 +242,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.I32_SHL),
 				},
-				nil,
 			),
 		},
 		{
@@ -260,7 +251,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.I32_SHR_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -270,7 +260,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.I32_SHR_U),
 				},
-				nil,
 			),
 		},
 		{
@@ -280,7 +269,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.I32_XOR),
 				},
-				nil,
 			),
 		},
 		{
@@ -290,7 +278,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.I32_AND),
 				},
-				nil,
 			),
 		},
 		{
@@ -300,7 +287,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.I32_OR),
 				},
-				nil,
 			),
 		},
 		{
@@ -310,7 +296,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.I32_EQ),
 				},
-				nil,
 			),
 		},
 		{
@@ -320,7 +305,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.I32_NE),
 				},
-				nil,
 			),
 		},
 		{
@@ -330,7 +314,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 2),
 					instr.New(instr.I32_LT_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -340,7 +323,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 2),
 					instr.New(instr.I32_GT_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -350,7 +332,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 2),
 					instr.New(instr.I32_LE_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -360,7 +341,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 2),
 					instr.New(instr.I32_GE_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -369,7 +349,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 42),
 					instr.New(instr.I32_TO_I64_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -378,7 +357,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 42),
 					instr.New(instr.I32_TO_I64_U),
 				},
-				nil,
 			),
 		},
 		{
@@ -387,7 +365,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 42),
 					instr.New(instr.I32_TO_F32_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -396,7 +373,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 42),
 					instr.New(instr.I32_TO_F32_U),
 				},
-				nil,
 			),
 		},
 		{
@@ -405,7 +381,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 42),
 					instr.New(instr.I32_TO_F64_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -414,7 +389,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 42),
 					instr.New(instr.I32_TO_F64_U),
 				},
-				nil,
 			),
 		},
 		{
@@ -422,7 +396,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 				[]instr.Instruction{
 					instr.New(instr.I64_CONST, 42),
 				},
-				nil,
 			),
 		},
 		{
@@ -432,7 +405,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 2),
 					instr.New(instr.I64_ADD),
 				},
-				nil,
 			),
 		},
 		{
@@ -442,7 +414,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 3),
 					instr.New(instr.I64_SUB),
 				},
-				nil,
 			),
 		},
 		{
@@ -452,7 +423,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 3),
 					instr.New(instr.I64_MUL),
 				},
-				nil,
 			),
 		},
 		{
@@ -462,7 +432,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 2),
 					instr.New(instr.I64_DIV_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -472,7 +441,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 3),
 					instr.New(instr.I64_DIV_U),
 				},
-				nil,
 			),
 		},
 		{
@@ -482,7 +450,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 3),
 					instr.New(instr.I64_REM_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -492,7 +459,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 3),
 					instr.New(instr.I64_REM_U),
 				},
-				nil,
 			),
 		},
 		{
@@ -502,7 +468,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.I64_SHL),
 				},
-				nil,
 			),
 		},
 		{
@@ -512,7 +477,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.I64_SHR_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -522,7 +486,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.I64_SHR_U),
 				},
-				nil,
 			),
 		},
 		{
@@ -532,7 +495,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.I64_EQ),
 				},
-				nil,
 			),
 		},
 		{
@@ -542,7 +504,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.I64_NE),
 				},
-				nil,
 			),
 		},
 		{
@@ -552,7 +513,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 2),
 					instr.New(instr.I64_LT_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -562,7 +522,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 2),
 					instr.New(instr.I64_GT_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -572,7 +531,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 2),
 					instr.New(instr.I64_LE_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -582,7 +540,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 2),
 					instr.New(instr.I64_GE_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -591,7 +548,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 42),
 					instr.New(instr.I64_TO_I32),
 				},
-				nil,
 			),
 		},
 		{
@@ -600,7 +556,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 42),
 					instr.New(instr.I64_TO_F32_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -609,7 +564,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 42),
 					instr.New(instr.I64_TO_F32_U),
 				},
-				nil,
 			),
 		},
 		{
@@ -618,7 +572,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 42),
 					instr.New(instr.I64_TO_F64_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -627,7 +580,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.I64_CONST, 42),
 					instr.New(instr.I64_TO_F64_U),
 				},
-				nil,
 			),
 		},
 		{
@@ -635,7 +587,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 				[]instr.Instruction{
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
 				},
-				nil,
 			),
 		},
 		{
@@ -645,7 +596,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(2.5))),
 					instr.New(instr.F32_ADD),
 				},
-				nil,
 			),
 		},
 		{
@@ -655,7 +605,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
 					instr.New(instr.F32_SUB),
 				},
-				nil,
 			),
 		},
 		{
@@ -665,7 +614,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(3.0))),
 					instr.New(instr.F32_MUL),
 				},
-				nil,
 			),
 		},
 		{
@@ -675,7 +623,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
 					instr.New(instr.F32_DIV),
 				},
-				nil,
 			),
 		},
 		{
@@ -685,7 +632,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
 					instr.New(instr.F32_EQ),
 				},
-				nil,
 			),
 		},
 		{
@@ -695,7 +641,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
 					instr.New(instr.F32_NE),
 				},
-				nil,
 			),
 		},
 		{
@@ -705,7 +650,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
 					instr.New(instr.F32_LT),
 				},
-				nil,
 			),
 		},
 		{
@@ -715,7 +659,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
 					instr.New(instr.F32_GT),
 				},
-				nil,
 			),
 		},
 		{
@@ -725,7 +668,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
 					instr.New(instr.F32_LE),
 				},
-				nil,
 			),
 		},
 		{
@@ -735,7 +677,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
 					instr.New(instr.F32_GE),
 				},
-				nil,
 			),
 		},
 		{
@@ -744,7 +685,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
 					instr.New(instr.F32_TO_I32_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -753,7 +693,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
 					instr.New(instr.F32_TO_I32_U),
 				},
-				nil,
 			),
 		},
 		{
@@ -762,7 +701,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
 					instr.New(instr.F32_TO_I64_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -771,7 +709,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
 					instr.New(instr.F32_TO_I64_U),
 				},
-				nil,
 			),
 		},
 		{
@@ -780,7 +717,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
 					instr.New(instr.F32_TO_F64),
 				},
-				nil,
 			),
 		},
 		{
@@ -788,7 +724,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 				[]instr.Instruction{
 					instr.New(instr.F64_CONST, math.Float64bits(42)),
 				},
-				nil,
 			),
 		},
 		{
@@ -798,7 +733,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F64_CONST, math.Float64bits(2.5)),
 					instr.New(instr.F64_ADD),
 				},
-				nil,
 			),
 		},
 		{
@@ -808,7 +742,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F64_CONST, math.Float64bits(2.0)),
 					instr.New(instr.F64_SUB),
 				},
-				nil,
 			),
 		},
 		{
@@ -818,7 +751,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F64_CONST, math.Float64bits(3.0)),
 					instr.New(instr.F64_MUL),
 				},
-				nil,
 			),
 		},
 		{
@@ -828,7 +760,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F64_CONST, math.Float64bits(2.0)),
 					instr.New(instr.F64_DIV),
 				},
-				nil,
 			),
 		},
 		{
@@ -838,7 +769,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F64_CONST, math.Float64bits(1.0)),
 					instr.New(instr.F64_EQ),
 				},
-				nil,
 			),
 		},
 		{
@@ -848,7 +778,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F64_CONST, math.Float64bits(1.0)),
 					instr.New(instr.F64_NE),
 				},
-				nil,
 			),
 		},
 		{
@@ -858,7 +787,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F64_CONST, math.Float64bits(2.0)),
 					instr.New(instr.F64_LT),
 				},
-				nil,
 			),
 		},
 		{
@@ -868,7 +796,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F64_CONST, math.Float64bits(2.0)),
 					instr.New(instr.F64_GT),
 				},
-				nil,
 			),
 		},
 		{
@@ -878,7 +805,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F64_CONST, math.Float64bits(2.0)),
 					instr.New(instr.F64_LE),
 				},
-				nil,
 			),
 		},
 		{
@@ -888,7 +814,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F64_CONST, math.Float64bits(2.0)),
 					instr.New(instr.F64_GE),
 				},
-				nil,
 			),
 		},
 		{
@@ -897,7 +822,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F64_CONST, math.Float64bits(42)),
 					instr.New(instr.F64_TO_I32_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -906,7 +830,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F64_CONST, math.Float64bits(42)),
 					instr.New(instr.F64_TO_I32_U),
 				},
-				nil,
 			),
 		},
 		{
@@ -915,7 +838,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F64_CONST, math.Float64bits(42)),
 					instr.New(instr.F64_TO_I64_S),
 				},
-				nil,
 			),
 		},
 		{
@@ -924,7 +846,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F64_CONST, math.Float64bits(42)),
 					instr.New(instr.F64_TO_I64_U),
 				},
-				nil,
 			),
 		},
 		{
@@ -933,7 +854,6 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.F64_CONST, math.Float64bits(42)),
 					instr.New(instr.F64_TO_F32),
 				},
-				nil,
 			),
 		},
 		{
@@ -942,7 +862,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.STRING_LEN),
 				},
-				[]types.Value{types.String("foo")},
+				program.WithConstants(types.String("foo")),
 			),
 		},
 		{
@@ -952,7 +872,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.CONST_GET, 1),
 					instr.New(instr.STRING_CONCAT),
 				},
-				[]types.Value{types.String("foo"), types.String("bar")},
+				program.WithConstants(types.String("foo"), types.String("bar")),
 			),
 		},
 		{
@@ -962,7 +882,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.STRING_EQ),
 				},
-				[]types.Value{types.String("foo")},
+				program.WithConstants(types.String("foo")),
 			),
 		},
 		{
@@ -972,7 +892,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.STRING_NE),
 				},
-				[]types.Value{types.String("foo")},
+				program.WithConstants(types.String("foo")),
 			),
 		},
 		{
@@ -982,7 +902,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.CONST_GET, 1),
 					instr.New(instr.STRING_LT),
 				},
-				[]types.Value{types.String("foo"), types.String("bar")},
+				program.WithConstants(types.String("foo"), types.String("bar")),
 			),
 		},
 		{
@@ -992,7 +912,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.CONST_GET, 1),
 					instr.New(instr.STRING_GT),
 				},
-				[]types.Value{types.String("foo"), types.String("bar")},
+				program.WithConstants(types.String("foo"), types.String("bar")),
 			),
 		},
 		{
@@ -1002,7 +922,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.CONST_GET, 1),
 					instr.New(instr.STRING_LE),
 				},
-				[]types.Value{types.String("foo"), types.String("bar")},
+				program.WithConstants(types.String("foo"), types.String("bar")),
 			),
 		},
 		{
@@ -1012,7 +932,42 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.CONST_GET, 1),
 					instr.New(instr.STRING_GE),
 				},
-				[]types.Value{types.String("foo"), types.String("bar")},
+				program.WithConstants(types.String("foo"), types.String("bar")),
+			),
+		},
+		{
+			program: program.New(
+				[]instr.Instruction{
+					instr.New(instr.RTT_CANON, 0),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.ARRAY_NEW),
+				},
+				program.WithTypes(types.NewArrayType(types.TypeI32)),
+			),
+		},
+		{
+			program: program.New(
+				[]instr.Instruction{
+					instr.New(instr.RTT_CANON, 0),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.ARRAY_NEW),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.ARRAY_GET),
+				},
+				program.WithTypes(types.NewArrayType(types.TypeI32)),
+			),
+		},
+		{
+			program: program.New(
+				[]instr.Instruction{
+					instr.New(instr.RTT_CANON, 0),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.ARRAY_NEW),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.ARRAY_SET),
+				},
+				program.WithTypes(types.NewArrayType(types.TypeI32)),
 			),
 		},
 		{
@@ -1024,7 +979,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.GLOBAL_GET, 0),
 					instr.New(instr.CALL),
 				},
-				[]types.Value{
+				program.WithConstants(
 					types.NewFunction(
 						[]instr.Instruction{
 							instr.New(instr.LOCAL_GET, 0),
@@ -1049,7 +1004,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 						types.FunctionWithParams(types.TypeI32),
 						types.FunctionWithReturns(types.TypeI32),
 					),
-				},
+				),
 			),
 		},
 		{
@@ -1061,7 +1016,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 					instr.New(instr.GLOBAL_GET, 0),
 					instr.New(instr.CALL),
 				},
-				[]types.Value{
+				program.WithConstants(
 					types.NewFunction(
 						[]instr.Instruction{
 							instr.New(instr.LOCAL_GET, 0),
@@ -1082,7 +1037,7 @@ func TestTypeCheckPass_Run(t *testing.T) {
 						types.FunctionWithParams(types.TypeI64),
 						types.FunctionWithReturns(types.TypeI64),
 					),
-				},
+				),
 			),
 		},
 	}

@@ -74,45 +74,44 @@ func (f *Function) String() string {
 	return sb.String()
 }
 
-func (f *FunctionType) Kind() Kind {
+func (t *FunctionType) Kind() Kind {
 	return KindRef
 }
 
-func (f *FunctionType) String() string {
+func (t *FunctionType) String() string {
 	var params []string
-	for _, p := range f.Params {
+	for _, p := range t.Params {
 		params = append(params, p.String())
 	}
-
 	var returns []string
-	for _, r := range f.Returns {
+	for _, r := range t.Returns {
 		returns = append(returns, r.String())
 	}
-
 	return fmt.Sprintf("func(%s) (%s)", strings.Join(params, ", "), strings.Join(returns, ", "))
 }
 
-func (f *FunctionType) Equals(other Type) bool {
+func (t *FunctionType) Cast(other Type) bool {
+	return t.Equals(other)
+}
+
+func (t *FunctionType) Equals(other Type) bool {
 	if other == nil {
 		return false
 	}
-
 	o, ok := other.(*FunctionType)
 	if !ok {
 		return false
 	}
-
-	if len(f.Params) != len(o.Params) || len(f.Returns) != len(o.Returns) {
+	if len(t.Params) != len(o.Params) || len(t.Returns) != len(o.Returns) {
 		return false
 	}
-
-	for i := range f.Params {
-		if !f.Params[i].Equals(o.Params[i]) {
+	for i := range t.Params {
+		if !t.Params[i].Equals(o.Params[i]) {
 			return false
 		}
 	}
-	for i := range f.Returns {
-		if !f.Returns[i].Equals(o.Returns[i]) {
+	for i := range t.Returns {
+		if !t.Returns[i].Equals(o.Returns[i]) {
 			return false
 		}
 	}

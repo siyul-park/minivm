@@ -7,9 +7,11 @@ type I32 int32
 type I64 int64
 type F32 float32
 type F64 float64
+
 type Ref int32
 
 type i32Type struct{}
+
 type i64Type struct{}
 type f32Type struct{}
 type f64Type struct{}
@@ -24,7 +26,7 @@ var (
 	TypeI32 = i32Type{}
 	TypeI64 = i64Type{}
 	TypeF32 = f32Type{}
-	TypeF64 = f32Type{}
+	TypeF64 = f64Type{}
 	TypeRef = refType{}
 )
 
@@ -120,22 +122,26 @@ func (r Ref) Type() Type {
 }
 
 func (r Ref) Interface() any {
-	return int32(r)
+	return int(r)
 }
 
 func (r Ref) String() string {
-	return fmt.Sprintf("%d", int32(r))
+	return fmt.Sprintf("%d", r)
 }
 
-func (i i32Type) Kind() Kind {
+func (i32Type) Kind() Kind {
 	return KindI32
 }
 
-func (i i32Type) String() string {
+func (i32Type) String() string {
 	return "i32"
 }
 
-func (i i32Type) Equals(other Type) bool {
+func (i32Type) Cast(other Type) bool {
+	return other == TypeI32
+}
+
+func (i32Type) Equals(other Type) bool {
 	return other == TypeI32
 }
 
@@ -145,6 +151,10 @@ func (i64Type) Kind() Kind {
 
 func (i64Type) String() string {
 	return "i64"
+}
+
+func (i64Type) Cast(other Type) bool {
+	return other == TypeI64
 }
 
 func (i64Type) Equals(other Type) bool {
@@ -159,6 +169,10 @@ func (f32Type) String() string {
 	return "f32"
 }
 
+func (f32Type) Cast(other Type) bool {
+	return other == TypeF32
+}
+
 func (f32Type) Equals(other Type) bool {
 	return other == TypeF32
 }
@@ -171,8 +185,12 @@ func (f64Type) String() string {
 	return "f64"
 }
 
+func (f64Type) Cast(other Type) bool {
+	return other == TypeF64
+}
+
 func (f64Type) Equals(other Type) bool {
-	return other == TypeI64
+	return other == TypeF64
 }
 
 func (refType) Kind() Kind {
@@ -181,6 +199,10 @@ func (refType) Kind() Kind {
 
 func (refType) String() string {
 	return "ref"
+}
+
+func (refType) Cast(_ Type) bool {
+	return true
 }
 
 func (refType) Equals(other Type) bool {

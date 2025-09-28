@@ -24,14 +24,19 @@ func (s String) Interface() any {
 func (s String) String() string {
 	return string(s)
 }
-func (s stringType) Kind() Kind {
+
+func (stringType) Kind() Kind {
 	return KindRef
 }
 
-func (s stringType) String() string {
+func (stringType) String() string {
 	return "string"
 }
 
-func (s stringType) Equals(other Type) bool {
+func (stringType) Cast(other Type) bool {
+	return other == TypeString
+}
+
+func (stringType) Equals(other Type) bool {
 	return other == TypeString
 }
