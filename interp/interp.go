@@ -1,10 +1,10 @@
 package interp
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
+	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
@@ -99,7 +99,7 @@ var dispatch = [256]func(i *Interpreter) error{
 	instr.BR: func(i *Interpreter) error {
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		offset := int(int32(binary.BigEndian.Uint16(code[frame.ip+1:])))
+		offset := int(int16(*(*uint16)(unsafe.Pointer(&code[frame.ip+1]))))
 		frame.ip += offset + 3
 		return nil
 	},
@@ -111,7 +111,8 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.sp--
 		cond := i.stack[i.sp].I32()
 		if cond != 0 {
-			offset := int(int32(binary.BigEndian.Uint16(frame.fn.Code[frame.ip+1:])))
+			code := frame.fn.Code
+			offset := int(int16(*(*uint16)(unsafe.Pointer(&code[frame.ip+1]))))
 			frame.ip += offset
 		}
 		frame.ip += 3
@@ -181,7 +182,7 @@ var dispatch = [256]func(i *Interpreter) error{
 
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(int32(binary.BigEndian.Uint16(code[frame.ip+1:])))
+		idx := int(int16(*(*uint16)(unsafe.Pointer(&code[frame.ip+1]))))
 		if idx < 0 || idx >= len(i.global) {
 			return ErrSegmentationFault
 		}
@@ -203,7 +204,7 @@ var dispatch = [256]func(i *Interpreter) error{
 
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(int32(binary.BigEndian.Uint16(code[frame.ip+1:])))
+		idx := int(int16(*(*uint16)(unsafe.Pointer(&code[frame.ip+1]))))
 		if idx < 0 {
 			return ErrSegmentationFault
 		}
@@ -281,7 +282,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(int32(binary.BigEndian.Uint16(code[frame.ip+1:])))
+		idx := int(int16(*(*uint16)(unsafe.Pointer(&code[frame.ip+1]))))
 		if idx < 0 || idx >= len(i.constants) {
 			return ErrSegmentationFault
 		}
@@ -297,7 +298,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(int32(binary.BigEndian.Uint16(code[frame.ip+1:])))
+		idx := int(int16(*(*uint16)(unsafe.Pointer(&code[frame.ip+1]))))
 		if idx < 0 || idx >= len(i.types) {
 			return ErrSegmentationFault
 		}
@@ -313,7 +314,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		val := types.BoxI32(int32(binary.BigEndian.Uint32(code[frame.ip+1:])))
+		val := types.BoxI32(int32(*(*uint32)(unsafe.Pointer(&code[frame.ip+1]))))
 		i.stack[i.sp] = val
 		i.sp++
 		frame.ip += 5
@@ -644,7 +645,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		val := i.boxI64(int64(binary.BigEndian.Uint64(code[frame.ip+1:])))
+		val := i.boxI64(int64(*(*uint64)(unsafe.Pointer(&code[frame.ip+1]))))
 		i.stack[i.sp] = val
 		i.sp++
 		frame.ip += 9
@@ -933,7 +934,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		val := types.BoxF32(math.Float32frombits(binary.BigEndian.Uint32(code[frame.ip+1:])))
+		val := types.BoxF32(math.Float32frombits(*(*uint32)(unsafe.Pointer(&code[frame.ip+1]))))
 		i.stack[i.sp] = val
 		i.sp++
 		frame.ip += 5
@@ -1148,7 +1149,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		val := types.BoxF64(math.Float64frombits(binary.BigEndian.Uint64(code[frame.ip+1:])))
+		val := types.BoxF64(math.Float64frombits(*(*uint64)(unsafe.Pointer(&code[frame.ip+1]))))
 		i.stack[i.sp] = val
 		i.sp++
 		frame.ip += 9

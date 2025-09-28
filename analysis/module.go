@@ -1,10 +1,10 @@
 package analysis
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"slices"
+	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
@@ -90,7 +90,7 @@ func (b *ModuleBuilder) buildCFG(fn *types.Function) (*CFG, error) {
 				offsets = append(offsets, next)
 			}
 		case instr.BR, instr.BR_IF:
-			offset := int(int32(binary.BigEndian.Uint16(code[ip+1:])))
+			offset := int(int16(*(*uint16)(unsafe.Pointer(&code[ip+1]))))
 			target := ip + typ.Size() + offset
 			if target < 0 || target >= len(code) {
 				return nil, fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
@@ -137,7 +137,7 @@ func (b *ModuleBuilder) buildCFG(fn *types.Function) (*CFG, error) {
 		switch op {
 		case instr.UNREACHABLE, instr.RETURN:
 		case instr.BR, instr.BR_IF:
-			offset := int(int32(binary.BigEndian.Uint16(blk.Code[ip+1:])))
+			offset := int(int16(*(*uint16)(unsafe.Pointer(&blk.Code[ip+1]))))
 			target := ip + typ.Size() + offset
 
 			found := false

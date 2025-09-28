@@ -1,9 +1,9 @@
 package types
 
 import (
-	"encoding/binary"
 	"fmt"
 	"strings"
+	"unsafe"
 )
 
 type Array struct {
@@ -33,18 +33,19 @@ func NewArray(typ *ArrayType, len int) *Array {
 
 func (a *Array) Get(idx int) (Boxed, bool) {
 	offset := idx * a.width
-	if offset < 0 || offset >= len(a.bytes) {
+	if offset < 0 || offset+a.width > len(a.bytes) {
 		return 0, false
 	}
+
 	switch a.width {
 	case 1:
 		return Box(uint64(a.bytes[offset]), a.kind), true
 	case 2:
-		return Box(uint64(binary.BigEndian.Uint16(a.bytes[offset:])), a.kind), true
+		return Box(uint64(*(*uint16)(unsafe.Pointer(&a.bytes[offset]))), a.kind), true
 	case 4:
-		return Box(uint64(binary.BigEndian.Uint32(a.bytes[offset:])), a.kind), true
+		return Box(uint64(*(*uint32)(unsafe.Pointer(&a.bytes[offset]))), a.kind), true
 	case 8:
-		return Boxed(binary.BigEndian.Uint64(a.bytes[offset:])), true
+		return Boxed(*(*uint64)(unsafe.Pointer(&a.bytes[offset]))), true
 	default:
 		return 0, false
 	}
@@ -52,25 +53,23 @@ func (a *Array) Get(idx int) (Boxed, bool) {
 
 func (a *Array) Set(idx int, val Boxed) bool {
 	offset := idx * a.width
-	if offset < 0 || offset >= len(a.bytes) {
+	if offset < 0 || offset+a.width > len(a.bytes) {
 		return false
 	}
+
 	switch a.width {
 	case 1:
 		a.bytes[offset] = byte(val)
-		return true
 	case 2:
-		binary.BigEndian.PutUint16(a.bytes[offset:], uint16(val))
-		return true
+		*(*uint16)(unsafe.Pointer(&a.bytes[offset])) = uint16(val)
 	case 4:
-		binary.BigEndian.PutUint32(a.bytes[offset:], uint32(val))
-		return true
+		*(*uint32)(unsafe.Pointer(&a.bytes[offset])) = uint32(val)
 	case 8:
-		binary.BigEndian.PutUint64(a.bytes[offset:], uint64(val))
-		return true
+		*(*uint64)(unsafe.Pointer(&a.bytes[offset])) = uint64(val)
 	default:
 		return false
 	}
+	return true
 }
 
 func (a *Array) Len() int {
@@ -123,7 +122,7 @@ func (a *Array) Refs() []Ref {
 	length := a.Len()
 	refs := make([]Ref, 0, length)
 	for i := 0; i < length; i++ {
-		v := Boxed(binary.BigEndian.Uint64(a.bytes[i*a.width:]))
+		v := Boxed(*(*uint64)(unsafe.Pointer(&a.bytes[i*a.width])))
 		if v.Kind() != KindRef {
 			continue
 		}

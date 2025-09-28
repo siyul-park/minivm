@@ -1,9 +1,9 @@
 package instr
 
 import (
-	"encoding/binary"
 	"fmt"
 	"strings"
+	"unsafe"
 )
 
 type Instruction []byte
@@ -58,11 +58,14 @@ func New(op Opcode, operands ...uint64) Instruction {
 		case 1:
 			bytecode[offset] = byte(o)
 		case 2:
-			binary.BigEndian.PutUint16(bytecode[offset:], uint16(o))
+			ptr := (*uint16)(unsafe.Pointer(&bytecode[offset]))
+			*ptr = uint16(o)
 		case 4:
-			binary.BigEndian.PutUint32(bytecode[offset:], uint32(o))
+			ptr := (*uint32)(unsafe.Pointer(&bytecode[offset]))
+			*ptr = uint32(o)
 		case 8:
-			binary.BigEndian.PutUint64(bytecode[offset:], o)
+			ptr := (*uint64)(unsafe.Pointer(&bytecode[offset]))
+			*ptr = o
 		default:
 			return nil
 		}
@@ -84,15 +87,16 @@ func (i Instruction) Operands() []uint64 {
 	operands := make([]uint64, len(typ.Widths))
 	offset := 0
 	for j, w := range typ.Widths {
+		ptr := unsafe.Pointer(&i[1+offset])
 		switch w {
 		case 1:
-			operands[j] = uint64(i[1+offset])
+			operands[j] = uint64(*(*byte)(ptr))
 		case 2:
-			operands[j] = uint64(binary.BigEndian.Uint16(i[1+offset:]))
+			operands[j] = uint64(*(*uint16)(ptr))
 		case 4:
-			operands[j] = uint64(binary.BigEndian.Uint32(i[1+offset:]))
+			operands[j] = uint64(*(*uint32)(ptr))
 		case 8:
-			operands[j] = binary.BigEndian.Uint64(i[1+offset:])
+			operands[j] = *(*uint64)(ptr)
 		default:
 			continue
 		}
