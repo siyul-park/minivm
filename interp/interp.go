@@ -1368,13 +1368,26 @@ var dispatch = [256]func(i *Interpreter) error{
 		if !ok {
 			return ErrTypeMismatch
 		}
-		i.release(addr)
 		typ, ok := rtt.Elem.(*types.ArrayType)
 		if !ok {
 			return ErrTypeMismatch
 		}
+		i.release(addr)
+		var arr types.Value
+		switch typ.Elem.Kind() {
+		case types.KindI32:
+			arr = make(types.I32Array, length)
+		case types.KindI64:
+			arr = make(types.I64Array, length)
+		case types.KindF32:
+			arr = make(types.F32Array, length)
+		case types.KindF64:
+			arr = make(types.F64Array, length)
+		default:
+			arr = make(types.RefArray, length)
+		}
 		i.sp--
-		i.stack[i.sp-1] = i.box(types.NewArray(typ, int(length)))
+		i.stack[i.sp-1] = i.box(arr)
 		i.frames[i.fp-1].ip++
 		return nil
 	},
@@ -1388,18 +1401,41 @@ var dispatch = [256]func(i *Interpreter) error{
 			return ErrTypeMismatch
 		}
 		addr := ref.Ref()
-		arr, ok := i.heap[addr].(*types.Array)
-		if !ok {
+		var val types.Boxed
+		switch arr := i.heap[addr].(type) {
+		case types.I32Array:
+			if idx < 0 || idx >= len(arr) {
+				return ErrIndexOutOfRange
+			}
+			val = types.BoxI32(int32(arr[idx]))
+		case types.I64Array:
+			if idx < 0 || idx >= len(arr) {
+				return ErrIndexOutOfRange
+			}
+			val = i.boxI64(int64(arr[idx]))
+		case types.F32Array:
+			if idx < 0 || idx >= len(arr) {
+				return ErrIndexOutOfRange
+			}
+			val = types.BoxF32(float32(arr[idx]))
+		case types.F64Array:
+			if idx < 0 || idx >= len(arr) {
+				return ErrIndexOutOfRange
+			}
+			val = types.BoxF64(float64(arr[idx]))
+		case types.RefArray:
+			if idx < 0 || idx >= len(arr) {
+				return ErrIndexOutOfRange
+			}
+			elem := arr[idx]
+			if elem.Kind() == types.KindRef {
+				i.retain(elem.Ref())
+			}
+			val = elem
+		default:
 			return ErrTypeMismatch
 		}
 		i.release(addr)
-		val, ok := arr.Get(idx)
-		if !ok {
-			return ErrIndexOutOfRange
-		}
-		if val.Kind() == types.KindRef {
-			i.retain(val.Ref())
-		}
 		i.sp--
 		i.stack[i.sp-1] = val
 		i.frames[i.fp-1].ip++
@@ -1416,18 +1452,40 @@ var dispatch = [256]func(i *Interpreter) error{
 			return ErrTypeMismatch
 		}
 		addr := ref.Ref()
-		arr, ok := i.heap[addr].(*types.Array)
-		if !ok {
+		switch arr := i.heap[addr].(type) {
+		case types.I32Array:
+			if idx < 0 || idx >= len(arr) {
+				return ErrIndexOutOfRange
+			}
+			arr[idx] = types.I32(val.I32())
+		case types.I64Array:
+			if idx < 0 || idx >= len(arr) {
+				return ErrIndexOutOfRange
+			}
+			arr[idx] = types.I64(i.unboxI64(val))
+		case types.F32Array:
+			if idx < 0 || idx >= len(arr) {
+				return ErrIndexOutOfRange
+			}
+			arr[idx] = types.F32(val.F32())
+		case types.F64Array:
+			if idx < 0 || idx >= len(arr) {
+				return ErrIndexOutOfRange
+			}
+			arr[idx] = types.F64(val.F64())
+		case types.RefArray:
+			if idx < 0 || idx >= len(arr) {
+				return ErrIndexOutOfRange
+			}
+			elem := arr[idx]
+			arr[idx] = val
+			if elem.Kind() == types.KindRef {
+				i.release(elem.Ref())
+			}
+		default:
 			return ErrTypeMismatch
 		}
 		i.release(addr)
-		old, ok := arr.Set(idx, val)
-		if !ok {
-			return ErrIndexOutOfRange
-		}
-		if old.Kind() == types.KindRef {
-			i.release(old.Ref())
-		}
 		i.sp -= 3
 		i.frames[i.fp-1].ip++
 		return nil

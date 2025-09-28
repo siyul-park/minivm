@@ -3,158 +3,194 @@ package types
 import (
 	"fmt"
 	"strings"
-	"unsafe"
 )
 
-type Array struct {
-	Typ   *ArrayType
-	kind  Kind
-	width int
-	bytes []byte
-}
+type I32Array []I32
+
+type I64Array []I64
+
+type F32Array []F32
+
+type F64Array []F64
+
+type RefArray []Boxed
 
 type ArrayType struct {
-	Elem  Type
-	kind  Kind
-	width int
+	Elem Type
 }
 
-var _ Traceable = (*Array)(nil)
+var (
+	TypeI32Array = NewArrayType(TypeI32)
+	TypeI64Array = NewArrayType(TypeI64)
+	TypeF32Array = NewArrayType(TypeF32)
+	TypeF64Array = NewArrayType(TypeF64)
+	TypeRefArray = NewArrayType(TypeRef)
+)
+
+var _ Value = I32Array(nil)
+var _ Value = I64Array(nil)
+var _ Value = F32Array(nil)
+var _ Value = F64Array(nil)
+var _ Traceable = RefArray(nil)
 var _ Type = (*ArrayType)(nil)
 
-func NewArray(typ *ArrayType, len int) *Array {
-	return &Array{
-		Typ:   typ,
-		kind:  typ.kind,
-		width: typ.width,
-		bytes: make([]byte, len*typ.width),
+func (a I32Array) Kind() Kind {
+	return KindI32
+}
+
+func (a I32Array) Type() Type {
+	return TypeI32Array
+}
+
+func (a I32Array) Interface() any {
+	v := make([]int32, len(a))
+	for j, e := range a {
+		v[j] = int32(e)
 	}
+	return v
 }
 
-func (a *Array) Get(idx int) (Boxed, bool) {
-	offset := idx * a.width
-	if offset < 0 || offset+a.width > len(a.bytes) {
-		return 0, false
-	}
-
-	ptr := &a.bytes[offset]
-	switch a.width {
-	case 1:
-		return Box(uint64(*ptr), a.kind), true
-	case 2:
-		return Box(uint64(*(*uint16)(unsafe.Pointer(ptr))), a.kind), true
-	case 4:
-		return Box(uint64(*(*uint32)(unsafe.Pointer(ptr))), a.kind), true
-	case 8:
-		return Boxed(*(*uint64)(unsafe.Pointer(ptr))), true
-	default:
-		return 0, false
-	}
-}
-
-func (a *Array) Set(idx int, val Boxed) (Boxed, bool) {
-	offset := idx * a.width
-	if offset < 0 || offset+a.width > len(a.bytes) {
-		return 0, false
-	}
-
-	ptr := &a.bytes[offset]
-	switch a.width {
-	case 1:
-		old := Box(uint64(*ptr), a.kind)
-		a.bytes[offset] = byte(val)
-		return old, true
-	case 2:
-		r := (*uint16)(unsafe.Pointer(ptr))
-		old := Box(uint64(*r), a.kind)
-		*r = uint16(val)
-		return old, true
-	case 4:
-		r := (*uint32)(unsafe.Pointer(ptr))
-		old := Box(uint64(*r), a.kind)
-		*r = uint32(val)
-		return old, true
-	case 8:
-		r := (*uint64)(unsafe.Pointer(ptr))
-		old := Boxed(*r)
-		*r = uint64(val)
-		return old, true
-	default:
-		return 0, false
-	}
-}
-
-func (a *Array) Len() int {
-	return len(a.bytes) / a.width
-}
-
-func (a *Array) Kind() Kind {
-	return KindRef
-}
-
-func (a *Array) Type() Type {
-	return a.Typ
-}
-
-func (a *Array) Interface() any {
-	length := a.Len()
-	value := make([]any, length)
-	for i := 0; i < length; i++ {
-		if v, ok := a.Get(i); ok {
-			value[i] = v.Interface()
-		}
-	}
-	return value
-}
-
-func (a *Array) String() string {
-	length := a.Len()
+func (a I32Array) String() string {
 	var sb strings.Builder
-	sb.WriteString(a.Typ.String())
-	sb.WriteString("{")
-	for i := 0; i < length; i++ {
-		if i > 0 {
+	sb.WriteByte('{')
+	for j, e := range a {
+		if j > 0 {
 			sb.WriteString(", ")
 		}
-		val, ok := a.Get(i)
-		if !ok {
-			sb.WriteString("<err>")
-			continue
-		}
-		sb.WriteString(fmt.Sprint(val.Interface()))
+		sb.WriteString(fmt.Sprintf("%d", int32(e)))
 	}
-	sb.WriteString("}")
+	sb.WriteByte('}')
 	return sb.String()
 }
 
-func (a *Array) Refs() []Ref {
-	if a.kind != KindRef {
-		return nil
+func (a I64Array) Kind() Kind {
+	return KindI64
+}
+
+func (a I64Array) Type() Type {
+	return TypeI64Array
+}
+
+func (a I64Array) Interface() any {
+	v := make([]int64, len(a))
+	for j, e := range a {
+		v[j] = int64(e)
 	}
-	length := a.Len()
-	refs := make([]Ref, 0, length)
-	for i := 0; i < length; i++ {
-		v := Boxed(*(*uint64)(unsafe.Pointer(&a.bytes[i*a.width])))
-		if v.Kind() != KindRef {
-			continue
+	return v
+}
+
+func (a I64Array) String() string {
+	var sb strings.Builder
+	sb.WriteByte('{')
+	for j, e := range a {
+		if j > 0 {
+			sb.WriteString(", ")
 		}
-		if ref := v.Ref(); ref > 0 {
-			refs = append(refs, Ref(ref))
+		sb.WriteString(fmt.Sprintf("%d", int64(e)))
+	}
+	sb.WriteByte('}')
+	return sb.String()
+}
+
+func (a F32Array) Kind() Kind {
+	return KindF32
+}
+
+func (a F32Array) Type() Type {
+	return TypeF32Array
+}
+
+func (a F32Array) Interface() any {
+	v := make([]float32, len(a))
+	for j, e := range a {
+		v[j] = float32(e)
+	}
+	return v
+}
+
+func (a F32Array) String() string {
+	var sb strings.Builder
+	sb.WriteByte('{')
+	for j, e := range a {
+		if j > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(fmt.Sprintf("%f", float32(e)))
+	}
+	sb.WriteByte('}')
+	return sb.String()
+}
+
+func (a F64Array) Kind() Kind {
+	return KindF64
+}
+
+func (a F64Array) Type() Type {
+	return TypeF64Array
+}
+
+func (a F64Array) Interface() any {
+	v := make([]float64, len(a))
+	for j, e := range a {
+		v[j] = float64(e)
+	}
+	return v
+}
+
+func (a F64Array) String() string {
+	var sb strings.Builder
+	sb.WriteByte('{')
+	for j, e := range a {
+		if j > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(fmt.Sprintf("%f", float64(e)))
+	}
+	sb.WriteByte('}')
+	return sb.String()
+}
+
+func (a RefArray) Kind() Kind {
+	return KindRef
+}
+
+func (a RefArray) Type() Type {
+	return TypeRefArray
+}
+
+func (a RefArray) Interface() any {
+	v := make([]any, len(a))
+	for j, e := range a {
+		v[j] = e.Interface()
+	}
+	return v
+}
+
+func (a RefArray) String() string {
+	var sb strings.Builder
+	sb.WriteByte('{')
+	for j, e := range a {
+		if j > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(e.String())
+	}
+	sb.WriteByte('}')
+	return sb.String()
+}
+
+func (a RefArray) Refs() []Ref {
+	refs := make([]Ref, 0, len(a))
+	for _, e := range a {
+		if e.Kind() == KindRef {
+			refs = append(refs, Ref(e.Ref()))
 		}
 	}
 	return refs
 }
 
 func NewArrayType(elem Type) *ArrayType {
-	kind := elem.Kind()
-	width := 0
-	switch kind {
-	case KindI32, KindF32:
-		width = 4
-	case KindI64, KindF64, KindRef:
-		width = 8
-	}
-	return &ArrayType{Elem: elem, kind: kind, width: width}
+	return &ArrayType{Elem: elem}
 }
 
 func (t *ArrayType) Kind() Kind {

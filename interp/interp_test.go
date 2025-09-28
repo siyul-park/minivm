@@ -1046,7 +1046,7 @@ var tests = []struct {
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI32)),
 		),
-		values: []types.Value{types.NewArray(types.NewArrayType(types.TypeI32), 1)},
+		values: []types.Value{make(types.I32Array, 1)},
 	},
 	{
 		program: program.New(
