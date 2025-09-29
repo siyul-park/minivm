@@ -1612,15 +1612,6 @@ func (i *Interpreter) Clear() {
 
 	i.sp = 0
 
-	for idx := range i.heap {
-		i.heap[idx] = nil
-	}
-	for idx := range i.rc {
-		i.rc[idx] = 0
-	}
-	for idx := range i.free {
-		i.free[idx] = 0
-	}
 	i.heap = i.heap[:1]
 	i.rc = i.rc[:1]
 	i.free = i.free[:0]
@@ -1712,13 +1703,9 @@ func (i *Interpreter) release(addr int) {
 		if i.rc[a] > 0 {
 			continue
 		}
-
-		obj := i.heap[a]
-		i.heap[a] = nil
-		i.rc[a] = 0
 		i.free = append(i.free, a)
 
-		if t, ok := obj.(types.Traceable); ok {
+		if t, ok := i.heap[a].(types.Traceable); ok {
 			for _, ref := range t.Refs() {
 				stack = append(stack, int(ref))
 			}
