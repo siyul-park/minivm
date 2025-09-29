@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
-
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,16 +31,14 @@ func TestModuleBuilder_Build(t *testing.T) {
 								instr.New(instr.NOP),
 							},
 						),
-						CFG: &CFG{
-							Blocks: []*Block{
-								{
-									Offset: 0,
-									Code: instr.Marshal([]instr.Instruction{
-										instr.New(instr.NOP),
-									}),
-									Succs: nil,
-									Preds: nil,
-								},
+						Blocks: []*BasicBlock{
+							{
+								Offset: 0,
+								Code: instr.Marshal([]instr.Instruction{
+									instr.New(instr.NOP),
+								}),
+								Succs: nil,
+								Preds: nil,
 							},
 						},
 					},
@@ -63,16 +61,14 @@ func TestModuleBuilder_Build(t *testing.T) {
 								instr.New(instr.UNREACHABLE),
 							},
 						),
-						CFG: &CFG{
-							Blocks: []*Block{
-								{
-									Offset: 0,
-									Code: instr.Marshal([]instr.Instruction{
-										instr.New(instr.UNREACHABLE),
-									}),
-									Succs: nil,
-									Preds: nil,
-								},
+						Blocks: []*BasicBlock{
+							{
+								Offset: 0,
+								Code: instr.Marshal([]instr.Instruction{
+									instr.New(instr.UNREACHABLE),
+								}),
+								Succs: nil,
+								Preds: nil,
 							},
 						},
 					},
@@ -95,16 +91,14 @@ func TestModuleBuilder_Build(t *testing.T) {
 								instr.New(instr.RETURN),
 							},
 						),
-						CFG: &CFG{
-							Blocks: []*Block{
-								{
-									Offset: 0,
-									Code: instr.Marshal([]instr.Instruction{
-										instr.New(instr.RETURN),
-									}),
-									Succs: nil,
-									Preds: nil,
-								},
+						Blocks: []*BasicBlock{
+							{
+								Offset: 0,
+								Code: instr.Marshal([]instr.Instruction{
+									instr.New(instr.RETURN),
+								}),
+								Succs: nil,
+								Preds: nil,
 							},
 						},
 					},
@@ -131,33 +125,30 @@ func TestModuleBuilder_Build(t *testing.T) {
 								instr.New(instr.I32_CONST, 2),
 							},
 						),
-						CFG: &CFG{
-							Blocks: []*Block{
-								{
-									Offset: 0,
-									Code: instr.Marshal([]instr.Instruction{
-										instr.New(instr.BR, 5),
-									}),
-									Succs: []int{2},
-									Preds: nil,
-								},
-								{
-									Offset: 3,
-									Code: instr.Marshal([]instr.Instruction{
-										instr.New(instr.I32_CONST, 1),
-									}),
-									Succs: []int{2},
-									Preds: nil,
-								},
-
-								{
-									Offset: 8,
-									Code: instr.Marshal([]instr.Instruction{
-										instr.New(instr.I32_CONST, 2),
-									}),
-									Succs: nil,
-									Preds: []int{0, 1},
-								},
+						Blocks: []*BasicBlock{
+							{
+								Offset: 0,
+								Code: instr.Marshal([]instr.Instruction{
+									instr.New(instr.BR, 5),
+								}),
+								Succs: []int{2},
+								Preds: nil,
+							},
+							{
+								Offset: 3,
+								Code: instr.Marshal([]instr.Instruction{
+									instr.New(instr.I32_CONST, 1),
+								}),
+								Succs: []int{2},
+								Preds: nil,
+							},
+							{
+								Offset: 8,
+								Code: instr.Marshal([]instr.Instruction{
+									instr.New(instr.I32_CONST, 2),
+								}),
+								Succs: nil,
+								Preds: []int{0, 1},
 							},
 						},
 					},
@@ -184,33 +175,30 @@ func TestModuleBuilder_Build(t *testing.T) {
 								instr.New(instr.I32_CONST, 2),
 							},
 						),
-						CFG: &CFG{
-							Blocks: []*Block{
-								{
-									Offset: 0,
-									Code: instr.Marshal([]instr.Instruction{
-										instr.New(instr.BR, 5),
-									}),
-									Succs: []int{2},
-									Preds: nil,
-								},
-								{
-									Offset: 3,
-									Code: instr.Marshal([]instr.Instruction{
-										instr.New(instr.I32_CONST, 1),
-									}),
-									Succs: []int{2},
-									Preds: nil,
-								},
-
-								{
-									Offset: 8,
-									Code: instr.Marshal([]instr.Instruction{
-										instr.New(instr.I32_CONST, 2),
-									}),
-									Succs: nil,
-									Preds: []int{0, 1},
-								},
+						Blocks: []*BasicBlock{
+							{
+								Offset: 0,
+								Code: instr.Marshal([]instr.Instruction{
+									instr.New(instr.BR, 5),
+								}),
+								Succs: []int{2},
+								Preds: nil,
+							},
+							{
+								Offset: 3,
+								Code: instr.Marshal([]instr.Instruction{
+									instr.New(instr.I32_CONST, 1),
+								}),
+								Succs: []int{2},
+								Preds: nil,
+							},
+							{
+								Offset: 8,
+								Code: instr.Marshal([]instr.Instruction{
+									instr.New(instr.I32_CONST, 2),
+								}),
+								Succs: nil,
+								Preds: []int{0, 1},
 							},
 						},
 					},
@@ -239,34 +227,32 @@ func TestModuleBuilder_Build(t *testing.T) {
 								instr.New(instr.I32_CONST, 3),
 							},
 						),
-						CFG: &CFG{
-							Blocks: []*Block{
-								{
-									Offset: 0,
-									Code: instr.Marshal([]instr.Instruction{
-										instr.New(instr.I32_CONST, 1),
-										instr.New(instr.BR_IF, 5),
-									}),
-									Succs: []int{1, 2},
-									Preds: nil,
-								},
-								{
-									Offset: 8,
-									Code: instr.Marshal([]instr.Instruction{
-										instr.New(instr.I32_CONST, 2),
-									}),
-									Succs: []int{2},
-									Preds: []int{0},
-								},
+						Blocks: []*BasicBlock{
+							{
+								Offset: 0,
+								Code: instr.Marshal([]instr.Instruction{
+									instr.New(instr.I32_CONST, 1),
+									instr.New(instr.BR_IF, 5),
+								}),
+								Succs: []int{1, 2},
+								Preds: nil,
+							},
+							{
+								Offset: 8,
+								Code: instr.Marshal([]instr.Instruction{
+									instr.New(instr.I32_CONST, 2),
+								}),
+								Succs: []int{2},
+								Preds: []int{0},
+							},
 
-								{
-									Offset: 13,
-									Code: instr.Marshal([]instr.Instruction{
-										instr.New(instr.I32_CONST, 3),
-									}),
-									Succs: nil,
-									Preds: []int{0, 1},
-								},
+							{
+								Offset: 13,
+								Code: instr.Marshal([]instr.Instruction{
+									instr.New(instr.I32_CONST, 3),
+								}),
+								Succs: nil,
+								Preds: []int{0, 1},
 							},
 						},
 					},
@@ -276,12 +262,17 @@ func TestModuleBuilder_Build(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.program.String(), func(t *testing.T) {
-			b := NewModuleBuilder(tt.program)
+		m := pass.NewManager()
+		_ = m.Register(NewModulePass())
 
-			m, err := b.Build()
+		t.Run(tt.program.String(), func(t *testing.T) {
+			err := m.Run(tt.program)
 			require.NoError(t, err)
-			require.Equal(t, tt.module, m)
+
+			var actual *Module
+			err = m.Load(&actual)
+			require.NoError(t, err)
+			require.Equal(t, tt.module, actual)
 		})
 	}
 }

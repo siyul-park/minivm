@@ -82,6 +82,14 @@ func (i Instruction) Opcode() Opcode {
 	return Opcode(i[0])
 }
 
+func (i Instruction) Operand(idx int) uint64 {
+	operands := i.Operands()
+	if idx < 0 || idx > len(operands) {
+		return 0
+	}
+	return operands[idx]
+}
+
 func (i Instruction) Operands() []uint64 {
 	typ := i.Type()
 	operands := make([]uint64, len(typ.Widths))
