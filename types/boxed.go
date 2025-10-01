@@ -13,15 +13,16 @@ var (
 )
 
 const (
-	tagBits     = 3
-	tagMask     = (1 << tagBits) - 1
-	payloadBits = 52 - tagBits
+	tBits = 3
+	tMask = (1 << tBits) - 1
+	vBits = 52 - tBits
+	vMask = (1 << vBits) - 1
 )
 
 var _ Value = Boxed(0)
 
 func IsBoxable(v int64) bool {
-	return v >= int64(-(1<<(payloadBits-1))) && v <= int64((1<<(payloadBits-1))-1)
+	return uint64(v+vMask) <= 2*vMask
 }
 
 func BoxI32(v int32) Boxed {
@@ -29,7 +30,7 @@ func BoxI32(v int32) Boxed {
 }
 
 func BoxI64(v int64) Boxed {
-	return Box(uint64(v&((1<<payloadBits)-1)), KindI64)
+	return Box(uint64(v)&vMask, KindI64)
 }
 
 func BoxF32(v float32) Boxed {
@@ -52,8 +53,8 @@ func BoxBool(b bool) Boxed {
 }
 
 func Box(v uint64, kind Kind) Boxed {
-	mantissa := (uint64(kind) << payloadBits) | v
-	u := (uint64(0x7FF) << 52) | mantissa
+	m := (uint64(kind) << vBits) | v
+	u := (uint64(0x7FF) << 52) | m
 	return Boxed(u)
 }
 
@@ -75,8 +76,9 @@ func Unbox(v Boxed) Value {
 }
 
 func (v Boxed) Kind() Kind {
-	if u := uint64(v); u>>52 == 0x7FF && u&0x000FFFFFFFFFFFFF != 0 {
-		return Kind((u >> payloadBits) & tagMask)
+	u := uint64(v)
+	if u>>52 == 0x7FF && u&0x000FFFFFFFFFFFFF != 0 {
+		return Kind((u >> vBits) & tMask)
 	}
 	return KindF64
 }
@@ -99,19 +101,19 @@ func (v Boxed) Type() Type {
 }
 
 func (v Boxed) I32() int32 {
-	return int32(uint64(v) & ((1 << payloadBits) - 1))
+	return int32(v & vMask)
 }
 
 func (v Boxed) I64() int64 {
-	payload := int64(uint64(v) & ((1 << payloadBits) - 1))
-	if payload>>(payloadBits-1) != 0 {
-		payload |= ^((1 << payloadBits) - 1)
+	i := int64(v & vMask)
+	if i>>(vBits-1) != 0 {
+		i |= ^vMask
 	}
-	return payload
+	return i
 }
 
 func (v Boxed) F32() float32 {
-	return math.Float32frombits(uint32(uint64(v) & ((1 << payloadBits) - 1)))
+	return math.Float32frombits(uint32(v & vMask))
 }
 
 func (v Boxed) F64() float64 {
@@ -119,11 +121,11 @@ func (v Boxed) F64() float64 {
 }
 
 func (v Boxed) Bool() bool {
-	return (uint64(v) & ((1 << payloadBits) - 1)) != 0
+	return (uint64(v) & vMask) != 0
 }
 
 func (v Boxed) Ref() int {
-	return int(uint64(v) & ((1 << payloadBits) - 1))
+	return int(uint64(v) & vMask)
 }
 
 func (v Boxed) Interface() any {

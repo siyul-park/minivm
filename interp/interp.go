@@ -286,8 +286,22 @@ var dispatch = [256]func(i *Interpreter) error{
 		if idx < 0 || idx >= len(i.constants) {
 			return ErrSegmentationFault
 		}
-		val := i.constants[idx]
-		i.stack[i.sp] = i.box(val)
+		var val types.Boxed
+		switch v := i.constants[idx].(type) {
+		case types.Boxed:
+			val = v
+		case types.I32:
+			val = types.BoxI32(int32(v))
+		case types.I64:
+			val = i.boxI64(int64(v))
+		case types.F32:
+			val = types.BoxF32(float32(v))
+		case types.F64:
+			val = types.BoxF64(float64(v))
+		default:
+			val = types.BoxRef(i.alloc(v))
+		}
+		i.stack[i.sp] = val
 		i.sp++
 		frame.ip += 3
 		return nil
@@ -303,7 +317,7 @@ var dispatch = [256]func(i *Interpreter) error{
 			return ErrSegmentationFault
 		}
 		typ := i.types[idx]
-		i.stack[i.sp] = i.box(types.NewRTT(typ))
+		i.stack[i.sp] = types.BoxRef(i.alloc(types.NewRTT(typ)))
 		i.sp++
 		frame.ip += 3
 		return nil
@@ -934,8 +948,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		val := types.BoxF32(math.Float32frombits(*(*uint32)(unsafe.Pointer(&code[frame.ip+1]))))
-		i.stack[i.sp] = val
+		i.stack[i.sp] = types.BoxF32(math.Float32frombits(*(*uint32)(unsafe.Pointer(&code[frame.ip+1]))))
 		i.sp++
 		frame.ip += 5
 		return nil
@@ -1149,8 +1162,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		val := types.BoxF64(math.Float64frombits(*(*uint64)(unsafe.Pointer(&code[frame.ip+1]))))
-		i.stack[i.sp] = val
+		i.stack[i.sp] = types.BoxF64(math.Float64frombits(*(*uint64)(unsafe.Pointer(&code[frame.ip+1]))))
 		i.sp++
 		frame.ip += 9
 		return nil
@@ -1284,7 +1296,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		v1 := i.unboxString(i.stack[i.sp-1])
 		v2 := i.unboxString(i.stack[i.sp-2])
 		i.sp--
-		i.stack[i.sp-1] = i.box(types.String(v2 + v1))
+		i.stack[i.sp-1] = types.BoxRef(i.alloc(types.String(v2 + v1)))
 		i.frames[i.fp-1].ip++
 		return nil
 	},
@@ -1372,7 +1384,6 @@ var dispatch = [256]func(i *Interpreter) error{
 		if !ok {
 			return ErrTypeMismatch
 		}
-		i.release(addr)
 		var arr types.Value
 		switch typ.Elem.Kind() {
 		case types.KindI32:
@@ -1389,8 +1400,9 @@ var dispatch = [256]func(i *Interpreter) error{
 				Elems: make([]types.Boxed, length),
 			}
 		}
+		i.release(addr)
 		i.sp--
-		i.stack[i.sp-1] = i.box(arr)
+		i.stack[i.sp-1] = types.BoxRef(i.alloc(arr))
 		i.frames[i.fp-1].ip++
 		return nil
 	},
@@ -1617,23 +1629,6 @@ func (i *Interpreter) Clear() {
 	i.free = i.free[:0]
 }
 
-func (i *Interpreter) box(val types.Value) types.Boxed {
-	switch v := val.(type) {
-	case types.Boxed:
-		return v
-	case types.I32:
-		return types.BoxI32(int32(v))
-	case types.I64:
-		return i.boxI64(int64(v))
-	case types.F32:
-		return types.BoxF32(float32(v))
-	case types.F64:
-		return types.BoxF64(float64(v))
-	default:
-		return types.BoxRef(i.alloc(v))
-	}
-}
-
 func (i *Interpreter) boxI64(val int64) types.Boxed {
 	if types.IsBoxable(val) {
 		return types.BoxI64(val)
@@ -1696,18 +1691,17 @@ func (i *Interpreter) retain(addr int) {
 func (i *Interpreter) release(addr int) {
 	stack := []int{addr}
 	for len(stack) > 0 {
-		a := stack[len(stack)-1]
+		addr := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 
-		i.rc[a]--
-		if i.rc[a] > 0 {
-			continue
-		}
-		i.free = append(i.free, a)
-
-		if t, ok := i.heap[a].(types.Traceable); ok {
-			for _, ref := range t.Refs() {
-				stack = append(stack, int(ref))
+		i.rc[addr]--
+		if i.rc[addr] == 0 {
+			i.free = append(i.free, addr)
+			t, ok := i.heap[addr].(types.Traceable)
+			if ok {
+				for _, r := range t.Refs() {
+					stack = append(stack, int(r))
+				}
 			}
 		}
 	}

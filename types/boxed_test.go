@@ -16,8 +16,8 @@ func TestBoxed_Interface(t *testing.T) {
 			expected: int32(42),
 		},
 		{
-			value:    BoxI64(42),
-			expected: int64(42),
+			value:    BoxI64(-1),
+			expected: int64(-1),
 		},
 		{
 			value:    BoxF32(3.14),
