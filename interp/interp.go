@@ -1666,6 +1666,14 @@ func (i *Interpreter) alloc(val types.Value) int {
 	}
 
 	if len(i.heap) == cap(i.heap) {
+		i.gc()
+		if len(i.free) > 0 {
+			addr := i.free[len(i.free)-1]
+			i.free = i.free[:len(i.free)-1]
+			i.heap[addr] = val
+			return addr
+		}
+
 		c := 2 * cap(i.heap)
 		if c == 0 {
 			c = 1
@@ -1696,13 +1704,62 @@ func (i *Interpreter) release(addr int) {
 
 		i.rc[addr]--
 		if i.rc[addr] == 0 {
-			i.free = append(i.free, addr)
 			t, ok := i.heap[addr].(types.Traceable)
 			if ok {
 				for _, r := range t.Refs() {
 					stack = append(stack, int(r))
 				}
 			}
+			i.heap[addr] = nil
+			i.free = append(i.free, addr)
+		}
+	}
+}
+
+func (i *Interpreter) gc() {
+	for j := 0; j < len(i.heap); j++ {
+		if i.rc[j] < 0 {
+			i.rc[j] = 0
+		}
+	}
+
+	var stack []int
+	push := func(addr int) {
+		if i.rc[addr] > 0 {
+			i.rc[addr] = -i.rc[addr]
+			stack = append(stack, addr)
+		}
+	}
+
+	for j := 0; j < i.sp; j++ {
+		val := i.stack[j]
+		if val.Kind() == types.KindRef {
+			push(val.Ref())
+		}
+	}
+	for _, val := range i.global {
+		if val.Kind() == types.KindRef {
+			push(val.Ref())
+		}
+	}
+
+	for len(stack) > 0 {
+		addr := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if t, ok := i.heap[addr].(types.Traceable); ok {
+			for _, ref := range t.Refs() {
+				push(int(ref))
+			}
+		}
+	}
+
+	for j := 0; j < len(i.heap); j++ {
+		if i.rc[j] < 0 {
+			i.rc[j] = -i.rc[j]
+		} else if i.rc[j] > 0 {
+			i.heap[j] = nil
+			i.free = append(i.free, j)
+			i.rc[j] = 0
 		}
 	}
 }
