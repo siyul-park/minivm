@@ -144,7 +144,8 @@ var types = map[Opcode]Type{
 	STRING_LE: {"string.le", []int{}},
 	STRING_GE: {"string.ge", []int{}},
 
-	ARRAY_NEW: {"array.new", []int{}},
+	ARRAY_NEW:         {"array.new", []int{}},
+	ARRAY_NEW_DEFAULT: {"array.new_default", []int{}},
 
 	ARRAY_GET:  {"array.get", []int{}},
 	ARRAY_SET:  {"array.set", []int{}},

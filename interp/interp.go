@@ -99,7 +99,7 @@ var dispatch = [256]func(i *Interpreter) error{
 	instr.BR: func(i *Interpreter) error {
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		offset := int(int16(*(*uint16)(unsafe.Pointer(&code[frame.ip+1]))))
+		offset := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
 		frame.ip += offset + 3
 		return nil
 	},
@@ -112,7 +112,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		cond := i.stack[i.sp].I32()
 		if cond != 0 {
 			code := frame.fn.Code
-			offset := int(int16(*(*uint16)(unsafe.Pointer(&code[frame.ip+1]))))
+			offset := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
 			frame.ip += offset
 		}
 		frame.ip += 3
@@ -182,7 +182,7 @@ var dispatch = [256]func(i *Interpreter) error{
 
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(int16(*(*uint16)(unsafe.Pointer(&code[frame.ip+1]))))
+		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.global) {
 			return ErrSegmentationFault
 		}
@@ -204,7 +204,7 @@ var dispatch = [256]func(i *Interpreter) error{
 
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(int16(*(*uint16)(unsafe.Pointer(&code[frame.ip+1]))))
+		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 {
 			return ErrSegmentationFault
 		}
@@ -282,7 +282,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(int16(*(*uint16)(unsafe.Pointer(&code[frame.ip+1]))))
+		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.constants) {
 			return ErrSegmentationFault
 		}
@@ -312,7 +312,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(int16(*(*uint16)(unsafe.Pointer(&code[frame.ip+1]))))
+		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
 			return ErrSegmentationFault
 		}
@@ -328,7 +328,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		val := types.BoxI32(int32(*(*uint32)(unsafe.Pointer(&code[frame.ip+1]))))
+		val := types.BoxI32(*(*int32)(unsafe.Pointer(&code[frame.ip+1])))
 		i.stack[i.sp] = val
 		i.sp++
 		frame.ip += 5
@@ -1370,8 +1370,69 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp < 2 {
 			return ErrStackUnderflow
 		}
-		length := i.stack[i.sp-1].I32()
-		ref := i.stack[i.sp-2]
+		ref := i.stack[i.sp-1]
+		size := int(i.stack[i.sp-2].I32())
+		if ref.Kind() != types.KindRef {
+			return ErrTypeMismatch
+		}
+		if i.sp < size+2 {
+			return ErrStackUnderflow
+		}
+		addr := ref.Ref()
+		rtt, ok := i.heap[addr].(*types.RTT)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		typ, ok := rtt.Elem.(*types.ArrayType)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		var arr types.Value
+		switch typ.Elem.Kind() {
+		case types.KindI32:
+			val := make(types.I32Array, size)
+			for j := 0; j < size; j++ {
+				val[j] = types.I32(i.stack[i.sp-size-j-2].I32())
+			}
+			arr = val
+		case types.KindI64:
+			val := make(types.I64Array, size)
+			for j := 0; j < size; j++ {
+				val[j] = types.I64(i.unboxI64(i.stack[i.sp-size-j-2]))
+			}
+			arr = val
+		case types.KindF32:
+			val := make(types.F32Array, size)
+			for j := 0; j < size; j++ {
+				val[j] = types.F32(i.stack[i.sp-size-j-2].F32())
+			}
+			arr = val
+		case types.KindF64:
+			val := make(types.F64Array, size)
+			for j := 0; j < size; j++ {
+				val[j] = types.F64(i.stack[i.sp-size-j-2].F64())
+			}
+			arr = val
+		default:
+			val := &types.Array{
+				Typ:   typ,
+				Elems: make([]types.Boxed, size),
+			}
+			copy(val.Elems, i.stack[i.sp-size-2:i.sp-2])
+			arr = val
+		}
+		i.release(addr)
+		i.sp -= size + 1
+		i.stack[i.sp-1] = types.BoxRef(i.alloc(arr))
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.ARRAY_NEW_DEFAULT: func(i *Interpreter) error {
+		if i.sp < 2 {
+			return ErrStackUnderflow
+		}
+		ref := i.stack[i.sp-1]
+		size := i.stack[i.sp-2].I32()
 		if ref.Kind() != types.KindRef {
 			return ErrTypeMismatch
 		}
@@ -1387,17 +1448,17 @@ var dispatch = [256]func(i *Interpreter) error{
 		var arr types.Value
 		switch typ.Elem.Kind() {
 		case types.KindI32:
-			arr = make(types.I32Array, length)
+			arr = make(types.I32Array, size)
 		case types.KindI64:
-			arr = make(types.I64Array, length)
+			arr = make(types.I64Array, size)
 		case types.KindF32:
-			arr = make(types.F32Array, length)
+			arr = make(types.F32Array, size)
 		case types.KindF64:
-			arr = make(types.F64Array, length)
+			arr = make(types.F64Array, size)
 		default:
 			arr = &types.Array{
 				Typ:   typ,
-				Elems: make([]types.Boxed, length),
+				Elems: make([]types.Boxed, size),
 			}
 		}
 		i.release(addr)

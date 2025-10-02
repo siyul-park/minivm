@@ -45,3 +45,20 @@ func (k Kind) String() string {
 		return "unknown"
 	}
 }
+
+func (k Kind) Size() int {
+	switch k {
+	case KindI32:
+		return 4
+	case KindI64:
+		return 8
+	case KindF32:
+		return 4
+	case KindF64:
+		return 8
+	case KindRef:
+		return 4
+	default:
+		return 0
+	}
+}

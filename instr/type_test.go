@@ -144,6 +144,7 @@ func TestTypeOf(t *testing.T) {
 		{opcode: STRING_GE},
 
 		{opcode: ARRAY_NEW},
+		{opcode: ARRAY_NEW_DEFAULT},
 
 		{opcode: ARRAY_LEN},
 		{opcode: ARRAY_GET},
