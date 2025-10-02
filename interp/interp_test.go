@@ -1078,6 +1078,21 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_NEW),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_FILL),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI32)),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.GLOBAL_SET, 0),
 				instr.New(instr.I32_CONST, 20),

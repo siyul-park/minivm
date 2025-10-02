@@ -27,7 +27,6 @@ var (
 	TypeI64Array = NewArrayType(TypeI64)
 	TypeF32Array = NewArrayType(TypeF32)
 	TypeF64Array = NewArrayType(TypeF64)
-	TypeRefArray = NewArrayType(TypeRef)
 )
 
 var _ Value = I32Array(nil)

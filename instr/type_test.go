@@ -148,6 +148,8 @@ func TestTypeOf(t *testing.T) {
 		{opcode: ARRAY_LEN},
 		{opcode: ARRAY_GET},
 		{opcode: ARRAY_SET},
+		{opcode: ARRAY_FILL},
+		{opcode: ARRAY_COPY},
 	}
 
 	for _, tt := range tests {

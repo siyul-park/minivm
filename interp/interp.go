@@ -1505,6 +1505,130 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.frames[i.fp-1].ip++
 		return nil
 	},
+	instr.ARRAY_FILL: func(i *Interpreter) error {
+		if i.sp < 4 {
+			return ErrStackUnderflow
+		}
+		size := int(i.stack[i.sp-1].I32())
+		val := i.stack[i.sp-2]
+		idx := int(i.stack[i.sp-3].I32())
+		ref := i.stack[i.sp-4]
+		if ref.Kind() != types.KindRef {
+			return ErrTypeMismatch
+		}
+		addr := ref.Ref()
+		switch arr := i.heap[addr].(type) {
+		case types.I32Array:
+			if idx < 0 || idx+size > len(arr) {
+				return ErrIndexOutOfRange
+			}
+			v := types.I32(val.I32())
+			for i := idx; i < idx+size; i++ {
+				arr[i] = v
+			}
+		case types.I64Array:
+			if idx < 0 || idx+size > len(arr) {
+				return ErrIndexOutOfRange
+			}
+			v := types.I64(i.unboxI64(val))
+			for i := idx; i < idx+size; i++ {
+				arr[i] = v
+			}
+		case types.F32Array:
+			if idx < 0 || idx+size > len(arr) {
+				return ErrIndexOutOfRange
+			}
+			v := types.F32(val.F32())
+			for i := idx; i < idx+size; i++ {
+				arr[i] = v
+			}
+		case types.F64Array:
+			if idx < 0 || idx+size > len(arr) {
+				return ErrIndexOutOfRange
+			}
+			v := types.F64(val.F64())
+			for i := idx; i < idx+size; i++ {
+				arr[i] = v
+			}
+		case *types.Array:
+			if idx < 0 || idx+size > len(arr.Elems) {
+				return ErrIndexOutOfRange
+			}
+			elem := arr.Elems[idx]
+			for i := idx; i < idx+size; i++ {
+				arr.Elems[i] = val
+			}
+			if val.Kind() == types.KindRef {
+				i.retains(val.Ref(), size-1)
+			}
+			if elem.Kind() == types.KindRef {
+				i.release(elem.Ref())
+			}
+		default:
+			return ErrTypeMismatch
+		}
+		i.release(addr)
+		i.sp -= 4
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.ARRAY_COPY: func(i *Interpreter) error {
+		if i.sp < 4 {
+			return ErrStackUnderflow
+		}
+		size := int(i.stack[i.sp-1].I32())
+		src := int(i.stack[i.sp-2].I32())
+		dst := int(i.stack[i.sp-3].I32())
+		ref := i.stack[i.sp-4]
+		if ref.Kind() != types.KindRef {
+			return ErrTypeMismatch
+		}
+		addr := ref.Ref()
+		switch arr := i.heap[addr].(type) {
+		case types.I32Array:
+			if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
+				return ErrIndexOutOfRange
+			}
+			copy(arr[dst:dst+size], arr[src:src+size])
+		case types.I64Array:
+			if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
+				return ErrIndexOutOfRange
+			}
+			copy(arr[dst:dst+size], arr[src:src+size])
+		case types.F32Array:
+			if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
+				return ErrIndexOutOfRange
+			}
+			copy(arr[dst:dst+size], arr[src:src+size])
+		case types.F64Array:
+			if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
+				return ErrIndexOutOfRange
+			}
+			copy(arr[dst:dst+size], arr[src:src+size])
+		case *types.Array:
+			if src < 0 || dst < 0 || src+size > len(arr.Elems) || dst+size > len(arr.Elems) {
+				return ErrIndexOutOfRange
+			}
+			elems := arr.Elems
+			for _, v := range elems[src : src+size] {
+				if v.Kind() == types.KindRef {
+					i.retain(v.Ref())
+				}
+			}
+			for _, v := range elems[dst : dst+size] {
+				if v.Kind() == types.KindRef {
+					i.release(v.Ref())
+				}
+			}
+			copy(elems[dst:dst+size], elems[src:src+size])
+		default:
+			return ErrTypeMismatch
+		}
+		i.release(addr)
+		i.sp -= 4
+		i.frames[i.fp-1].ip++
+		return nil
+	},
 }
 
 func New(prog *program.Program, opts ...Option) *Interpreter {
@@ -1694,6 +1818,10 @@ func (i *Interpreter) alloc(val types.Value) int {
 
 func (i *Interpreter) retain(addr int) {
 	i.rc[addr]++
+}
+
+func (i *Interpreter) retains(addr int, n int) {
+	i.rc[addr] += n
 }
 
 func (i *Interpreter) release(addr int) {

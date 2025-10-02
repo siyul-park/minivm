@@ -146,9 +146,11 @@ var types = map[Opcode]Type{
 
 	ARRAY_NEW: {"array.new", []int{}},
 
-	ARRAY_GET: {"array.get", []int{}},
-	ARRAY_SET: {"array.set", []int{}},
-	ARRAY_LEN: {"array.len", []int{}},
+	ARRAY_GET:  {"array.get", []int{}},
+	ARRAY_SET:  {"array.set", []int{}},
+	ARRAY_LEN:  {"array.len", []int{}},
+	ARRAY_FILL: {"array.fill", []int{}},
+	ARRAY_COPY: {"array.copy", []int{}},
 }
 
 func TypeOf(op Opcode) Type {
