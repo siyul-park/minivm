@@ -191,7 +191,7 @@ func (t *StructType) Cast(other Type) bool {
 			return false
 		}
 		for i, f := range o.Fields {
-			if !f.Type.Cast(t.Fields[i].Type) {
+			if !f.Type.Equals(t.Fields[i].Type) {
 				return false
 			}
 		}
