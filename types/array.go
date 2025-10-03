@@ -19,7 +19,8 @@ type Array struct {
 }
 
 type ArrayType struct {
-	Elem Type
+	Elem     Type
+	ElemKind Kind
 }
 
 var (
@@ -152,6 +153,10 @@ func (a F64Array) String() string {
 	return sb.String()
 }
 
+func NewArray(typ *ArrayType, elems ...Boxed) *Array {
+	return &Array{Typ: typ, Elems: elems}
+}
+
 func (a *Array) Kind() Kind {
 	return KindRef
 }
@@ -192,7 +197,7 @@ func (a *Array) Refs() []Ref {
 }
 
 func NewArrayType(elem Type) *ArrayType {
-	return &ArrayType{Elem: elem}
+	return &ArrayType{Elem: elem, ElemKind: elem.Kind()}
 }
 
 func (t *ArrayType) Kind() Kind {

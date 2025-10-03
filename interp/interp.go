@@ -3,7 +3,6 @@ package interp
 import (
 	"errors"
 	"fmt"
-	"math"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
@@ -948,7 +947,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		i.stack[i.sp] = types.BoxF32(math.Float32frombits(*(*uint32)(unsafe.Pointer(&code[frame.ip+1]))))
+		i.stack[i.sp] = types.BoxF32(*(*float32)(unsafe.Pointer(&code[frame.ip+1])))
 		i.sp++
 		frame.ip += 5
 		return nil
@@ -1162,7 +1161,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		i.stack[i.sp] = types.BoxF64(math.Float64frombits(*(*uint64)(unsafe.Pointer(&code[frame.ip+1]))))
+		i.stack[i.sp] = types.BoxF64(*(*float64)(unsafe.Pointer(&code[frame.ip+1])))
 		i.sp++
 		frame.ip += 9
 		return nil
@@ -1388,7 +1387,7 @@ var dispatch = [256]func(i *Interpreter) error{
 			return ErrTypeMismatch
 		}
 		var arr types.Value
-		switch typ.Elem.Kind() {
+		switch typ.ElemKind {
 		case types.KindI32:
 			val := make(types.I32Array, size)
 			for j := 0; j < size; j++ {
@@ -1446,7 +1445,7 @@ var dispatch = [256]func(i *Interpreter) error{
 			return ErrTypeMismatch
 		}
 		var arr types.Value
-		switch typ.Elem.Kind() {
+		switch typ.ElemKind {
 		case types.KindI32:
 			arr = make(types.I32Array, size)
 		case types.KindI64:
@@ -1690,6 +1689,163 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.frames[i.fp-1].ip++
 		return nil
 	},
+	instr.STRUCT_NEW: func(i *Interpreter) error {
+		if i.sp < 1 {
+			return ErrStackUnderflow
+		}
+		ref := i.stack[i.sp-1]
+		if ref.Kind() != types.KindRef {
+			return ErrTypeMismatch
+		}
+		addr := ref.Ref()
+		rtt, ok := i.heap[addr].(*types.RTT)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		typ, ok := rtt.Elem.(*types.StructType)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		size := len(typ.Fields)
+		if i.sp < size+1 {
+			return ErrStackUnderflow
+		}
+		s := types.NewStruct(typ)
+		for j, f := range typ.Fields {
+			offset := f.Offset
+			val := i.stack[i.sp-size-j-1]
+			switch f.Kind {
+			case types.KindI32:
+				*(*int32)(unsafe.Pointer(&s.Data[offset])) = val.I32()
+			case types.KindI64:
+				*(*int64)(unsafe.Pointer(&s.Data[offset])) = i.unboxI64(val)
+			case types.KindF32:
+				*(*float32)(unsafe.Pointer(&s.Data[offset])) = val.F32()
+			case types.KindF64:
+				*(*float64)(unsafe.Pointer(&s.Data[offset])) = val.F64()
+			case types.KindRef:
+				*(*uint64)(unsafe.Pointer(&s.Data[offset])) = uint64(val)
+			default:
+				return ErrTypeMismatch
+			}
+		}
+		i.release(addr)
+		i.sp -= size
+		i.stack[i.sp-1] = types.BoxRef(i.alloc(s))
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.STRUCT_NEW_DEFAULT: func(i *Interpreter) error {
+		if i.sp < 1 {
+			return ErrStackUnderflow
+		}
+		ref := i.stack[i.sp-1]
+		if ref.Kind() != types.KindRef {
+			return ErrTypeMismatch
+		}
+		addr := ref.Ref()
+		rtt, ok := i.heap[addr].(*types.RTT)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		typ, ok := rtt.Elem.(*types.StructType)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		s := types.NewStruct(typ)
+		i.release(addr)
+		i.stack[i.sp-1] = types.BoxRef(i.alloc(s))
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.STRUCT_GET: func(i *Interpreter) error {
+		if i.sp < 2 {
+			return ErrStackUnderflow
+		}
+		idx := int(i.stack[i.sp-1].I32())
+		ref := i.stack[i.sp-2]
+		if ref.Kind() != types.KindRef {
+			return ErrTypeMismatch
+		}
+		addr := ref.Ref()
+		s, ok := i.heap[addr].(*types.Struct)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		typ := s.Typ
+		if idx < 0 || idx >= len(typ.Fields) {
+			return ErrSegmentationFault
+		}
+		f := typ.Fields[idx]
+		offset := f.Offset
+		var val types.Boxed
+		switch f.Kind {
+		case types.KindI32:
+			val = types.BoxI32(*(*int32)(unsafe.Pointer(&s.Data[offset])))
+		case types.KindI64:
+			val = i.boxI64(*(*int64)(unsafe.Pointer(&s.Data[offset])))
+		case types.KindF32:
+			val = types.BoxF32(*(*float32)(unsafe.Pointer(&s.Data[offset])))
+		case types.KindF64:
+			val = types.BoxF64(*(*float64)(unsafe.Pointer(&s.Data[offset])))
+		case types.KindRef:
+			val = types.Boxed(*(*uint64)(unsafe.Pointer(&s.Data[offset])))
+			if val.Kind() == types.KindRef {
+				i.retain(val.Ref())
+			}
+		default:
+			return ErrTypeMismatch
+		}
+		i.release(addr)
+		i.sp--
+		i.stack[i.sp-1] = val
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.STRUCT_SET: func(i *Interpreter) error {
+		if i.sp < 3 {
+			return ErrStackUnderflow
+		}
+		val := i.stack[i.sp-1]
+		idx := int(i.stack[i.sp-2].I32())
+		ref := i.stack[i.sp-3]
+		if ref.Kind() != types.KindRef {
+			return ErrTypeMismatch
+		}
+		addr := ref.Ref()
+		s, ok := i.heap[addr].(*types.Struct)
+		if !ok {
+			return ErrTypeMismatch
+		}
+		typ := s.Typ
+		if idx < 0 || idx >= len(typ.Fields) {
+			return ErrSegmentationFault
+		}
+		f := typ.Fields[idx]
+		offset := f.Offset
+		switch f.Kind {
+		case types.KindI32:
+			*(*int32)(unsafe.Pointer(&s.Data[offset])) = val.I32()
+		case types.KindI64:
+			*(*int64)(unsafe.Pointer(&s.Data[offset])) = i.unboxI64(val)
+		case types.KindF32:
+			*(*float32)(unsafe.Pointer(&s.Data[offset])) = val.F32()
+		case types.KindF64:
+			*(*float64)(unsafe.Pointer(&s.Data[offset])) = val.F64()
+		case types.KindRef:
+			ptr := (*uint64)(unsafe.Pointer(&s.Data[offset]))
+			if old := types.Boxed(*ptr); old.Kind() == types.KindRef {
+				i.release(old.Ref())
+			}
+			*ptr = uint64(val)
+		default:
+			return ErrTypeMismatch
+		}
+		i.release(addr)
+		i.sp -= 3
+		i.frames[i.fp-1].ip++
+		return nil
+	},
 }
 
 func New(prog *program.Program, opts ...Option) *Interpreter {
@@ -1729,7 +1885,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	}
 
 	i.heap = append(i.heap, nil)
-	i.rc = append(i.rc, 0)
+	i.rc = append(i.rc, -1)
 
 	i.frames[0].fn = &types.Function{Code: prog.Code}
 	i.frames[0].bp = i.sp

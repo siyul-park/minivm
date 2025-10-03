@@ -1052,6 +1052,54 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI64)),
+		),
+		values: []types.Value{types.I64Array{types.I64(1)}},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeF32)),
+		),
+		values: []types.Value{types.F32Array{types.F32(42)}},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(42)),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeF64)),
+		),
+		values: []types.Value{types.F64Array{types.F64(42)}},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeRef)),
+		),
+		values: []types.Value{types.NewArray(types.NewArrayType(types.TypeRef), types.BoxI32(1))},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.RTT_CANON, 0),
 				instr.New(instr.ARRAY_NEW_DEFAULT),
@@ -1066,12 +1114,108 @@ var tests = []struct {
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.RTT_CANON, 0),
 				instr.New(instr.ARRAY_NEW_DEFAULT),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI64)),
+		),
+		values: []types.Value{make(types.I64Array, 1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeF32)),
+		),
+		values: []types.Value{make(types.F32Array, 1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeF64)),
+		),
+		values: []types.Value{make(types.F64Array, 1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeRef)),
+		),
+		values: []types.Value{&types.Array{Typ: types.NewArrayType(types.TypeRef), Elems: make([]types.Boxed, 1)}},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.ARRAY_GET),
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI32)),
 		),
 		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI64)),
+		),
+		values: []types.Value{types.I64(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeF32)),
+		),
+		values: []types.Value{types.F32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeF64)),
+		),
+		values: []types.Value{types.F64(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeRef)),
+		),
+		values: []types.Value{types.F64(0)},
 	},
 	{
 		program: program.New(
@@ -1095,10 +1239,356 @@ var tests = []struct {
 				instr.New(instr.ARRAY_NEW_DEFAULT),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_SET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI64)),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
+				instr.New(instr.ARRAY_SET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeF32)),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.F64_CONST, math.Float64bits(42)),
+				instr.New(instr.ARRAY_SET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeF64)),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_SET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeRef)),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.ARRAY_FILL),
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI32)),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_FILL),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI64)),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_FILL),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeF32)),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.F64_CONST, math.Float64bits(42)),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_FILL),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeF64)),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_FILL),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeRef)),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32))),
+		),
+		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32)), types.I32(1))},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI64))),
+		),
+		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI64)), types.I64(1))},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF32))),
+		),
+		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeF32)), types.F32(42))},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(42)),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF64))),
+		),
+		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeF64)), types.F64(42))},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeRef))),
+		),
+		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeRef)), types.BoxI32(1))},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW_DEFAULT),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32))),
+		),
+		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32)))},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW_DEFAULT),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI64))),
+		),
+		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI64)))},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW_DEFAULT),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF32))),
+		),
+		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeF32)))},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW_DEFAULT),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF64))),
+		),
+		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeF64)))},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW_DEFAULT),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeRef))),
+		),
+		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeRef)))},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.STRUCT_GET),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32))),
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.STRUCT_GET),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI64))),
+		),
+		values: []types.Value{types.I64(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.STRUCT_GET),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF32))),
+		),
+		values: []types.Value{types.F32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.STRUCT_GET),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF64))),
+		),
+		values: []types.Value{types.F64(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.STRUCT_GET),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeRef))),
+		),
+		values: []types.Value{types.F64(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.STRUCT_SET),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32))),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.STRUCT_SET),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI64))),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
+				instr.New(instr.STRUCT_SET),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF32))),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.F64_CONST, math.Float64bits(42)),
+				instr.New(instr.STRUCT_SET),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF64))),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.RTT_CANON, 0),
+				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.STRUCT_SET),
+			},
+			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeRef))),
 		),
 		values: nil,
 	},
