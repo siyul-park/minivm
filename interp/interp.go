@@ -2066,12 +2066,13 @@ func (i *Interpreter) gc() {
 		if i.rc[j] < 0 {
 			i.rc[j] = 0
 		}
+		i.rc[j] *= -1
 	}
 
 	var stack []int
 	push := func(addr int) {
-		if i.rc[addr] > 0 {
-			i.rc[addr] = -i.rc[addr]
+		if i.rc[addr] < 0 {
+			i.rc[addr] *= -1
 			stack = append(stack, addr)
 		}
 	}
@@ -2100,11 +2101,9 @@ func (i *Interpreter) gc() {
 
 	for j := 0; j < len(i.heap); j++ {
 		if i.rc[j] < 0 {
-			i.rc[j] = -i.rc[j]
-		} else if i.rc[j] > 0 {
 			i.heap[j] = nil
-			i.free = append(i.free, j)
 			i.rc[j] = 0
+			i.free = append(i.free, j)
 		}
 	}
 }
