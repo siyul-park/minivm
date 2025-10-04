@@ -1042,8 +1042,7 @@ var tests = []struct {
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW),
+				instr.New(instr.ARRAY_NEW, 0),
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI32)),
 		),
@@ -1054,8 +1053,7 @@ var tests = []struct {
 			[]instr.Instruction{
 				instr.New(instr.I64_CONST, 1),
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW),
+				instr.New(instr.ARRAY_NEW, 0),
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI64)),
 		),
@@ -1066,8 +1064,7 @@ var tests = []struct {
 			[]instr.Instruction{
 				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW),
+				instr.New(instr.ARRAY_NEW, 0),
 			},
 			program.WithTypes(types.NewArrayType(types.TypeF32)),
 		),
@@ -1078,8 +1075,7 @@ var tests = []struct {
 			[]instr.Instruction{
 				instr.New(instr.F64_CONST, math.Float64bits(42)),
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW),
+				instr.New(instr.ARRAY_NEW, 0),
 			},
 			program.WithTypes(types.NewArrayType(types.TypeF64)),
 		),
@@ -1090,8 +1086,7 @@ var tests = []struct {
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW),
+				instr.New(instr.ARRAY_NEW, 0),
 			},
 			program.WithTypes(types.NewArrayType(types.TypeRef)),
 		),
@@ -1101,8 +1096,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI32)),
 		),
@@ -1112,8 +1106,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI64)),
 		),
@@ -1123,8 +1116,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			},
 			program.WithTypes(types.NewArrayType(types.TypeF32)),
 		),
@@ -1134,8 +1126,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			},
 			program.WithTypes(types.NewArrayType(types.TypeF64)),
 		),
@@ -1145,8 +1136,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			},
 			program.WithTypes(types.NewArrayType(types.TypeRef)),
 		),
@@ -1156,8 +1146,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.ARRAY_GET),
 			},
@@ -1169,8 +1158,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.ARRAY_GET),
 			},
@@ -1182,8 +1170,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.ARRAY_GET),
 			},
@@ -1195,8 +1182,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.ARRAY_GET),
 			},
@@ -1208,8 +1194,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.ARRAY_GET),
 			},
@@ -1221,8 +1206,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.ARRAY_SET),
@@ -1235,8 +1219,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.ARRAY_SET),
@@ -1249,8 +1232,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
 				instr.New(instr.ARRAY_SET),
@@ -1263,8 +1245,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.F64_CONST, math.Float64bits(42)),
 				instr.New(instr.ARRAY_SET),
@@ -1277,8 +1258,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.ARRAY_SET),
@@ -1291,8 +1271,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_CONST, 1),
@@ -1306,8 +1285,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.I64_CONST, 1),
 				instr.New(instr.I32_CONST, 1),
@@ -1321,8 +1299,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
 				instr.New(instr.I32_CONST, 1),
@@ -1336,8 +1313,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.F64_CONST, math.Float64bits(42)),
 				instr.New(instr.I32_CONST, 1),
@@ -1351,8 +1327,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.ARRAY_NEW_DEFAULT),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_CONST, 1),
@@ -1366,8 +1341,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW),
+				instr.New(instr.STRUCT_NEW, 0),
 			},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32))),
 		),
@@ -1377,8 +1351,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I64_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW),
+				instr.New(instr.STRUCT_NEW, 0),
 			},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI64))),
 		),
@@ -1388,8 +1361,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW),
+				instr.New(instr.STRUCT_NEW, 0),
 			},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF32))),
 		),
@@ -1399,8 +1371,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.F64_CONST, math.Float64bits(42)),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW),
+				instr.New(instr.STRUCT_NEW, 0),
 			},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF64))),
 		),
@@ -1410,8 +1381,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW),
+				instr.New(instr.STRUCT_NEW, 0),
 			},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeRef))),
 		),
@@ -1420,8 +1390,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 			},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32))),
 		),
@@ -1430,8 +1399,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 			},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI64))),
 		),
@@ -1440,8 +1408,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 			},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF32))),
 		),
@@ -1450,8 +1417,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 			},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF64))),
 		),
@@ -1460,8 +1426,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 			},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeRef))),
 		),
@@ -1470,8 +1435,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.STRUCT_GET),
 			},
@@ -1482,8 +1446,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.STRUCT_GET),
 			},
@@ -1494,8 +1457,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.STRUCT_GET),
 			},
@@ -1506,8 +1468,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.STRUCT_GET),
 			},
@@ -1518,8 +1479,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.STRUCT_GET),
 			},
@@ -1530,8 +1490,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.STRUCT_SET),
@@ -1543,8 +1502,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.I64_CONST, 1),
 				instr.New(instr.STRUCT_SET),
@@ -1556,8 +1514,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.F32_CONST, uint64(math.Float32bits(42))),
 				instr.New(instr.STRUCT_SET),
@@ -1569,8 +1526,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.F64_CONST, math.Float64bits(42)),
 				instr.New(instr.STRUCT_SET),
@@ -1582,8 +1538,7 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.RTT_CANON, 0),
-				instr.New(instr.STRUCT_NEW_DEFAULT),
+				instr.New(instr.STRUCT_NEW_DEFAULT, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.STRUCT_SET),

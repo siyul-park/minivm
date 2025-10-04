@@ -1366,50 +1366,47 @@ var dispatch = [256]func(i *Interpreter) error{
 		return nil
 	},
 	instr.ARRAY_NEW: func(i *Interpreter) error {
-		if i.sp < 2 {
+		if i.sp < 1 {
 			return ErrStackUnderflow
 		}
-		ref := i.stack[i.sp-1]
-		size := int(i.stack[i.sp-2].I32())
-		if ref.Kind() != types.KindRef {
-			return ErrTypeMismatch
+		frame := &i.frames[i.fp-1]
+		code := frame.fn.Code
+		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+		if idx < 0 || idx >= len(i.types) {
+			return ErrSegmentationFault
 		}
-		if i.sp < size+2 {
-			return ErrStackUnderflow
-		}
-		addr := ref.Ref()
-		rtt, ok := i.heap[addr].(*types.RTT)
+		typ, ok := i.types[idx].(*types.ArrayType)
 		if !ok {
 			return ErrTypeMismatch
 		}
-		typ, ok := rtt.Elem.(*types.ArrayType)
-		if !ok {
-			return ErrTypeMismatch
+		size := int(i.stack[i.sp-1].I32())
+		if i.sp < size+1 {
+			return ErrStackUnderflow
 		}
 		var arr types.Value
 		switch typ.ElemKind {
 		case types.KindI32:
 			val := make(types.I32Array, size)
 			for j := 0; j < size; j++ {
-				val[j] = types.I32(i.stack[i.sp-size-j-2].I32())
+				val[j] = types.I32(i.stack[i.sp-size-j-1].I32())
 			}
 			arr = val
 		case types.KindI64:
 			val := make(types.I64Array, size)
 			for j := 0; j < size; j++ {
-				val[j] = types.I64(i.unboxI64(i.stack[i.sp-size-j-2]))
+				val[j] = types.I64(i.unboxI64(i.stack[i.sp-size-j-1]))
 			}
 			arr = val
 		case types.KindF32:
 			val := make(types.F32Array, size)
 			for j := 0; j < size; j++ {
-				val[j] = types.F32(i.stack[i.sp-size-j-2].F32())
+				val[j] = types.F32(i.stack[i.sp-size-j-1].F32())
 			}
 			arr = val
 		case types.KindF64:
 			val := make(types.F64Array, size)
 			for j := 0; j < size; j++ {
-				val[j] = types.F64(i.stack[i.sp-size-j-2].F64())
+				val[j] = types.F64(i.stack[i.sp-size-j-1].F64())
 			}
 			arr = val
 		default:
@@ -1417,33 +1414,29 @@ var dispatch = [256]func(i *Interpreter) error{
 				Typ:   typ,
 				Elems: make([]types.Boxed, size),
 			}
-			copy(val.Elems, i.stack[i.sp-size-2:i.sp-2])
+			copy(val.Elems, i.stack[i.sp-size-1:i.sp-1])
 			arr = val
 		}
-		i.release(addr)
-		i.sp -= size + 1
+		i.sp -= size
 		i.stack[i.sp-1] = types.BoxRef(i.alloc(arr))
 		i.frames[i.fp-1].ip++
 		return nil
 	},
 	instr.ARRAY_NEW_DEFAULT: func(i *Interpreter) error {
-		if i.sp < 2 {
+		if i.sp < 1 {
 			return ErrStackUnderflow
 		}
-		ref := i.stack[i.sp-1]
-		size := i.stack[i.sp-2].I32()
-		if ref.Kind() != types.KindRef {
-			return ErrTypeMismatch
+		frame := &i.frames[i.fp-1]
+		code := frame.fn.Code
+		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+		if idx < 0 || idx >= len(i.types) {
+			return ErrSegmentationFault
 		}
-		addr := ref.Ref()
-		rtt, ok := i.heap[addr].(*types.RTT)
+		typ, ok := i.types[idx].(*types.ArrayType)
 		if !ok {
 			return ErrTypeMismatch
 		}
-		typ, ok := rtt.Elem.(*types.ArrayType)
-		if !ok {
-			return ErrTypeMismatch
-		}
+		size := i.stack[i.sp-1].I32()
 		var arr types.Value
 		switch typ.ElemKind {
 		case types.KindI32:
@@ -1460,8 +1453,6 @@ var dispatch = [256]func(i *Interpreter) error{
 				Elems: make([]types.Boxed, size),
 			}
 		}
-		i.release(addr)
-		i.sp--
 		i.stack[i.sp-1] = types.BoxRef(i.alloc(arr))
 		i.frames[i.fp-1].ip++
 		return nil
@@ -1690,30 +1681,24 @@ var dispatch = [256]func(i *Interpreter) error{
 		return nil
 	},
 	instr.STRUCT_NEW: func(i *Interpreter) error {
-		if i.sp < 1 {
-			return ErrStackUnderflow
+		frame := &i.frames[i.fp-1]
+		code := frame.fn.Code
+		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+		if idx < 0 || idx >= len(i.types) {
+			return ErrSegmentationFault
 		}
-		ref := i.stack[i.sp-1]
-		if ref.Kind() != types.KindRef {
-			return ErrTypeMismatch
-		}
-		addr := ref.Ref()
-		rtt, ok := i.heap[addr].(*types.RTT)
-		if !ok {
-			return ErrTypeMismatch
-		}
-		typ, ok := rtt.Elem.(*types.StructType)
+		typ, ok := i.types[idx].(*types.StructType)
 		if !ok {
 			return ErrTypeMismatch
 		}
 		size := len(typ.Fields)
-		if i.sp < size+1 {
+		if i.sp < size {
 			return ErrStackUnderflow
 		}
 		s := types.NewStruct(typ)
 		for j, f := range typ.Fields {
 			offset := f.Offset
-			val := i.stack[i.sp-size-j-1]
+			val := i.stack[i.sp-size-j]
 			switch f.Kind {
 			case types.KindI32:
 				*(*int32)(unsafe.Pointer(&s.Data[offset])) = val.I32()
@@ -1729,31 +1714,24 @@ var dispatch = [256]func(i *Interpreter) error{
 				return ErrTypeMismatch
 			}
 		}
-		i.release(addr)
-		i.sp -= size
+		i.sp -= size - 1
 		i.stack[i.sp-1] = types.BoxRef(i.alloc(s))
 		i.frames[i.fp-1].ip++
 		return nil
 	},
 	instr.STRUCT_NEW_DEFAULT: func(i *Interpreter) error {
-		if i.sp < 1 {
-			return ErrStackUnderflow
+		frame := &i.frames[i.fp-1]
+		code := frame.fn.Code
+		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+		if idx < 0 || idx >= len(i.types) {
+			return ErrSegmentationFault
 		}
-		ref := i.stack[i.sp-1]
-		if ref.Kind() != types.KindRef {
-			return ErrTypeMismatch
-		}
-		addr := ref.Ref()
-		rtt, ok := i.heap[addr].(*types.RTT)
-		if !ok {
-			return ErrTypeMismatch
-		}
-		typ, ok := rtt.Elem.(*types.StructType)
+		typ, ok := i.types[idx].(*types.StructType)
 		if !ok {
 			return ErrTypeMismatch
 		}
 		s := types.NewStruct(typ)
-		i.release(addr)
+		i.sp++
 		i.stack[i.sp-1] = types.BoxRef(i.alloc(s))
 		i.frames[i.fp-1].ip++
 		return nil

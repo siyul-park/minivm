@@ -144,8 +144,8 @@ var types = map[Opcode]Type{
 	STRING_LE: {"string.le", []int{}},
 	STRING_GE: {"string.ge", []int{}},
 
-	ARRAY_NEW:         {"array.new", []int{}},
-	ARRAY_NEW_DEFAULT: {"array.new_default", []int{}},
+	ARRAY_NEW:         {"array.new", []int{2}},
+	ARRAY_NEW_DEFAULT: {"array.new_default", []int{2}},
 
 	ARRAY_GET:  {"array.get", []int{}},
 	ARRAY_SET:  {"array.set", []int{}},
@@ -153,8 +153,8 @@ var types = map[Opcode]Type{
 	ARRAY_FILL: {"array.fill", []int{}},
 	ARRAY_COPY: {"array.copy", []int{}},
 
-	STRUCT_NEW:         {"struct.new", []int{}},
-	STRUCT_NEW_DEFAULT: {"struct.new_default", []int{}},
+	STRUCT_NEW:         {"struct.new", []int{2}},
+	STRUCT_NEW_DEFAULT: {"struct.new_default", []int{2}},
 
 	STRUCT_GET: {"struct.get", []int{}},
 	STRUCT_SET: {"struct.set", []int{}},
