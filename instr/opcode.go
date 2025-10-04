@@ -24,8 +24,6 @@ const (
 
 	CONST_GET
 
-	RTT_CANON
-
 	I32_CONST
 
 	I32_ADD

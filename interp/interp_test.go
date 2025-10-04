@@ -173,15 +173,6 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.RTT_CANON, 0),
-			},
-			program.WithTypes(types.TypeI32),
-		),
-		values: []types.Value{types.NewRTT(types.TypeI32)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 42),
 			},
 		),

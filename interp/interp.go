@@ -305,22 +305,6 @@ var dispatch = [256]func(i *Interpreter) error{
 		frame.ip += 3
 		return nil
 	},
-	instr.RTT_CANON: func(i *Interpreter) error {
-		if i.sp == len(i.stack) {
-			return ErrStackOverflow
-		}
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
-		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
-		if idx < 0 || idx >= len(i.types) {
-			return ErrSegmentationFault
-		}
-		typ := i.types[idx]
-		i.stack[i.sp] = types.BoxRef(i.alloc(types.NewRTT(typ)))
-		i.sp++
-		frame.ip += 3
-		return nil
-	},
 	instr.I32_CONST: func(i *Interpreter) error {
 		if i.sp == len(i.stack) {
 			return ErrStackOverflow
