@@ -124,31 +124,26 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.fp == len(i.frames) {
 			return ErrFrameOverflow
 		}
-
-		i.sp--
-		addr := i.stack[i.sp].Ref()
+		addr := i.stack[i.sp-1].Ref()
 		fn, ok := i.heap[addr].(*types.Function)
 		if !ok {
 			return ErrTypeMismatch
 		}
-		if i.sp < fn.Params {
+		if i.sp <= fn.Params {
 			return ErrStackUnderflow
 		}
-		if i.sp+fn.Locals-fn.Params >= len(i.stack) {
+		if i.sp+fn.Locals-fn.Params > len(i.stack) {
 			return ErrStackOverflow
 		}
-
 		for idx := 0; idx < fn.Locals-fn.Params; idx++ {
-			i.stack[i.sp+idx] = 0
+			i.stack[i.sp+idx-1] = 0
 		}
-
 		frame := &i.frames[i.fp]
 		frame.addr = addr
 		frame.fn = fn
 		frame.ip = 0
-		frame.bp = i.sp - fn.Params
+		frame.bp = i.sp - fn.Params - 1
 		i.fp++
-
 		i.sp = frame.bp + fn.Locals
 		i.frames[i.fp-2].ip++
 		return nil
@@ -157,16 +152,13 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.fp == 1 {
 			return ErrFrameUnderflow
 		}
-
 		frame := &i.frames[i.fp-1]
 		fn := frame.fn
 		if i.sp < fn.Returns {
 			return ErrStackUnderflow
 		}
-
 		copy(i.stack[frame.bp:frame.bp+fn.Returns], i.stack[i.sp-fn.Returns:i.sp])
 		i.sp = frame.bp + fn.Returns
-
 		if frame.addr > 0 {
 			i.release(frame.addr)
 		}
@@ -178,19 +170,16 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp == len(i.stack) {
 			return ErrStackOverflow
 		}
-
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.global) {
 			return ErrSegmentationFault
 		}
-
 		val := i.global[idx]
 		if val.Kind() == types.KindRef {
 			i.retain(val.Ref())
 		}
-
 		i.stack[i.sp] = val
 		i.sp++
 		frame.ip += 3
@@ -200,14 +189,12 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp == 0 {
 			return ErrStackUnderflow
 		}
-
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 {
 			return ErrSegmentationFault
 		}
-
 		val := i.stack[i.sp-1]
 		if idx >= len(i.global) {
 			if cap(i.global) > idx {
@@ -218,11 +205,9 @@ var dispatch = [256]func(i *Interpreter) error{
 				i.global = global[:idx+1]
 			}
 		}
-
 		if old := i.global[idx]; old != val && old.Kind() == types.KindRef {
 			i.release(old.Ref())
 		}
-
 		i.global[idx] = val
 		i.sp--
 		frame.ip += 3
@@ -232,7 +217,6 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp == len(i.stack) {
 			return ErrStackOverflow
 		}
-
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(int32(code[frame.ip+1]))
@@ -240,12 +224,10 @@ var dispatch = [256]func(i *Interpreter) error{
 		if addr < 0 || addr > i.sp {
 			return ErrSegmentationFault
 		}
-
 		val := i.stack[addr]
 		if val.Kind() == types.KindRef {
 			i.retain(val.Ref())
 		}
-
 		i.stack[i.sp] = val
 		i.sp++
 		frame.ip += 2
@@ -255,7 +237,6 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp == 0 {
 			return ErrStackUnderflow
 		}
-
 		frame := &i.frames[i.fp-1]
 		fn := frame.fn
 		code := fn.Code
@@ -264,12 +245,10 @@ var dispatch = [256]func(i *Interpreter) error{
 		if addr < 0 || addr > i.sp {
 			return ErrSegmentationFault
 		}
-
 		val := i.stack[i.sp-1]
 		if old := i.stack[addr]; old != val && old.Kind() == types.KindRef {
 			i.release(old.Ref())
 		}
-
 		i.stack[addr] = val
 		i.sp--
 		frame.ip += 2
@@ -1267,7 +1246,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp == 0 {
 			return ErrStackUnderflow
 		}
-		v := i.unboxString(i.stack[i.sp-1])
+		v, _ := i.unbox(i.stack[i.sp-1]).(types.String)
 		i.stack[i.sp-1] = types.BoxI32(int32(len(v)))
 		i.frames[i.fp-1].ip++
 		return nil
@@ -1276,10 +1255,10 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp < 2 {
 			return ErrStackUnderflow
 		}
-		v1 := i.unboxString(i.stack[i.sp-1])
-		v2 := i.unboxString(i.stack[i.sp-2])
+		v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
+		v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
 		i.sp--
-		i.stack[i.sp-1] = types.BoxRef(i.alloc(types.String(v2 + v1)))
+		i.stack[i.sp-1] = types.BoxRef(i.alloc(v2 + v1))
 		i.frames[i.fp-1].ip++
 		return nil
 	},
@@ -1287,8 +1266,8 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp < 2 {
 			return ErrStackUnderflow
 		}
-		v1 := i.unboxString(i.stack[i.sp-1])
-		v2 := i.unboxString(i.stack[i.sp-2])
+		v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
+		v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 == v1)
 		i.frames[i.fp-1].ip++
@@ -1298,8 +1277,8 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp < 2 {
 			return ErrStackUnderflow
 		}
-		v1 := i.unboxString(i.stack[i.sp-1])
-		v2 := i.unboxString(i.stack[i.sp-2])
+		v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
+		v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 != v1)
 		i.frames[i.fp-1].ip++
@@ -1309,8 +1288,8 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp < 2 {
 			return ErrStackUnderflow
 		}
-		v1 := i.unboxString(i.stack[i.sp-1])
-		v2 := i.unboxString(i.stack[i.sp-2])
+		v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
+		v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 < v1)
 		i.frames[i.fp-1].ip++
@@ -1320,8 +1299,8 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp < 2 {
 			return ErrStackUnderflow
 		}
-		v1 := i.unboxString(i.stack[i.sp-1])
-		v2 := i.unboxString(i.stack[i.sp-2])
+		v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
+		v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 > v1)
 		i.frames[i.fp-1].ip++
@@ -1331,8 +1310,8 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp < 2 {
 			return ErrStackUnderflow
 		}
-		v1 := i.unboxString(i.stack[i.sp-1])
-		v2 := i.unboxString(i.stack[i.sp-2])
+		v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
+		v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
 		i.frames[i.fp-1].ip++
@@ -1342,8 +1321,8 @@ var dispatch = [256]func(i *Interpreter) error{
 		if i.sp < 2 {
 			return ErrStackUnderflow
 		}
-		v1 := i.unboxString(i.stack[i.sp-1])
-		v2 := i.unboxString(i.stack[i.sp-2])
+		v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
+		v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
 		i.frames[i.fp-1].ip++
@@ -1877,14 +1856,7 @@ func (i *Interpreter) Push(val types.Value) error {
 	if i.sp == len(i.stack) {
 		return ErrStackOverflow
 	}
-
-	switch val := val.(type) {
-	case types.Boxed:
-		i.stack[i.sp] = val
-	default:
-		addr := i.alloc(val)
-		i.stack[i.sp] = types.BoxRef(addr)
-	}
+	i.stack[i.sp] = i.box(val)
 	i.sp++
 	return nil
 }
@@ -1893,19 +1865,8 @@ func (i *Interpreter) Pop() (types.Value, error) {
 	if i.sp == 0 {
 		return nil, ErrStackUnderflow
 	}
-
 	i.sp--
-	val := i.stack[i.sp]
-
-	switch val.Kind() {
-	case types.KindRef:
-		addr := val.Ref()
-		v := i.heap[addr]
-		i.release(addr)
-		return v, nil
-	default:
-		return types.Unbox(val), nil
-	}
+	return i.unbox(i.stack[i.sp]), nil
 }
 
 func (i *Interpreter) Len() int {
@@ -1950,14 +1911,24 @@ func (i *Interpreter) unboxI64(val types.Boxed) int64 {
 	return int64(v)
 }
 
-func (i *Interpreter) unboxString(val types.Boxed) string {
+func (i *Interpreter) box(val types.Value) types.Boxed {
+	switch v := val.(type) {
+	case types.Boxed:
+		return v
+	default:
+		addr := i.alloc(v)
+		return types.BoxRef(addr)
+	}
+}
+
+func (i *Interpreter) unbox(val types.Boxed) types.Value {
 	if val.Kind() != types.KindRef {
-		return ""
+		return types.Unbox(val)
 	}
 	addr := val.Ref()
-	v, _ := i.heap[addr].(types.String)
+	v := i.heap[addr]
 	i.release(addr)
-	return string(v)
+	return v
 }
 
 func (i *Interpreter) alloc(val types.Value) int {
