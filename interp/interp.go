@@ -64,7 +64,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		if opt.Heap > 0 {
 			h = opt.Heap
 		}
-		if opt.Tick > 0 {
+		if opt.Tick != 0 {
 			t = opt.Tick
 		}
 	}
