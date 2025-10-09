@@ -312,6 +312,33 @@ var dispatch = [256]func(i *Interpreter) error{
 		frame.ip += 3
 		return nil
 	},
+	instr.REF_CAST: func(i *Interpreter) error {
+		if i.sp == 0 {
+			return ErrStackUnderflow
+		}
+		frame := &i.frames[i.fp-1]
+		fn := frame.fn
+		code := fn.Code
+		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+		if idx < 0 || idx >= len(i.types) {
+			return ErrSegmentationFault
+		}
+		typ := i.types[idx]
+		val := i.stack[i.sp-1]
+		switch kind := val.Kind(); kind {
+		case types.KindRef:
+			ref := i.heap[val.Ref()]
+			if !ref.Type().Cast(typ) {
+				return ErrTypeMismatch
+			}
+		default:
+			if kind != typ.Kind() {
+				return ErrTypeMismatch
+			}
+		}
+		frame.ip += 3
+		return nil
+	},
 	instr.I32_CONST: func(i *Interpreter) error {
 		if i.sp == len(i.stack) {
 			return ErrStackOverflow

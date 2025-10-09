@@ -28,6 +28,7 @@ var types = map[Opcode]Type{
 	CONST_GET: {"const.get", []int{2}},
 
 	REF_TEST: {"ref.test", []int{2}},
+	REF_CAST: {"ref.cast", []int{2}},
 
 	I32_CONST: {"i32.const", []int{4}},
 

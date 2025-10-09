@@ -25,6 +25,7 @@ const (
 	CONST_GET
 
 	REF_TEST
+	REF_CAST
 
 	I32_CONST
 
