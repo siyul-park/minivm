@@ -12,6 +12,8 @@ const (
 
 	BR
 	BR_IF
+	BR_TABLE
+
 	SELECT
 
 	CALL

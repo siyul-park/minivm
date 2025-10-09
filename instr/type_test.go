@@ -20,6 +20,8 @@ func TestTypeOf(t *testing.T) {
 
 		{opcode: BR},
 		{opcode: BR_IF},
+		{opcode: BR_TABLE},
+
 		{opcode: SELECT},
 
 		{opcode: CALL},
@@ -167,9 +169,4 @@ func TestTypeOf(t *testing.T) {
 			require.NotZero(t, typ)
 		})
 	}
-}
-
-func TestType_Size(t *testing.T) {
-	typ := TypeOf(NOP)
-	require.Equal(t, 1, typ.Size())
 }

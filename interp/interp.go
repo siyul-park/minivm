@@ -116,9 +116,7 @@ func (i *Interpreter) Run(ctx context.Context) error {
 			return fmt.Errorf("%w: at=%d", ErrUnknownOpcode, f.ip)
 		}
 		if err := fn(i); err != nil {
-			typ := instr.TypeOf(opcode)
-			inst := instr.Instruction(code[f.ip : f.ip+typ.Size()])
-			return fmt.Errorf("%w: at=%d, opcode=%s, operands=%v", err, f.ip, typ.Mnemonic, inst.Operands())
+			return fmt.Errorf("%w: at=%d", err, f.ip)
 		}
 
 		f = &i.frames[i.fp-1]

@@ -55,7 +55,7 @@ var dispatch = [256]func(i *Interpreter) error{
 	instr.BR: func(i *Interpreter) error {
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		offset := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+		offset := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		frame.ip += offset + 3
 		return nil
 	},
@@ -68,10 +68,26 @@ var dispatch = [256]func(i *Interpreter) error{
 		cond := i.stack[i.sp].I32()
 		if cond != 0 {
 			code := frame.fn.Code
-			offset := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+			offset := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 			frame.ip += offset
 		}
 		frame.ip += 3
+		return nil
+	},
+	instr.BR_TABLE: func(i *Interpreter) error {
+		if i.sp == 0 {
+			return ErrStackUnderflow
+		}
+		frame := &i.frames[i.fp-1]
+		code := frame.fn.Code
+		count := int(code[frame.ip+1])
+		i.sp--
+		cond := int(i.stack[i.sp].I32())
+		if cond > count {
+			cond = count + 1
+		}
+		offset := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+cond*2+2])))
+		frame.ip += offset + count*2 + 4
 		return nil
 	},
 	instr.SELECT: func(i *Interpreter) error {
@@ -148,7 +164,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.global) {
 			return ErrSegmentationFault
 		}
@@ -167,7 +183,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 {
 			return ErrSegmentationFault
 		}
@@ -236,7 +252,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.constants) {
 			return ErrSegmentationFault
 		}
@@ -267,7 +283,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		frame := &i.frames[i.fp-1]
 		fn := frame.fn
 		code := fn.Code
-		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
 			return ErrSegmentationFault
 		}
@@ -292,7 +308,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		frame := &i.frames[i.fp-1]
 		fn := frame.fn
 		code := fn.Code
-		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
 			return ErrSegmentationFault
 		}
@@ -1362,7 +1378,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
 			return ErrSegmentationFault
 		}
@@ -1419,7 +1435,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
 			return ErrSegmentationFault
 		}
@@ -1674,7 +1690,7 @@ var dispatch = [256]func(i *Interpreter) error{
 	instr.STRUCT_NEW: func(i *Interpreter) error {
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
 			return ErrSegmentationFault
 		}
@@ -1713,7 +1729,7 @@ var dispatch = [256]func(i *Interpreter) error{
 	instr.STRUCT_NEW_DEFAULT: func(i *Interpreter) error {
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
 			return ErrSegmentationFault
 		}

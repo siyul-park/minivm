@@ -76,6 +76,17 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.BR_TABLE, 2, 0, 5, 1),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_CONST, 3),
+			},
+		),
+		values: []types.Value{types.I32(3)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_CONST, 2),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.SELECT),

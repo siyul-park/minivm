@@ -11,20 +11,10 @@ type Instruction []byte
 func Unmarshal(code []byte) []Instruction {
 	var instrs []Instruction
 	for ip := 0; ip < len(code); {
-		op := Opcode(code[ip])
-		typ, ok := types[op]
-		if !ok {
-			break
-		}
-		size := 1
-		for _, w := range typ.Widths {
-			size += w
-		}
-		if ip+size > len(code) {
-			break
-		}
-		instrs = append(instrs, code[ip:ip+size])
-		ip += size
+		inst := Instruction(code[ip:])
+		width := inst.Width()
+		instrs = append(instrs, code[ip:ip+width])
+		ip += width
 	}
 	return instrs
 }
@@ -44,34 +34,49 @@ func New(op Opcode, operands ...uint64) Instruction {
 	}
 
 	width := 1
+	idx := 0
 	for _, w := range typ.Widths {
-		width += w
+		if w > 0 {
+			width += w
+			idx++
+		} else {
+			count := int(operands[idx])
+			width += 1 + count*-w
+			idx += count + 1
+		}
 	}
 
-	bytecode := make(Instruction, width)
-	bytecode[0] = byte(op)
+	code := make(Instruction, width)
+	code[0] = byte(op)
 
 	offset := 1
-	for i, o := range operands {
-		w := typ.Widths[i]
-		switch w {
-		case 1:
-			bytecode[offset] = byte(o)
-		case 2:
-			ptr := (*uint16)(unsafe.Pointer(&bytecode[offset]))
-			*ptr = uint16(o)
-		case 4:
-			ptr := (*uint32)(unsafe.Pointer(&bytecode[offset]))
-			*ptr = uint32(o)
-		case 8:
-			ptr := (*uint64)(unsafe.Pointer(&bytecode[offset]))
-			*ptr = o
-		default:
-			return nil
+	idx = 0
+	for _, w := range typ.Widths {
+		count := idx + 1
+		if w < 0 {
+			code[offset] = byte(operands[idx])
+			count += int(operands[idx])
+			w *= -1
+			offset++
+			idx++
 		}
-		offset += w
+		for ; idx < count; idx++ {
+			switch w {
+			case 1:
+				code[offset] = byte(operands[idx])
+			case 2:
+				*(*uint16)(unsafe.Pointer(&code[offset])) = uint16(operands[idx])
+			case 4:
+				*(*uint32)(unsafe.Pointer(&code[offset])) = uint32(operands[idx])
+			case 8:
+				*(*uint64)(unsafe.Pointer(&code[offset])) = operands[idx]
+			default:
+				return nil
+			}
+			offset += w
+		}
 	}
-	return bytecode
+	return code
 }
 
 func (i Instruction) Type() Type {
@@ -92,39 +97,77 @@ func (i Instruction) Operand(idx int) uint64 {
 
 func (i Instruction) Operands() []uint64 {
 	typ := i.Type()
-	operands := make([]uint64, len(typ.Widths))
-	offset := 0
-	for j, w := range typ.Widths {
-		ptr := unsafe.Pointer(&i[1+offset])
-		switch w {
-		case 1:
-			operands[j] = uint64(*(*byte)(ptr))
-		case 2:
-			operands[j] = uint64(*(*uint16)(ptr))
-		case 4:
-			operands[j] = uint64(*(*uint32)(ptr))
-		case 8:
-			operands[j] = *(*uint64)(ptr)
-		default:
-			continue
+
+	var operands []uint64
+	offset := 1
+	idx := 0
+	for _, w := range typ.Widths {
+		count := idx + 1
+		if w < 0 {
+			operands = append(operands, uint64(i[offset]))
+			count += int(i[offset])
+			w *= -1
+			offset++
+			idx++
 		}
-		offset += w
+		for ; idx < count; idx++ {
+			switch w {
+			case 1:
+				operands = append(operands, uint64(i[offset]))
+			case 2:
+				operands = append(operands, uint64(*(*uint16)(unsafe.Pointer(&i[offset]))))
+			case 4:
+				operands = append(operands, uint64(*(*uint32)(unsafe.Pointer(&i[offset]))))
+			case 8:
+				operands = append(operands, *(*uint64)(unsafe.Pointer(&i[offset])))
+			default:
+				return nil
+			}
+			offset += w
+		}
 	}
 	return operands
 }
 
+func (i Instruction) Width() int {
+	typ := i.Type()
+	operands := i.Operands()
+	width := 1
+	idx := 0
+	for _, w := range typ.Widths {
+		if w > 0 {
+			width += w
+			idx++
+		} else {
+			count := int(operands[idx])
+			width += 1 + count*-w
+			idx += count + 1
+		}
+	}
+	return width
+}
+
 func (i Instruction) String() string {
 	typ := i.Type()
-	if len(typ.Widths) == 0 {
-		return typ.Mnemonic
-	}
+
+	var sb strings.Builder
+	sb.WriteString(typ.Mnemonic)
 
 	operands := i.Operands()
-	widths := typ.Widths
-
-	var ops []string
-	for idx, operand := range operands {
-		ops = append(ops, fmt.Sprintf("0x%0*X", widths[idx]*2, operand))
+	offset := 0
+	for _, w := range typ.Widths {
+		count := offset + 1
+		if w < 0 {
+			sb.WriteByte(' ')
+			sb.WriteString(fmt.Sprintf("0x%02x", operands[offset]))
+			count += int(operands[offset])
+			w *= -1
+			offset++
+		}
+		for ; offset < count; offset++ {
+			sb.WriteByte(' ')
+			sb.WriteString(fmt.Sprintf("0x%0*X", w*2, operands[offset]))
+		}
 	}
-	return fmt.Sprintf("%s %s", typ.Mnemonic, strings.Join(ops, " "))
+	return sb.String()
 }

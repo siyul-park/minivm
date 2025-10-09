@@ -13,8 +13,10 @@ var types = map[Opcode]Type{
 	DUP:  {"dup", []int{}},
 	SWAP: {"swap", []int{}},
 
-	BR:     {"br", []int{2}},
-	BR_IF:  {"br_if", []int{2}},
+	BR:       {"br", []int{2}},
+	BR_IF:    {"br_if", []int{2}},
+	BR_TABLE: {"br_table", []int{-2, 2}},
+
 	SELECT: {"select", []int{}},
 
 	CALL:   {"call", []int{}},
@@ -167,12 +169,4 @@ func TypeOf(op Opcode) Type {
 		return t
 	}
 	return Type{}
-}
-
-func (t *Type) Size() int {
-	size := 1
-	for _, w := range t.Widths {
-		size += w
-	}
-	return size
 }

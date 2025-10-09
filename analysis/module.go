@@ -56,10 +56,8 @@ func NewModulePass() pass.Pass[*Module] {
 
 			offsets := []int{0}
 			for ip := 0; ip < len(code); {
-				typ := instr.TypeOf(instr.Opcode(code[ip]))
-				inst := instr.Instruction(code[ip : ip+typ.Size()])
-
-				next := ip + typ.Size()
+				inst := instr.Instruction(code[ip:])
+				next := ip + inst.Width()
 				switch inst.Opcode() {
 				case instr.UNREACHABLE, instr.RETURN:
 					if next < len(code) {
@@ -67,7 +65,7 @@ func NewModulePass() pass.Pass[*Module] {
 					}
 				case instr.BR, instr.BR_IF:
 					offset := int(inst.Operand(0))
-					target := ip + typ.Size() + offset
+					target := ip + inst.Width() + offset
 					if target < 0 || target >= len(code) {
 						return nil, fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
 					}
@@ -96,25 +94,23 @@ func NewModulePass() pass.Pass[*Module] {
 			for i, blk := range blocks {
 				ip := 0
 				for ip < len(code) {
-					op := instr.Opcode(blk.Code[ip])
-					typ := instr.TypeOf(op)
-					if ip+typ.Size() >= len(blk.Code) {
+					inst := instr.Instruction(blk.Code[ip:])
+					if ip+inst.Width() >= len(blk.Code) {
 						break
 					}
-					ip += typ.Size()
+					ip += inst.Width()
 				}
 				if ip == len(code) {
 					continue
 				}
 
-				typ := instr.TypeOf(instr.Opcode(blk.Code[ip]))
-				inst := instr.Instruction(blk.Code[ip : ip+typ.Size()])
+				inst := instr.Instruction(blk.Code[ip:])
 
 				switch inst.Opcode() {
 				case instr.UNREACHABLE, instr.RETURN:
 				case instr.BR, instr.BR_IF:
 					offset := int(inst.Operand(0))
-					target := ip + typ.Size() + offset
+					target := ip + inst.Width() + offset
 
 					ok := false
 					for j, blk := range blocks {
