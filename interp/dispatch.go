@@ -1832,3 +1832,13 @@ var dispatch = [256]func(i *Interpreter) error{
 		return nil
 	},
 }
+
+func init() {
+	for i, fn := range dispatch {
+		if fn == nil {
+			dispatch[i] = func(i *Interpreter) error {
+				return ErrUnknownOpcode
+			}
+		}
+	}
+}

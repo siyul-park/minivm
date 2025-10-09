@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
@@ -110,15 +109,10 @@ func (i *Interpreter) Run(ctx context.Context) error {
 			}
 		}
 
-		opcode := instr.Opcode(code[f.ip])
-		fn := dispatch[opcode]
-		if fn == nil {
-			return fmt.Errorf("%w: at=%d", ErrUnknownOpcode, f.ip)
-		}
+		fn := dispatch[code[f.ip]]
 		if err := fn(i); err != nil {
 			return fmt.Errorf("%w: at=%d", err, f.ip)
 		}
-
 		f = &i.frames[i.fp-1]
 		code = f.fn.Code
 	}
