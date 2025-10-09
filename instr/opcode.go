@@ -12,6 +12,7 @@ const (
 
 	BR
 	BR_IF
+	SELECT
 
 	CALL
 	RETURN

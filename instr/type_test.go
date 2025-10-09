@@ -20,6 +20,7 @@ func TestTypeOf(t *testing.T) {
 
 		{opcode: BR},
 		{opcode: BR_IF},
+		{opcode: SELECT},
 
 		{opcode: CALL},
 		{opcode: RETURN},

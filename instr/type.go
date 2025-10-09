@@ -13,8 +13,9 @@ var types = map[Opcode]Type{
 	DUP:  {"dup", []int{}},
 	SWAP: {"swap", []int{}},
 
-	BR:    {"br", []int{2}},
-	BR_IF: {"br_if", []int{2}},
+	BR:     {"br", []int{2}},
+	BR_IF:  {"br_if", []int{2}},
+	SELECT: {"select", []int{}},
 
 	CALL:   {"call", []int{}},
 	RETURN: {"return", []int{}},

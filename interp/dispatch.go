@@ -74,6 +74,25 @@ var dispatch = [256]func(i *Interpreter) error{
 		frame.ip += 3
 		return nil
 	},
+	instr.SELECT: func(i *Interpreter) error {
+		if i.sp < 3 {
+			return ErrStackUnderflow
+		}
+		cond := i.stack[i.sp-1].I32()
+		var discard types.Boxed
+		if cond == 0 {
+			discard = i.stack[i.sp-3]
+			i.stack[i.sp-3] = i.stack[i.sp-2]
+		} else {
+			discard = i.stack[i.sp-2]
+		}
+		if discard.Kind() == types.KindRef {
+			i.release(discard.Ref())
+		}
+		i.sp -= 2
+		i.frames[i.fp-1].ip++
+		return nil
+	},
 	instr.CALL: func(i *Interpreter) error {
 		if i.sp == 0 {
 			return ErrStackUnderflow
