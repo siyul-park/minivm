@@ -113,10 +113,12 @@ func (i *Interpreter) Run(ctx context.Context) error {
 		opcode := instr.Opcode(code[f.ip])
 		fn := dispatch[opcode]
 		if fn == nil {
-			return fmt.Errorf("%w: at=%d, op=%s", ErrUnknownOpcode, f.ip, instr.TypeOf(opcode).Mnemonic)
+			return fmt.Errorf("%w: at=%d", ErrUnknownOpcode, f.ip)
 		}
 		if err := fn(i); err != nil {
-			return fmt.Errorf("%w: at=%d, op=%s", ErrUnknownOpcode, f.ip, instr.TypeOf(opcode).Mnemonic)
+			typ := instr.TypeOf(opcode)
+			inst := instr.Instruction(code[f.ip : f.ip+typ.Size()])
+			return fmt.Errorf("%w: at=%d, opcode=%s, operands=%v", err, f.ip, typ.Mnemonic, inst.Operands())
 		}
 
 		f = &i.frames[i.fp-1]
