@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"context"
 	"math"
 	"testing"
 
@@ -1625,8 +1626,12 @@ var tests = []struct {
 func TestInterpreter_Run(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.program.String(), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.TODO())
+			defer cancel()
+
 			i := New(tt.program)
-			err := i.Run()
+
+			err := i.Run(ctx)
 			require.NoError(t, err)
 			for _, val := range tt.values {
 				v, err := i.Pop()
@@ -1640,10 +1645,14 @@ func TestInterpreter_Run(t *testing.T) {
 func BenchmarkInterpreter_Run(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.program.String(), func(b *testing.B) {
+			ctx, cancel := context.WithCancel(context.TODO())
+			defer cancel()
+
 			i := New(tt.program)
 			b.ResetTimer()
+
 			for n := 0; n < b.N; n++ {
-				_ = i.Run()
+				_ = i.Run(ctx)
 				i.Clear()
 			}
 		})

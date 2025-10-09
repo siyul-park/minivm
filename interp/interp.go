@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"unsafe"
@@ -15,6 +16,7 @@ type Option struct {
 	Global int
 	Stack  int
 	Heap   int
+	Tick   int
 }
 
 type Interpreter struct {
@@ -28,6 +30,7 @@ type Interpreter struct {
 	rc        []int
 	fp        int
 	sp        int
+	tick      int
 }
 
 type frame struct {
@@ -1819,6 +1822,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	g := 128
 	s := 1024
 	h := 128
+	t := 1024
 	for _, opt := range opts {
 		if opt.Frame > 0 {
 			f = opt.Frame
@@ -1831,6 +1835,9 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		}
 		if opt.Heap > 0 {
 			h = opt.Heap
+		}
+		if opt.Tick > 0 {
+			t = opt.Tick
 		}
 	}
 	if f <= 0 {
@@ -1848,6 +1855,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		free:      make([]int, 0, h),
 		fp:        1,
 		sp:        0,
+		tick:      t,
 	}
 
 	i.heap = append(i.heap, nil)
@@ -1858,19 +1866,31 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	return i
 }
 
-func (i *Interpreter) Run() error {
+func (i *Interpreter) Run(ctx context.Context) error {
 	f := &i.frames[i.fp-1]
 	code := f.fn.Code
+	tick := i.tick
 
 	for f.ip < len(code) {
+		tick--
+		if tick == 0 {
+			tick = i.tick
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+
 		opcode := instr.Opcode(code[f.ip])
 		fn := dispatch[opcode]
 		if fn == nil {
-			return fmt.Errorf("%w: at=%d", ErrUnknownOpcode, f.ip)
+			return fmt.Errorf("%w: at=%d, op=%s", ErrUnknownOpcode, f.ip, instr.TypeOf(opcode).Mnemonic)
 		}
 		if err := fn(i); err != nil {
-			return fmt.Errorf("%w: at=%d", err, f.ip)
+			return fmt.Errorf("%w: at=%d, op=%s", ErrUnknownOpcode, f.ip, instr.TypeOf(opcode).Mnemonic)
 		}
+
 		f = &i.frames[i.fp-1]
 		code = f.fn.Code
 	}
