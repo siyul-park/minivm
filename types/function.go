@@ -18,41 +18,38 @@ type Function struct {
 type FunctionType struct {
 	Params  []Type
 	Returns []Type
+	Locals  []Type
 }
 
 var _ Value = (*Function)(nil)
 var _ Type = (*FunctionType)(nil)
 
-func FunctionWithParams(types ...Type) func(*Function) {
-	return func(fn *Function) {
-		fn.Typ.Params = append(fn.Typ.Params, types...)
-		fn.Params += len(types)
-		fn.Locals += len(types)
+func WithParams(types ...Type) func(*FunctionType) {
+	return func(typ *FunctionType) {
+		typ.Params = append(typ.Params, types...)
 	}
 }
 
-func FunctionWithReturns(types ...Type) func(*Function) {
-	return func(fn *Function) {
-		fn.Typ.Returns = append(fn.Typ.Returns, types...)
-		fn.Returns += len(types)
+func WithReturns(types ...Type) func(*FunctionType) {
+	return func(typ *FunctionType) {
+		typ.Returns = append(typ.Returns, types...)
 	}
 }
 
-func FunctionWithLocals(types ...Type) func(*Function) {
-	return func(function *Function) {
-		function.Locals += len(types)
+func WithLocals(types ...Type) func(*FunctionType) {
+	return func(typ *FunctionType) {
+		typ.Locals = append(typ.Locals, types...)
 	}
 }
 
-func NewFunction(instrs []instr.Instruction, opts ...func(*Function)) *Function {
-	fn := &Function{
-		Typ:  &FunctionType{},
-		Code: instr.Marshal(instrs),
+func NewFunction(typ *FunctionType, instrs ...instr.Instruction) *Function {
+	return &Function{
+		Typ:     typ,
+		Params:  len(typ.Params),
+		Returns: len(typ.Returns),
+		Locals:  len(typ.Params) + len(typ.Locals),
+		Code:    instr.Marshal(instrs),
 	}
-	for _, opt := range opts {
-		opt(fn)
-	}
-	return fn
 }
 
 func (f *Function) Type() Type {
@@ -72,6 +69,14 @@ func (f *Function) String() string {
 	sb.WriteString(fmt.Sprintf("%s\n", f.Typ.String()))
 	sb.WriteString(instr.Disassemble(f.Code))
 	return sb.String()
+}
+
+func NewFunctionType(opts ...func(*FunctionType)) *FunctionType {
+	typ := &FunctionType{}
+	for _, opt := range opts {
+		opt(typ)
+	}
+	return typ
 }
 
 func (t *FunctionType) Kind() Kind {
