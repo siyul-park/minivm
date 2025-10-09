@@ -24,6 +24,8 @@ const (
 
 	CONST_GET
 
+	REF_TEST
+
 	I32_CONST
 
 	I32_ADD

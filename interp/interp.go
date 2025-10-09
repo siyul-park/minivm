@@ -219,7 +219,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
-		idx := int(int32(code[frame.ip+1]))
+		idx := int(code[frame.ip+1])
 		addr := frame.bp + idx
 		if addr < 0 || addr > i.sp {
 			return ErrSegmentationFault
@@ -240,7 +240,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		frame := &i.frames[i.fp-1]
 		fn := frame.fn
 		code := fn.Code
-		idx := int(int32(code[frame.ip+1]))
+		idx := int(code[frame.ip+1])
 		addr := frame.bp + idx
 		if addr < 0 || addr > i.sp {
 			return ErrSegmentationFault
@@ -281,6 +281,31 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		i.stack[i.sp] = val
 		i.sp++
+		frame.ip += 3
+		return nil
+	},
+	instr.REF_TEST: func(i *Interpreter) error {
+		if i.sp == 0 {
+			return ErrStackUnderflow
+		}
+		frame := &i.frames[i.fp-1]
+		fn := frame.fn
+		code := fn.Code
+		idx := int(*(*int16)(unsafe.Pointer(&code[frame.ip+1])))
+		if idx < 0 || idx >= len(i.types) {
+			return ErrSegmentationFault
+		}
+		typ := i.types[idx]
+		val := i.stack[i.sp-1]
+		var cond types.Boxed
+		switch kind := val.Kind(); kind {
+		case types.KindRef:
+			ref := i.heap[val.Ref()]
+			cond = types.BoxBool(ref.Type().Equals(typ))
+		default:
+			cond = types.BoxBool(kind == typ.Kind())
+		}
+		i.stack[i.sp-1] = cond
 		frame.ip += 3
 		return nil
 	},

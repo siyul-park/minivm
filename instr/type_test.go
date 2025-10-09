@@ -32,6 +32,8 @@ func TestTypeOf(t *testing.T) {
 
 		{opcode: CONST_GET},
 
+		{opcode: REF_TEST},
+
 		{opcode: I32_CONST},
 
 		{opcode: I32_XOR},

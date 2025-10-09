@@ -174,6 +174,16 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.REF_TEST, 0),
+			},
+			program.WithTypes(types.TypeI32),
+		),
+		values: []types.Value{types.True},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 42),
 			},
 		),
 		values: []types.Value{types.I32(42)},
