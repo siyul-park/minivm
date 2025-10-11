@@ -30,6 +30,8 @@ const (
 	REF_TEST
 	REF_CAST
 
+	REF_EQ
+
 	I32_CONST
 
 	I32_ADD
@@ -47,6 +49,7 @@ const (
 	I32_AND
 	I32_OR
 
+	I32_EQZ
 	I32_EQ
 	I32_NE
 	I32_LT_S
@@ -78,6 +81,7 @@ const (
 	I64_SHR_S
 	I64_SHR_U
 
+	I64_EQZ
 	I64_EQ
 	I64_NE
 	I64_LT_S

@@ -38,6 +38,8 @@ func TestTypeOf(t *testing.T) {
 		{opcode: REF_TEST},
 		{opcode: REF_CAST},
 
+		{opcode: REF_EQ},
+
 		{opcode: I32_CONST},
 
 		{opcode: I32_XOR},
@@ -55,6 +57,7 @@ func TestTypeOf(t *testing.T) {
 		{opcode: I32_SHR_S},
 		{opcode: I32_SHR_U},
 
+		{opcode: I32_EQZ},
 		{opcode: I32_EQ},
 		{opcode: I32_NE},
 		{opcode: I32_LT_S},
@@ -86,6 +89,7 @@ func TestTypeOf(t *testing.T) {
 		{opcode: I64_SHR_S},
 		{opcode: I64_SHR_U},
 
+		{opcode: I64_EQZ},
 		{opcode: I64_EQ},
 		{opcode: I64_NE},
 		{opcode: I64_LT_S},

@@ -33,6 +33,8 @@ var types = map[Opcode]Type{
 	REF_TEST: {"ref.test", []int{2}},
 	REF_CAST: {"ref.cast", []int{2}},
 
+	REF_EQ: {"ref.eq", []int{}},
+
 	I32_CONST: {"i32.const", []int{4}},
 
 	I32_XOR: {"i32.xor", []int{}},
@@ -50,6 +52,7 @@ var types = map[Opcode]Type{
 	I32_SHR_S: {"i32.shr_s", []int{}},
 	I32_SHR_U: {"i32.shr_u", []int{}},
 
+	I32_EQZ:  {"i32.eqz", []int{}},
 	I32_EQ:   {"i32.eq", []int{}},
 	I32_NE:   {"i32.ne", []int{}},
 	I32_LT_S: {"i32.lt_s", []int{}},
@@ -81,6 +84,7 @@ var types = map[Opcode]Type{
 	I64_SHR_S: {"i64.shr_s", []int{}},
 	I64_SHR_U: {"i64.shr_u", []int{}},
 
+	I64_EQZ:  {"i64.eqz", []int{}},
 	I64_EQ:   {"i64.eq", []int{}},
 	I64_NE:   {"i64.ne", []int{}},
 	I64_LT_S: {"i64.lt_s", []int{}},

@@ -328,6 +328,17 @@ var dispatch = [256]func(i *Interpreter) error{
 		frame.ip += 3
 		return nil
 	},
+	instr.REF_EQ: func(i *Interpreter) error {
+		if i.sp < 2 {
+			return ErrStackUnderflow
+		}
+		v1 := i.stack[i.sp-1]
+		v2 := i.stack[i.sp-2]
+		i.sp--
+		i.stack[i.sp-1] = types.BoxBool(v2 == v1)
+		i.frames[i.fp-1].ip++
+		return nil
+	},
 	instr.I32_CONST: func(i *Interpreter) error {
 		if i.sp == len(i.stack) {
 			return ErrStackOverflow
@@ -347,7 +358,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
-		i.stack[i.sp-1] = types.BoxI32(v1 + v2)
+		i.stack[i.sp-1] = types.BoxI32(v2 + v1)
 		i.frames[i.fp-1].ip++
 		return nil
 	},
@@ -492,6 +503,15 @@ var dispatch = [256]func(i *Interpreter) error{
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxI32(v1 | v2)
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.I32_EQZ: func(i *Interpreter) error {
+		if i.sp == 0 {
+			return ErrStackUnderflow
+		}
+		val := i.stack[i.sp-1].I32()
+		i.stack[i.sp-1] = types.BoxBool(val == 0)
 		i.frames[i.fp-1].ip++
 		return nil
 	},
@@ -678,7 +698,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
-		i.stack[i.sp-1] = i.boxI64(v1 + v2)
+		i.stack[i.sp-1] = i.boxI64(v2 + v1)
 		i.frames[i.fp-1].ip++
 		return nil
 	},
@@ -790,6 +810,15 @@ var dispatch = [256]func(i *Interpreter) error{
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = i.boxI64(int64(uint64(v2) >> (v1 & 0x3F)))
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.I64_EQZ: func(i *Interpreter) error {
+		if i.sp == 0 {
+			return ErrStackUnderflow
+		}
+		val := i.unboxI64(i.stack[i.sp-1])
+		i.stack[i.sp-1] = types.BoxBool(val == 0)
 		i.frames[i.fp-1].ip++
 		return nil
 	},
@@ -966,7 +995,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		v1 := i.stack[i.sp-1].F32()
 		v2 := i.stack[i.sp-2].F32()
 		i.sp--
-		i.stack[i.sp-1] = types.BoxF32(v1 + v2)
+		i.stack[i.sp-1] = types.BoxF32(v2 + v1)
 		i.frames[i.fp-1].ip++
 		return nil
 	},
@@ -1180,7 +1209,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		v1 := i.stack[i.sp-1].F64()
 		v2 := i.stack[i.sp-2].F64()
 		i.sp--
-		i.stack[i.sp-1] = types.BoxF64(v1 + v2)
+		i.stack[i.sp-1] = types.BoxF64(v2 + v1)
 		i.frames[i.fp-1].ip++
 		return nil
 	},

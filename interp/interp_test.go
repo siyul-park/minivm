@@ -202,7 +202,6 @@ var tests = []struct {
 		),
 		values: []types.Value{types.True},
 	},
-
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -212,6 +211,17 @@ var tests = []struct {
 			program.WithTypes(types.TypeI32),
 		),
 		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.DUP),
+				instr.New(instr.REF_EQ),
+			},
+			program.WithConstants(types.String("foo")),
+		),
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -355,11 +365,20 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_EQZ),
+			},
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_EQ),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -369,7 +388,7 @@ var tests = []struct {
 				instr.New(instr.I32_NE),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -379,7 +398,7 @@ var tests = []struct {
 				instr.New(instr.I32_LT_S),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -389,7 +408,7 @@ var tests = []struct {
 				instr.New(instr.I32_GT_S),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -399,7 +418,7 @@ var tests = []struct {
 				instr.New(instr.I32_LE_S),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -409,7 +428,7 @@ var tests = []struct {
 				instr.New(instr.I32_GE_S),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -577,11 +596,20 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I64_EQZ),
+			},
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 1),
 				instr.New(instr.I64_CONST, 1),
 				instr.New(instr.I64_EQ),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -591,7 +619,7 @@ var tests = []struct {
 				instr.New(instr.I64_NE),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -601,7 +629,7 @@ var tests = []struct {
 				instr.New(instr.I64_LT_S),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -611,7 +639,7 @@ var tests = []struct {
 				instr.New(instr.I64_GT_S),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -621,7 +649,7 @@ var tests = []struct {
 				instr.New(instr.I64_LE_S),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -631,7 +659,7 @@ var tests = []struct {
 				instr.New(instr.I64_GE_S),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -734,7 +762,7 @@ var tests = []struct {
 				instr.New(instr.F32_EQ),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -744,7 +772,7 @@ var tests = []struct {
 				instr.New(instr.F32_NE),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -754,7 +782,7 @@ var tests = []struct {
 				instr.New(instr.F32_LT),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -764,7 +792,7 @@ var tests = []struct {
 				instr.New(instr.F32_GT),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -774,7 +802,7 @@ var tests = []struct {
 				instr.New(instr.F32_LE),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -784,7 +812,7 @@ var tests = []struct {
 				instr.New(instr.F32_GE),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -887,7 +915,7 @@ var tests = []struct {
 				instr.New(instr.F64_EQ),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -897,7 +925,7 @@ var tests = []struct {
 				instr.New(instr.F64_NE),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -907,7 +935,7 @@ var tests = []struct {
 				instr.New(instr.F64_LT),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -917,7 +945,7 @@ var tests = []struct {
 				instr.New(instr.F64_GT),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -927,7 +955,7 @@ var tests = []struct {
 				instr.New(instr.F64_LE),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -937,7 +965,7 @@ var tests = []struct {
 				instr.New(instr.F64_GE),
 			},
 		),
-		values: []types.Value{types.Bool(true)},
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
