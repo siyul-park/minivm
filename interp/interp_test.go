@@ -132,6 +132,16 @@ var tests = []struct {
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.GLOBAL_GET, 0),
+			},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.GLOBAL_SET, 0),
 			},
 		),
 		values: nil,
@@ -140,9 +150,27 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.GLOBAL_SET, 0),
-				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.GLOBAL_TEE, 0),
 			},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(
+				types.NewFunction(
+					types.NewFunctionType(
+						types.WithLocals(types.TypeI32),
+					),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.LOCAL_SET, 0),
+					instr.New(instr.LOCAL_GET, 0),
+				),
+			),
 		),
 		values: []types.Value{types.I32(1)},
 	},
@@ -176,8 +204,7 @@ var tests = []struct {
 						types.WithLocals(types.TypeI32),
 					),
 					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.LOCAL_SET, 0),
-					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.LOCAL_TEE, 0),
 				),
 			),
 		),

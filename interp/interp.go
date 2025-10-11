@@ -10,18 +10,18 @@ import (
 )
 
 type Option struct {
-	Frame  int
-	Global int
-	Stack  int
-	Heap   int
-	Tick   int
+	Frame   int
+	Globals int
+	Stack   int
+	Heap    int
+	Tick    int
 }
 
 type Interpreter struct {
 	frames    []frame
 	types     []types.Type
 	constants []types.Boxed
-	global    []types.Boxed
+	globals   []types.Boxed
 	stack     []types.Boxed
 	heap      []types.Value
 	free      []int
@@ -54,8 +54,8 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		if opt.Frame > 0 {
 			f = opt.Frame
 		}
-		if opt.Global > 0 {
-			g = opt.Global
+		if opt.Globals > 0 {
+			g = opt.Globals
 		}
 		if opt.Stack > 0 {
 			s = opt.Stack
@@ -75,7 +75,7 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		frames:    make([]frame, f),
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
-		global:    make([]types.Boxed, 0, g),
+		globals:   make([]types.Boxed, 0, g),
 		stack:     make([]types.Boxed, s),
 		heap:      make([]types.Value, 0, h),
 		rc:        make([]int, 0, h),
@@ -166,10 +166,10 @@ func (i *Interpreter) Clear() {
 	i.frames[i.fp-1].bp = i.sp
 	i.frames[i.fp-1].ip = 0
 
-	for idx := range i.global {
-		i.global[idx] = 0
+	for idx := range i.globals {
+		i.globals[idx] = 0
 	}
-	i.global = i.global[:0]
+	i.globals = i.globals[:0]
 
 	i.sp = 0
 
@@ -316,7 +316,7 @@ func (i *Interpreter) gc() {
 			push(val.Ref())
 		}
 	}
-	for _, val := range i.global {
+	for _, val := range i.globals {
 		if val.Kind() == types.KindRef {
 			push(val.Ref())
 		}

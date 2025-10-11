@@ -165,10 +165,10 @@ var dispatch = [256]func(i *Interpreter) error{
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
-		if idx < 0 || idx >= len(i.global) {
+		if idx < 0 || idx >= len(i.globals) {
 			return ErrSegmentationFault
 		}
-		val := i.global[idx]
+		val := i.globals[idx]
 		if val.Kind() == types.KindRef {
 			i.retain(val.Ref())
 		}
@@ -188,20 +188,47 @@ var dispatch = [256]func(i *Interpreter) error{
 			return ErrSegmentationFault
 		}
 		val := i.stack[i.sp-1]
-		if idx >= len(i.global) {
-			if cap(i.global) > idx {
-				i.global = i.global[:idx+1]
+		if idx >= len(i.globals) {
+			if cap(i.globals) > idx {
+				i.globals = i.globals[:idx+1]
 			} else {
 				global := make([]types.Boxed, idx*2)
-				copy(global, i.global)
-				i.global = global[:idx+1]
+				copy(global, i.globals)
+				i.globals = global[:idx+1]
 			}
 		}
-		if old := i.global[idx]; old != val && old.Kind() == types.KindRef {
+		if old := i.globals[idx]; old != val && old.Kind() == types.KindRef {
 			i.release(old.Ref())
 		}
-		i.global[idx] = val
+		i.globals[idx] = val
 		i.sp--
+		frame.ip += 3
+		return nil
+	},
+	instr.GLOBAL_TEE: func(i *Interpreter) error {
+		if i.sp == 0 {
+			return ErrStackUnderflow
+		}
+		frame := &i.frames[i.fp-1]
+		code := frame.fn.Code
+		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
+		if idx < 0 {
+			return ErrSegmentationFault
+		}
+		val := i.stack[i.sp-1]
+		if idx >= len(i.globals) {
+			if cap(i.globals) > idx {
+				i.globals = i.globals[:idx+1]
+			} else {
+				global := make([]types.Boxed, idx*2)
+				copy(global, i.globals)
+				i.globals = global[:idx+1]
+			}
+		}
+		if old := i.globals[idx]; old != val && old.Kind() == types.KindRef {
+			i.release(old.Ref())
+		}
+		i.globals[idx] = val
 		frame.ip += 3
 		return nil
 	},
@@ -243,6 +270,26 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		i.stack[addr] = val
 		i.sp--
+		frame.ip += 2
+		return nil
+	},
+	instr.LOCAL_TEE: func(i *Interpreter) error {
+		if i.sp == 0 {
+			return ErrStackUnderflow
+		}
+		frame := &i.frames[i.fp-1]
+		fn := frame.fn
+		code := fn.Code
+		idx := int(code[frame.ip+1])
+		addr := frame.bp + idx
+		if addr < 0 || addr > i.sp {
+			return ErrSegmentationFault
+		}
+		val := i.stack[i.sp-1]
+		if old := i.stack[addr]; old != val && old.Kind() == types.KindRef {
+			i.release(old.Ref())
+		}
+		i.stack[addr] = val
 		frame.ip += 2
 		return nil
 	},
