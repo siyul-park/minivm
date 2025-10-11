@@ -102,7 +102,7 @@ var tests = []struct {
 			},
 			program.WithConstants(
 				types.NewFunction(
-					types.NewFunctionType(),
+					types.NewFunctionSignature(),
 					instr.New(instr.I32_CONST, 1),
 				),
 			),
@@ -117,7 +117,7 @@ var tests = []struct {
 			},
 			program.WithConstants(
 				NewNativeFunction(
-					types.NewFunctionType(
+					types.NewFunctionSignature(
 						types.WithReturns(types.TypeI32),
 					),
 					func(i *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
@@ -136,7 +136,7 @@ var tests = []struct {
 			},
 			program.WithConstants(
 				types.NewFunction(
-					types.NewFunctionType(
+					types.NewFunctionSignature(
 						types.WithReturns(types.TypeI32),
 					),
 					instr.New(instr.I32_CONST, 1),
@@ -182,7 +182,7 @@ var tests = []struct {
 			},
 			program.WithConstants(
 				types.NewFunction(
-					types.NewFunctionType(
+					types.NewFunctionSignature(
 						types.WithLocals(types.TypeI32),
 					),
 					instr.New(instr.I32_CONST, 1),
@@ -201,7 +201,7 @@ var tests = []struct {
 			},
 			program.WithConstants(
 				types.NewFunction(
-					types.NewFunctionType(
+					types.NewFunctionSignature(
 						types.WithLocals(types.TypeI32),
 					),
 					instr.New(instr.I32_CONST, 1),
@@ -219,7 +219,7 @@ var tests = []struct {
 			},
 			program.WithConstants(
 				types.NewFunction(
-					types.NewFunctionType(
+					types.NewFunctionSignature(
 						types.WithLocals(types.TypeI32),
 					),
 					instr.New(instr.I32_CONST, 1),
@@ -234,9 +234,9 @@ var tests = []struct {
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 			},
-			program.WithConstants(types.NewFunction(types.NewFunctionType())),
+			program.WithConstants(types.NewFunction(types.NewFunctionSignature())),
 		),
-		values: []types.Value{types.NewFunction(types.NewFunctionType())},
+		values: []types.Value{types.NewFunction(types.NewFunctionSignature())},
 	},
 	{
 		program: program.New(
@@ -1696,7 +1696,7 @@ var tests = []struct {
 			},
 			program.WithConstants(
 				types.NewFunction(
-					types.NewFunctionType(
+					types.NewFunctionSignature(
 						types.WithParams(types.TypeI64),
 						types.WithReturns(types.TypeI64),
 					),
@@ -1732,7 +1732,7 @@ var tests = []struct {
 			},
 			program.WithConstants(
 				types.NewFunction(
-					types.NewFunctionType(
+					types.NewFunctionSignature(
 						types.WithParams(types.TypeI64),
 						types.WithReturns(types.TypeI64),
 					),

@@ -8,20 +8,20 @@ import (
 )
 
 type NativeFunction struct {
-	Typ     *types.FunctionType
-	Params  int
-	Returns int
-	Fn      func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error)
+	Signature *types.FunctionSignature
+	Params    int
+	Returns   int
+	Fn        func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error)
 }
 
 var _ types.Value = (*NativeFunction)(nil)
 
-func NewNativeFunction(typ *types.FunctionType, fn func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error)) *NativeFunction {
+func NewNativeFunction(signature *types.FunctionSignature, fn func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error)) *NativeFunction {
 	return &NativeFunction{
-		Typ:     typ,
-		Params:  len(typ.Params),
-		Returns: len(typ.Returns),
-		Fn:      fn,
+		Signature: signature,
+		Params:    len(signature.Params),
+		Returns:   len(signature.Returns),
+		Fn:        fn,
 	}
 }
 
@@ -30,7 +30,7 @@ func (f *NativeFunction) Kind() types.Kind {
 }
 
 func (f *NativeFunction) Type() types.Type {
-	return f.Typ
+	return f.Signature.Type()
 }
 
 func (f *NativeFunction) Interface() any {
@@ -39,7 +39,7 @@ func (f *NativeFunction) Interface() any {
 
 func (f *NativeFunction) String() string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s\n", f.Typ.String()))
+	sb.WriteString(fmt.Sprintf("%s\n", f.Signature.String()))
 	sb.WriteString("<native>")
 	return sb.String()
 }

@@ -27,7 +27,7 @@ func TestModuleBuilder_Build(t *testing.T) {
 				Functions: []*Function{
 					{
 						Function: types.NewFunction(
-							types.NewFunctionType(),
+							types.NewFunctionSignature(),
 							instr.New(instr.NOP),
 						),
 						Blocks: []*BasicBlock{
@@ -56,7 +56,7 @@ func TestModuleBuilder_Build(t *testing.T) {
 				Functions: []*Function{
 					{
 						Function: types.NewFunction(
-							types.NewFunctionType(),
+							types.NewFunctionSignature(),
 							instr.New(instr.UNREACHABLE),
 						),
 						Blocks: []*BasicBlock{
@@ -85,7 +85,7 @@ func TestModuleBuilder_Build(t *testing.T) {
 				Functions: []*Function{
 					{
 						Function: types.NewFunction(
-							types.NewFunctionType(),
+							types.NewFunctionSignature(),
 							instr.New(instr.RETURN),
 						),
 						Blocks: []*BasicBlock{
@@ -116,7 +116,7 @@ func TestModuleBuilder_Build(t *testing.T) {
 				Functions: []*Function{
 					{
 						Function: types.NewFunction(
-							types.NewFunctionType(),
+							types.NewFunctionSignature(),
 							instr.New(instr.BR, 5),
 							instr.New(instr.I32_CONST, 1),
 							instr.New(instr.I32_CONST, 2),
@@ -165,7 +165,7 @@ func TestModuleBuilder_Build(t *testing.T) {
 				Functions: []*Function{
 					{
 						Function: types.NewFunction(
-							types.NewFunctionType(),
+							types.NewFunctionSignature(),
 							instr.New(instr.BR, 5),
 							instr.New(instr.I32_CONST, 1),
 							instr.New(instr.I32_CONST, 2),
@@ -215,7 +215,7 @@ func TestModuleBuilder_Build(t *testing.T) {
 				Functions: []*Function{
 					{
 						Function: types.NewFunction(
-							types.NewFunctionType(),
+							types.NewFunctionSignature(),
 							instr.New(instr.I32_CONST, 1),
 							instr.New(instr.BR_IF, 5),
 							instr.New(instr.I32_CONST, 2),

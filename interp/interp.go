@@ -9,14 +9,6 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-type Option struct {
-	Frame   int
-	Globals int
-	Stack   int
-	Heap    int
-	Tick    int
-}
-
 type Interpreter struct {
 	ctx       context.Context
 	frames    []frame
@@ -32,6 +24,14 @@ type Interpreter struct {
 	tick      int
 }
 
+type option struct {
+	frame   int
+	globals int
+	stack   int
+	heap    int
+	tick    int
+}
+
 var (
 	ErrUnknownOpcode       = errors.New("unknown opcode")
 	ErrUnreachableExecuted = errors.New("unreachable executed")
@@ -45,49 +45,56 @@ var (
 	ErrIndexOutOfRange     = errors.New("index out of range")
 )
 
-func New(prog *program.Program, opts ...Option) *Interpreter {
-	f := 128
-	g := 128
-	s := 1024
-	h := 128
-	t := 1024
-	for _, opt := range opts {
-		if opt.Frame > 0 {
-			f = opt.Frame
-		}
-		if opt.Globals > 0 {
-			g = opt.Globals
-		}
-		if opt.Stack > 0 {
-			s = opt.Stack
-		}
-		if opt.Heap > 0 {
-			h = opt.Heap
-		}
-		if opt.Tick != 0 {
-			t = opt.Tick
-		}
+func WithFrame(val int) func(*option) {
+	return func(o *option) { o.frame = val }
+}
+
+func WithGlobals(val int) func(*option) {
+	return func(o *option) { o.globals = val }
+}
+
+func WithStack(val int) func(*option) {
+	return func(o *option) { o.stack = val }
+}
+
+func WithHeap(val int) func(*option) {
+	return func(o *option) { o.heap = val }
+}
+
+func WithTick(val int) func(*option) {
+	return func(o *option) { o.tick = val }
+}
+
+func New(prog *program.Program, opts ...func(*option)) *Interpreter {
+	opt := option{
+		frame:   128,
+		globals: 128,
+		stack:   1024,
+		heap:    128,
+		tick:    1024,
 	}
-	if f <= 0 {
-		f = 1
+	for _, o := range opts {
+		o(&opt)
+	}
+	if opt.frame <= 0 {
+		opt.frame = 1
 	}
 
 	i := &Interpreter{
-		frames:    make([]frame, f),
+		frames:    make([]frame, opt.frame),
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
-		globals:   make([]types.Boxed, 0, g),
-		stack:     make([]types.Boxed, s),
-		heap:      make([]types.Value, 0, h),
-		rc:        make([]int, 0, h),
-		free:      make([]int, 0, h),
-		fp:        1,
+		globals:   make([]types.Boxed, 0, opt.globals),
+		stack:     make([]types.Boxed, opt.stack),
+		heap:      make([]types.Value, 0, opt.heap),
+		rc:        make([]int, 0, opt.heap),
+		free:      make([]int, 0, opt.heap),
+		fp:        0,
 		sp:        0,
-		tick:      t,
+		tick:      opt.tick,
 	}
 
 	i.alloc(nil)
-
 	for j, v := range prog.Constants {
 		var val types.Boxed
 		switch v := v.(type) {
@@ -109,6 +116,8 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 
 	i.frames[0].fn = &types.Function{Code: prog.Code}
 	i.frames[0].bp = i.sp
+	i.fp = 1
+
 	return i
 }
 

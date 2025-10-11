@@ -38,7 +38,7 @@ func NewModulePass() pass.Pass[*Module] {
 			return nil, err
 		}
 
-		fns := []*types.Function{{Typ: &types.FunctionType{}, Code: prog.Code}}
+		fns := []*types.Function{{Signature: &types.FunctionSignature{}, Code: prog.Code}}
 		for _, v := range prog.Constants {
 			if fn, ok := v.(*types.Function); ok {
 				fns = append(fns, fn)
