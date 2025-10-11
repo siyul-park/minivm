@@ -241,6 +241,14 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.REF_NULL),
+			},
+		),
+		values: []types.Value{types.Null},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 42),
 				instr.New(instr.REF_TEST, 0),
 			},

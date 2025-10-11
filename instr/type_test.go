@@ -37,6 +37,8 @@ func TestTypeOf(t *testing.T) {
 
 		{opcode: CONST_GET},
 
+		{opcode: REF_NULL},
+
 		{opcode: REF_TEST},
 		{opcode: REF_CAST},
 

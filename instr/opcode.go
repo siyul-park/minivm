@@ -29,6 +29,8 @@ const (
 
 	CONST_GET
 
+	REF_NULL
+
 	REF_TEST
 	REF_CAST
 

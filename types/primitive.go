@@ -123,6 +123,9 @@ func (r Ref) Type() Type {
 }
 
 func (r Ref) Interface() any {
+	if r == 0 {
+		return nil
+	}
 	return int(r)
 }
 

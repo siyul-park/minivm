@@ -94,7 +94,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		tick:      opt.tick,
 	}
 
-	i.alloc(nil)
+	i.alloc(types.Null)
+
 	for j, v := range prog.Constants {
 		var val types.Boxed
 		switch v := v.(type) {
@@ -117,7 +118,6 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	i.frames[0].fn = &types.Function{Code: prog.Code}
 	i.frames[0].bp = i.sp
 	i.fp = 1
-
 	return i
 }
 

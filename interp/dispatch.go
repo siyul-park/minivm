@@ -327,6 +327,14 @@ var dispatch = [256]func(i *Interpreter){
 		i.sp++
 		frame.ip += 3
 	},
+	instr.REF_NULL: func(i *Interpreter) {
+		if i.sp == len(i.stack) {
+			panic(ErrStackOverflow)
+		}
+		i.stack[i.sp] = types.BoxedNull
+		i.sp++
+		i.frames[i.fp-1].ip++
+	},
 	instr.REF_TEST: func(i *Interpreter) {
 		if i.sp == 0 {
 			panic(ErrStackUnderflow)

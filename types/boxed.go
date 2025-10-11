@@ -140,7 +140,11 @@ func (v Boxed) Interface() any {
 	case KindF64:
 		return v.F64()
 	case KindRef:
-		return v.Ref()
+		addr := v.Ref()
+		if addr == 0 {
+			return nil
+		}
+		return addr
 	default:
 		return nil
 	}
