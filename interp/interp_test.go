@@ -262,6 +262,16 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.REF_IS_NULL),
+			},
+			program.WithConstants(types.String("foo")),
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.REF_EQ),
 			},

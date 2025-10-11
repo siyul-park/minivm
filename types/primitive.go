@@ -18,6 +18,7 @@ type f64Type struct{}
 type refType struct{}
 
 var (
+	Null  = Ref(0)
 	False = I32(0)
 	True  = I32(1)
 )

@@ -40,6 +40,7 @@ func TestTypeOf(t *testing.T) {
 		{opcode: REF_TEST},
 		{opcode: REF_CAST},
 
+		{opcode: REF_IS_NULL},
 		{opcode: REF_EQ},
 		{opcode: REF_NE},
 

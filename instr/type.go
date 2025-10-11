@@ -35,8 +35,9 @@ var types = map[Opcode]Type{
 	REF_TEST: {"ref.test", []int{2}},
 	REF_CAST: {"ref.cast", []int{2}},
 
-	REF_EQ: {"ref.eq", []int{}},
-	REF_NE: {"ref.ne", []int{}},
+	REF_IS_NULL: {"ref.is_null", []int{}},
+	REF_EQ:      {"ref.eq", []int{}},
+	REF_NE:      {"ref.ne", []int{}},
 
 	I32_CONST: {"i32.const", []int{4}},
 

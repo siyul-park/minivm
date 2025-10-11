@@ -32,6 +32,7 @@ const (
 	REF_TEST
 	REF_CAST
 
+	REF_IS_NULL
 	REF_EQ
 	REF_NE
 

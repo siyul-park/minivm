@@ -8,6 +8,7 @@ import (
 type Boxed uint64
 
 var (
+	BoxedNull  = BoxRef(0)
 	BoxedFalse = BoxI32(0)
 	BoxedTrue  = BoxI32(1)
 )

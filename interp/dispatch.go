@@ -377,6 +377,14 @@ var dispatch = [256]func(i *Interpreter){
 		}
 		frame.ip += 3
 	},
+	instr.REF_IS_NULL: func(i *Interpreter) {
+		if i.sp == 0 {
+			panic(ErrStackUnderflow)
+		}
+		val := i.stack[i.sp-1]
+		i.stack[i.sp-1] = types.BoxBool(val.Ref() == 0)
+		i.frames[i.fp-1].ip++
+	},
 	instr.REF_EQ: func(i *Interpreter) {
 		if i.sp < 2 {
 			panic(ErrStackUnderflow)
