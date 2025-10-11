@@ -1788,7 +1788,7 @@ func TestInterpreter_Run(t *testing.T) {
 			for _, val := range tt.values {
 				v, err := i.Pop()
 				require.NoError(t, err)
-				require.Equal(t, val.Interface(), v.Interface())
+				require.Equal(t, val, v)
 			}
 		})
 	}
