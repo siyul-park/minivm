@@ -142,6 +142,8 @@ var types = map[Opcode]Type{
 	F64_TO_I64_U: {"f64.to_i64_u", []int{}},
 	F64_TO_F32:   {"f64.to_f32", []int{}},
 
+	STRING_NEW_UTF32: {"string.new_utf32", []int{}},
+
 	STRING_LEN:    {"string.len", []int{}},
 	STRING_CONCAT: {"string.concat", []int{}},
 
@@ -151,6 +153,8 @@ var types = map[Opcode]Type{
 	STRING_GT: {"string.gt", []int{}},
 	STRING_LE: {"string.le", []int{}},
 	STRING_GE: {"string.ge", []int{}},
+
+	STRING_ENCODE_UTF32: {"string.encode_utf32", []int{}},
 
 	ARRAY_NEW:         {"array.new", []int{2}},
 	ARRAY_NEW_DEFAULT: {"array.new_default", []int{2}},

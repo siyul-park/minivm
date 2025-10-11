@@ -141,6 +141,8 @@ func TestTypeOf(t *testing.T) {
 		{opcode: F64_LE},
 		{opcode: F64_GE},
 
+		{opcode: STRING_NEW_UTF32},
+
 		{opcode: STRING_LEN},
 		{opcode: STRING_CONCAT},
 
@@ -150,6 +152,8 @@ func TestTypeOf(t *testing.T) {
 		{opcode: STRING_GT},
 		{opcode: STRING_LE},
 		{opcode: STRING_GE},
+
+		{opcode: STRING_ENCODE_UTF32},
 
 		{opcode: ARRAY_NEW},
 		{opcode: ARRAY_NEW_DEFAULT},

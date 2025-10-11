@@ -1016,6 +1016,17 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.STRING_ENCODE_UTF32),
+				instr.New(instr.STRING_NEW_UTF32),
+			},
+			program.WithConstants(types.String("foo")),
+		),
+		values: []types.Value{types.String("foo")},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.STRING_LEN),
 			},
 			program.WithConstants(types.String("foo")),
@@ -1098,6 +1109,16 @@ var tests = []struct {
 			program.WithConstants(types.String("foo"), types.String("bar")),
 		),
 		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.STRING_ENCODE_UTF32),
+			},
+			program.WithConstants(types.String("foo")),
+		),
+		values: []types.Value{types.I32Array{'f', 'o', 'o'}},
 	},
 	{
 		program: program.New(

@@ -1304,6 +1304,15 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.frames[i.fp-1].ip++
 		return nil
 	},
+	instr.STRING_NEW_UTF32: func(i *Interpreter) error {
+		if i.sp == 0 {
+			return ErrStackUnderflow
+		}
+		val, _ := i.unbox(i.stack[i.sp-1]).(types.I32Array)
+		i.stack[i.sp-1] = types.BoxRef(i.alloc(types.String(val)))
+		i.frames[i.fp-1].ip++
+		return nil
+	},
 	instr.STRING_LEN: func(i *Interpreter) error {
 		if i.sp == 0 {
 			return ErrStackUnderflow
@@ -1387,6 +1396,15 @@ var dispatch = [256]func(i *Interpreter) error{
 		v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
+		i.frames[i.fp-1].ip++
+		return nil
+	},
+	instr.STRING_ENCODE_UTF32: func(i *Interpreter) error {
+		if i.sp == 0 {
+			return ErrStackUnderflow
+		}
+		val, _ := i.unbox(i.stack[i.sp-1]).(types.String)
+		i.stack[i.sp-1] = types.BoxRef(i.alloc(types.I32Array(val)))
 		i.frames[i.fp-1].ip++
 		return nil
 	},
