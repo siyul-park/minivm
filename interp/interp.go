@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
@@ -111,7 +110,19 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 	return i
 }
 
-func (i *Interpreter) Run(ctx context.Context) error {
+func (i *Interpreter) Run(ctx context.Context) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			f := i.frames[i.fp-1]
+			switch v := r.(type) {
+			case error:
+				err = fmt.Errorf("%w: at=%d", v, f.ip)
+			default:
+				err = fmt.Errorf("%v: at=%d", v, f.ip)
+			}
+		}
+	}()
+
 	f := &i.frames[i.fp-1]
 	code := f.fn.Code
 	tick := i.tick
@@ -127,10 +138,8 @@ func (i *Interpreter) Run(ctx context.Context) error {
 			}
 		}
 
-		fn := dispatch[code[f.ip]]
-		if err := fn(i); err != nil {
-			return fmt.Errorf("%w: at=%d", err, f.ip)
-		}
+		dispatch[code[f.ip]](i)
+
 		f = &i.frames[i.fp-1]
 		code = f.fn.Code
 	}

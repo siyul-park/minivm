@@ -7,18 +7,17 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-var dispatch = [256]func(i *Interpreter) error{
-	instr.NOP: func(i *Interpreter) error {
+var dispatch = [256]func(i *Interpreter){
+	instr.NOP: func(i *Interpreter) {
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.UNREACHABLE: func(i *Interpreter) error {
+	instr.UNREACHABLE: func(i *Interpreter) {
 		i.frames[i.fp-1].ip++
-		return ErrUnreachableExecuted
+		panic(ErrUnreachableExecuted)
 	},
-	instr.DROP: func(i *Interpreter) error {
+	instr.DROP: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		val := i.stack[i.sp-1]
 		if val.Kind() == types.KindRef {
@@ -26,14 +25,13 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		i.sp--
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.DUP: func(i *Interpreter) error {
+	instr.DUP: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		if i.sp == len(i.stack) {
-			return ErrStackOverflow
+			panic(ErrStackOverflow)
 		}
 		val := i.stack[i.sp-1]
 		if val.Kind() == types.KindRef {
@@ -42,26 +40,23 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.stack[i.sp] = val
 		i.sp++
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.SWAP: func(i *Interpreter) error {
+	instr.SWAP: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		i.stack[i.sp-1], i.stack[i.sp-2] = i.stack[i.sp-2], i.stack[i.sp-1]
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.BR: func(i *Interpreter) error {
+	instr.BR: func(i *Interpreter) {
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		offset := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		frame.ip += offset + 3
-		return nil
 	},
-	instr.BR_IF: func(i *Interpreter) error {
+	instr.BR_IF: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		frame := &i.frames[i.fp-1]
 		i.sp--
@@ -72,11 +67,10 @@ var dispatch = [256]func(i *Interpreter) error{
 			frame.ip += offset
 		}
 		frame.ip += 3
-		return nil
 	},
-	instr.BR_TABLE: func(i *Interpreter) error {
+	instr.BR_TABLE: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
@@ -88,11 +82,10 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		offset := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+cond*2+2])))
 		frame.ip += offset + count*2 + 4
-		return nil
 	},
-	instr.SELECT: func(i *Interpreter) error {
+	instr.SELECT: func(i *Interpreter) {
 		if i.sp < 3 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		cond := i.stack[i.sp-1].I32()
 		var discard types.Boxed
@@ -107,25 +100,24 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		i.sp -= 2
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.CALL: func(i *Interpreter) error {
+	instr.CALL: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		if i.fp == len(i.frames) {
-			return ErrFrameOverflow
+			panic(ErrFrameOverflow)
 		}
 		addr := i.stack[i.sp-1].Ref()
 		fn, ok := i.heap[addr].(*types.Function)
 		if !ok {
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		if i.sp <= fn.Params {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		if i.sp+fn.Locals-fn.Params > len(i.stack) {
-			return ErrStackOverflow
+			panic(ErrStackOverflow)
 		}
 		for idx := 0; idx < fn.Locals-fn.Params; idx++ {
 			i.stack[i.sp+idx-1] = 0
@@ -138,16 +130,15 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.fp++
 		i.sp = frame.bp + fn.Locals
 		i.frames[i.fp-2].ip++
-		return nil
 	},
-	instr.RETURN: func(i *Interpreter) error {
+	instr.RETURN: func(i *Interpreter) {
 		if i.fp == 1 {
-			return ErrFrameUnderflow
+			panic(ErrFrameUnderflow)
 		}
 		frame := &i.frames[i.fp-1]
 		fn := frame.fn
 		if i.sp < fn.Returns {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		copy(i.stack[frame.bp:frame.bp+fn.Returns], i.stack[i.sp-fn.Returns:i.sp])
 		i.sp = frame.bp + fn.Returns
@@ -156,17 +147,16 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		frame.fn = nil
 		i.fp--
-		return nil
 	},
-	instr.GLOBAL_GET: func(i *Interpreter) error {
+	instr.GLOBAL_GET: func(i *Interpreter) {
 		if i.sp == len(i.stack) {
-			return ErrStackOverflow
+			panic(ErrStackOverflow)
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.globals) {
-			return ErrSegmentationFault
+			panic(ErrSegmentationFault)
 		}
 		val := i.globals[idx]
 		if val.Kind() == types.KindRef {
@@ -175,17 +165,16 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.stack[i.sp] = val
 		i.sp++
 		frame.ip += 3
-		return nil
 	},
-	instr.GLOBAL_SET: func(i *Interpreter) error {
+	instr.GLOBAL_SET: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 {
-			return ErrSegmentationFault
+			panic(ErrSegmentationFault)
 		}
 		val := i.stack[i.sp-1]
 		if idx >= len(i.globals) {
@@ -203,17 +192,16 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.globals[idx] = val
 		i.sp--
 		frame.ip += 3
-		return nil
 	},
-	instr.GLOBAL_TEE: func(i *Interpreter) error {
+	instr.GLOBAL_TEE: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 {
-			return ErrSegmentationFault
+			panic(ErrSegmentationFault)
 		}
 		val := i.stack[i.sp-1]
 		if idx >= len(i.globals) {
@@ -230,18 +218,17 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		i.globals[idx] = val
 		frame.ip += 3
-		return nil
 	},
-	instr.LOCAL_GET: func(i *Interpreter) error {
+	instr.LOCAL_GET: func(i *Interpreter) {
 		if i.sp == len(i.stack) {
-			return ErrStackOverflow
+			panic(ErrStackOverflow)
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(code[frame.ip+1])
 		addr := frame.bp + idx
 		if addr < 0 || addr > i.sp {
-			return ErrSegmentationFault
+			panic(ErrSegmentationFault)
 		}
 		val := i.stack[addr]
 		if val.Kind() == types.KindRef {
@@ -250,11 +237,10 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.stack[i.sp] = val
 		i.sp++
 		frame.ip += 2
-		return nil
 	},
-	instr.LOCAL_SET: func(i *Interpreter) error {
+	instr.LOCAL_SET: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		frame := &i.frames[i.fp-1]
 		fn := frame.fn
@@ -262,7 +248,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		idx := int(code[frame.ip+1])
 		addr := frame.bp + idx
 		if addr < 0 || addr > i.sp {
-			return ErrSegmentationFault
+			panic(ErrSegmentationFault)
 		}
 		val := i.stack[i.sp-1]
 		if old := i.stack[addr]; old != val && old.Kind() == types.KindRef {
@@ -271,11 +257,10 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.stack[addr] = val
 		i.sp--
 		frame.ip += 2
-		return nil
 	},
-	instr.LOCAL_TEE: func(i *Interpreter) error {
+	instr.LOCAL_TEE: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		frame := &i.frames[i.fp-1]
 		fn := frame.fn
@@ -283,7 +268,7 @@ var dispatch = [256]func(i *Interpreter) error{
 		idx := int(code[frame.ip+1])
 		addr := frame.bp + idx
 		if addr < 0 || addr > i.sp {
-			return ErrSegmentationFault
+			panic(ErrSegmentationFault)
 		}
 		val := i.stack[i.sp-1]
 		if old := i.stack[addr]; old != val && old.Kind() == types.KindRef {
@@ -291,17 +276,16 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		i.stack[addr] = val
 		frame.ip += 2
-		return nil
 	},
-	instr.CONST_GET: func(i *Interpreter) error {
+	instr.CONST_GET: func(i *Interpreter) {
 		if i.sp == len(i.stack) {
-			return ErrStackOverflow
+			panic(ErrStackOverflow)
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.constants) {
-			return ErrSegmentationFault
+			panic(ErrSegmentationFault)
 		}
 		val := i.constants[idx]
 		if val.Kind() == types.KindRef {
@@ -310,18 +294,17 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.stack[i.sp] = val
 		i.sp++
 		frame.ip += 3
-		return nil
 	},
-	instr.REF_TEST: func(i *Interpreter) error {
+	instr.REF_TEST: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		frame := &i.frames[i.fp-1]
 		fn := frame.fn
 		code := fn.Code
 		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
-			return ErrSegmentationFault
+			panic(ErrSegmentationFault)
 		}
 		typ := i.types[idx]
 		val := i.stack[i.sp-1]
@@ -335,18 +318,17 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		i.stack[i.sp-1] = cond
 		frame.ip += 3
-		return nil
 	},
-	instr.REF_CAST: func(i *Interpreter) error {
+	instr.REF_CAST: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		frame := &i.frames[i.fp-1]
 		fn := frame.fn
 		code := fn.Code
 		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
-			return ErrSegmentationFault
+			panic(ErrSegmentationFault)
 		}
 		typ := i.types[idx]
 		val := i.stack[i.sp-1]
@@ -354,30 +336,28 @@ var dispatch = [256]func(i *Interpreter) error{
 		case types.KindRef:
 			ref := i.heap[val.Ref()]
 			if !ref.Type().Cast(typ) {
-				return ErrTypeMismatch
+				panic(ErrTypeMismatch)
 			}
 		default:
 			if kind != typ.Kind() {
-				return ErrTypeMismatch
+				panic(ErrTypeMismatch)
 			}
 		}
 		frame.ip += 3
-		return nil
 	},
-	instr.REF_EQ: func(i *Interpreter) error {
+	instr.REF_EQ: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1]
 		v2 := i.stack[i.sp-2]
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 == v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_CONST: func(i *Interpreter) error {
+	instr.I32_CONST: func(i *Interpreter) {
 		if i.sp == len(i.stack) {
-			return ErrStackOverflow
+			panic(ErrStackOverflow)
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
@@ -385,339 +365,308 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.stack[i.sp] = val
 		i.sp++
 		frame.ip += 5
-		return nil
 	},
-	instr.I32_ADD: func(i *Interpreter) error {
+	instr.I32_ADD: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxI32(v2 + v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_SUB: func(i *Interpreter) error {
+	instr.I32_SUB: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxI32(v2 - v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_MUL: func(i *Interpreter) error {
+	instr.I32_MUL: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxI32(v1 * v2)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_DIV_S: func(i *Interpreter) error {
+	instr.I32_DIV_S: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		if v1 == 0 {
-			return ErrDivideByZero
+			panic(ErrDivideByZero)
 		}
 		i.sp--
 		i.stack[i.sp-1] = types.BoxI32(v2 / v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_DIV_U: func(i *Interpreter) error {
+	instr.I32_DIV_U: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		if v1 == 0 {
-			return ErrDivideByZero
+			panic(ErrDivideByZero)
 		}
 		i.sp--
 		i.stack[i.sp-1] = types.BoxI32(int32(uint32(v2) / uint32(v1)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_REM_S: func(i *Interpreter) error {
+	instr.I32_REM_S: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		if v1 == 0 {
-			return ErrDivideByZero
+			panic(ErrDivideByZero)
 		}
 		i.sp--
 		i.stack[i.sp-1] = types.BoxI32(v2 % v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_REM_U: func(i *Interpreter) error {
+	instr.I32_REM_U: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		if v1 == 0 {
-			return ErrDivideByZero
+			panic(ErrDivideByZero)
 		}
 		i.sp--
 		i.stack[i.sp-1] = types.BoxI32(int32(uint32(v2) % uint32(v1)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_SHL: func(i *Interpreter) error {
+	instr.I32_SHL: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32() & 0x1F
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxI32(v2 << v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_SHR_S: func(i *Interpreter) error {
+	instr.I32_SHR_S: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32() & 0x1F
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxI32(v2 >> v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_SHR_U: func(i *Interpreter) error {
+	instr.I32_SHR_U: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32() & 0x1F
 		v2 := uint32(i.stack[i.sp-2].I32())
 		i.sp--
 		i.stack[i.sp-1] = types.BoxI32(int32(v2 >> v1))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_XOR: func(i *Interpreter) error {
+	instr.I32_XOR: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxI32(v1 ^ v2)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_AND: func(i *Interpreter) error {
+	instr.I32_AND: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxI32(v1 & v2)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_OR: func(i *Interpreter) error {
+	instr.I32_OR: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxI32(v1 | v2)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_EQZ: func(i *Interpreter) error {
+	instr.I32_EQZ: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		val := i.stack[i.sp-1].I32()
 		i.stack[i.sp-1] = types.BoxBool(val == 0)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_EQ: func(i *Interpreter) error {
+	instr.I32_EQ: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 == v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_NE: func(i *Interpreter) error {
+	instr.I32_NE: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 != v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_LT_S: func(i *Interpreter) error {
+	instr.I32_LT_S: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 < v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_LT_U: func(i *Interpreter) error {
+	instr.I32_LT_U: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(uint32(v2) < uint32(v1))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_GT_S: func(i *Interpreter) error {
+	instr.I32_GT_S: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 > v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_GT_U: func(i *Interpreter) error {
+	instr.I32_GT_U: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(uint32(v2) > uint32(v1))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_LE_S: func(i *Interpreter) error {
+	instr.I32_LE_S: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_LE_U: func(i *Interpreter) error {
+	instr.I32_LE_U: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(uint32(v2) <= uint32(v1))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_GE_S: func(i *Interpreter) error {
+	instr.I32_GE_S: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_GE_U: func(i *Interpreter) error {
+	instr.I32_GE_U: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].I32()
 		v2 := i.stack[i.sp-2].I32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(uint32(v2) >= uint32(v1))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_TO_I64_S: func(i *Interpreter) error {
+	instr.I32_TO_I64_S: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.stack[i.sp-1].I32()
 		i.stack[i.sp-1] = i.boxI64(int64(v))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_TO_I64_U: func(i *Interpreter) error {
+	instr.I32_TO_I64_U: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := uint32(i.stack[i.sp-1].I32())
 		i.stack[i.sp-1] = i.boxI64(int64(v))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_TO_F32_S: func(i *Interpreter) error {
+	instr.I32_TO_F32_S: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.stack[i.sp-1].I32()
 		i.stack[i.sp-1] = types.BoxF32(float32(v))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_TO_F32_U: func(i *Interpreter) error {
+	instr.I32_TO_F32_U: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.stack[i.sp-1].I32()
 		i.stack[i.sp-1] = types.BoxF32(float32(uint32(v)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_TO_F64_S: func(i *Interpreter) error {
+	instr.I32_TO_F64_S: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.stack[i.sp-1].I32()
 		i.stack[i.sp-1] = types.BoxF64(float64(v))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I32_TO_F64_U: func(i *Interpreter) error {
+	instr.I32_TO_F64_U: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.stack[i.sp-1].I32()
 		i.stack[i.sp-1] = types.BoxF64(float64(uint32(v)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_CONST: func(i *Interpreter) error {
+	instr.I64_CONST: func(i *Interpreter) {
 		if i.sp == len(i.stack) {
-			return ErrStackOverflow
+			panic(ErrStackOverflow)
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
@@ -725,753 +674,684 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.stack[i.sp] = val
 		i.sp++
 		frame.ip += 9
-		return nil
 	},
-	instr.I64_ADD: func(i *Interpreter) error {
+	instr.I64_ADD: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = i.boxI64(v2 + v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_SUB: func(i *Interpreter) error {
+	instr.I64_SUB: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = i.boxI64(v2 - v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_MUL: func(i *Interpreter) error {
+	instr.I64_MUL: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = i.boxI64(v1 * v2)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_DIV_S: func(i *Interpreter) error {
+	instr.I64_DIV_S: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		if v1 == 0 {
-			return ErrDivideByZero
+			panic(ErrDivideByZero)
 		}
 		i.sp--
 		i.stack[i.sp-1] = i.boxI64(v2 / v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_DIV_U: func(i *Interpreter) error {
+	instr.I64_DIV_U: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		if v1 == 0 {
-			return ErrDivideByZero
+			panic(ErrDivideByZero)
 		}
 		i.sp--
 		i.stack[i.sp-1] = i.boxI64(int64(uint64(v2) / uint64(v1)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_REM_S: func(i *Interpreter) error {
+	instr.I64_REM_S: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		if v1 == 0 {
-			return ErrDivideByZero
+			panic(ErrDivideByZero)
 		}
 		i.sp--
 		i.stack[i.sp-1] = i.boxI64(v2 % v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_REM_U: func(i *Interpreter) error {
+	instr.I64_REM_U: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		if v1 == 0 {
-			return ErrDivideByZero
+			panic(ErrDivideByZero)
 		}
 		i.sp--
 		i.stack[i.sp-1] = i.boxI64(int64(uint64(v2) % uint64(v1)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_SHL: func(i *Interpreter) error {
+	instr.I64_SHL: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = i.boxI64(int64(v2 << (v1 & 0x3F)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_SHR_S: func(i *Interpreter) error {
+	instr.I64_SHR_S: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = i.boxI64(int64(v2 >> (v1 & 0x3F)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_SHR_U: func(i *Interpreter) error {
+	instr.I64_SHR_U: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = i.boxI64(int64(uint64(v2) >> (v1 & 0x3F)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_EQZ: func(i *Interpreter) error {
+	instr.I64_EQZ: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		val := i.unboxI64(i.stack[i.sp-1])
 		i.stack[i.sp-1] = types.BoxBool(val == 0)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_EQ: func(i *Interpreter) error {
+	instr.I64_EQ: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 == v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_NE: func(i *Interpreter) error {
+	instr.I64_NE: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 != v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_LT_S: func(i *Interpreter) error {
+	instr.I64_LT_S: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 < v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_LT_U: func(i *Interpreter) error {
+	instr.I64_LT_U: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(uint64(v2) < uint64(v1))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_GT_S: func(i *Interpreter) error {
+	instr.I64_GT_S: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 > v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_GT_U: func(i *Interpreter) error {
+	instr.I64_GT_U: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(uint64(v2) > uint64(v1))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_LE_S: func(i *Interpreter) error {
+	instr.I64_LE_S: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_LE_U: func(i *Interpreter) error {
+	instr.I64_LE_U: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(uint64(v2) <= uint64(v1))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_GE_S: func(i *Interpreter) error {
+	instr.I64_GE_S: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_GE_U: func(i *Interpreter) error {
+	instr.I64_GE_U: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.unboxI64(i.stack[i.sp-1])
 		v2 := i.unboxI64(i.stack[i.sp-2])
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(uint64(v2) >= uint64(v1))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_TO_I32: func(i *Interpreter) error {
+	instr.I64_TO_I32: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.unboxI64(i.stack[i.sp-1])
 		i.stack[i.sp-1] = types.BoxI32(int32(v))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_TO_F32_S: func(i *Interpreter) error {
+	instr.I64_TO_F32_S: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.unboxI64(i.stack[i.sp-1])
 		i.stack[i.sp-1] = types.BoxF32(float32(v))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_TO_F32_U: func(i *Interpreter) error {
+	instr.I64_TO_F32_U: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.unboxI64(i.stack[i.sp-1])
 		i.stack[i.sp-1] = types.BoxF32(float32(uint64(v)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_TO_F64_S: func(i *Interpreter) error {
+	instr.I64_TO_F64_S: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.unboxI64(i.stack[i.sp-1])
 		i.stack[i.sp-1] = types.BoxF64(float64(v))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.I64_TO_F64_U: func(i *Interpreter) error {
+	instr.I64_TO_F64_U: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.unboxI64(i.stack[i.sp-1])
 		i.stack[i.sp-1] = types.BoxF64(float64(uint64(v)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F32_CONST: func(i *Interpreter) error {
+	instr.F32_CONST: func(i *Interpreter) {
 		if i.sp == len(i.stack) {
-			return ErrStackOverflow
+			panic(ErrStackOverflow)
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		i.stack[i.sp] = types.BoxF32(*(*float32)(unsafe.Pointer(&code[frame.ip+1])))
 		i.sp++
 		frame.ip += 5
-		return nil
 	},
-	instr.F32_ADD: func(i *Interpreter) error {
+	instr.F32_ADD: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F32()
 		v2 := i.stack[i.sp-2].F32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxF32(v2 + v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F32_SUB: func(i *Interpreter) error {
+	instr.F32_SUB: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F32()
 		v2 := i.stack[i.sp-2].F32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxF32(v2 - v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F32_MUL: func(i *Interpreter) error {
+	instr.F32_MUL: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F32()
 		v2 := i.stack[i.sp-2].F32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxF32(v1 * v2)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F32_DIV: func(i *Interpreter) error {
+	instr.F32_DIV: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F32()
 		v2 := i.stack[i.sp-2].F32()
 		if v1 == 0 {
-			return ErrDivideByZero
+			panic(ErrDivideByZero)
 		}
 		i.sp--
 		i.stack[i.sp-1] = types.BoxF32(v2 / v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F32_EQ: func(i *Interpreter) error {
+	instr.F32_EQ: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F32()
 		v2 := i.stack[i.sp-2].F32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 == v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F32_NE: func(i *Interpreter) error {
+	instr.F32_NE: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F32()
 		v2 := i.stack[i.sp-2].F32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 != v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F32_LT: func(i *Interpreter) error {
+	instr.F32_LT: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F32()
 		v2 := i.stack[i.sp-2].F32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 < v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F32_GT: func(i *Interpreter) error {
+	instr.F32_GT: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F32()
 		v2 := i.stack[i.sp-2].F32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 > v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F32_LE: func(i *Interpreter) error {
+	instr.F32_LE: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F32()
 		v2 := i.stack[i.sp-2].F32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F32_GE: func(i *Interpreter) error {
+	instr.F32_GE: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F32()
 		v2 := i.stack[i.sp-2].F32()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F32_TO_I32_S: func(i *Interpreter) error {
+	instr.F32_TO_I32_S: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.stack[i.sp-1].F32()
 		i.stack[i.sp-1] = types.BoxI32(int32(v))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F32_TO_I32_U: func(i *Interpreter) error {
+	instr.F32_TO_I32_U: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.stack[i.sp-1].F32()
 		i.stack[i.sp-1] = types.BoxI32(int32(uint32(v)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F32_TO_I64_S: func(i *Interpreter) error {
+	instr.F32_TO_I64_S: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.stack[i.sp-1].F32()
 		i.stack[i.sp-1] = i.boxI64(int64(v))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F32_TO_I64_U: func(i *Interpreter) error {
+	instr.F32_TO_I64_U: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.stack[i.sp-1].F32()
 		i.stack[i.sp-1] = i.boxI64(int64(uint32(v)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F32_TO_F64: func(i *Interpreter) error {
+	instr.F32_TO_F64: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.stack[i.sp-1].F32()
 		i.stack[i.sp-1] = types.BoxF64(float64(v))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F64_TO_I32_S: func(i *Interpreter) error {
+	instr.F64_TO_I32_S: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.stack[i.sp-1].F64()
 		i.stack[i.sp-1] = types.BoxI32(int32(v))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F64_TO_I32_U: func(i *Interpreter) error {
+	instr.F64_TO_I32_U: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.stack[i.sp-1].F64()
 		i.stack[i.sp-1] = types.BoxI32(int32(uint32(v)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F64_TO_I64_S: func(i *Interpreter) error {
+	instr.F64_TO_I64_S: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.stack[i.sp-1].F64()
 		i.stack[i.sp-1] = i.boxI64(int64(v))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F64_TO_I64_U: func(i *Interpreter) error {
+	instr.F64_TO_I64_U: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.stack[i.sp-1].F64()
 		i.stack[i.sp-1] = i.boxI64(int64(uint64(v)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F64_TO_F32: func(i *Interpreter) error {
+	instr.F64_TO_F32: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v := i.stack[i.sp-1].F64()
 		i.stack[i.sp-1] = types.BoxF32(float32(v))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F64_CONST: func(i *Interpreter) error {
+	instr.F64_CONST: func(i *Interpreter) {
 		if i.sp == len(i.stack) {
-			return ErrStackOverflow
+			panic(ErrStackOverflow)
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		i.stack[i.sp] = types.BoxF64(*(*float64)(unsafe.Pointer(&code[frame.ip+1])))
 		i.sp++
 		frame.ip += 9
-		return nil
 	},
-	instr.F64_ADD: func(i *Interpreter) error {
+	instr.F64_ADD: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F64()
 		v2 := i.stack[i.sp-2].F64()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxF64(v2 + v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F64_SUB: func(i *Interpreter) error {
+	instr.F64_SUB: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F64()
 		v2 := i.stack[i.sp-2].F64()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxF64(v2 - v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F64_MUL: func(i *Interpreter) error {
+	instr.F64_MUL: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F64()
 		v2 := i.stack[i.sp-2].F64()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxF64(v1 * v2)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F64_DIV: func(i *Interpreter) error {
+	instr.F64_DIV: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F64()
 		v2 := i.stack[i.sp-2].F64()
 		if v1 == 0 {
-			return ErrDivideByZero
+			panic(ErrDivideByZero)
 		}
 		i.sp--
 		i.stack[i.sp-1] = types.BoxF64(v2 / v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F64_EQ: func(i *Interpreter) error {
+	instr.F64_EQ: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F64()
 		v2 := i.stack[i.sp-2].F64()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 == v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F64_NE: func(i *Interpreter) error {
+	instr.F64_NE: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F64()
 		v2 := i.stack[i.sp-2].F64()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 != v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F64_LT: func(i *Interpreter) error {
+	instr.F64_LT: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F64()
 		v2 := i.stack[i.sp-2].F64()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 < v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F64_GT: func(i *Interpreter) error {
+	instr.F64_GT: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F64()
 		v2 := i.stack[i.sp-2].F64()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 > v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F64_LE: func(i *Interpreter) error {
+	instr.F64_LE: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F64()
 		v2 := i.stack[i.sp-2].F64()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.F64_GE: func(i *Interpreter) error {
+	instr.F64_GE: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1 := i.stack[i.sp-1].F64()
 		v2 := i.stack[i.sp-2].F64()
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.STRING_NEW_UTF32: func(i *Interpreter) error {
+	instr.STRING_NEW_UTF32: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		val, _ := i.unbox(i.stack[i.sp-1]).(types.I32Array)
 		i.stack[i.sp-1] = types.BoxRef(i.alloc(types.String(val)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.STRING_LEN: func(i *Interpreter) error {
+	instr.STRING_LEN: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v, _ := i.unbox(i.stack[i.sp-1]).(types.String)
 		i.stack[i.sp-1] = types.BoxI32(int32(len(v)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.STRING_CONCAT: func(i *Interpreter) error {
+	instr.STRING_CONCAT: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
 		v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
 		i.sp--
 		i.stack[i.sp-1] = types.BoxRef(i.alloc(v2 + v1))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.STRING_EQ: func(i *Interpreter) error {
+	instr.STRING_EQ: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
 		v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 == v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.STRING_NE: func(i *Interpreter) error {
+	instr.STRING_NE: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
 		v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 != v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.STRING_LT: func(i *Interpreter) error {
+	instr.STRING_LT: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
 		v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 < v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.STRING_GT: func(i *Interpreter) error {
+	instr.STRING_GT: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
 		v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 > v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.STRING_LE: func(i *Interpreter) error {
+	instr.STRING_LE: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
 		v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.STRING_GE: func(i *Interpreter) error {
+	instr.STRING_GE: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
 		v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
 		i.sp--
 		i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.STRING_ENCODE_UTF32: func(i *Interpreter) error {
+	instr.STRING_ENCODE_UTF32: func(i *Interpreter) {
 		if i.sp == 0 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		val, _ := i.unbox(i.stack[i.sp-1]).(types.String)
 		i.stack[i.sp-1] = types.BoxRef(i.alloc(types.I32Array(val)))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.ARRAY_NEW: func(i *Interpreter) error {
+	instr.ARRAY_NEW: func(i *Interpreter) {
 		if i.sp < 1 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
-			return ErrSegmentationFault
+			panic(ErrSegmentationFault)
 		}
 		typ, ok := i.types[idx].(*types.ArrayType)
 		if !ok {
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		size := int(i.stack[i.sp-1].I32())
 		if i.sp < size+1 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		var arr types.Value
 		switch typ.ElemKind {
@@ -1510,21 +1390,20 @@ var dispatch = [256]func(i *Interpreter) error{
 		i.sp -= size
 		i.stack[i.sp-1] = types.BoxRef(i.alloc(arr))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.ARRAY_NEW_DEFAULT: func(i *Interpreter) error {
+	instr.ARRAY_NEW_DEFAULT: func(i *Interpreter) {
 		if i.sp < 1 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
-			return ErrSegmentationFault
+			panic(ErrSegmentationFault)
 		}
 		typ, ok := i.types[idx].(*types.ArrayType)
 		if !ok {
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		size := i.stack[i.sp-1].I32()
 		var arr types.Value
@@ -1545,43 +1424,42 @@ var dispatch = [256]func(i *Interpreter) error{
 		}
 		i.stack[i.sp-1] = types.BoxRef(i.alloc(arr))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.ARRAY_GET: func(i *Interpreter) error {
+	instr.ARRAY_GET: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		idx := int(i.stack[i.sp-1].I32())
 		ref := i.stack[i.sp-2]
 		if ref.Kind() != types.KindRef {
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		addr := ref.Ref()
 		var val types.Boxed
 		switch arr := i.heap[addr].(type) {
 		case types.I32Array:
 			if idx < 0 || idx >= len(arr) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			val = types.BoxI32(int32(arr[idx]))
 		case types.I64Array:
 			if idx < 0 || idx >= len(arr) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			val = i.boxI64(int64(arr[idx]))
 		case types.F32Array:
 			if idx < 0 || idx >= len(arr) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			val = types.BoxF32(float32(arr[idx]))
 		case types.F64Array:
 			if idx < 0 || idx >= len(arr) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			val = types.BoxF64(float64(arr[idx]))
 		case *types.Array:
 			if idx < 0 || idx >= len(arr.Elems) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			elem := arr.Elems[idx]
 			if elem.Kind() == types.KindRef {
@@ -1589,49 +1467,48 @@ var dispatch = [256]func(i *Interpreter) error{
 			}
 			val = elem
 		default:
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		i.release(addr)
 		i.sp--
 		i.stack[i.sp-1] = val
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.ARRAY_SET: func(i *Interpreter) error {
+	instr.ARRAY_SET: func(i *Interpreter) {
 		if i.sp < 3 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		val := i.stack[i.sp-1]
 		idx := int(i.stack[i.sp-2].I32())
 		ref := i.stack[i.sp-3]
 		if ref.Kind() != types.KindRef {
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		addr := ref.Ref()
 		switch arr := i.heap[addr].(type) {
 		case types.I32Array:
 			if idx < 0 || idx >= len(arr) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			arr[idx] = types.I32(val.I32())
 		case types.I64Array:
 			if idx < 0 || idx >= len(arr) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			arr[idx] = types.I64(i.unboxI64(val))
 		case types.F32Array:
 			if idx < 0 || idx >= len(arr) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			arr[idx] = types.F32(val.F32())
 		case types.F64Array:
 			if idx < 0 || idx >= len(arr) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			arr[idx] = types.F64(val.F64())
 		case *types.Array:
 			if idx < 0 || idx >= len(arr.Elems) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			elem := arr.Elems[idx]
 			arr.Elems[idx] = val
@@ -1639,29 +1516,28 @@ var dispatch = [256]func(i *Interpreter) error{
 				i.release(elem.Ref())
 			}
 		default:
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		i.release(addr)
 		i.sp -= 3
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.ARRAY_FILL: func(i *Interpreter) error {
+	instr.ARRAY_FILL: func(i *Interpreter) {
 		if i.sp < 4 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		size := int(i.stack[i.sp-1].I32())
 		val := i.stack[i.sp-2]
 		idx := int(i.stack[i.sp-3].I32())
 		ref := i.stack[i.sp-4]
 		if ref.Kind() != types.KindRef {
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		addr := ref.Ref()
 		switch arr := i.heap[addr].(type) {
 		case types.I32Array:
 			if idx < 0 || idx+size > len(arr) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			v := types.I32(val.I32())
 			for i := idx; i < idx+size; i++ {
@@ -1669,7 +1545,7 @@ var dispatch = [256]func(i *Interpreter) error{
 			}
 		case types.I64Array:
 			if idx < 0 || idx+size > len(arr) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			v := types.I64(i.unboxI64(val))
 			for i := idx; i < idx+size; i++ {
@@ -1677,7 +1553,7 @@ var dispatch = [256]func(i *Interpreter) error{
 			}
 		case types.F32Array:
 			if idx < 0 || idx+size > len(arr) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			v := types.F32(val.F32())
 			for i := idx; i < idx+size; i++ {
@@ -1685,7 +1561,7 @@ var dispatch = [256]func(i *Interpreter) error{
 			}
 		case types.F64Array:
 			if idx < 0 || idx+size > len(arr) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			v := types.F64(val.F64())
 			for i := idx; i < idx+size; i++ {
@@ -1693,7 +1569,7 @@ var dispatch = [256]func(i *Interpreter) error{
 			}
 		case *types.Array:
 			if idx < 0 || idx+size > len(arr.Elems) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			elem := arr.Elems[idx]
 			for i := idx; i < idx+size; i++ {
@@ -1706,49 +1582,48 @@ var dispatch = [256]func(i *Interpreter) error{
 				i.release(elem.Ref())
 			}
 		default:
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		i.release(addr)
 		i.sp -= 4
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.ARRAY_COPY: func(i *Interpreter) error {
+	instr.ARRAY_COPY: func(i *Interpreter) {
 		if i.sp < 4 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		size := int(i.stack[i.sp-1].I32())
 		src := int(i.stack[i.sp-2].I32())
 		dst := int(i.stack[i.sp-3].I32())
 		ref := i.stack[i.sp-4]
 		if ref.Kind() != types.KindRef {
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		addr := ref.Ref()
 		switch arr := i.heap[addr].(type) {
 		case types.I32Array:
 			if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			copy(arr[dst:dst+size], arr[src:src+size])
 		case types.I64Array:
 			if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			copy(arr[dst:dst+size], arr[src:src+size])
 		case types.F32Array:
 			if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			copy(arr[dst:dst+size], arr[src:src+size])
 		case types.F64Array:
 			if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			copy(arr[dst:dst+size], arr[src:src+size])
 		case *types.Array:
 			if src < 0 || dst < 0 || src+size > len(arr.Elems) || dst+size > len(arr.Elems) {
-				return ErrIndexOutOfRange
+				panic(ErrIndexOutOfRange)
 			}
 			elems := arr.Elems
 			for _, v := range elems[src : src+size] {
@@ -1763,27 +1638,26 @@ var dispatch = [256]func(i *Interpreter) error{
 			}
 			copy(elems[dst:dst+size], elems[src:src+size])
 		default:
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		i.release(addr)
 		i.sp -= 4
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.STRUCT_NEW: func(i *Interpreter) error {
+	instr.STRUCT_NEW: func(i *Interpreter) {
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
-			return ErrSegmentationFault
+			panic(ErrSegmentationFault)
 		}
 		typ, ok := i.types[idx].(*types.StructType)
 		if !ok {
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		size := len(typ.Fields)
 		if i.sp < size {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		s := types.NewStruct(typ)
 		for j, f := range typ.Fields {
@@ -1801,48 +1675,46 @@ var dispatch = [256]func(i *Interpreter) error{
 			case types.KindRef:
 				*(*uint64)(unsafe.Pointer(&s.Data[offset])) = uint64(val)
 			default:
-				return ErrTypeMismatch
+				panic(ErrTypeMismatch)
 			}
 		}
 		i.sp -= size - 1
 		i.stack[i.sp-1] = types.BoxRef(i.alloc(s))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.STRUCT_NEW_DEFAULT: func(i *Interpreter) error {
+	instr.STRUCT_NEW_DEFAULT: func(i *Interpreter) {
 		frame := &i.frames[i.fp-1]
 		code := frame.fn.Code
 		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
-			return ErrSegmentationFault
+			panic(ErrSegmentationFault)
 		}
 		typ, ok := i.types[idx].(*types.StructType)
 		if !ok {
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		s := types.NewStruct(typ)
 		i.sp++
 		i.stack[i.sp-1] = types.BoxRef(i.alloc(s))
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.STRUCT_GET: func(i *Interpreter) error {
+	instr.STRUCT_GET: func(i *Interpreter) {
 		if i.sp < 2 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		idx := int(i.stack[i.sp-1].I32())
 		ref := i.stack[i.sp-2]
 		if ref.Kind() != types.KindRef {
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		addr := ref.Ref()
 		s, ok := i.heap[addr].(*types.Struct)
 		if !ok {
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		typ := s.Typ
 		if idx < 0 || idx >= len(typ.Fields) {
-			return ErrSegmentationFault
+			panic(ErrSegmentationFault)
 		}
 		f := typ.Fields[idx]
 		offset := f.Offset
@@ -1862,32 +1734,31 @@ var dispatch = [256]func(i *Interpreter) error{
 				i.retain(val.Ref())
 			}
 		default:
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		i.release(addr)
 		i.sp--
 		i.stack[i.sp-1] = val
 		i.frames[i.fp-1].ip++
-		return nil
 	},
-	instr.STRUCT_SET: func(i *Interpreter) error {
+	instr.STRUCT_SET: func(i *Interpreter) {
 		if i.sp < 3 {
-			return ErrStackUnderflow
+			panic(ErrStackUnderflow)
 		}
 		val := i.stack[i.sp-1]
 		idx := int(i.stack[i.sp-2].I32())
 		ref := i.stack[i.sp-3]
 		if ref.Kind() != types.KindRef {
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		addr := ref.Ref()
 		s, ok := i.heap[addr].(*types.Struct)
 		if !ok {
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		typ := s.Typ
 		if idx < 0 || idx >= len(typ.Fields) {
-			return ErrSegmentationFault
+			panic(ErrSegmentationFault)
 		}
 		f := typ.Fields[idx]
 		offset := f.Offset
@@ -1907,20 +1778,19 @@ var dispatch = [256]func(i *Interpreter) error{
 			}
 			*ptr = uint64(val)
 		default:
-			return ErrTypeMismatch
+			panic(ErrTypeMismatch)
 		}
 		i.release(addr)
 		i.sp -= 3
 		i.frames[i.fp-1].ip++
-		return nil
 	},
 }
 
 func init() {
 	for i, fn := range dispatch {
 		if fn == nil {
-			dispatch[i] = func(i *Interpreter) error {
-				return ErrUnknownOpcode
+			dispatch[i] = func(i *Interpreter) {
+				panic(ErrUnknownOpcode)
 			}
 		}
 	}
