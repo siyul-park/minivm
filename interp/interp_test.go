@@ -116,6 +116,25 @@ var tests = []struct {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(
+				NewNativeFunction(
+					types.NewFunctionType(
+						types.WithReturns(types.TypeI32),
+					),
+					func(i *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+						return []types.Boxed{types.BoxI32(1)}, nil
+					},
+				),
+			),
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(
 				types.NewFunction(
 					types.NewFunctionType(
 						types.WithReturns(types.TypeI32),

@@ -18,6 +18,7 @@ type Option struct {
 }
 
 type Interpreter struct {
+	ctx       context.Context
 	frames    []frame
 	types     []types.Type
 	constants []types.Boxed
@@ -112,14 +113,14 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 }
 
 func (i *Interpreter) Run(ctx context.Context) (err error) {
+	i.ctx = ctx
 	defer func() {
+		i.ctx = nil
 		if r := recover(); r != nil {
-			f := i.frames[i.fp-1]
-			switch v := r.(type) {
-			case error:
-				err = fmt.Errorf("%w: at=%d", v, f.ip)
-			default:
-				err = fmt.Errorf("%v: at=%d", v, f.ip)
+			if e, ok := r.(error); ok {
+				err = fmt.Errorf("%w: at=%d", e, i.frames[i.fp-1].ip)
+			} else {
+				err = fmt.Errorf("%v: at=%d", r, i.frames[i.fp-1].ip)
 			}
 		}
 	}()
@@ -145,6 +146,53 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 		code = f.fn.Code
 	}
 	return nil
+}
+
+func (i *Interpreter) Context() context.Context {
+	return i.ctx
+}
+
+func (i *Interpreter) Load(addr int) types.Value {
+	if addr < 0 || addr >= len(i.heap) {
+		return nil
+	}
+	return i.heap[addr]
+}
+
+func (i *Interpreter) Store(addr int, val types.Value) {
+	if addr < 0 || addr >= len(i.heap) {
+		return
+	}
+	if v, ok := val.(types.Boxed); ok {
+		if v.Kind() == types.KindRef {
+			val = i.heap[v.Ref()]
+		} else {
+			val = types.Unbox(v)
+		}
+	}
+	i.heap[addr] = val
+}
+
+func (i *Interpreter) Alloc(val types.Value) int {
+	if v, ok := val.(types.Boxed); ok {
+		if v.Kind() == types.KindRef {
+			return v.Ref()
+		}
+		val = types.Unbox(v)
+	}
+	return i.alloc(val)
+}
+
+func (i *Interpreter) Retain(addr int) types.Value {
+	if addr < 0 || addr >= len(i.heap) {
+		return nil
+	}
+	i.retain(addr)
+	return i.heap[addr]
+}
+
+func (i *Interpreter) Release(addr int) {
+	i.release(addr)
 }
 
 func (i *Interpreter) Push(val types.Value) error {

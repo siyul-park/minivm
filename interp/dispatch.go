@@ -109,27 +109,59 @@ var dispatch = [256]func(i *Interpreter){
 			panic(ErrFrameOverflow)
 		}
 		addr := i.stack[i.sp-1].Ref()
-		fn, ok := i.heap[addr].(*types.Function)
-		if !ok {
+		switch fn := i.heap[addr].(type) {
+		case *types.Function:
+			if i.sp <= fn.Params {
+				panic(ErrStackUnderflow)
+			}
+			if i.sp+fn.Locals-fn.Params-1 >= len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			for idx := 0; idx < fn.Locals-fn.Params; idx++ {
+				i.stack[i.sp+idx-1] = 0
+			}
+			frame := &i.frames[i.fp]
+			frame.addr = addr
+			frame.fn = fn
+			frame.ip = 0
+			frame.bp = i.sp - fn.Params - 1
+			i.fp++
+			i.sp = frame.bp + fn.Locals
+			i.frames[i.fp-2].ip++
+		case *NativeFunction:
+			if i.sp <= fn.Params {
+				panic(ErrStackUnderflow)
+			}
+			if i.sp+fn.Returns-fn.Params-1 >= len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			params := i.stack[i.sp-fn.Params : i.sp]
+			returns, err := fn.Fn(i, params)
+			if err != nil {
+				panic(err)
+			}
+			for _, val := range params {
+				if val.Kind() != types.KindRef {
+					continue
+				}
+				ok := false
+				for _, r := range returns {
+					if r == val {
+						ok = true
+						break
+					}
+				}
+				if !ok {
+					i.release(val.Ref())
+				}
+			}
+			i.sp -= fn.Params
+			copy(i.stack[i.sp-fn.Returns:i.sp], returns)
+			i.sp += fn.Returns - 1
+			i.frames[i.fp-1].ip++
+		default:
 			panic(ErrTypeMismatch)
 		}
-		if i.sp <= fn.Params {
-			panic(ErrStackUnderflow)
-		}
-		if i.sp+fn.Locals-fn.Params > len(i.stack) {
-			panic(ErrStackOverflow)
-		}
-		for idx := 0; idx < fn.Locals-fn.Params; idx++ {
-			i.stack[i.sp+idx-1] = 0
-		}
-		frame := &i.frames[i.fp]
-		frame.addr = addr
-		frame.fn = fn
-		frame.ip = 0
-		frame.bp = i.sp - fn.Params - 1
-		i.fp++
-		i.sp = frame.bp + fn.Locals
-		i.frames[i.fp-2].ip++
 	},
 	instr.RETURN: func(i *Interpreter) {
 		if i.fp == 1 {
