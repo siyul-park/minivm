@@ -216,7 +216,7 @@ var tests = []struct {
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.DUP),
+				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.REF_EQ),
 			},
 			program.WithConstants(types.String("foo")),
@@ -1612,10 +1612,8 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.GLOBAL_SET, 0),
 				instr.New(instr.I32_CONST, 20),
-				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(
@@ -1631,12 +1629,12 @@ var tests = []struct {
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.I32_SUB),
-					instr.New(instr.GLOBAL_GET, 0),
+					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.CALL),
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.I32_CONST, 2),
 					instr.New(instr.I32_SUB),
-					instr.New(instr.GLOBAL_GET, 0),
+					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.CALL),
 					instr.New(instr.I32_ADD),
 					instr.New(instr.RETURN),
@@ -1650,10 +1648,8 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.GLOBAL_SET, 0),
 				instr.New(instr.I64_CONST, 10),
-				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(
@@ -1669,7 +1665,7 @@ var tests = []struct {
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.I64_SUB),
-					instr.New(instr.GLOBAL_GET, 0),
+					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.CALL),
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.I64_MUL),

@@ -19,8 +19,8 @@ type Option struct {
 
 type Interpreter struct {
 	frames    []frame
-	constants []types.Value
 	types     []types.Type
+	constants []types.Boxed
 	global    []types.Boxed
 	stack     []types.Boxed
 	heap      []types.Value
@@ -73,8 +73,8 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 
 	i := &Interpreter{
 		frames:    make([]frame, f),
-		constants: prog.Constants,
 		types:     prog.Types,
+		constants: make([]types.Boxed, len(prog.Constants)),
 		global:    make([]types.Boxed, 0, g),
 		stack:     make([]types.Boxed, s),
 		heap:      make([]types.Value, 0, h),
@@ -85,8 +85,26 @@ func New(prog *program.Program, opts ...Option) *Interpreter {
 		tick:      t,
 	}
 
-	i.heap = append(i.heap, nil)
-	i.rc = append(i.rc, -1)
+	i.alloc(nil)
+
+	for j, v := range prog.Constants {
+		var val types.Boxed
+		switch v := v.(type) {
+		case types.Boxed:
+			val = v
+		case types.I32:
+			val = types.BoxI32(int32(v))
+		case types.I64:
+			val = i.boxI64(int64(v))
+		case types.F32:
+			val = types.BoxF32(float32(v))
+		case types.F64:
+			val = types.BoxF64(float64(v))
+		default:
+			val = types.BoxRef(i.alloc(v))
+		}
+		i.constants[j] = val
+	}
 
 	i.frames[0].fn = &types.Function{Code: prog.Code}
 	i.frames[0].bp = i.sp
@@ -155,8 +173,18 @@ func (i *Interpreter) Clear() {
 
 	i.sp = 0
 
-	i.heap = i.heap[:1]
-	i.rc = i.rc[:1]
+	constants := 1
+	for _, v := range i.constants {
+		if v.Kind() == types.KindRef {
+			constants++
+		}
+	}
+
+	i.heap = i.heap[:constants]
+	i.rc = i.rc[:constants]
+	for j := 0; j < constants; j++ {
+		i.rc[j] = 1
+	}
 	i.free = i.free[:0]
 }
 
@@ -279,6 +307,11 @@ func (i *Interpreter) gc() {
 
 	for j := 0; j < i.sp; j++ {
 		val := i.stack[j]
+		if val.Kind() == types.KindRef {
+			push(val.Ref())
+		}
+	}
+	for _, val := range i.constants {
 		if val.Kind() == types.KindRef {
 			push(val.Ref())
 		}

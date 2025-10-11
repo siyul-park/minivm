@@ -256,20 +256,9 @@ var dispatch = [256]func(i *Interpreter) error{
 		if idx < 0 || idx >= len(i.constants) {
 			return ErrSegmentationFault
 		}
-		var val types.Boxed
-		switch v := i.constants[idx].(type) {
-		case types.Boxed:
-			val = v
-		case types.I32:
-			val = types.BoxI32(int32(v))
-		case types.I64:
-			val = i.boxI64(int64(v))
-		case types.F32:
-			val = types.BoxF32(float32(v))
-		case types.F64:
-			val = types.BoxF64(float64(v))
-		default:
-			val = types.BoxRef(i.alloc(v))
+		val := i.constants[idx]
+		if val.Kind() == types.KindRef {
+			i.retain(val.Ref())
 		}
 		i.stack[i.sp] = val
 		i.sp++
