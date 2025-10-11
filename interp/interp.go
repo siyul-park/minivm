@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )

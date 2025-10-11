@@ -33,6 +33,7 @@ const (
 	REF_CAST
 
 	REF_EQ
+	REF_NE
 
 	I32_CONST
 

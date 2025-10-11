@@ -355,6 +355,16 @@ var dispatch = [256]func(i *Interpreter){
 		i.stack[i.sp-1] = types.BoxBool(v2 == v1)
 		i.frames[i.fp-1].ip++
 	},
+	instr.REF_NE: func(i *Interpreter) {
+		if i.sp < 2 {
+			panic(ErrStackUnderflow)
+		}
+		v1 := i.stack[i.sp-1]
+		v2 := i.stack[i.sp-2]
+		i.sp--
+		i.stack[i.sp-1] = types.BoxBool(v2 != v1)
+		i.frames[i.fp-1].ip++
+	},
 	instr.I32_CONST: func(i *Interpreter) {
 		if i.sp == len(i.stack) {
 			panic(ErrStackOverflow)

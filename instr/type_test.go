@@ -41,6 +41,7 @@ func TestTypeOf(t *testing.T) {
 		{opcode: REF_CAST},
 
 		{opcode: REF_EQ},
+		{opcode: REF_NE},
 
 		{opcode: I32_CONST},
 
