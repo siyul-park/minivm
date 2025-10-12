@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestModuleBuilder_Build(t *testing.T) {
+func TestModulePass_Run(t *testing.T) {
 	tests := []struct {
 		program *program.Program
 		module  *Module
@@ -24,19 +24,17 @@ func TestModuleBuilder_Build(t *testing.T) {
 				},
 			),
 			module: &Module{
-				Functions: []*Function{
-					{
-						Function: types.NewFunction(
-							types.NewFunctionSignature(),
-							instr.New(instr.NOP),
-						),
-						Blocks: []*BasicBlock{
-							{
-								Start: 0,
-								End:   1,
-								Succs: nil,
-								Preds: nil,
-							},
+				EntryPoint: &Function{
+					Function: types.NewFunction(
+						types.NewFunctionSignature(),
+						instr.New(instr.NOP),
+					),
+					Blocks: []*BasicBlock{
+						{
+							Start: 0,
+							End:   1,
+							Succs: nil,
+							Preds: nil,
 						},
 					},
 				},
@@ -51,19 +49,17 @@ func TestModuleBuilder_Build(t *testing.T) {
 				},
 			),
 			module: &Module{
-				Functions: []*Function{
-					{
-						Function: types.NewFunction(
-							types.NewFunctionSignature(),
-							instr.New(instr.UNREACHABLE),
-						),
-						Blocks: []*BasicBlock{
-							{
-								Start: 0,
-								End:   1,
-								Succs: nil,
-								Preds: nil,
-							},
+				EntryPoint: &Function{
+					Function: types.NewFunction(
+						types.NewFunctionSignature(),
+						instr.New(instr.UNREACHABLE),
+					),
+					Blocks: []*BasicBlock{
+						{
+							Start: 0,
+							End:   1,
+							Succs: nil,
+							Preds: nil,
 						},
 					},
 				},
@@ -78,19 +74,17 @@ func TestModuleBuilder_Build(t *testing.T) {
 				},
 			),
 			module: &Module{
-				Functions: []*Function{
-					{
-						Function: types.NewFunction(
-							types.NewFunctionSignature(),
-							instr.New(instr.RETURN),
-						),
-						Blocks: []*BasicBlock{
-							{
-								Start: 0,
-								End:   1,
-								Succs: nil,
-								Preds: nil,
-							},
+				EntryPoint: &Function{
+					Function: types.NewFunction(
+						types.NewFunctionSignature(),
+						instr.New(instr.RETURN),
+					),
+					Blocks: []*BasicBlock{
+						{
+							Start: 0,
+							End:   1,
+							Succs: nil,
+							Preds: nil,
 						},
 					},
 				},
@@ -107,33 +101,31 @@ func TestModuleBuilder_Build(t *testing.T) {
 				},
 			),
 			module: &Module{
-				Functions: []*Function{
-					{
-						Function: types.NewFunction(
-							types.NewFunctionSignature(),
-							instr.New(instr.BR, 5),
-							instr.New(instr.I32_CONST, 1),
-							instr.New(instr.I32_CONST, 2),
-						),
-						Blocks: []*BasicBlock{
-							{
-								Start: 0,
-								End:   3,
-								Succs: []int{2},
-								Preds: nil,
-							},
-							{
-								Start: 3,
-								End:   8,
-								Succs: []int{2},
-								Preds: nil,
-							},
-							{
-								Start: 8,
-								End:   13,
-								Succs: nil,
-								Preds: []int{0, 1},
-							},
+				EntryPoint: &Function{
+					Function: types.NewFunction(
+						types.NewFunctionSignature(),
+						instr.New(instr.BR, 5),
+						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.I32_CONST, 2),
+					),
+					Blocks: []*BasicBlock{
+						{
+							Start: 0,
+							End:   3,
+							Succs: []int{2},
+							Preds: nil,
+						},
+						{
+							Start: 3,
+							End:   8,
+							Succs: []int{2},
+							Preds: nil,
+						},
+						{
+							Start: 8,
+							End:   13,
+							Succs: nil,
+							Preds: []int{0, 1},
 						},
 					},
 				},
@@ -150,33 +142,31 @@ func TestModuleBuilder_Build(t *testing.T) {
 				},
 			),
 			module: &Module{
-				Functions: []*Function{
-					{
-						Function: types.NewFunction(
-							types.NewFunctionSignature(),
-							instr.New(instr.BR, 5),
-							instr.New(instr.I32_CONST, 1),
-							instr.New(instr.I32_CONST, 2),
-						),
-						Blocks: []*BasicBlock{
-							{
-								Start: 0,
-								End:   3,
-								Succs: []int{2},
-								Preds: nil,
-							},
-							{
-								Start: 3,
-								End:   8,
-								Succs: []int{2},
-								Preds: nil,
-							},
-							{
-								Start: 8,
-								End:   13,
-								Succs: nil,
-								Preds: []int{0, 1},
-							},
+				EntryPoint: &Function{
+					Function: types.NewFunction(
+						types.NewFunctionSignature(),
+						instr.New(instr.BR, 5),
+						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.I32_CONST, 2),
+					),
+					Blocks: []*BasicBlock{
+						{
+							Start: 0,
+							End:   3,
+							Succs: []int{2},
+							Preds: nil,
+						},
+						{
+							Start: 3,
+							End:   8,
+							Succs: []int{2},
+							Preds: nil,
+						},
+						{
+							Start: 8,
+							End:   13,
+							Succs: nil,
+							Preds: []int{0, 1},
 						},
 					},
 				},
@@ -194,35 +184,33 @@ func TestModuleBuilder_Build(t *testing.T) {
 				},
 			),
 			module: &Module{
-				Functions: []*Function{
-					{
-						Function: types.NewFunction(
-							types.NewFunctionSignature(),
-							instr.New(instr.I32_CONST, 1),
-							instr.New(instr.BR_IF, 5),
-							instr.New(instr.I32_CONST, 2),
-							instr.New(instr.I32_CONST, 3),
-						),
-						Blocks: []*BasicBlock{
-							{
-								Start: 0,
-								End:   8,
-								Succs: []int{1, 2},
-								Preds: nil,
-							},
-							{
-								Start: 8,
-								End:   13,
-								Succs: []int{2},
-								Preds: []int{0},
-							},
+				EntryPoint: &Function{
+					Function: types.NewFunction(
+						types.NewFunctionSignature(),
+						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.BR_IF, 5),
+						instr.New(instr.I32_CONST, 2),
+						instr.New(instr.I32_CONST, 3),
+					),
+					Blocks: []*BasicBlock{
+						{
+							Start: 0,
+							End:   8,
+							Succs: []int{1, 2},
+							Preds: nil,
+						},
+						{
+							Start: 8,
+							End:   13,
+							Succs: []int{2},
+							Preds: []int{0},
+						},
 
-							{
-								Start: 13,
-								End:   18,
-								Succs: nil,
-								Preds: []int{0, 1},
-							},
+						{
+							Start: 13,
+							End:   18,
+							Succs: nil,
+							Preds: []int{0, 1},
 						},
 					},
 				},
@@ -240,34 +228,32 @@ func TestModuleBuilder_Build(t *testing.T) {
 				},
 			),
 			module: &Module{
-				Functions: []*Function{
-					{
-						Function: types.NewFunction(
-							types.NewFunctionSignature(),
-							instr.New(instr.I32_CONST, 1),
-							instr.New(instr.BR_TABLE, 1, 5, 0),
-							instr.New(instr.I32_CONST, 2),
-							instr.New(instr.I32_CONST, 3),
-						),
-						Blocks: []*BasicBlock{
-							{
-								Start: 0,
-								End:   11,
-								Succs: []int{1, 2},
-								Preds: nil,
-							},
-							{
-								Start: 11,
-								End:   16,
-								Succs: []int{2},
-								Preds: []int{0},
-							},
-							{
-								Start: 16,
-								End:   21,
-								Succs: nil,
-								Preds: []int{0, 1},
-							},
+				EntryPoint: &Function{
+					Function: types.NewFunction(
+						types.NewFunctionSignature(),
+						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.BR_TABLE, 1, 5, 0),
+						instr.New(instr.I32_CONST, 2),
+						instr.New(instr.I32_CONST, 3),
+					),
+					Blocks: []*BasicBlock{
+						{
+							Start: 0,
+							End:   11,
+							Succs: []int{1, 2},
+							Preds: nil,
+						},
+						{
+							Start: 11,
+							End:   16,
+							Succs: []int{2},
+							Preds: []int{0},
+						},
+						{
+							Start: 16,
+							End:   21,
+							Succs: nil,
+							Preds: []int{0, 1},
 						},
 					},
 				},

@@ -14,9 +14,10 @@ import (
 type ModulePass struct{}
 
 type Module struct {
-	Functions []*Function
-	Constants []types.Value
-	Types     []types.Type
+	EntryPoint *Function
+	Functions  []*Function
+	Constants  []types.Value
+	Types      []types.Type
 }
 
 type Function struct {
@@ -45,26 +46,21 @@ func (p *ModulePass) Run(m *pass.Manager) (*Module, error) {
 		return nil, err
 	}
 
-	fns := []*types.Function{{
-		Signature: types.NewFunctionSignature(),
-		Code:      prog.Code,
-	}}
+	var fns []*Function
+	fns = append(fns, &Function{
+		Function: &types.Function{
+			Signature: types.NewFunctionSignature(),
+			Code:      prog.Code,
+		},
+	})
 	for _, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
-			fns = append(fns, fn)
+			fns = append(fns, &Function{Function: fn})
 		}
 	}
 
-	mdl := &Module{
-		Functions: make([]*Function, len(fns)),
-		Constants: prog.Constants,
-		Types:     prog.Types,
-	}
-
-	for i, f := range fns {
-		fn := &Function{Function: f}
+	for _, fn := range fns {
 		code := fn.Code
-
 		blocks, err := p.blocks(code)
 		if err != nil {
 			return nil, err
@@ -72,9 +68,16 @@ func (p *ModulePass) Run(m *pass.Manager) (*Module, error) {
 		if err := p.connect(code, blocks); err != nil {
 			return nil, err
 		}
-
 		fn.Blocks = blocks
-		mdl.Functions[i] = fn
+	}
+
+	mdl := &Module{
+		EntryPoint: fns[0],
+		Constants:  prog.Constants,
+		Types:      prog.Types,
+	}
+	if len(fns) > 1 {
+		mdl.Functions = fns[1:]
 	}
 	return mdl, nil
 }
@@ -162,15 +165,16 @@ func (p *ModulePass) connect(code []byte, blocks []*BasicBlock) error {
 				blocks[j+1].Preds = append(blocks[j+1].Preds, j)
 			}
 		case instr.BR_TABLE:
+			width := inst.Width()
 			operands := inst.Operands()
 			count := int(operands[0])
 			for k := 0; k < count; k++ {
-				offset := ip + inst.Width() + int(operands[k+1])
+				offset := ip + int(operands[k+1]) + width
 				if !p.link(blocks, j, offset) {
 					return fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
 				}
 			}
-			offset := ip + inst.Width() + int(operands[len(operands)-1])
+			offset := ip + int(operands[len(operands)-1]) + width
 			if !p.link(blocks, j, offset) {
 				return fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
 			}

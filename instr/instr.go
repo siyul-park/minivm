@@ -87,12 +87,49 @@ func (i Instruction) Opcode() Opcode {
 	return Opcode(i[0])
 }
 
-func (i Instruction) Operand(idx int) uint64 {
+func (i Instruction) SetOperand(index int, value uint64) {
+	typ := i.Type()
+
+	offset := 1
+	idx := 0
+	for _, w := range typ.Widths {
+		count := idx + 1
+		if w < 0 {
+			if index == idx {
+				i[offset] = byte(value)
+				return
+			}
+			count += int(i[offset])
+			w *= -1
+			offset++
+			idx++
+		}
+
+		if index >= idx && index < count {
+			switch w {
+			case 1:
+				i[offset+(index-idx)] = byte(value)
+			case 2:
+				*(*uint16)(unsafe.Pointer(&i[offset+(index-idx)*2])) = uint16(value)
+			case 4:
+				*(*uint32)(unsafe.Pointer(&i[offset+(index-idx)*4])) = uint32(value)
+			case 8:
+				*(*uint64)(unsafe.Pointer(&i[offset+(index-idx)*8])) = value
+			}
+			return
+		}
+
+		offset += w * (count - idx)
+		idx = count
+	}
+}
+
+func (i Instruction) Operand(index int) uint64 {
 	operands := i.Operands()
-	if idx < 0 || idx > len(operands) {
+	if index < 0 || index > len(operands) {
 		return 0
 	}
-	return operands[idx]
+	return operands[index]
 }
 
 func (i Instruction) Operands() []uint64 {
