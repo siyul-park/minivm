@@ -8,18 +8,18 @@ import (
 )
 
 type Manager struct {
-	passes map[reflect.Type]reflect.Value
+	passes map[reflect.Type][]reflect.Value
 	cache  map[reflect.Type]reflect.Value
 }
 
 var (
-	ErrInvalid  = fmt.Errorf("invalid argument")
-	ErrNotFound = fmt.Errorf("not found")
+	ErrPassInvalid = fmt.Errorf("invalid pass type")
+	ErrPassMissing = fmt.Errorf("no pass registered for type")
 )
 
 func NewManager() *Manager {
 	return &Manager{
-		passes: make(map[reflect.Type]reflect.Value),
+		passes: make(map[reflect.Type][]reflect.Value),
 		cache:  make(map[reflect.Type]reflect.Value),
 	}
 }
@@ -30,36 +30,35 @@ func (m *Manager) Register(pass any) error {
 	if !ok ||
 		run.Type.NumIn() != 2 || run.Type.In(1) != reflect.TypeOf(m) ||
 		run.Type.NumOut() != 2 || run.Type.Out(1) != reflect.TypeOf((*error)(nil)).Elem() {
-		return ErrInvalid
+		return ErrPassInvalid
 	}
-	m.passes[run.Type.Out(0)] = val
+	m.passes[run.Type.Out(0)] = append(m.passes[run.Type.Out(0)], val)
 	return nil
 }
 
 func (m *Manager) Load(val any) error {
 	v := reflect.ValueOf(val)
 	if v.Kind() != reflect.Ptr || v.IsNil() {
-		return ErrInvalid
+		return ErrPassInvalid
 	}
 
 	typ := v.Elem().Type()
 
 	r, ok := m.cache[typ]
 	if !ok {
-		p, ok := m.passes[typ]
+		passes, ok := m.passes[typ]
 		if !ok {
-			return ErrNotFound
+			return ErrPassMissing
 		}
-
-		run := p.MethodByName("Run")
-		res := run.Call([]reflect.Value{reflect.ValueOf(m)})
-
-		if err := res[1]; !err.IsNil() {
-			return err.Interface().(error)
+		for _, p := range passes {
+			run := p.MethodByName("Run")
+			res := run.Call([]reflect.Value{reflect.ValueOf(m)})
+			if err := res[1]; !err.IsNil() {
+				return err.Interface().(error)
+			}
+			r = res[0]
+			m.cache[typ] = r
 		}
-
-		r = res[0]
-		m.cache[typ] = r
 	}
 
 	v.Elem().Set(r)
@@ -67,13 +66,20 @@ func (m *Manager) Load(val any) error {
 }
 
 func (m *Manager) Run(prog *program.Program) error {
+	progType := reflect.TypeOf(prog)
 	m.cache = map[reflect.Type]reflect.Value{
-		reflect.TypeOf(prog): reflect.ValueOf(prog),
+		progType: reflect.ValueOf(prog),
 	}
-	for t := range m.passes {
-		val := reflect.New(t).Interface()
-		if err := m.Load(val); err != nil {
-			return err
+	for _, p := range m.passes[progType] {
+		run := p.MethodByName("Run")
+		res := run.Call([]reflect.Value{reflect.ValueOf(m)})
+		if err := res[1]; !err.IsNil() {
+			return err.Interface().(error)
+		}
+		if !res[0].IsZero() && res[0].IsValid() {
+			m.cache = map[reflect.Type]reflect.Value{
+				progType: res[0],
+			}
 		}
 	}
 	return nil

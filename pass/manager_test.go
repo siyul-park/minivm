@@ -9,16 +9,24 @@ import (
 
 func TestManager_Register(t *testing.T) {
 	m := NewManager()
-	err := m.Register(NewPass[any](func(m *Manager) (any, error) {
-		return nil, nil
+	err := m.Register(NewPass[*program.Program](func(m *Manager) (*program.Program, error) {
+		var prog *program.Program
+		if err := m.Load(&prog); err != nil {
+			return nil, err
+		}
+		return prog, nil
 	}))
 	require.NoError(t, err)
 }
 
 func TestManager_Run(t *testing.T) {
 	m := NewManager()
-	_ = m.Register(NewPass[any](func(m *Manager) (any, error) {
-		return nil, nil
+	_ = m.Register(NewPass[*program.Program](func(m *Manager) (*program.Program, error) {
+		var prog *program.Program
+		if err := m.Load(&prog); err != nil {
+			return nil, err
+		}
+		return prog, nil
 	}))
 
 	err := m.Run(program.New(nil))
