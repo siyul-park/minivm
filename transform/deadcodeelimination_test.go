@@ -3,13 +3,14 @@ package transform
 import (
 	"testing"
 
+	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
 	"github.com/stretchr/testify/require"
 )
 
-func TestNOPEliminationPass_Run(t *testing.T) {
+func TestDeadCodeEliminationPass_Run(t *testing.T) {
 	tests := []struct {
 		program  *program.Program
 		expected *program.Program
@@ -48,8 +49,7 @@ func TestNOPEliminationPass_Run(t *testing.T) {
 			expected: program.New(
 				[]instr.Instruction{
 					instr.Marshal([]instr.Instruction{
-						instr.New(instr.BR, 5),
-						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.BR, 0),
 						instr.New(instr.I32_CONST, 2),
 					}),
 				},
@@ -101,7 +101,8 @@ func TestNOPEliminationPass_Run(t *testing.T) {
 
 	for _, tt := range tests {
 		m := pass.NewManager()
-		_ = m.Register(NewNOPEliminationPass())
+		_ = m.Register(analysis.NewModulePass())
+		_ = m.Register(NewDeadCodeEliminationPass())
 
 		t.Run(tt.program.String(), func(t *testing.T) {
 			err := m.Run(tt.program)

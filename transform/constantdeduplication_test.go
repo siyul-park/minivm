@@ -3,14 +3,15 @@ package transform
 import (
 	"testing"
 
-	"github.com/siyul-park/minivm/analysis"
+	"github.com/siyul-park/minivm/types"
+
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
 	"github.com/stretchr/testify/require"
 )
 
-func TestDeadCodeEliminationPass_Run(t *testing.T) {
+func TestConstantDeduplicationPassPass_Run(t *testing.T) {
 	tests := []struct {
 		program  *program.Program
 		expected *program.Program
@@ -18,33 +19,26 @@ func TestDeadCodeEliminationPass_Run(t *testing.T) {
 		{
 			program: program.New(
 				[]instr.Instruction{
-					instr.Marshal([]instr.Instruction{
-						instr.New(instr.BR, 5),
-						instr.New(instr.I32_CONST, 1),
-						instr.New(instr.I32_CONST, 2),
-					}),
+					instr.New(instr.CONST_GET, 1),
+					instr.New(instr.CONST_GET, 2),
 				},
+				program.WithConstants(types.String("foo"), types.String("bar"), types.String("bar")),
 			),
 			expected: program.New(
 				[]instr.Instruction{
 					instr.Marshal([]instr.Instruction{
-						instr.New(instr.BR, 5),
-						instr.New(instr.UNREACHABLE),
-						instr.New(instr.UNREACHABLE),
-						instr.New(instr.UNREACHABLE),
-						instr.New(instr.UNREACHABLE),
-						instr.New(instr.UNREACHABLE),
-						instr.New(instr.I32_CONST, 2),
+						instr.New(instr.CONST_GET, 0),
+						instr.New(instr.CONST_GET, 0),
 					}),
 				},
+				program.WithConstants(types.String("bar")),
 			),
 		},
 	}
 
 	for _, tt := range tests {
 		m := pass.NewManager()
-		_ = m.Register(analysis.NewModulePass())
-		_ = m.Register(NewDeadCodeEliminationPass())
+		_ = m.Register(NewConstantDeduplicationPass())
 
 		t.Run(tt.program.String(), func(t *testing.T) {
 			err := m.Run(tt.program)

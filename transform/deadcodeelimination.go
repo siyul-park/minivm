@@ -7,38 +7,46 @@ import (
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
-	"github.com/siyul-park/minivm/types"
 )
 
-type NOPEliminationPass struct{}
+type DeadCodeEliminationPass struct{}
 
-var _ pass.Pass[*program.Program] = (*NOPEliminationPass)(nil)
+var _ pass.Pass[*program.Program] = (*DeadCodeEliminationPass)(nil)
 
-func NewNOPEliminationPass() *NOPEliminationPass {
-	return &NOPEliminationPass{}
+func NewDeadCodeEliminationPass() *DeadCodeEliminationPass {
+	return &DeadCodeEliminationPass{}
 }
 
-func (p *NOPEliminationPass) Run(m *pass.Manager) (*program.Program, error) {
+func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error) {
 	var prog *program.Program
+	var module *analysis.Module
 	if err := m.Load(&prog); err != nil {
 		return nil, err
 	}
+	if err := m.Load(&module); err != nil {
+		return nil, err
+	}
 
-	var codes []*[]byte
-	codes = append(codes, &prog.Code)
-	for _, v := range prog.Constants {
-		if fn, ok := v.(*types.Function); ok {
-			codes = append(codes, &fn.Code)
+	fns := module.AllFunctions()
+	for _, fn := range fns {
+		code := fn.Code
+		for i := 1; i < len(fn.Blocks); i++ {
+			blk := fn.Blocks[i]
+			if len(blk.Preds) == 0 {
+				for j := blk.Start; j < blk.End; j++ {
+					code[j] = byte(instr.UNREACHABLE)
+				}
+			}
 		}
 	}
 
-	for _, ptr := range codes {
-		code := *ptr
+	for i, fn := range fns {
+		code := fn.Code
 		write := 0
 
 		offsets := make([]int, len(code))
-		for i := range offsets {
-			offsets[i] = -1
+		for j := range offsets {
+			offsets[j] = -1
 		}
 
 		for read := 0; read < len(code); {
@@ -58,11 +66,10 @@ func (p *NOPEliminationPass) Run(m *pass.Manager) (*program.Program, error) {
 		if len(code) == 0 {
 			code = nil
 		}
-		*ptr = code
 
 		read := 0
 		write = 0
-		for read < len(code) {
+		for write < len(code) {
 			inst := instr.Instruction(code[write:])
 
 			switch inst.Opcode() {
@@ -98,8 +105,13 @@ func (p *NOPEliminationPass) Run(m *pass.Manager) (*program.Program, error) {
 			}
 
 			write += inst.Width()
-			for ; read < len(offsets) && offsets[read] < write; read++ {
+			for ; read < len(offsets) && offsets[read] != write; read++ {
 			}
+		}
+
+		fn.Code = code
+		if i == 0 {
+			prog.Code = code
 		}
 	}
 

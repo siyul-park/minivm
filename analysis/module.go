@@ -202,3 +202,12 @@ func (p *ModulePass) link(blocks []*BasicBlock, src, dst int) bool {
 	}
 	return false
 }
+
+func (m *Module) AllFunctions() []*Function {
+	fns := make([]*Function, 0, len(m.Functions)+1)
+	if m.EntryPoint != nil {
+		fns = append(fns, m.EntryPoint)
+	}
+	fns = append(fns, m.Functions...)
+	return fns
+}
