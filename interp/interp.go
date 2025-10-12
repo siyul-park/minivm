@@ -24,6 +24,13 @@ type Interpreter struct {
 	tick      int
 }
 
+type frame struct {
+	code []byte
+	addr int
+	ip   int
+	bp   int
+}
+
 type option struct {
 	frame   int
 	globals int
@@ -115,8 +122,9 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		i.constants[j] = val
 	}
 
-	i.frames[0].fn = &types.Function{Code: prog.Code}
+	i.frames[0].code = prog.Code
 	i.frames[0].bp = i.sp
+	i.frames[0].addr = 0
 	i.fp = 1
 
 	i.retain(0)
@@ -138,10 +146,9 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 	}()
 
 	f := &i.frames[i.fp-1]
-	code := f.fn.Code
 	tick := i.tick
 
-	for f.ip < len(code) {
+	for f.ip < len(f.code) {
 		tick--
 		if tick == 0 {
 			tick = i.tick
@@ -152,10 +159,9 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 			}
 		}
 
-		dispatch[code[f.ip]](i)
+		dispatch[f.code[f.ip]](i)
 
 		f = &i.frames[i.fp-1]
-		code = f.fn.Code
 	}
 	return nil
 }

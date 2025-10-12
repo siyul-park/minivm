@@ -49,39 +49,36 @@ var dispatch = [256]func(i *Interpreter){
 		i.frames[i.fp-1].ip++
 	},
 	instr.BR: func(i *Interpreter) {
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
-		offset := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
-		frame.ip += offset + 3
+		f := &i.frames[i.fp-1]
+		offset := int(*(*uint16)(unsafe.Pointer(&f.code[f.ip+1])))
+		f.ip += offset + 3
 	},
 	instr.BR_IF: func(i *Interpreter) {
 		if i.sp == 0 {
 			panic(ErrStackUnderflow)
 		}
-		frame := &i.frames[i.fp-1]
+		f := &i.frames[i.fp-1]
 		i.sp--
 		cond := i.stack[i.sp].I32()
 		if cond != 0 {
-			code := frame.fn.Code
-			offset := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
-			frame.ip += offset
+			offset := int(*(*uint16)(unsafe.Pointer(&f.code[f.ip+1])))
+			f.ip += offset
 		}
-		frame.ip += 3
+		f.ip += 3
 	},
 	instr.BR_TABLE: func(i *Interpreter) {
 		if i.sp == 0 {
 			panic(ErrStackUnderflow)
 		}
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
-		count := int(code[frame.ip+1])
+		f := &i.frames[i.fp-1]
+		count := int(f.code[f.ip+1])
 		i.sp--
 		cond := int(i.stack[i.sp].I32())
 		if cond > count {
 			cond = count + 1
 		}
-		offset := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+cond*2+2])))
-		frame.ip += offset + count*2 + 4
+		offset := int(*(*uint16)(unsafe.Pointer(&f.code[f.ip+cond*2+2])))
+		f.ip += offset + count*2 + 4
 	},
 	instr.SELECT: func(i *Interpreter) {
 		if i.sp < 3 {
@@ -120,13 +117,13 @@ var dispatch = [256]func(i *Interpreter){
 			for idx := 0; idx < fn.Locals-fn.Params; idx++ {
 				i.stack[i.sp+idx-1] = 0
 			}
-			frame := &i.frames[i.fp]
-			frame.addr = addr
-			frame.fn = fn
-			frame.ip = 0
-			frame.bp = i.sp - fn.Params - 1
+			f := &i.frames[i.fp]
+			f.code = fn.Code
+			f.addr = addr
+			f.ip = 0
+			f.bp = i.sp - fn.Params - 1
+			i.sp = f.bp + fn.Locals
 			i.fp++
-			i.sp = frame.bp + fn.Locals
 			i.frames[i.fp-2].ip++
 		case *NativeFunction:
 			if i.sp <= fn.Params {
@@ -167,24 +164,23 @@ var dispatch = [256]func(i *Interpreter){
 		if i.fp == 1 {
 			panic(ErrFrameUnderflow)
 		}
-		frame := &i.frames[i.fp-1]
-		fn := frame.fn
+		f := &i.frames[i.fp-1]
+		fn := i.heap[f.addr].(*types.Function)
 		if i.sp < fn.Returns {
 			panic(ErrStackUnderflow)
 		}
-		copy(i.stack[frame.bp:frame.bp+fn.Returns], i.stack[i.sp-fn.Returns:i.sp])
-		i.sp = frame.bp + fn.Returns
-		i.release(frame.addr)
-		frame.fn = nil
+		copy(i.stack[f.bp:f.bp+fn.Returns], i.stack[i.sp-fn.Returns:i.sp])
+		i.sp = f.bp + fn.Returns
+		i.release(f.addr)
+		f.code = nil
 		i.fp--
 	},
 	instr.GLOBAL_GET: func(i *Interpreter) {
 		if i.sp == len(i.stack) {
 			panic(ErrStackOverflow)
 		}
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
-		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
+		f := &i.frames[i.fp-1]
+		idx := int(*(*uint16)(unsafe.Pointer(&f.code[f.ip+1])))
 		if idx < 0 || idx >= len(i.globals) {
 			panic(ErrSegmentationFault)
 		}
@@ -194,15 +190,14 @@ var dispatch = [256]func(i *Interpreter){
 		}
 		i.stack[i.sp] = val
 		i.sp++
-		frame.ip += 3
+		f.ip += 3
 	},
 	instr.GLOBAL_SET: func(i *Interpreter) {
 		if i.sp == 0 {
 			panic(ErrStackUnderflow)
 		}
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
-		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
+		f := &i.frames[i.fp-1]
+		idx := int(*(*uint16)(unsafe.Pointer(&f.code[f.ip+1])))
 		if idx < 0 {
 			panic(ErrSegmentationFault)
 		}
@@ -221,15 +216,14 @@ var dispatch = [256]func(i *Interpreter){
 		}
 		i.globals[idx] = val
 		i.sp--
-		frame.ip += 3
+		f.ip += 3
 	},
 	instr.GLOBAL_TEE: func(i *Interpreter) {
 		if i.sp == 0 {
 			panic(ErrStackUnderflow)
 		}
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
-		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
+		f := &i.frames[i.fp-1]
+		idx := int(*(*uint16)(unsafe.Pointer(&f.code[f.ip+1])))
 		if idx < 0 {
 			panic(ErrSegmentationFault)
 		}
@@ -247,16 +241,15 @@ var dispatch = [256]func(i *Interpreter){
 			i.release(old.Ref())
 		}
 		i.globals[idx] = val
-		frame.ip += 3
+		f.ip += 3
 	},
 	instr.LOCAL_GET: func(i *Interpreter) {
 		if i.sp == len(i.stack) {
 			panic(ErrStackOverflow)
 		}
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
-		idx := int(code[frame.ip+1])
-		addr := frame.bp + idx
+		f := &i.frames[i.fp-1]
+		idx := int(f.code[f.ip+1])
+		addr := f.bp + idx
 		if addr < 0 || addr > i.sp {
 			panic(ErrSegmentationFault)
 		}
@@ -266,17 +259,15 @@ var dispatch = [256]func(i *Interpreter){
 		}
 		i.stack[i.sp] = val
 		i.sp++
-		frame.ip += 2
+		f.ip += 2
 	},
 	instr.LOCAL_SET: func(i *Interpreter) {
 		if i.sp == 0 {
 			panic(ErrStackUnderflow)
 		}
-		frame := &i.frames[i.fp-1]
-		fn := frame.fn
-		code := fn.Code
-		idx := int(code[frame.ip+1])
-		addr := frame.bp + idx
+		f := &i.frames[i.fp-1]
+		idx := int(f.code[f.ip+1])
+		addr := f.bp + idx
 		if addr < 0 || addr > i.sp {
 			panic(ErrSegmentationFault)
 		}
@@ -286,17 +277,15 @@ var dispatch = [256]func(i *Interpreter){
 		}
 		i.stack[addr] = val
 		i.sp--
-		frame.ip += 2
+		f.ip += 2
 	},
 	instr.LOCAL_TEE: func(i *Interpreter) {
 		if i.sp == 0 {
 			panic(ErrStackUnderflow)
 		}
-		frame := &i.frames[i.fp-1]
-		fn := frame.fn
-		code := fn.Code
-		idx := int(code[frame.ip+1])
-		addr := frame.bp + idx
+		f := &i.frames[i.fp-1]
+		idx := int(f.code[f.ip+1])
+		addr := f.bp + idx
 		if addr < 0 || addr > i.sp {
 			panic(ErrSegmentationFault)
 		}
@@ -305,15 +294,15 @@ var dispatch = [256]func(i *Interpreter){
 			i.release(old.Ref())
 		}
 		i.stack[addr] = val
-		frame.ip += 2
+		f.ip += 2
 	},
 	instr.CONST_GET: func(i *Interpreter) {
 		if i.sp == len(i.stack) {
 			panic(ErrStackOverflow)
 		}
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
-		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
+		f := &i.frames[i.fp-1]
+
+		idx := int(*(*uint16)(unsafe.Pointer(&f.code[f.ip+1])))
 		if idx < 0 || idx >= len(i.constants) {
 			panic(ErrSegmentationFault)
 		}
@@ -323,7 +312,7 @@ var dispatch = [256]func(i *Interpreter){
 		}
 		i.stack[i.sp] = val
 		i.sp++
-		frame.ip += 3
+		f.ip += 3
 	},
 	instr.REF_NULL: func(i *Interpreter) {
 		if i.sp == len(i.stack) {
@@ -338,10 +327,8 @@ var dispatch = [256]func(i *Interpreter){
 		if i.sp == 0 {
 			panic(ErrStackUnderflow)
 		}
-		frame := &i.frames[i.fp-1]
-		fn := frame.fn
-		code := fn.Code
-		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
+		f := &i.frames[i.fp-1]
+		idx := int(*(*uint16)(unsafe.Pointer(&f.code[f.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
 			panic(ErrSegmentationFault)
 		}
@@ -356,16 +343,14 @@ var dispatch = [256]func(i *Interpreter){
 			cond = types.BoxBool(kind == typ.Kind())
 		}
 		i.stack[i.sp-1] = cond
-		frame.ip += 3
+		f.ip += 3
 	},
 	instr.REF_CAST: func(i *Interpreter) {
 		if i.sp == 0 {
 			panic(ErrStackUnderflow)
 		}
-		frame := &i.frames[i.fp-1]
-		fn := frame.fn
-		code := fn.Code
-		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
+		f := &i.frames[i.fp-1]
+		idx := int(*(*uint16)(unsafe.Pointer(&f.code[f.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
 			panic(ErrSegmentationFault)
 		}
@@ -382,7 +367,7 @@ var dispatch = [256]func(i *Interpreter){
 				panic(ErrTypeMismatch)
 			}
 		}
-		frame.ip += 3
+		f.ip += 3
 	},
 	instr.REF_IS_NULL: func(i *Interpreter) {
 		if i.sp == 0 {
@@ -416,12 +401,11 @@ var dispatch = [256]func(i *Interpreter){
 		if i.sp == len(i.stack) {
 			panic(ErrStackOverflow)
 		}
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
-		val := types.BoxI32(*(*int32)(unsafe.Pointer(&code[frame.ip+1])))
+		f := &i.frames[i.fp-1]
+		val := types.BoxI32(*(*int32)(unsafe.Pointer(&f.code[f.ip+1])))
 		i.stack[i.sp] = val
 		i.sp++
-		frame.ip += 5
+		f.ip += 5
 	},
 	instr.I32_ADD: func(i *Interpreter) {
 		if i.sp < 2 {
@@ -725,12 +709,12 @@ var dispatch = [256]func(i *Interpreter){
 		if i.sp == len(i.stack) {
 			panic(ErrStackOverflow)
 		}
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
-		val := i.boxI64(int64(*(*uint64)(unsafe.Pointer(&code[frame.ip+1]))))
+		f := &i.frames[i.fp-1]
+
+		val := i.boxI64(int64(*(*uint64)(unsafe.Pointer(&f.code[f.ip+1]))))
 		i.stack[i.sp] = val
 		i.sp++
-		frame.ip += 9
+		f.ip += 9
 	},
 	instr.I64_ADD: func(i *Interpreter) {
 		if i.sp < 2 {
@@ -996,11 +980,10 @@ var dispatch = [256]func(i *Interpreter){
 		if i.sp == len(i.stack) {
 			panic(ErrStackOverflow)
 		}
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
-		i.stack[i.sp] = types.BoxF32(*(*float32)(unsafe.Pointer(&code[frame.ip+1])))
+		f := &i.frames[i.fp-1]
+		i.stack[i.sp] = types.BoxF32(*(*float32)(unsafe.Pointer(&f.code[f.ip+1])))
 		i.sp++
-		frame.ip += 5
+		f.ip += 5
 	},
 	instr.F32_ADD: func(i *Interpreter) {
 		if i.sp < 2 {
@@ -1189,11 +1172,10 @@ var dispatch = [256]func(i *Interpreter){
 		if i.sp == len(i.stack) {
 			panic(ErrStackOverflow)
 		}
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
-		i.stack[i.sp] = types.BoxF64(*(*float64)(unsafe.Pointer(&code[frame.ip+1])))
+		f := &i.frames[i.fp-1]
+		i.stack[i.sp] = types.BoxF64(*(*float64)(unsafe.Pointer(&f.code[f.ip+1])))
 		i.sp++
-		frame.ip += 9
+		f.ip += 9
 	},
 	instr.F64_ADD: func(i *Interpreter) {
 		if i.sp < 2 {
@@ -1396,9 +1378,8 @@ var dispatch = [256]func(i *Interpreter){
 		if i.sp < 1 {
 			panic(ErrStackUnderflow)
 		}
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
-		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
+		f := &i.frames[i.fp-1]
+		idx := int(*(*uint16)(unsafe.Pointer(&f.code[f.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
 			panic(ErrSegmentationFault)
 		}
@@ -1452,9 +1433,8 @@ var dispatch = [256]func(i *Interpreter){
 		if i.sp < 1 {
 			panic(ErrStackUnderflow)
 		}
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
-		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
+		f := &i.frames[i.fp-1]
+		idx := int(*(*uint16)(unsafe.Pointer(&f.code[f.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
 			panic(ErrSegmentationFault)
 		}
@@ -1702,9 +1682,8 @@ var dispatch = [256]func(i *Interpreter){
 		i.frames[i.fp-1].ip++
 	},
 	instr.STRUCT_NEW: func(i *Interpreter) {
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
-		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
+		f := &i.frames[i.fp-1]
+		idx := int(*(*uint16)(unsafe.Pointer(&f.code[f.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
 			panic(ErrSegmentationFault)
 		}
@@ -1740,9 +1719,8 @@ var dispatch = [256]func(i *Interpreter){
 		i.frames[i.fp-1].ip++
 	},
 	instr.STRUCT_NEW_DEFAULT: func(i *Interpreter) {
-		frame := &i.frames[i.fp-1]
-		code := frame.fn.Code
-		idx := int(*(*uint16)(unsafe.Pointer(&code[frame.ip+1])))
+		f := &i.frames[i.fp-1]
+		idx := int(*(*uint16)(unsafe.Pointer(&f.code[f.ip+1])))
 		if idx < 0 || idx >= len(i.types) {
 			panic(ErrSegmentationFault)
 		}
@@ -1773,20 +1751,19 @@ var dispatch = [256]func(i *Interpreter){
 		if idx < 0 || idx >= len(typ.Fields) {
 			panic(ErrSegmentationFault)
 		}
-		f := typ.Fields[idx]
-		offset := f.Offset
+		field := typ.Fields[idx]
 		var val types.Boxed
-		switch f.Kind {
+		switch field.Kind {
 		case types.KindI32:
-			val = types.BoxI32(*(*int32)(unsafe.Pointer(&s.Data[offset])))
+			val = types.BoxI32(*(*int32)(unsafe.Pointer(&s.Data[field.Offset])))
 		case types.KindI64:
-			val = i.boxI64(*(*int64)(unsafe.Pointer(&s.Data[offset])))
+			val = i.boxI64(*(*int64)(unsafe.Pointer(&s.Data[field.Offset])))
 		case types.KindF32:
-			val = types.BoxF32(*(*float32)(unsafe.Pointer(&s.Data[offset])))
+			val = types.BoxF32(*(*float32)(unsafe.Pointer(&s.Data[field.Offset])))
 		case types.KindF64:
-			val = types.BoxF64(*(*float64)(unsafe.Pointer(&s.Data[offset])))
+			val = types.BoxF64(*(*float64)(unsafe.Pointer(&s.Data[field.Offset])))
 		case types.KindRef:
-			val = types.Boxed(*(*uint64)(unsafe.Pointer(&s.Data[offset])))
+			val = types.Boxed(*(*uint64)(unsafe.Pointer(&s.Data[field.Offset])))
 			if val.Kind() == types.KindRef {
 				i.retain(val.Ref())
 			}
@@ -1817,19 +1794,18 @@ var dispatch = [256]func(i *Interpreter){
 		if idx < 0 || idx >= len(typ.Fields) {
 			panic(ErrSegmentationFault)
 		}
-		f := typ.Fields[idx]
-		offset := f.Offset
-		switch f.Kind {
+		field := typ.Fields[idx]
+		switch field.Kind {
 		case types.KindI32:
-			*(*int32)(unsafe.Pointer(&s.Data[offset])) = val.I32()
+			*(*int32)(unsafe.Pointer(&s.Data[field.Offset])) = val.I32()
 		case types.KindI64:
-			*(*int64)(unsafe.Pointer(&s.Data[offset])) = i.unboxI64(val)
+			*(*int64)(unsafe.Pointer(&s.Data[field.Offset])) = i.unboxI64(val)
 		case types.KindF32:
-			*(*float32)(unsafe.Pointer(&s.Data[offset])) = val.F32()
+			*(*float32)(unsafe.Pointer(&s.Data[field.Offset])) = val.F32()
 		case types.KindF64:
-			*(*float64)(unsafe.Pointer(&s.Data[offset])) = val.F64()
+			*(*float64)(unsafe.Pointer(&s.Data[field.Offset])) = val.F64()
 		case types.KindRef:
-			ptr := (*uint64)(unsafe.Pointer(&s.Data[offset]))
+			ptr := (*uint64)(unsafe.Pointer(&s.Data[field.Offset]))
 			if old := types.Boxed(*ptr); old.Kind() == types.KindRef {
 				i.release(old.Ref())
 			}
