@@ -28,6 +28,16 @@ func TestNOPEliminationPass_Run(t *testing.T) {
 			program: program.New(
 				[]instr.Instruction{
 					instr.Marshal([]instr.Instruction{
+						instr.New(instr.UNREACHABLE),
+					}),
+				},
+			),
+			expected: program.New(nil),
+		},
+		{
+			program: program.New(
+				[]instr.Instruction{
+					instr.Marshal([]instr.Instruction{
 						instr.New(instr.BR, 6),
 						instr.New(instr.I32_CONST, 1),
 						instr.New(instr.NOP),

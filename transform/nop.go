@@ -44,7 +44,7 @@ func (p *NOPEliminationPass) Run(m *pass.Manager) (*program.Program, error) {
 		for read := 0; read < len(code); {
 			inst := instr.Instruction(code[read:])
 			width := inst.Width()
-			if inst.Opcode() != instr.NOP {
+			if inst.Opcode() != instr.NOP && inst.Opcode() != instr.UNREACHABLE {
 				offsets[read] = write
 				if write != read {
 					copy(code[write:write+width], code[read:read+width])

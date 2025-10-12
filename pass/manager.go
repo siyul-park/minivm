@@ -13,8 +13,8 @@ type Manager struct {
 }
 
 var (
-	ErrPassInvalid = fmt.Errorf("invalid pass type")
-	ErrPassMissing = fmt.Errorf("no pass registered for type")
+	ErrPassInvalid      = fmt.Errorf("invalid pass type")
+	ErrPassUnregistered = fmt.Errorf("registered pass type")
 )
 
 func NewManager() *Manager {
@@ -39,7 +39,7 @@ func (m *Manager) Register(pass any) error {
 func (m *Manager) Load(val any) error {
 	v := reflect.ValueOf(val)
 	if v.Kind() != reflect.Ptr || v.IsNil() {
-		return ErrPassInvalid
+		return ErrPassUnregistered
 	}
 
 	typ := v.Elem().Type()
@@ -48,7 +48,7 @@ func (m *Manager) Load(val any) error {
 	if !ok {
 		passes, ok := m.passes[typ]
 		if !ok {
-			return ErrPassMissing
+			return ErrPassUnregistered
 		}
 		for _, p := range passes {
 			run := p.MethodByName("Run")
