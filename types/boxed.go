@@ -129,35 +129,18 @@ func (v Boxed) Ref() int {
 	return int(uint64(v) & vMask)
 }
 
-func (v Boxed) Interface() any {
-	switch v.Kind() {
-	case KindI32:
-		return v.I32()
-	case KindI64:
-		return v.I64()
-	case KindF32:
-		return v.F32()
-	case KindF64:
-		return v.F64()
-	case KindRef:
-		addr := v.Ref()
-		if addr == 0 {
-			return nil
-		}
-		return addr
-	default:
-		return nil
-	}
-}
-
 func (v Boxed) String() string {
 	switch v.Kind() {
-	case KindI32, KindI64:
-		return fmt.Sprintf("%d", v.Interface())
-	case KindF32, KindF64:
-		return fmt.Sprintf("%f", v.Interface())
+	case KindI32:
+		return fmt.Sprintf("%d", v.I32())
+	case KindI64:
+		return fmt.Sprintf("%d", v.I64())
+	case KindF32:
+		return fmt.Sprintf("%f", v.F32())
+	case KindF64:
+		return fmt.Sprintf("%f", v.F64())
 	case KindRef:
-		return fmt.Sprintf("%d", v.Interface())
+		return fmt.Sprintf("%d", v.Ref())
 	default:
 		return "<invalid>"
 	}

@@ -17,10 +17,6 @@ func (s String) Type() Type {
 	return TypeString
 }
 
-func (s String) Interface() any {
-	return string(s)
-}
-
 func (s String) String() string {
 	return string(s)
 }

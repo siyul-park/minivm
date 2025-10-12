@@ -45,14 +45,6 @@ func (a I32Array) Type() Type {
 	return TypeI32Array
 }
 
-func (a I32Array) Interface() any {
-	v := make([]int32, len(a))
-	for j, e := range a {
-		v[j] = int32(e)
-	}
-	return v
-}
-
 func (a I32Array) String() string {
 	var sb strings.Builder
 	sb.WriteByte('{')
@@ -72,14 +64,6 @@ func (a I64Array) Kind() Kind {
 
 func (a I64Array) Type() Type {
 	return TypeI64Array
-}
-
-func (a I64Array) Interface() any {
-	v := make([]int64, len(a))
-	for j, e := range a {
-		v[j] = int64(e)
-	}
-	return v
 }
 
 func (a I64Array) String() string {
@@ -103,14 +87,6 @@ func (a F32Array) Type() Type {
 	return TypeF32Array
 }
 
-func (a F32Array) Interface() any {
-	v := make([]float32, len(a))
-	for j, e := range a {
-		v[j] = float32(e)
-	}
-	return v
-}
-
 func (a F32Array) String() string {
 	var sb strings.Builder
 	sb.WriteByte('{')
@@ -130,14 +106,6 @@ func (a F64Array) Kind() Kind {
 
 func (a F64Array) Type() Type {
 	return TypeF64Array
-}
-
-func (a F64Array) Interface() any {
-	v := make([]float64, len(a))
-	for j, e := range a {
-		v[j] = float64(e)
-	}
-	return v
 }
 
 func (a F64Array) String() string {
@@ -163,14 +131,6 @@ func (a *Array) Kind() Kind {
 
 func (a *Array) Type() Type {
 	return a.Typ
-}
-
-func (a *Array) Interface() any {
-	v := make([]any, len(a.Elems))
-	for j, e := range a.Elems {
-		v[j] = e.Interface()
-	}
-	return v
 }
 
 func (a *Array) String() string {

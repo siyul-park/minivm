@@ -64,10 +64,6 @@ func (f *Function) Kind() Kind {
 	return KindRef
 }
 
-func (f *Function) Interface() any {
-	return f
-}
-
 func (f *Function) String() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("%s\n", f.Signature.String()))

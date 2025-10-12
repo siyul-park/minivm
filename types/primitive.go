@@ -58,10 +58,6 @@ func (i I32) Type() Type {
 	return TypeI32
 }
 
-func (i I32) Interface() any {
-	return int32(i)
-}
-
 func (i I32) String() string {
 	return fmt.Sprintf("%d", int32(i))
 }
@@ -72,10 +68,6 @@ func (i I64) Kind() Kind {
 
 func (i I64) Type() Type {
 	return TypeI64
-}
-
-func (i I64) Interface() any {
-	return int64(i)
 }
 
 func (i I64) String() string {
@@ -90,10 +82,6 @@ func (f F32) Type() Type {
 	return TypeF32
 }
 
-func (f F32) Interface() any {
-	return float32(f)
-}
-
 func (f F32) String() string {
 	return fmt.Sprintf("%f", float32(f))
 }
@@ -106,10 +94,6 @@ func (f F64) Type() Type {
 	return f64Type{}
 }
 
-func (f F64) Interface() any {
-	return float64(f)
-}
-
 func (f F64) String() string {
 	return fmt.Sprintf("%f", float64(f))
 }
@@ -120,13 +104,6 @@ func (r Ref) Kind() Kind {
 
 func (r Ref) Type() Type {
 	return TypeRef
-}
-
-func (r Ref) Interface() any {
-	if r == 0 {
-		return nil
-	}
-	return int(r)
 }
 
 func (r Ref) String() string {

@@ -1,8 +1,6 @@
 package types
 
 import (
-	"fmt"
-	"reflect"
 	"strings"
 	"unsafe"
 )
@@ -84,26 +82,6 @@ func (s *Struct) Kind() Kind {
 
 func (s *Struct) Type() Type {
 	return s.Typ
-}
-
-func (s *Struct) Interface() any {
-	vals := make([]reflect.Value, len(s.Typ.Fields))
-	fields := make([]reflect.StructField, len(s.Typ.Fields))
-	for i, f := range s.Typ.Fields {
-		name := f.Name
-		if name == "" {
-			name = fmt.Sprintf("F%d", i)
-		}
-		vals[i] = reflect.ValueOf(s.field(f).Interface())
-		fields[i] = reflect.StructField{Name: name, Type: reflect.TypeOf(vals[i].Interface())}
-	}
-
-	typ := reflect.StructOf(fields)
-	val := reflect.New(typ).Elem()
-	for i := range fields {
-		val.Field(i).Set(vals[i])
-	}
-	return val.Interface()
 }
 
 func (s *Struct) String() string {
