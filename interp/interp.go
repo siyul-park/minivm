@@ -118,6 +118,9 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	i.frames[0].fn = &types.Function{Code: prog.Code}
 	i.frames[0].bp = i.sp
 	i.fp = 1
+
+	i.retain(0)
+
 	return i
 }
 

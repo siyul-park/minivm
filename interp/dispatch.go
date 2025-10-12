@@ -174,9 +174,7 @@ var dispatch = [256]func(i *Interpreter){
 		}
 		copy(i.stack[frame.bp:frame.bp+fn.Returns], i.stack[i.sp-fn.Returns:i.sp])
 		i.sp = frame.bp + fn.Returns
-		if frame.addr > 0 {
-			i.release(frame.addr)
-		}
+		i.release(frame.addr)
 		frame.fn = nil
 		i.fp--
 	},
