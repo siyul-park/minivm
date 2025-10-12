@@ -331,6 +331,7 @@ var dispatch = [256]func(i *Interpreter){
 		if i.sp == len(i.stack) {
 			panic(ErrStackOverflow)
 		}
+		i.retain(0)
 		i.stack[i.sp] = types.BoxedNull
 		i.sp++
 		i.frames[i.fp-1].ip++

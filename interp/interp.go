@@ -357,7 +357,7 @@ func (i *Interpreter) release(addr int) {
 }
 
 func (i *Interpreter) gc() {
-	for j := 0; j < len(i.heap); j++ {
+	for j := 1; j < len(i.heap); j++ {
 		if i.rc[j] < 0 {
 			i.rc[j] = 0
 		}
