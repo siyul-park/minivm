@@ -30,10 +30,15 @@ func (p *ConstantDeduplicationPass) Run(m *pass.Manager) (*program.Program, erro
 	}
 
 	constants := prog.Constants
+	typs := prog.Types
 
-	index := make([]int, len(constants))
-	for i := 0; i < len(index); i++ {
-		index[i] = -1
+	constIndex := make([]int, len(constants))
+	typeIndex := make([]int, len(typs))
+	for i := 0; i < len(constIndex); i++ {
+		constIndex[i] = -1
+	}
+	for i := 0; i < len(typeIndex); i++ {
+		typeIndex[i] = -1
 	}
 
 	for _, code := range codes {
@@ -43,7 +48,10 @@ func (p *ConstantDeduplicationPass) Run(m *pass.Manager) (*program.Program, erro
 			switch inst.Opcode() {
 			case instr.CONST_GET:
 				idx := inst.Operand(0)
-				index[idx] = int(idx)
+				constIndex[idx] = int(idx)
+			case instr.ARRAY_NEW, instr.ARRAY_NEW_DEFAULT, instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT:
+				idx := inst.Operand(0)
+				typeIndex[idx] = int(idx)
 			default:
 			}
 			ip += inst.Width()
@@ -51,26 +59,67 @@ func (p *ConstantDeduplicationPass) Run(m *pass.Manager) (*program.Program, erro
 	}
 
 	for i := 0; i < len(constants); i++ {
-		if index[i] == -1 {
+		if constIndex[i] == -1 {
 			continue
 		}
-		for j := i; j < len(constants); j++ {
+		for j := i + 1; j < len(constants); j++ {
 			if constants[j] == constants[i] {
-				index[j] = index[i]
+				constIndex[j] = constIndex[i]
+			}
+		}
+	}
+	for i := 0; i < len(typs); i++ {
+		if typeIndex[i] == -1 {
+			continue
+		}
+		for j := i + 1; j < len(typs); j++ {
+			if typs[j].Equals(typs[i]) {
+				typeIndex[j] = typeIndex[i]
 			}
 		}
 	}
 
-	idx := 0
-	for i := 0; i < len(index); i++ {
-		if index[i] != -1 {
-			if index[i] != i {
-				index[i] = index[index[i]]
+	constSize := 0
+	typesSize := 0
+	for i := 0; i < len(constIndex); i++ {
+		if constIndex[i] != -1 {
+			if constIndex[i] != i {
+				constIndex[i] = constIndex[constIndex[i]]
 			} else {
-				index[i] = idx
-				idx++
+				constIndex[i] = constSize
+				constSize++
 			}
 		}
+	}
+	for i := 0; i < len(typeIndex); i++ {
+		if typeIndex[i] != -1 {
+			if typeIndex[i] != i {
+				typeIndex[i] = typeIndex[typeIndex[i]]
+			} else {
+				typeIndex[i] = typesSize
+				typesSize++
+			}
+		}
+	}
+
+	for i, v := range constIndex {
+		if v >= 0 {
+			constants[v] = constants[i]
+		}
+	}
+	for i, v := range typeIndex {
+		if v >= 0 {
+			typs[v] = typs[i]
+		}
+	}
+
+	constants = constants[:constSize]
+	typs = typs[:typesSize]
+	if len(constants) == 0 {
+		constants = nil
+	}
+	if len(typs) == 0 {
+		typs = nil
 	}
 
 	for _, code := range codes {
@@ -80,24 +129,18 @@ func (p *ConstantDeduplicationPass) Run(m *pass.Manager) (*program.Program, erro
 			switch inst.Opcode() {
 			case instr.CONST_GET:
 				idx := inst.Operand(0)
-				inst.SetOperand(0, uint64(index[idx]))
+				inst.SetOperand(0, uint64(constIndex[idx]))
+			case instr.ARRAY_NEW, instr.ARRAY_NEW_DEFAULT, instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT:
+				idx := inst.Operand(0)
+				inst.SetOperand(0, uint64(typeIndex[idx]))
 			default:
 			}
 			ip += inst.Width()
 		}
 	}
 
-	for i, v := range index {
-		if v >= 0 {
-			constants[v] = constants[i]
-		}
-	}
-
-	constants = constants[:idx]
-	if len(constants) == 0 {
-		constants = nil
-	}
 	prog.Constants = constants
+	prog.Types = typs
 
 	return prog, nil
 }

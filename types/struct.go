@@ -178,6 +178,9 @@ func (t *StructType) String() string {
 
 func (t *StructType) Cast(other Type) bool {
 	if o, ok := other.(*StructType); ok {
+		if o == other {
+			return true
+		}
 		if len(t.Fields) >= len(o.Fields) {
 			return false
 		}
@@ -191,17 +194,22 @@ func (t *StructType) Cast(other Type) bool {
 }
 
 func (t *StructType) Equals(other Type) bool {
-	if o, ok := other.(*StructType); ok {
-		if len(t.Fields) != len(o.Fields) {
+	if t == other {
+		return true
+	}
+	o, ok := other.(*StructType)
+	if !ok {
+		return false
+	}
+	if len(t.Fields) != len(o.Fields) {
+		return false
+	}
+	for i, f := range o.Fields {
+		if !f.Type.Equals(t.Fields[i].Type) {
 			return false
 		}
-		for i, f := range o.Fields {
-			if !f.Type.Equals(t.Fields[i].Type) {
-				return false
-			}
-		}
 	}
-	return false
+	return true
 }
 
 func NewStructField(typ Type) StructField {

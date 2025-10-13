@@ -173,6 +173,9 @@ func (t *ArrayType) Cast(other Type) bool {
 }
 
 func (t *ArrayType) Equals(other Type) bool {
+	if t == other {
+		return true
+	}
 	if o, ok := other.(*ArrayType); ok {
 		return t.Elem.Equals(o.Elem)
 	}

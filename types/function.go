@@ -114,8 +114,8 @@ func (t *FunctionType) Cast(other Type) bool {
 }
 
 func (t *FunctionType) Equals(other Type) bool {
-	if other == nil {
-		return false
+	if t == other {
+		return true
 	}
 	o, ok := other.(*FunctionType)
 	if !ok {

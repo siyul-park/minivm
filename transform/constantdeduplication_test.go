@@ -34,6 +34,27 @@ func TestConstantDeduplicationPassPass_Run(t *testing.T) {
 				program.WithConstants(types.String("bar")),
 			),
 		},
+		{
+			program: program.New(
+				[]instr.Instruction{
+					instr.New(instr.STRUCT_NEW_DEFAULT, 0),
+					instr.New(instr.STRUCT_NEW_DEFAULT, 1),
+				},
+				program.WithTypes(
+					types.NewStructType(types.NewStructField(types.TypeF64)),
+					types.NewStructType(types.NewStructField(types.TypeF64)),
+				),
+			),
+			expected: program.New(
+				[]instr.Instruction{
+					instr.Marshal([]instr.Instruction{
+						instr.New(instr.STRUCT_NEW_DEFAULT, 0),
+						instr.New(instr.STRUCT_NEW_DEFAULT, 0),
+					}),
+				},
+				program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF64))),
+			),
+		},
 	}
 
 	for _, tt := range tests {
