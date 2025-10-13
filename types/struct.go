@@ -132,7 +132,20 @@ func NewStructType(fields ...StructField) *StructType {
 	offset := 0
 	for i := 0; i < len(fields); i++ {
 		fields[i].Offset = offset
+		align := fields[i].Size
+		if align > 0 && offset%align != 0 {
+			offset += align - (offset % align)
+		}
 		offset += fields[i].Size
+	}
+	align := 1
+	for _, f := range fields {
+		if f.Size > align {
+			align = f.Size
+		}
+	}
+	if offset%align != 0 {
+		offset += align - (offset % align)
 	}
 	return &StructType{Fields: fields, Size: offset}
 }
