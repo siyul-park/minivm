@@ -86,15 +86,15 @@ var dispatch = [256]func(i *Interpreter){
 			panic(ErrStackUnderflow)
 		}
 		cond := i.stack[i.sp-1].I32()
-		var discard types.Boxed
+		var val types.Boxed
 		if cond == 0 {
-			discard = i.stack[i.sp-3]
+			val = i.stack[i.sp-3]
 			i.stack[i.sp-3] = i.stack[i.sp-2]
 		} else {
-			discard = i.stack[i.sp-2]
+			val = i.stack[i.sp-2]
 		}
-		if discard.Kind() == types.KindRef {
-			i.release(discard.Ref())
+		if val.Kind() == types.KindRef {
+			i.release(val.Ref())
 		}
 		i.sp -= 2
 		i.frames[i.fp-1].ip++
