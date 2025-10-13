@@ -71,13 +71,14 @@ var dispatch = [256]func(i *Interpreter){
 			panic(ErrStackUnderflow)
 		}
 		f := &i.frames[i.fp-1]
-		count := int(f.code[f.ip+1])
+		code := f.code
+		count := int(code[f.ip+1])
 		i.sp--
 		cond := int(i.stack[i.sp].I32())
 		if cond > count {
 			cond = count + 1
 		}
-		offset := int(*(*uint16)(unsafe.Pointer(&f.code[f.ip+cond*2+2])))
+		offset := int(*(*uint16)(unsafe.Pointer(&code[f.ip+cond*2+2])))
 		f.ip += offset + count*2 + 4
 	},
 	instr.SELECT: func(i *Interpreter) {
@@ -123,8 +124,8 @@ var dispatch = [256]func(i *Interpreter){
 			f.ip = 0
 			f.bp = i.sp - fn.Params - 1
 			i.sp = f.bp + fn.Locals
+			i.frames[i.fp-1].ip++
 			i.fp++
-			i.frames[i.fp-2].ip++
 		case *NativeFunction:
 			if i.sp <= fn.Params {
 				panic(ErrStackUnderflow)
@@ -301,7 +302,6 @@ var dispatch = [256]func(i *Interpreter){
 			panic(ErrStackOverflow)
 		}
 		f := &i.frames[i.fp-1]
-
 		idx := int(*(*uint16)(unsafe.Pointer(&f.code[f.ip+1])))
 		if idx < 0 || idx >= len(i.constants) {
 			panic(ErrSegmentationFault)

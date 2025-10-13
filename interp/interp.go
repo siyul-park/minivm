@@ -124,9 +124,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 
 	i.frames[0].code = prog.Code
 	i.frames[0].bp = i.sp
-	i.frames[0].addr = 0
 	i.fp = 1
-
 	i.retain(0)
 
 	return i
@@ -146,9 +144,10 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 	}()
 
 	f := &i.frames[i.fp-1]
+	code := f.code
 	tick := i.tick
 
-	for f.ip < len(f.code) {
+	for f.ip < len(code) {
 		tick--
 		if tick == 0 {
 			tick = i.tick
@@ -159,9 +158,10 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 			}
 		}
 
-		dispatch[f.code[f.ip]](i)
+		dispatch[code[f.ip]](i)
 
 		f = &i.frames[i.fp-1]
+		code = f.code
 	}
 	return nil
 }
