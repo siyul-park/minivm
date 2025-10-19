@@ -212,7 +212,8 @@ var dispatch = [256]func(i *Interpreter){
 				i.globals = global[:idx+1]
 			}
 		}
-		if old := i.globals[idx]; old != val && old.Kind() == types.KindRef {
+		old := i.globals[idx]
+		if old != val && old.Kind() == types.KindRef {
 			i.release(old.Ref())
 		}
 		i.globals[idx] = val
@@ -238,7 +239,8 @@ var dispatch = [256]func(i *Interpreter){
 				i.globals = global[:idx+1]
 			}
 		}
-		if old := i.globals[idx]; old != val && old.Kind() == types.KindRef {
+		old := i.globals[idx]
+		if old != val && old.Kind() == types.KindRef {
 			i.release(old.Ref())
 		}
 		i.globals[idx] = val
@@ -273,7 +275,8 @@ var dispatch = [256]func(i *Interpreter){
 			panic(ErrSegmentationFault)
 		}
 		val := i.stack[i.sp-1]
-		if old := i.stack[addr]; old != val && old.Kind() == types.KindRef {
+		old := i.stack[addr]
+		if old != val && old.Kind() == types.KindRef {
 			i.release(old.Ref())
 		}
 		i.stack[addr] = val
@@ -291,7 +294,8 @@ var dispatch = [256]func(i *Interpreter){
 			panic(ErrSegmentationFault)
 		}
 		val := i.stack[i.sp-1]
-		if old := i.stack[addr]; old != val && old.Kind() == types.KindRef {
+		old := i.stack[addr]
+		if old != val && old.Kind() == types.KindRef {
 			i.release(old.Ref())
 		}
 		i.stack[addr] = val
@@ -1806,7 +1810,8 @@ var dispatch = [256]func(i *Interpreter){
 			*(*float64)(unsafe.Pointer(&s.Data[field.Offset])) = val.F64()
 		case types.KindRef:
 			ptr := (*uint64)(unsafe.Pointer(&s.Data[field.Offset]))
-			if old := types.Boxed(*ptr); old.Kind() == types.KindRef {
+			old := types.Boxed(*ptr)
+			if old.Kind() == types.KindRef {
 				i.release(old.Ref())
 			}
 			*ptr = uint64(val)

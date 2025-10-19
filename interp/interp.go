@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
@@ -170,16 +169,64 @@ func (i *Interpreter) Context() context.Context {
 	return i.ctx
 }
 
-func (i *Interpreter) Load(addr int) types.Value {
-	if addr < 0 || addr >= len(i.heap) {
-		return nil
+func (i *Interpreter) Const(idx int) (types.Boxed, error) {
+	if idx < 0 || idx >= len(i.constants) {
+		return 0, ErrSegmentationFault
 	}
-	return i.heap[addr]
+	return i.constants[idx], nil
 }
 
-func (i *Interpreter) Store(addr int, val types.Value) {
-	if addr < 0 || addr >= len(i.heap) {
-		return
+func (i *Interpreter) Global(idx int) (types.Boxed, error) {
+	if idx < 0 || idx >= len(i.globals) {
+		return 0, ErrSegmentationFault
+	}
+	val := i.globals[idx]
+	return val, nil
+}
+
+func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
+	if idx < 0 || idx >= len(i.globals) {
+		return ErrSegmentationFault
+	}
+	old := i.globals[idx]
+	if old.Kind() == types.KindRef {
+		i.release(old.Ref())
+	}
+	i.globals[idx] = val
+	return nil
+}
+
+func (i *Interpreter) Local(idx int) (types.Boxed, error) {
+	addr := i.frames[i.fp-1].bp + idx
+	if addr < 0 || addr > i.sp {
+		return 0, ErrSegmentationFault
+	}
+	return i.stack[addr], nil
+}
+
+func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
+	addr := i.frames[i.fp-1].bp + idx
+	if addr < 0 || addr > i.sp {
+		return ErrSegmentationFault
+	}
+	old := i.stack[addr]
+	if old.Kind() == types.KindRef {
+		i.release(old.Ref())
+	}
+	i.stack[addr] = val
+	return nil
+}
+
+func (i *Interpreter) Load(addr int) (types.Value, error) {
+	if addr < 0 || addr >= len(i.heap) || i.rc[addr] <= 0 {
+		return nil, ErrSegmentationFault
+	}
+	return i.heap[addr], nil
+}
+
+func (i *Interpreter) Store(addr int, val types.Value) error {
+	if addr < 0 || addr >= len(i.heap) || i.rc[addr] <= 0 {
+		return ErrSegmentationFault
 	}
 	if v, ok := val.(types.Boxed); ok {
 		if v.Kind() == types.KindRef {
@@ -189,28 +236,33 @@ func (i *Interpreter) Store(addr int, val types.Value) {
 		}
 	}
 	i.heap[addr] = val
+	return nil
 }
 
-func (i *Interpreter) Alloc(val types.Value) int {
+func (i *Interpreter) Alloc(val types.Value) (int, error) {
 	if v, ok := val.(types.Boxed); ok {
 		if v.Kind() == types.KindRef {
-			return v.Ref()
+			return v.Ref(), nil
 		}
 		val = types.Unbox(v)
 	}
-	return i.alloc(val)
+	return i.alloc(val), nil
 }
 
-func (i *Interpreter) Retain(addr int) types.Value {
-	if addr < 0 || addr >= len(i.heap) {
-		return nil
+func (i *Interpreter) Retain(addr int) (types.Value, error) {
+	if addr < 0 || addr >= len(i.heap) || i.rc[addr] <= 0 {
+		return nil, ErrSegmentationFault
 	}
 	i.retain(addr)
-	return i.heap[addr]
+	return i.heap[addr], nil
 }
 
-func (i *Interpreter) Release(addr int) {
+func (i *Interpreter) Release(addr int) error {
+	if addr < 0 || addr >= len(i.heap) || i.rc[addr] <= 0 {
+		return ErrSegmentationFault
+	}
 	i.release(addr)
+	return nil
 }
 
 func (i *Interpreter) Push(val types.Value) error {
