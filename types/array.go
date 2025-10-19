@@ -38,7 +38,7 @@ var _ Traceable = (*Array)(nil)
 var _ Type = (*ArrayType)(nil)
 
 func (a I32Array) Kind() Kind {
-	return KindI32
+	return KindRef
 }
 
 func (a I32Array) Type() Type {
@@ -47,6 +47,7 @@ func (a I32Array) Type() Type {
 
 func (a I32Array) String() string {
 	var sb strings.Builder
+	sb.WriteString(a.Type().String())
 	sb.WriteByte('{')
 	for j, e := range a {
 		if j > 0 {
@@ -59,7 +60,7 @@ func (a I32Array) String() string {
 }
 
 func (a I64Array) Kind() Kind {
-	return KindI64
+	return KindRef
 }
 
 func (a I64Array) Type() Type {
@@ -68,6 +69,7 @@ func (a I64Array) Type() Type {
 
 func (a I64Array) String() string {
 	var sb strings.Builder
+	sb.WriteString(a.Type().String())
 	sb.WriteByte('{')
 	for j, e := range a {
 		if j > 0 {
@@ -80,7 +82,7 @@ func (a I64Array) String() string {
 }
 
 func (a F32Array) Kind() Kind {
-	return KindF32
+	return KindRef
 }
 
 func (a F32Array) Type() Type {
@@ -89,6 +91,7 @@ func (a F32Array) Type() Type {
 
 func (a F32Array) String() string {
 	var sb strings.Builder
+	sb.WriteString(a.Type().String())
 	sb.WriteByte('{')
 	for j, e := range a {
 		if j > 0 {
@@ -101,7 +104,7 @@ func (a F32Array) String() string {
 }
 
 func (a F64Array) Kind() Kind {
-	return KindF64
+	return KindRef
 }
 
 func (a F64Array) Type() Type {
@@ -110,6 +113,7 @@ func (a F64Array) Type() Type {
 
 func (a F64Array) String() string {
 	var sb strings.Builder
+	sb.WriteString(a.Type().String())
 	sb.WriteByte('{')
 	for j, e := range a {
 		if j > 0 {
@@ -135,6 +139,7 @@ func (a *Array) Type() Type {
 
 func (a *Array) String() string {
 	var sb strings.Builder
+	sb.WriteString(a.Type().String())
 	sb.WriteByte('{')
 	for j, e := range a.Elems {
 		if j > 0 {

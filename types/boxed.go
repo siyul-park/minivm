@@ -27,7 +27,7 @@ func IsBoxable(v int64) bool {
 }
 
 func BoxI32(v int32) Boxed {
-	return Box(uint64(uint32(v)), KindI32)
+	return Box(uint64(v), KindI32)
 }
 
 func BoxI64(v int64) Boxed {
@@ -43,7 +43,7 @@ func BoxF64(v float64) Boxed {
 }
 
 func BoxRef(v int) Boxed {
-	return Box(uint64(uint32(v)), KindRef)
+	return Box(uint64(v), KindRef)
 }
 
 func BoxBool(b bool) Boxed {
@@ -126,7 +126,7 @@ func (v Boxed) Bool() bool {
 }
 
 func (v Boxed) Ref() int {
-	return int(uint64(v) & vMask)
+	return int(int32(v & vMask))
 }
 
 func (v Boxed) String() string {

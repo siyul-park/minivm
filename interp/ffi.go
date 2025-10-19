@@ -33,10 +33,6 @@ func (f *NativeFunction) Type() types.Type {
 	return f.Signature.Type()
 }
 
-func (f *NativeFunction) Interface() any {
-	return f.Fn
-}
-
 func (f *NativeFunction) String() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("%s\n", f.Signature.String()))

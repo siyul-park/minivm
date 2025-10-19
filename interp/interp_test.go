@@ -1503,7 +1503,7 @@ var tests = []struct {
 			},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32))),
 		),
-		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32)), types.I32(1))},
+		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32)), types.BoxI32(1))},
 	},
 	{
 		program: program.New(
@@ -1513,7 +1513,7 @@ var tests = []struct {
 			},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI64))),
 		),
-		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI64)), types.I64(1))},
+		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI64)), types.BoxI64(1))},
 	},
 	{
 		program: program.New(
@@ -1523,7 +1523,7 @@ var tests = []struct {
 			},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF32))),
 		),
-		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeF32)), types.F32(42))},
+		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeF32)), types.BoxF32(42))},
 	},
 	{
 		program: program.New(
@@ -1533,7 +1533,7 @@ var tests = []struct {
 			},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF64))),
 		),
-		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeF64)), types.F64(42))},
+		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeF64)), types.BoxF64(42))},
 	},
 	{
 		program: program.New(

@@ -56,12 +56,12 @@ func NewFunction(signature *FunctionSignature, instrs ...instr.Instruction) *Fun
 	}
 }
 
-func (f *Function) Type() Type {
-	return f.Signature.Type()
-}
-
 func (f *Function) Kind() Kind {
 	return KindRef
+}
+
+func (f *Function) Type() Type {
+	return f.Signature.Type()
 }
 
 func (f *Function) String() string {
