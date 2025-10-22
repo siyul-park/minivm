@@ -60,12 +60,8 @@ func (p *ModulePass) Run(m *pass.Manager) (*Module, error) {
 	}
 
 	for _, fn := range fns {
-		code := fn.Code
-		blocks, err := p.blocks(code)
+		blocks, err := p.Blocks(fn.Code)
 		if err != nil {
-			return nil, err
-		}
-		if err := p.connect(code, blocks); err != nil {
 			return nil, err
 		}
 		fn.Blocks = blocks
@@ -82,7 +78,7 @@ func (p *ModulePass) Run(m *pass.Manager) (*Module, error) {
 	return mdl, nil
 }
 
-func (p *ModulePass) blocks(code []byte) ([]*BasicBlock, error) {
+func (p *ModulePass) Blocks(code []byte) ([]*BasicBlock, error) {
 	offsets := []int{0}
 	for ip := 0; ip < len(code); {
 		inst := instr.Instruction(code[ip:])
@@ -135,10 +131,7 @@ func (p *ModulePass) blocks(code []byte) ([]*BasicBlock, error) {
 			End:   end,
 		}
 	}
-	return blocks, nil
-}
 
-func (p *ModulePass) connect(code []byte, blocks []*BasicBlock) error {
 	for j, blk := range blocks {
 		ip := blk.Start
 		for ip < blk.End {
@@ -158,7 +151,7 @@ func (p *ModulePass) connect(code []byte, blocks []*BasicBlock) error {
 		case instr.BR, instr.BR_IF:
 			offset := ip + inst.Width() + int(inst.Operand(0))
 			if !p.link(blocks, j, offset) {
-				return fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
+				return nil, fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
 			}
 			if inst.Opcode() == instr.BR_IF && j+1 < len(blocks) {
 				blk.Succs = append(blk.Succs, j+1)
@@ -171,12 +164,12 @@ func (p *ModulePass) connect(code []byte, blocks []*BasicBlock) error {
 			for k := 0; k < count; k++ {
 				offset := ip + int(operands[k+1]) + width
 				if !p.link(blocks, j, offset) {
-					return fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
+					return nil, fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
 				}
 			}
 			offset := ip + int(operands[len(operands)-1]) + width
 			if !p.link(blocks, j, offset) {
-				return fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
+				return nil, fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
 			}
 		default:
 			if j+1 < len(blocks) {
@@ -189,7 +182,7 @@ func (p *ModulePass) connect(code []byte, blocks []*BasicBlock) error {
 		slices.Sort(b.Succs)
 		slices.Sort(b.Preds)
 	}
-	return nil
+	return blocks, nil
 }
 
 func (p *ModulePass) link(blocks []*BasicBlock, src, dst int) bool {

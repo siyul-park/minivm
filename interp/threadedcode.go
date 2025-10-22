@@ -10,6 +10,7 @@ import (
 type threadedCodeCompiler struct {
 	types     []types.Type
 	constants []types.Boxed
+	heap      []types.Value
 	code      []byte
 	ip        int
 }

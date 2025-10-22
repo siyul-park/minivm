@@ -108,6 +108,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	c := &threadedCodeCompiler{
 		types:     i.types,
 		constants: i.constants,
+		heap:      i.heap,
 	}
 
 	i.alloc(types.Null)
