@@ -3,11 +3,10 @@ package transform
 import (
 	"testing"
 
-	"github.com/siyul-park/minivm/types"
-
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
+	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 

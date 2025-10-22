@@ -3,11 +3,10 @@ package pass
 import (
 	"fmt"
 	"reflect"
-
-	"github.com/siyul-park/minivm/program"
 )
 
 type Manager struct {
+	parent *Manager
 	passes map[reflect.Type][]reflect.Value
 	cache  map[reflect.Type]reflect.Value
 }
@@ -36,6 +35,18 @@ func (m *Manager) Register(pass any) error {
 	return nil
 }
 
+func (m *Manager) Convert(src, dst any) error {
+	child := &Manager{
+		parent: m,
+		passes: m.passes,
+		cache:  make(map[reflect.Type]reflect.Value),
+	}
+	if err := child.Run(src); err != nil {
+		return err
+	}
+	return child.Load(dst)
+}
+
 func (m *Manager) Load(val any) error {
 	v := reflect.ValueOf(val)
 	if v.Kind() != reflect.Ptr || v.IsNil() {
@@ -48,6 +59,13 @@ func (m *Manager) Load(val any) error {
 	if !ok {
 		passes, ok := m.passes[typ]
 		if !ok {
+			if p := m.parent; p != nil {
+				for p := m.parent; p != nil; p = p.parent {
+					if err := p.Load(val); err == nil {
+						return nil
+					}
+				}
+			}
 			return ErrPassUnregistered
 		}
 		for _, p := range passes {
@@ -65,12 +83,12 @@ func (m *Manager) Load(val any) error {
 	return nil
 }
 
-func (m *Manager) Run(prog *program.Program) error {
-	progType := reflect.TypeOf(prog)
+func (m *Manager) Run(val any) error {
+	typ := reflect.TypeOf(val)
 	m.cache = map[reflect.Type]reflect.Value{
-		progType: reflect.ValueOf(prog),
+		typ: reflect.ValueOf(val),
 	}
-	for _, p := range m.passes[progType] {
+	for _, p := range m.passes[typ] {
 		run := p.MethodByName("Run")
 		res := run.Call([]reflect.Value{reflect.ValueOf(m)})
 		if err := res[1]; !err.IsNil() {
@@ -78,7 +96,7 @@ func (m *Manager) Run(prog *program.Program) error {
 		}
 		if !res[0].IsZero() && res[0].IsValid() {
 			m.cache = map[reflect.Type]reflect.Value{
-				progType: res[0],
+				typ: res[0],
 			}
 		}
 	}

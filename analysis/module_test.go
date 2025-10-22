@@ -264,6 +264,7 @@ func TestModulePass_Run(t *testing.T) {
 	for _, tt := range tests {
 		m := pass.NewManager()
 		_ = m.Register(NewModulePass())
+		_ = m.Register(NewBasicBlocksPass())
 
 		t.Run(tt.program.String(), func(t *testing.T) {
 			err := m.Run(tt.program)

@@ -102,6 +102,7 @@ func TestDeadCodeEliminationPass_Run(t *testing.T) {
 	for _, tt := range tests {
 		m := pass.NewManager()
 		_ = m.Register(analysis.NewModulePass())
+		_ = m.Register(analysis.NewBasicBlocksPass())
 		_ = m.Register(NewDeadCodeEliminationPass())
 
 		t.Run(tt.program.String(), func(t *testing.T) {
