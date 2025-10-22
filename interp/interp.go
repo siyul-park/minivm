@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
 
 type Interpreter struct {
 	ctx       context.Context
+	code      [][]func(*Interpreter)
 	frames    []frame
 	types     []types.Type
 	constants []types.Boxed
@@ -24,7 +26,7 @@ type Interpreter struct {
 }
 
 type frame struct {
-	code []byte
+	code []func(*Interpreter)
 	addr int
 	ip   int
 	bp   int
@@ -87,6 +89,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	}
 
 	i := &Interpreter{
+		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
 		frames:    make([]frame, opt.frame),
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
@@ -98,6 +101,11 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		fp:        0,
 		sp:        0,
 		tick:      opt.tick,
+	}
+
+	c := &threadedCodeCompiler{
+		types:     i.types,
+		constants: i.constants,
 	}
 
 	i.alloc(types.Null)
@@ -121,7 +129,13 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		i.constants[j] = val
 	}
 
-	i.frames[0].code = prog.Code
+	for j, v := range prog.Constants {
+		if fn, ok := v.(*types.Function); ok {
+			i.code[j+1] = c.Compile(fn.Code)
+		}
+	}
+
+	i.frames[0].code = c.Compile(prog.Code)
 	i.frames[0].bp = i.sp
 	i.fp = 1
 	i.retain(0)
@@ -157,7 +171,7 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 			}
 		}
 
-		dispatch[code[f.ip]](i)
+		code[f.ip](i)
 
 		f = &i.frames[i.fp-1]
 		code = f.code
