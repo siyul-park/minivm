@@ -12,6 +12,7 @@ import (
 type Interpreter struct {
 	ctx       context.Context
 	code      [][]func(*Interpreter)
+	hits      [][]uint64
 	frames    []frame
 	types     []types.Type
 	constants []types.Boxed
@@ -90,6 +91,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 
 	i := &Interpreter{
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
+		hits:      make([][]uint64, len(prog.Constants)+1),
 		frames:    make([]frame, opt.frame),
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
@@ -129,17 +131,23 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		i.constants[j] = val
 	}
 
+	i.code[0] = c.Compile(prog.Code)
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
 			i.code[j+1] = c.Compile(fn.Code)
 		}
 	}
 
-	i.frames[0].code = c.Compile(prog.Code)
+	i.frames[0].code = i.code[0]
 	i.frames[0].bp = i.sp
 	i.fp = 1
 	i.retain(0)
 
+	for j, code := range i.code {
+		if len(code) > 0 {
+			i.hits[j] = make([]uint64, len(code)+1)
+		}
+	}
 	return i
 }
 
@@ -169,6 +177,9 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 				return ctx.Err()
 			default:
 			}
+
+			i.hits[f.addr][0]++
+			i.hits[f.addr][f.ip+1]++
 		}
 
 		code[f.ip](i)
