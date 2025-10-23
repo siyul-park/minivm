@@ -105,12 +105,6 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		tick:      opt.tick,
 	}
 
-	c := &threadedCodeCompiler{
-		types:     i.types,
-		constants: i.constants,
-		heap:      i.heap,
-	}
-
 	i.alloc(types.Null)
 
 	for j, v := range prog.Constants {
@@ -130,6 +124,12 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 			val = types.BoxRef(i.alloc(v))
 		}
 		i.constants[j] = val
+	}
+
+	c := &threadedCodeCompiler{
+		types:     i.types,
+		constants: i.constants,
+		heap:      i.heap,
 	}
 
 	i.code[0] = c.Compile(prog.Code)

@@ -172,7 +172,7 @@ var threaded = [256]func(c *threadedCodeCompiler) func(i *Interpreter){
 				if i.sp+fn.Returns-fn.Params-1 >= len(i.stack) {
 					panic(ErrStackOverflow)
 				}
-				params := i.stack[i.sp-fn.Params : i.sp]
+				params := i.stack[i.sp-fn.Params-1 : i.sp-1]
 				returns, err := fn.Fn(i, params)
 				if err != nil {
 					panic(err)
@@ -192,9 +192,8 @@ var threaded = [256]func(c *threadedCodeCompiler) func(i *Interpreter){
 						i.release(val.Ref())
 					}
 				}
-				i.sp -= fn.Params
+				i.sp += fn.Returns - fn.Params - 1
 				copy(i.stack[i.sp-fn.Returns:i.sp], returns)
-				i.sp += fn.Returns - 1
 				i.frames[i.fp-1].ip++
 			default:
 				panic(ErrTypeMismatch)
@@ -387,11 +386,83 @@ var threaded = [256]func(c *threadedCodeCompiler) func(i *Interpreter){
 		}
 		val := c.constants[idx]
 		if val.Kind() == types.KindRef {
+			addr := val.Ref()
+			if c.ip < len(c.code) {
+				switch instr.Opcode(c.code[c.ip]) {
+				case instr.CALL:
+					switch fn := c.heap[addr].(type) {
+					case *types.Function:
+						return func(i *Interpreter) {
+							if i.fp == len(i.frames) {
+								panic(ErrFrameOverflow)
+							}
+							if i.sp < fn.Params {
+								panic(ErrStackUnderflow)
+							}
+							if i.sp+fn.Locals-fn.Params >= len(i.stack) {
+								panic(ErrStackOverflow)
+							}
+							for idx := 0; idx < fn.Locals-fn.Params; idx++ {
+								i.stack[i.sp+idx] = 0
+							}
+							i.retain(addr)
+							f := &i.frames[i.fp]
+							f.code = i.code[addr]
+							f.addr = addr
+							f.ip = 0
+							f.bp = i.sp - fn.Params
+							i.sp = f.bp + fn.Locals
+							i.frames[i.fp-1].ip += 4
+							i.fp++
+						}
+					case *NativeFunction:
+						return func(i *Interpreter) {
+							if i.fp == len(i.frames) {
+								panic(ErrFrameOverflow)
+							}
+							if i.sp < fn.Params {
+								panic(ErrStackUnderflow)
+							}
+							if i.sp+fn.Returns-fn.Params >= len(i.stack) {
+								panic(ErrStackOverflow)
+							}
+							params := i.stack[i.sp-fn.Params : i.sp]
+							returns, err := fn.Fn(i, params)
+							if err != nil {
+								panic(err)
+							}
+							for _, val := range params {
+								if val.Kind() != types.KindRef {
+									continue
+								}
+								ok := false
+								for _, r := range returns {
+									if r == val {
+										ok = true
+										break
+									}
+								}
+								if !ok {
+									i.release(val.Ref())
+								}
+							}
+							i.sp += fn.Returns - fn.Params
+							copy(i.stack[i.sp-fn.Returns:i.sp], returns)
+							i.frames[i.fp-1].ip += 4
+						}
+					default:
+						return func(i *Interpreter) {
+							panic(ErrTypeMismatch)
+						}
+					}
+				default:
+				}
+			}
 			return func(i *Interpreter) {
 				if i.sp == len(i.stack) {
 					panic(ErrStackOverflow)
 				}
-				i.retain(val.Ref())
+				i.retain(addr)
 				i.stack[i.sp] = val
 				i.sp++
 				i.frames[i.fp-1].ip += 3
@@ -914,22 +985,22 @@ var threaded = [256]func(c *threadedCodeCompiler) func(i *Interpreter){
 		val := int64(*(*uint64)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 9
 		if types.IsBoxable(val) {
-			val := types.BoxI64(val)
+			v := types.BoxI64(val)
 			return func(i *Interpreter) {
 				if i.sp == len(i.stack) {
 					panic(ErrStackOverflow)
 				}
-				i.stack[i.sp] = val
+				i.stack[i.sp] = v
 				i.sp++
 				i.frames[i.fp-1].ip += 9
 			}
 		}
+		v := types.I64(val)
 		return func(i *Interpreter) {
-			val := types.I64(val)
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			i.stack[i.sp] = types.BoxRef(i.alloc(val))
+			i.stack[i.sp] = types.BoxRef(i.alloc(v))
 			i.sp++
 			i.frames[i.fp-1].ip += 9
 		}
@@ -1274,7 +1345,7 @@ var threaded = [256]func(c *threadedCodeCompiler) func(i *Interpreter){
 	},
 	instr.F32_CONST: func(c *threadedCodeCompiler) func(i *Interpreter) {
 		val := types.BoxF32(*(*float32)(unsafe.Pointer(&c.code[c.ip+1])))
-		c.ip++
+		c.ip += 5
 		return func(i *Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
