@@ -312,6 +312,36 @@ func (i *Interpreter) Len() int {
 	return i.sp - 1
 }
 
+func (i *Interpreter) Clone() *Interpreter {
+	c := &Interpreter{
+		ctx:       i.ctx,
+		code:      i.code,
+		hits:      i.hits,
+		types:     i.types,
+		constants: i.constants,
+
+		frames:  make([]frame, len(i.frames)),
+		globals: make([]types.Boxed, len(i.globals), cap(i.globals)),
+		stack:   make([]types.Boxed, len(i.stack), cap(i.stack)),
+		heap:    make([]types.Value, len(i.heap), cap(i.heap)),
+		rc:      make([]int, len(i.rc), cap(i.rc)),
+		free:    make([]int, len(i.free), cap(i.free)),
+
+		fp:   i.fp,
+		sp:   i.sp,
+		tick: i.tick,
+	}
+
+	copy(c.frames, i.frames)
+	copy(c.globals, i.globals)
+	copy(c.stack, i.stack)
+	copy(c.heap, i.heap)
+	copy(c.rc, i.rc)
+	copy(c.free, i.free)
+
+	return c
+}
+
 func (i *Interpreter) Clear() {
 	for i.fp > 1 {
 		i.frames[i.fp] = frame{}

@@ -1794,6 +1794,16 @@ func TestInterpreter_Run(t *testing.T) {
 	}
 }
 
+func BenchmarkNew(b *testing.B) {
+	for _, tt := range tests {
+		b.Run(tt.program.String(), func(b *testing.B) {
+			for n := 0; n < b.N; n++ {
+				New(tt.program)
+			}
+		})
+	}
+}
+
 func BenchmarkInterpreter_Run(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.program.String(), func(b *testing.B) {
@@ -1806,6 +1816,19 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			for n := 0; n < b.N; n++ {
 				_ = i.Run(ctx)
 				i.Clear()
+			}
+		})
+	}
+}
+
+func BenchmarkInterpreter_Clone(b *testing.B) {
+	for _, tt := range tests {
+		b.Run(tt.program.String(), func(b *testing.B) {
+			i := New(tt.program)
+			b.ResetTimer()
+
+			for n := 0; n < b.N; n++ {
+				i.Clone()
 			}
 		})
 	}
