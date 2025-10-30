@@ -149,20 +149,16 @@ func (i Instruction) Operands() []uint64 {
 
 func (i Instruction) Width() int {
 	typ := i.Type()
-	operands := i.Operands()
-	width := 1
-	idx := 0
+	offset := 1
 	for _, w := range typ.Widths {
 		if w > 0 {
-			width += w
-			idx++
+			offset += w
 		} else {
-			count := int(operands[idx])
-			width += 1 + count*-w
-			idx += count + 1
+			count := int(i[offset])
+			offset += 1 + count*-w
 		}
 	}
-	return width
+	return offset
 }
 
 func (i Instruction) String() string {
