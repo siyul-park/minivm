@@ -224,7 +224,7 @@ func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
 
 func (i *Interpreter) Local(idx int) (types.Boxed, error) {
 	addr := i.frames[i.fp-1].bp + idx
-	if addr < 0 || addr > i.sp {
+	if addr < 0 || addr >= i.sp {
 		return 0, ErrSegmentationFault
 	}
 	return i.stack[addr], nil
@@ -232,7 +232,7 @@ func (i *Interpreter) Local(idx int) (types.Boxed, error) {
 
 func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
 	addr := i.frames[i.fp-1].bp + idx
-	if addr < 0 || addr > i.sp {
+	if addr < 0 || addr >= i.sp {
 		return ErrSegmentationFault
 	}
 	old := i.stack[addr]
