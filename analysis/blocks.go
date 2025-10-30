@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 
@@ -17,6 +18,8 @@ type BasicBlock struct {
 	Succs []int
 	Preds []int
 }
+
+var ErrInvalidJump = errors.New("invalid jump")
 
 var _ pass.Pass[[]*BasicBlock] = (*BasicBlocksPass)(nil)
 

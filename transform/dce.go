@@ -3,6 +3,8 @@ package transform
 import (
 	"fmt"
 
+	"github.com/siyul-park/minivm/types"
+
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/pass"
@@ -19,36 +21,43 @@ func NewDeadCodeEliminationPass() *DeadCodeEliminationPass {
 
 func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error) {
 	var prog *program.Program
-	var module *analysis.Module
 	if err := m.Load(&prog); err != nil {
 		return nil, err
 	}
-	if err := m.Load(&module); err != nil {
-		return nil, err
+
+	var fns []*types.Function
+	fns = append(fns, &types.Function{
+		Signature: types.NewFunctionSignature(),
+		Code:      prog.Code,
+	})
+	for _, v := range prog.Constants {
+		if fn, ok := v.(*types.Function); ok {
+			fns = append(fns, fn)
+		}
 	}
 
-	fns := module.AllFunctions()
-	for _, fn := range fns {
+	for i, fn := range fns {
 		code := fn.Code
-		for i := 1; i < len(fn.Blocks); i++ {
-			blk := fn.Blocks[i]
+
+		var blocks []*analysis.BasicBlock
+		if err := m.Convert(fn, &blocks); err != nil {
+			return nil, err
+		}
+		for i := 1; i < len(blocks); i++ {
+			blk := blocks[i]
 			if len(blk.Preds) == 0 {
 				for j := blk.Start; j < blk.End; j++ {
 					code[j] = byte(instr.UNREACHABLE)
 				}
 			}
 		}
-	}
-
-	for i, fn := range fns {
-		code := fn.Code
-		write := 0
 
 		offsets := make([]int, len(code))
 		for j := range offsets {
 			offsets[j] = -1
 		}
 
+		write := 0
 		for read := 0; read < len(code); {
 			inst := instr.Instruction(code[read:])
 			width := inst.Width()
