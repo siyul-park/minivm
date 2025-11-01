@@ -478,9 +478,29 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_LT_U),
+			},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 3),
 				instr.New(instr.I32_CONST, 2),
 				instr.New(instr.I32_GT_S),
+			},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_GT_U),
 			},
 		),
 		values: []types.Value{types.I32(1)},
@@ -498,9 +518,29 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_LE_U),
+			},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 3),
 				instr.New(instr.I32_CONST, 2),
 				instr.New(instr.I32_GE_S),
+			},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_GE_U),
 			},
 		),
 		values: []types.Value{types.I32(1)},
@@ -709,9 +749,29 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I64_CONST, 2),
+				instr.New(instr.I64_LT_U),
+			},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.I64_CONST, 3),
 				instr.New(instr.I64_CONST, 2),
 				instr.New(instr.I64_GT_S),
+			},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 3),
+				instr.New(instr.I64_CONST, 2),
+				instr.New(instr.I64_GT_U),
 			},
 		),
 		values: []types.Value{types.I32(1)},
@@ -729,9 +789,29 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 2),
+				instr.New(instr.I64_CONST, 2),
+				instr.New(instr.I64_LE_U),
+			},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.I64_CONST, 3),
 				instr.New(instr.I64_CONST, 2),
 				instr.New(instr.I64_GE_S),
+			},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 3),
+				instr.New(instr.I64_CONST, 2),
+				instr.New(instr.I64_GE_U),
 			},
 		),
 		values: []types.Value{types.I32(1)},
