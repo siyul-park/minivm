@@ -17,9 +17,13 @@ type threadedCodeCompiler struct {
 
 var threaded = [256]func(c *threadedCodeCompiler) func(i *Interpreter){
 	instr.NOP: func(c *threadedCodeCompiler) func(i *Interpreter) {
-		c.ip++
+		nop := 0
+		for c.ip+nop < len(c.code) && instr.Opcode(c.code[c.ip+nop]) == instr.NOP {
+			nop++
+		}
+		c.ip += nop
 		return func(i *Interpreter) {
-			i.frames[i.fp-1].ip++
+			i.frames[i.fp-1].ip += nop
 		}
 	},
 	instr.UNREACHABLE: func(c *threadedCodeCompiler) func(i *Interpreter) {
