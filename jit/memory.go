@@ -14,8 +14,6 @@ var (
 
 type ExecutableMemory struct {
 	Data []byte
-	ptr  uintptr
-	size int
 }
 
 func AllocateExecutable(size int) (*ExecutableMemory, error) {
@@ -23,30 +21,29 @@ func AllocateExecutable(size int) (*ExecutableMemory, error) {
 		return nil, fmt.Errorf("invalid size: %d", size)
 	}
 
-	ptr, err := allocExecutable(size)
+	data, err := allocExecutable(size)
 	if err != nil {
 		return nil, err
 	}
 
-	data := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), size)
-
 	return &ExecutableMemory{
 		Data: data,
-		ptr:  ptr,
-		size: size,
 	}, nil
 }
 
 func (m *ExecutableMemory) Execute() (uint64, error) {
-	return callMachineCode(m.ptr)
+	if len(m.Data) == 0 {
+		return 0, errors.New("empty executable memory")
+	}
+	ptr := uintptr(unsafe.Pointer(&m.Data[0]))
+	return callMachineCode(ptr)
 }
 
 func (m *ExecutableMemory) Free() error {
-	if m.ptr == 0 {
+	if len(m.Data) == 0 {
 		return nil
 	}
-	err := freeExecutable(m.ptr, m.size)
-	m.ptr = 0
+	err := freeExecutable(m.Data)
 	m.Data = nil
 	return err
 }

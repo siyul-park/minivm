@@ -4,24 +4,22 @@ package jit
 
 import (
 	"syscall"
-	"unsafe"
 )
 
-func allocExecutable(size int) (uintptr, error) {
+func allocExecutable(size int) ([]byte, error) {
 	data, err := syscall.Mmap(
 		-1,
 		0,
 		size,
 		syscall.PROT_READ|syscall.PROT_WRITE|syscall.PROT_EXEC,
-		syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS,
+		syscall.MAP_PRIVATE|syscall.MAP_ANON,
 	)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return uintptr(unsafe.Pointer(&data[0])), nil
+	return data, nil
 }
 
-func freeExecutable(ptr uintptr, size int) error {
-	data := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), size)
+func freeExecutable(data []byte) error {
 	return syscall.Munmap(data)
 }
