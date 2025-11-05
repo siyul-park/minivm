@@ -1,91 +1,176 @@
 package jit
 
 import (
-	"syscall"
-	"unsafe"
+	"errors"
+	"fmt"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/types"
 )
 
-const (
-	pageSize = 4096
+var (
+	ErrInvalidBytecode   = errors.New("jit: invalid bytecode")
+	ErrUnsupportedOpcode = errors.New("jit: unsupported opcode")
+	ErrCompilationFailed = errors.New("jit: compilation failed")
 )
 
-type jitCompiler struct {
-	code      []byte
-	ip        int
-	assembler *assembler
-	stackOff  uintptr
-	spOff     uintptr
-	fpOff     uintptr
-	framesOff uintptr
+type InterpreterState struct {
+	Stack []types.Boxed
+	SP    *int
+	BP    int
 }
 
-func Compile(code []byte, offsets Offsets) (*Code, error) {
-	asm := newAssembler()
-	c := &jitCompiler{
-		code:      code,
-		ip:        0,
-		assembler: asm,
-		stackOff:  offsets.Stack,
-		spOff:     offsets.SP,
-		fpOff:     offsets.FP,
-		framesOff: offsets.Frames,
+type CompiledFunction struct {
+	Code       []byte
+	NumParams  int
+	NumReturns int
+	execute    func([]int32) []int32
+	mem        *ExecutableMemory
+}
+
+type Compiler struct {
+	asm *Assembler
+}
+
+func NewCompiler() *Compiler {
+	return &Compiler{
+		asm: NewAssembler(),
+	}
+}
+
+func (cf *CompiledFunction) Free() error {
+	if cf.mem != nil {
+		return cf.mem.Free()
+	}
+	return nil
+}
+
+func (c *CompiledFunction) Execute(state *InterpreterState) error {
+	if *state.SP < c.NumParams {
+		return ErrInvalidBytecode
 	}
 
-	asm.emit(0x53)
-	asm.emit(0x55)
-	asm.emit(0x41, 0x54)
-	asm.emit(0x41, 0x55)
-	asm.emit(0x41, 0x56)
-	asm.emit(0x41, 0x57)
-	asm.emit(0x49, 0x89, 0xfc)
+	params := make([]int32, c.NumParams)
+	for i := 0; i < c.NumParams; i++ {
+		params[i] = state.Stack[*state.SP-c.NumParams+i].I32()
+	}
 
-	for c.ip < len(code) {
-		op := instr.Opcode(code[c.ip])
-		if !c.compileOpcode(op) {
-			break
+	*state.SP -= c.NumParams
+
+	results := c.execute(params)
+
+	if *state.SP+len(results) > len(state.Stack) {
+		return ErrCompilationFailed
+	}
+
+	for _, r := range results {
+		state.Stack[*state.SP] = types.BoxI32(r)
+		*state.SP++
+	}
+
+	return nil
+}
+
+func (c *Compiler) Compile(code []byte) (*CompiledFunction, error) {
+	c.asm.Reset()
+
+	c.asm.PushReg(RBP)
+	c.asm.MovRegToReg32(RBP, RSP)
+
+	stackEffect, err := c.compileInstructions(code)
+	if err != nil {
+		return nil, err
+	}
+
+	c.asm.PopReg(RAX)
+	c.asm.PopReg(RBP)
+	c.asm.Ret()
+
+	codeBytes := c.asm.Bytes()
+	mem, err := AllocateExecutable(len(codeBytes))
+	if err != nil {
+		return nil, err
+	}
+	copy(mem.Data, codeBytes)
+
+	fn := &CompiledFunction{
+		Code:       codeBytes,
+		NumParams:  0,
+		NumReturns: stackEffect,
+		mem:        mem,
+	}
+
+	fn.execute = func(params []int32) []int32 {
+		result, err := mem.Execute()
+		if err != nil {
+			panic(err)
+		}
+		return []int32{int32(result)}
+	}
+
+	return fn, nil
+}
+
+func (c *Compiler) compileInstructions(code []byte) (int, error) {
+	stackEffect := 0
+
+	for i := 0; i < len(code); {
+		op := instr.Opcode(code[i])
+
+		switch op {
+		case instr.I32_CONST:
+			if i+4 >= len(code) {
+				return 0, fmt.Errorf("%w: invalid I32_CONST at position %d", ErrInvalidBytecode, i)
+			}
+			val := int32(code[i+1]) | int32(code[i+2])<<8 | int32(code[i+3])<<16 | int32(code[i+4])<<24
+			c.asm.MovImm32ToReg(RAX, val)
+			c.asm.PushReg(RAX)
+			stackEffect++
+			i += 5
+
+		case instr.I32_ADD:
+			c.asm.PopReg(RCX)
+			c.asm.PopReg(RAX)
+			c.asm.AddRegToReg32(RAX, RCX)
+			c.asm.PushReg(RAX)
+			stackEffect--
+			i++
+
+		case instr.I32_SUB:
+			c.asm.PopReg(RCX)
+			c.asm.PopReg(RAX)
+			c.asm.SubRegFromReg32(RAX, RCX)
+			c.asm.PushReg(RAX)
+			stackEffect--
+			i++
+
+		case instr.I32_MUL:
+			c.asm.PopReg(RCX)
+			c.asm.PopReg(RAX)
+			c.asm.ImulRegReg32(RAX, RCX)
+			c.asm.PushReg(RAX)
+			stackEffect--
+			i++
+
+		case instr.I32_DIV_S:
+			c.asm.PopReg(RCX)
+			c.asm.PopReg(RAX)
+			c.asm.Cdq()
+			c.asm.Idiv32(RCX)
+			c.asm.PushReg(RAX)
+			stackEffect--
+			i++
+
+		case instr.RETURN:
+			c.asm.PopReg(RAX)
+			c.asm.PopReg(RBP)
+			c.asm.Ret()
+			return stackEffect, nil
+
+		default:
+			return 0, fmt.Errorf("%w: %v at position %d", ErrUnsupportedOpcode, op, i)
 		}
 	}
 
-	asm.emit(0x41, 0x5f)
-	asm.emit(0x41, 0x5e)
-	asm.emit(0x41, 0x5d)
-	asm.emit(0x41, 0x5c)
-	asm.emit(0x5d)
-	asm.emit(0x5b)
-	asm.emit(0xc3)
-
-	codeBytes := asm.finalize()
-	alignedSize := (len(codeBytes) + pageSize - 1) &^ (pageSize - 1)
-
-	mmapData, err := syscall.Mmap(-1, 0, alignedSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANON)
-	if err != nil {
-		return nil, err
-	}
-
-	copy(mmapData, codeBytes)
-
-	err = syscall.Mprotect(mmapData, syscall.PROT_READ|syscall.PROT_EXEC)
-	if err != nil {
-		syscall.Munmap(mmapData)
-		return nil, err
-	}
-
-	return newCode(mmapData, unsafe.Pointer(&mmapData[0]), len(codeBytes)), nil
-}
-
-func (c *jitCompiler) compileOpcode(op instr.Opcode) bool {
-	switch op {
-	case instr.I32_CONST:
-		return c.compileI32Const()
-	case instr.I32_ADD:
-		return c.compileI32Add()
-	case instr.I32_SUB:
-		return c.compileI32Sub()
-	case instr.I32_MUL:
-		return c.compileI32Mul()
-	default:
-		return false
-	}
+	return stackEffect, nil
 }
