@@ -24,7 +24,9 @@ func NewOptimizer(level Level) *Optimizer {
 
 	_ = opt.manager.Register(analysis.NewBasicBlocksPass())
 
-	if level >= O1 {
+	switch level {
+	case O0:
+	case O1:
 		_ = opt.manager.Register(transform.NewConstantFoldingPass())
 		_ = opt.manager.Register(transform.NewConstantDeduplicationPass())
 		_ = opt.manager.Register(transform.NewDeadCodeEliminationPass())

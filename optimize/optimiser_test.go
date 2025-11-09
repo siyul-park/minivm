@@ -57,7 +57,6 @@ func TestOptimizer_Optimize(t *testing.T) {
 			),
 		),
 	)
-
 	prog, err := o.Optimize(prog)
 	require.NoError(t, err)
 }
