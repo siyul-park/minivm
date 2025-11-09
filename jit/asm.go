@@ -110,6 +110,12 @@ func (a *Assembler) MovRegToReg32(dst, src Register) {
 	a.emitModRM(3, byte(src&7), byte(dst&7))
 }
 
+func (a *Assembler) MovRegToReg64(dst, src Register) {
+	a.emitRex(true, src >= R8, false, dst >= R8)
+	a.emit(0x89)
+	a.emitModRM(3, byte(src&7), byte(dst&7))
+}
+
 func (a *Assembler) AddRegToReg32(dst, src Register) {
 	if dst >= R8 || src >= R8 {
 		a.emitRex(false, src >= R8, false, dst >= R8)

@@ -54,6 +54,25 @@ func BenchmarkSimpleArithmetic(b *testing.B) {
 			fn.Free()
 		}
 	})
+
+	b.Run("JITRuntimeOnly", func(b *testing.B) {
+		compiler := NewCompiler()
+		fn, err := compiler.Compile(p.Code)
+		require.NoError(b, err)
+		defer fn.Free()
+
+		b.ResetTimer()
+		for b.Loop() {
+			state := &InterpreterState{
+				Stack: make([]types.Boxed, 1024),
+				SP:    new(int),
+				BP:    0,
+			}
+
+			err = fn.Execute(state)
+			require.NoError(b, err)
+		}
+	})
 }
 
 func BenchmarkSumArithmetic(b *testing.B) {
@@ -97,6 +116,25 @@ func BenchmarkSumArithmetic(b *testing.B) {
 			require.NoError(b, err)
 
 			fn.Free()
+		}
+	})
+
+	b.Run("JITRuntimeOnly", func(b *testing.B) {
+		compiler := NewCompiler()
+		fn, err := compiler.Compile(p.Code)
+		require.NoError(b, err)
+		defer fn.Free()
+
+		b.ResetTimer()
+		for b.Loop() {
+			state := &InterpreterState{
+				Stack: make([]types.Boxed, 1024),
+				SP:    new(int),
+				BP:    0,
+			}
+
+			err = fn.Execute(state)
+			require.NoError(b, err)
 		}
 	})
 }

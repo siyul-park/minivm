@@ -75,7 +75,7 @@ func (c *Compiler) Compile(code []byte) (*CompiledFunction, error) {
 	c.asm.Reset()
 
 	c.asm.PushReg(RBP)
-	c.asm.MovRegToReg32(RBP, RSP)
+	c.asm.MovRegToReg64(RBP, RSP)
 
 	stackEffect, err := c.compileInstructions(code)
 	if err != nil {
@@ -83,6 +83,7 @@ func (c *Compiler) Compile(code []byte) (*CompiledFunction, error) {
 	}
 
 	c.asm.PopReg(RAX)
+	c.asm.MovRegToReg64(RSP, RBP)
 	c.asm.PopReg(RBP)
 	c.asm.Ret()
 
@@ -163,6 +164,7 @@ func (c *Compiler) compileInstructions(code []byte) (int, error) {
 
 		case instr.RETURN:
 			c.asm.PopReg(RAX)
+			c.asm.MovRegToReg64(RSP, RBP)
 			c.asm.PopReg(RBP)
 			c.asm.Ret()
 			return stackEffect, nil
