@@ -10,7 +10,7 @@ import (
 
 func TestManager_Register(t *testing.T) {
 	m := NewManager()
-	err := m.Register(NewPass[*program.Program](func(m *Manager) (*program.Program, error) {
+	err := m.Register(New[*program.Program](func(m *Manager) (*program.Program, error) {
 		var prog *program.Program
 		if err := m.Load(&prog); err != nil {
 			return nil, err
@@ -22,7 +22,7 @@ func TestManager_Register(t *testing.T) {
 
 func TestManager_Convert(t *testing.T) {
 	m := NewManager()
-	_ = m.Register(NewPass[*program.Program](func(m *Manager) (*program.Program, error) {
+	_ = m.Register(New[*program.Program](func(m *Manager) (*program.Program, error) {
 		var prog *program.Program
 		if err := m.Load(&prog); err != nil {
 			return nil, err
@@ -33,7 +33,7 @@ func TestManager_Convert(t *testing.T) {
 		}
 		return prog, nil
 	}))
-	_ = m.Register(NewPass[*types.Function](func(m *Manager) (*types.Function, error) {
+	_ = m.Register(New[*types.Function](func(m *Manager) (*types.Function, error) {
 		var fn *types.Function
 		if err := m.Load(&fn); err != nil {
 			return nil, err
@@ -47,7 +47,7 @@ func TestManager_Convert(t *testing.T) {
 
 func TestManager_Run(t *testing.T) {
 	m := NewManager()
-	_ = m.Register(NewPass[*program.Program](func(m *Manager) (*program.Program, error) {
+	_ = m.Register(New[*program.Program](func(m *Manager) (*program.Program, error) {
 		var prog *program.Program
 		if err := m.Load(&prog); err != nil {
 			return nil, err

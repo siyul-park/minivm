@@ -1273,7 +1273,7 @@ var tests = []struct {
 			},
 			program.WithConstants(types.String("foo")),
 		),
-		values: []types.Value{types.I32Array{'f', 'o', 'o'}},
+		values: []types.Value{types.I32Array("foo")},
 	},
 	{
 		program: program.New(

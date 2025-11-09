@@ -8,7 +8,7 @@ type pass[T any] struct {
 	run func(*Manager) (T, error)
 }
 
-func NewPass[T any](run func(*Manager) (T, error)) Pass[T] {
+func New[T any](run func(*Manager) (T, error)) Pass[T] {
 	return &pass[T]{run: run}
 }
 
