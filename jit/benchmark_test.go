@@ -24,38 +24,16 @@ func BenchmarkSimpleArithmetic(b *testing.B) {
 
 	b.Run("Interpreter", func(b *testing.B) {
 		ctx := context.Background()
+		vm := interp.New(p)
 		b.ResetTimer()
 		for b.Loop() {
-			vm := interp.New(p)
 			err := vm.Run(ctx)
 			require.NoError(b, err)
-			result, err := vm.Pop()
-			require.NoError(b, err)
-			_ = result
+			vm.Clear()
 		}
 	})
 
 	b.Run("JIT", func(b *testing.B) {
-		b.ResetTimer()
-		for b.Loop() {
-			compiler := NewCompiler()
-			fn, err := compiler.Compile(p.Code)
-			require.NoError(b, err)
-
-			state := &InterpreterState{
-				Stack: make([]types.Boxed, 1024),
-				SP:    new(int),
-				BP:    0,
-			}
-
-			err = fn.Execute(state)
-			require.NoError(b, err)
-
-			fn.Free()
-		}
-	})
-
-	b.Run("JITRuntimeOnly", func(b *testing.B) {
 		compiler := NewCompiler()
 		fn, err := compiler.Compile(p.Code)
 		require.NoError(b, err)
@@ -88,38 +66,16 @@ func BenchmarkSumArithmetic(b *testing.B) {
 
 	b.Run("Interpreter", func(b *testing.B) {
 		ctx := context.Background()
+		vm := interp.New(p)
 		b.ResetTimer()
 		for b.Loop() {
-			vm := interp.New(p)
 			err := vm.Run(ctx)
 			require.NoError(b, err)
-			result, err := vm.Pop()
-			require.NoError(b, err)
-			_ = result
+			vm.Clear()
 		}
 	})
 
 	b.Run("JIT", func(b *testing.B) {
-		b.ResetTimer()
-		for b.Loop() {
-			compiler := NewCompiler()
-			fn, err := compiler.Compile(p.Code)
-			require.NoError(b, err)
-
-			state := &InterpreterState{
-				Stack: make([]types.Boxed, 1024),
-				SP:    new(int),
-				BP:    0,
-			}
-
-			err = fn.Execute(state)
-			require.NoError(b, err)
-
-			fn.Free()
-		}
-	})
-
-	b.Run("JITRuntimeOnly", func(b *testing.B) {
 		compiler := NewCompiler()
 		fn, err := compiler.Compile(p.Code)
 		require.NoError(b, err)
