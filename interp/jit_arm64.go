@@ -3,6 +3,8 @@
 package interp
 
 import (
+	"fmt"
+	"strings"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/asm"
@@ -11,22 +13,39 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+type CompiledFunction struct {
+	Signature *types.FunctionSignature
+	Params    []types.Kind
+	Returns   []types.Kind
+	Code      *asm.Code
+}
+
+type jitCompiler struct {
+	types     []types.Type
+	constants []types.Boxed
+	code      []byte
+	params    int
+	returns   int
+	ip        int
+	sp        int
+}
+
+var _ types.Value = (*CompiledFunction)(nil)
+
 var jit = [256]func(c *jitCompiler) ([]byte, error){
 	instr.I32_CONST: func(c *jitCompiler) ([]byte, error) {
 		val := types.BoxI32(*(*int32)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 5
 
-		reg := c.sp
-		c.sp++
-
 		imm0 := uint16(val & 0xFFFF)
 		imm1 := uint16((val >> 16) & 0xFFFF)
 
 		code := make([]byte, 0, 8)
-		code = append(code, arm64.MOVZ(reg, imm0, 0)...)
+		code = append(code, arm64.MOVZ(c.sp, imm0, 0)...)
 		if imm1 != 0 {
-			code = append(code, arm64.MOVK(reg, imm1, 16)...)
+			code = append(code, arm64.MOVK(c.sp, imm1, 16)...)
 		}
+		c.sp++
 		return code, nil
 	},
 	instr.RETURN: func(c *jitCompiler) ([]byte, error) {
@@ -53,6 +72,22 @@ func init() {
 			jit[i] = unknown
 		}
 	}
+}
+
+func NewCompiledFunction(signature *types.FunctionSignature, code *asm.Code) *CompiledFunction {
+	fn := &CompiledFunction{
+		Signature: signature,
+		Code:      code,
+	}
+	fn.Params = make([]types.Kind, len(signature.Params))
+	for i, t := range signature.Params {
+		fn.Params[i] = t.Kind()
+	}
+	fn.Returns = make([]types.Kind, len(signature.Returns))
+	for i, t := range signature.Returns {
+		fn.Returns[i] = t.Kind()
+	}
+	return fn
 }
 
 func (f *CompiledFunction) Run(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
@@ -96,12 +131,31 @@ func (f *CompiledFunction) Run(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, 
 	}
 }
 
+func (f *CompiledFunction) Kind() types.Kind {
+	return types.KindRef
+}
+
+func (f *CompiledFunction) Type() types.Type {
+	return f.Signature.Type()
+}
+
+func (f *CompiledFunction) String() string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%s\n", f.Signature.String()))
+	sb.WriteString("<compiled>")
+	return sb.String()
+}
+
+func (f *CompiledFunction) Close() error {
+	return f.Code.Close()
+}
+
 func (c *jitCompiler) Compile(fn *types.Function) (*CompiledFunction, error) {
 	c.code = fn.Code
 	c.params = fn.Params
 	c.returns = fn.Returns
 	c.ip = 0
-	c.sp = 0
+	c.sp = arm64.X8
 
 	emitter := asm.NewEmitter()
 	for c.ip < len(c.code) {
