@@ -14,7 +14,7 @@ type Code struct {
 
 func NewCode(b []byte) (*Code, error) {
 	data, err := syscall.Mmap(
-		-1, 0, len(b),
+		-1, 0, ((len(b)+syscall.Getpagesize()-1)/syscall.Getpagesize())*syscall.Getpagesize(),
 		syscall.PROT_READ|syscall.PROT_WRITE,
 		syscall.MAP_PRIVATE|syscall.MAP_ANON,
 	)
