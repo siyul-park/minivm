@@ -199,6 +199,36 @@ var threaded = [256]func(c *threadedCodeCompiler) func(i *Interpreter){
 				i.sp += fn.Returns - fn.Params - 1
 				copy(i.stack[i.sp-fn.Returns:i.sp], returns)
 				i.frames[i.fp-1].ip++
+			case *CompiledFunction:
+				if i.sp <= len(fn.Params) {
+					panic(ErrStackUnderflow)
+				}
+				if i.sp+len(fn.Returns)-len(fn.Params)-1 >= len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				params := i.stack[i.sp-len(fn.Params)-1 : i.sp-1]
+				returns, err := fn.Run(i, params)
+				if err != nil {
+					panic(err)
+				}
+				for _, val := range params {
+					if val.Kind() != types.KindRef {
+						continue
+					}
+					ok := false
+					for _, r := range returns {
+						if r == val {
+							ok = true
+							break
+						}
+					}
+					if !ok {
+						i.release(val.Ref())
+					}
+				}
+				i.sp += len(fn.Returns) - len(fn.Params) - 1
+				copy(i.stack[i.sp-len(fn.Returns):i.sp], returns)
+				i.frames[i.fp-1].ip++
 			default:
 				panic(ErrTypeMismatch)
 			}
@@ -452,6 +482,41 @@ var threaded = [256]func(c *threadedCodeCompiler) func(i *Interpreter){
 							}
 							i.sp += fn.Returns - fn.Params
 							copy(i.stack[i.sp-fn.Returns:i.sp], returns)
+							i.frames[i.fp-1].ip += 4
+						}
+					case *CompiledFunction:
+						return func(i *Interpreter) {
+							if i.fp == len(i.frames) {
+								panic(ErrFrameOverflow)
+							}
+							if i.sp < len(fn.Params) {
+								panic(ErrStackUnderflow)
+							}
+							if i.sp+len(fn.Returns)-len(fn.Params) >= len(i.stack) {
+								panic(ErrStackOverflow)
+							}
+							params := i.stack[i.sp-len(fn.Params) : i.sp]
+							returns, err := fn.Run(i, params)
+							if err != nil {
+								panic(err)
+							}
+							for _, val := range params {
+								if val.Kind() != types.KindRef {
+									continue
+								}
+								ok := false
+								for _, r := range returns {
+									if r == val {
+										ok = true
+										break
+									}
+								}
+								if !ok {
+									i.release(val.Ref())
+								}
+							}
+							i.sp += len(fn.Returns) - len(fn.Params)
+							copy(i.stack[i.sp-len(fn.Returns):i.sp], returns)
 							i.frames[i.fp-1].ip += 4
 						}
 					default:

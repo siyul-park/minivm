@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -11,6 +12,7 @@ import (
 
 type Interpreter struct {
 	ctx       context.Context
+	jit       *jitCompiler
 	code      [][]func(*Interpreter)
 	hits      [][]uint64
 	frames    []frame
@@ -24,6 +26,7 @@ type Interpreter struct {
 	fp        int
 	sp        int
 	tick      int
+	threshold uint64
 }
 
 type frame struct {
@@ -34,11 +37,12 @@ type frame struct {
 }
 
 type option struct {
-	frame   int
-	globals int
-	stack   int
-	heap    int
-	tick    int
+	frame     int
+	globals   int
+	stack     int
+	heap      int
+	tick      int
+	threshold int
 }
 
 var (
@@ -74,13 +78,18 @@ func WithTick(val int) func(*option) {
 	return func(o *option) { o.tick = val }
 }
 
+func WithThreshold(val int) func(*option) {
+	return func(o *option) { o.threshold = val }
+}
+
 func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	opt := option{
-		frame:   128,
-		globals: 128,
-		stack:   1024,
-		heap:    128,
-		tick:    1024,
+		frame:     128,
+		globals:   128,
+		stack:     1024,
+		heap:      128,
+		tick:      1024,
+		threshold: 1024 * 64,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -103,6 +112,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		fp:        0,
 		sp:        0,
 		tick:      opt.tick,
+		threshold: uint64(opt.threshold / opt.tick),
 	}
 
 	i.alloc(types.Null)
@@ -149,6 +159,11 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 			i.hits[j] = make([]uint64, len(code)+1)
 		}
 	}
+
+	i.jit = &jitCompiler{
+		types:     i.types,
+		constants: i.constants,
+	}
 	return i
 }
 
@@ -181,6 +196,17 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 
 			i.hits[f.addr][0]++
 			i.hits[f.addr][f.ip+1]++
+
+			if i.hits[f.addr][0] >= i.threshold {
+				if f.addr > 1 {
+					fn, ok := i.heap[f.addr].(*types.Function)
+					if ok {
+						if n, err := i.jit.Compile(fn); err == nil {
+							i.heap[f.addr] = n
+						}
+					}
+				}
+			}
 		}
 
 		code[f.ip](i)
@@ -461,11 +487,14 @@ func (i *Interpreter) release(addr int) {
 
 		i.rc[addr]--
 		if i.rc[addr] == 0 {
-			t, ok := i.heap[addr].(types.Traceable)
-			if ok {
+			v := i.heap[addr]
+			if t, ok := v.(types.Traceable); ok {
 				for _, r := range t.Refs() {
 					stack = append(stack, int(r))
 				}
+			}
+			if c, ok := v.(io.Closer); ok {
+				_ = c.Close()
 			}
 			i.heap[addr] = nil
 			i.free = append(i.free, addr)
