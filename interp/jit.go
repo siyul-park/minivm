@@ -18,6 +18,9 @@ type jitCompiler struct {
 	rp        int
 }
 
+func call(addr uintptr)
+func call_ret1(addr uintptr) uint64
+
 var jit = [256]func(c *jitCompiler) error{}
 
 func init() {
@@ -80,7 +83,7 @@ func (c *jitCompiler) Compile(fn *types.Function) (func(_ *Interpreter), error) 
 		case 0:
 			return func(i *Interpreter) {
 				f := &i.frames[i.fp-1]
-				(*(*func())(code.Ptr()))()
+				call(uintptr(code.Ptr()))
 				i.sp = f.bp
 				i.release(f.addr)
 				f.code = nil
@@ -127,7 +130,7 @@ func (c *jitCompiler) Compile(fn *types.Function) (func(_ *Interpreter), error) 
 		case 0:
 			return func(i *Interpreter) {
 				f := &i.frames[i.fp-1]
-				r0 := (*(*func() uint64)(code.Ptr()))()
+				r0 := call_ret1(uintptr(code.Ptr()))
 				i.stack[f.bp] = i.box64(r0, returns[0])
 				i.sp = f.bp + 1
 				i.release(f.addr)
