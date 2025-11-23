@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/siyul-park/minivm/asm"
 	"io"
 
 	"github.com/siyul-park/minivm/program"
@@ -12,7 +13,6 @@ import (
 
 type Interpreter struct {
 	ctx       context.Context
-	jit       *jitCompiler
 	code      [][]func(*Interpreter)
 	hits      [][]uint64
 	frames    []frame
@@ -88,8 +88,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		globals:   128,
 		stack:     1024,
 		heap:      128,
-		tick:      1024,
-		threshold: 1024 * 64,
+		tick:      1,
+		threshold: 1,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -159,11 +159,6 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 			i.hits[j] = make([]uint64, len(code)+1)
 		}
 	}
-
-	i.jit = &jitCompiler{
-		types:     i.types,
-		constants: i.constants,
-	}
 	return i
 }
 
@@ -179,6 +174,8 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 			}
 		}
 	}()
+
+	var emitter *asm.Emitter
 
 	f := &i.frames[i.fp-1]
 	code := f.code
@@ -198,14 +195,24 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 			i.hits[f.addr][f.ip+1]++
 
 			if i.hits[f.addr][0] >= i.threshold {
-				if f.addr > 1 {
+				if f.addr > 0 {
 					fn, ok := i.heap[f.addr].(*types.Function)
-					if ok {
-						if n, err := i.jit.Compile(fn); err == nil {
-							i.heap[f.addr] = n
+					if ok && len(i.code[f.addr]) == len(fn.Code) {
+						if emitter == nil {
+							emitter = asm.NewEmitter()
+						}
+						c := &jitCompiler{
+							emitter:   emitter,
+							types:     i.types,
+							constants: i.constants,
+							heap:      i.heap,
+						}
+						if v, err := c.Compile(fn); err == nil {
+							i.code[f.addr] = []func(*Interpreter){v}
 						}
 					}
 				}
+				i.hits[f.addr][0] = 0
 			}
 		}
 
@@ -368,7 +375,7 @@ func (i *Interpreter) Clone() *Interpreter {
 	return c
 }
 
-func (i *Interpreter) Clear() {
+func (i *Interpreter) Reset() {
 	for i.fp > 1 {
 		i.frames[i.fp] = frame{}
 		i.fp--
@@ -396,6 +403,29 @@ func (i *Interpreter) Clear() {
 		i.rc[j] = 1
 	}
 	i.free = i.free[:0]
+}
+
+func (i *Interpreter) unbox64(val types.Boxed) uint64 {
+	switch val.Kind() {
+	case types.KindI64:
+		return uint64(val.I64())
+	case types.KindRef:
+		addr := val.Ref()
+		v, _ := i.heap[addr].(types.I64)
+		i.release(addr)
+		return uint64(v)
+	default:
+		return uint64(val)
+	}
+}
+
+func (i *Interpreter) box64(val uint64, kind types.Kind) types.Boxed {
+	switch kind {
+	case types.KindI64:
+		return i.boxI64(int64(val))
+	default:
+		return types.Box(val, kind)
+	}
 }
 
 func (i *Interpreter) boxI64(val int64) types.Boxed {

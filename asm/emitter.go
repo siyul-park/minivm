@@ -56,3 +56,7 @@ func (e *Emitter) PC() int {
 func (e *Emitter) Bytes() []byte {
 	return e.code
 }
+
+func (e *Emitter) Reset() {
+	e.code = e.code[:0]
+}
