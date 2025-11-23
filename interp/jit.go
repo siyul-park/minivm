@@ -9,7 +9,9 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-type CompiledFunction struct{}
+type CompiledFunction struct {
+	Signature *types.FunctionSignature
+}
 
 type jitCompiler struct {
 	types     []types.Type

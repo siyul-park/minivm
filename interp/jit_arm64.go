@@ -21,51 +21,81 @@ type CompiledFunction struct {
 }
 
 type jitCompiler struct {
+	emitter   *asm.Emitter
 	types     []types.Type
 	constants []types.Boxed
 	code      []byte
 	params    int
 	returns   int
 	ip        int
-	sp        int
+	rp        int
 }
+
+const (
+	regBase  = arm64.X8
+	regLimit = arm64.X15
+	regCount = regLimit - regBase + 1
+)
 
 var _ types.Value = (*CompiledFunction)(nil)
 
-var jit = [256]func(c *jitCompiler) ([]byte, error){
-	instr.I32_CONST: func(c *jitCompiler) ([]byte, error) {
+var jit = [256]func(c *jitCompiler) error{
+	instr.I32_CONST: func(c *jitCompiler) error {
 		val := types.BoxI32(*(*int32)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 5
 
 		imm0 := uint16(val & 0xFFFF)
 		imm1 := uint16((val >> 16) & 0xFFFF)
 
-		code := make([]byte, 0, 8)
-		code = append(code, arm64.MOVZ(c.sp, imm0, 0)...)
-		if imm1 != 0 {
-			code = append(code, arm64.MOVK(c.sp, imm1, 16)...)
+		if c.rp <= regLimit {
+			c.emitter.Emit32(arm64.MOVZ(c.rp, imm0, 0))
+			if imm1 != 0 {
+				c.emitter.Emit32(arm64.MOVK(c.rp, imm1, 16))
+			}
+		} else {
+			spill := regBase + ((c.rp - regBase) % regCount)
+			c.emitter.Emit32(arm64.STR(spill, arm64.SP, 0))
+			c.emitter.Emit32(arm64.ADDI(arm64.SP, arm64.SP, 8))
 		}
-		c.sp++
-		return code, nil
+		c.rp++
+		return nil
 	},
-	instr.RETURN: func(c *jitCompiler) ([]byte, error) {
+	instr.RETURN: func(c *jitCompiler) error {
 		c.ip++
 
-		code := make([]byte, 0, 16)
-		for i := 0; i < c.returns && i <= c.sp; i++ {
-			src := c.sp - c.returns + i
-			if src != i {
-				code = append(code, arm64.ORRW(i, src)...)
+		reg := regCount
+		if c.returns < regCount {
+			reg = c.returns
+		}
+
+		for i := 0; i < reg; i++ {
+			src := c.rp - c.returns + i
+			if src >= 0 {
+				if src != i {
+					c.emitter.Emit32(arm64.ORRW(i, src))
+				}
+			} else {
+				offset := (i - c.returns) * 8
+				c.emitter.Emit32(arm64.LDR(i, arm64.SP, offset))
 			}
 		}
-		code = append(code, arm64.RET()...)
-		return code, nil
+		for i := reg; i < c.returns; i++ {
+			offset := (i - reg) * 8
+			c.emitter.Emit32(arm64.LDR(i, arm64.SP, offset))
+		}
+		if c.rp > regLimit {
+			spillCount := c.rp - regLimit
+			c.emitter.Emit32(arm64.ADDI(arm64.SP, arm64.SP, -8*spillCount))
+		}
+
+		c.emitter.Emit32(arm64.RET())
+		return nil
 	},
 }
 
 func init() {
-	unknown := func(_ *jitCompiler) ([]byte, error) {
-		return nil, ErrUnknownOpcode
+	unknown := func(_ *jitCompiler) error {
+		return ErrUnknownOpcode
 	}
 	for i, fn := range jit {
 		if fn == nil {
@@ -151,22 +181,20 @@ func (f *CompiledFunction) Close() error {
 }
 
 func (c *jitCompiler) Compile(fn *types.Function) (*CompiledFunction, error) {
+	c.emitter = asm.NewEmitter()
 	c.code = fn.Code
 	c.params = fn.Params
 	c.returns = fn.Returns
 	c.ip = 0
-	c.sp = arm64.X8
+	c.rp = regBase
 
-	emitter := asm.NewEmitter()
 	for c.ip < len(c.code) {
-		code, err := jit[c.code[c.ip]](c)
-		if err != nil {
+		if err := jit[c.code[c.ip]](c); err != nil {
 			return nil, err
 		}
-		emitter.Emit(code)
 	}
 
-	code, err := asm.NewCode(emitter.Bytes())
+	code, err := asm.NewCode(c.emitter.Bytes())
 	if err != nil {
 		return nil, err
 	}
