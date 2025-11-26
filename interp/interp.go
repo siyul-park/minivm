@@ -88,8 +88,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		globals:   128,
 		stack:     1024,
 		heap:      128,
-		tick:      1024,
-		threshold: 1024,
+		tick:      1,
+		threshold: 1,
 	}
 	for _, o := range opts {
 		o(&opt)
