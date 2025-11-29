@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/siyul-park/minivm/asm"
 	"io"
 
 	"github.com/siyul-park/minivm/program"
@@ -175,8 +174,6 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 		}
 	}()
 
-	var emitter *asm.Emitter
-
 	f := &i.frames[i.fp-1]
 	code := f.code
 	tick := i.tick
@@ -193,27 +190,6 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 
 			i.hits[f.addr][0]++
 			i.hits[f.addr][f.ip+1]++
-
-			if i.hits[f.addr][0] >= i.threshold {
-				if f.addr > 0 {
-					fn, ok := i.heap[f.addr].(*types.Function)
-					if ok && len(i.code[f.addr]) == len(fn.Code) {
-						if emitter == nil {
-							emitter = asm.NewEmitter()
-						}
-						c := &jitCompiler{
-							emitter:   emitter,
-							types:     i.types,
-							constants: i.constants,
-							heap:      i.heap,
-						}
-						if v, err := c.Compile(fn); err == nil {
-							i.code[f.addr] = []func(*Interpreter){v}
-						}
-					}
-				}
-				i.hits[f.addr][0] = 0
-			}
 		}
 
 		code[f.ip](i)

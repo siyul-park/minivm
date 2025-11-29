@@ -1,61 +1,88 @@
 #include "textflag.h"
 
 // func invoke(addr uintptr, argv *uint64)
-// argv layout: [param_num, return_num, param_types..., return_types..., values...]
-TEXT ·invoke(SB), NOSPLIT, $32-16
-    MOVD argv+8(FP), R9
+// argv: [header(param_num|return_num|param_types|return_types), values...]
+TEXT ·invoke(SB), NOSPLIT, $0-16
+    MOVD argv+8(FP), R8
+    MOVD 0(R8), R9
 
-    MOVD 0(R9), R10
-    MOVD 8(R9), R11
-
-    ADD R10, R11, R12
-    ADD $2, R12
-    LSL $3, R12
-    ADD R9, R12
-
-    MOVD R11, R19
-    MOVD R12, R20
+    AND $0xFF, R9, R10           // param_num
+    UBFX $16, R9, $8, R12        // param_types
+    ADD $8, R8, R14              // values_base
 
     CBZ R10, call
-    MOVD 0(R12), R0
+    TBZ $0, R12, 1(PC); FMOVD 0(R14), F0
+    TBZ $0, R12, 2(PC); B 2(PC); MOVD 0(R14), R0
     SUB $1, R10; CBZ R10, call
-    MOVD 8(R12), R1
+
+    TBZ $1, R12, 1(PC); FMOVD 8(R14), F1
+    TBZ $1, R12, 2(PC); B 2(PC); MOVD 8(R14), R1
     SUB $1, R10; CBZ R10, call
-    MOVD 16(R12), R2
+
+    TBZ $2, R12, 1(PC); FMOVD 16(R14), F2
+    TBZ $2, R12, 2(PC); B 2(PC); MOVD 16(R14), R2
     SUB $1, R10; CBZ R10, call
-    MOVD 24(R12), R3
+
+    TBZ $3, R12, 1(PC); FMOVD 24(R14), F3
+    TBZ $3, R12, 2(PC); B 2(PC); MOVD 24(R14), R3
     SUB $1, R10; CBZ R10, call
-    MOVD 32(R12), R4
+
+    TBZ $4, R12, 1(PC); FMOVD 32(R14), F4
+    TBZ $4, R12, 2(PC); B 2(PC); MOVD 32(R14), R4
     SUB $1, R10; CBZ R10, call
-    MOVD 40(R12), R5
+
+    TBZ $5, R12, 1(PC); FMOVD 40(R14), F5
+    TBZ $5, R12, 2(PC); B 2(PC); MOVD 40(R14), R5
     SUB $1, R10; CBZ R10, call
-    MOVD 48(R12), R6
+
+    TBZ $6, R12, 1(PC); FMOVD 48(R14), F6
+    TBZ $6, R12, 2(PC); B 2(PC); MOVD 48(R14), R6
     SUB $1, R10; CBZ R10, call
-    MOVD 56(R12), R7
+
+    TBZ $7, R12, 1(PC); FMOVD 56(R14), F7
+    TBZ $7, R12, 2(PC); B 2(PC); MOVD 56(R14), R7
 
 call:
-    MOVD addr+0(FP), R8
-    BL (R8)
+    MOVD addr+0(FP), R15
+    BL (R15)
 
-    MOVD R19, R11
-    MOVD R20, R12
+    MOVD argv+8(FP), R8
+    MOVD 0(R8), R9
+    UBFX $8, R9, $8, R11         // return_num
+    UBFX $24, R9, $8, R13        // return_types
+    ADD $8, R8, R14              // values_base
 
-    CBZ R11, done
-    MOVD R0, 0(R12)
-    SUB $1, R11; CBZ R11, done
-    MOVD R1, 8(R12)
-    SUB $1, R11; CBZ R11, done
-    MOVD R2, 16(R12)
-    SUB $1, R11; CBZ R11, done
-    MOVD R3, 24(R12)
-    SUB $1, R11; CBZ R11, done
-    MOVD R4, 32(R12)
-    SUB $1, R11; CBZ R11, done
-    MOVD R5, 40(R12)
-    SUB $1, R11; CBZ R11, done
-    MOVD R6, 48(R12)
-    SUB $1, R11; CBZ R11, done
-    MOVD R7, 56(R12)
+    CBZ R11, return
+    TBZ $0, R13, 1(PC); FMOVD F0, 0(R14)
+    TBZ $0, R13, 2(PC); B 2(PC); MOVD R0, 0(R14)
+    SUB $1, R11; CBZ R11, return
 
-done:
+    TBZ $1, R13, 1(PC); FMOVD F1, 8(R14)
+    TBZ $1, R13, 2(PC); B 2(PC); MOVD R1, 8(R14)
+    SUB $1, R11; CBZ R11, return
+
+    TBZ $2, R13, 1(PC); FMOVD F2, 16(R14)
+    TBZ $2, R13, 2(PC); B 2(PC); MOVD R2, 16(R14)
+    SUB $1, R11; CBZ R11, return
+
+    TBZ $3, R13, 1(PC); FMOVD F3, 24(R14)
+    TBZ $3, R13, 2(PC); B 2(PC); MOVD R3, 24(R14)
+    SUB $1, R11; CBZ R11, return
+
+    TBZ $4, R13, 1(PC); FMOVD F4, 32(R14)
+    TBZ $4, R13, 2(PC); B 2(PC); MOVD R4, 32(R14)
+    SUB $1, R11; CBZ R11, return
+
+    TBZ $5, R13, 1(PC); FMOVD F5, 40(R14)
+    TBZ $5, R13, 2(PC); B 2(PC); MOVD R5, 40(R14)
+    SUB $1, R11; CBZ R11, return
+
+    TBZ $6, R13, 1(PC); FMOVD F6, 48(R14)
+    TBZ $6, R13, 2(PC); B 2(PC); MOVD R6, 48(R14)
+    SUB $1, R11; CBZ R11, return
+
+    TBZ $7, R13, 1(PC); FMOVD F7, 56(R14)
+    TBZ $7, R13, 2(PC); B 2(PC); MOVD R7, 56(R14)
+
+return:
     RET
