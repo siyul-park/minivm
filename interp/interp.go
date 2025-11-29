@@ -342,7 +342,7 @@ func (i *Interpreter) Clone() *Interpreter {
 	return c
 }
 
-func (i *Interpreter) Clear() {
+func (i *Interpreter) Reset() {
 	for i.fp > 1 {
 		i.frames[i.fp] = frame{}
 		i.fp--
