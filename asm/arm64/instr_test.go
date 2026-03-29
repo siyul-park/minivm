@@ -10,7 +10,7 @@ func TestADD(t *testing.T) {
 	a := asm.NewAssembler()
 	r0 := asm.NewRegister(0, asm.TypeInt, 64)
 
-	a.Emit(ADDS(r0, r0, r0))
+	a.Emit(ADD(r0, r0, r0))
 	a.Emit(RET())
 
 	b, err := asm.NewBuffer(64)
