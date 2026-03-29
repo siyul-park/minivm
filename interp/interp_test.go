@@ -1795,8 +1795,8 @@ var tests = []struct {
 			program.WithConstants(
 				types.NewFunction(
 					types.NewFunctionSignature(
-						types.WithParams(types.TypeI64),
-						types.WithReturns(types.TypeI64),
+						types.WithParams(types.TypeI32),
+						types.WithReturns(types.TypeI32),
 					),
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.I32_CONST, 2),
