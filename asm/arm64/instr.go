@@ -63,7 +63,6 @@ func LSR(dst, src asm.Register, shift uint8) asm.Instruction {
 	return encode(0xD340FC00 | uint32(shift)<<16 | uint32(src.ID())<<5 | uint32(dst.ID()))
 }
 
-// 비교
 func CMP(src1, src2 asm.Register) asm.Instruction {
 	return encode(0xEB00001F | uint32(src2.ID())<<16 | uint32(src1.ID())<<5)
 }
@@ -80,7 +79,6 @@ func CMNI(src asm.Register, imm uint16) asm.Instruction {
 	return encode(0xB1000000 | uint32(imm)<<10 | uint32(src.ID())<<5 | 0x1F)
 }
 
-// MOV
 func MOV(dst, src asm.Register) asm.Instruction {
 	return encode(0xAA0003E0 | uint32(src.ID())<<16 | uint32(dst.ID()))
 }
@@ -93,7 +91,6 @@ func MOVK(dst asm.Register, imm uint16, shift uint8) asm.Instruction {
 	return encode(0xF2800000 | uint32(shift/16)<<21 | uint32(imm)<<5 | uint32(dst.ID()))
 }
 
-// Load / Store
 func LDR(dst, base asm.Register, offset int16) asm.Instruction {
 	return encode(0xF9400000 | uint32(offset/8)<<10 | uint32(base.ID())<<5 | uint32(dst.ID()))
 }
@@ -102,7 +99,6 @@ func STR(src, base asm.Register, offset int16) asm.Instruction {
 	return encode(0xF9000000 | uint32(offset/8)<<10 | uint32(base.ID())<<5 | uint32(src.ID()))
 }
 
-// Float 산술
 func FADD(dst, src1, src2 asm.Register) asm.Instruction {
 	return encode(0x1E602800 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5 | uint32(dst.ID()))
 }
@@ -127,7 +123,6 @@ func FCMP(src1, src2 asm.Register) asm.Instruction {
 	return encode(0x1E602000 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5)
 }
 
-// 정수 ↔ float 변환
 func SCVTF(dst, src asm.Register) asm.Instruction {
 	return encode(0x9E620000 | uint32(src.ID())<<5 | uint32(dst.ID()))
 }
@@ -136,7 +131,6 @@ func FCVTZS(dst, src asm.Register) asm.Instruction {
 	return encode(0x9E780000 | uint32(src.ID())<<5 | uint32(dst.ID()))
 }
 
-// 분기
 func RET() asm.Instruction {
 	return encode(0xD65F03C0)
 }
@@ -173,12 +167,7 @@ func BLE(offset int32) asm.Instruction { return encodeCond(0xD, offset) }
 func BGE(offset int32) asm.Instruction { return encodeCond(0xA, offset) }
 
 func encode(instr uint32) asm.Instruction {
-	return asm.Instruction{
-		byte(instr),
-		byte(instr >> 8),
-		byte(instr >> 16),
-		byte(instr >> 24),
-	}
+	return asm.Instruction{byte(instr), byte(instr >> 8), byte(instr >> 16), byte(instr >> 24)}
 }
 
 func encodeCond(cond uint32, offset int32) asm.Instruction {
