@@ -9,7 +9,7 @@ func TestAlloc(t *testing.T) {
 	m, err := Alloc(64)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(m), 64)
-	defer m.Free()
+	require.NoError(t, m.Free())
 }
 
 func TestWrite(t *testing.T) {

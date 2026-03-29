@@ -7,16 +7,16 @@ import (
 )
 
 type caller struct {
-	mem    asm.Memory
-	header Header
+	executable asm.Executable
+	header     Header
 }
 
 var _ asm.Caller = (*caller)(nil)
 
-func NewCaller(mem asm.Memory, header Header) asm.Caller {
+func NewCaller(mem asm.Executable, header Header) asm.Caller {
 	return &caller{
-		mem:    mem,
-		header: header,
+		executable: mem,
+		header:     header,
 	}
 }
 
@@ -29,7 +29,7 @@ func (c *caller) Call(args []uint64) ([]uint64, error) {
 	argv[0] = uint64(c.header)
 	copy(argv[1:], args)
 
-	invoke(uintptr(c.mem.Func()), uintptr(unsafe.Pointer(&argv[0])))
+	invoke(uintptr(c.executable.Func()), uintptr(unsafe.Pointer(&argv[0])))
 
 	return argv[1 : 1+c.header.Returns()], nil
 }
