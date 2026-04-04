@@ -15,7 +15,7 @@ type threadedCodeCompiler struct {
 	ip        int
 }
 
-var threaded = [256]func(c *threadedCodeCompiler) func(i *Interpreter){
+var handlers = [256]func(c *threadedCodeCompiler) func(i *Interpreter){
 	instr.NOP: func(c *threadedCodeCompiler) func(i *Interpreter) {
 		skip := 0
 		for c.ip+skip < len(c.code) && instr.Opcode(c.code[c.ip+skip]) == instr.NOP {
@@ -2438,9 +2438,9 @@ var unknown = func(_ *Interpreter) {
 }
 
 func init() {
-	for i, fn := range threaded {
+	for i, fn := range handlers {
 		if fn == nil {
-			threaded[i] = func(c *threadedCodeCompiler) func(*Interpreter) {
+			handlers[i] = func(c *threadedCodeCompiler) func(*Interpreter) {
 				c.ip++
 				return unknown
 			}
@@ -2455,7 +2455,7 @@ func (c *threadedCodeCompiler) Compile(code []byte) []func(*Interpreter) {
 	compiled := make([]func(*Interpreter), len(code))
 	for c.ip < len(code) {
 		ip := c.ip
-		compiled[ip] = threaded[code[ip]](c)
+		compiled[ip] = handlers[code[ip]](c)
 	}
 	for ip := 0; ip < len(code); ip++ {
 		if compiled[ip] == nil {

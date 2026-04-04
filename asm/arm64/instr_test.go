@@ -23,7 +23,7 @@ func TestADD(t *testing.T) {
 	require.NoError(t, err)
 
 	h := NewHeader([]asm.RegType{asm.TypeInt}, []asm.RegType{asm.TypeInt})
-	c := NewCaller(ch, h)
+	c := NewCaller(h, ch)
 
 	rets, err := c.Call([]uint64{1})
 	require.NoError(t, err)

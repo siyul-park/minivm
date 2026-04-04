@@ -20,7 +20,7 @@ func TestCaller_Call(t *testing.T) {
 	require.NoError(t, err)
 
 	h := NewHeader([]asm.RegType{asm.TypeInt}, []asm.RegType{asm.TypeInt})
-	c := NewCaller(m, h)
+	c := NewCaller(h, m)
 
 	rets, err := c.Call([]uint64{1})
 	require.NoError(t, err)

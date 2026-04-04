@@ -24,18 +24,32 @@ func NewHeader(params, rets []asm.RegType) Header {
 	)
 }
 
-func (h Header) Params() int {
-	return int(h & 0xFF)
+func (h Header) Params() []asm.RegType {
+	n := int(h & 0xFF)
+	types := uint8((h >> 16) & 0xFF)
+
+	res := make([]asm.RegType, n)
+	for i := 0; i < n; i++ {
+		if (types>>uint(i))&1 == 1 {
+			res[i] = asm.TypeFloat
+		} else {
+			res[i] = asm.TypeInt
+		}
+	}
+	return res
 }
 
-func (h Header) Returns() int {
-	return int((h >> 8) & 0xFF)
-}
+func (h Header) Returns() []asm.RegType {
+	n := int((h >> 8) & 0xFF)
+	types := uint8((h >> 24) & 0xFF)
 
-func (h Header) ParamTypes() uint8 {
-	return uint8((h >> 16) & 0xFF)
-}
-
-func (h Header) ReturnTypes() uint8 {
-	return uint8((h >> 24) & 0xFF)
+	res := make([]asm.RegType, n)
+	for i := 0; i < n; i++ {
+		if (types>>uint(i))&1 == 1 {
+			res[i] = asm.TypeFloat
+		} else {
+			res[i] = asm.TypeInt
+		}
+	}
+	return res
 }
