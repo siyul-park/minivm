@@ -3,6 +3,9 @@ package arm64
 import "github.com/siyul-park/minivm/asm"
 
 func ADD(dst, src1, src2 asm.Register) asm.Instruction {
+	if dst.Type() == asm.TypeFloat {
+		return encode(0x1E602800 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5 | uint32(dst.ID()))
+	}
 	return encode(0x8B000000 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5 | uint32(dst.ID()))
 }
 
@@ -19,6 +22,9 @@ func ADDSI(dst, src asm.Register, imm uint16) asm.Instruction {
 }
 
 func SUB(dst, src1, src2 asm.Register) asm.Instruction {
+	if dst.Type() == asm.TypeFloat {
+		return encode(0x1E603800 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5 | uint32(dst.ID()))
+	}
 	return encode(0xCB000000 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5 | uint32(dst.ID()))
 }
 
@@ -35,14 +41,19 @@ func SUBSI(dst, src asm.Register, imm uint16) asm.Instruction {
 }
 
 func MUL(dst, src1, src2 asm.Register) asm.Instruction {
+	if dst.Type() == asm.TypeFloat {
+		return encode(0x1E600800 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5 | uint32(dst.ID()))
+	}
 	return encode(0x9B007C00 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5 | uint32(dst.ID()))
 }
 
-func SDIV(dst, src1, src2 asm.Register) asm.Instruction {
+func DIV(dst, src1, src2 asm.Register) asm.Instruction {
+	if dst.Type() == asm.TypeFloat {
+		return encode(0x1E601800 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5 | uint32(dst.ID()))
+	}
 	return encode(0x9AC00C00 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5 | uint32(dst.ID()))
 }
 
-// 비트 연산 (레지스터)
 func AND(dst, src1, src2 asm.Register) asm.Instruction {
 	return encode(0x8A000000 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5 | uint32(dst.ID()))
 }
@@ -64,6 +75,9 @@ func LSR(dst, src asm.Register, shift uint8) asm.Instruction {
 }
 
 func CMP(src1, src2 asm.Register) asm.Instruction {
+	if src1.Type() == asm.TypeFloat {
+		return encode(0x1E602000 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5)
+	}
 	return encode(0xEB00001F | uint32(src2.ID())<<16 | uint32(src1.ID())<<5)
 }
 
@@ -71,15 +85,10 @@ func CMPI(src asm.Register, imm uint16) asm.Instruction {
 	return encode(0xF1000000 | uint32(imm)<<10 | uint32(src.ID())<<5 | 0x1F)
 }
 
-func CMN(src1, src2 asm.Register) asm.Instruction {
-	return encode(0xAB00001F | uint32(src2.ID())<<16 | uint32(src1.ID())<<5)
-}
-
-func CMNI(src asm.Register, imm uint16) asm.Instruction {
-	return encode(0xB1000000 | uint32(imm)<<10 | uint32(src.ID())<<5 | 0x1F)
-}
-
 func MOV(dst, src asm.Register) asm.Instruction {
+	if dst.Type() == asm.TypeFloat {
+		return encode(0x1E604000 | uint32(src.ID())<<5 | uint32(dst.ID()))
+	}
 	return encode(0xAA0003E0 | uint32(src.ID())<<16 | uint32(dst.ID()))
 }
 
@@ -97,30 +106,6 @@ func LDR(dst, base asm.Register, offset int16) asm.Instruction {
 
 func STR(src, base asm.Register, offset int16) asm.Instruction {
 	return encode(0xF9000000 | uint32(offset/8)<<10 | uint32(base.ID())<<5 | uint32(src.ID()))
-}
-
-func FADD(dst, src1, src2 asm.Register) asm.Instruction {
-	return encode(0x1E602800 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5 | uint32(dst.ID()))
-}
-
-func FSUB(dst, src1, src2 asm.Register) asm.Instruction {
-	return encode(0x1E603800 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5 | uint32(dst.ID()))
-}
-
-func FMUL(dst, src1, src2 asm.Register) asm.Instruction {
-	return encode(0x1E600800 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5 | uint32(dst.ID()))
-}
-
-func FDIV(dst, src1, src2 asm.Register) asm.Instruction {
-	return encode(0x1E601800 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5 | uint32(dst.ID()))
-}
-
-func FMOV(dst, src asm.Register) asm.Instruction {
-	return encode(0x1E604000 | uint32(src.ID())<<5 | uint32(dst.ID()))
-}
-
-func FCMP(src1, src2 asm.Register) asm.Instruction {
-	return encode(0x1E602000 | uint32(src2.ID())<<16 | uint32(src1.ID())<<5)
 }
 
 func SCVTF(dst, src asm.Register) asm.Instruction {
