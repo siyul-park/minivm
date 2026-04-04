@@ -1,9 +1,9 @@
 package asm
 
 type Register struct {
-	id   uint8
-	typ  RegType
-	size RegSize
+	id      uint8
+	typ     RegType
+	virtual bool
 }
 
 type RegType uint8
@@ -13,17 +13,14 @@ const (
 	TypeFloat
 )
 
-type RegSize uint8
+func NewReg(id uint8, typ RegType) Register {
+	return Register{id: id, typ: typ}
+}
 
-const (
-	Size32 RegSize = 32
-	Size64 RegSize = 64
-)
-
-func NewRegister(id uint8, typ RegType, size RegSize) Register {
-	return Register{id: id, typ: typ, size: size}
+func NewVReg(id uint8, typ RegType) Register {
+	return Register{id: id, typ: typ, virtual: true}
 }
 
 func (r Register) ID() uint8     { return r.id }
 func (r Register) Type() RegType { return r.typ }
-func (r Register) Size() RegSize { return r.size }
+func (r Register) Virtual() bool { return r.virtual }
