@@ -15,10 +15,10 @@ type caller struct {
 
 var _ asm.Caller = (*caller)(nil)
 
-func NewCaller(header Header, mem asm.Executable) asm.Caller {
+func NewCaller(header Header, executable asm.Executable) asm.Caller {
 	return &caller{
 		header:     header,
-		executable: mem,
+		executable: executable,
 		params:     header.Params(),
 		returns:    header.Returns(),
 	}
