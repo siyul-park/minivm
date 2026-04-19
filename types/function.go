@@ -49,16 +49,27 @@ func (b *FunctionBuilder) WithLocals(ls ...Type) *FunctionBuilder {
 	return b
 }
 
-func (b *FunctionBuilder) Emit(ins ...instr.Instruction) *FunctionBuilder {
-	b.instrs = append(b.instrs, ins...)
+func (b *FunctionBuilder) Emit(instrs ...instr.Instruction) *FunctionBuilder {
+	b.instrs = append(b.instrs, instrs...)
 	return b
 }
 
 func (b *FunctionBuilder) Build() *Function {
 	return &Function{
 		Typ:    b.typ,
-		Locals: append([]Type(nil), b.locals...),
+		Locals: b.locals,
 		Code:   instr.Marshal(b.instrs),
+	}
+}
+
+func NewFunction(typ *FunctionType, locals []Type, code []byte) *Function {
+	if typ == nil {
+		typ = &FunctionType{}
+	}
+	return &Function{
+		Typ:    typ,
+		Locals: locals,
+		Code:   code,
 	}
 }
 
