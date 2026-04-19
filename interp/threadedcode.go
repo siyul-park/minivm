@@ -415,7 +415,7 @@ var handlers = [256]func(c *threadedCodeCompiler) func(i *Interpreter){
 							f.addr = addr
 							f.ip = 0
 							f.bp = i.sp - len(fn.Typ.Params)
-							i.sp = f.bp + len(fn.Typ.Params) + len(fn.Locals)
+							i.sp += len(fn.Locals)
 							i.frames[i.fp-1].ip += 4
 							i.fp++
 						}
