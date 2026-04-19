@@ -107,6 +107,12 @@ func (t *FunctionType) String() string {
 	for _, r := range t.Returns {
 		returns = append(returns, r.String())
 	}
+	if len(returns) == 0 {
+		return fmt.Sprintf("func(%s)", strings.Join(params, ", "))
+	}
+	if len(returns) == 1 {
+		return fmt.Sprintf("func(%s) %s", strings.Join(params, ", "), returns[0])
+	}
 	return fmt.Sprintf("func(%s) (%s)", strings.Join(params, ", "), strings.Join(returns, ", "))
 }
 
