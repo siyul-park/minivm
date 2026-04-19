@@ -7,16 +7,16 @@ import (
 )
 
 func TestFunction_Kind(t *testing.T) {
-	fn := NewFunction(nil, nil, nil)
+	fn := NewFunction(nil, nil)
 	require.Equal(t, KindRef, fn.Kind())
 }
 
 func TestFunction_Type(t *testing.T) {
-	fn := NewFunction(nil, nil, nil)
+	fn := NewFunction(nil, nil)
 	require.Equal(t, &FunctionType{}, fn.Type())
 }
 
 func TestFunction_String(t *testing.T) {
-	fn := NewFunction(nil, nil, nil)
+	fn := NewFunction(nil, nil)
 	require.Equal(t, "func() ()\n", fn.String())
 }

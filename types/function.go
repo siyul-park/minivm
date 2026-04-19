@@ -62,14 +62,14 @@ func (b *FunctionBuilder) Build() *Function {
 	}
 }
 
-func NewFunction(typ *FunctionType, locals []Type, code []byte) *Function {
+func NewFunction(typ *FunctionType, locals []Type, instrs ...instr.Instruction) *Function {
 	if typ == nil {
 		typ = &FunctionType{}
 	}
 	return &Function{
 		Typ:    typ,
 		Locals: locals,
-		Code:   code,
+		Code:   instr.Marshal(instrs),
 	}
 }
 
