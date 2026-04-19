@@ -28,7 +28,7 @@ func TestManager_Convert(t *testing.T) {
 			return nil, err
 		}
 		var fn *types.Function
-		if err := m.Convert(types.NewFunction(types.NewFunctionSignature(), prog.Code), &fn); err != nil {
+		if err := m.Convert(types.NewFunctionBuilder(nil).Emit(prog.Code).Build(), &fn); err != nil {
 			return nil, err
 		}
 		return prog, nil

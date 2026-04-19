@@ -32,11 +32,10 @@ func TestOptimizer_Optimize(t *testing.T) {
 			instr.New(instr.CALL),
 		},
 		program.WithConstants(
-			types.NewFunction(
-				types.NewFunctionSignature(
-					types.WithParams(types.TypeI64),
-					types.WithReturns(types.TypeI64),
-				),
+			types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI64},
+				Returns: []types.Type{types.TypeI64},
+			}).Emit(
 				instr.New(instr.LOCAL_GET, 0),
 				instr.New(instr.I32_CONST, 2),
 				instr.New(instr.I32_LT_S),
@@ -55,7 +54,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 				instr.New(instr.RETURN),
 				instr.New(instr.LOCAL_GET, 0),
 				instr.New(instr.RETURN),
-			),
+			).Build(),
 		),
 	)
 	prog, err := o.Optimize(prog)

@@ -7,17 +7,16 @@ import (
 	"github.com/siyul-park/minivm/instr"
 )
 
-type Function struct {
-	Signature *FunctionSignature
-	Params    int
-	Returns   int
-	Locals    int
-	Code      []byte
+type FunctionBuilder struct {
+	typ    *FunctionType
+	locals []Type
+	instrs []instr.Instruction
 }
 
-type FunctionSignature struct {
-	FunctionType
+type Function struct {
+	Typ    *FunctionType
 	Locals []Type
+	Code   []byte
 }
 
 type FunctionType struct {
@@ -28,31 +27,38 @@ type FunctionType struct {
 var _ Value = (*Function)(nil)
 var _ Type = (*FunctionType)(nil)
 
-func WithParams(types ...Type) func(*FunctionSignature) {
-	return func(s *FunctionSignature) {
-		s.Params = append(s.Params, types...)
+func NewFunctionBuilder(typ *FunctionType) *FunctionBuilder {
+	if typ == nil {
+		typ = &FunctionType{}
 	}
+	return &FunctionBuilder{typ: typ}
 }
 
-func WithReturns(types ...Type) func(*FunctionSignature) {
-	return func(s *FunctionSignature) {
-		s.Returns = append(s.Returns, types...)
-	}
+func (b *FunctionBuilder) WithParams(ps ...Type) *FunctionBuilder {
+	b.typ.Params = append(b.typ.Params, ps...)
+	return b
 }
 
-func WithLocals(types ...Type) func(*FunctionSignature) {
-	return func(s *FunctionSignature) {
-		s.Locals = append(s.Locals, types...)
-	}
+func (b *FunctionBuilder) WithReturns(rs ...Type) *FunctionBuilder {
+	b.typ.Returns = append(b.typ.Returns, rs...)
+	return b
 }
 
-func NewFunction(signature *FunctionSignature, instrs ...instr.Instruction) *Function {
+func (b *FunctionBuilder) WithLocals(ls ...Type) *FunctionBuilder {
+	b.locals = append(b.locals, ls...)
+	return b
+}
+
+func (b *FunctionBuilder) Emit(ins ...instr.Instruction) *FunctionBuilder {
+	b.instrs = append(b.instrs, ins...)
+	return b
+}
+
+func (b *FunctionBuilder) Build() *Function {
 	return &Function{
-		Signature: signature,
-		Params:    len(signature.Params),
-		Returns:   len(signature.Returns),
-		Locals:    len(signature.Params) + len(signature.Locals),
-		Code:      instr.Marshal(instrs),
+		Typ:    b.typ,
+		Locals: append([]Type(nil), b.locals...),
+		Code:   instr.Marshal(b.instrs),
 	}
 }
 
@@ -61,35 +67,17 @@ func (f *Function) Kind() Kind {
 }
 
 func (f *Function) Type() Type {
-	return f.Signature.Type()
+	return f.Typ
 }
 
 func (f *Function) String() string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s\n", f.Signature.String()))
-	sb.WriteString(instr.Disassemble(f.Code))
-	return sb.String()
-}
-
-func NewFunctionSignature(opts ...func(*FunctionSignature)) *FunctionSignature {
-	typ := &FunctionSignature{}
-	for _, opt := range opts {
-		opt(typ)
-	}
-	return typ
-}
-
-func (s *FunctionSignature) Type() *FunctionType {
-	return &s.FunctionType
-}
-
-func (s *FunctionSignature) String() string {
-	var sb strings.Builder
-	sb.WriteString(s.FunctionType.String())
-	for _, t := range s.Locals {
+	sb.WriteString(fmt.Sprintf("%s\n", f.Type().String()))
+	for _, t := range f.Locals {
 		sb.WriteString("\n")
 		sb.WriteString(t.String())
 	}
+	sb.WriteString(instr.Disassemble(f.Code))
 	return sb.String()
 }
 

@@ -101,10 +101,9 @@ var tests = []struct {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(
-				types.NewFunction(
-					types.NewFunctionSignature(),
+				types.NewFunctionBuilder(nil).Emit(
 					instr.New(instr.I32_CONST, 1),
-				),
+				).Build(),
 			),
 		),
 		values: []types.Value{types.I32(1)},
@@ -116,10 +115,10 @@ var tests = []struct {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(
-				NewNativeFunction(
-					types.NewFunctionSignature(
-						types.WithReturns(types.TypeI32),
-					),
+				NewHostFunction(
+					&types.FunctionType{
+						Returns: []types.Type{types.TypeI32},
+					},
 					func(i *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
 						return []types.Boxed{types.BoxI32(1)}, nil
 					},
@@ -135,13 +134,12 @@ var tests = []struct {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(
-				types.NewFunction(
-					types.NewFunctionSignature(
-						types.WithReturns(types.TypeI32),
-					),
+				types.NewFunctionBuilder(&types.FunctionType{
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.RETURN),
-				),
+				).Build(),
 			),
 		),
 		values: []types.Value{types.I32(1)},
@@ -181,14 +179,11 @@ var tests = []struct {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(
-				types.NewFunction(
-					types.NewFunctionSignature(
-						types.WithLocals(types.TypeI32),
-					),
+				types.NewFunctionBuilder(nil).WithLocals(types.TypeI32).Emit(
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.LOCAL_SET, 0),
 					instr.New(instr.LOCAL_GET, 0),
-				),
+				).Build(),
 			),
 		),
 		values: []types.Value{types.I32(1)},
@@ -200,13 +195,10 @@ var tests = []struct {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(
-				types.NewFunction(
-					types.NewFunctionSignature(
-						types.WithLocals(types.TypeI32),
-					),
+				types.NewFunctionBuilder(nil).WithLocals(types.TypeI32).Emit(
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.LOCAL_SET, 0),
-				),
+				).Build(),
 			),
 		),
 		values: nil,
@@ -218,13 +210,10 @@ var tests = []struct {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(
-				types.NewFunction(
-					types.NewFunctionSignature(
-						types.WithLocals(types.TypeI32),
-					),
+				types.NewFunctionBuilder(nil).WithLocals(types.TypeI32).Emit(
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.LOCAL_TEE, 0),
-				),
+				).Build(),
 			),
 		),
 		values: []types.Value{types.I32(1)},
@@ -234,9 +223,9 @@ var tests = []struct {
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 			},
-			program.WithConstants(types.NewFunction(types.NewFunctionSignature())),
+			program.WithConstants(types.NewFunctionBuilder(nil).Build()),
 		),
-		values: []types.Value{types.NewFunction(types.NewFunctionSignature())},
+		values: []types.Value{types.NewFunctionBuilder(nil).Build()},
 	},
 	{
 		program: program.New(
@@ -1793,11 +1782,10 @@ var tests = []struct {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(
-				types.NewFunction(
-					types.NewFunctionSignature(
-						types.WithParams(types.TypeI32),
-						types.WithReturns(types.TypeI32),
-					),
+				types.NewFunctionBuilder(&types.FunctionType{
+					Params:  []types.Type{types.TypeI32},
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.I32_CONST, 2),
 					instr.New(instr.I32_LT_S),
@@ -1816,7 +1804,7 @@ var tests = []struct {
 					instr.New(instr.RETURN),
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.RETURN),
-				),
+				).Build(),
 			),
 		),
 		values: []types.Value{types.I32(6765)},
@@ -1829,11 +1817,10 @@ var tests = []struct {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(
-				types.NewFunction(
-					types.NewFunctionSignature(
-						types.WithParams(types.TypeI64),
-						types.WithReturns(types.TypeI64),
-					),
+				types.NewFunctionBuilder(&types.FunctionType{
+					Params:  []types.Type{types.TypeI64},
+					Returns: []types.Type{types.TypeI64},
+				}).Emit(
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.I64_LE_S),
@@ -1848,7 +1835,7 @@ var tests = []struct {
 					instr.New(instr.RETURN),
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.RETURN),
-				),
+				).Build(),
 			),
 		),
 		values: []types.Value{types.I64(3628800)},
