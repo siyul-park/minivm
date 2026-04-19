@@ -84,8 +84,10 @@ func (f *Function) Type() Type {
 func (f *Function) String() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("%s\n", f.Type().String()))
-	for _, t := range f.Locals {
-		sb.WriteString("\n")
+	for i, t := range f.Locals {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
 		sb.WriteString(t.String())
 	}
 	sb.WriteString(instr.Disassemble(f.Code))
