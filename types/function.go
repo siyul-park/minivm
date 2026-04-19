@@ -62,7 +62,7 @@ func (b *FunctionBuilder) Build() *Function {
 	}
 }
 
-func NewFunction(typ *FunctionType, locals []Type, instrs ...instr.Instruction) *Function {
+func NewFunction(typ *FunctionType, locals []Type, instrs []instr.Instruction) *Function {
 	if typ == nil {
 		typ = &FunctionType{}
 	}
