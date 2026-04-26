@@ -5,3 +5,7 @@ type Arch struct {
 	Encoder   Encoder
 	ABI       ABI
 }
+
+func (a *Arch) NewCaller(sig *Signature, chunk *Chunk) (Caller, error) {
+	return a.ABI.NewCaller(sig, chunk)
+}

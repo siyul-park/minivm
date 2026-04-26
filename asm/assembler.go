@@ -74,7 +74,7 @@ func (a *Assembler) Build() (Caller, error) {
 	}
 
 	a.Reset()
-	return a.arch.ABI.NewCaller(sig, chunk)
+	return a.arch.NewCaller(sig, chunk)
 }
 
 func (a *Assembler) Reset() {
