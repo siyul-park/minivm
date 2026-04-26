@@ -44,8 +44,9 @@ func (a *Assembler) Pop(typ RegType) Register {
 	return last
 }
 
-func (a *Assembler) Emit(inst Instruction) {
+func (a *Assembler) Emit(inst Instruction) int {
 	a.insts = append(a.insts, inst)
+	return len(a.insts) - 1
 }
 
 func (a *Assembler) Build() (Caller, error) {
