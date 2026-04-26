@@ -77,7 +77,7 @@ func (m Memory) Writable() error {
 	return nil
 }
 
-func (m Memory) Func() unsafe.Pointer {
+func (m Memory) Ptr() unsafe.Pointer {
 	if len(m) == 0 {
 		return nil
 	}

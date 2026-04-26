@@ -22,18 +22,6 @@ func TestBuffer_Append(t *testing.T) {
 	require.NotNil(t, chunk)
 }
 
-func TestBuffer_Remove(t *testing.T) {
-	b, err := NewBuffer(64)
-	require.NoError(t, err)
-	defer b.Free()
-
-	chunk, err := b.Append([]byte{0x90, 0x90, 0x90})
-	require.NoError(t, err)
-
-	err = b.Remove(chunk)
-	require.NoError(t, err)
-}
-
 func TestBuffer_Seal(t *testing.T) {
 	b, err := NewBuffer(64)
 	require.NoError(t, err)

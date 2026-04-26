@@ -27,8 +27,8 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error)
 
 	var fns []*types.Function
 	fns = append(fns, &types.Function{
-		Signature: types.NewFunctionSignature(),
-		Code:      prog.Code,
+		Typ:  &types.FunctionType{},
+		Code: prog.Code,
 	})
 	for _, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {

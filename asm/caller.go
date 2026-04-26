@@ -5,8 +5,6 @@ import (
 )
 
 type Caller interface {
-	Params() []RegType
-	Returns() []RegType
 	Call(args []uint64) ([]uint64, error)
 }
 
