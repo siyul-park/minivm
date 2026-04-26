@@ -122,14 +122,14 @@ func (a *Assembler) allocRegs() ([]Instruction, error) {
 	for _, vreg := range a.stack {
 		var phys Register
 		if vreg.Type() == RegTypeFloat {
-			if floatReturns >= len(floatRegs) {
-				return nil, fmt.Errorf("asm: too many float returns: %d", len(a.stack))
+			if floatReturns >= a.arch.ABI.MaxReturns() {
+				return nil, ErrTooManyReturns
 			}
 			phys = floatRegs[floatReturns]
 			floatReturns++
 		} else {
-			if intReturns >= len(intRegs) {
-				return nil, fmt.Errorf("asm: too many int returns: %d", len(a.stack))
+			if intReturns >= a.arch.ABI.MaxReturns() {
+				return nil, ErrTooManyReturns
 			}
 			phys = intRegs[intReturns]
 			intReturns++
@@ -143,14 +143,14 @@ func (a *Assembler) allocRegs() ([]Instruction, error) {
 	for _, vreg := range a.params {
 		var phys Register
 		if vreg.Type() == RegTypeFloat {
-			if floatParams >= len(floatRegs) {
-				return nil, fmt.Errorf("asm: too many float params: %d", len(a.params))
+			if floatParams >= a.arch.ABI.MaxParams() {
+				return nil, ErrTooManyParams
 			}
 			phys = floatRegs[floatParams]
 			floatParams++
 		} else {
-			if intParams >= len(intRegs) {
-				return nil, fmt.Errorf("asm: too many int params: %d", len(a.params))
+			if intParams >= a.arch.ABI.MaxParams() {
+				return nil, ErrTooManyParams
 			}
 			phys = intRegs[intParams]
 			intParams++
@@ -254,12 +254,9 @@ func (a *Assembler) allocRegs() ([]Instruction, error) {
 
 func (a *Assembler) allocatable(typ RegType) []Register {
 	mask := a.arch.Registers.Allocatable(typ)
-	regs := make([]Register, 0, 8)
+	regs := make([]Register, 0, mask.Count())
 	for _, id := range mask.List() {
 		regs = append(regs, NewReg(id, typ))
-		if len(regs) == 8 {
-			break
-		}
 	}
 	return regs
 }

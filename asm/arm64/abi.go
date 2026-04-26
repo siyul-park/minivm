@@ -13,3 +13,11 @@ func NewABI() *ABI {
 func (a *ABI) NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
 	return NewCaller(sig, chunk)
 }
+
+func (a *ABI) MaxParams() int {
+	return maxParams
+}
+
+func (a *ABI) MaxReturns() int {
+	return maxReturns
+}

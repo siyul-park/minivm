@@ -1,7 +1,6 @@
 package arm64
 
 import (
-	"errors"
 	"fmt"
 	"unsafe"
 
@@ -17,17 +16,17 @@ type caller struct {
 
 var _ asm.Caller = (*caller)(nil)
 
-var (
-	ErrTooManyParams  = errors.New("arm64: too many params (max 8)")
-	ErrTooManyReturns = errors.New("arm64: too many returns (max 8)")
+const (
+	maxParams  = 8
+	maxReturns = 8
 )
 
 func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
-	if len(sig.Params) > 8 {
-		return nil, fmt.Errorf("%w: %d", ErrTooManyParams, len(sig.Params))
+	if len(sig.Params) > maxParams {
+		return nil, fmt.Errorf("%w: %d", asm.ErrTooManyParams, len(sig.Params))
 	}
-	if len(sig.Returns) > 8 {
-		return nil, fmt.Errorf("%w: %d", ErrTooManyReturns, len(sig.Returns))
+	if len(sig.Returns) > maxReturns {
+		return nil, fmt.Errorf("%w: %d", asm.ErrTooManyReturns, len(sig.Returns))
 	}
 
 	params := append([]asm.RegType(nil), sig.Params...)
