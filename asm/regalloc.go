@@ -1,10 +1,7 @@
 package asm
 
-import "errors"
-
-var (
-	ErrNotVirtual  = errors.New("register is not virtual")
-	ErrNoRegisters = errors.New("no registers available")
+import (
+	"errors"
 )
 
 type RegAlloc struct {
@@ -13,6 +10,11 @@ type RegAlloc struct {
 	intAvail   RegMask
 	floatAvail RegMask
 }
+
+var (
+	ErrRegisterNotVirtual   = errors.New("register is not virtual")
+	ErrNoRegistersAvailable = errors.New("no registers available")
+)
 
 func NewRegAlloc(info *RegInfo) *RegAlloc {
 	ra := &RegAlloc{
@@ -28,7 +30,7 @@ func NewRegAlloc(info *RegInfo) *RegAlloc {
 
 func (ra *RegAlloc) Alloc(vreg Register) (Register, error) {
 	if !vreg.IsVirtual() {
-		return Register{}, ErrNotVirtual
+		return Register{}, ErrRegisterNotVirtual
 	}
 
 	if phys, ok := ra.phys[vreg]; ok {
@@ -42,7 +44,7 @@ func (ra *RegAlloc) Alloc(vreg Register) (Register, error) {
 
 	id := avail.First()
 	if id == InvalidRegID {
-		return Register{}, ErrNoRegisters
+		return Register{}, ErrNoRegistersAvailable
 	}
 
 	avail.Clear(id)
@@ -50,6 +52,28 @@ func (ra *RegAlloc) Alloc(vreg Register) (Register, error) {
 	ra.phys[vreg] = phys
 
 	return phys, nil
+}
+
+func (ra *RegAlloc) Reserve(vreg, phys Register) error {
+	if existing, ok := ra.phys[vreg]; ok {
+		if existing == phys {
+			return nil
+		}
+		return ErrNoRegistersAvailable
+	}
+
+	avail := &ra.intAvail
+	if phys.Type() == RegTypeFloat {
+		avail = &ra.floatAvail
+	}
+
+	if !avail.Contains(phys.ID()) {
+		return ErrNoRegistersAvailable
+	}
+
+	avail.Clear(phys.ID())
+	ra.phys[vreg] = phys
+	return nil
 }
 
 func (ra *RegAlloc) Free(vreg Register) {

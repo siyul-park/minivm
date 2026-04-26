@@ -85,7 +85,3 @@ func (b *Buffer) Sealed() bool {
 func (c *Chunk) Ptr() unsafe.Pointer {
 	return unsafe.Pointer(&c.buf.mem[c.offset])
 }
-
-func (c *Chunk) Memory() Memory {
-	return c.buf.mem[c.offset : c.offset+c.size]
-}

@@ -155,7 +155,7 @@ func (a *Assembler) allocRegs() ([]Instruction, error) {
 			phys = intRegs[intParams]
 			intParams++
 		}
-		if err := a.reserve(vreg, phys); err != nil {
+		if err := a.regAlloc.Reserve(vreg, phys); err != nil {
 			return nil, err
 		}
 		physical[vreg] = phys
@@ -183,12 +183,13 @@ func (a *Assembler) allocRegs() ([]Instruction, error) {
 			if _, ok := physical[dst]; !ok {
 				if desired, ok := returnRegs[dst]; ok {
 					owner, occupied := virtual[desired]
-					if !occupied || owner == dst || (lastUse[owner] == idx && !a.isReturn(owner, returnRegs)) {
+					_, ok := returnRegs[owner]
+					if !occupied || owner == dst || (lastUse[owner] == idx && !ok) {
 						if occupied && owner != dst {
 							a.regAlloc.Free(owner)
 							delete(virtual, desired)
 						}
-						if err := a.reserve(dst, desired); err == nil {
+						if err := a.regAlloc.Reserve(dst, desired); err == nil {
 							physical[dst] = desired
 							virtual[desired] = dst
 						} else {
@@ -223,7 +224,7 @@ func (a *Assembler) allocRegs() ([]Instruction, error) {
 				continue
 			}
 			if lastUse[src] == idx {
-				if !a.isReturn(src, returnRegs) {
+				if _, ok := returnRegs[src]; !ok {
 					if phys, ok := physical[src]; ok {
 						a.regAlloc.Free(src)
 						delete(virtual, phys)
@@ -238,7 +239,7 @@ func (a *Assembler) allocRegs() ([]Instruction, error) {
 		if _, ok := physical[vreg]; ok {
 			continue
 		}
-		if err := a.reserve(vreg, phys); err != nil {
+		if err := a.regAlloc.Reserve(vreg, phys); err != nil {
 			return nil, err
 		}
 		physical[vreg] = phys
@@ -261,33 +262,6 @@ func (a *Assembler) allocatable(typ RegType) []Register {
 		}
 	}
 	return regs
-}
-
-func (a *Assembler) isReturn(reg Register, returns map[Register]Register) bool {
-	_, ok := returns[reg]
-	return ok
-}
-
-func (a *Assembler) reserve(vreg, phys Register) error {
-	if existing, ok := a.regAlloc.phys[vreg]; ok {
-		if existing == phys {
-			return nil
-		}
-		return fmt.Errorf("asm: vreg %v already mapped to %v", vreg, existing)
-	}
-
-	avail := &a.regAlloc.intAvail
-	if phys.Type() == RegTypeFloat {
-		avail = &a.regAlloc.floatAvail
-	}
-
-	if !avail.Contains(phys.ID()) {
-		return fmt.Errorf("asm: physical register %v already reserved", phys)
-	}
-
-	avail.Clear(phys.ID())
-	a.regAlloc.phys[vreg] = phys
-	return nil
 }
 
 func (a *Assembler) srcs(inst Instruction) []Register {
