@@ -1,7 +1,7 @@
 package pass
 
 import (
-	"fmt"
+	"errors"
 	"reflect"
 )
 
@@ -12,8 +12,8 @@ type Manager struct {
 }
 
 var (
-	ErrPassInvalid      = fmt.Errorf("invalid pass type")
-	ErrPassUnregistered = fmt.Errorf("registered pass type")
+	ErrInvalidPassType      = errors.New("invalid pass type")
+	ErrUnregisteredPassType = errors.New("unregistered pass type")
 )
 
 func NewManager() *Manager {
@@ -29,7 +29,7 @@ func (m *Manager) Register(pass any) error {
 	if !ok ||
 		run.Type.NumIn() != 2 || run.Type.In(1) != reflect.TypeOf(m) ||
 		run.Type.NumOut() != 2 || run.Type.Out(1) != reflect.TypeOf((*error)(nil)).Elem() {
-		return ErrPassInvalid
+		return ErrInvalidPassType
 	}
 	m.passes[run.Type.Out(0)] = append(m.passes[run.Type.Out(0)], val)
 	return nil
@@ -50,7 +50,7 @@ func (m *Manager) Convert(src, dst any) error {
 func (m *Manager) Load(val any) error {
 	v := reflect.ValueOf(val)
 	if v.Kind() != reflect.Ptr || v.IsNil() {
-		return ErrPassUnregistered
+		return ErrUnregisteredPassType
 	}
 
 	typ := v.Elem().Type()
@@ -66,7 +66,7 @@ func (m *Manager) Load(val any) error {
 					}
 				}
 			}
-			return ErrPassUnregistered
+			return ErrUnregisteredPassType
 		}
 		for _, p := range passes {
 			run := p.MethodByName("Run")

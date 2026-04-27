@@ -18,8 +18,8 @@ func TestAssembler_Build(t *testing.T) {
 
 	a := asm.NewAssembler(arch, buffer)
 
-	left := a.Pop(asm.RegTypeInt)
-	right := a.Pop(asm.RegTypeInt)
+	left, _ := a.Pop(asm.RegTypeInt)
+	right, _ := a.Pop(asm.RegTypeInt)
 	result := a.Push(asm.RegTypeInt)
 	a.Emit(ADD(result, left, right))
 	a.Emit(RET())

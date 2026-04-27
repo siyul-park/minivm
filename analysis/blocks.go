@@ -45,7 +45,7 @@ func (p *BasicBlocksPass) Run(m *pass.Manager) ([]*BasicBlock, error) {
 		case instr.BR, instr.BR_IF:
 			offset := ip + inst.Width() + int(inst.Operand(0))
 			if offset < 0 || offset >= len(fn.Code) {
-				return nil, fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
+				return nil, invalidJumpError(ip)
 			}
 			offsets = append(offsets, offset)
 			if next < len(fn.Code) {
@@ -57,13 +57,13 @@ func (p *BasicBlocksPass) Run(m *pass.Manager) ([]*BasicBlock, error) {
 			for j := 0; j < count; j++ {
 				offset := ip + inst.Width() + int(operands[j+1])
 				if offset < 0 || offset >= len(fn.Code) {
-					return nil, fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
+					return nil, invalidJumpError(ip)
 				}
 				offsets = append(offsets, offset)
 			}
 			offset := ip + inst.Width() + int(operands[len(operands)-1])
 			if offset < 0 || offset >= len(fn.Code) {
-				return nil, fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
+				return nil, invalidJumpError(ip)
 			}
 			offsets = append(offsets, offset)
 		default:
@@ -105,7 +105,7 @@ func (p *BasicBlocksPass) Run(m *pass.Manager) ([]*BasicBlock, error) {
 		case instr.BR, instr.BR_IF:
 			offset := ip + inst.Width() + int(inst.Operand(0))
 			if !p.link(blocks, j, offset) {
-				return nil, fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
+				return nil, invalidJumpError(ip)
 			}
 			if inst.Opcode() == instr.BR_IF && j+1 < len(blocks) {
 				blk.Succs = append(blk.Succs, j+1)
@@ -118,12 +118,12 @@ func (p *BasicBlocksPass) Run(m *pass.Manager) ([]*BasicBlock, error) {
 			for k := 0; k < count; k++ {
 				offset := ip + int(operands[k+1]) + width
 				if !p.link(blocks, j, offset) {
-					return nil, fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
+					return nil, invalidJumpError(ip)
 				}
 			}
 			offset := ip + int(operands[len(operands)-1]) + width
 			if !p.link(blocks, j, offset) {
-				return nil, fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
+				return nil, invalidJumpError(ip)
 			}
 		default:
 			if j+1 < len(blocks) {
@@ -137,6 +137,10 @@ func (p *BasicBlocksPass) Run(m *pass.Manager) ([]*BasicBlock, error) {
 		slices.Sort(b.Preds)
 	}
 	return blocks, nil
+}
+
+func invalidJumpError(ip int) error {
+	return fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
 }
 
 func (p *BasicBlocksPass) link(blocks []*BasicBlock, src, dst int) bool {

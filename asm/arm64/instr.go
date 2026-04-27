@@ -49,31 +49,31 @@ func newInst(op Op, dst, src1, src2 asm.Operand) asm.Instruction {
 }
 
 func newReg3(op Op, dst, src1, src2 asm.Register) asm.Instruction {
-	return newInst(op, asm.RegOperand{dst}, asm.RegOperand{src1}, asm.RegOperand{src2})
+	return newInst(op, asm.RegOperand{Reg: dst}, asm.RegOperand{Reg: src1}, asm.RegOperand{Reg: src2})
 }
 
 func newReg2(op Op, dst, src asm.Register) asm.Instruction {
-	return newInst(op, asm.RegOperand{dst}, asm.RegOperand{src}, nil)
+	return newInst(op, asm.RegOperand{Reg: dst}, asm.RegOperand{Reg: src}, nil)
 }
 
 func newRegImm(op Op, dst, src asm.Register, imm int64) asm.Instruction {
-	return newInst(op, asm.RegOperand{dst}, asm.RegOperand{src}, asm.ImmOperand{Value: imm})
+	return newInst(op, asm.RegOperand{Reg: dst}, asm.RegOperand{Reg: src}, asm.ImmOperand{Value: imm})
 }
 
 func newRegMem(op Op, dst asm.Register, base asm.Register, offset int64) asm.Instruction {
-	return newInst(op, asm.RegOperand{dst}, asm.MemOperand{Base: base, Offset: offset}, nil)
+	return newInst(op, asm.RegOperand{Reg: dst}, asm.MemOperand{Base: base, Offset: offset}, nil)
 }
 
 func newMemReg(op Op, src asm.Register, base asm.Register, offset int64) asm.Instruction {
-	return newInst(op, asm.MemOperand{Base: base, Offset: offset}, asm.RegOperand{src}, nil)
+	return newInst(op, asm.MemOperand{Base: base, Offset: offset}, asm.RegOperand{Reg: src}, nil)
 }
 
 func newCmp(op Op, src1, src2 asm.Register) asm.Instruction {
-	return newInst(op, nil, asm.RegOperand{src1}, asm.RegOperand{src2})
+	return newInst(op, nil, asm.RegOperand{Reg: src1}, asm.RegOperand{Reg: src2})
 }
 
 func newCmpImm(op Op, src asm.Register, imm int64) asm.Instruction {
-	return newInst(op, nil, asm.RegOperand{src}, asm.ImmOperand{Value: imm})
+	return newInst(op, nil, asm.RegOperand{Reg: src}, asm.ImmOperand{Value: imm})
 }
 
 func newBranch(op Op, offset int64) asm.Instruction {
@@ -81,7 +81,7 @@ func newBranch(op Op, offset int64) asm.Instruction {
 }
 
 func newRegOnly(op Op, reg asm.Register) asm.Instruction {
-	return newInst(op, nil, asm.RegOperand{reg}, nil)
+	return newInst(op, nil, asm.RegOperand{Reg: reg}, nil)
 }
 
 func ADD(dst, src1, src2 asm.Register) asm.Instruction {
@@ -157,11 +157,11 @@ func MOV(dst, src asm.Register) asm.Instruction {
 }
 
 func MOVZ(dst asm.Register, imm uint16, shift uint8) asm.Instruction {
-	return newInst(OpMOVZ, asm.RegOperand{dst}, asm.ImmOperand{Value: int64(imm)}, asm.ImmOperand{Value: int64(shift)})
+	return newInst(OpMOVZ, asm.RegOperand{Reg: dst}, asm.ImmOperand{Value: int64(imm)}, asm.ImmOperand{Value: int64(shift)})
 }
 
 func MOVK(dst asm.Register, imm uint16, shift uint8) asm.Instruction {
-	return newInst(OpMOVK, asm.RegOperand{dst}, asm.ImmOperand{Value: int64(imm)}, asm.ImmOperand{Value: int64(shift)})
+	return newInst(OpMOVK, asm.RegOperand{Reg: dst}, asm.ImmOperand{Value: int64(imm)}, asm.ImmOperand{Value: int64(shift)})
 }
 
 func LDR(dst, base asm.Register, offset int16) asm.Instruction {
@@ -201,11 +201,11 @@ func BLR(reg asm.Register) asm.Instruction {
 }
 
 func CBZ(reg asm.Register, offset int32) asm.Instruction {
-	return newInst(OpCBZ, nil, asm.RegOperand{reg}, asm.ImmOperand{Value: int64(offset)})
+	return newInst(OpCBZ, nil, asm.RegOperand{Reg: reg}, asm.ImmOperand{Value: int64(offset)})
 }
 
 func CBNZ(reg asm.Register, offset int32) asm.Instruction {
-	return newInst(OpCBNZ, nil, asm.RegOperand{reg}, asm.ImmOperand{Value: int64(offset)})
+	return newInst(OpCBNZ, nil, asm.RegOperand{Reg: reg}, asm.ImmOperand{Value: int64(offset)})
 }
 
 func BEQ(offset int32) asm.Instruction { return newBranch(OpBEQ, int64(offset)) }

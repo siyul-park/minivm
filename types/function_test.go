@@ -18,5 +18,5 @@ func TestFunction_Type(t *testing.T) {
 
 func TestFunction_String(t *testing.T) {
 	fn := NewFunction(nil, nil, nil)
-	require.Equal(t, "func() ()\n", fn.String())
+	require.Equal(t, "func()\n", fn.String())
 }

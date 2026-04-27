@@ -54,6 +54,14 @@ func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
 	}, nil
 }
 
+func (c *caller) Params() []asm.RegType {
+	return c.params
+}
+
+func (c *caller) Returns() []asm.RegType {
+	return c.returns
+}
+
 func (c *caller) Call(args []uint64) ([]uint64, error) {
 	if len(args) != len(c.params) {
 		return nil, fmt.Errorf("%w: expected %d, got %d", asm.ErrInvalidArgs, len(c.params), len(args))

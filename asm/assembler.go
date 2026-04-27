@@ -1,9 +1,5 @@
 package asm
 
-import (
-	"fmt"
-)
-
 type Assembler struct {
 	arch      *Arch
 	vregAlloc *VRegAlloc
@@ -29,19 +25,19 @@ func (a *Assembler) Push(typ RegType) Register {
 	return reg
 }
 
-func (a *Assembler) Pop(typ RegType) Register {
+func (a *Assembler) Pop(typ RegType) (Register, bool) {
 	if len(a.stack) == 0 {
 		reg := a.vregAlloc.Alloc(typ)
 		a.params = append(a.params, reg)
-		return reg
+		return reg, true
 	}
 
 	last := a.stack[len(a.stack)-1]
-	a.stack = a.stack[:len(a.stack)-1]
 	if last.Type() != typ {
-		panic(fmt.Sprintf("asm: stack type mismatch: expected %v, got %v", typ, last.Type()))
+		return Register{}, false
 	}
-	return last
+	a.stack = a.stack[:len(a.stack)-1]
+	return last, true
 }
 
 func (a *Assembler) Emit(inst Instruction) int {
@@ -263,23 +259,23 @@ func (a *Assembler) allocatable(typ RegType) []Register {
 
 func (a *Assembler) srcs(inst Instruction) []Register {
 	var regs []Register
-	if r, ok := a.operands(inst.Src1); ok {
+	if r, ok := a.reg(inst.Src1); ok {
 		regs = append(regs, r)
 	}
-	if r, ok := a.operands(inst.Src2); ok {
+	if r, ok := a.reg(inst.Src2); ok {
 		regs = append(regs, r)
 	}
 	return regs
 }
 
 func (a *Assembler) dst(inst Instruction) Register {
-	if r, ok := a.operands(inst.Dst); ok {
+	if r, ok := a.reg(inst.Dst); ok {
 		return r
 	}
 	return Register{}
 }
 
-func (a *Assembler) operands(op Operand) (Register, bool) {
+func (a *Assembler) reg(op Operand) (Register, bool) {
 	switch value := op.(type) {
 	case RegOperand:
 		return value.Reg, true

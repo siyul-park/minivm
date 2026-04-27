@@ -135,7 +135,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		i.constants[j] = val
 	}
 
-	c := &threadedCodeCompiler{
+	c := &threadedCompiler{
 		types:     i.types,
 		constants: i.constants,
 		heap:      i.heap,
@@ -166,15 +166,11 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 	defer func() {
 		i.ctx = nil
 		if r := recover(); r != nil {
-			if e, ok := r.(error); ok {
-				err = fmt.Errorf("%w: at=%d", e, i.frames[i.fp-1].ip)
-			} else {
-				err = fmt.Errorf("%v: at=%d", r, i.frames[i.fp-1].ip)
-			}
+			err = i.error(r)
 		}
 	}()
 
-	f := &i.frames[i.fp-1]
+	f := i.frame()
 	code := f.code
 	tick := i.tick
 
@@ -232,7 +228,8 @@ func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
 }
 
 func (i *Interpreter) Local(idx int) (types.Boxed, error) {
-	addr := i.frames[i.fp-1].bp + idx
+	f := i.frame()
+	addr := f.bp + idx
 	if addr < 0 || addr >= i.sp {
 		return 0, ErrSegmentationFault
 	}
@@ -240,7 +237,8 @@ func (i *Interpreter) Local(idx int) (types.Boxed, error) {
 }
 
 func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
-	addr := i.frames[i.fp-1].bp + idx
+	f := i.frame()
+	addr := f.bp + idx
 	if addr < 0 || addr >= i.sp {
 		return ErrSegmentationFault
 	}
@@ -379,6 +377,20 @@ func (i *Interpreter) Reset() {
 		i.rc[j] = 1
 	}
 	i.free = i.free[:0]
+}
+
+func (i *Interpreter) frame() *frame {
+	return &i.frames[i.fp-1]
+}
+
+func (i *Interpreter) error(r any) error {
+	ip := i.frame().ip
+	switch e := r.(type) {
+	case error:
+		return fmt.Errorf("%w: at=%d", e, ip)
+	default:
+		return fmt.Errorf("%v: at=%d", r, ip)
+	}
 }
 
 func (i *Interpreter) unbox64(val types.Boxed) uint64 {

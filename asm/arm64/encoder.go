@@ -1,12 +1,25 @@
 package arm64
 
 import (
-	"fmt"
+	"errors"
 
 	"github.com/siyul-park/minivm/asm"
 )
 
 type Encoder struct{}
+
+var (
+	ErrUnsupportedOpcode         = errors.New("unsupported opcode")
+	ErrMissingDestinationReg     = errors.New("missing destination register")
+	ErrMissingSourceReg          = errors.New("missing source register")
+	ErrMissingSourceRegs         = errors.New("missing source registers")
+	ErrMissingImmediate          = errors.New("missing immediate")
+	ErrMissingShiftImmediate     = errors.New("missing shift immediate")
+	ErrMissingMemoryOperand      = errors.New("missing memory operand")
+	ErrMissingRegisterOperand    = errors.New("missing register operand")
+	ErrMissingBranchOffset       = errors.New("missing branch offset")
+	ErrUnexpectedRegisterOperand = errors.New("unexpected register operand")
+)
 
 var _ asm.Encoder = (*Encoder)(nil)
 
@@ -205,19 +218,19 @@ func (*Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return encode(0x54000000 | uint32(offset/4)&0x7FFFF<<5 | uint32(cond)), nil
 	default:
-		return nil, fmt.Errorf("arm64: unsupported opcode %d", inst.Op)
+		return nil, ErrUnsupportedOpcode
 	}
 }
 
 func decodeReg3(inst asm.Instruction) (dst, src1, src2 asm.Register, err error) {
 	dstOp, ok := inst.Dst.(asm.RegOperand)
 	if !ok {
-		return asm.Register{}, asm.Register{}, asm.Register{}, fmt.Errorf("arm64: missing dst reg")
+		return asm.Register{}, asm.Register{}, asm.Register{}, ErrMissingDestinationReg
 	}
 	src1Op, ok1 := inst.Src1.(asm.RegOperand)
 	src2Op, ok2 := inst.Src2.(asm.RegOperand)
 	if !ok1 || !ok2 {
-		return asm.Register{}, asm.Register{}, asm.Register{}, fmt.Errorf("arm64: missing source regs")
+		return asm.Register{}, asm.Register{}, asm.Register{}, ErrMissingSourceRegs
 	}
 	return dstOp.Reg, src1Op.Reg, src2Op.Reg, nil
 }
@@ -225,11 +238,11 @@ func decodeReg3(inst asm.Instruction) (dst, src1, src2 asm.Register, err error) 
 func decodeReg2(inst asm.Instruction) (dst, src asm.Register, err error) {
 	dstOp, ok := inst.Dst.(asm.RegOperand)
 	if !ok {
-		return asm.Register{}, asm.Register{}, fmt.Errorf("arm64: missing dst reg")
+		return asm.Register{}, asm.Register{}, ErrMissingDestinationReg
 	}
 	srcOp, ok := inst.Src1.(asm.RegOperand)
 	if !ok {
-		return asm.Register{}, asm.Register{}, fmt.Errorf("arm64: missing src reg")
+		return asm.Register{}, asm.Register{}, ErrMissingSourceReg
 	}
 	return dstOp.Reg, srcOp.Reg, nil
 }
@@ -237,15 +250,15 @@ func decodeReg2(inst asm.Instruction) (dst, src asm.Register, err error) {
 func decodeRegImm(inst asm.Instruction) (dst, src asm.Register, imm int64, err error) {
 	dstOp, ok := inst.Dst.(asm.RegOperand)
 	if !ok {
-		return asm.Register{}, asm.Register{}, 0, fmt.Errorf("arm64: missing dst reg")
+		return asm.Register{}, asm.Register{}, 0, ErrMissingDestinationReg
 	}
 	srcOp, ok := inst.Src1.(asm.RegOperand)
 	if !ok {
-		return asm.Register{}, asm.Register{}, 0, fmt.Errorf("arm64: missing src reg")
+		return asm.Register{}, asm.Register{}, 0, ErrMissingSourceReg
 	}
 	immOp, ok := inst.Src2.(asm.ImmOperand)
 	if !ok {
-		return asm.Register{}, asm.Register{}, 0, fmt.Errorf("arm64: missing immediate")
+		return asm.Register{}, asm.Register{}, 0, ErrMissingImmediate
 	}
 	return dstOp.Reg, srcOp.Reg, immOp.Value, nil
 }
@@ -253,11 +266,11 @@ func decodeRegImm(inst asm.Instruction) (dst, src asm.Register, imm int64, err e
 func decodeCmp(inst asm.Instruction) (src1, src2 asm.Register, err error) {
 	src1Op, ok := inst.Src1.(asm.RegOperand)
 	if !ok {
-		return asm.Register{}, asm.Register{}, fmt.Errorf("arm64: missing src1 reg")
+		return asm.Register{}, asm.Register{}, ErrMissingSourceReg
 	}
 	src2Op, ok := inst.Src2.(asm.RegOperand)
 	if !ok {
-		return asm.Register{}, asm.Register{}, fmt.Errorf("arm64: missing src2 reg")
+		return asm.Register{}, asm.Register{}, ErrMissingSourceReg
 	}
 	return src1Op.Reg, src2Op.Reg, nil
 }
@@ -265,11 +278,11 @@ func decodeCmp(inst asm.Instruction) (src1, src2 asm.Register, err error) {
 func decodeCmpImm(inst asm.Instruction) (src asm.Register, imm int64, err error) {
 	srcOp, ok := inst.Src1.(asm.RegOperand)
 	if !ok {
-		return asm.Register{}, 0, fmt.Errorf("arm64: missing src reg")
+		return asm.Register{}, 0, ErrMissingSourceReg
 	}
 	immOp, ok := inst.Src2.(asm.ImmOperand)
 	if !ok {
-		return asm.Register{}, 0, fmt.Errorf("arm64: missing immediate")
+		return asm.Register{}, 0, ErrMissingImmediate
 	}
 	return srcOp.Reg, immOp.Value, nil
 }
@@ -277,15 +290,15 @@ func decodeCmpImm(inst asm.Instruction) (src asm.Register, imm int64, err error)
 func decodeMovImm(inst asm.Instruction) (dst asm.Register, imm int64, shift int64, err error) {
 	dstOp, ok := inst.Dst.(asm.RegOperand)
 	if !ok {
-		return asm.Register{}, 0, 0, fmt.Errorf("arm64: missing dst reg")
+		return asm.Register{}, 0, 0, ErrMissingDestinationReg
 	}
 	immOp, ok := inst.Src1.(asm.ImmOperand)
 	if !ok {
-		return asm.Register{}, 0, 0, fmt.Errorf("arm64: missing immediate")
+		return asm.Register{}, 0, 0, ErrMissingImmediate
 	}
 	shiftOp, ok := inst.Src2.(asm.ImmOperand)
 	if !ok {
-		return asm.Register{}, 0, 0, fmt.Errorf("arm64: missing shift immediate")
+		return asm.Register{}, 0, 0, ErrMissingShiftImmediate
 	}
 	return dstOp.Reg, immOp.Value, shiftOp.Value, nil
 }
@@ -293,11 +306,11 @@ func decodeMovImm(inst asm.Instruction) (dst asm.Register, imm int64, shift int6
 func decodeMemOp(inst asm.Instruction) (dst, base asm.Register, offset int64, err error) {
 	dstOp, ok := inst.Dst.(asm.RegOperand)
 	if !ok {
-		return asm.Register{}, asm.Register{}, 0, fmt.Errorf("arm64: missing dst reg")
+		return asm.Register{}, asm.Register{}, 0, ErrMissingDestinationReg
 	}
 	baseOp, ok := inst.Src1.(asm.MemOperand)
 	if !ok {
-		return asm.Register{}, asm.Register{}, 0, fmt.Errorf("arm64: missing memory operand")
+		return asm.Register{}, asm.Register{}, 0, ErrMissingMemoryOperand
 	}
 	return dstOp.Reg, baseOp.Base, baseOp.Offset, nil
 }
@@ -305,11 +318,11 @@ func decodeMemOp(inst asm.Instruction) (dst, base asm.Register, offset int64, er
 func decodeStrOp(inst asm.Instruction) (src, base asm.Register, offset int64, err error) {
 	srcOp, ok := inst.Src1.(asm.RegOperand)
 	if !ok {
-		return asm.Register{}, asm.Register{}, 0, fmt.Errorf("arm64: missing src reg")
+		return asm.Register{}, asm.Register{}, 0, ErrMissingSourceReg
 	}
 	baseOp, ok := inst.Dst.(asm.MemOperand)
 	if !ok {
-		return asm.Register{}, asm.Register{}, 0, fmt.Errorf("arm64: missing memory operand")
+		return asm.Register{}, asm.Register{}, 0, ErrMissingMemoryOperand
 	}
 	return srcOp.Reg, baseOp.Base, baseOp.Offset, nil
 }
@@ -317,7 +330,7 @@ func decodeStrOp(inst asm.Instruction) (src, base asm.Register, offset int64, er
 func decodeRegOnly(inst asm.Instruction) (reg asm.Register, err error) {
 	reOp, ok := inst.Src1.(asm.RegOperand)
 	if !ok {
-		return asm.Register{}, fmt.Errorf("arm64: missing reg operand")
+		return asm.Register{}, ErrMissingRegisterOperand
 	}
 	return reOp.Reg, nil
 }
@@ -325,7 +338,7 @@ func decodeRegOnly(inst asm.Instruction) (reg asm.Register, err error) {
 func decodeBranch(inst asm.Instruction) (int64, error) {
 	immOp, ok := inst.Src2.(asm.ImmOperand)
 	if !ok {
-		return 0, fmt.Errorf("arm64: missing branch offset")
+		return 0, ErrMissingBranchOffset
 	}
 	return immOp.Value, nil
 }
@@ -333,11 +346,11 @@ func decodeBranch(inst asm.Instruction) (int64, error) {
 func decodeRegBranch(inst asm.Instruction) (reg asm.Register, offset int64, err error) {
 	reOp, ok := inst.Src1.(asm.RegOperand)
 	if !ok {
-		return asm.Register{}, 0, fmt.Errorf("arm64: missing reg operand")
+		return asm.Register{}, 0, ErrMissingRegisterOperand
 	}
 	immOp, ok := inst.Src2.(asm.ImmOperand)
 	if !ok {
-		return asm.Register{}, 0, fmt.Errorf("arm64: missing branch offset")
+		return asm.Register{}, 0, ErrMissingBranchOffset
 	}
 	return reOp.Reg, immOp.Value, nil
 }
@@ -345,11 +358,11 @@ func decodeRegBranch(inst asm.Instruction) (reg asm.Register, offset int64, err 
 func decodeCondBranch(inst asm.Instruction) (cond int64, offset int64, err error) {
 	immOp, ok := inst.Src2.(asm.ImmOperand)
 	if !ok {
-		return 0, 0, fmt.Errorf("arm64: missing branch offset")
+		return 0, 0, ErrMissingBranchOffset
 	}
 	_, ok = inst.Src1.(asm.RegOperand)
 	if ok {
-		return 0, 0, fmt.Errorf("arm64: unexpected reg operand")
+		return 0, 0, ErrUnexpectedRegisterOperand
 	}
 	return 0, immOp.Value, nil
 }

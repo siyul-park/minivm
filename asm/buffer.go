@@ -19,7 +19,7 @@ type Chunk struct {
 }
 
 var (
-	ErrBufferSealed = errors.New("asm: buffer is sealed")
+	ErrBufferSealed = errors.New("buffer is sealed")
 )
 
 func NewBuffer(size int) (*Buffer, error) {
@@ -37,7 +37,7 @@ func (b *Buffer) Append(code []byte) (*Chunk, error) {
 
 	end := b.offset + len(code)
 	if end > len(b.mem) {
-		return nil, fmt.Errorf("%w: need %d, have %d", ErrCodeTooLarge, end, len(b.mem))
+		return nil, fmt.Errorf("%w: code size %d exceeds memory size %d", ErrCodeTooLarge, end, len(b.mem))
 	}
 
 	copy(b.mem[b.offset:end], code)

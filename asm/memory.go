@@ -9,11 +9,11 @@ import (
 )
 
 var (
-	ErrInvalidSize    = errors.New("asm: invalid size")
-	ErrCodeTooLarge   = errors.New("asm: code too large for memory")
-	ErrMmapFailed     = errors.New("asm: mmap failed")
-	ErrMprotectFailed = errors.New("asm: mprotect failed")
-	ErrMunmapFailed   = errors.New("asm: munmap failed")
+	ErrInvalidSize    = errors.New("invalid size")
+	ErrCodeTooLarge   = errors.New("code too large for memory")
+	ErrMmapFailed     = errors.New("mmap failed")
+	ErrMprotectFailed = errors.New("mprotect failed")
+	ErrMunmapFailed   = errors.New("munmap failed")
 )
 
 type Memory []byte
