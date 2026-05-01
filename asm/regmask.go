@@ -1,59 +1,81 @@
 package asm
 
+import "math/bits"
+
 type RegMask uint64
 
 func NewRegMask(ids []uint8) RegMask {
 	var m RegMask
 	for _, id := range ids {
-		m.Set(id)
+		m |= 1 << id
 	}
 	return m
 }
 
-func (m *RegMask) Set(id uint8) {
+func (m RegMask) Set(id uint8) RegMask {
 	if id < 64 {
-		*m |= 1 << id
+		m |= 1 << id
 	}
+	return m
 }
 
-func (m *RegMask) Clear(id uint8) {
+func (m RegMask) Clear(id uint8) RegMask {
 	if id < 64 {
-		*m &^= 1 << id
+		m &^= 1 << id
 	}
+	return m
 }
 
-func (m *RegMask) Contains(id uint8) bool {
-	return id < 64 && (*m&(1<<id)) != 0
+func (m RegMask) Contains(id uint8) bool {
+	return id < 64 && (m&(1<<id)) != 0
 }
 
-func (m *RegMask) First() uint8 {
-	if *m == 0 {
-		return InvalidRegID
-	}
-	for i := uint8(0); i < 64; i++ {
-		if (*m & (1 << i)) != 0 {
-			return i
-		}
-	}
-	return InvalidRegID
+func (m RegMask) Empty() bool {
+	return m == 0
 }
 
-func (m *RegMask) Count() int {
-	count := 0
-	mask := uint64(*m)
-	for mask != 0 {
-		count++
-		mask &= mask - 1
+func (m RegMask) First() uint8 {
+	if m == 0 {
+		return 0xFF
 	}
-	return count
+	return uint8(bits.TrailingZeros64(uint64(m)))
 }
 
-func (m *RegMask) List() []uint8 {
-	var ids []uint8
-	for i := uint8(0); i < 64; i++ {
-		if m.Contains(i) {
-			ids = append(ids, i)
-		}
+func (m RegMask) PopFirst() (uint8, RegMask) {
+	if m == 0 {
+		return 0xFF, m
 	}
-	return ids
+	i := uint8(bits.TrailingZeros64(uint64(m)))
+	m &^= 1 << i
+	return i, m
+}
+
+func (m RegMask) Count() int {
+	return bits.OnesCount64(uint64(m))
+}
+
+func (m RegMask) List() []uint8 {
+	out := make([]uint8, 0, m.Count())
+	for m != 0 {
+		i := uint8(bits.TrailingZeros64(uint64(m)))
+		out = append(out, i)
+		m &^= 1 << i
+	}
+	return out
+}
+
+func (m RegMask) And(o RegMask) RegMask {
+	return m & o
+}
+
+func (m RegMask) Or(o RegMask) RegMask {
+	return m | o
+}
+
+func (m RegMask) Not() RegMask {
+	return ^m
+}
+
+func (m RegMask) Sub(o RegMask) RegMask {
+	return m &^ o
 }

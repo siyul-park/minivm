@@ -10,17 +10,16 @@ import (
 )
 
 func TestAssembler_Build(t *testing.T) {
-	arch := NewArch()
-
 	buffer, err := asm.NewBuffer(256)
 	require.NoError(t, err)
 	defer buffer.Free()
 
-	a := asm.NewAssembler(arch, buffer)
+	a := asm.NewAssembler(Arch, buffer)
 
-	left, _ := a.Pop(asm.RegTypeInt)
-	right, _ := a.Pop(asm.RegTypeInt)
-	result := a.Push(asm.RegTypeInt)
+	left, _ := a.Take(asm.RegTypeInt)
+	right, _ := a.Take(asm.RegTypeInt)
+	result := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Push(result)
 	a.Emit(ADD(result, left, right))
 	a.Emit(RET())
 

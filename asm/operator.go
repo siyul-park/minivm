@@ -4,16 +4,35 @@ import "fmt"
 
 type Operand interface {
 	operand()
+	String() string
 }
 
-type RegOperand struct {
-	Reg Register
+type VRegOperand struct {
+	Reg VReg
 }
 
-func (RegOperand) operand() {}
+func (VRegOperand) operand() {}
 
-func (o RegOperand) String() string {
+func (o VRegOperand) String() string {
 	return o.Reg.String()
+}
+
+type PRegOperand struct {
+	Reg PReg
+}
+
+func (PRegOperand) operand() {}
+
+func (o PRegOperand) String() string {
+	return o.Reg.String()
+}
+
+func V(r VReg) VRegOperand {
+	return VRegOperand{Reg: r}
+}
+
+func P(r PReg) PRegOperand {
+	return PRegOperand{Reg: r}
 }
 
 type ImmOperand struct {
@@ -22,16 +41,24 @@ type ImmOperand struct {
 
 func (ImmOperand) operand() {}
 
+func Imm(v int64) ImmOperand {
+	return ImmOperand{Value: v}
+}
+
 func (o ImmOperand) String() string {
 	return fmt.Sprintf("#%d", o.Value)
 }
 
 type MemOperand struct {
-	Base   Register
+	Base   Operand
 	Offset int64
 }
 
 func (MemOperand) operand() {}
+
+func Mem(base Operand, offset int64) MemOperand {
+	return MemOperand{Base: base, Offset: offset}
+}
 
 func (o MemOperand) String() string {
 	if o.Offset != 0 {

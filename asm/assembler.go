@@ -5,8 +5,8 @@ type Assembler struct {
 	vregAlloc *VRegAlloc
 	regAlloc  *RegAlloc
 	buffer    *Buffer
-	stack     []Register
-	params    []Register
+	stack     []VReg
+	params    []VReg
 	insts     []Instruction
 }
 
@@ -19,23 +19,48 @@ func NewAssembler(arch *Arch, buffer *Buffer) *Assembler {
 	}
 }
 
-func (a *Assembler) Push(typ RegType) Register {
-	reg := a.vregAlloc.Alloc(typ)
-	a.stack = append(a.stack, reg)
-	return reg
+func (a *Assembler) Params() []VReg {
+	return append([]VReg(nil), a.params...)
 }
 
-func (a *Assembler) Pop(typ RegType) (Register, bool) {
+func (a *Assembler) Returns() []VReg {
+	return append([]VReg(nil), a.stack...)
+}
+
+func (a *Assembler) NewVReg(typ RegType, w RegWidth) VReg {
+	return a.vregAlloc.Alloc(typ, w)
+}
+
+func (a *Assembler) Take(typ RegType) (VReg, bool) {
 	if len(a.stack) == 0 {
-		reg := a.vregAlloc.Alloc(typ)
+		reg := a.vregAlloc.Alloc(typ, Width64)
 		a.params = append(a.params, reg)
 		return reg, true
 	}
-
 	last := a.stack[len(a.stack)-1]
 	if last.Type() != typ {
-		return Register{}, false
+		return VReg{}, false
 	}
+	a.stack = a.stack[:len(a.stack)-1]
+	return last, true
+}
+
+func (a *Assembler) Top(i int) (VReg, bool) {
+	if len(a.stack) <= i {
+		return VReg{}, false
+	}
+	return a.stack[len(a.stack)-1-i], true
+}
+
+func (a *Assembler) Push(reg VReg) {
+	a.stack = append(a.stack, reg)
+}
+
+func (a *Assembler) Pop() (VReg, bool) {
+	if len(a.stack) == 0 {
+		return VReg{}, false
+	}
+	last := a.stack[len(a.stack)-1]
 	a.stack = a.stack[:len(a.stack)-1]
 	return last, true
 }
@@ -46,8 +71,11 @@ func (a *Assembler) Emit(inst Instruction) int {
 }
 
 func (a *Assembler) Build() (Caller, error) {
-	sig := a.signature()
-	instrs, err := a.allocRegs()
+	sig, err := a.signature()
+	if err != nil {
+		return nil, err
+	}
+	instrs, err := a.assign()
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +115,13 @@ func (a *Assembler) Reset() {
 	}
 }
 
-func (a *Assembler) signature() *Signature {
+func (a *Assembler) signature() (*Signature, error) {
+	if len(a.stack) > a.arch.ABI.MaxReturns() {
+		return nil, ErrTooManyReturns
+	}
+	if len(a.params) > a.arch.ABI.MaxParams() {
+		return nil, ErrTooManyParams
+	}
 	params := make([]RegType, len(a.params))
 	for i, reg := range a.params {
 		params[i] = reg.Type()
@@ -96,197 +130,184 @@ func (a *Assembler) signature() *Signature {
 	for i, reg := range a.stack {
 		returns[i] = reg.Type()
 	}
-	return &Signature{Params: params, Returns: returns}
+	return &Signature{Params: params, Returns: returns}, nil
 }
 
-func (a *Assembler) allocRegs() ([]Instruction, error) {
-	lastUse := make(map[Register]int)
-	for idx, inst := range a.insts {
-		for _, reg := range a.srcs(inst) {
-			if !reg.IsVirtual() {
-				continue
-			}
-			lastUse[reg] = idx
+func (a *Assembler) assign() ([]Instruction, error) {
+	last := make(map[int32]int)
+	for i, inst := range a.insts {
+		for _, v := range a.srcs(inst) {
+			last[v.ID()] = i
 		}
 	}
 
-	intRegs := a.allocatable(RegTypeInt)
-	floatRegs := a.allocatable(RegTypeFloat)
+	intRegs := a.allocatable(RegTypeInt, Width64)
+	floatRegs := a.allocatable(RegTypeFloat, Width64)
 
-	returnRegs := make(map[Register]Register)
-	intReturns, floatReturns := 0, 0
-	for _, vreg := range a.stack {
-		var phys Register
-		if vreg.Type() == RegTypeFloat {
-			if floatReturns >= a.arch.ABI.MaxReturns() {
-				return nil, ErrTooManyReturns
-			}
-			phys = floatRegs[floatReturns]
-			floatReturns++
+	physical := make(map[int32]PReg)
+	virtual := make(map[uint8]VReg)
+	fixed := make(map[int32]PReg)
+
+	intR, floatR := 0, 0
+	for _, v := range a.stack {
+		var p PReg
+		if v.Type() == RegTypeFloat {
+			p = floatRegs[floatR]
+			floatR++
 		} else {
-			if intReturns >= a.arch.ABI.MaxReturns() {
-				return nil, ErrTooManyReturns
-			}
-			phys = intRegs[intReturns]
-			intReturns++
+			p = intRegs[intR]
+			intR++
 		}
-		returnRegs[vreg] = phys
+		fixed[v.ID()] = p
 	}
 
-	physical := make(map[Register]Register)
-	virtual := make(map[Register]Register)
-	intParams, floatParams := 0, 0
-	for _, vreg := range a.params {
-		var phys Register
-		if vreg.Type() == RegTypeFloat {
-			if floatParams >= a.arch.ABI.MaxParams() {
+	intP, floatP := 0, 0
+	for _, v := range a.params {
+		var p PReg
+
+		if v.Type() == RegTypeFloat {
+			if floatP >= a.arch.ABI.MaxParams() {
 				return nil, ErrTooManyParams
 			}
-			phys = floatRegs[floatParams]
-			floatParams++
+			p = floatRegs[floatP]
+			floatP++
 		} else {
-			if intParams >= a.arch.ABI.MaxParams() {
+			if intP >= a.arch.ABI.MaxParams() {
 				return nil, ErrTooManyParams
 			}
-			phys = intRegs[intParams]
-			intParams++
+			p = intRegs[intP]
+			intP++
 		}
-		if err := a.regAlloc.Reserve(vreg, phys); err != nil {
+
+		if err := a.regAlloc.Reserve(v, p); err != nil {
 			return nil, err
 		}
-		physical[vreg] = phys
-		virtual[phys] = vreg
+
+		physical[v.ID()] = p
+		virtual[p.ID()] = v
 	}
 
-	for idx, inst := range a.insts {
-		for _, src := range a.srcs(inst) {
-			if !src.IsVirtual() {
+	for i, inst := range a.insts {
+		for _, v := range a.srcs(inst) {
+			if _, ok := physical[v.ID()]; ok {
 				continue
 			}
-			if _, ok := physical[src]; ok {
-				continue
-			}
-			phys, err := a.regAlloc.Alloc(src)
+
+			p, err := a.regAlloc.Alloc(v)
 			if err != nil {
 				return nil, err
 			}
-			physical[src] = phys
-			virtual[phys] = src
+
+			physical[v.ID()] = p
+			virtual[p.ID()] = v
 		}
 
-		dst := a.dst(inst)
-		if dst.IsVirtual() {
-			if _, ok := physical[dst]; !ok {
-				if desired, ok := returnRegs[dst]; ok {
-					owner, occupied := virtual[desired]
-					_, ok := returnRegs[owner]
-					if !occupied || owner == dst || (lastUse[owner] == idx && !ok) {
-						if occupied && owner != dst {
+		if dst, ok := a.dst(inst); ok {
+			if _, exists := physical[dst.ID()]; !exists {
+				if want, ok := fixed[dst.ID()]; ok {
+					owner, occupied := virtual[want.ID()]
+					fix := false
+					if owner.ID() != 0 {
+						if _, ok := fixed[owner.ID()]; ok {
+							fix = true
+						}
+					}
+					if !occupied || owner.ID() == dst.ID() || (last[owner.ID()] == i && !fix) {
+						if occupied && owner.ID() != dst.ID() {
 							a.regAlloc.Free(owner)
-							delete(virtual, desired)
+							delete(virtual, want.ID())
 						}
-						if err := a.regAlloc.Reserve(dst, desired); err == nil {
-							physical[dst] = desired
-							virtual[desired] = dst
-						} else {
-							phys, err := a.regAlloc.Alloc(dst)
-							if err != nil {
-								return nil, err
-							}
-							physical[dst] = phys
-							virtual[phys] = dst
+
+						if err := a.regAlloc.Reserve(dst, want); err == nil {
+							physical[dst.ID()] = want
+							virtual[want.ID()] = dst
+							continue
 						}
-					} else {
-						phys, err := a.regAlloc.Alloc(dst)
-						if err != nil {
-							return nil, err
-						}
-						physical[dst] = phys
-						virtual[phys] = dst
 					}
-				} else {
-					phys, err := a.regAlloc.Alloc(dst)
-					if err != nil {
-						return nil, err
-					}
-					physical[dst] = phys
-					virtual[phys] = dst
 				}
+
+				p, err := a.regAlloc.Alloc(dst)
+				if err != nil {
+					return nil, err
+				}
+
+				physical[dst.ID()] = p
+				virtual[p.ID()] = dst
 			}
 		}
 
-		for _, src := range a.srcs(inst) {
-			if !src.IsVirtual() {
+		for _, v := range a.srcs(inst) {
+			if last[v.ID()] != i {
 				continue
 			}
-			if lastUse[src] == idx {
-				if _, ok := returnRegs[src]; !ok {
-					if phys, ok := physical[src]; ok {
-						a.regAlloc.Free(src)
-						delete(virtual, phys)
-						delete(physical, src)
-					}
-				}
+			if _, ok := fixed[v.ID()]; ok {
+				continue
+			}
+			if p, ok := physical[v.ID()]; ok {
+				a.regAlloc.Free(v)
+				delete(physical, v.ID())
+				delete(virtual, p.ID())
 			}
 		}
 	}
 
-	for vreg, phys := range returnRegs {
-		if _, ok := physical[vreg]; ok {
+	for vid, p := range fixed {
+		if _, ok := physical[vid]; ok {
 			continue
 		}
-		if err := a.regAlloc.Reserve(vreg, phys); err != nil {
+		if err := a.regAlloc.Reserve(NewVReg(vid, p.Type(), p.Width()), p); err != nil {
 			return nil, err
 		}
-		physical[vreg] = phys
+		physical[vid] = p
 	}
 
-	rewrite := make([]Instruction, 0, len(a.insts))
+	out := make([]Instruction, 0, len(a.insts))
 	for _, inst := range a.insts {
-		rewrite = append(rewrite, a.rewrite(inst, physical))
+		out = append(out, a.rewrite(inst, physical))
 	}
-	return rewrite, nil
+
+	return out, nil
 }
 
-func (a *Assembler) allocatable(typ RegType) []Register {
+func (a *Assembler) allocatable(typ RegType, w RegWidth) []PReg {
 	mask := a.arch.Registers.Allocatable(typ)
-	regs := make([]Register, 0, mask.Count())
-	for _, id := range mask.List() {
-		regs = append(regs, NewReg(id, typ))
+	regs := make([]PReg, 0, mask.Count())
+	for !mask.Empty() {
+		var id uint8
+		id, mask = mask.PopFirst()
+		regs = append(regs, NewPReg(id, typ, w))
 	}
 	return regs
 }
 
-func (a *Assembler) srcs(inst Instruction) []Register {
-	var regs []Register
-	if r, ok := a.reg(inst.Src1); ok {
+func (a *Assembler) srcs(inst Instruction) []VReg {
+	var regs []VReg
+	if r, ok := a.vreg(inst.Src1); ok {
 		regs = append(regs, r)
 	}
-	if r, ok := a.reg(inst.Src2); ok {
+	if r, ok := a.vreg(inst.Src2); ok {
 		regs = append(regs, r)
 	}
 	return regs
 }
 
-func (a *Assembler) dst(inst Instruction) Register {
-	if r, ok := a.reg(inst.Dst); ok {
-		return r
-	}
-	return Register{}
+func (a *Assembler) dst(inst Instruction) (VReg, bool) {
+	return a.vreg(inst.Dst)
 }
 
-func (a *Assembler) reg(op Operand) (Register, bool) {
-	switch value := op.(type) {
-	case RegOperand:
-		return value.Reg, true
+func (a *Assembler) vreg(op Operand) (VReg, bool) {
+	switch v := op.(type) {
+	case VRegOperand:
+		return v.Reg, true
 	case MemOperand:
-		return value.Base, true
-	default:
-		return Register{}, false
+		if b, ok := v.Base.(VRegOperand); ok {
+			return b.Reg, true
+		}
 	}
+	return VReg{}, false
 }
 
-func (a *Assembler) rewrite(inst Instruction, mapping map[Register]Register) Instruction {
+func (a *Assembler) rewrite(inst Instruction, mapping map[int32]PReg) Instruction {
 	return Instruction{
 		Op:   inst.Op,
 		Dst:  a.rewriteOP(inst.Dst, mapping),
@@ -295,19 +316,22 @@ func (a *Assembler) rewrite(inst Instruction, mapping map[Register]Register) Ins
 	}
 }
 
-func (a *Assembler) rewriteOP(op Operand, mapping map[Register]Register) Operand {
-	switch value := op.(type) {
-	case RegOperand:
-		if phys, ok := mapping[value.Reg]; ok {
-			return RegOperand{phys}
+func (a *Assembler) rewriteOP(op Operand, mapping map[int32]PReg) Operand {
+	switch v := op.(type) {
+	case VRegOperand:
+		if p, ok := mapping[v.Reg.ID()]; ok {
+			return P(p)
 		}
-		return value
+		return v
 	case MemOperand:
-		base := value.Base
-		if phys, ok := mapping[base]; ok {
-			base = phys
+		base := v.Base
+		if vr, ok := base.(VRegOperand); ok {
+			if p, ok := mapping[vr.Reg.ID()]; ok {
+				base = P(p)
+			}
 		}
-		return MemOperand{Base: base, Offset: value.Offset}
+		return Mem(base, v.Offset)
+
 	default:
 		return op
 	}

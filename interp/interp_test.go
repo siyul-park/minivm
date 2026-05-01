@@ -1849,6 +1849,7 @@ func TestInterpreter_Run(t *testing.T) {
 			defer cancel()
 
 			i := New(tt.program)
+			defer i.Close()
 
 			err := i.Run(ctx)
 			require.NoError(t, err)
@@ -1868,6 +1869,8 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			defer cancel()
 
 			i := New(tt.program)
+			defer i.Close()
+
 			b.ResetTimer()
 
 			for n := 0; n < b.N; n++ {

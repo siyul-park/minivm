@@ -5,13 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 
+	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
 
 type Interpreter struct {
 	ctx       context.Context
+	patch     chan patch
+	buffer    *asm.Buffer
+	instrs    [][]byte
 	code      [][]func(*Interpreter)
 	hits      [][]uint64
 	frames    []frame
@@ -33,6 +38,11 @@ type frame struct {
 	addr int
 	ip   int
 	bp   int
+}
+
+type patch struct {
+	code []func(*Interpreter)
+	addr int
 }
 
 type option struct {
@@ -87,8 +97,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		globals:   128,
 		stack:     1024,
 		heap:      128,
-		tick:      1,
-		threshold: 1,
+		tick:      128,
+		threshold: 1024,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -98,6 +108,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	}
 
 	i := &Interpreter{
+		patch:     make(chan patch),
+		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
 		hits:      make([][]uint64, len(prog.Constants)+1),
 		frames:    make([]frame, opt.frame),
@@ -141,9 +153,11 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		heap:      i.heap,
 	}
 
+	i.instrs[0] = prog.Code
 	i.code[0] = c.Compile(prog.Code)
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
+			i.instrs[j+1] = fn.Code
 			i.code[j+1] = c.Compile(fn.Code)
 		}
 	}
@@ -181,11 +195,43 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
+			case p := <-i.patch:
+				for j, fn := range p.code {
+					if fn != nil {
+						i.code[p.addr][j] = fn
+					}
+				}
 			default:
 			}
 
 			i.hits[f.addr][0]++
 			i.hits[f.addr][f.ip+1]++
+
+			if i.hits[f.addr][0] == i.threshold {
+				if arch != nil {
+					if i.buffer == nil {
+						i.buffer, err = asm.NewBuffer(256)
+						if err != nil {
+							return err
+						}
+					}
+					c := &jitCompiler{
+						assembler: asm.NewAssembler(arch, i.buffer),
+						types:     i.types,
+						constants: i.constants,
+						heap:      i.heap,
+					}
+
+					addr := f.addr
+					go func() {
+						code := c.Compile(i.instrs[addr])
+						i.patch <- patch{
+							code: code,
+							addr: addr,
+						}
+					}()
+				}
+			}
 		}
 
 		code[f.ip](i)
@@ -319,34 +365,15 @@ func (i *Interpreter) Len() int {
 	return i.sp - 1
 }
 
-func (i *Interpreter) Clone() *Interpreter {
-	c := &Interpreter{
-		ctx:       i.ctx,
-		code:      i.code,
-		hits:      i.hits,
-		types:     i.types,
-		constants: i.constants,
-
-		frames:  make([]frame, len(i.frames)),
-		globals: make([]types.Boxed, len(i.globals), cap(i.globals)),
-		stack:   make([]types.Boxed, len(i.stack), cap(i.stack)),
-		heap:    make([]types.Value, len(i.heap), cap(i.heap)),
-		rc:      make([]int, len(i.rc), cap(i.rc)),
-		free:    make([]int, len(i.free), cap(i.free)),
-
-		fp:   i.fp,
-		sp:   i.sp,
-		tick: i.tick,
+func (i *Interpreter) Close() error {
+	i.Reset()
+	if i.buffer != nil {
+		if err := i.buffer.Free(); err != nil {
+			return err
+		}
+		i.buffer = nil
 	}
-
-	copy(c.frames, i.frames)
-	copy(c.globals, i.globals)
-	copy(c.stack, i.stack)
-	copy(c.heap, i.heap)
-	copy(c.rc, i.rc)
-	copy(c.free, i.free)
-
-	return c
+	return nil
 }
 
 func (i *Interpreter) Reset() {
@@ -395,8 +422,14 @@ func (i *Interpreter) error(r any) error {
 
 func (i *Interpreter) unbox64(val types.Boxed) uint64 {
 	switch val.Kind() {
+	case types.KindI32:
+		return uint64(val.I32())
 	case types.KindI64:
 		return uint64(val.I64())
+	case types.KindF32:
+		return math.Float64bits(float64(val.F32()))
+	case types.KindF64:
+		return math.Float64bits(val.F64())
 	case types.KindRef:
 		addr := val.Ref()
 		v, _ := i.heap[addr].(types.I64)
@@ -409,8 +442,16 @@ func (i *Interpreter) unbox64(val types.Boxed) uint64 {
 
 func (i *Interpreter) box64(val uint64, kind types.Kind) types.Boxed {
 	switch kind {
+	case types.KindI32:
+		return types.BoxI32(int32(val))
 	case types.KindI64:
 		return i.boxI64(int64(val))
+	case types.KindF32:
+		return types.BoxF32(float32(math.Float64frombits(val)))
+	case types.KindF64:
+		return types.BoxF64(math.Float64frombits(val))
+	case types.KindRef:
+		return types.BoxRef(int(val))
 	default:
 		return types.Box(val, kind)
 	}

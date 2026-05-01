@@ -9,7 +9,7 @@ import (
 
 type caller struct {
 	header  uint64
-	ptr     unsafe.Pointer
+	chunk   *asm.Chunk
 	params  []asm.RegType
 	returns []asm.RegType
 }
@@ -48,7 +48,7 @@ func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
 
 	return &caller{
 		header:  header,
-		ptr:     chunk.Ptr(),
+		chunk:   chunk,
 		params:  params,
 		returns: returns,
 	}, nil
@@ -63,17 +63,11 @@ func (c *caller) Returns() []asm.RegType {
 }
 
 func (c *caller) Call(args []uint64) ([]uint64, error) {
-	if len(args) != len(c.params) {
-		return nil, fmt.Errorf("%w: expected %d, got %d", asm.ErrInvalidArgs, len(c.params), len(args))
-	}
-
 	var stack [1 + 8]uint64
 	needed := 1 + max(len(c.params), len(c.returns))
 	argv := stack[:needed]
 	argv[0] = c.header
-	copy(argv[1:], args)
-
-	invoke(uintptr(c.ptr), uintptr(unsafe.Pointer(&argv[0])))
-
+	copy(argv[1:], args[:min(len(args), len(c.params))])
+	invoke(uintptr(c.chunk.Ptr()), uintptr(unsafe.Pointer(&argv[0])))
 	return argv[1 : 1+len(c.returns)], nil
 }

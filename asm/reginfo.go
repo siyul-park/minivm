@@ -1,14 +1,14 @@
 package asm
 
 type RegInfo struct {
-	NumInt      int
-	NumFloat    int
+	NumInt      uint8
+	NumFloat    uint8
 	IntReserved RegMask
 	FltReserved RegMask
 }
 
-func NewRegInfo(numInt, numFloat int, intRes, fltRes []uint8) *RegInfo {
-	return &RegInfo{
+func NewRegInfo(numInt, numFloat uint8, intRes, fltRes []uint8) RegInfo {
+	return RegInfo{
 		NumInt:      numInt,
 		NumFloat:    numFloat,
 		IntReserved: NewRegMask(intRes),
@@ -16,16 +16,15 @@ func NewRegInfo(numInt, numFloat int, intRes, fltRes []uint8) *RegInfo {
 	}
 }
 
-func (ri *RegInfo) IsReserved(reg Register) bool {
+func (ri RegInfo) IsReserved(reg PReg) bool {
 	if reg.Type() == RegTypeInt {
 		return ri.IntReserved.Contains(reg.ID())
 	}
 	return ri.FltReserved.Contains(reg.ID())
 }
 
-func (ri *RegInfo) Allocatable(typ RegType) RegMask {
-	var mask RegMask
-	var count int
+func (ri RegInfo) Allocatable(typ RegType) RegMask {
+	var count uint8
 	var reserved RegMask
 
 	if typ == RegTypeInt {
@@ -36,10 +35,8 @@ func (ri *RegInfo) Allocatable(typ RegType) RegMask {
 		reserved = ri.FltReserved
 	}
 
-	for i := uint8(0); i < uint8(count); i++ {
-		if !reserved.Contains(i) {
-			mask.Set(i)
-		}
-	}
+	mask := RegMask((1 << count) - 1)
+	mask &^= reserved
+
 	return mask
 }

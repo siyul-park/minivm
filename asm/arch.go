@@ -1,7 +1,7 @@
 package asm
 
 type Arch struct {
-	Registers *RegInfo
+	Registers RegInfo
 	Encoder   Encoder
 	ABI       ABI
 }

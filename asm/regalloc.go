@@ -1,99 +1,105 @@
 package asm
 
-import (
-	"errors"
-)
+import "errors"
 
 type RegAlloc struct {
-	info       *RegInfo
-	phys       map[Register]Register
+	info       RegInfo
+	phys       map[int32]PReg
 	intAvail   RegMask
 	floatAvail RegMask
 }
 
-var (
-	ErrRegisterNotVirtual   = errors.New("register is not virtual")
-	ErrNoRegistersAvailable = errors.New("no registers available")
-)
+var ErrNoRegistersAvailable = errors.New("no registers available")
 
-func NewRegAlloc(info *RegInfo) *RegAlloc {
-	ra := &RegAlloc{
-		info: info,
-		phys: make(map[Register]Register),
+func NewRegAlloc(info RegInfo) *RegAlloc {
+	return &RegAlloc{
+		info:       info,
+		phys:       make(map[int32]PReg),
+		intAvail:   info.Allocatable(RegTypeInt),
+		floatAvail: info.Allocatable(RegTypeFloat),
 	}
-
-	ra.intAvail = info.Allocatable(RegTypeInt)
-	ra.floatAvail = info.Allocatable(RegTypeFloat)
-
-	return ra
 }
 
-func (ra *RegAlloc) Alloc(vreg Register) (Register, error) {
-	if !vreg.IsVirtual() {
-		return Register{}, ErrRegisterNotVirtual
-	}
-
-	if phys, ok := ra.phys[vreg]; ok {
+func (ra *RegAlloc) Alloc(vreg VReg) (PReg, error) {
+	if phys, ok := ra.phys[vreg.ID()]; ok {
 		return phys, nil
 	}
 
-	avail := &ra.intAvail
+	var mask RegMask
 	if vreg.Type() == RegTypeFloat {
-		avail = &ra.floatAvail
+		mask = ra.floatAvail
+	} else {
+		mask = ra.intAvail
 	}
 
-	id := avail.First()
-	if id == InvalidRegID {
-		return Register{}, ErrNoRegistersAvailable
+	id := mask.First()
+	if id == 0xFF {
+		return PReg{}, ErrNoRegistersAvailable
 	}
 
-	avail.Clear(id)
-	phys := NewReg(id, vreg.Type())
-	ra.phys[vreg] = phys
+	_, mask = mask.PopFirst()
 
-	return phys, nil
+	if vreg.Type() == RegTypeFloat {
+		ra.floatAvail = mask
+	} else {
+		ra.intAvail = mask
+	}
+
+	p := NewPReg(id, vreg.Type(), vreg.Width())
+	ra.phys[vreg.ID()] = p
+
+	return p, nil
 }
 
-func (ra *RegAlloc) Reserve(vreg, phys Register) error {
-	if existing, ok := ra.phys[vreg]; ok {
-		if existing == phys {
+func (ra *RegAlloc) Reserve(vreg VReg, preg PReg) error {
+	if existing, ok := ra.phys[vreg.ID()]; ok {
+		if existing == preg {
 			return nil
 		}
 		return ErrNoRegistersAvailable
 	}
 
-	avail := &ra.intAvail
-	if phys.Type() == RegTypeFloat {
-		avail = &ra.floatAvail
+	var mask RegMask
+	if preg.Type() == RegTypeFloat {
+		mask = ra.floatAvail
+	} else {
+		mask = ra.intAvail
 	}
 
-	if !avail.Contains(phys.ID()) {
+	if !mask.Contains(preg.ID()) {
 		return ErrNoRegistersAvailable
 	}
 
-	avail.Clear(phys.ID())
-	ra.phys[vreg] = phys
+	mask = mask.Clear(preg.ID())
+
+	if preg.Type() == RegTypeFloat {
+		ra.floatAvail = mask
+	} else {
+		ra.intAvail = mask
+	}
+
+	ra.phys[vreg.ID()] = preg
 	return nil
 }
 
-func (ra *RegAlloc) Free(vreg Register) {
-	phys, ok := ra.phys[vreg]
+func (ra *RegAlloc) Free(vreg VReg) {
+	preg, ok := ra.phys[vreg.ID()]
 	if !ok {
 		return
 	}
 
-	delete(ra.phys, vreg)
+	delete(ra.phys, vreg.ID())
 
-	if phys.Type() == RegTypeInt {
-		ra.intAvail.Set(phys.ID())
+	if preg.Type() == RegTypeFloat {
+		ra.floatAvail = ra.floatAvail.Set(preg.ID())
 	} else {
-		ra.floatAvail.Set(phys.ID())
+		ra.intAvail = ra.intAvail.Set(preg.ID())
 	}
 }
 
-func (ra *RegAlloc) Get(vreg Register) (Register, bool) {
-	phys, ok := ra.phys[vreg]
-	return phys, ok
+func (ra *RegAlloc) Get(vreg VReg) (PReg, bool) {
+	p, ok := ra.phys[vreg.ID()]
+	return p, ok
 }
 
 func (ra *RegAlloc) Reset() {
