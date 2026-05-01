@@ -14,7 +14,6 @@ import (
 
 type Interpreter struct {
 	ctx       context.Context
-	patch     chan patch
 	buffer    *asm.Buffer
 	instrs    [][]byte
 	code      [][]func(*Interpreter)
@@ -38,11 +37,6 @@ type frame struct {
 	addr int
 	ip   int
 	bp   int
-}
-
-type patch struct {
-	code []func(*Interpreter)
-	addr int
 }
 
 type option struct {
@@ -108,7 +102,6 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	}
 
 	i := &Interpreter{
-		patch:     make(chan patch),
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
 		hits:      make([][]uint64, len(prog.Constants)+1),
@@ -195,12 +188,6 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case p := <-i.patch:
-				for j, fn := range p.code {
-					if fn != nil {
-						i.code[p.addr][j] = fn
-					}
-				}
 			default:
 			}
 
@@ -221,15 +208,11 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 						constants: i.constants,
 						heap:      i.heap,
 					}
-
-					addr := f.addr
-					go func() {
-						code := c.Compile(i.instrs[addr])
-						i.patch <- patch{
-							code: code,
-							addr: addr,
+					for j, fn := range c.Compile(i.instrs[f.addr]) {
+						if fn != nil {
+							i.code[f.addr][j] = fn
 						}
-					}()
+					}
 				}
 			}
 		}
