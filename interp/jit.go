@@ -3,6 +3,7 @@ package interp
 import (
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/types"
 )
@@ -28,7 +29,8 @@ func init() {
 	for i, fn := range jit {
 		if fn == nil {
 			jit[i] = func(c *jitCompiler) bool {
-				c.ip++
+				inst := instr.Instruction(c.code[c.ip:])
+				c.ip += inst.Width()
 				return false
 			}
 		}

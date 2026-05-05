@@ -2441,7 +2441,8 @@ func init() {
 	for i, fn := range threaded {
 		if fn == nil {
 			threaded[i] = func(c *threadedCompiler) func(*Interpreter) {
-				c.ip++
+				inst := instr.Instruction(c.code[c.ip:])
+				c.ip += inst.Width()
 				return unknown
 			}
 		}

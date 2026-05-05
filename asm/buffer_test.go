@@ -1,8 +1,9 @@
 package asm
 
 import (
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewCodeBuffer(t *testing.T) {
