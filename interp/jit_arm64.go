@@ -539,7 +539,7 @@ func init() {
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
 		c.assembler.Push(r1)
-		c.assembler.Emit(arm64.MOV(r1, r0))
+		c.assembler.Emit(arm64.UXTW(r1, r0))
 		return true
 	}
 
@@ -962,7 +962,7 @@ func init() {
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
 		c.assembler.Push(r1)
-		c.assembler.Emit(arm64.MOV(r1, r0))
+		c.assembler.Emit(arm64.UXTW(r1, r0))
 		return true
 	}
 

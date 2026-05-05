@@ -474,8 +474,14 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-
 		return enc(0xD3400000 | 0<<16 | 15<<10 | reg(n)<<5 | reg(d)), nil
+
+	case OpUXTW:
+		d, n, err := decodeReg2(inst)
+		if err != nil {
+			return nil, err
+		}
+		return enc(0xD3400000 | 0<<16 | 31<<10 | reg(n)<<5 | reg(d)), nil
 
 	// -----------------------------------------------------------------------
 	// TST

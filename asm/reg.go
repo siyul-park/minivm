@@ -32,8 +32,9 @@ const (
 type RegWidth uint8
 
 const (
-	Width32 RegWidth = 32
-	Width64 RegWidth = 64
+	WidthUndefined RegWidth = 0
+	Width32        RegWidth = 32
+	Width64        RegWidth = 64
 )
 
 func NewPReg(id uint8, typ RegType, w RegWidth) PReg {

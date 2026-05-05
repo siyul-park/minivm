@@ -63,6 +63,7 @@ const (
 	OpSXTW
 	OpUXTB
 	OpUXTH
+	OpUXTW
 
 	// Move
 	OpMOV
@@ -362,6 +363,7 @@ func SXTH(dst, src asm.Reg) asm.Instruction { return newReg2(OpSXTH, dst, src) }
 func SXTW(dst, src asm.Reg) asm.Instruction { return newReg2(OpSXTW, dst, src) }
 func UXTB(dst, src asm.Reg) asm.Instruction { return newReg2(OpUXTB, dst, src) }
 func UXTH(dst, src asm.Reg) asm.Instruction { return newReg2(OpUXTH, dst, src) }
+func UXTW(dst, src asm.Reg) asm.Instruction { return newReg2(OpUXTW, dst, src) }
 
 // ---------------------------------------------------------------------------
 // Move

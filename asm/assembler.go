@@ -38,7 +38,7 @@ func (a *Assembler) Take(typ RegType, w RegWidth) (VReg, bool) {
 		return reg, true
 	}
 	last := a.stack[len(a.stack)-1]
-	if last.Type() != typ {
+	if last.Type() != typ || last.Width() != w {
 		return VReg{}, false
 	}
 	a.stack = a.stack[:len(a.stack)-1]
@@ -141,9 +141,10 @@ func (a *Assembler) assign() ([]Instruction, error) {
 		}
 	}
 
-	intRegs := a.allocatable(RegTypeInt, Width64)
-	floatRegs := a.allocatable(RegTypeFloat, Width64)
+	intRegs := a.allocatable(RegTypeInt)
+	floatRegs := a.allocatable(RegTypeFloat)
 
+	// physical maps VReg.ID → PReg (WidthUndefined; Width is taken from VReg at rewrite time)
 	physical := make(map[int32]PReg)
 	virtual := make(map[uint8]VReg)
 	fixed := make(map[int32]PReg)
@@ -164,7 +165,6 @@ func (a *Assembler) assign() ([]Instruction, error) {
 	intP, floatP := 0, 0
 	for _, v := range a.params {
 		var p PReg
-
 		if v.Type() == RegTypeFloat {
 			if floatP >= a.arch.ABI.MaxParams() {
 				return nil, ErrTooManyParams
@@ -261,21 +261,41 @@ func (a *Assembler) assign() ([]Instruction, error) {
 		physical[vid] = p
 	}
 
+	widths := make(map[int32]RegWidth, len(physical))
+	for _, v := range a.params {
+		widths[v.ID()] = v.Width()
+	}
+	for _, v := range a.stack {
+		widths[v.ID()] = v.Width()
+	}
+	for _, inst := range a.insts {
+		for _, v := range a.srcs(inst) {
+			if _, ok := widths[v.ID()]; !ok {
+				widths[v.ID()] = v.Width()
+			}
+		}
+		if dst, ok := a.dst(inst); ok {
+			if _, ok := widths[dst.ID()]; !ok {
+				widths[dst.ID()] = dst.Width()
+			}
+		}
+	}
+
 	out := make([]Instruction, 0, len(a.insts))
 	for _, inst := range a.insts {
-		out = append(out, a.rewrite(inst, physical))
+		out = append(out, a.rewrite(inst, physical, widths))
 	}
 
 	return out, nil
 }
 
-func (a *Assembler) allocatable(typ RegType, w RegWidth) []PReg {
+func (a *Assembler) allocatable(typ RegType) []PReg {
 	mask := a.arch.Registers.Allocatable(typ)
 	regs := make([]PReg, 0, mask.Count())
 	for !mask.Empty() {
 		var id uint8
 		id, mask = mask.PopFirst()
-		regs = append(regs, NewPReg(id, typ, w))
+		regs = append(regs, NewPReg(id, typ, WidthUndefined))
 	}
 	return regs
 }
@@ -307,31 +327,43 @@ func (a *Assembler) vreg(op Operand) (VReg, bool) {
 	return VReg{}, false
 }
 
-func (a *Assembler) rewrite(inst Instruction, mapping map[int32]PReg) Instruction {
+func (a *Assembler) rewrite(inst Instruction, mapping map[int32]PReg, widths map[int32]RegWidth) Instruction {
 	return Instruction{
 		Op:   inst.Op,
-		Dst:  a.rewriteOP(inst.Dst, mapping),
-		Src1: a.rewriteOP(inst.Src1, mapping),
-		Src2: a.rewriteOP(inst.Src2, mapping),
+		Dst:  a.rewriteOP(inst.Dst, mapping, widths),
+		Src1: a.rewriteOP(inst.Src1, mapping, widths),
+		Src2: a.rewriteOP(inst.Src2, mapping, widths),
 	}
 }
 
-func (a *Assembler) rewriteOP(op Operand, mapping map[int32]PReg) Operand {
+// rewriteOP replaces a VRegOperand with the allocated PReg, preserving the
+func (a *Assembler) rewriteOP(op Operand, mapping map[int32]PReg, widths map[int32]RegWidth) Operand {
 	switch v := op.(type) {
 	case VRegOperand:
 		if p, ok := mapping[v.Reg.ID()]; ok {
-			return P(p)
+			w := v.Reg.Width()
+			if w == WidthUndefined {
+				if ww, ok := widths[v.Reg.ID()]; ok {
+					w = ww
+				}
+			}
+			return P(NewPReg(p.ID(), p.Type(), w))
 		}
 		return v
 	case MemOperand:
 		base := v.Base
 		if vr, ok := base.(VRegOperand); ok {
 			if p, ok := mapping[vr.Reg.ID()]; ok {
-				base = P(p)
+				w := vr.Reg.Width()
+				if w == WidthUndefined {
+					if ww, ok := widths[vr.Reg.ID()]; ok {
+						w = ww
+					}
+				}
+				base = P(NewPReg(p.ID(), p.Type(), w))
 			}
 		}
 		return Mem(base, v.Offset)
-
 	default:
 		return op
 	}
