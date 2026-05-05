@@ -92,7 +92,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		stack:     1024,
 		heap:      128,
 		tick:      128,
-		threshold: 1024,
+		threshold: 4096,
 	}
 	for _, o := range opts {
 		o(&opt)

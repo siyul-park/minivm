@@ -57,6 +57,13 @@ const (
 	OpREV16
 	OpREV32
 
+	// Sign/Zero extend
+	OpSXTB
+	OpSXTH
+	OpSXTW
+	OpUXTB
+	OpUXTH
+
 	// Move
 	OpMOV
 	OpMOVI
@@ -350,6 +357,12 @@ func REV(dst, src asm.Reg) asm.Instruction   { return newReg2(OpREV, dst, src) }
 func REV16(dst, src asm.Reg) asm.Instruction { return newReg2(OpREV16, dst, src) }
 func REV32(dst, src asm.Reg) asm.Instruction { return newReg2(OpREV32, dst, src) }
 
+func SXTB(dst, src asm.Reg) asm.Instruction { return newReg2(OpSXTB, dst, src) }
+func SXTH(dst, src asm.Reg) asm.Instruction { return newReg2(OpSXTH, dst, src) }
+func SXTW(dst, src asm.Reg) asm.Instruction { return newReg2(OpSXTW, dst, src) }
+func UXTB(dst, src asm.Reg) asm.Instruction { return newReg2(OpUXTB, dst, src) }
+func UXTH(dst, src asm.Reg) asm.Instruction { return newReg2(OpUXTH, dst, src) }
+
 // ---------------------------------------------------------------------------
 // Move
 // ---------------------------------------------------------------------------
@@ -624,7 +637,24 @@ func MSR(sysreg uint16, src asm.Reg) asm.Instruction {
 	return newInst(OpMSR, imm(int64(sysreg)), regOperand(src), nil)
 }
 
-// Memory barriers
 func ISB() asm.Instruction { return newInst(OpISB, nil, nil, nil) }
 func DSB() asm.Instruction { return newInst(OpDSB, nil, nil, nil) }
 func DMB() asm.Instruction { return newInst(OpDMB, nil, nil, nil) }
+
+const (
+	CondEQ uint8 = 0x0
+	CondNE uint8 = 0x1
+	CondCS uint8 = 0x2
+	CondCC uint8 = 0x3
+	CondMI uint8 = 0x4
+	CondPL uint8 = 0x5
+	CondVS uint8 = 0x6
+	CondVC uint8 = 0x7
+	CondHI uint8 = 0x8
+	CondLS uint8 = 0x9
+	CondGE uint8 = 0xA
+	CondLT uint8 = 0xB
+	CondGT uint8 = 0xC
+	CondLE uint8 = 0xD
+	CondAL uint8 = 0xE
+)

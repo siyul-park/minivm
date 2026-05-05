@@ -31,9 +31,9 @@ func (a *Assembler) NewVReg(typ RegType, w RegWidth) VReg {
 	return a.vregAlloc.Alloc(typ, w)
 }
 
-func (a *Assembler) Take(typ RegType) (VReg, bool) {
+func (a *Assembler) Take(typ RegType, w RegWidth) (VReg, bool) {
 	if len(a.stack) == 0 {
-		reg := a.vregAlloc.Alloc(typ, Width64)
+		reg := a.vregAlloc.Alloc(typ, w)
 		a.params = append(a.params, reg)
 		return reg, true
 	}

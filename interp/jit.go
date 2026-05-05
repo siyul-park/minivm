@@ -77,7 +77,7 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 			}
 
 			if c.ip == b.End-1 || !ok {
-				if count > 4 && entryIP != -1 {
+				if count > 8 && entryIP != -1 {
 					nParams := len(c.assembler.Params())
 					nRets := len(c.assembler.Returns())
 

@@ -437,6 +437,46 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return enc(0xDAC00800 | reg(n)<<5 | reg(d)), nil
 
+	case OpSXTB:
+		d, n, err := decodeReg2(inst)
+		if err != nil {
+			return nil, err
+		}
+
+		return enc(0x93400000 | 0<<16 | 7<<10 | reg(n)<<5 | reg(d)), nil
+
+	case OpSXTH:
+		d, n, err := decodeReg2(inst)
+		if err != nil {
+			return nil, err
+		}
+
+		return enc(0x93400000 | 0<<16 | 15<<10 | reg(n)<<5 | reg(d)), nil
+
+	case OpSXTW:
+		d, n, err := decodeReg2(inst)
+		if err != nil {
+			return nil, err
+		}
+
+		return enc(0x93400000 | 0<<16 | 31<<10 | reg(n)<<5 | reg(d)), nil
+
+	case OpUXTB:
+		d, n, err := decodeReg2(inst)
+		if err != nil {
+			return nil, err
+		}
+
+		return enc(0xD3400000 | 0<<16 | 7<<10 | reg(n)<<5 | reg(d)), nil
+
+	case OpUXTH:
+		d, n, err := decodeReg2(inst)
+		if err != nil {
+			return nil, err
+		}
+
+		return enc(0xD3400000 | 0<<16 | 15<<10 | reg(n)<<5 | reg(d)), nil
+
 	// -----------------------------------------------------------------------
 	// TST
 	// -----------------------------------------------------------------------
