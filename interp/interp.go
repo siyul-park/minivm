@@ -406,11 +406,11 @@ func (i *Interpreter) error(r any) error {
 func (i *Interpreter) unbox64(val types.Boxed) uint64 {
 	switch val.Kind() {
 	case types.KindI32:
-		return uint64(val.I32())
+		return uint64(uint32(val.I32()))
 	case types.KindI64:
 		return uint64(val.I64())
 	case types.KindF32:
-		return math.Float64bits(float64(val.F32()))
+		return uint64(math.Float32bits(val.F32()))
 	case types.KindF64:
 		return math.Float64bits(val.F64())
 	case types.KindRef:
@@ -430,7 +430,7 @@ func (i *Interpreter) box64(val uint64, kind types.Kind) types.Boxed {
 	case types.KindI64:
 		return i.boxI64(int64(val))
 	case types.KindF32:
-		return types.BoxF32(float32(math.Float64frombits(val)))
+		return types.BoxF32(math.Float32frombits(uint32(val)))
 	case types.KindF64:
 		return types.BoxF64(math.Float64frombits(val))
 	case types.KindRef:
