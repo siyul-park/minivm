@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go test *)",
+      "Bash(go build *)",
+      "Bash(go vet *)",
+      "Bash(go generate *)",
+      "Bash(go mod *)",
+      "Bash(go run *)",
+      "Bash(goimports *)",
+      "Bash(make test*)",
+      "Bash(make lint*)",
+      "Bash(make coverage*)",
+      "Bash(make benchmark*)",
+      "Bash(make fmt*)",
+      "Bash(make vet*)",
+      "Bash(make build*)",
+      "Bash(make tidy*)",
+      "Bash(make doc*)",
+      "Bash(grep *)",
+      "Bash(find . *)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | { read -r f && [[ \"$f\" == *.go ]] && ~/go/bin/goimports -w \"$f\"; } 2>/dev/null || true",
+            "statusMessage": "goimports..."
+          }
+        ]
+      }
+    ]
+  }
+}
