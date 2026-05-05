@@ -15,10 +15,9 @@ func TestBasicBlockPass_Run(t *testing.T) {
 		blocks []*BasicBlock
 	}{
 		{
-			fn: types.NewFunction(
-				types.NewFunctionSignature(),
+			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.NOP),
-			),
+			).Build(),
 			blocks: []*BasicBlock{
 				{
 					Start: 0,
@@ -29,10 +28,9 @@ func TestBasicBlockPass_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunction(
-				types.NewFunctionSignature(),
+			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.UNREACHABLE),
-			),
+			).Build(),
 			blocks: []*BasicBlock{
 				{
 					Start: 0,
@@ -43,10 +41,9 @@ func TestBasicBlockPass_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunction(
-				types.NewFunctionSignature(),
+			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.RETURN),
-			),
+			).Build(),
 			blocks: []*BasicBlock{
 				{
 					Start: 0,
@@ -57,12 +54,11 @@ func TestBasicBlockPass_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunction(
-				types.NewFunctionSignature(),
+			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.BR, 5),
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_CONST, 2),
-			),
+			).Build(),
 			blocks: []*BasicBlock{
 				{
 					Start: 0,
@@ -85,12 +81,11 @@ func TestBasicBlockPass_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunction(
-				types.NewFunctionSignature(),
+			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.BR, 5),
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_CONST, 2),
-			),
+			).Build(),
 			blocks: []*BasicBlock{
 				{
 					Start: 0,
@@ -113,13 +108,12 @@ func TestBasicBlockPass_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunction(
-				types.NewFunctionSignature(),
+			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.BR_IF, 5),
 				instr.New(instr.I32_CONST, 2),
 				instr.New(instr.I32_CONST, 3),
-			),
+			).Build(),
 			blocks: []*BasicBlock{
 				{
 					Start: 0,
@@ -143,13 +137,12 @@ func TestBasicBlockPass_Run(t *testing.T) {
 			},
 		},
 		{
-			fn: types.NewFunction(
-				types.NewFunctionSignature(),
+			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.BR_TABLE, 1, 5, 0),
 				instr.New(instr.I32_CONST, 2),
 				instr.New(instr.I32_CONST, 3),
-			),
+			).Build(),
 			blocks: []*BasicBlock{
 				{
 					Start: 0,

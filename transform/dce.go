@@ -27,8 +27,8 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error)
 
 	var fns []*types.Function
 	fns = append(fns, &types.Function{
-		Signature: types.NewFunctionSignature(),
-		Code:      prog.Code,
+		Typ:  &types.FunctionType{},
+		Code: prog.Code,
 	})
 	for _, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
@@ -88,7 +88,7 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error)
 					offset++
 				}
 				if offset >= len(offsets) {
-					return nil, fmt.Errorf("%w: at=%d", analysis.ErrInvalidJump, read)
+					return nil, invalidJumpError(read)
 				}
 				offset = offsets[offset] - write - inst.Width()
 				inst.SetOperand(0, uint64(offset))
@@ -102,14 +102,11 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error)
 						offset++
 					}
 					if offset >= len(offsets) {
-						return nil, fmt.Errorf("%w: at=%d", analysis.ErrInvalidJump, read)
+						return nil, invalidJumpError(read)
 					}
 					offset = offsets[offset] - write - width
 					inst.SetOperand(j+1, uint64(offset))
 				}
-				offset := read + int(operands[len(operands)-1]) + width
-				offset = offsets[offset] - write - width
-				inst.SetOperand(len(operands)-1, uint64(offset))
 			default:
 			}
 
@@ -125,4 +122,8 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error)
 	}
 
 	return prog, nil
+}
+
+func invalidJumpError(at int) error {
+	return fmt.Errorf("%w: at=%d", analysis.ErrInvalidJump, at)
 }

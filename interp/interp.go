@@ -4,13 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 
+	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
 
 type Interpreter struct {
 	ctx       context.Context
+	buffer    *asm.Buffer
+	instrs    [][]byte
 	code      [][]func(*Interpreter)
 	hits      [][]uint64
 	frames    []frame
@@ -24,6 +29,7 @@ type Interpreter struct {
 	fp        int
 	sp        int
 	tick      int
+	threshold uint64
 }
 
 type frame struct {
@@ -34,11 +40,12 @@ type frame struct {
 }
 
 type option struct {
-	frame   int
-	globals int
-	stack   int
-	heap    int
-	tick    int
+	frame     int
+	globals   int
+	stack     int
+	heap      int
+	tick      int
+	threshold int
 }
 
 var (
@@ -74,13 +81,18 @@ func WithTick(val int) func(*option) {
 	return func(o *option) { o.tick = val }
 }
 
+func WithThreshold(val int) func(*option) {
+	return func(o *option) { o.threshold = val }
+}
+
 func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	opt := option{
-		frame:   128,
-		globals: 128,
-		stack:   1024,
-		heap:    128,
-		tick:    1024,
+		frame:     128,
+		globals:   128,
+		stack:     1024,
+		heap:      128,
+		tick:      128,
+		threshold: 4096,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -90,6 +102,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	}
 
 	i := &Interpreter{
+		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
 		hits:      make([][]uint64, len(prog.Constants)+1),
 		frames:    make([]frame, opt.frame),
@@ -103,6 +116,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		fp:        0,
 		sp:        0,
 		tick:      opt.tick,
+		threshold: uint64(opt.threshold / opt.tick),
 	}
 
 	i.alloc(types.Null)
@@ -126,15 +140,17 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		i.constants[j] = val
 	}
 
-	c := &threadedCodeCompiler{
+	c := &threadedCompiler{
 		types:     i.types,
 		constants: i.constants,
 		heap:      i.heap,
 	}
 
+	i.instrs[0] = prog.Code
 	i.code[0] = c.Compile(prog.Code)
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
+			i.instrs[j+1] = fn.Code
 			i.code[j+1] = c.Compile(fn.Code)
 		}
 	}
@@ -157,15 +173,11 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 	defer func() {
 		i.ctx = nil
 		if r := recover(); r != nil {
-			if e, ok := r.(error); ok {
-				err = fmt.Errorf("%w: at=%d", e, i.frames[i.fp-1].ip)
-			} else {
-				err = fmt.Errorf("%v: at=%d", r, i.frames[i.fp-1].ip)
-			}
+			err = i.error(r)
 		}
 	}()
 
-	f := &i.frames[i.fp-1]
+	f := i.frame()
 	code := f.code
 	tick := i.tick
 
@@ -181,6 +193,28 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 
 			i.hits[f.addr][0]++
 			i.hits[f.addr][f.ip+1]++
+
+			if i.hits[f.addr][0] == i.threshold {
+				if arch != nil {
+					if i.buffer == nil {
+						i.buffer, err = asm.NewBuffer(256)
+						if err != nil {
+							return err
+						}
+					}
+					c := &jitCompiler{
+						assembler: asm.NewAssembler(arch, i.buffer),
+						types:     i.types,
+						constants: i.constants,
+						heap:      i.heap,
+					}
+					for j, fn := range c.Compile(i.instrs[f.addr]) {
+						if fn != nil {
+							i.code[f.addr][j] = fn
+						}
+					}
+				}
+			}
 		}
 
 		code[f.ip](i)
@@ -223,7 +257,8 @@ func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
 }
 
 func (i *Interpreter) Local(idx int) (types.Boxed, error) {
-	addr := i.frames[i.fp-1].bp + idx
+	f := i.frame()
+	addr := f.bp + idx
 	if addr < 0 || addr >= i.sp {
 		return 0, ErrSegmentationFault
 	}
@@ -231,7 +266,8 @@ func (i *Interpreter) Local(idx int) (types.Boxed, error) {
 }
 
 func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
-	addr := i.frames[i.fp-1].bp + idx
+	f := i.frame()
+	addr := f.bp + idx
 	if addr < 0 || addr >= i.sp {
 		return ErrSegmentationFault
 	}
@@ -312,34 +348,15 @@ func (i *Interpreter) Len() int {
 	return i.sp - 1
 }
 
-func (i *Interpreter) Clone() *Interpreter {
-	c := &Interpreter{
-		ctx:       i.ctx,
-		code:      i.code,
-		hits:      i.hits,
-		types:     i.types,
-		constants: i.constants,
-
-		frames:  make([]frame, len(i.frames)),
-		globals: make([]types.Boxed, len(i.globals), cap(i.globals)),
-		stack:   make([]types.Boxed, len(i.stack), cap(i.stack)),
-		heap:    make([]types.Value, len(i.heap), cap(i.heap)),
-		rc:      make([]int, len(i.rc), cap(i.rc)),
-		free:    make([]int, len(i.free), cap(i.free)),
-
-		fp:   i.fp,
-		sp:   i.sp,
-		tick: i.tick,
+func (i *Interpreter) Close() error {
+	i.Reset()
+	if i.buffer != nil {
+		if err := i.buffer.Free(); err != nil {
+			return err
+		}
+		i.buffer = nil
 	}
-
-	copy(c.frames, i.frames)
-	copy(c.globals, i.globals)
-	copy(c.stack, i.stack)
-	copy(c.heap, i.heap)
-	copy(c.rc, i.rc)
-	copy(c.free, i.free)
-
-	return c
+	return nil
 }
 
 func (i *Interpreter) Reset() {
@@ -370,6 +387,57 @@ func (i *Interpreter) Reset() {
 		i.rc[j] = 1
 	}
 	i.free = i.free[:0]
+}
+
+func (i *Interpreter) frame() *frame {
+	return &i.frames[i.fp-1]
+}
+
+func (i *Interpreter) error(r any) error {
+	ip := i.frame().ip
+	switch e := r.(type) {
+	case error:
+		return fmt.Errorf("%w: at=%d", e, ip)
+	default:
+		return fmt.Errorf("%v: at=%d", r, ip)
+	}
+}
+
+func (i *Interpreter) unbox64(val types.Boxed) uint64 {
+	switch val.Kind() {
+	case types.KindI32:
+		return uint64(val.I32())
+	case types.KindI64:
+		return uint64(val.I64())
+	case types.KindF32:
+		return math.Float64bits(float64(val.F32()))
+	case types.KindF64:
+		return math.Float64bits(val.F64())
+	case types.KindRef:
+		addr := val.Ref()
+		v, _ := i.heap[addr].(types.I64)
+		i.release(addr)
+		return uint64(v)
+	default:
+		return uint64(val)
+	}
+}
+
+func (i *Interpreter) box64(val uint64, kind types.Kind) types.Boxed {
+	switch kind {
+	case types.KindI32:
+		return types.BoxI32(int32(val))
+	case types.KindI64:
+		return i.boxI64(int64(val))
+	case types.KindF32:
+		return types.BoxF32(float32(math.Float64frombits(val)))
+	case types.KindF64:
+		return types.BoxF64(math.Float64frombits(val))
+	case types.KindRef:
+		return types.BoxRef(int(val))
+	default:
+		return types.Box(val, kind)
+	}
 }
 
 func (i *Interpreter) boxI64(val int64) types.Boxed {
@@ -461,11 +529,14 @@ func (i *Interpreter) release(addr int) {
 
 		i.rc[addr]--
 		if i.rc[addr] == 0 {
-			t, ok := i.heap[addr].(types.Traceable)
-			if ok {
+			v := i.heap[addr]
+			if t, ok := v.(types.Traceable); ok {
 				for _, r := range t.Refs() {
 					stack = append(stack, int(r))
 				}
+			}
+			if c, ok := v.(io.Closer); ok {
+				_ = c.Close()
 			}
 			i.heap[addr] = nil
 			i.free = append(i.free, addr)
