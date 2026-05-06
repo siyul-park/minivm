@@ -23,10 +23,7 @@ func init() {
 		return true
 	}
 
-	// BR — unconditional branch.
-	// Requires an empty operand stack (initial constraint).
-	// Emits a direct B to the target block if compilable (resolved by Link),
-	// or LoadImm64+RET for interpreter fallback otherwise.
+	// BR — emits B to target if compilable, otherwise LDI+RET (interpreter fallback).
 	jit[instr.BR] = func(c *jitCompiler) bool {
 		if len(c.assembler.Returns()) > 0 {
 			inst := instr.Instruction(c.code[c.ip:])
@@ -51,10 +48,8 @@ func init() {
 		return true
 	}
 
-	// BR_IF — conditional branch.
-	// The condition must be the only value on the operand stack (Returns()==1),
-	// or come from the interpreter stack (Returns()==0).  Checked before Take()
-	// to avoid state mutation when bailing out with a non-empty remaining stack.
+	// BR_IF — pops i32 condition; stack must have ≤1 value (condition only).
+	// Checked before Take() to avoid state mutation on bail-out.
 	jit[instr.BR_IF] = func(c *jitCompiler) bool {
 		if len(c.assembler.Returns()) > 1 {
 			inst := instr.Instruction(c.code[c.ip:])
@@ -77,7 +72,6 @@ func init() {
 		targetCompilable := c.compilable[targetIP]
 		fallCompilable := c.compilable[fallIP]
 
-		// Case A: both compilable — CBNZ to target, B to fallthrough.
 		if targetCompilable && fallCompilable {
 			c.assembler.Emit(arm64.CBNZLabel(r0, c.blockLabels[targetIP]))
 			c.assembler.Emit(arm64.BLabel(c.blockLabels[fallIP]))
@@ -85,10 +79,9 @@ func init() {
 			return true
 		}
 
-		// Case B: target compilable, fallthrough not.
-		if targetCompilable && !fallCompilable {
+		if targetCompilable {
 			fallStubLabel := c.assembler.NewLabel()
-			c.assembler.Emit(arm64.CBZLabel(r0, fallStubLabel)) // r0==0 → fall-through
+			c.assembler.Emit(arm64.CBZLabel(r0, fallStubLabel))
 			c.assembler.Emit(arm64.BLabel(c.blockLabels[targetIP]))
 			c.assembler.PlaceLabel(fallStubLabel)
 			c.assembler.Emits(arm64.LDI(ipReg, uint64(fallIP))...)
@@ -97,10 +90,9 @@ func init() {
 			return true
 		}
 
-		// Case C: fallthrough compilable, target not.
-		if !targetCompilable && fallCompilable {
+		if fallCompilable {
 			takenStubLabel := c.assembler.NewLabel()
-			c.assembler.Emit(arm64.CBNZLabel(r0, takenStubLabel)) // r0!=0 → taken
+			c.assembler.Emit(arm64.CBNZLabel(r0, takenStubLabel))
 			c.assembler.Emit(arm64.BLabel(c.blockLabels[fallIP]))
 			c.assembler.PlaceLabel(takenStubLabel)
 			c.assembler.Emits(arm64.LDI(ipReg, uint64(targetIP))...)
@@ -109,7 +101,7 @@ func init() {
 			return true
 		}
 
-		// Case D: neither compilable — emit both fallback paths.
+		// Neither compilable.
 		takenStubLabel := c.assembler.NewLabel()
 		c.assembler.Emit(arm64.CBNZLabel(r0, takenStubLabel))
 		c.assembler.Emits(arm64.LDI(ipReg, uint64(fallIP))...)
@@ -162,8 +154,7 @@ func init() {
 		return true
 	}
 
-	// SELECT — pops cond(i32), val2, val1; pushes val1 if cond != 0, else val2.
-	// val1 and val2 must have the same type and width.
+	// SELECT — pops cond(i32), val2, val1; result = (cond != 0) ? val1 : val2.
 	jit[instr.SELECT] = func(c *jitCompiler) bool {
 		c.ip++
 
@@ -211,12 +202,9 @@ func init() {
 		return true
 	}
 
-	// BR_TABLE — pops i32 index; jumps to targets[index] or targets[count] (default).
-	// Emits a linear comparison chain.  Each target either links directly to a
-	// compiled block (via BLabel relocation) or falls back to the interpreter
-	// (LoadImm64+RET).
-	// The index must be the only value on the operand stack; checked before Take()
-	// to avoid state mutation on bail-out.
+	// BR_TABLE — pops i32 index; emits a linear CMP chain to per-case stubs.
+	// Each stub either B's to a compilable target or uses LDI+RET as fallback.
+	// Index must be the only stack value; checked before Take() to avoid mutation.
 	jit[instr.BR_TABLE] = func(c *jitCompiler) bool {
 		if len(c.assembler.Returns()) > 1 {
 			inst := instr.Instruction(c.code[c.ip:])

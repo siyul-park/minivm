@@ -5,9 +5,7 @@ import (
 	"unsafe"
 )
 
-// reservedSlot describes a metadata return slot with a user-chosen type/width.
-// Reserved slots are prepended to the Signature.Returns list and pinned to the
-// leading canonical registers so every block shares the same layout.
+// reservedSlot is a metadata slot allocated via Reserve, pinned to a canonical register.
 type reservedSlot struct {
 	typ  RegType
 	w    RegWidth
@@ -56,22 +54,19 @@ func (a *Assembler) NewLabel() int {
 }
 
 // PlaceLabel marks the current IR position as the definition of label id.
-// Backward-reference branches (id already in globalLabels or localLabels) are
-// resolved immediately in Compile; forward references become Relocations.
+// Intra-block references are resolved immediately in Compile; cross-block
+// references become Relocations resolved by Link.
 func (a *Assembler) PlaceLabel(id int) {
 	if a.localLabels == nil {
 		a.localLabels = make(map[int]int)
 	}
-	// Record position before the pseudo-instruction itself so the label points
-	// to the next real instruction emitted after PlaceLabel.
-	a.localLabels[id] = len(a.insts)
+	a.localLabels[id] = len(a.insts) // points to next real instruction (0-byte pseudo)
 	a.insts = append(a.insts, Instruction{Op: OpPseudoLabel, Dst: Label(id)})
 }
 
-// Reserve allocates a VReg prepended to the return signature with the given
-// type and width.  The VReg is pinned to the leading canonical register for
-// its type (X0, D0, …) so every block uses the same layout.
-// Callers write metadata into it (e.g. next IP) before each RET.
+// Reserve allocates a VReg pinned to the leading canonical register for its
+// type (X0 for int, D0 for float).  It appears first in the Signature.Reserved
+// slice so callers can write metadata (e.g. next IP) before each RET.
 func (a *Assembler) Reserve(typ RegType, w RegWidth) VReg {
 	vreg := a.vregAlloc.Alloc(typ, w)
 	a.reserved = append(a.reserved, reservedSlot{typ: typ, w: w, vreg: vreg})
