@@ -49,7 +49,7 @@ jitCompiler → native ARM64               replaces closures in-place for hot bl
 
 **Package responsibilities (one line each):**
 - `program/` — bytecode + constants container; entry point for program construction
-- `instr/` — opcode definitions, variable-width encoding/decoding, disassembler, text parser (`Parse`/`ParseAll`)
+- `instr/` — opcode definitions, variable-width encoding/decoding, text formatter (`Format`), text parser (`Parse`/`ParseAll`)
 - `types/` — value types (`Boxed`, `Function`, `Array`, `Struct`, `String`) and NaN boxing
 - `interp/` — interpreter state, threaded compiler, JIT driver, host function bridge
 - `asm/` — virtual-register IR, linear-scan register allocator, executable memory buffer

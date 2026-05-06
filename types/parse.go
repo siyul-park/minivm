@@ -143,7 +143,7 @@ func ParseFunction(lines []string) (*Function, error) {
 	// Find where disassembly starts (first line matching "NNNN:\t" with hex digits).
 	localsEnd := 1
 	for localsEnd < len(lines) {
-		if isDisassemblyLine(lines[localsEnd]) {
+		if isFormatLine(lines[localsEnd]) {
 			break
 		}
 		localsEnd++
@@ -166,8 +166,8 @@ func ParseFunction(lines []string) (*Function, error) {
 	return NewFunction(ft, locals, codeInstrs), nil
 }
 
-// isDisassemblyLine reports whether s looks like a Disassemble output line ("NNNx:\t…").
-func isDisassemblyLine(s string) bool {
+// isFormatLine reports whether s looks like a Format output line ("NNNx:\t…").
+func isFormatLine(s string) bool {
 	if len(s) < 5 || s[4] != ':' {
 		return false
 	}

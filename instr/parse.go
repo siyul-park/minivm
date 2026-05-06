@@ -24,7 +24,7 @@ func init() {
 
 // Parse parses a single assembly instruction line.
 // Accepts both plain format ("i32.const 42") and the offset-prefixed format
-// produced by Disassemble ("0000:  i32.const 0x2a"). Returns nil, nil for
+// produced by Format ("0000:  i32.const 0x2a"). Returns nil, nil for
 // blank lines.
 func Parse(line string) (Instruction, error) {
 	// Strip optional offset prefix of the form "NNNN:" or "NNNN:\t"

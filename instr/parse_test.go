@@ -151,16 +151,16 @@ func TestParse(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("round-trip with Disassemble", func(t *testing.T) {
+	t.Run("round-trip with Format", func(t *testing.T) {
 		original := []Instruction{New(I32_CONST, 1), New(I32_CONST, 2), New(I32_ADD)}
-		got, err := ParseAll(strings.NewReader(Disassemble(Marshal(original))))
+		got, err := ParseAll(strings.NewReader(Format(Marshal(original))))
 		require.NoError(t, err)
 		require.Equal(t, original, got)
 	})
 
 	t.Run("round-trip br_table", func(t *testing.T) {
 		original := []Instruction{New(BR_TABLE, 2, 0, 1, 0)}
-		got, err := ParseAll(strings.NewReader(Disassemble(Marshal(original))))
+		got, err := ParseAll(strings.NewReader(Format(Marshal(original))))
 		require.NoError(t, err)
 		require.Equal(t, original, got)
 	})

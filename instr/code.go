@@ -24,7 +24,7 @@ func Marshal(instrs []Instruction) []byte {
 	return code
 }
 
-func Disassemble(code []byte) string {
+func Format(code []byte) string {
 	var sb strings.Builder
 	ip := 0
 	for _, inst := range Unmarshal(code) {

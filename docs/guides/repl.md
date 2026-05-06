@@ -44,15 +44,15 @@ stack produces no output.
 | Command | Effect |
 |---|---|
 | `.help` | Print command reference |
-| `.show` | Disassemble the accumulated instruction history (includes constants) |
+| `.show` | Format (disassemble) the accumulated instruction history (includes constants) |
 | `.reset` | Clear accumulated instructions, constants, and stack state |
 | `.const` | Declare a function constant (multi-line block, end with blank line) |
 | `.quit` / `.exit` | Exit the REPL |
 
 ## Instruction Syntax
 
-The REPL accepts the same text format that `instr.Disassemble` produces, so
-you can paste disassembly output directly.
+The REPL accepts the same text format that `instr.Format` produces, so
+you can paste formatted output directly.
 
 **Plain form** (for interactive use):
 ```
@@ -62,7 +62,7 @@ f32.const 1.0
 br_table 0x02 0x0000 0x0005 0x0000
 ```
 
-**Offset-prefixed form** (disassembly output, also accepted):
+**Offset-prefixed form** (formatted output, also accepted):
 ```
 0000:	i32.const 0x0000002A
 0005:	i32.add
@@ -101,7 +101,7 @@ Everything that operates purely on value-typed stack entries works correctly.
 ## Declaring Function Constants
 
 Use `.const` to add a function to the constant pool. The format is identical
-to what `Program.String()` / `.show` produces for constants — paste disassembly
+to what `Program.String()` / `.show` produces for constants — paste formatted
 output directly.
 
 ```
@@ -190,11 +190,11 @@ instrs, err  = instr.ParseAll(os.Stdin)
 ```
 
 `ParseAll` skips blank lines and reports the first error with its line number.
-The output of `instr.Disassemble` round-trips cleanly through `ParseAll`:
+The output of `instr.Format` round-trips cleanly through `ParseAll`:
 
 ```go
 original := []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD)}
-text     := instr.Disassemble(instr.Marshal(original))
+text     := instr.Format(instr.Marshal(original))
 parsed, _ := instr.ParseAll(strings.NewReader(text))
 // parsed == original
 ```
