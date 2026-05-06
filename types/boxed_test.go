@@ -66,6 +66,10 @@ func TestUnbox(t *testing.T) {
 			val:   BoxF64(0),
 			unbox: F64(0),
 		},
+		{
+			val:   BoxRef(3),
+			unbox: Ref(3),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
@@ -273,3 +277,31 @@ func TestBoxed_String(t *testing.T) {
 		})
 	}
 }
+
+func TestBoxBool(t *testing.T) {
+	require.Equal(t, BoxedTrue, BoxBool(true))
+	require.Equal(t, BoxedFalse, BoxBool(false))
+}
+
+func TestBoxed_Bool(t *testing.T) {
+	require.True(t, BoxI32(1).Bool())
+	require.False(t, BoxI32(0).Bool())
+}
+
+func TestBox(t *testing.T) {
+	tests := []struct {
+		val  uint64
+		kind Kind
+	}{
+		{val: 0, kind: KindI32},
+		{val: 1, kind: KindI32},
+		{val: 0, kind: KindRef},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%d/%d", tt.val, tt.kind), func(t *testing.T) {
+			b := Box(tt.val, tt.kind)
+			require.Equal(t, tt.kind, b.Kind())
+		})
+	}
+}
+

@@ -23,6 +23,14 @@ func TestOptimizer_Register(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestOptimizer_Optimize_O0(t *testing.T) {
+	o := NewOptimizer(O0)
+	prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+	result, err := o.Optimize(prog)
+	require.NoError(t, err)
+	require.Equal(t, prog.String(), result.String())
+}
+
 func TestOptimizer_Optimize(t *testing.T) {
 	o := NewOptimizer(O1)
 	prog := program.New(
