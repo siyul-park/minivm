@@ -576,6 +576,12 @@ func BLabel(id int) asm.Instruction {
 	return asm.Instruction{Op: uint16(OpB), Src2: asm.LabelOperand{ID: id}}
 }
 
+// BCondLabel emits a conditional branch (BEQ, BNE, BLT, …) to a symbolic
+// label.  condOp must be one of OpBEQ, OpBNE, OpBLT, OpBGT, OpBLE, OpBGE, …
+func BCondLabel(condOp Op, id int) asm.Instruction {
+	return asm.Instruction{Op: uint16(condOp), Src2: asm.LabelOperand{ID: id}}
+}
+
 // ---------------------------------------------------------------------------
 // Branch (compare-and-branch)
 // ---------------------------------------------------------------------------

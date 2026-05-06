@@ -171,6 +171,126 @@ func init() {
 		return true
 	}
 
+	// SELECT — pops cond(i32), val2, val1; pushes val1 if cond != 0, else val2.
+	// val1 and val2 must have the same type and width.
+	jit[instr.SELECT] = func(c *jitCompiler) bool {
+		c.ip++
+
+		cond, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
+		if !ok {
+			return false
+		}
+		val2, ok2 := c.assembler.Pop()
+		val1, ok1 := c.assembler.Pop()
+		if !ok1 || !ok2 {
+			return false
+		}
+		if val1.Type() != val2.Type() || val1.Width() != val2.Width() {
+			return false
+		}
+
+		result := c.assembler.NewVReg(val1.Type(), val1.Width())
+		c.assembler.Push(result)
+
+		isFloat := val1.Type() == asm.RegTypeFloat
+		lTrue := c.assembler.NewLabel()
+		lDone := c.assembler.NewLabel()
+
+		// Branch to lTrue if cond != 0 (select val1).
+		c.assembler.Emit(arm64.CMPI(cond, 0))
+		c.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, lTrue))
+
+		// cond == 0: result = val2
+		if isFloat {
+			c.assembler.Emit(arm64.FMOV(result, val2))
+		} else {
+			c.assembler.Emit(arm64.ADDI(result, val2, 0))
+		}
+		c.assembler.Emit(arm64.BLabel(lDone))
+
+		// cond != 0: result = val1
+		c.assembler.PlaceLabel(lTrue)
+		if isFloat {
+			c.assembler.Emit(arm64.FMOV(result, val1))
+		} else {
+			c.assembler.Emit(arm64.ADDI(result, val1, 0))
+		}
+		c.assembler.PlaceLabel(lDone)
+
+		return true
+	}
+
+	// BR_TABLE — pops i32 index; jumps to targets[index] or targets[count] (default).
+	// Emits a linear comparison chain.  Each target either links directly to a
+	// compiled block (via BLabel relocation) or falls back to the interpreter
+	// (LoadImm64+RET).  Requires an empty operand stack.
+	// Bail-out if count >= 4096 (CMPI immediate limit).
+	jit[instr.BR_TABLE] = func(c *jitCompiler) bool {
+		if len(c.assembler.Returns()) > 0 {
+			inst := instr.Instruction(c.code[c.ip:])
+			c.ip += inst.Width()
+			return false
+		}
+
+		count := int(c.code[c.ip+1])
+		if count >= 4096 {
+			inst := instr.Instruction(c.code[c.ip:])
+			c.ip += inst.Width()
+			return false
+		}
+
+		offsets := make([]int, count+1)
+		for j := 0; j <= count; j++ {
+			offsets[j] = int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+j*2+2])))
+		}
+		c.ip += count*2 + 4 // advance past the full BR_TABLE instruction
+
+		// Compute target IPs: ip_after_BR_TABLE + offset[j]
+		targetIPs := make([]int, count+1)
+		for j, off := range offsets {
+			targetIPs[j] = c.ip + off
+		}
+
+		r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
+		if !ok {
+			return false
+		}
+
+		ipReg := c.assembler.Reserve(asm.RegTypeInt, asm.Width64)
+		c.assembler.Push(ipReg)
+
+		// Allocate a local stub label per case (including default).
+		stubLabels := make([]int, count+1)
+		for j := range stubLabels {
+			stubLabels[j] = c.assembler.NewLabel()
+		}
+
+		// Linear comparison chain: CMP r0, #j; BEQ stub_j
+		for j := 0; j < count; j++ {
+			c.assembler.Emit(arm64.CMPI(r0, uint16(j)))
+			c.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, stubLabels[j]))
+		}
+		// Default (r0 >= count or r0 == count after the loop): jump to default stub.
+		c.assembler.Emit(arm64.BLabel(stubLabels[count]))
+
+		// Emit stubs: each either chains to a compiled block or returns to interpreter.
+		for j := 0; j <= count; j++ {
+			c.assembler.PlaceLabel(stubLabels[j])
+			targetIP := targetIPs[j]
+			if c.compilable[targetIP] {
+				c.assembler.Emit(arm64.BLabel(c.blockLabels[targetIP]))
+			} else {
+				for _, inst := range arm64.LoadImm64(ipReg, uint64(targetIP)) {
+					c.assembler.Emit(inst)
+				}
+				c.assembler.Emit(arm64.RET())
+			}
+		}
+
+		c.terminated = true
+		return true
+	}
+
 	jit[instr.CONST_GET] = func(c *jitCompiler) bool {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3

@@ -78,12 +78,6 @@ func (a *Assembler) Reserve(typ RegType, w RegWidth) VReg {
 	return vreg
 }
 
-// AbortBlock discards any partial compilation and resets per-block state.
-// Call this when a block fails before Compile() is reached.
-func (a *Assembler) AbortBlock() {
-	a.resetBlock()
-}
-
 func (a *Assembler) Params() []VReg {
 	return append([]VReg(nil), a.params...)
 }
@@ -270,6 +264,20 @@ func (a *Assembler) Link(objects []*RelocObject) ([]Caller, error) {
 	return callers, firstErr
 }
 
+// Abort discards any partial compilation and resets per-block state.
+// Call this when a block fails before Compile() is reached.
+func (a *Assembler) Abort() {
+	a.resetBlock()
+}
+
+// Reset fully resets the assembler, including the shared label namespace.
+// Call this between function compilations (not between blocks of the same function).
+func (a *Assembler) Reset() {
+	a.resetBlock()
+	a.nextLabel = 0
+	a.globalLabels = make(map[int]globalLabelEntry)
+}
+
 // resolveLabels strips OpPseudoLabel pseudo-instructions, computes intra-block
 // label byte offsets, resolves local LabelOperands to PC-relative immediates,
 // and returns cross-block LabelOperands intact so that Link can re-encode them.
@@ -333,14 +341,6 @@ func (a *Assembler) resetBlock() {
 	if a.regAlloc != nil {
 		a.regAlloc.Reset()
 	}
-}
-
-// Reset fully resets the assembler, including the shared label namespace.
-// Call this between function compilations (not between blocks of the same function).
-func (a *Assembler) Reset() {
-	a.resetBlock()
-	a.nextLabel = 0
-	a.globalLabels = make(map[int]globalLabelEntry)
 }
 
 func (a *Assembler) signature() (*Signature, error) {

@@ -138,7 +138,7 @@ func (c *jitCompiler) compileBlock(b *analysis.BasicBlock) (*asm.RelocObject, in
 
 		if !ok {
 			if count == 0 {
-				c.assembler.AbortBlock()
+				c.assembler.Abort()
 				return nil, 0
 			}
 			jit[_EPILOGUE](c)
@@ -193,7 +193,8 @@ func (c *jitCompiler) isBranchBlock(b *analysis.BasicBlock) bool {
 		last = c.code[ip]
 		ip += instr.Instruction(c.code[ip:]).Width()
 	}
-	return instr.Opcode(last) == instr.BR || instr.Opcode(last) == instr.BR_IF
+	op := instr.Opcode(last)
+	return op == instr.BR || op == instr.BR_IF || op == instr.BR_TABLE
 }
 
 // makeBranchClosure wraps a branch-block Caller.
