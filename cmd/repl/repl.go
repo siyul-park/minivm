@@ -199,21 +199,15 @@ func (r *REPL) execute(ctx context.Context, inst instr.Instruction) error {
 		return err
 	}
 
-	// Collect resulting stack as raw Boxed values (TOS first) and update saved state.
-	// Using PopBoxed preserves NaN-boxed primitives and heap references so that
-	// KindRef values (e.g. function refs from const.get) remain valid when pushed
-	// into the next interpreter, which has the same constant heap layout.
-	var newStack []types.Boxed
-	for {
-		v, err := vm.PopBoxed()
-		if err != nil {
-			break
-		}
-		newStack = append(newStack, v)
-	}
-	// Reverse to bottom-to-top order.
-	for l, r := 0, len(newStack)-1; l < r; l, r = l+1, r-1 {
-		newStack[l], newStack[r] = newStack[r], newStack[l]
+	// Save resulting stack via Peek (bottom-to-top order).
+	// Peek returns raw Boxed values without unboxing, so KindRef values (e.g.
+	// function refs from const.get) stay valid when pushed into the next
+	// interpreter, which has the same constant pool heap layout.
+	n := vm.Len()
+	newStack := make([]types.Boxed, n)
+	for k := 0; k < n; k++ {
+		v, _ := vm.Peek(n - 1 - k)
+		newStack[k] = v
 	}
 	r.stack = newStack
 

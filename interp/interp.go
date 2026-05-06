@@ -344,20 +344,17 @@ func (i *Interpreter) Pop() (types.Value, error) {
 	return i.unbox(i.stack[i.sp]), nil
 }
 
-// PopBoxed returns the raw NaN-boxed value from the top of the stack without
-// heap-unboxing it. The caller is responsible for ensuring the boxed value
-// remains valid when pushed into a subsequent interpreter with the same
-// constant pool layout (heap[j+1] == constants[j]).
-func (i *Interpreter) PopBoxed() (types.Boxed, error) {
-	if i.sp == 0 {
+// Peek returns the raw NaN-boxed value at position n from the top of the stack
+// (n=0 is TOS) without consuming it or modifying reference counts.
+func (i *Interpreter) Peek(n int) (types.Boxed, error) {
+	if n < 0 || i.sp <= n {
 		return 0, ErrStackUnderflow
 	}
-	i.sp--
-	return i.stack[i.sp], nil
+	return i.stack[i.sp-1-n], nil
 }
 
 func (i *Interpreter) Len() int {
-	return i.sp - 1
+	return i.sp
 }
 
 func (i *Interpreter) Close() error {
