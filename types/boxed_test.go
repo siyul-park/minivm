@@ -66,6 +66,10 @@ func TestUnbox(t *testing.T) {
 			val:   BoxF64(0),
 			unbox: F64(0),
 		},
+		{
+			val:   BoxRef(3),
+			unbox: Ref(3),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
@@ -301,8 +305,3 @@ func TestBox(t *testing.T) {
 	}
 }
 
-func TestUnbox_Ref(t *testing.T) {
-	b := BoxRef(3)
-	v := Unbox(b)
-	require.Equal(t, Ref(3), v)
-}

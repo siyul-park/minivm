@@ -99,7 +99,10 @@ Full details in [docs/coding-patterns.md](../docs/coding-patterns.md). Quick ref
 - Hot-path errors `panic`; boundaries `recover` (see `interp.Run`)
 
 **Testing**
-- One `Test<Type>_<Method>` per public method; all cases inside as a table
-- Subtest name: `t.Run(fmt.Sprint(tt.<primary_input>), ...)`
+- One test file per source file: `foo.go` → `foo_test.go`
+- One `Test<Type>_<Method>` per public method; all cases inside as a table using `t.Run`
+- Constructors: `TestNew<Type>`; package-level functions: `Test<FuncName>`
+- Subtest name: `t.Run(fmt.Sprint(tt.<primary_input>), ...)` or a descriptive string for error paths
+- Never write helper functions in test files — inline all setup directly in each test or subtest
 - Always `require` (never `assert`) — fails fast
 - `defer resource.Free()` immediately after successful allocation

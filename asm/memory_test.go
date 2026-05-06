@@ -40,3 +40,40 @@ func TestFree(t *testing.T) {
 	err = m.Free()
 	require.NoError(t, err)
 }
+
+func TestAlloc_InvalidSize(t *testing.T) {
+	_, err := Alloc(0)
+	require.ErrorIs(t, err, ErrInvalidSize)
+
+	_, err = Alloc(-1)
+	require.ErrorIs(t, err, ErrInvalidSize)
+}
+
+func TestMemory_Writable(t *testing.T) {
+	m, err := Alloc(64)
+	require.NoError(t, err)
+	defer m.Free()
+
+	require.NoError(t, m.Executable())
+	require.NoError(t, m.Writable())
+
+	code := []byte{0x90}
+	require.NoError(t, m.Write(code))
+}
+
+func TestMemory_Ptr(t *testing.T) {
+	m, err := Alloc(64)
+	require.NoError(t, err)
+	defer m.Free()
+
+	require.NotNil(t, m.Ptr())
+}
+
+func TestWrite_TooLarge(t *testing.T) {
+	m, err := Alloc(4)
+	require.NoError(t, err)
+	defer m.Free()
+
+	err = m.Write(make([]byte, len(m)+1))
+	require.ErrorIs(t, err, ErrCodeTooLarge)
+}
