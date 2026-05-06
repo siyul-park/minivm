@@ -56,6 +56,19 @@ func TestInstruction_Width(t *testing.T) {
 	})
 }
 
+func TestInstruction_SetOperand(t *testing.T) {
+	t.Run("static", func(t *testing.T) {
+		instr := New(I32_CONST, 1)
+		instr.SetOperand(0, 42)
+		require.Equal(t, []uint64{42}, instr.Operands())
+	})
+	t.Run("dynamic", func(t *testing.T) {
+		instr := New(BR_TABLE, 2, 0, 1, 0)
+		instr.SetOperand(1, 5)
+		require.Equal(t, []uint64{2, 5, 1, 0}, instr.Operands())
+	})
+}
+
 func TestInstruction_String(t *testing.T) {
 	t.Run("static", func(t *testing.T) {
 		instr := New(NOP)
