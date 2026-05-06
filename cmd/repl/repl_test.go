@@ -3,6 +3,7 @@ package repl
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -11,86 +12,71 @@ import (
 
 func TestREPL_Run(t *testing.T) {
 	tests := []struct {
-		name     string
 		input    string
 		contains []string
 		excludes []string
 	}{
 		{
-			name:     "arithmetic",
 			input:    "i32.const 1\ni32.const 2\ni32.add\n.quit\n",
 			contains: []string{"3"},
 		},
 		{
-			name:     "stack grows",
 			input:    "i32.const 10\ni32.const 20\n.quit\n",
 			contains: []string{"10 20"},
 		},
 		{
-			name:     "f32 float literal",
 			input:    "f32.const 1.0\n.quit\n",
 			contains: []string{"1.000000"},
 			excludes: []string{"error:"},
 		},
 		{
-			name:     "empty stack silent",
 			input:    "nop\n.quit\n",
 			excludes: []string{"stack"},
 		},
 		{
-			name:     "blank lines ignored",
 			input:    "\n\ni32.const 5\n\n.quit\n",
 			contains: []string{"5"},
 		},
 		{
-			name:     "offset prefix accepted",
 			input:    "0000:\ti32.const 0x00000007\n.quit\n",
 			contains: []string{"7"},
 		},
 		{
-			name:     "quit",
 			input:    ".quit\n",
 			contains: []string{"bye"},
 		},
 		{
-			name:     "exit",
 			input:    ".exit\n",
 			contains: []string{"bye"},
 		},
 		{
-			name:     "help",
 			input:    ".help\n.quit\n",
 			contains: []string{".quit", ".reset"},
 		},
 		{
-			name:     "reset clears show",
 			input:    "i32.const 42\n.reset\n.show\n.quit\n",
 			contains: []string{"reset.", "(empty)"},
 		},
 		{
-			name:     "show disassembly",
 			input:    "i32.const 1\ni32.const 2\ni32.add\n.show\n.quit\n",
 			contains: []string{"i32.const", "i32.add"},
 		},
 		{
-			name:     "error rejects instruction",
 			input:    "drop\n.show\n.quit\n",
 			contains: []string{"error:", "(empty)"},
 		},
 		{
-			name:     "unknown meta command",
 			input:    ".unknown\n.quit\n",
 			contains: []string{"unknown command"},
 		},
 		{
-			name:     "unknown mnemonic",
 			input:    "bad.opcode 1\n.quit\n",
 			contains: []string{"error:"},
 		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(fmt.Sprint(tt.input), func(t *testing.T) {
 			var out bytes.Buffer
 			r := New(strings.NewReader(tt.input), &out)
 			require.NoError(t, r.Run(context.Background()))
