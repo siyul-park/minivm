@@ -31,6 +31,11 @@ transform ──► analysis, pass, types, instr, program
    ▲
    │
 optimize ──► transform, analysis, pass, program
+
+cmd/repl ──► instr, interp, program, types
+   ▲
+   │
+cmd/minivm ──► cmd/repl   (cobra CLI entry point)
 ```
 
 **Simplified view** (most important paths):
@@ -38,6 +43,7 @@ optimize ──► transform, analysis, pass, program
 program → instr → (nothing)
 interp  → program, instr, types, asm, pass, analysis
 optimize → transform → analysis → pass
+cmd/repl → instr, interp, program, types
 ```
 
 ## Component Responsibilities
@@ -62,7 +68,9 @@ The instruction set is a `byte`-sized `Opcode`. Each opcode has an associated `T
 
 `instr.Marshal([]Instruction) []byte` → serializes.  
 `instr.Unmarshal([]byte) []Instruction` → deserializes.  
-`instr.Disassemble([]byte) string` → human-readable output for debugging.
+`instr.Disassemble([]byte) string` → human-readable output for debugging.  
+`instr.Parse(line string) (Instruction, error)` → parses one text line back to bytecode; accepts both plain (`i32.const 42`) and offset-prefixed (`0000:\ti32.const 0x0000002a`) formats.  
+`instr.ParseAll(r io.Reader) ([]Instruction, error)` → reads from any `io.Reader` line-by-line, skipping blank lines.
 
 ### `types/`
 

@@ -10,7 +10,8 @@ go test -race -run TestFoo ./interp/...          # single test
 make benchmark                                   # go test -run="-" -bench=".*" -benchmem ./...
 make lint                                        # goimports -w . && go vet ./...
 make coverage                                    # produces coverage.out
-make build                                       # NOTE: ./cmd/ does not exist yet — will fail
+make build                                       # builds ./dist/minivm
+./dist/minivm                                    # launch the interactive assembly REPL
 ```
 
 ## Documentation
@@ -28,6 +29,7 @@ Read these docs on demand — do not pre-load all of them. Each entry states whe
 | [docs/coding-patterns.md](../docs/coding-patterns.md) | writing any new code in this repository |
 | [docs/guides/add-opcode.md](../docs/guides/add-opcode.md) | adding a new instruction end-to-end |
 | [docs/guides/add-architecture.md](../docs/guides/add-architecture.md) | adding a new JIT backend (e.g. x86-64) |
+| [docs/guides/repl.md](../docs/guides/repl.md) | using or extending the interactive REPL (`cmd/minivm`, `cmd/repl`) |
 
 ## Architecture Overview
 
@@ -47,7 +49,7 @@ jitCompiler → native ARM64               replaces closures in-place for hot bl
 
 **Package responsibilities (one line each):**
 - `program/` — bytecode + constants container; entry point for program construction
-- `instr/` — opcode definitions, variable-width encoding/decoding, disassembler
+- `instr/` — opcode definitions, variable-width encoding/decoding, disassembler, text parser (`Parse`/`ParseAll`)
 - `types/` — value types (`Boxed`, `Function`, `Array`, `Struct`, `String`) and NaN boxing
 - `interp/` — interpreter state, threaded compiler, JIT driver, host function bridge
 - `asm/` — virtual-register IR, linear-scan register allocator, executable memory buffer
@@ -56,6 +58,8 @@ jitCompiler → native ARM64               replaces closures in-place for hot bl
 - `analysis/` — `BasicBlocksPass` (shared by JIT and optimizer)
 - `transform/` — `ConstantFoldingPass`, `ConstantDeduplicationPass`, `DeadCodeEliminationPass`
 - `optimize/` — `Optimizer` that wires passes into O0/O1 levels
+- `cmd/repl/` — interactive assembly REPL (`REPL` type, `Run` loop)
+- `cmd/minivm/` — CLI entry point (cobra root command)
 
 ## Key Invariants
 
@@ -74,11 +78,11 @@ These are the non-obvious rules that cause silent bugs when violated:
 
 | Gap | Impact |
 |-----|--------|
-| `./cmd/` missing | `make build` fails |
 | `SELECT` unimplemented | no threaded or JIT handler; panics if executed |
 | JIT excludes control flow, calls, variable access | loops and function calls always run threaded |
 | No x86-64 backend | JIT inactive on Linux/Windows servers |
 | No benchmark suite | 4096-tick JIT threshold is unvalidated |
+| REPL stack transfer unsafe for `KindRef` values | heap pointers from one interpreter step are invalid in the next; ref-producing instructions behave incorrectly in the REPL |
 
 ## Coding Conventions (summary)
 
