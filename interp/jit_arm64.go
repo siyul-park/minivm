@@ -24,16 +24,10 @@ func init() {
 	}
 
 	// BR — unconditional branch.
-	// Emits IP-setting code then RET (interpreter fallback), or a direct B to the
-	// target block's native code (resolved at Link time if target is compilable).
+	// Requires an empty operand stack (initial constraint).
+	// Emits a direct B to the target block if compilable (resolved by Link),
+	// or LoadImm64+RET for interpreter fallback otherwise.
 	jit[instr.BR] = func(c *jitCompiler) bool {
-		// Only valid inside branch-block compilation (blockLabels set).
-		if c.blockLabels == nil {
-			inst := instr.Instruction(c.code[c.ip:])
-			c.ip += inst.Width()
-			return false
-		}
-		// Require empty operand stack at the branch (initial constraint).
 		if len(c.assembler.Returns()) > 0 {
 			inst := instr.Instruction(c.code[c.ip:])
 			c.ip += inst.Width()
@@ -48,11 +42,8 @@ func init() {
 		c.assembler.Push(ipReg)
 
 		if c.compilable[targetIP] {
-			// Emit a B to the target block's label (resolved by Link if compiled).
-			targetLabel := c.blockLabels[targetIP]
-			c.assembler.Emit(arm64.BLabel(targetLabel))
+			c.assembler.Emit(arm64.BLabel(c.blockLabels[targetIP]))
 		} else {
-			// Target not compilable — emit interpreter fallback inline.
 			for _, inst := range arm64.LoadImm64(ipReg, uint64(targetIP)) {
 				c.assembler.Emit(inst)
 			}
@@ -63,16 +54,10 @@ func init() {
 	}
 
 	// BR_IF — conditional branch.
-	// Pops the i32 condition. If non-zero: jump to target; else: fall through.
-	// Both paths emit IP + RET (interpreter fallback) unless the target is
-	// compilable, in which case a B / CBNZ relocation is emitted for Link.
+	// Pops the i32 condition. Requires empty operand stack after pop.
+	// Each path (taken / fall-through) either chains directly to a compiled
+	// block or emits LoadImm64+RET for interpreter fallback.
 	jit[instr.BR_IF] = func(c *jitCompiler) bool {
-		if c.blockLabels == nil {
-			inst := instr.Instruction(c.code[c.ip:])
-			c.ip += inst.Width()
-			return false
-		}
-
 		r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
 		if !ok {
 			return false

@@ -149,16 +149,6 @@ func (a *Assembler) Compile() (*RelocObject, error) {
 		return nil, err
 	}
 
-	// Build an encodable copy: replace remaining LabelOperands with Imm(0) so
-	// the encoder sees a valid (placeholder) branch offset.
-	encodable := make([]Instruction, len(physical))
-	copy(encodable, physical)
-	for i, inst := range encodable {
-		if _, ok := inst.Src2.(LabelOperand); ok {
-			encodable[i].Src2 = Imm(0)
-		}
-	}
-
 	saved := a.insts
 	a.insts = physical // assign() reads from a.insts
 
@@ -174,18 +164,18 @@ func (a *Assembler) Compile() (*RelocObject, error) {
 	}
 	a.insts = saved
 
-	// Propagate the resolved LabelOperands from physical into physAssigned
-	// (assign rewrites VRegs→PRegs but passes LabelOperands through unchanged).
-	// Rebuild the encodable copy from the post-assign list.
-	encAssigned := make([]Instruction, len(physAssigned))
-	copy(encAssigned, physAssigned)
-	for i, inst := range encAssigned {
+	// assign() preserves LabelOperands (they pass through rewrite unchanged).
+	// Build an encodable copy with Imm(0) placeholder for each unresolved label
+	// so the encoder sees a syntactically valid branch offset.
+	encodable := make([]Instruction, len(physAssigned))
+	copy(encodable, physAssigned)
+	for i, inst := range encodable {
 		if _, ok := inst.Src2.(LabelOperand); ok {
-			encAssigned[i].Src2 = Imm(0)
+			encodable[i].Src2 = Imm(0)
 		}
 	}
 
-	code, err := Encode(a.arch.Encoder, encAssigned)
+	code, err := Encode(a.arch.Encoder, encodable)
 	if err != nil {
 		return nil, err
 	}
@@ -354,26 +344,45 @@ func (a *Assembler) Reset() {
 }
 
 func (a *Assembler) signature() (*Signature, error) {
-	nReserved := len(a.reserved)
-	nReturns := nReserved + len(a.stack)
-	if nReturns > a.arch.ABI.MaxReturns() {
-		return nil, ErrTooManyReturns
-	}
-	if len(a.params) > a.arch.ABI.MaxParams() {
+	nRes := len(a.reserved)
+	nParams := len(a.params)
+	nReturns := len(a.stack)
+	if nRes+nParams > a.arch.ABI.MaxParams() {
 		return nil, ErrTooManyParams
 	}
-	returns := make([]RegType, nReturns)
+	if nRes+nReturns > a.arch.ABI.MaxReturns() {
+		return nil, ErrTooManyReturns
+	}
+
+	reserved := make([]RegType, nRes)
+	reservedWidths := make([]RegWidth, nRes)
 	for i, rs := range a.reserved {
-		returns[i] = rs.typ
+		reserved[i] = rs.typ
+		reservedWidths[i] = rs.w
 	}
-	for i, reg := range a.stack {
-		returns[nReserved+i] = reg.Type()
-	}
-	params := make([]RegType, len(a.params))
+
+	params := make([]RegType, nParams)
+	paramWidths := make([]RegWidth, nParams)
 	for i, reg := range a.params {
 		params[i] = reg.Type()
+		paramWidths[i] = reg.Width()
 	}
-	return &Signature{Params: params, Returns: returns, ReservedReturns: nReserved}, nil
+
+	returns := make([]RegType, nReturns)
+	returnWidths := make([]RegWidth, nReturns)
+	for i, reg := range a.stack {
+		returns[i] = reg.Type()
+		returnWidths[i] = reg.Width()
+	}
+
+	return &Signature{
+		Reserved:       reserved,
+		ReservedWidths: reservedWidths,
+		Params:         params,
+		ParamWidths:    paramWidths,
+		Returns:        returns,
+		ReturnWidths:   returnWidths,
+	}, nil
 }
 
 func (a *Assembler) assign() ([]Instruction, error) {

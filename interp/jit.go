@@ -48,15 +48,8 @@ func init() {
 // three-pass strategy and returns a sparse slice indexed by instruction offset.
 //
 // Pass 1 – pre-analysis: assign labels; mark blocks whose terminal is BR/BR_IF.
-// Pass 2 – compilation: each block is compiled with Compile() into a RelocObject.
-//
-//	If any instruction fails, the whole block is aborted.
-//	Branch blocks (terminated=true) record their entry/exit metadata.
-//	Non-branch blocks record a fixed exitIP (block's End).
-//
-// Pass 3 – linking: Link() patches cross-block branches and returns Callers.
-//
-//	Closures are installed only for blocks with a non-nil Caller.
+// Pass 2 – compilation: each block is compiled into a RelocObject.
+// Pass 3 – linking: cross-block branches are patched; Callers are returned.
 func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 	if arch == nil {
 		return nil
@@ -122,10 +115,10 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 
 // compileBlock compiles all instructions in b into one RelocObject.
 //
-// Returns (obj, 0) for branch blocks (jit[BR/BR_IF] set c.terminated).
-// Returns (obj, exitIP) for arithmetic blocks where exitIP is the byte offset
-// of the first non-compilable instruction (i.e. where the interpreter resumes).
-// Returns (nil, 0) if any non-terminal instruction fails to compile.
+// Returns (obj, 0) for branch blocks.
+// Returns (obj, prevIP) for arithmetic blocks, where prevIP is the offset of
+// the first non-compilable instruction (the interpreter resumes there).
+// Returns (nil, 0) if the very first instruction fails.
 func (c *jitCompiler) compileBlock(b *analysis.BasicBlock) (*asm.RelocObject, int) {
 	c.ip = b.Start
 	c.terminated = false
@@ -135,11 +128,9 @@ func (c *jitCompiler) compileBlock(b *analysis.BasicBlock) (*asm.RelocObject, in
 
 	count := 0
 	for c.ip < b.End {
-		// Save the IP *before* the handler advances it so we can report the
-		// correct resume point when a non-compilable instruction is encountered.
+		// Capture IP before the handler advances it.
 		prevIP := c.ip
-		op := c.code[c.ip]
-		ok := jit[op](c)
+		ok := jit[c.code[c.ip]](c)
 
 		if c.terminated {
 			break
@@ -147,11 +138,9 @@ func (c *jitCompiler) compileBlock(b *analysis.BasicBlock) (*asm.RelocObject, in
 
 		if !ok {
 			if count == 0 {
-				// Nothing useful was compiled — discard and skip the block.
 				c.assembler.AbortBlock()
 				return nil, 0
 			}
-			// Seal the arithmetic portion compiled so far.
 			jit[_EPILOGUE](c)
 			obj, err := c.assembler.Compile()
 			if err != nil {
@@ -163,7 +152,6 @@ func (c *jitCompiler) compileBlock(b *analysis.BasicBlock) (*asm.RelocObject, in
 	}
 
 	if !c.terminated {
-		// All instructions compiled, no explicit branch — arithmetic block.
 		jit[_EPILOGUE](c)
 	}
 
@@ -173,7 +161,7 @@ func (c *jitCompiler) compileBlock(b *analysis.BasicBlock) (*asm.RelocObject, in
 	}
 
 	if c.terminated {
-		return obj, 0 // branch block: IP from native code
+		return obj, 0 // branch block: next IP is in native code
 	}
 	return obj, b.End // arithmetic block: interpreter resumes at block end
 }
@@ -209,68 +197,81 @@ func (c *jitCompiler) isBranchBlock(b *analysis.BasicBlock) bool {
 }
 
 // makeBranchClosure wraps a branch-block Caller.
-// rets[0..ReservedReturns-1] are metadata (first = next IP);
-// rets[ReservedReturns:] are stack values returned to the interpreter.
+//
+// The native ABI layout is [Reserved..., Params...] for inputs and
+// [Reserved..., Returns...] for outputs.  Reserved input slots are passed as
+// zero (the native code overwrites them); Reserved output slots carry metadata
+// with rets[0] being the next interpreter IP.
 func makeBranchClosure(fn asm.Caller, sig *asm.Signature) func(*Interpreter) {
+	nRes := len(sig.Reserved)
 	nParams := len(sig.Params)
-	nRes := sig.ReservedReturns
-	nStack := len(sig.Returns) - nRes
-
-	kinds := retKinds(sig.Returns[nRes:])
-	params := make([]uint64, nParams)
+	nTotal := nRes + nParams
+	stackKinds := slotKinds(sig.Returns, sig.ReturnWidths)
+	args := make([]uint64, nTotal) // reused; [0..nRes-1] stay zero
 
 	return func(i *Interpreter) {
 		base := i.sp - nParams
-		for j := range params {
-			params[j] = i.unbox64(i.stack[base+j])
+		for j := 0; j < nParams; j++ {
+			args[nRes+j] = i.unbox64(i.stack[base+j])
 		}
-		rets, err := fn.Call(params)
+		rets, err := fn.Call(args)
 		if err != nil {
 			panic(err)
 		}
-		nextIP := int(rets[0])
-		for j := 0; j < nStack; j++ {
-			i.stack[base+j] = i.box64(rets[nRes+j], kinds[j])
+		nextIP := int(rets[0]) // first Reserved output = next IP
+		for j, kind := range stackKinds {
+			i.stack[base+j] = i.box64(rets[nRes+j], kind)
 		}
-		i.sp = base + nStack
+		i.sp = base + len(stackKinds)
 		i.frames[i.fp-1].ip = nextIP
 	}
 }
 
 // makeArithClosure wraps an arithmetic-block Caller with a fixed exit IP.
+// Arithmetic blocks have no Reserved slots.
 func makeArithClosure(fn asm.Caller, sig *asm.Signature, exitIP int) func(*Interpreter) {
 	nParams := len(sig.Params)
-	nRets := len(sig.Returns)
-
-	kinds := retKinds(sig.Returns)
-	params := make([]uint64, nParams)
+	kinds := slotKinds(sig.Returns, sig.ReturnWidths)
+	args := make([]uint64, nParams)
 
 	return func(i *Interpreter) {
 		base := i.sp - nParams
-		for j := range params {
-			params[j] = i.unbox64(i.stack[base+j])
+		for j := range args {
+			args[j] = i.unbox64(i.stack[base+j])
 		}
-		rets, err := fn.Call(params)
+		rets, err := fn.Call(args)
 		if err != nil {
 			panic(err)
 		}
-		for j := 0; j < nRets; j++ {
-			i.stack[base+j] = i.box64(rets[j], kinds[j])
+		for j, kind := range kinds {
+			i.stack[base+j] = i.box64(rets[j], kind)
 		}
-		i.sp = base + nRets
+		i.sp = base + len(kinds)
 		i.frames[i.fp-1].ip = exitIP
 	}
 }
 
-// retKinds converts a slice of RegType to the corresponding types.Kind values.
-func retKinds(returns []asm.RegType) []types.Kind {
-	kinds := make([]types.Kind, len(returns))
-	for i, rt := range returns {
-		switch rt {
+// slotKinds converts parallel RegType/RegWidth slices into boxing kinds.
+func slotKinds(typs []asm.RegType, widths []asm.RegWidth) []types.Kind {
+	kinds := make([]types.Kind, len(typs))
+	for i, t := range typs {
+		w := asm.Width64
+		if i < len(widths) {
+			w = widths[i]
+		}
+		switch t {
 		case asm.RegTypeFloat:
-			kinds[i] = types.KindF64
+			if w == asm.Width32 {
+				kinds[i] = types.KindF32
+			} else {
+				kinds[i] = types.KindF64
+			}
 		default:
-			kinds[i] = types.KindI64
+			if w == asm.Width32 {
+				kinds[i] = types.KindI32
+			} else {
+				kinds[i] = types.KindI64
+			}
 		}
 	}
 	return kinds

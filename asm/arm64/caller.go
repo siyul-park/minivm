@@ -10,8 +10,8 @@ import (
 type caller struct {
 	header  uint64
 	chunk   *asm.Chunk
-	params  []asm.RegType
-	returns []asm.RegType
+	params  []asm.RegType // Reserved + Params (native input ABI order)
+	returns []asm.RegType // Reserved + Returns (native output ABI order)
 }
 
 var _ asm.Caller = (*caller)(nil)
@@ -22,45 +22,49 @@ const (
 )
 
 func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
-	if len(sig.Params) > maxParams {
-		return nil, fmt.Errorf("%w: %d", asm.ErrTooManyParams, len(sig.Params))
-	}
-	if len(sig.Returns) > maxReturns {
-		return nil, fmt.Errorf("%w: %d", asm.ErrTooManyReturns, len(sig.Returns))
-	}
+	// Reserved slots lead both the input and output register lists.
+	allParams := make([]asm.RegType, 0, len(sig.Reserved)+len(sig.Params))
+	allParams = append(allParams, sig.Reserved...)
+	allParams = append(allParams, sig.Params...)
 
-	params := append([]asm.RegType(nil), sig.Params...)
-	returns := append([]asm.RegType(nil), sig.Returns...)
+	allReturns := make([]asm.RegType, 0, len(sig.Reserved)+len(sig.Returns))
+	allReturns = append(allReturns, sig.Reserved...)
+	allReturns = append(allReturns, sig.Returns...)
+
+	if len(allParams) > maxParams {
+		return nil, fmt.Errorf("%w: %d", asm.ErrTooManyParams, len(allParams))
+	}
+	if len(allReturns) > maxReturns {
+		return nil, fmt.Errorf("%w: %d", asm.ErrTooManyReturns, len(allReturns))
+	}
 
 	var paramTypes, returnTypes uint8
-	for i, t := range params {
+	for i, t := range allParams {
 		if t == asm.RegTypeFloat {
 			paramTypes |= 1 << uint(i)
 		}
 	}
-	for i, t := range returns {
+	for i, t := range allReturns {
 		if t == asm.RegTypeFloat {
 			returnTypes |= 1 << uint(i)
 		}
 	}
 
-	header := uint64(len(params)) | uint64(len(returns))<<8 | uint64(paramTypes)<<16 | uint64(returnTypes)<<24
+	header := uint64(len(allParams)) |
+		uint64(len(allReturns))<<8 |
+		uint64(paramTypes)<<16 |
+		uint64(returnTypes)<<24
 
 	return &caller{
 		header:  header,
 		chunk:   chunk,
-		params:  params,
-		returns: returns,
+		params:  allParams,
+		returns: allReturns,
 	}, nil
 }
 
-func (c *caller) Params() []asm.RegType {
-	return c.params
-}
-
-func (c *caller) Returns() []asm.RegType {
-	return c.returns
-}
+func (c *caller) Params() []asm.RegType  { return c.params }
+func (c *caller) Returns() []asm.RegType { return c.returns }
 
 func (c *caller) Call(args []uint64) ([]uint64, error) {
 	var stack [1 + 8]uint64
