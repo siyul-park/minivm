@@ -97,8 +97,8 @@ func (r *REPL) handleMeta(line string) (done bool, err error) {
 		fmt.Fprintln(r.out, "bye")
 		return true, nil
 	case ".reset":
-		r.instrs = r.instrs[:0]
-		r.stack = r.stack[:0]
+		r.instrs = nil
+		r.stack = nil
 		fmt.Fprintln(r.out, "reset.")
 	case ".show":
 		if len(r.instrs) == 0 {
