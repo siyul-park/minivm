@@ -1,7 +1,9 @@
 package instr
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"math"
 	"strconv"
 	"strings"
@@ -60,6 +62,27 @@ func Parse(line string) (Instruction, error) {
 	}
 
 	return New(op, operands...), nil
+}
+
+// ParseAll reads from r line by line and parses each non-empty line as an
+// assembly instruction. It returns the first error encountered with the line
+// number for context.
+func ParseAll(r io.Reader) ([]Instruction, error) {
+	var instrs []Instruction
+	scanner := bufio.NewScanner(r)
+	for line := 1; scanner.Scan(); line++ {
+		inst, err := Parse(scanner.Text())
+		if err != nil {
+			return nil, fmt.Errorf("line %d: %w", line, err)
+		}
+		if inst != nil {
+			instrs = append(instrs, inst)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return instrs, nil
 }
 
 func parseOperands(fields []string, widths []int) ([]uint64, error) {
