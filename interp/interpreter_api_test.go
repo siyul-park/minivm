@@ -166,6 +166,21 @@ func TestInterpreter_Release(t *testing.T) {
 }
 
 func TestInterpreter_Global(t *testing.T) {
+	t.Run("basic", func(t *testing.T) {
+		prog := program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.GLOBAL_SET, 0),
+			},
+		)
+		i := New(prog, WithGlobals(4))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Global(0)
+		require.NoError(t, err)
+		require.Equal(t, int32(42), v.I32())
+	})
 	t.Run("segfault negative", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()

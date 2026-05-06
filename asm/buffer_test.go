@@ -14,13 +14,24 @@ func TestNewCodeBuffer(t *testing.T) {
 }
 
 func TestBuffer_Append(t *testing.T) {
-	b, err := NewBuffer(64)
-	require.NoError(t, err)
-	defer b.Free()
+	t.Run("basic", func(t *testing.T) {
+		b, err := NewBuffer(64)
+		require.NoError(t, err)
+		defer b.Free()
 
-	chunk, err := b.Append([]byte{0x90, 0x90, 0x90})
-	require.NoError(t, err)
-	require.NotNil(t, chunk)
+		chunk, err := b.Append([]byte{0x90, 0x90, 0x90})
+		require.NoError(t, err)
+		require.NotNil(t, chunk)
+	})
+	t.Run("when sealed", func(t *testing.T) {
+		b, err := NewBuffer(64)
+		require.NoError(t, err)
+		defer b.Free()
+
+		require.NoError(t, b.Seal())
+		_, err = b.Append([]byte{0x90})
+		require.ErrorIs(t, err, ErrBufferSealed)
+	})
 }
 
 func TestBuffer_Seal(t *testing.T) {
@@ -56,17 +67,6 @@ func TestBuffer_Sealed(t *testing.T) {
 
 	require.NoError(t, b.Unseal())
 	require.False(t, b.Sealed())
-}
-
-func TestBuffer_Append_WhenSealed(t *testing.T) {
-	b, err := NewBuffer(64)
-	require.NoError(t, err)
-	defer b.Free()
-
-	require.NoError(t, b.Seal())
-
-	_, err = b.Append([]byte{0x90})
-	require.ErrorIs(t, err, ErrBufferSealed)
 }
 
 func TestChunk_Ptr(t *testing.T) {

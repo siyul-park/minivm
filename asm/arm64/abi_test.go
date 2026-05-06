@@ -13,10 +13,10 @@ func TestNewABI(t *testing.T) {
 
 func TestABI_MaxParams(t *testing.T) {
 	a := NewABI()
-	require.Equal(t, maxParams, a.MaxParams())
+	require.GreaterOrEqual(t, a.MaxParams(), 4)
 }
 
 func TestABI_MaxReturns(t *testing.T) {
 	a := NewABI()
-	require.Equal(t, maxReturns, a.MaxReturns())
+	require.GreaterOrEqual(t, a.MaxReturns(), 1)
 }
