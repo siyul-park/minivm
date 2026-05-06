@@ -150,6 +150,23 @@ BasicBlocksPass → ConstantFoldingPass → ConstantDeduplicationPass → DeadCo
 
 All transform passes operate on `*program.Program` in-place by mutating `prog.Code` bytes and `prog.Constants`.
 
+### `cmd/repl/`
+
+`REPL` is the interactive read-eval-print loop. It holds two pieces of state between steps:
+
+| Field | Purpose |
+|---|---|
+| `instrs []instr.Instruction` | accumulated instruction history (used only by `.show` and `.reset`) |
+| `stack []types.Value` | stack values carried across instruction steps |
+
+For each new instruction the REPL creates a fresh single-instruction `program.Program`, initializes a new `interp.Interpreter`, pre-pushes the saved stack values, runs the one instruction, then collects the resulting stack back. This keeps execution cost O(1) per step.
+
+On error the stack and history are not updated, so the session remains consistent. `.reset` sets both fields to `nil`.
+
+### `cmd/minivm/`
+
+Thin cobra entry point. The root command (no subcommand) launches the REPL with `os.Stdin` / `os.Stdout`. Cobra provides `--help` and `--version` automatically. Future subcommands (e.g. `run <file>`) can be added here with no changes to `cmd/repl`.
+
 ## Execution Flow (detailed)
 
 ```

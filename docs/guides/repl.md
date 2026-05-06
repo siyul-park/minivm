@@ -74,10 +74,60 @@ br_table 0x02 0x0000 0x0005 0x0000
 | Hex | `0x2a`, `0x3F800000` | all operands |
 | Unsigned decimal | `42`, `5` | integer operands |
 | Signed decimal | `-1` | integer operands |
-| Float literal | `1.0`, `-3.14` | `f32.const`, `f64.const` |
+| Float literal | `1.0`, `-3.14` | `f32.const`, `f64.const` (encoded as IEEE 754 bits) |
 
-Float literals are encoded as IEEE 754 bits using the operand width (4 bytes
-for f32, 8 bytes for f64).
+## What Works in the REPL
+
+The REPL is designed for stack-based arithmetic and value manipulation.
+Everything that operates purely on value-typed stack entries works correctly.
+
+**Fully supported:**
+
+| Category | Examples |
+|---|---|
+| Integer arithmetic | `i32.add`, `i32.mul`, `i32.div_s`, `i64.sub`, … |
+| Float arithmetic | `f32.add`, `f64.mul`, `f64.div`, … |
+| Comparisons | `i32.eq`, `i32.lt_s`, `f64.ge`, … |
+| Type conversions | `i32.to_i64_s`, `f32.to_f64`, `i64.to_i32`, … |
+| Bitwise ops | `i32.and`, `i32.xor`, `i64.shl`, … |
+| Stack manipulation | `drop`, `dup`, `swap`, `nop` |
+| Branches (within one step) | `br`, `br_if`, `br_table` — but see limitation below |
+| Globals | `global.get`, `global.set`, `global.tee` |
+| Locals | `local.get`, `local.set`, `local.tee` — index relative to bottom of pre-pushed stack |
+| Constants | `const.get` — only if a constant pool step precedes (see limitation) |
+
+## What Does Not Work
+
+### Functions (`call`, `return`, `const.get` pointing to a function)
+
+Functions are heap objects stored in the constant pool of a `program.Program`.
+The REPL creates a fresh single-instruction program per step with no constant
+pool, so there is no way to push a function reference onto the stack.
+
+Supporting functions would require:
+1. A multi-line syntax to declare function bodies and a constant pool inside
+   the REPL session.
+2. A persistent single interpreter shared across all steps (so heap addresses
+   remain valid between instructions).
+
+### Heap-producing instructions (`array.new`, `struct.new`, string ops)
+
+These instructions allocate objects on the interpreter's heap and push a
+`KindRef` (heap index) onto the stack. Each REPL step uses a fresh
+interpreter with an empty heap, so a ref saved from step N points into the
+old interpreter's heap and is invalid in step N+1.
+
+Affected opcodes: `array.new`, `array.new_default`, `array.get`, `array.set`,
+`struct.new`, `struct.new_default`, `struct.get`, `struct.set`,
+`string.new_utf32`, `string.concat`, `ref.null`, `ref.cast`, `ref.test`, and
+all other string/array/struct operations.
+
+### Branches that span multiple steps
+
+A `br 0x0005` instruction is compiled as part of a one-instruction program.
+The branch offset is interpreted relative to the current instruction, so a
+branch within a single step works, but you cannot branch to an instruction
+typed in a previous REPL step.
 
 ## Execution Model
 
@@ -88,21 +138,16 @@ Internally the REPL maintains `stack []types.Value`. For each new instruction:
 
 1. A single-instruction `program.Program` is created.
 2. A fresh `interp.Interpreter` is initialized with saved stack values
-   pre-pushed.
-3. The one instruction executes and the resulting stack is saved.
+   pre-pushed via `Push()`.
+3. The one instruction executes and the resulting stack is saved back.
 4. On error the stack is not updated and the instruction is not added to
-   history.
+   history (session remains consistent).
 
 This gives O(1) execution cost per instruction regardless of session length.
 
-> **Limitation**: `KindRef` values (heap pointers) are bound to a specific
-> interpreter's heap. Transferring them across instruction steps is not
-> supported; instructions that produce refs (e.g. `array.new`, `struct.new`)
-> will not behave correctly in the REPL.
-
 ## Parsing API
 
-The text parser lives in the `instr` package and is available for other uses:
+The text parser lives in the `instr` package and is usable independently:
 
 ```go
 // Parse one line — accepts plain or offset-prefixed format.
@@ -114,12 +159,19 @@ instrs, err  = instr.ParseAll(os.Stdin)
 ```
 
 `ParseAll` skips blank lines and reports the first error with its line number.
-The output of `instr.Disassemble` round-trips cleanly through `ParseAll`.
+The output of `instr.Disassemble` round-trips cleanly through `ParseAll`:
+
+```go
+original := []instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD)}
+text     := instr.Disassemble(instr.Marshal(original))
+parsed, _ := instr.ParseAll(strings.NewReader(text))
+// parsed == original
+```
 
 ## Extending the CLI
 
 `cmd/minivm/main.go` uses [cobra](https://github.com/spf13/cobra). To add a
-new subcommand (e.g. `minivm run <file>`):
+new subcommand (e.g. `minivm run <file>`) that executes an assembly file:
 
 ```go
 runCmd := &cobra.Command{
