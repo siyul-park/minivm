@@ -22,7 +22,7 @@ generate:
 build:
 	@go clean -cache
 	@mkdir -p dist
-	@go build -ldflags "-s -w" -o ./dist/$(PROJECT) ./cmd/...
+	@go build -ldflags "-s -w" -o ./dist/ ./cmd/...
 
 clean:
 	@go clean -cache
