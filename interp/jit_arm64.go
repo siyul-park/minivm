@@ -23,6 +23,128 @@ func init() {
 		return true
 	}
 
+	// BR — unconditional branch.
+	// Emits IP-setting code then RET (interpreter fallback), or a direct B to the
+	// target block's native code (resolved at Link time if target is compilable).
+	jit[instr.BR] = func(c *jitCompiler) bool {
+		// Only valid inside branch-block compilation (blockLabels set).
+		if c.blockLabels == nil {
+			inst := instr.Instruction(c.code[c.ip:])
+			c.ip += inst.Width()
+			return false
+		}
+		// Require empty operand stack at the branch (initial constraint).
+		if len(c.assembler.Returns()) > 0 {
+			inst := instr.Instruction(c.code[c.ip:])
+			c.ip += inst.Width()
+			return false
+		}
+
+		offset := int(uint16(c.code[c.ip+1]) | uint16(c.code[c.ip+2])<<8)
+		targetIP := c.ip + 3 + offset
+		c.ip += 3
+
+		ipReg := c.assembler.Reserve(asm.RegTypeInt, asm.Width64)
+		c.assembler.Push(ipReg)
+
+		if c.compilable[targetIP] {
+			// Emit a B to the target block's label (resolved by Link if compiled).
+			targetLabel := c.blockLabels[targetIP]
+			c.assembler.Emit(arm64.BLabel(targetLabel))
+		} else {
+			// Target not compilable — emit interpreter fallback inline.
+			for _, inst := range arm64.LoadImm64(ipReg, uint64(targetIP)) {
+				c.assembler.Emit(inst)
+			}
+			c.assembler.Emit(arm64.RET())
+		}
+		c.terminated = true
+		return true
+	}
+
+	// BR_IF — conditional branch.
+	// Pops the i32 condition. If non-zero: jump to target; else: fall through.
+	// Both paths emit IP + RET (interpreter fallback) unless the target is
+	// compilable, in which case a B / CBNZ relocation is emitted for Link.
+	jit[instr.BR_IF] = func(c *jitCompiler) bool {
+		if c.blockLabels == nil {
+			inst := instr.Instruction(c.code[c.ip:])
+			c.ip += inst.Width()
+			return false
+		}
+
+		r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
+		if !ok {
+			return false
+		}
+		// Require empty operand stack after popping condition.
+		if len(c.assembler.Returns()) > 0 {
+			return false
+		}
+
+		offset := int(uint16(c.code[c.ip+1]) | uint16(c.code[c.ip+2])<<8)
+		targetIP := c.ip + 3 + offset
+		fallIP := c.ip + 3
+		c.ip += 3
+
+		ipReg := c.assembler.Reserve(asm.RegTypeInt, asm.Width64)
+		c.assembler.Push(ipReg)
+
+		targetCompilable := c.compilable[targetIP]
+		fallCompilable := c.compilable[fallIP]
+
+		// Case A: both compilable — CBNZ to target, B to fallthrough.
+		if targetCompilable && fallCompilable {
+			c.assembler.Emit(arm64.CBNZLabel(r0, c.blockLabels[targetIP]))
+			c.assembler.Emit(arm64.BLabel(c.blockLabels[fallIP]))
+			c.terminated = true
+			return true
+		}
+
+		// Case B: target compilable, fallthrough not.
+		if targetCompilable && !fallCompilable {
+			fallStubLabel := c.assembler.NewLabel()
+			c.assembler.Emit(arm64.CBZLabel(r0, fallStubLabel)) // r0==0 → fall-through
+			c.assembler.Emit(arm64.BLabel(c.blockLabels[targetIP]))
+			c.assembler.PlaceLabel(fallStubLabel)
+			for _, inst := range arm64.LoadImm64(ipReg, uint64(fallIP)) {
+				c.assembler.Emit(inst)
+			}
+			c.assembler.Emit(arm64.RET())
+			c.terminated = true
+			return true
+		}
+
+		// Case C: fallthrough compilable, target not.
+		if !targetCompilable && fallCompilable {
+			takenStubLabel := c.assembler.NewLabel()
+			c.assembler.Emit(arm64.CBNZLabel(r0, takenStubLabel)) // r0!=0 → taken
+			c.assembler.Emit(arm64.BLabel(c.blockLabels[fallIP]))
+			c.assembler.PlaceLabel(takenStubLabel)
+			for _, inst := range arm64.LoadImm64(ipReg, uint64(targetIP)) {
+				c.assembler.Emit(inst)
+			}
+			c.assembler.Emit(arm64.RET())
+			c.terminated = true
+			return true
+		}
+
+		// Case D: neither compilable — emit both fallback paths.
+		takenStubLabel := c.assembler.NewLabel()
+		c.assembler.Emit(arm64.CBNZLabel(r0, takenStubLabel))
+		for _, inst := range arm64.LoadImm64(ipReg, uint64(fallIP)) {
+			c.assembler.Emit(inst)
+		}
+		c.assembler.Emit(arm64.RET())
+		c.assembler.PlaceLabel(takenStubLabel)
+		for _, inst := range arm64.LoadImm64(ipReg, uint64(targetIP)) {
+			c.assembler.Emit(inst)
+		}
+		c.assembler.Emit(arm64.RET())
+		c.terminated = true
+		return true
+	}
+
 	jit[instr.NOP] = func(c *jitCompiler) bool {
 		c.ip++
 		return true

@@ -569,6 +569,13 @@ func BR(reg asm.Reg) asm.Instruction  { return newReg1(OpBR, reg) }
 func BLR(reg asm.Reg) asm.Instruction { return newReg1(OpBLR, reg) }
 func RET() asm.Instruction            { return newInst(OpRET, nil, nil, nil) }
 
+// BLabel emits an unconditional B with a symbolic label target.
+// The label is resolved immediately if already placed in the same block;
+// otherwise it becomes a Relocation patched by Assembler.Link.
+func BLabel(id int) asm.Instruction {
+	return asm.Instruction{Op: uint16(OpB), Src2: asm.LabelOperand{ID: id}}
+}
+
 // ---------------------------------------------------------------------------
 // Branch (compare-and-branch)
 // ---------------------------------------------------------------------------
@@ -578,6 +585,27 @@ func CBZ(reg asm.Reg, offset int32) asm.Instruction {
 }
 func CBNZ(reg asm.Reg, offset int32) asm.Instruction {
 	return newInst(OpCBNZ, nil, regOperand(reg), imm(int64(offset)))
+}
+
+// CBZLabel emits CBZ with a symbolic label target patched by Assembler.Link.
+func CBZLabel(reg asm.Reg, id int) asm.Instruction {
+	return asm.Instruction{Op: uint16(OpCBZ), Src1: regOperand(reg), Src2: asm.LabelOperand{ID: id}}
+}
+
+// CBNZLabel emits CBNZ with a symbolic label target patched by Assembler.Link.
+func CBNZLabel(reg asm.Reg, id int) asm.Instruction {
+	return asm.Instruction{Op: uint16(OpCBNZ), Src1: regOperand(reg), Src2: asm.LabelOperand{ID: id}}
+}
+
+// LoadImm64 returns a 4-instruction MOVZ+MOVK sequence that loads a full
+// 64-bit immediate into dst. Each instruction must be passed to Emit separately.
+func LoadImm64(dst asm.Reg, val uint64) []asm.Instruction {
+	return []asm.Instruction{
+		MOVZ(dst, uint16(val&0xFFFF), 0),
+		MOVK(dst, uint16((val>>16)&0xFFFF), 16),
+		MOVK(dst, uint16((val>>32)&0xFFFF), 32),
+		MOVK(dst, uint16((val>>48)&0xFFFF), 48),
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,25 @@
 package asm
 
+import (
+	"fmt"
+	"unsafe"
+)
+
+// reservedSlot describes a metadata return slot with a user-chosen type/width.
+// Reserved slots are prepended to the Signature.Returns list and pinned to the
+// leading canonical registers so every block shares the same layout.
+type reservedSlot struct {
+	typ  RegType
+	w    RegWidth
+	vreg VReg
+}
+
+// globalLabelEntry records where a label landed after a Compile call.
+type globalLabelEntry struct {
+	chunk  *Chunk
+	offset int // byte offset from chunk start
+}
+
 type Assembler struct {
 	arch      *Arch
 	vregAlloc *VRegAlloc
@@ -8,15 +28,60 @@ type Assembler struct {
 	stack     []VReg
 	params    []VReg
 	insts     []Instruction
+
+	// Survive Reset — shared across all blocks in a function.
+	nextLabel    int
+	globalLabels map[int]globalLabelEntry
+
+	// Reset with each block.
+	localLabels map[int]int // labelID → index in a.insts (set by PlaceLabel)
+	reserved    []reservedSlot
 }
 
 func NewAssembler(arch *Arch, buffer *Buffer) *Assembler {
 	return &Assembler{
-		arch:      arch,
-		vregAlloc: NewVRegAlloc(),
-		regAlloc:  NewRegAlloc(arch.Registers),
-		buffer:    buffer,
+		arch:         arch,
+		vregAlloc:    NewVRegAlloc(),
+		regAlloc:     NewRegAlloc(arch.Registers),
+		buffer:       buffer,
+		globalLabels: make(map[int]globalLabelEntry),
 	}
+}
+
+// NewLabel returns a globally unique label ID. IDs survive Reset.
+func (a *Assembler) NewLabel() int {
+	id := a.nextLabel
+	a.nextLabel++
+	return id
+}
+
+// PlaceLabel marks the current IR position as the definition of label id.
+// Backward-reference branches (id already in globalLabels or localLabels) are
+// resolved immediately in Compile; forward references become Relocations.
+func (a *Assembler) PlaceLabel(id int) {
+	if a.localLabels == nil {
+		a.localLabels = make(map[int]int)
+	}
+	// Record position before the pseudo-instruction itself so the label points
+	// to the next real instruction emitted after PlaceLabel.
+	a.localLabels[id] = len(a.insts)
+	a.insts = append(a.insts, Instruction{Op: OpPseudoLabel, Dst: Label(id)})
+}
+
+// Reserve allocates a VReg prepended to the return signature with the given
+// type and width.  The VReg is pinned to the leading canonical register for
+// its type (X0, D0, …) so every block uses the same layout.
+// Callers write metadata into it (e.g. next IP) before each RET.
+func (a *Assembler) Reserve(typ RegType, w RegWidth) VReg {
+	vreg := a.vregAlloc.Alloc(typ, w)
+	a.reserved = append(a.reserved, reservedSlot{typ: typ, w: w, vreg: vreg})
+	return vreg
+}
+
+// AbortBlock discards any partial compilation and resets per-block state.
+// Call this when a block fails before Compile() is reached.
+func (a *Assembler) AbortBlock() {
+	a.resetBlock()
 }
 
 func (a *Assembler) Params() []VReg {
@@ -70,17 +135,57 @@ func (a *Assembler) Emit(inst Instruction) int {
 	return len(a.insts) - 1
 }
 
-func (a *Assembler) Build() (Caller, error) {
-	sig, err := a.signature()
-	if err != nil {
-		return nil, err
-	}
-	instrs, err := a.assign()
+// Compile encodes the current IR into a RelocObject for one block.
+//
+// Intra-block labels are resolved to PC-relative immediates immediately.
+// Cross-block LabelOperands are preserved in RelocObject.Instrs and listed as
+// Relocations; Link re-encodes them once target addresses are known.
+//
+// Per-block state is cleared by resetBlock; nextLabel and globalLabels survive
+// so all blocks in a function share one label namespace.
+func (a *Assembler) Compile() (*RelocObject, error) {
+	physical, localBytes, relocs, err := a.resolveLabels()
 	if err != nil {
 		return nil, err
 	}
 
-	code, err := Encode(a.arch.Encoder, instrs)
+	// Build an encodable copy: replace remaining LabelOperands with Imm(0) so
+	// the encoder sees a valid (placeholder) branch offset.
+	encodable := make([]Instruction, len(physical))
+	copy(encodable, physical)
+	for i, inst := range encodable {
+		if _, ok := inst.Src2.(LabelOperand); ok {
+			encodable[i].Src2 = Imm(0)
+		}
+	}
+
+	saved := a.insts
+	a.insts = physical // assign() reads from a.insts
+
+	sig, err := a.signature()
+	if err != nil {
+		a.insts = saved
+		return nil, err
+	}
+	physAssigned, err := a.assign()
+	if err != nil {
+		a.insts = saved
+		return nil, err
+	}
+	a.insts = saved
+
+	// Propagate the resolved LabelOperands from physical into physAssigned
+	// (assign rewrites VRegs→PRegs but passes LabelOperands through unchanged).
+	// Rebuild the encodable copy from the post-assign list.
+	encAssigned := make([]Instruction, len(physAssigned))
+	copy(encAssigned, physAssigned)
+	for i, inst := range encAssigned {
+		if _, ok := inst.Src2.(LabelOperand); ok {
+			encAssigned[i].Src2 = Imm(0)
+		}
+	}
+
+	code, err := Encode(a.arch.Encoder, encAssigned)
 	if err != nil {
 		return nil, err
 	}
@@ -88,25 +193,150 @@ func (a *Assembler) Build() (Caller, error) {
 	if err := a.buffer.Unseal(); err != nil {
 		return nil, err
 	}
-
 	chunk, err := a.buffer.Append(code)
 	if err != nil {
 		return nil, err
+	}
+	if err := a.buffer.Seal(); err != nil {
+		return nil, err
+	}
+
+	for id, off := range localBytes {
+		a.globalLabels[id] = globalLabelEntry{chunk: chunk, offset: off}
+	}
+
+	a.resetBlock()
+
+	return &RelocObject{
+		Chunk:  chunk,
+		Sig:    sig,
+		Instrs: physAssigned,
+		Labels: localBytes,
+		Relocs: relocs,
+	}, nil
+}
+
+// Link resolves all Relocations across the given objects and returns one Caller
+// per object.  Objects whose labels cannot all be resolved get a nil Caller;
+// the first such failure is returned as the error (others still succeed).
+// After Link the buffer is sealed and callers can be invoked immediately.
+func (a *Assembler) Link(objects []*RelocObject) ([]Caller, error) {
+	if err := a.buffer.Unseal(); err != nil {
+		return nil, err
+	}
+
+	var firstErr error
+	failed := make([]bool, len(objects))
+
+	for i, obj := range objects {
+		base := uintptr(obj.Chunk.Ptr())
+		for _, r := range obj.Relocs {
+			entry, ok := a.globalLabels[r.Label]
+			if !ok {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("unresolved label %d", r.Label)
+				}
+				failed[i] = true
+				continue
+			}
+			target := uintptr(entry.chunk.Ptr()) + uintptr(entry.offset)
+			src := base + uintptr(r.Offset)
+			off := int64(target) - int64(src)
+
+			// Re-encode the instruction with the resolved offset.
+			// This is architecture-agnostic: the encoder owns the bit layout.
+			inst := obj.Instrs[r.InstrIdx]
+			inst.Src2 = Imm(off)
+			patched, err := a.arch.Encoder.Encode(inst)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				failed[i] = true
+				continue
+			}
+			writeBytes(unsafe.Pointer(src), patched)
+		}
 	}
 
 	if err := a.buffer.Seal(); err != nil {
 		return nil, err
 	}
 
-	a.Reset()
-	return a.arch.NewCaller(sig, chunk)
+	callers := make([]Caller, len(objects))
+	for i, obj := range objects {
+		if failed[i] {
+			continue
+		}
+		caller, err := a.arch.NewCaller(obj.Sig, obj.Chunk)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		callers[i] = caller
+	}
+	return callers, firstErr
 }
 
-func (a *Assembler) Reset() {
+// resolveLabels strips OpPseudoLabel pseudo-instructions, computes intra-block
+// label byte offsets, resolves local LabelOperands to PC-relative immediates,
+// and returns cross-block LabelOperands intact so that Link can re-encode them.
+//
+// Returns:
+//
+//	physical   – instruction list ready for assign() (ARM64: 4 bytes each)
+//	localBytes – intra-block label positions (byte offset from chunk start)
+//	relocs     – unresolved cross-block references
+func (a *Assembler) resolveLabels() (physical []Instruction, localBytes map[int]int, relocs []Relocation, err error) {
+	// Pass 1: compute byte position of each intra-block label.
+	localBytes = make(map[int]int)
+	bytePos := 0
+	for _, inst := range a.insts {
+		if inst.Op == OpPseudoLabel {
+			if lbl, ok := inst.Dst.(LabelOperand); ok {
+				localBytes[lbl.ID] = bytePos
+			}
+			continue
+		}
+		bytePos += 4
+	}
+
+	// Pass 2: strip pseudo-instructions, patch or record label references.
+	instrIdx := 0
+	bytePos = 0
+	for _, inst := range a.insts {
+		if inst.Op == OpPseudoLabel {
+			continue
+		}
+		if lbl, ok := inst.Src2.(LabelOperand); ok {
+			if off, found := localBytes[lbl.ID]; found {
+				// Intra-block: resolve immediately.
+				inst.Src2 = Imm(int64(off - bytePos))
+			} else {
+				// Cross-block: keep LabelOperand for re-encoding at Link time.
+				relocs = append(relocs, Relocation{
+					InstrIdx: instrIdx,
+					Offset:   bytePos,
+					Label:    lbl.ID,
+				})
+			}
+		}
+		physical = append(physical, inst)
+		instrIdx++
+		bytePos += 4
+	}
+	return
+}
+
+// resetBlock clears per-block state. nextLabel and globalLabels are preserved.
+func (a *Assembler) resetBlock() {
 	a.stack = a.stack[:0]
 	a.params = a.params[:0]
 	a.insts = a.insts[:0]
-
+	a.localLabels = nil
+	a.reserved = a.reserved[:0]
 	if a.vregAlloc != nil {
 		a.vregAlloc.Reset()
 	}
@@ -115,22 +345,35 @@ func (a *Assembler) Reset() {
 	}
 }
 
+// Reset fully resets the assembler, including the shared label namespace.
+// Call this between function compilations (not between blocks of the same function).
+func (a *Assembler) Reset() {
+	a.resetBlock()
+	a.nextLabel = 0
+	a.globalLabels = make(map[int]globalLabelEntry)
+}
+
 func (a *Assembler) signature() (*Signature, error) {
-	if len(a.stack) > a.arch.ABI.MaxReturns() {
+	nReserved := len(a.reserved)
+	nReturns := nReserved + len(a.stack)
+	if nReturns > a.arch.ABI.MaxReturns() {
 		return nil, ErrTooManyReturns
 	}
 	if len(a.params) > a.arch.ABI.MaxParams() {
 		return nil, ErrTooManyParams
 	}
+	returns := make([]RegType, nReturns)
+	for i, rs := range a.reserved {
+		returns[i] = rs.typ
+	}
+	for i, reg := range a.stack {
+		returns[nReserved+i] = reg.Type()
+	}
 	params := make([]RegType, len(a.params))
 	for i, reg := range a.params {
 		params[i] = reg.Type()
 	}
-	returns := make([]RegType, len(a.stack))
-	for i, reg := range a.stack {
-		returns[i] = reg.Type()
-	}
-	return &Signature{Params: params, Returns: returns}, nil
+	return &Signature{Params: params, Returns: returns, ReservedReturns: nReserved}, nil
 }
 
 func (a *Assembler) assign() ([]Instruction, error) {
@@ -149,7 +392,20 @@ func (a *Assembler) assign() ([]Instruction, error) {
 	virtual := make(map[uint8]VReg)
 	fixed := make(map[int32]PReg)
 
+	// Reserved output slots occupy leading canonical registers for their type.
 	intR, floatR := 0, 0
+	for _, rs := range a.reserved {
+		var p PReg
+		if rs.typ == RegTypeFloat {
+			p = floatRegs[floatR]
+			floatR++
+		} else {
+			p = intRegs[intR]
+			intR++
+		}
+		fixed[rs.vreg.ID()] = p
+	}
+	// Stack outputs follow reserved slots.
 	for _, v := range a.stack {
 		var p PReg
 		if v.Type() == RegTypeFloat {
