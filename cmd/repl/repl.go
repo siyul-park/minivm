@@ -17,7 +17,7 @@ const prompt = "> "
 
 const helpText = `MiniVM Assembly REPL
 
-Enter assembly instructions one per line. Each instruction is executed
+Enter assembly instructions one per line. Each instruction executes
 immediately and the current stack is shown after each step.
 
 Instructions (examples):
@@ -28,16 +28,17 @@ Instructions (examples):
 
 Commands:
   .show               show disassembly of accumulated program
-  .reset              clear all accumulated instructions
+  .reset              clear all accumulated instructions and stack
   .help               show this help
   .quit  /  .exit     exit the REPL
 `
 
-// REPL holds accumulated instructions and runs them interactively.
+// REPL holds accumulated instructions and persistent stack state.
 type REPL struct {
 	in     io.Reader
 	out    io.Writer
-	instrs []instr.Instruction
+	instrs []instr.Instruction // for .show and .reset
+	stack  []types.Value       // stack state carried across instructions
 }
 
 // New returns a new REPL that reads from in and writes to out.
@@ -82,12 +83,11 @@ func (r *REPL) Run(ctx context.Context) error {
 			continue
 		}
 
-		r.instrs = append(r.instrs, inst)
-
-		if err := r.execute(ctx); err != nil {
-			r.instrs = r.instrs[:len(r.instrs)-1]
+		if err := r.execute(ctx, inst); err != nil {
 			fmt.Fprintf(r.out, "error: %v\n", err)
+			continue
 		}
+		r.instrs = append(r.instrs, inst)
 	}
 }
 
@@ -98,6 +98,7 @@ func (r *REPL) handleMeta(line string) (done bool, err error) {
 		return true, nil
 	case ".reset":
 		r.instrs = r.instrs[:0]
+		r.stack = r.stack[:0]
 		fmt.Fprintln(r.out, "reset.")
 	case ".show":
 		if len(r.instrs) == 0 {
@@ -114,37 +115,51 @@ func (r *REPL) handleMeta(line string) (done bool, err error) {
 	return false, nil
 }
 
-func (r *REPL) execute(ctx context.Context) error {
-	prog := program.New(r.instrs)
+// execute runs a single instruction on top of the saved stack state.
+// On success it updates r.stack and prints the result; on error it leaves
+// r.stack unchanged.
+func (r *REPL) execute(ctx context.Context, inst instr.Instruction) error {
+	prog := program.New([]instr.Instruction{inst})
 	vm := interp.New(prog)
 	defer vm.Close()
+
+	// Restore saved stack into the new interpreter before running.
+	for _, v := range r.stack {
+		if err := vm.Push(v); err != nil {
+			return err
+		}
+	}
 
 	if err := vm.Run(ctx); err != nil {
 		return err
 	}
 
-	printStack(r.out, vm)
-	return nil
-}
-
-func printStack(out io.Writer, vm *interp.Interpreter) {
-	var vals []types.Value
+	// Collect resulting stack (TOS first) and update saved state.
+	var newStack []types.Value
 	for {
 		v, err := vm.Pop()
 		if err != nil {
 			break
 		}
-		vals = append(vals, v)
+		newStack = append(newStack, v)
 	}
+	// Reverse to bottom-to-top order.
+	for l, r := 0, len(newStack)-1; l < r; l, r = l+1, r-1 {
+		newStack[l], newStack[r] = newStack[r], newStack[l]
+	}
+	r.stack = newStack
 
-	if len(vals) == 0 {
+	printStack(r.out, r.stack)
+	return nil
+}
+
+func printStack(out io.Writer, stack []types.Value) {
+	if len(stack) == 0 {
 		return
 	}
-
-	// vals[0] is TOS; display bottom-to-top
-	parts := make([]string, len(vals))
-	for i, v := range vals {
-		parts[len(vals)-1-i] = v.String()
+	parts := make([]string, len(stack))
+	for i, v := range stack {
+		parts[i] = v.String()
 	}
 	fmt.Fprintln(out, strings.Join(parts, " "))
 }
