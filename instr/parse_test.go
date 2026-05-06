@@ -1,11 +1,28 @@
 package instr
 
 import (
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+// parseAll is a test helper that parses multiple newline-separated lines.
+func parseAll(text string) ([]Instruction, error) {
+	var instrs []Instruction
+	for i, line := range strings.Split(text, "\n") {
+		inst, err := Parse(line)
+		if err != nil {
+			return nil, fmt.Errorf("line %d: %w", i+1, err)
+		}
+		if inst != nil {
+			instrs = append(instrs, inst)
+		}
+	}
+	return instrs, nil
+}
 
 func TestParse(t *testing.T) {
 	tests := []struct {
@@ -132,52 +149,35 @@ func TestParse(t *testing.T) {
 			require.Equal(t, tt.want, got)
 		})
 	}
-}
 
-func TestParseAll(t *testing.T) {
-	t.Run("basic", func(t *testing.T) {
-		instrs, err := ParseAll("i32.const 1\ni32.const 2\ni32.add")
+	t.Run("multi-line basic", func(t *testing.T) {
+		got, err := parseAll("i32.const 1\ni32.const 2\ni32.add")
 		require.NoError(t, err)
-		require.Equal(t, []Instruction{
-			New(I32_CONST, 1),
-			New(I32_CONST, 2),
-			New(I32_ADD),
-		}, instrs)
+		require.Equal(t, []Instruction{New(I32_CONST, 1), New(I32_CONST, 2), New(I32_ADD)}, got)
 	})
 
-	t.Run("blank lines skipped", func(t *testing.T) {
-		instrs, err := ParseAll("\ni32.const 1\n\ni32.add\n")
+	t.Run("multi-line blank lines skipped", func(t *testing.T) {
+		got, err := parseAll("\ni32.const 1\n\ni32.add\n")
 		require.NoError(t, err)
-		require.Equal(t, []Instruction{
-			New(I32_CONST, 1),
-			New(I32_ADD),
-		}, instrs)
+		require.Equal(t, []Instruction{New(I32_CONST, 1), New(I32_ADD)}, got)
 	})
 
-	t.Run("error propagates", func(t *testing.T) {
-		_, err := ParseAll("i32.const 1\nbad.op\ni32.add")
+	t.Run("multi-line error propagates", func(t *testing.T) {
+		_, err := parseAll("i32.const 1\nbad.op\ni32.add")
 		require.Error(t, err)
 	})
 
 	t.Run("round-trip with Disassemble", func(t *testing.T) {
-		original := []Instruction{
-			New(I32_CONST, 1),
-			New(I32_CONST, 2),
-			New(I32_ADD),
-		}
-		disasm := Disassemble(Marshal(original))
-		parsed, err := ParseAll(disasm)
+		original := []Instruction{New(I32_CONST, 1), New(I32_CONST, 2), New(I32_ADD)}
+		got, err := parseAll(Disassemble(Marshal(original)))
 		require.NoError(t, err)
-		require.Equal(t, original, parsed)
+		require.Equal(t, original, got)
 	})
 
 	t.Run("round-trip br_table", func(t *testing.T) {
-		original := []Instruction{
-			New(BR_TABLE, 2, 0, 1, 0),
-		}
-		disasm := Disassemble(Marshal(original))
-		parsed, err := ParseAll(disasm)
+		original := []Instruction{New(BR_TABLE, 2, 0, 1, 0)}
+		got, err := parseAll(Disassemble(Marshal(original)))
 		require.NoError(t, err)
-		require.Equal(t, original, parsed)
+		require.Equal(t, original, got)
 	})
 }

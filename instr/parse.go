@@ -62,22 +62,6 @@ func Parse(line string) (Instruction, error) {
 	return New(op, operands...), nil
 }
 
-// ParseAll parses multiple newline-separated assembly instruction lines.
-// Empty lines are skipped. Returns the first error encountered.
-func ParseAll(text string) ([]Instruction, error) {
-	var instrs []Instruction
-	for lineNum, line := range strings.Split(text, "\n") {
-		inst, err := Parse(line)
-		if err != nil {
-			return nil, fmt.Errorf("line %d: %w", lineNum+1, err)
-		}
-		if inst != nil {
-			instrs = append(instrs, inst)
-		}
-	}
-	return instrs, nil
-}
-
 func parseOperands(fields []string, widths []int) ([]uint64, error) {
 	var operands []uint64
 	fi := 0
