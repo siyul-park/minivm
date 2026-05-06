@@ -37,7 +37,7 @@ func New(instrs []instr.Instruction, options ...func(*Program)) *Program {
 
 func (p *Program) String() string {
 	var sb strings.Builder
-	sb.WriteString(instr.Disassemble(p.Code))
+	sb.WriteString(instr.Format(p.Code))
 	if len(p.Constants) > 0 {
 		sb.WriteString("\n")
 		for i, c := range p.Constants {

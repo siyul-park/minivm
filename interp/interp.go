@@ -344,8 +344,17 @@ func (i *Interpreter) Pop() (types.Value, error) {
 	return i.unbox(i.stack[i.sp]), nil
 }
 
+// Peek returns the raw NaN-boxed value at position n from the top of the stack
+// (n=0 is TOS) without consuming it or modifying reference counts.
+func (i *Interpreter) Peek(n int) (types.Boxed, error) {
+	if n < 0 || i.sp <= n {
+		return 0, ErrStackUnderflow
+	}
+	return i.stack[i.sp-1-n], nil
+}
+
 func (i *Interpreter) Len() int {
-	return i.sp - 1
+	return i.sp
 }
 
 func (i *Interpreter) Close() error {
@@ -462,6 +471,14 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 	switch v := val.(type) {
 	case types.Boxed:
 		return v
+	case types.I32:
+		return types.BoxI32(int32(v))
+	case types.I64:
+		return i.boxI64(int64(v))
+	case types.F32:
+		return types.BoxF32(float32(v))
+	case types.F64:
+		return types.BoxF64(float64(v))
 	default:
 		addr := i.alloc(v)
 		return types.BoxRef(addr)

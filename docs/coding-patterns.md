@@ -89,6 +89,32 @@ Rules:
 
 ---
 
+## 2.1b Parser naming
+
+Text-to-value parsers use `Parse` (not `Parse<Type>`).
+
+```go
+// types/parse.go
+func Parse(s string) (Type, error)          // parses any Type.String() output
+func ParseFunction(lines []string) (*Function, error)  // parses Function.String() lines
+
+// instr/parse.go
+func Parse(line string) (Instruction, error)
+func ParseAll(r io.Reader) ([]Instruction, error)
+
+// program/parse.go
+func Parse(r io.Reader) (*Program, error)   // round-trips Program.String()
+```
+
+Rules:
+
+* The base name `Parse` parses the primary type of the package (e.g. `types.Parse` → `Type`)
+* Use `Parse<Specific>` only when the package has multiple distinct parseable types
+  (e.g. `types.ParseFunction` because `types.Parse` already handles the `Type` interface)
+* `ParseAll` is the batch variant — reads from `io.Reader`, skips blank lines
+
+---
+
 ## 2.2 Functional options
 
 Use functional options for optional configuration.

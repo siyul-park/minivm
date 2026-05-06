@@ -31,6 +31,11 @@ transform ──► analysis, pass, types, instr, program
    ▲
    │
 optimize ──► transform, analysis, pass, program
+
+cmd/repl ──► instr, interp, program, types
+   ▲
+   │
+cmd/minivm ──► cmd/repl   (cobra CLI entry point)
 ```
 
 **Simplified view** (most important paths):
@@ -38,6 +43,7 @@ optimize ──► transform, analysis, pass, program
 program → instr → (nothing)
 interp  → program, instr, types, asm, pass, analysis
 optimize → transform → analysis → pass
+cmd/repl → instr, interp, program, types
 ```
 
 ## Component Responsibilities
@@ -62,7 +68,9 @@ The instruction set is a `byte`-sized `Opcode`. Each opcode has an associated `T
 
 `instr.Marshal([]Instruction) []byte` → serializes.  
 `instr.Unmarshal([]byte) []Instruction` → deserializes.  
-`instr.Disassemble([]byte) string` → human-readable output for debugging.
+`instr.Format([]byte) string` → human-readable output for debugging.  
+`instr.Parse(line string) (Instruction, error)` → parses one text line back to bytecode; accepts both plain (`i32.const 42`) and offset-prefixed (`0000:\ti32.const 0x0000002a`) formats.  
+`instr.ParseAll(r io.Reader) ([]Instruction, error)` → reads from any `io.Reader` line-by-line, skipping blank lines.
 
 ### `types/`
 
@@ -141,6 +149,23 @@ BasicBlocksPass → ConstantFoldingPass → ConstantDeduplicationPass → DeadCo
 ```
 
 All transform passes operate on `*program.Program` in-place by mutating `prog.Code` bytes and `prog.Constants`.
+
+### `cmd/repl/`
+
+`REPL` is the interactive read-eval-print loop. It holds two pieces of state between steps:
+
+| Field | Purpose |
+|---|---|
+| `instrs []instr.Instruction` | accumulated instruction history (used only by `.show` and `.reset`) |
+| `stack []types.Value` | stack values carried across instruction steps |
+
+For each new instruction the REPL creates a fresh single-instruction `program.Program`, initializes a new `interp.Interpreter`, pre-pushes the saved stack values, runs the one instruction, then collects the resulting stack back. This keeps execution cost O(1) per step.
+
+On error the stack and history are not updated, so the session remains consistent. `.reset` sets both fields to `nil`.
+
+### `cmd/minivm/`
+
+Thin cobra entry point. The root command (no subcommand) launches the REPL with `os.Stdin` / `os.Stdout`. Cobra provides `--help` and `--version` automatically. Future subcommands (e.g. `run <file>`) can be added here with no changes to `cmd/repl`.
 
 ## Execution Flow (detailed)
 
