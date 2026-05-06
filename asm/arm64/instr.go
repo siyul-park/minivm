@@ -603,9 +603,9 @@ func CBNZLabel(reg asm.Reg, id int) asm.Instruction {
 	return asm.Instruction{Op: uint16(OpCBNZ), Src1: regOperand(reg), Src2: asm.LabelOperand{ID: id}}
 }
 
-// LoadImm64 returns a 4-instruction MOVZ+MOVK sequence that loads a full
+// LDI returns a 4-instruction MOVZ+MOVK sequence that loads a full
 // 64-bit immediate into dst. Each instruction must be passed to Emit separately.
-func LoadImm64(dst asm.Reg, val uint64) []asm.Instruction {
+func LDI(dst asm.Reg, val uint64) []asm.Instruction {
 	return []asm.Instruction{
 		MOVZ(dst, uint16(val&0xFFFF), 0),
 		MOVK(dst, uint16((val>>16)&0xFFFF), 16),

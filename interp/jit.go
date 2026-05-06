@@ -18,7 +18,7 @@ type jitCompiler struct {
 
 	// Shared across all blocks in a function; set before any block is compiled.
 	blockLabels map[int]int  // blockStart IP → label ID
-	compilable  map[int]bool // optimistic: true if block ends with BR/BR_IF
+	compilable  map[int]bool // optimistic: true if block ends with BR/BR_IF/BR_TABLE
 
 	// Set by jit[BR] / jit[BR_IF] when the handler emits its own terminator.
 	terminated bool
@@ -65,26 +65,54 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 
 	compiled := make([]func(*Interpreter), len(code))
 
-	// Pass 1 — pre-assign labels and determine branch-compilable blocks.
+	// Pre-assign label IDs for every block so handlers can reference targets by
+	// label before those blocks are compiled.
 	c.blockLabels = make(map[int]int, len(blocks))
 	c.compilable = make(map[int]bool, len(blocks))
 	for _, b := range blocks {
 		c.blockLabels[b.Start] = c.assembler.NewLabel()
-		c.compilable[b.Start] = c.isBranchBlock(b)
 	}
 
-	// Pass 2 — compile each block.
 	type blockMeta struct {
 		obj     *asm.RelocObject
 		entryIP int
-		exitIP  int // 0 = branch block (IP comes from native code), >0 = arith
+		exitIP  int // 0 = branch block (IP from native code), >0 = arith
 	}
 	var allObjs []*asm.RelocObject
 	var allMeta []blockMeta
 
+	// Pass 1 — compile every block in program order.
+	//
+	// Branch blocks are marked compilable after actual success.  Backward
+	// references to already-compiled targets emit BLabel; forward references
+	// still use LoadImm64+RET because the target is unknown at this point.
+	var branchBlocks []*analysis.BasicBlock
 	for _, b := range blocks {
 		obj, exitIP := c.compileBlock(b)
 		if obj == nil {
+			continue
+		}
+		if exitIP == 0 {
+			// Branch block compiled successfully: mark so later blocks can link.
+			c.compilable[b.Start] = true
+			branchBlocks = append(branchBlocks, b)
+		} else {
+			// Arithmetic block: pass-1 result is final (no branch decisions).
+			allObjs = append(allObjs, obj)
+			allMeta = append(allMeta, blockMeta{obj, b.Start, exitIP})
+		}
+	}
+
+	// Pass 2 — recompile branch blocks with the now-accurate compilable map.
+	//
+	// Forward references that pointed to not-yet-compiled targets in pass 1
+	// now emit BLabel, so every compilable target gets a direct native link.
+	// Arithmetic blocks are unchanged; only branch blocks are recompiled.
+	for _, b := range branchBlocks {
+		obj, exitIP := c.compileBlock(b)
+		if obj == nil {
+			// Should not happen (pass 1 succeeded), but handle defensively.
+			c.compilable[b.Start] = false
 			continue
 		}
 		allObjs = append(allObjs, obj)
@@ -104,9 +132,9 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 		}
 		sig := meta.obj.Sig
 		if meta.exitIP == 0 {
-			compiled[meta.entryIP] = makeBranchClosure(caller, sig)
+			compiled[meta.entryIP] = c.branchClosure(caller, sig)
 		} else {
-			compiled[meta.entryIP] = makeArithClosure(caller, sig, meta.exitIP)
+			compiled[meta.entryIP] = c.arithClosure(caller, sig, meta.exitIP)
 		}
 	}
 
@@ -182,44 +210,28 @@ func (c *jitCompiler) getBlocks(code []byte) []*analysis.BasicBlock {
 	return blocks
 }
 
-// isBranchBlock reports whether b's terminal instruction is BR or BR_IF.
-func (c *jitCompiler) isBranchBlock(b *analysis.BasicBlock) bool {
-	if b.Start >= b.End {
-		return false
-	}
-	ip := b.Start
-	var last byte
-	for ip < b.End {
-		last = c.code[ip]
-		ip += instr.Instruction(c.code[ip:]).Width()
-	}
-	op := instr.Opcode(last)
-	return op == instr.BR || op == instr.BR_IF || op == instr.BR_TABLE
-}
-
-// makeBranchClosure wraps a branch-block Caller.
+// branchClosure wraps a branch-block Caller.
 //
-// The native ABI layout is [Reserved..., Params...] for inputs and
-// [Reserved..., Returns...] for outputs.  Reserved input slots are passed as
-// zero (the native code overwrites them); Reserved output slots carry metadata
-// with rets[0] being the next interpreter IP.
-func makeBranchClosure(fn asm.Caller, sig *asm.Signature) func(*Interpreter) {
+// Native ABI: inputs = [Reserved..., Params...], outputs = [Reserved..., Returns...].
+// Reserved input slots are zeroed (native code overwrites them on output);
+// rets[0] carries the next interpreter IP.
+func (c *jitCompiler) branchClosure(fn asm.Caller, sig *asm.Signature) func(*Interpreter) {
 	nRes := len(sig.Reserved)
 	nParams := len(sig.Params)
 	nTotal := nRes + nParams
-	stackKinds := slotKinds(sig.Returns, sig.ReturnWidths)
+	stackKinds := c.slotKinds(sig.Returns, sig.ReturnWidths)
 	args := make([]uint64, nTotal) // reused; [0..nRes-1] stay zero
 
 	return func(i *Interpreter) {
 		base := i.sp - nParams
-		for j := 0; j < nParams; j++ {
+		for j := range nParams {
 			args[nRes+j] = i.unbox64(i.stack[base+j])
 		}
 		rets, err := fn.Call(args)
 		if err != nil {
 			panic(err)
 		}
-		nextIP := int(rets[0]) // first Reserved output = next IP
+		nextIP := int(rets[0])
 		for j, kind := range stackKinds {
 			i.stack[base+j] = i.box64(rets[nRes+j], kind)
 		}
@@ -228,11 +240,11 @@ func makeBranchClosure(fn asm.Caller, sig *asm.Signature) func(*Interpreter) {
 	}
 }
 
-// makeArithClosure wraps an arithmetic-block Caller with a fixed exit IP.
+// arithClosure wraps an arithmetic-block Caller with a fixed exit IP.
 // Arithmetic blocks have no Reserved slots.
-func makeArithClosure(fn asm.Caller, sig *asm.Signature, exitIP int) func(*Interpreter) {
+func (c *jitCompiler) arithClosure(fn asm.Caller, sig *asm.Signature, exitIP int) func(*Interpreter) {
 	nParams := len(sig.Params)
-	kinds := slotKinds(sig.Returns, sig.ReturnWidths)
+	kinds := c.slotKinds(sig.Returns, sig.ReturnWidths)
 	args := make([]uint64, nParams)
 
 	return func(i *Interpreter) {
@@ -253,7 +265,7 @@ func makeArithClosure(fn asm.Caller, sig *asm.Signature, exitIP int) func(*Inter
 }
 
 // slotKinds converts parallel RegType/RegWidth slices into boxing kinds.
-func slotKinds(typs []asm.RegType, widths []asm.RegWidth) []types.Kind {
+func (c *jitCompiler) slotKinds(typs []asm.RegType, widths []asm.RegWidth) []types.Kind {
 	kinds := make([]types.Kind, len(typs))
 	for i, t := range typs {
 		w := asm.Width64

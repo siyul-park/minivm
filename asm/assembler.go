@@ -129,6 +129,12 @@ func (a *Assembler) Emit(inst Instruction) int {
 	return len(a.insts) - 1
 }
 
+// Emits appends multiple instructions in one call.
+// Useful for instruction sequences returned by helpers such as LoadImm64.
+func (a *Assembler) Emits(insts ...Instruction) {
+	a.insts = append(a.insts, insts...)
+}
+
 // Compile encodes the current IR into a RelocObject for one block.
 //
 // Intra-block labels are resolved to PC-relative immediates immediately.

@@ -15,10 +15,12 @@ type Relocation struct {
 // the physical instruction list, exported labels, and unresolved references.
 // Sig is kept so the caller can construct a Caller after Link completes.
 type RelocObject struct {
-	Chunk  *Chunk
-	Sig    *Signature
-	Instrs []Instruction // physical instructions after register allocation;
-	// unresolved branches retain their LabelOperand in Src2
+	Chunk *Chunk
+	Sig   *Signature
+	// Instrs holds the post-register-allocation instruction list.
+	// Unresolved cross-block branches retain their LabelOperand in Src2
+	// so that Link can re-encode them once the target address is known.
+	Instrs []Instruction
 	Labels map[int]int // labelID → byte offset from Chunk start
 	Relocs []Relocation
 }

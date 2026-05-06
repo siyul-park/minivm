@@ -185,6 +185,8 @@ var _ Type      = (*StructType)(nil)
 
 Order declarations by abstraction level:
 
+### File layout within a package
+
 1. Exported interfaces and types
 2. Exported error variables
 3. Interface compliance assertions
@@ -322,6 +324,20 @@ return fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
 * Use panic in execution hot paths only
 * Recover once at the boundary (e.g. `interp.Run`)
 * Do not use panic in general logic
+
+---
+
+### 3.4 Methods vs package-level functions
+
+If a function is only used by one receiver type, make it a method — not a package-level function.  Package-level functions are for utilities shared across multiple types or callers.
+
+```go
+// ✗ package-level function only used by jitCompiler
+func makeBranchClosure(fn Caller, sig *Signature) func(*Interpreter) { ... }
+
+// ✓ method — ownership is explicit, receiver gives context
+func (c *jitCompiler) branchClosure(fn Caller, sig *Signature) func(*Interpreter) { ... }
+```
 
 ---
 

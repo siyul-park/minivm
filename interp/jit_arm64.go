@@ -44,9 +44,7 @@ func init() {
 		if c.compilable[targetIP] {
 			c.assembler.Emit(arm64.BLabel(c.blockLabels[targetIP]))
 		} else {
-			for _, inst := range arm64.LoadImm64(ipReg, uint64(targetIP)) {
-				c.assembler.Emit(inst)
-			}
+			c.assembler.Emits(arm64.LDI(ipReg, uint64(targetIP))...)
 			c.assembler.Emit(arm64.RET())
 		}
 		c.terminated = true
@@ -54,16 +52,17 @@ func init() {
 	}
 
 	// BR_IF — conditional branch.
-	// Pops the i32 condition. Requires empty operand stack after pop.
-	// Each path (taken / fall-through) either chains directly to a compiled
-	// block or emits LoadImm64+RET for interpreter fallback.
+	// The condition must be the only value on the operand stack (Returns()==1),
+	// or come from the interpreter stack (Returns()==0).  Checked before Take()
+	// to avoid state mutation when bailing out with a non-empty remaining stack.
 	jit[instr.BR_IF] = func(c *jitCompiler) bool {
-		r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
+		if len(c.assembler.Returns()) > 1 {
+			inst := instr.Instruction(c.code[c.ip:])
+			c.ip += inst.Width()
 			return false
 		}
-		// Require empty operand stack after popping condition.
-		if len(c.assembler.Returns()) > 0 {
+		r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
+		if !ok {
 			return false
 		}
 
@@ -92,9 +91,7 @@ func init() {
 			c.assembler.Emit(arm64.CBZLabel(r0, fallStubLabel)) // r0==0 → fall-through
 			c.assembler.Emit(arm64.BLabel(c.blockLabels[targetIP]))
 			c.assembler.PlaceLabel(fallStubLabel)
-			for _, inst := range arm64.LoadImm64(ipReg, uint64(fallIP)) {
-				c.assembler.Emit(inst)
-			}
+			c.assembler.Emits(arm64.LDI(ipReg, uint64(fallIP))...)
 			c.assembler.Emit(arm64.RET())
 			c.terminated = true
 			return true
@@ -106,9 +103,7 @@ func init() {
 			c.assembler.Emit(arm64.CBNZLabel(r0, takenStubLabel)) // r0!=0 → taken
 			c.assembler.Emit(arm64.BLabel(c.blockLabels[fallIP]))
 			c.assembler.PlaceLabel(takenStubLabel)
-			for _, inst := range arm64.LoadImm64(ipReg, uint64(targetIP)) {
-				c.assembler.Emit(inst)
-			}
+			c.assembler.Emits(arm64.LDI(ipReg, uint64(targetIP))...)
 			c.assembler.Emit(arm64.RET())
 			c.terminated = true
 			return true
@@ -117,14 +112,10 @@ func init() {
 		// Case D: neither compilable — emit both fallback paths.
 		takenStubLabel := c.assembler.NewLabel()
 		c.assembler.Emit(arm64.CBNZLabel(r0, takenStubLabel))
-		for _, inst := range arm64.LoadImm64(ipReg, uint64(fallIP)) {
-			c.assembler.Emit(inst)
-		}
+		c.assembler.Emits(arm64.LDI(ipReg, uint64(fallIP))...)
 		c.assembler.Emit(arm64.RET())
 		c.assembler.PlaceLabel(takenStubLabel)
-		for _, inst := range arm64.LoadImm64(ipReg, uint64(targetIP)) {
-			c.assembler.Emit(inst)
-		}
+		c.assembler.Emits(arm64.LDI(ipReg, uint64(targetIP))...)
 		c.assembler.Emit(arm64.RET())
 		c.terminated = true
 		return true
@@ -223,22 +214,17 @@ func init() {
 	// BR_TABLE — pops i32 index; jumps to targets[index] or targets[count] (default).
 	// Emits a linear comparison chain.  Each target either links directly to a
 	// compiled block (via BLabel relocation) or falls back to the interpreter
-	// (LoadImm64+RET).  Requires an empty operand stack.
-	// Bail-out if count >= 4096 (CMPI immediate limit).
+	// (LoadImm64+RET).
+	// The index must be the only value on the operand stack; checked before Take()
+	// to avoid state mutation on bail-out.
 	jit[instr.BR_TABLE] = func(c *jitCompiler) bool {
-		if len(c.assembler.Returns()) > 0 {
+		if len(c.assembler.Returns()) > 1 {
 			inst := instr.Instruction(c.code[c.ip:])
 			c.ip += inst.Width()
 			return false
 		}
 
-		count := int(c.code[c.ip+1])
-		if count >= 4096 {
-			inst := instr.Instruction(c.code[c.ip:])
-			c.ip += inst.Width()
-			return false
-		}
-
+		count := int(c.code[c.ip+1]) // uint8, max 255
 		offsets := make([]int, count+1)
 		for j := 0; j <= count; j++ {
 			offsets[j] = int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+j*2+2])))
@@ -280,9 +266,7 @@ func init() {
 			if c.compilable[targetIP] {
 				c.assembler.Emit(arm64.BLabel(c.blockLabels[targetIP]))
 			} else {
-				for _, inst := range arm64.LoadImm64(ipReg, uint64(targetIP)) {
-					c.assembler.Emit(inst)
-				}
+				c.assembler.Emits(arm64.LDI(ipReg, uint64(targetIP))...)
 				c.assembler.Emit(arm64.RET())
 			}
 		}
