@@ -344,6 +344,18 @@ func (i *Interpreter) Pop() (types.Value, error) {
 	return i.unbox(i.stack[i.sp]), nil
 }
 
+// PopBoxed returns the raw NaN-boxed value from the top of the stack without
+// heap-unboxing it. The caller is responsible for ensuring the boxed value
+// remains valid when pushed into a subsequent interpreter with the same
+// constant pool layout (heap[j+1] == constants[j]).
+func (i *Interpreter) PopBoxed() (types.Boxed, error) {
+	if i.sp == 0 {
+		return 0, ErrStackUnderflow
+	}
+	i.sp--
+	return i.stack[i.sp], nil
+}
+
 func (i *Interpreter) Len() int {
 	return i.sp - 1
 }
@@ -462,6 +474,14 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 	switch v := val.(type) {
 	case types.Boxed:
 		return v
+	case types.I32:
+		return types.BoxI32(int32(v))
+	case types.I64:
+		return i.boxI64(int64(v))
+	case types.F32:
+		return types.BoxF32(float32(v))
+	case types.F64:
+		return types.BoxF64(float64(v))
 	default:
 		addr := i.alloc(v)
 		return types.BoxRef(addr)

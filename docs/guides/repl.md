@@ -27,9 +27,9 @@ MiniVM REPL — type '.help' for commands, '.quit' to exit
 > i32.add
 50
 > .show
-0000:   i32.const 0x0000002A
-0005:   i32.const 0x00000008
-000a:   i32.add
+0000:	i32.const 0x0000002A
+0005:	i32.const 0x00000008
+0010:	i32.add
 > .reset
 reset.
 > .quit
@@ -44,8 +44,9 @@ stack produces no output.
 | Command | Effect |
 |---|---|
 | `.help` | Print command reference |
-| `.show` | Disassemble the accumulated instruction history |
-| `.reset` | Clear accumulated instructions and stack state |
+| `.show` | Disassemble the accumulated instruction history (includes constants) |
+| `.reset` | Clear accumulated instructions, constants, and stack state |
+| `.const` | Declare a function constant (multi-line block, end with blank line) |
 | `.quit` / `.exit` | Exit the REPL |
 
 ## Instruction Syntax
@@ -63,8 +64,8 @@ br_table 0x02 0x0000 0x0005 0x0000
 
 **Offset-prefixed form** (disassembly output, also accepted):
 ```
-0000:   i32.const 0x0000002A
-0005:   i32.add
+0000:	i32.const 0x0000002A
+0005:	i32.add
 ```
 
 ### Operand formats
@@ -94,21 +95,51 @@ Everything that operates purely on value-typed stack entries works correctly.
 | Branches (within one step) | `br`, `br_if`, `br_table` — but see limitation below |
 | Globals | `global.get`, `global.set`, `global.tee` |
 | Locals | `local.get`, `local.set`, `local.tee` — index relative to bottom of pre-pushed stack |
-| Constants | `const.get` — only if a constant pool step precedes (see limitation) |
+| Constants | `const.get N` — after declaring constant N with `.const` |
+| Functions | call a declared function with `const.get N` + `call` |
+
+## Declaring Function Constants
+
+Use `.const` to add a function to the constant pool. The format is identical
+to what `Program.String()` / `.show` produces for constants — paste disassembly
+output directly.
+
+```
+> .const
+... func() i32
+... 0000:	i32.const 0x0000002A
+... 0005:	return
+...
+constant 0 added.
+> const.get 0
+> call
+42
+> .show
+0000:	const.get 0x0000
+0003:	call
+
+0000:	func() i32
+	0000:	i32.const 0x0000002A
+	0005:	return
+```
+
+Functions with parameters and locals:
+
+```
+> .const
+... func(i32) i32
+... i32
+... 0000:	local.get 0x00
+... 0003:	local.get 0x00
+... 0006:	i32.add
+... 000b:	return
+...
+constant 0 added.
+```
+
+The block prompt `... ` appears for each line. End the block with a blank line.
 
 ## What Does Not Work
-
-### Functions (`call`, `return`, `const.get` pointing to a function)
-
-Functions are heap objects stored in the constant pool of a `program.Program`.
-The REPL creates a fresh single-instruction program per step with no constant
-pool, so there is no way to push a function reference onto the stack.
-
-Supporting functions would require:
-1. A multi-line syntax to declare function bodies and a constant pool inside
-   the REPL session.
-2. A persistent single interpreter shared across all steps (so heap addresses
-   remain valid between instructions).
 
 ### Heap-producing instructions (`array.new`, `struct.new`, string ops)
 

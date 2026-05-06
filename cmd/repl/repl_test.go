@@ -21,6 +21,11 @@ func TestREPL_Run(t *testing.T) {
 			contains: []string{"3"},
 		},
 		{
+			// non-trivial values: ensure box() uses NaN-boxing, not heap allocation
+			input:    "i32.const 42\ni32.const 8\ni32.add\n.quit\n",
+			contains: []string{"50"},
+		},
+		{
 			input:    "i32.const 10\ni32.const 20\n.quit\n",
 			contains: []string{"10 20"},
 		},
@@ -72,6 +77,36 @@ func TestREPL_Run(t *testing.T) {
 		{
 			input:    "bad.opcode 1\n.quit\n",
 			contains: []string{"error:"},
+		},
+		{
+			// declare a no-arg function constant and verify .show includes it
+			input:    ".const\nfunc() i32\n0000:	i32.const 0x0000002A\n0005:	return\n\n.show\n.quit\n",
+			contains: []string{"constant 0 added.", "func() i32"},
+		},
+		{
+			// .reset clears constants
+			input:    ".const\nfunc() i32\n0000:	i32.const 0x0000002A\n0005:	return\n\n.reset\n.show\n.quit\n",
+			contains: []string{"reset.", "(empty)"},
+		},
+		{
+			// empty .const block reports error
+			input:    ".const\n\n.quit\n",
+			contains: []string{"error:"},
+		},
+		{
+			// declare a type and verify .show includes it
+			input:    ".type []i32\n.show\n.quit\n",
+			contains: []string{"type 0 added.", "[]i32"},
+		},
+		{
+			// .type with missing argument reports error
+			input:    ".type\n.quit\n",
+			contains: []string{"error:"},
+		},
+		{
+			// .reset clears types
+			input:    ".type []i32\n.reset\n.show\n.quit\n",
+			contains: []string{"reset.", "(empty)"},
 		},
 	}
 

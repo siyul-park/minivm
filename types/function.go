@@ -90,6 +90,9 @@ func (f *Function) String() string {
 		}
 		sb.WriteString(t.String())
 	}
+	if len(f.Locals) > 0 {
+		sb.WriteString("\n")
+	}
 	sb.WriteString(instr.Disassemble(f.Code))
 	return sb.String()
 }
