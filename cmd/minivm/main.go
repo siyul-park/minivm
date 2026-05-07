@@ -3,8 +3,8 @@ package main
 import (
 	"os"
 
-	"github.com/spf13/cobra"
 	"github.com/siyul-park/minivm/cmd/repl"
+	"github.com/spf13/cobra"
 )
 
 func main() {
