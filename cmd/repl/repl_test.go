@@ -149,6 +149,26 @@ func TestREPL_Run(t *testing.T) {
 			contains: []string{"3"},
 			excludes: []string{"error:"},
 		},
+		{
+			// @-absolute branch syntax: br_if @8 at offset 5, rel=0, condition false → no error
+			input:    "i32.const 0\nbr_if @8\n.quit\n",
+			excludes: []string{"error:"},
+		},
+		{
+			// @-absolute branch syntax: br_if @8 with hex notation
+			input:    "i32.const 0\nbr_if @0x0008\n.quit\n",
+			excludes: []string{"error:"},
+		},
+		{
+			// relative branch syntax still works unchanged
+			input:    "i32.const 0\nbr_if 0x0000\n.quit\n",
+			excludes: []string{"error:"},
+		},
+		{
+			// out-of-range absolute target reports error
+			input:    "br @0x0000\n.quit\n",
+			contains: []string{"error:"},
+		},
 	}
 
 	for _, tt := range tests {

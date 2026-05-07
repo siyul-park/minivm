@@ -97,7 +97,7 @@ func (a F32Array) String() string {
 		if j > 0 {
 			sb.WriteString(", ")
 		}
-		sb.WriteString(fmt.Sprintf("%f", float32(e)))
+		sb.WriteString(fmt.Sprintf("%g", float32(e)))
 	}
 	sb.WriteByte('}')
 	return sb.String()
@@ -119,7 +119,7 @@ func (a F64Array) String() string {
 		if j > 0 {
 			sb.WriteString(", ")
 		}
-		sb.WriteString(fmt.Sprintf("%f", float64(e)))
+		sb.WriteString(fmt.Sprintf("%g", float64(e)))
 	}
 	sb.WriteByte('}')
 	return sb.String()

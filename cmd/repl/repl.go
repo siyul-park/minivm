@@ -26,7 +26,10 @@ Instructions (examples):
   i32.const 42        push i32 constant
   i32.const 8         push another i32
   i32.add             pop two i32s, push their sum
-  br 0x0005           branch to byte offset 5
+  global.set 0        pop and store into global 0
+  global.get 0        push global 0
+  br 0x0005           branch (relative offset from instruction end)
+  br @0x0010          branch (absolute byte offset in accumulated program)
 
 Commands:
   .const              declare a function constant (multi-line, end with blank line)
@@ -81,7 +84,17 @@ func (r *REPL) Run(ctx context.Context) error {
 			continue
 		}
 
-		inst, err := instr.Parse(line)
+		offset := 0
+		for _, acc := range r.instrs {
+			offset += len(acc)
+		}
+		rewritten, rewErr := rewriteBranchAbsolute(line, offset)
+		if rewErr != nil {
+			fmt.Fprintf(r.out, "error: %v\n", rewErr)
+			continue
+		}
+
+		inst, err := instr.Parse(rewritten)
 		if err != nil {
 			fmt.Fprintf(r.out, "error: %v\n", err)
 			continue
@@ -237,7 +250,119 @@ func printStack(out io.Writer, vm *interp.Interpreter) {
 	parts := make([]string, n)
 	for k := 0; k < n; k++ {
 		v, _ := vm.Peek(k)
-		parts[n-1-k] = v.String()
+		parts[n-1-k] = formatBoxed(v, vm)
 	}
 	fmt.Fprintln(out, strings.Join(parts, " "))
+}
+
+// formatBoxed returns a human-readable string for a stack value.
+// KindRef values are resolved through the interpreter heap so the
+// actual object (array, struct, string, …) is displayed rather than
+// a raw heap index. Multi-line values (functions) are truncated to
+// their first line. i64/f32/f64 carry a type suffix to disambiguate
+// from the more common i32.
+func formatBoxed(v types.Boxed, vm *interp.Interpreter) string {
+	switch v.Kind() {
+	case types.KindI32:
+		return fmt.Sprintf("%d", v.I32())
+	case types.KindI64:
+		return fmt.Sprintf("%d (i64)", v.I64())
+	case types.KindF32:
+		return fmt.Sprintf("%g (f32)", v.F32())
+	case types.KindF64:
+		return fmt.Sprintf("%g (f64)", v.F64())
+	case types.KindRef:
+		val, err := vm.Load(v.Ref())
+		if err != nil || val == nil {
+			return "null"
+		}
+		s := val.String()
+		if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+			s = s[:idx]
+		}
+		return s
+	default:
+		return "<invalid>"
+	}
+}
+
+// rewriteBranchAbsolute replaces "@N" absolute byte targets in branch
+// instructions with the equivalent relative offset, given that the
+// instruction will be encoded starting at byte ip.
+// Lines with no "@" tokens are returned unchanged.
+func rewriteBranchAbsolute(line string, ip int) (string, error) {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return line, nil
+	}
+	opLower := strings.ToLower(fields[0])
+	switch opLower {
+	case "br", "br_if":
+		if len(fields) < 2 || !strings.HasPrefix(fields[1], "@") {
+			return line, nil
+		}
+		abs, err := parseAbsTarget(fields[1][1:])
+		if err != nil {
+			return "", fmt.Errorf("invalid absolute branch target %s: %w", fields[1], err)
+		}
+		const instrWidth = 3
+		rel := abs - (ip + instrWidth)
+		if rel < 0 || rel > 0xFFFF {
+			return "", fmt.Errorf("branch target %s out of range from offset %d", fields[1], ip)
+		}
+		return fmt.Sprintf("%s %d", fields[0], rel), nil
+
+	case "br_table":
+		if len(fields) < 2 {
+			return line, nil
+		}
+		hasAt := false
+		for _, f := range fields[2:] {
+			if strings.HasPrefix(f, "@") {
+				hasAt = true
+				break
+			}
+		}
+		if !hasAt {
+			return line, nil
+		}
+		count, err := parseAbsTarget(fields[1])
+		if err != nil {
+			return "", fmt.Errorf("invalid br_table count %s: %w", fields[1], err)
+		}
+		instrWidth := 4 + count*2
+		parts := make([]string, len(fields))
+		copy(parts, fields)
+		for i, f := range fields[2:] {
+			if !strings.HasPrefix(f, "@") {
+				continue
+			}
+			abs, err := parseAbsTarget(f[1:])
+			if err != nil {
+				return "", fmt.Errorf("invalid absolute branch target %s: %w", f, err)
+			}
+			rel := abs - (ip + instrWidth)
+			if rel < 0 || rel > 0xFFFF {
+				return "", fmt.Errorf("branch target %s out of range from offset %d", f, ip)
+			}
+			parts[2+i] = fmt.Sprintf("%d", rel)
+		}
+		return strings.Join(parts, " "), nil
+	}
+	return line, nil
+}
+
+// parseAbsTarget parses a decimal or 0x-prefixed hex integer.
+func parseAbsTarget(s string) (int, error) {
+	var v int64
+	var n int
+	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
+		n, _ = fmt.Sscanf(s[2:], "%x", &v)
+	} else {
+		n, _ = fmt.Sscanf(s, "%d", &v)
+	}
+	if n == 0 {
+		return 0, fmt.Errorf("expected integer, got %q", s)
+	}
+	return int(v), nil
 }
