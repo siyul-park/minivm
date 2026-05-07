@@ -418,3 +418,17 @@ Do not open a PR if self-review fails.
 - Follow the existing PR template.
 - Clearly describe the changes.
 - Include benchmark results if applicable.
+
+---
+
+## 8. Documentation Maintenance
+
+When code style or quality feedback results in a change to how code is written
+in this repository, the relevant document **must be updated in the same commit**:
+
+- Style / naming / structure feedback → update `docs/coding-patterns.md`
+- Architecture or package-boundary feedback → update `docs/architecture.md`
+- JIT handler contract or assembler API changes → update `docs/jit-internals.md`
+- Key invariants or known gaps → update `.claude/CLAUDE.md` (invariants) or `docs/architecture.md` (gaps)
+
+**Code changes that encode a new convention are incomplete without the corresponding doc change.**

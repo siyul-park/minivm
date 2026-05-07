@@ -110,12 +110,12 @@ instr.I32_MY_OP: func(c *threadedCompiler) func(i *Interpreter) {
 Add an entry to the `jit [256]func` table inside the `init()` function. If JIT is not feasible (e.g. the opcode requires access to `*Interpreter` fields), skip this step — the threaded fallback is always correct.
 
 ```go
-jit[instr.I32_MY_OP] = func(c *jitCompiler) bool {
-    c.ip++  // MUST be first, even if returning false
+jit[instr.I32_MY_OP] = func(c *jitCompiler) (bool, bool) {
+    c.ip++  // MUST be first, even if returning false, false
 
     // Pop operands from the VReg stack
     r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
-    if !ok { return false }
+    if !ok { return false, false }
 
     // Allocate result VReg
     r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
@@ -125,16 +125,22 @@ jit[instr.I32_MY_OP] = func(c *jitCompiler) bool {
 
     // Push result
     c.assembler.Push(r1)
-    return true
+    return true, false  // compiled ok, block continues
 }
 ```
 
+The two return bools are `(ok, stop)`:
+- `true, false` — compiled, continue to next instruction
+- `false, false` — not compilable, end this segment
+- `true, true` — compiled and block terminates (branch instructions only; they emit their own `RET`)
+
 **Checklist for the JIT handler:**
 - [ ] `c.ip++` is the first statement
-- [ ] `Take` called with correct `RegType` and `RegWidth` — returns `false` on mismatch
+- [ ] `Take` called with correct `RegType` and `RegWidth` — returns `false, false` on mismatch
 - [ ] All VRegs used in `Emit` were obtained from `Take` or `NewVReg`
 - [ ] Result VReg pushed with `Push`
-- [ ] `return false` used (not `panic`) when emission is not possible
+- [ ] `return false, false` used (not `panic`) when emission is not possible
+- [ ] Non-branch instructions always return `(ok, false)` — only branch terminators return `(true, true)`
 
 ---
 

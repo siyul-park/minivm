@@ -36,6 +36,11 @@ var Arch = &asm.Arch{
     Registers: NewRegInfo(),
     Encoder:   NewEncoder(),
     ABI:       NewABI(),
+    // Scratch lists caller-saved registers reserved for out-of-band JIT metadata
+    // (e.g., the next interpreter IP). These must NOT overlap with the ABI
+    // param/return range. Leave at least 2 registers outside Scratch free for
+    // use as temporaries in the invoke trampoline after BL.
+    Scratch: asm.NewRegMask([]uint8{...}),
 }
 ```
 
@@ -147,14 +152,14 @@ func NewRegInfo() asm.RegInfo  { return asm.RegInfo{} }
 
 ### Tests
 
-Create `arch_test.go` with `//go:build <arch>`. At minimum, test that `Assembler.Build()` produces a callable chunk that computes a simple addition:
+Create `arch_test.go` with `//go:build <arch>`. At minimum, test that `Assembler.Compile()` + `Link()` produces a callable chunk that computes a simple addition:
 
 ```go
 //go:build <arch>
 
 package <arch>
 
-func TestAssembler_Build(t *testing.T) {
+func TestAssembler_Compile(t *testing.T) {
     buffer, err := asm.NewBuffer(256)
     require.NoError(t, err)
     defer buffer.Free()
@@ -167,10 +172,14 @@ func TestAssembler_Build(t *testing.T) {
     a.Emit(ADD(result, left, right))
     a.Emit(RET())
 
-    caller, err := a.Build()
+    obj, err := a.Compile()
     require.NoError(t, err)
 
-    out, err := caller.Call([]uint64{3, 5})
+    callers, err := a.Link([]*asm.RelocObject{obj})
+    require.NoError(t, err)
+    require.NotNil(t, callers[0])
+
+    out, err := callers[0].Call([]uint64{3, 5}, nil)
     require.NoError(t, err)
     require.Equal(t, []uint64{8}, out)
 }
@@ -194,33 +203,40 @@ import (
 func init() {
     arch = <arch>.Arch
 
-    // PROLOGUE: called before each sub-block; emit nothing on most architectures
-    jit[_PROLOGUE] = func(c *jitCompiler) bool {
-        return true
+    // PROLOGUE: emitted at the start of each segment.
+    // Load the segment's exit IP into the scratch register so it is always set
+    // on return, even if the segment is later truncated.
+    jit[_PROLOGUE] = func(c *jitCompiler) (bool, bool) {
+        c.assembler.Emits(<arch>.LDI(c.scratch, uint64(c.blockEnd))...)
+        return true, false
     }
 
-    // EPILOGUE: called at the end of each sub-block; emit return instruction
-    jit[_EPILOGUE] = func(c *jitCompiler) bool {
+    // EPILOGUE: emitted at the end of each non-terminating segment.
+    // Reload the (possibly truncated) exit IP into scratch, then return.
+    jit[_EPILOGUE] = func(c *jitCompiler) (bool, bool) {
+        c.assembler.Emits(<arch>.LDI(c.scratch, uint64(c.blockEnd))...)
         c.assembler.Emit(<arch>.RET())
-        return true
+        return true, false
     }
 
-    // Register opcode handlers
-    jit[instr.NOP] = func(c *jitCompiler) bool {
+    // Register opcode handlers.
+    // Return (true, false) on success, (false, false) on failure.
+    // Branch terminators return (true, true) and emit their own RET.
+    jit[instr.NOP] = func(c *jitCompiler) (bool, bool) {
         c.ip++
-        return true
+        return true, false
     }
 
-    jit[instr.I32_ADD] = func(c *jitCompiler) bool {
+    jit[instr.I32_ADD] = func(c *jitCompiler) (bool, bool) {
         c.ip++
         r1, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
-        if !ok { return false }
+        if !ok { return false, false }
         r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
-        if !ok { return false }
+        if !ok { return false, false }
         dst := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
         c.assembler.Emit(<arch>.ADD(dst, r0, r1))
         c.assembler.Push(dst)
-        return true
+        return true, false
     }
 
     // ... register remaining opcodes ...

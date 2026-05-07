@@ -44,7 +44,7 @@ threadedCompiler → []func(*Interpreter)   one closure per byte offset, always
     ▼ Interpreter.Run() — every 128 ticks, count hot-block hits
     │ when hits reach threshold (default 4096 ticks):
     ▼
-jitCompiler → native ARM64               replaces closures in-place for hot blocks
+jitCompiler → native ARM64               replaces closures in-place for hot segments
 ```
 
 **Package responsibilities (one line each):**
@@ -67,64 +67,9 @@ These are the non-obvious rules that cause silent bugs when violated:
 
 - **Heap index 0 is permanently `Null`** — allocated in `interp.New()`, never free it.
 - **Threaded closure: advance `c.ip` at compile time, advance `f.ip` at runtime** — missing either causes wrong execution or infinite loops.
-- **JIT handler: call `c.ip++` first, then `return false` on type mismatch** — never coerce mismatched types; return false to split the sub-block.
+- **JIT handler: call `c.ip++` first, then `return false, false` on type mismatch** — never coerce mismatched types; the second bool signals termination (`true, true` for branch terminators).
 - **`Buffer`: `Unseal` before `Append`, `Seal` before `Call`** — wrong order triggers a signal on Apple Silicon.
 - **`ConstantFoldingPass` pads with NOPs left-aligned** — threaded NOP handler absorbs the gap at compile time; do not strip this padding.
 - **JIT emits a segment only when `count > 4`** — exactly 4 consecutive JIT-able instructions is not enough; threshold is strictly greater.
 - **`release()` is iterative, not recursive** — it uses an explicit stack to walk `Traceable.Refs()`.
 - **Errors in threaded closures should `panic`** — `interp.Run()` recovers and appends `at=<ip>` via `i.error(r)`.
-
-## Known Gaps
-
-| Gap | Impact |
-|-----|--------|
-| `SELECT` unimplemented | no threaded or JIT handler; panics if executed |
-| JIT excludes control flow, calls, variable access | loops and function calls always run threaded |
-| No x86-64 backend | JIT inactive on Linux/Windows servers |
-| No benchmark suite | 4096-tick JIT threshold is unvalidated |
-
-## Coding Conventions (summary)
-
-Full details in [docs/coding-patterns.md](../docs/coding-patterns.md). Quick reference:
-
-**Function design** (see §0 of coding-patterns.md for examples)
-- One level of abstraction per function — do not mix raw field access with method calls in the same function
-- Names hide implementation details — describe the outcome, not the mechanism (`commit`, not `appendInstrAndUpdateLen`)
-- Consistent abstraction within a function — every statement at the same conceptual height
-- Top-down structure — callers above callees; a reader follows logic downward without scrolling up
-
-**Naming**
-- Constructors: `New<Type>` — always returns the concrete type or its primary interface
-- Options: `With<Name>() func(*option)` — functional options pattern only, no config structs
-- Errors: `Err<PascalCase> = errors.New(...)` — declared at package level, grouped together
-
-**Interfaces**
-- Define interfaces in the consuming package, not the implementing one
-- Declare `var _ Interface = (*Type)(nil)` immediately after type declaration
-- Unexported type + exported instance for singleton-value types (e.g. `TypeI32 = i32Type{}`)
-
-**Errors**
-- Wrap with context: `fmt.Errorf("%w: context", ErrBase)` — always use `%w` for sentinel
-- Hot-path errors `panic`; boundaries `recover` (see `interp.Run`)
-
-**Testing**
-- One test file per source file: `foo.go` → `foo_test.go`
-- One `Test<Type>_<Method>` per public method; all cases inside as a table using `t.Run`
-- Constructors: `TestNew<Type>`; package-level functions: `Test<FuncName>`
-- Subtest name: `t.Run(fmt.Sprint(tt.<primary_input>), ...)` or a descriptive string for error paths
-- Never write helper functions in test files — inline all setup directly in each test or subtest
-- Always `require` (never `assert`) — fails fast
-- `defer resource.Free()` immediately after successful allocation
-
-## Documentation Maintenance
-
-When code style or quality feedback results in a change to how code is written
-in this repository, the relevant document **must be updated in the same commit**:
-
-- Style / naming / structure feedback → update `docs/coding-patterns.md`
-- Architecture or package-boundary feedback → update `docs/architecture.md`
-- Any section of CLAUDE.md that becomes stale → update it directly
-
-The rule: **code changes that encode a new convention are incomplete without
-the corresponding doc change.** Reviewers should treat an un-documented
-convention as a bug.
