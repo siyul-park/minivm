@@ -25,7 +25,7 @@ func TestInterpreter_Push(t *testing.T) {
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I32(42)))
-		require.Equal(t, 0, i.Len())
+		require.Equal(t, 1, i.Len())
 	})
 	t.Run("overflow", func(t *testing.T) {
 		i := New(program.New(nil), WithStack(1))
@@ -59,11 +59,11 @@ func TestInterpreter_Len(t *testing.T) {
 	i := New(program.New(nil))
 	defer i.Close()
 
-	require.Equal(t, -1, i.Len())
-	_ = i.Push(types.I32(1))
 	require.Equal(t, 0, i.Len())
-	_ = i.Push(types.I32(2))
+	_ = i.Push(types.I32(1))
 	require.Equal(t, 1, i.Len())
+	_ = i.Push(types.I32(2))
+	require.Equal(t, 2, i.Len())
 }
 
 func TestInterpreter_Alloc(t *testing.T) {
@@ -263,7 +263,7 @@ func TestInterpreter_Reset(t *testing.T) {
 	require.Greater(t, i.Len(), -1)
 
 	i.Reset()
-	require.Equal(t, -1, i.Len())
+	require.Equal(t, 0, i.Len())
 }
 
 func TestNewHostFunction(t *testing.T) {
