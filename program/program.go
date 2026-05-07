@@ -39,20 +39,23 @@ func (p *Program) String() string {
 	var sb strings.Builder
 	sb.WriteString(instr.Format(p.Code))
 	if len(p.Constants) > 0 {
+		sb.WriteString("\n")
 		writeIndexed(&sb, p.Constants)
 	}
 	if len(p.Types) > 0 {
+		sb.WriteString("\n")
 		writeIndexed(&sb, p.Types)
 	}
 	return sb.String()
 }
 
 func writeIndexed[T fmt.Stringer](sb *strings.Builder, items []T) {
-	sb.WriteString("\n")
 	for i, item := range items {
-		lines := strings.Split(item.String(), "\n")
-		sb.WriteString(fmt.Sprintf("%04d:\t%s\n", i, lines[0]))
-		for _, line := range lines[1:] {
+		head, tail, _ := strings.Cut(item.String(), "\n")
+		sb.WriteString(fmt.Sprintf("%04d:\t%s\n", i, head))
+		for tail != "" {
+			var line string
+			line, tail, _ = strings.Cut(tail, "\n")
 			sb.WriteString(fmt.Sprintf("\t%s\n", line))
 		}
 	}

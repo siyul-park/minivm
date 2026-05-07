@@ -34,119 +34,29 @@ var _ Value = F64Array(nil)
 var _ Traceable = (*Array)(nil)
 var _ Type = (*ArrayType)(nil)
 
-func (a I32Array) Kind() Kind {
-	return KindRef
-}
+func (a I32Array) Kind() Kind  { return KindRef }
+func (a I32Array) Type() Type  { return TypeI32Array }
+func (a I32Array) String() string { return joinElems(a.Type(), []I32(a)) }
 
-func (a I32Array) Type() Type {
-	return TypeI32Array
-}
+func (a I64Array) Kind() Kind  { return KindRef }
+func (a I64Array) Type() Type  { return TypeI64Array }
+func (a I64Array) String() string { return joinElems(a.Type(), []I64(a)) }
 
-func (a I32Array) String() string {
-	var sb strings.Builder
-	sb.WriteString(a.Type().String())
-	sb.WriteByte('{')
-	for j, e := range a {
-		if j > 0 {
-			sb.WriteString(", ")
-		}
-		sb.WriteString(e.String())
-	}
-	sb.WriteByte('}')
-	return sb.String()
-}
+func (a F32Array) Kind() Kind  { return KindRef }
+func (a F32Array) Type() Type  { return TypeF32Array }
+func (a F32Array) String() string { return joinElems(a.Type(), []F32(a)) }
 
-func (a I64Array) Kind() Kind {
-	return KindRef
-}
-
-func (a I64Array) Type() Type {
-	return TypeI64Array
-}
-
-func (a I64Array) String() string {
-	var sb strings.Builder
-	sb.WriteString(a.Type().String())
-	sb.WriteByte('{')
-	for j, e := range a {
-		if j > 0 {
-			sb.WriteString(", ")
-		}
-		sb.WriteString(e.String())
-	}
-	sb.WriteByte('}')
-	return sb.String()
-}
-
-func (a F32Array) Kind() Kind {
-	return KindRef
-}
-
-func (a F32Array) Type() Type {
-	return TypeF32Array
-}
-
-func (a F32Array) String() string {
-	var sb strings.Builder
-	sb.WriteString(a.Type().String())
-	sb.WriteByte('{')
-	for j, e := range a {
-		if j > 0 {
-			sb.WriteString(", ")
-		}
-		sb.WriteString(e.String())
-	}
-	sb.WriteByte('}')
-	return sb.String()
-}
-
-func (a F64Array) Kind() Kind {
-	return KindRef
-}
-
-func (a F64Array) Type() Type {
-	return TypeF64Array
-}
-
-func (a F64Array) String() string {
-	var sb strings.Builder
-	sb.WriteString(a.Type().String())
-	sb.WriteByte('{')
-	for j, e := range a {
-		if j > 0 {
-			sb.WriteString(", ")
-		}
-		sb.WriteString(e.String())
-	}
-	sb.WriteByte('}')
-	return sb.String()
-}
+func (a F64Array) Kind() Kind  { return KindRef }
+func (a F64Array) Type() Type  { return TypeF64Array }
+func (a F64Array) String() string { return joinElems(a.Type(), []F64(a)) }
 
 func NewArray(typ *ArrayType, elems ...Boxed) *Array {
 	return &Array{Typ: typ, Elems: elems}
 }
 
-func (a *Array) Kind() Kind {
-	return KindRef
-}
-
-func (a *Array) Type() Type {
-	return a.Typ
-}
-
-func (a *Array) String() string {
-	var sb strings.Builder
-	sb.WriteString(a.Type().String())
-	sb.WriteByte('{')
-	for j, e := range a.Elems {
-		if j > 0 {
-			sb.WriteString(", ")
-		}
-		sb.WriteString(e.String())
-	}
-	sb.WriteByte('}')
-	return sb.String()
-}
+func (a *Array) Kind() Kind     { return KindRef }
+func (a *Array) Type() Type     { return a.Typ }
+func (a *Array) String() string { return joinElems(a.Type(), a.Elems) }
 
 func (a *Array) Refs() []Ref {
 	refs := make([]Ref, 0, len(a.Elems))
@@ -158,13 +68,25 @@ func (a *Array) Refs() []Ref {
 	return refs
 }
 
+func joinElems[T interface{ String() string }](typ Type, elems []T) string {
+	var sb strings.Builder
+	sb.WriteString(typ.String())
+	sb.WriteByte('{')
+	for i, e := range elems {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(e.String())
+	}
+	sb.WriteByte('}')
+	return sb.String()
+}
+
 func NewArrayType(elem Type) *ArrayType {
 	return &ArrayType{Elem: elem, ElemKind: elem.Kind()}
 }
 
-func (t *ArrayType) Kind() Kind {
-	return KindRef
-}
+func (t *ArrayType) Kind() Kind { return KindRef }
 
 func (t *ArrayType) String() string {
 	return "[]" + t.Elem.String()

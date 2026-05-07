@@ -46,9 +46,10 @@ Commands:
 type REPL struct {
 	in        io.Reader
 	out       io.Writer
-	instrs    []instr.Instruction // accumulated instruction history
-	constants []types.Value       // constant pool
-	typs      []types.Type        // type pool
+	instrs    []instr.Instruction
+	codeLen   int // byte length of instr.Marshal(instrs); updated incrementally
+	constants []types.Value
+	typs      []types.Type
 }
 
 // New returns a new REPL that reads from in and writes to out.
@@ -84,11 +85,7 @@ func (r *REPL) Run(ctx context.Context) error {
 			continue
 		}
 
-		offset := 0
-		for _, acc := range r.instrs {
-			offset += len(acc)
-		}
-		rewritten, rewErr := rewriteBranchAbsolute(line, offset)
+		rewritten, rewErr := rewriteBranchAbsolute(line, r.codeLen)
 		if rewErr != nil {
 			fmt.Fprintf(r.out, "error: %v\n", rewErr)
 			continue
@@ -108,6 +105,7 @@ func (r *REPL) Run(ctx context.Context) error {
 			continue
 		}
 		r.instrs = append(r.instrs, inst)
+		r.codeLen += len(inst)
 	}
 }
 
@@ -119,6 +117,7 @@ func (r *REPL) handleMeta(scanner *bufio.Scanner, line string) (done bool, err e
 		return true, nil
 	case lower == ".reset":
 		r.instrs = nil
+		r.codeLen = 0
 		r.constants = nil
 		r.typs = nil
 		fmt.Fprintln(r.out, "reset.")
@@ -145,8 +144,6 @@ func (r *REPL) handleMeta(scanner *bufio.Scanner, line string) (done bool, err e
 	return false, nil
 }
 
-// readBlock reads lines from scanner until a blank line or EOF, printing
-// blockPrompt before each line. Returns the collected non-blank lines.
 func (r *REPL) readBlock(scanner *bufio.Scanner) []string {
 	var lines []string
 	for {
@@ -163,8 +160,6 @@ func (r *REPL) readBlock(scanner *bufio.Scanner) []string {
 	return lines
 }
 
-// readConstant reads a multi-line constant definition (until blank line) and
-// appends the parsed constant to r.constants.
 func (r *REPL) readConstant(scanner *bufio.Scanner) error {
 	lines := r.readBlock(scanner)
 	if len(lines) == 0 {
@@ -179,9 +174,7 @@ func (r *REPL) readConstant(scanner *bufio.Scanner) error {
 	return nil
 }
 
-// readTypes reads a multi-line type block (until blank line) and appends each
-// parsed type to r.typs. Accepts the program.String() format with optional
-// "N:\t" index prefix per line.
+// readTypes accepts the program.String() format: optional "N:\t" index prefix is stripped.
 func (r *REPL) readTypes(scanner *bufio.Scanner) error {
 	lines := r.readBlock(scanner)
 	if len(lines) == 0 {
@@ -198,7 +191,6 @@ func (r *REPL) readTypes(scanner *bufio.Scanner) error {
 	return nil
 }
 
-// addType parses a type string and appends it to r.typs.
 func (r *REPL) addType(s string) error {
 	if s == "" {
 		return fmt.Errorf("missing type: usage: .type <type>")
@@ -212,8 +204,7 @@ func (r *REPL) addType(s string) error {
 	return nil
 }
 
-// execute reruns the full accumulated instruction history plus inst.
-// On success appending inst to r.instrs is done by the caller (Run).
+// execute reruns the full accumulated history plus inst; the caller appends inst on success.
 func (r *REPL) execute(ctx context.Context, inst instr.Instruction) error {
 	all := make([]instr.Instruction, len(r.instrs)+1)
 	copy(all, r.instrs)
@@ -348,7 +339,6 @@ func rewriteBranchAbsolute(line string, ip int) (string, error) {
 	return line, nil
 }
 
-// parseIntLiteral parses a decimal or 0x-prefixed hex integer.
 func parseIntLiteral(s string) (int, error) {
 	v, err := strconv.ParseInt(s, 0, 64)
 	if err != nil {
