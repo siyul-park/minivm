@@ -44,9 +44,10 @@ stack produces no output.
 | Command | Effect |
 |---|---|
 | `.help` | Print command reference |
-| `.show` | Format (disassemble) the accumulated instruction history (includes constants) |
-| `.reset` | Clear accumulated instructions, constants, and stack state |
+| `.show` | Format (disassemble) the accumulated instruction history (includes constants and types) |
+| `.reset` | Clear accumulated instructions, constants, types, and stack state |
 | `.const` | Declare a function constant (multi-line block, end with blank line) |
+| `.type` | Declare one or more types (multi-line block, end with blank line) |
 | `.quit` / `.exit` | Exit the REPL |
 
 ## Instruction Syntax
@@ -104,6 +105,19 @@ Use `.const` to add a function to the constant pool. The format is identical
 to what `Program.String()` / `.show` produces for constants — paste formatted
 output directly.
 
+Instructions can be written with or without the offset prefix:
+
+```
+> .const
+... func() i32
+... i32.const 42
+... return
+...
+constant 0 added.
+```
+
+Offset-prefixed form (from `.show` output) is also accepted:
+
 ```
 > .const
 ... func() i32
@@ -129,15 +143,49 @@ Functions with parameters and locals:
 > .const
 ... func(i32) i32
 ... i32
-... 0000:	local.get 0x00
-... 0003:	local.get 0x00
-... 0006:	i32.add
-... 000b:	return
+... local.get 0
+... local.get 0
+... i32.add
+... return
 ...
 constant 0 added.
 ```
 
 The block prompt `... ` appears for each line. End the block with a blank line.
+
+## Declaring Types
+
+Use `.type` to add type definitions to the type pool. Types are needed by
+instructions like `array.new`, `struct.new`, `ref.test`, and `ref.cast`.
+
+The format matches the types section of `Program.String()` / `.show` output —
+paste it directly. Each line is one type definition; an optional `N:\t` index
+prefix is stripped automatically.
+
+```
+> .type
+... struct {i32; f64}
+...
+type 0 added.
+
+> .type
+... []i32
+... struct {i32; f64}
+...
+type 0 added.
+type 1 added.
+```
+
+Pasting `.show` types section directly also works:
+
+```
+> .type
+... 0:	struct {i32; f64}
+... 1:	[]i32
+...
+type 0 added.
+type 1 added.
+```
 
 ## What Does Not Work
 
