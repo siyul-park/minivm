@@ -16,11 +16,16 @@ type jitCompiler struct {
 	code      []byte
 	ip        int
 
-	// blockLabels and compilable are shared across all blocks in a function.
-	blockLabels map[int]int  // blockStart IP → label ID
-	compilable  map[int]bool // true after a branch block compiles successfully
+	// Shared across all blocks in a function; set before any block is compiled.
+	labels     map[int]int            // blockStart IP → label ID
+	compilable map[int]bool           // true after a block compiles successfully
+	sigs       map[int]*asm.Signature // pass-1 signatures, used by canLink()
 
-	// terminated is set by jit[BR/BR_IF/BR_TABLE] when the handler emits its own RET.
+	// Set per block by compileBlock.
+	blockEnd int
+	scratch  asm.PReg // Scratch[0] — pre-allocated by compileBlock, used by _PROLOGUE/_EPILOGUE and branch handlers
+
+	// Set by jit[BR/BR_IF/BR_TABLE] when the handler emits its own RET.
 	terminated bool
 }
 
@@ -47,17 +52,18 @@ func init() {
 // Compile compiles all basic blocks in code and returns a sparse slice of
 // closures indexed by instruction offset.
 //
-// Two compilation passes are used so that every branch (forward and backward)
-// gets a direct native link when the target compiles successfully:
+// Two passes ensure every branch (forward and backward) gets a direct native
+// link when the target compiles successfully and the register signatures are
+// compatible:
 //
-//   - Pass 1: compile all blocks in order.  Backward references to already-
-//     compiled branch blocks emit BLabel; forward references fall back to
-//     LoadImm+RET.  Successfully compiled branch blocks are marked compilable.
+//   - Pass 1: compile in program order; backward references emit BLabel,
+//     forward references fall back to LDI+RET.  Each compiled block is marked
+//     compilable and its Signature is stored.
 //
-//   - Pass 2: recompile branch blocks only.  compilable is now complete, so
-//     every target that compiled in pass 1 gets a BLabel in pass 2 as well.
+//   - Pass 2: recompile branch blocks only — compilable/sigs are now complete,
+//     so forward BLabels are emitted correctly.
 //
-//   - Link: patch all BLabel relocations and install closures.
+//   - Link: patch BLabel relocations and install closures.
 func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 	if arch == nil {
 		return nil
@@ -66,89 +72,79 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 	c.assembler.Reset()
 	c.code, c.ip = code, 0
 
-	blocks := c.getBlocks(code)
+	blocks := c.blocks(code)
 	if blocks == nil {
 		return nil
 	}
 
-	compiled := make([]func(*Interpreter), len(code))
+	out := make([]func(*Interpreter), len(code))
 
-	// Pre-assign label IDs so handlers can reference any target by label
-	// before that block is compiled.
-	c.blockLabels = make(map[int]int, len(blocks))
+	c.labels = make(map[int]int, len(blocks))
 	c.compilable = make(map[int]bool, len(blocks))
+	c.sigs = make(map[int]*asm.Signature, len(blocks))
 	for _, b := range blocks {
-		c.blockLabels[b.Start] = c.assembler.NewLabel()
+		c.labels[b.Start] = c.assembler.NewLabel()
 	}
 
-	type blockMeta struct {
+	type meta struct {
 		obj     *asm.RelocObject
 		entryIP int
-		exitIP  int // 0 = branch block, >0 = arithmetic block
 	}
-	var allObjs []*asm.RelocObject
-	var allMeta []blockMeta
+	var objs []*asm.RelocObject
+	var metas []meta
 
-	// Pass 1
-	var branchBlocks []*analysis.BasicBlock
+	var branchs []*analysis.BasicBlock
 	for _, b := range blocks {
-		obj, exitIP := c.compileBlock(b)
+		obj, terminated := c.compileBlock(b)
 		if obj == nil {
 			continue
 		}
-		if exitIP == 0 {
-			c.compilable[b.Start] = true
-			branchBlocks = append(branchBlocks, b)
+		c.compilable[b.Start] = true
+		c.sigs[b.Start] = obj.Sig
+		if terminated {
+			branchs = append(branchs, b)
 		} else {
-			allObjs = append(allObjs, obj)
-			allMeta = append(allMeta, blockMeta{obj, b.Start, exitIP})
+			objs = append(objs, obj)
+			metas = append(metas, meta{obj, b.Start})
 		}
 	}
 
-	// Pass 2: recompile branch blocks with complete compilable information.
-	for _, b := range branchBlocks {
-		obj, exitIP := c.compileBlock(b)
+	for _, b := range branchs {
+		obj, _ := c.compileBlock(b)
 		if obj == nil {
 			c.compilable[b.Start] = false
 			continue
 		}
-		allObjs = append(allObjs, obj)
-		allMeta = append(allMeta, blockMeta{obj, b.Start, exitIP})
+		objs = append(objs, obj)
+		metas = append(metas, meta{obj, b.Start})
 	}
 
-	if len(allObjs) == 0 {
+	if len(objs) == 0 {
 		return nil
 	}
 
-	// Link
-	callers, _ := c.assembler.Link(allObjs)
-	for i, meta := range allMeta {
-		caller := callers[i]
-		if caller == nil {
+	callers, _ := c.assembler.Link(objs)
+	for i, m := range metas {
+		if callers[i] == nil {
 			continue
 		}
-		sig := meta.obj.Sig
-		if meta.exitIP == 0 {
-			compiled[meta.entryIP] = c.branchClosure(caller, sig)
-		} else {
-			compiled[meta.entryIP] = c.arithClosure(caller, sig, meta.exitIP)
-		}
+		out[m.entryIP] = c.closure(callers[i], m.obj.Sig)
 	}
 
-	return compiled
+	return out
 }
 
 // compileBlock compiles all instructions in b into one RelocObject.
-//
-// Returns (obj, 0) for branch blocks (c.terminated set by handler).
-// Returns (obj, prevIP) for arithmetic blocks; interpreter resumes at prevIP.
-// Returns (nil, 0) when the first instruction already fails.
-func (c *jitCompiler) compileBlock(b *analysis.BasicBlock) (*asm.RelocObject, int) {
+// Returns (obj, true) for branch blocks; (obj, false) for arithmetic/partial.
+// Returns (nil, false) when the very first instruction fails.
+func (c *jitCompiler) compileBlock(b *analysis.BasicBlock) (*asm.RelocObject, bool) {
 	c.ip = b.Start
+	c.blockEnd = b.End
 	c.terminated = false
+	c.scratch = c.assembler.Reserve()
 
 	jit[_PROLOGUE](c)
-	c.assembler.PlaceLabel(c.blockLabels[b.Start])
+	c.assembler.Place(c.labels[b.Start])
 
 	compiled := false
 	for c.ip < b.End {
@@ -162,14 +158,15 @@ func (c *jitCompiler) compileBlock(b *analysis.BasicBlock) (*asm.RelocObject, in
 		if !ok {
 			if !compiled {
 				c.assembler.Abort()
-				return nil, 0
+				return nil, false
 			}
+			c.blockEnd = prevIP
 			jit[_EPILOGUE](c)
 			obj, err := c.assembler.Compile()
 			if err != nil {
-				return nil, 0
+				return nil, false
 			}
-			return obj, prevIP
+			return obj, false
 		}
 		compiled = true
 	}
@@ -180,17 +177,12 @@ func (c *jitCompiler) compileBlock(b *analysis.BasicBlock) (*asm.RelocObject, in
 
 	obj, err := c.assembler.Compile()
 	if err != nil {
-		return nil, 0
+		return nil, false
 	}
-
-	if c.terminated {
-		return obj, 0
-	}
-	return obj, b.End
+	return obj, c.terminated
 }
 
-// getBlocks runs BasicBlocksPass on code and returns the block list.
-func (c *jitCompiler) getBlocks(code []byte) []*analysis.BasicBlock {
+func (c *jitCompiler) blocks(code []byte) []*analysis.BasicBlock {
 	m := pass.NewManager()
 	if err := m.Register(analysis.NewBasicBlocksPass()); err != nil {
 		return nil
@@ -205,42 +197,37 @@ func (c *jitCompiler) getBlocks(code []byte) []*analysis.BasicBlock {
 	return blocks
 }
 
-// branchClosure wraps a branch-block Caller.  rets[0] is the next IP.
-func (c *jitCompiler) branchClosure(fn asm.Caller, sig *asm.Signature) func(*Interpreter) {
-	nRes := len(sig.Reserved)
+// linkable reports whether the current assembler operand stack is compatible
+// with the target block's expected Params (same count, type, width).
+func (c *jitCompiler) linkable(targetIP int) bool {
+	sig := c.sigs[targetIP]
+	if sig == nil {
+		return false
+	}
+	src := c.assembler.Returns()
+	if len(src) != len(sig.Params) {
+		return false
+	}
+	for i, v := range src {
+		if v.Type() != sig.Params[i].Type() || v.Width() != sig.Params[i].Width() {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpreter) {
 	nParams := len(sig.Params)
-	stackKinds := c.slotKinds(sig.Returns, sig.ReturnWidths)
-	args := make([]uint64, nRes+nParams) // reserved inputs stay zero
+	kinds := c.kinds(sig.Returns)
+	params := make([]uint64, nParams)
+	rsv := make([]uint64, len(sig.Reserved))
 
 	return func(i *Interpreter) {
 		base := i.sp - nParams
 		for j := range nParams {
-			args[nRes+j] = i.unbox64(i.stack[base+j])
+			params[j] = i.unbox64(i.stack[base+j])
 		}
-		rets, err := fn.Call(args)
-		if err != nil {
-			panic(err)
-		}
-		for j, kind := range stackKinds {
-			i.stack[base+j] = i.box64(rets[nRes+j], kind)
-		}
-		i.sp = base + len(stackKinds)
-		i.frames[i.fp-1].ip = int(rets[0])
-	}
-}
-
-// arithClosure wraps an arithmetic-block Caller with a fixed exit IP.
-func (c *jitCompiler) arithClosure(fn asm.Caller, sig *asm.Signature, exitIP int) func(*Interpreter) {
-	nParams := len(sig.Params)
-	kinds := c.slotKinds(sig.Returns, sig.ReturnWidths)
-	args := make([]uint64, nParams)
-
-	return func(i *Interpreter) {
-		base := i.sp - nParams
-		for j := range args {
-			args[j] = i.unbox64(i.stack[base+j])
-		}
-		rets, err := fn.Call(args)
+		rets, err := fn.Call(params, &rsv)
 		if err != nil {
 			panic(err)
 		}
@@ -248,22 +235,22 @@ func (c *jitCompiler) arithClosure(fn asm.Caller, sig *asm.Signature, exitIP int
 			i.stack[base+j] = i.box64(rets[j], kind)
 		}
 		i.sp = base + len(kinds)
-		i.frames[i.fp-1].ip = exitIP
+		i.frames[i.fp-1].ip = int(rsv[0])
 	}
 }
 
-func (c *jitCompiler) slotKinds(typs []asm.RegType, widths []asm.RegWidth) []types.Kind {
-	kinds := make([]types.Kind, len(typs))
-	for i, t := range typs {
-		switch t {
+func (c *jitCompiler) kinds(regs []asm.PReg) []types.Kind {
+	kinds := make([]types.Kind, len(regs))
+	for i, p := range regs {
+		switch p.Type() {
 		case asm.RegTypeFloat:
-			if widths[i] == asm.Width32 {
+			if p.Width() == asm.Width32 {
 				kinds[i] = types.KindF32
 			} else {
 				kinds[i] = types.KindF64
 			}
 		default:
-			if widths[i] == asm.Width32 {
+			if p.Width() == asm.Width32 {
 				kinds[i] = types.KindI32
 			} else {
 				kinds[i] = types.KindI64

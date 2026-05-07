@@ -31,7 +31,7 @@ func TestAssembler_Compile(t *testing.T) {
 	require.Len(t, callers, 1)
 	require.NotNil(t, callers[0])
 
-	out, err := callers[0].Call([]uint64{3, 5})
+	out, err := callers[0].Call([]uint64{3, 5}, nil)
 	require.NoError(t, err)
 	require.Equal(t, []uint64{8}, out)
 }

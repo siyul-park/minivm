@@ -5,35 +5,23 @@ import (
 	"unsafe"
 )
 
-// reservedSlot is a metadata slot allocated via Reserve, pinned to a canonical register.
-type reservedSlot struct {
-	typ  RegType
-	w    RegWidth
-	vreg VReg
-}
-
-// globalLabelEntry records where a label landed after a Compile call.
-type globalLabelEntry struct {
+type labelEntry struct {
 	chunk  *Chunk
-	offset int // byte offset from chunk start
+	offset int
 }
 
 type Assembler struct {
-	arch      *Arch
-	vregAlloc *VRegAlloc
-	regAlloc  *RegAlloc
-	buffer    *Buffer
-	stack     []VReg
-	params    []VReg
-	insts     []Instruction
-
-	// Survive Reset — shared across all blocks in a function.
+	arch         *Arch
+	vregAlloc    *VRegAlloc
+	regAlloc     *RegAlloc
+	buffer       *Buffer
+	stack        []VReg
+	params       []VReg
+	insts        []Instruction
 	nextLabel    int
-	globalLabels map[int]globalLabelEntry
-
-	// Reset with each block.
-	localLabels map[int]int // labelID → index in a.insts (set by PlaceLabel)
-	reserved    []reservedSlot
+	globalLabels map[int]labelEntry
+	localLabels  map[int]int
+	scratch      []PReg
 }
 
 func NewAssembler(arch *Arch, buffer *Buffer) *Assembler {
@@ -42,7 +30,7 @@ func NewAssembler(arch *Arch, buffer *Buffer) *Assembler {
 		vregAlloc:    NewVRegAlloc(),
 		regAlloc:     NewRegAlloc(arch.Registers),
 		buffer:       buffer,
-		globalLabels: make(map[int]globalLabelEntry),
+		globalLabels: make(map[int]labelEntry),
 	}
 }
 
@@ -53,10 +41,10 @@ func (a *Assembler) NewLabel() int {
 	return id
 }
 
-// PlaceLabel marks the current IR position as the definition of label id.
+// Place marks the current IR position as the definition of label id.
 // Intra-block references are resolved immediately in Compile; cross-block
 // references become Relocations resolved by Link.
-func (a *Assembler) PlaceLabel(id int) {
+func (a *Assembler) Place(id int) {
 	if a.localLabels == nil {
 		a.localLabels = make(map[int]int)
 	}
@@ -64,13 +52,19 @@ func (a *Assembler) PlaceLabel(id int) {
 	a.insts = append(a.insts, Instruction{Op: OpPseudoLabel, Dst: Label(id)})
 }
 
-// Reserve allocates a VReg pinned to the leading canonical register for its
-// type (X0 for int, D0 for float).  It appears first in the Signature.Reserved
-// slice so callers can write metadata (e.g. next IP) before each RET.
-func (a *Assembler) Reserve(typ RegType, w RegWidth) VReg {
-	vreg := a.vregAlloc.Alloc(typ, w)
-	a.reserved = append(a.reserved, reservedSlot{typ: typ, w: w, vreg: vreg})
-	return vreg
+// Reserve allocates the next PReg from Arch.Scratch (always Width64 int).
+// The register is blocked from general VReg allocation for this block.
+// JIT code uses the returned PReg directly in Emit() calls.
+func (a *Assembler) Reserve() PReg {
+	mask := a.arch.Scratch
+	for range len(a.scratch) {
+		_, mask = mask.PopFirst()
+	}
+	id := mask.First()
+	preg := NewPReg(id, RegTypeInt, Width64)
+	a.scratch = append(a.scratch, preg)
+	a.regAlloc.Block(preg)
+	return preg
 }
 
 func (a *Assembler) Params() []VReg {
@@ -187,7 +181,7 @@ func (a *Assembler) Compile() (*RelocObject, error) {
 	}
 
 	for id, off := range localBytes {
-		a.globalLabels[id] = globalLabelEntry{chunk: chunk, offset: off}
+		a.globalLabels[id] = labelEntry{chunk: chunk, offset: off}
 	}
 
 	a.resetBlock()
@@ -276,7 +270,7 @@ func (a *Assembler) Abort() {
 func (a *Assembler) Reset() {
 	a.resetBlock()
 	a.nextLabel = 0
-	a.globalLabels = make(map[int]globalLabelEntry)
+	a.globalLabels = make(map[int]labelEntry)
 }
 
 // resolveLabels strips OpPseudoLabel pseudo-instructions, computes intra-block
@@ -335,7 +329,7 @@ func (a *Assembler) resetBlock() {
 	a.params = a.params[:0]
 	a.insts = a.insts[:0]
 	a.localLabels = nil
-	a.reserved = a.reserved[:0]
+	a.scratch = a.scratch[:0]
 	if a.vregAlloc != nil {
 		a.vregAlloc.Reset()
 	}
@@ -345,44 +339,46 @@ func (a *Assembler) resetBlock() {
 }
 
 func (a *Assembler) signature() (*Signature, error) {
-	nRes := len(a.reserved)
-	nParams := len(a.params)
-	nReturns := len(a.stack)
-	if nRes+nParams > a.arch.ABI.MaxParams() {
+	if len(a.params) > a.arch.ABI.MaxParams() {
 		return nil, ErrTooManyParams
 	}
-	if nRes+nReturns > a.arch.ABI.MaxReturns() {
+	if len(a.stack) > a.arch.ABI.MaxReturns() {
 		return nil, ErrTooManyReturns
 	}
 
-	reserved := make([]RegType, nRes)
-	reservedWidths := make([]RegWidth, nRes)
-	for i, rs := range a.reserved {
-		reserved[i] = rs.typ
-		reservedWidths[i] = rs.w
+	intRegs := a.allocatable(RegTypeInt)
+	floatRegs := a.allocatable(RegTypeFloat)
+
+	// Map each virtual param/return to its canonical physical register.
+	// Convention: int param 0→X0, 1→X1, …; float param 0→D0, 1→D1, …
+	params := make([]PReg, len(a.params))
+	intP, floatP := 0, 0
+	for i, v := range a.params {
+		if v.Type() == RegTypeFloat {
+			params[i] = NewPReg(floatRegs[floatP].ID(), v.Type(), v.Width())
+			floatP++
+		} else {
+			params[i] = NewPReg(intRegs[intP].ID(), v.Type(), v.Width())
+			intP++
+		}
 	}
 
-	params := make([]RegType, nParams)
-	paramWidths := make([]RegWidth, nParams)
-	for i, reg := range a.params {
-		params[i] = reg.Type()
-		paramWidths[i] = reg.Width()
-	}
-
-	returns := make([]RegType, nReturns)
-	returnWidths := make([]RegWidth, nReturns)
-	for i, reg := range a.stack {
-		returns[i] = reg.Type()
-		returnWidths[i] = reg.Width()
+	returns := make([]PReg, len(a.stack))
+	intR, floatR := 0, 0
+	for i, v := range a.stack {
+		if v.Type() == RegTypeFloat {
+			returns[i] = NewPReg(floatRegs[floatR].ID(), v.Type(), v.Width())
+			floatR++
+		} else {
+			returns[i] = NewPReg(intRegs[intR].ID(), v.Type(), v.Width())
+			intR++
+		}
 	}
 
 	return &Signature{
-		Reserved:       reserved,
-		ReservedWidths: reservedWidths,
-		Params:         params,
-		ParamWidths:    paramWidths,
-		Returns:        returns,
-		ReturnWidths:   returnWidths,
+		Reserved: append([]PReg(nil), a.scratch...),
+		Params:   params,
+		Returns:  returns,
 	}, nil
 }
 
@@ -402,20 +398,9 @@ func (a *Assembler) assign() ([]Instruction, error) {
 	virtual := make(map[uint8]VReg)
 	fixed := make(map[int32]PReg)
 
-	// Reserved output slots occupy leading canonical registers for their type.
+	// Reserved PRegs (from Arch.Scratch) are already blocked via Reserve().
+	// Stack outputs start at X0 — no conflict since scratch regs are outside X0-X7.
 	intR, floatR := 0, 0
-	for _, rs := range a.reserved {
-		var p PReg
-		if rs.typ == RegTypeFloat {
-			p = floatRegs[floatR]
-			floatR++
-		} else {
-			p = intRegs[intR]
-			intR++
-		}
-		fixed[rs.vreg.ID()] = p
-	}
-	// Stack outputs follow reserved slots.
 	for _, v := range a.stack {
 		var p PReg
 		if v.Type() == RegTypeFloat {

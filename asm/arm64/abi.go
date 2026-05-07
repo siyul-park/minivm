@@ -15,9 +15,9 @@ func (a *ABI) NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error
 }
 
 func (a *ABI) MaxParams() int {
-	return maxParams
+	return abiRegs
 }
 
 func (a *ABI) MaxReturns() int {
-	return maxReturns
+	return abiRegs
 }

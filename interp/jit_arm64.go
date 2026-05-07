@@ -15,15 +15,20 @@ func init() {
 	arch = arm64.Arch
 
 	jit[_PROLOGUE] = func(c *jitCompiler) bool {
+		// scratch (Scratch[0] = X9) is pre-allocated by compileBlock.
+		// Set the default exit IP; branch handlers override for non-fallthrough paths.
+		c.assembler.Emits(arm64.LDI(c.scratch, uint64(c.blockEnd))...)
 		return true
 	}
 
 	jit[_EPILOGUE] = func(c *jitCompiler) bool {
+		// c.blockEnd may be overridden to prevIP for partial compilations.
+		c.assembler.Emits(arm64.LDI(c.scratch, uint64(c.blockEnd))...)
 		c.assembler.Emit(arm64.RET())
 		return true
 	}
 
-	// BR — emits B to target if compilable, otherwise LDI+RET (interpreter fallback).
+	// BR — emits B to target if compilable+compatible, otherwise LDI+RET.
 	jit[instr.BR] = func(c *jitCompiler) bool {
 		if len(c.assembler.Returns()) > 0 {
 			inst := instr.Instruction(c.code[c.ip:])
@@ -35,13 +40,10 @@ func init() {
 		targetIP := c.ip + 3 + offset
 		c.ip += 3
 
-		ipReg := c.assembler.Reserve(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(ipReg)
-
-		if c.compilable[targetIP] {
-			c.assembler.Emit(arm64.BLabel(c.blockLabels[targetIP]))
+		if c.compilable[targetIP] && c.linkable(targetIP) {
+			c.assembler.Emit(arm64.BLabel(c.labels[targetIP]))
 		} else {
-			c.assembler.Emits(arm64.LDI(ipReg, uint64(targetIP))...)
+			c.assembler.Emits(arm64.LDI(c.scratch, uint64(targetIP))...)
 			c.assembler.Emit(arm64.RET())
 		}
 		c.terminated = true
@@ -66,48 +68,45 @@ func init() {
 		fallIP := c.ip + 3
 		c.ip += 3
 
-		ipReg := c.assembler.Reserve(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(ipReg)
+		targetLink := c.compilable[targetIP] && c.linkable(targetIP)
+		fallLink := c.compilable[fallIP] && c.linkable(fallIP)
 
-		targetCompilable := c.compilable[targetIP]
-		fallCompilable := c.compilable[fallIP]
-
-		if targetCompilable && fallCompilable {
-			c.assembler.Emit(arm64.CBNZLabel(r0, c.blockLabels[targetIP]))
-			c.assembler.Emit(arm64.BLabel(c.blockLabels[fallIP]))
+		if targetLink && fallLink {
+			c.assembler.Emit(arm64.CBNZLabel(r0, c.labels[targetIP]))
+			c.assembler.Emit(arm64.BLabel(c.labels[fallIP]))
 			c.terminated = true
 			return true
 		}
 
-		if targetCompilable {
+		if targetLink {
 			fallStubLabel := c.assembler.NewLabel()
 			c.assembler.Emit(arm64.CBZLabel(r0, fallStubLabel))
-			c.assembler.Emit(arm64.BLabel(c.blockLabels[targetIP]))
-			c.assembler.PlaceLabel(fallStubLabel)
-			c.assembler.Emits(arm64.LDI(ipReg, uint64(fallIP))...)
+			c.assembler.Emit(arm64.BLabel(c.labels[targetIP]))
+			c.assembler.Place(fallStubLabel)
+			// fall-through: scratch already = fallIP from prologue; just RET
 			c.assembler.Emit(arm64.RET())
 			c.terminated = true
 			return true
 		}
 
-		if fallCompilable {
+		if fallLink {
 			takenStubLabel := c.assembler.NewLabel()
 			c.assembler.Emit(arm64.CBNZLabel(r0, takenStubLabel))
-			c.assembler.Emit(arm64.BLabel(c.blockLabels[fallIP]))
-			c.assembler.PlaceLabel(takenStubLabel)
-			c.assembler.Emits(arm64.LDI(ipReg, uint64(targetIP))...)
+			c.assembler.Emit(arm64.BLabel(c.labels[fallIP]))
+			c.assembler.Place(takenStubLabel)
+			c.assembler.Emits(arm64.LDI(c.scratch, uint64(targetIP))...)
 			c.assembler.Emit(arm64.RET())
 			c.terminated = true
 			return true
 		}
 
-		// Neither compilable.
+		// Neither compilable/compatible.
 		takenStubLabel := c.assembler.NewLabel()
 		c.assembler.Emit(arm64.CBNZLabel(r0, takenStubLabel))
-		c.assembler.Emits(arm64.LDI(ipReg, uint64(fallIP))...)
+		// fall-through: scratch = fallIP from prologue; just RET
 		c.assembler.Emit(arm64.RET())
-		c.assembler.PlaceLabel(takenStubLabel)
-		c.assembler.Emits(arm64.LDI(ipReg, uint64(targetIP))...)
+		c.assembler.Place(takenStubLabel)
+		c.assembler.Emits(arm64.LDI(c.scratch, uint64(targetIP))...)
 		c.assembler.Emit(arm64.RET())
 		c.terminated = true
 		return true
@@ -191,13 +190,13 @@ func init() {
 		c.assembler.Emit(arm64.BLabel(lDone))
 
 		// cond != 0: result = val1
-		c.assembler.PlaceLabel(lTrue)
+		c.assembler.Place(lTrue)
 		if isFloat {
 			c.assembler.Emit(arm64.FMOV(result, val1))
 		} else {
 			c.assembler.Emit(arm64.ADDI(result, val1, 0))
 		}
-		c.assembler.PlaceLabel(lDone)
+		c.assembler.Place(lDone)
 
 		return true
 	}
@@ -230,9 +229,6 @@ func init() {
 			return false
 		}
 
-		ipReg := c.assembler.Reserve(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(ipReg)
-
 		// Allocate a local stub label per case (including default).
 		stubLabels := make([]int, count+1)
 		for j := range stubLabels {
@@ -244,17 +240,16 @@ func init() {
 			c.assembler.Emit(arm64.CMPI(r0, uint16(j)))
 			c.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, stubLabels[j]))
 		}
-		// Default (r0 >= count or r0 == count after the loop): jump to default stub.
 		c.assembler.Emit(arm64.BLabel(stubLabels[count]))
 
-		// Emit stubs: each either chains to a compiled block or returns to interpreter.
+		// Emit stubs: each either chains to a compatible compiled block or returns to interpreter.
 		for j := 0; j <= count; j++ {
-			c.assembler.PlaceLabel(stubLabels[j])
+			c.assembler.Place(stubLabels[j])
 			targetIP := targetIPs[j]
-			if c.compilable[targetIP] {
-				c.assembler.Emit(arm64.BLabel(c.blockLabels[targetIP]))
+			if c.compilable[targetIP] && c.linkable(targetIP) {
+				c.assembler.Emit(arm64.BLabel(c.labels[targetIP]))
 			} else {
-				c.assembler.Emits(arm64.LDI(ipReg, uint64(targetIP))...)
+				c.assembler.Emits(arm64.LDI(c.scratch, uint64(targetIP))...)
 				c.assembler.Emit(arm64.RET())
 			}
 		}

@@ -1,13 +1,22 @@
 #include "textflag.h"
 
-// func invoke(addr uintptr, argv *uint64)
-// argv: [header(param_num|return_num|param_types|return_types), values...]
-TEXT ·invoke(SB), NOSPLIT, $0-16
+// func invoke(addr uintptr, argv uintptr, rsv uintptr)
+//
+// Header at argv[0]:
+//   bits[7:0]   = nParams
+//   bits[15:8]  = nReturns
+//   bits[23:16] = nReserved
+//   bits[31:24] = paramTypes  (float bitmask)
+//   bits[39:32] = returnTypes (float bitmask)
+//
+// argv: [header, param0, param1, …]   — params in, returns out (same slots)
+// rsv:  scratch-register output buffer (nil → skip)
+TEXT ·invoke(SB), NOSPLIT, $0-24
     MOVD argv+8(FP), R8
     MOVD 0(R8), R9
 
-    AND $0xFF, R9, R10           // param_num
-    UBFX $16, R9, $8, R12        // param_types
+    AND $0xFF, R9, R10           // nParams
+    UBFX $24, R9, $8, R12       // paramTypes (bits[31:24])
     ADD $8, R8, R14              // values_base
 
     CBZ R10, call
@@ -46,11 +55,24 @@ call:
     MOVD addr+0(FP), R15
     BL (R15)
 
+    // Decode nReserved from header (argv[0]), then save scratch regs to rsv.
+    // Do this before R9 is reloaded as the header below.
+    MOVD argv+8(FP), R8
+    MOVD 0(R8), R11
+    UBFX $16, R11, $8, R11      // R11 = nReserved (bits[23:16])
+    CBZ R11, save_returns
+    MOVD rsv+16(FP), R12
+    CBZ R12, save_returns
+    MOVD R9, 0(R12)             // Scratch[0] = X9
+    SUB $1, R11; CBZ R11, save_returns
+    MOVD R10, 8(R12)            // Scratch[1] = X10
+
+save_returns:
     MOVD argv+8(FP), R8
     MOVD 0(R8), R9
-    UBFX $8, R9, $8, R11         // return_num
-    UBFX $24, R9, $8, R13        // return_types
-    ADD $8, R8, R14              // values_base
+    UBFX $8, R9, $8, R11        // nReturns (bits[15:8])
+    UBFX $32, R9, $8, R13       // returnTypes (bits[39:32])
+    ADD $8, R8, R14
 
     CBZ R11, return
     TBZ $0, R13, 1(PC); FMOVD F0, 0(R14)

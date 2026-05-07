@@ -2,19 +2,18 @@ package asm
 
 // Signature describes the calling convention of a compiled block.
 //
-// Native ABI layout:
+// Each PReg carries its physical register ID, type (int/float), and width,
+// so no separate type or width slices are needed.
 //
-//	inputs:  [Reserved[0..N-1], Params[0..M-1]]   → X0..XN, X(N+1)..X(N+M)
-//	outputs: [Reserved[0..N-1], Returns[0..K-1]]  → X0..XN, X(N+1)..X(N+K)
+// ABI layout (inputs = Params, outputs = Returns):
 //
-// Reserved slots share the same physical registers in both directions and carry
-// metadata (e.g. next interpreter IP).  Width slices are element-wise and have
-// the same length as their paired type slices.
+//	inputs:  Params[0], Params[1], …   — physical registers X0/D0, X1/D1, …
+//	outputs: Returns[0], Returns[1], … — same registers (different direction)
+//
+// Reserved registers (Arch.Scratch) live outside the ABI range and carry
+// out-of-band metadata (e.g. next interpreter IP).
 type Signature struct {
-	Reserved       []RegType
-	ReservedWidths []RegWidth
-	Params         []RegType
-	ParamWidths    []RegWidth
-	Returns        []RegType
-	ReturnWidths   []RegWidth
+	Reserved []PReg
+	Params   []PReg
+	Returns  []PReg
 }
