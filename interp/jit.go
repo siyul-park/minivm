@@ -74,28 +74,31 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 
 	var branches []*analysis.BasicBlock
 	for _, b := range blocks {
-		obj, terminated := c.compile(b)
-		if obj == nil {
-			continue
+		segObjs, entryIPs, terminated := c.compile(b)
+		for i, entryIP := range entryIPs {
+			c.compilable[entryIP] = true
+			c.sigs[entryIP] = segObjs[i].Sig
 		}
-		c.compilable[b.Start] = true
-		c.sigs[b.Start] = obj.Sig
 		if terminated {
 			branches = append(branches, b)
 		} else {
-			objs = append(objs, obj)
-			metas = append(metas, meta{obj, b.Start})
+			for i, obj := range segObjs {
+				objs = append(objs, obj)
+				metas = append(metas, meta{obj, entryIPs[i]})
+			}
 		}
 	}
 
 	for _, b := range branches {
-		obj, _ := c.compile(b)
-		if obj == nil {
+		segObjs, entryIPs, _ := c.compile(b)
+		if len(segObjs) == 0 {
 			c.compilable[b.Start] = false
 			continue
 		}
-		objs = append(objs, obj)
-		metas = append(metas, meta{obj, b.Start})
+		for i, obj := range segObjs {
+			objs = append(objs, obj)
+			metas = append(metas, meta{obj, entryIPs[i]})
+		}
 	}
 
 	if len(objs) == 0 {
@@ -113,49 +116,75 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 	return out
 }
 
-func (c *jitCompiler) compile(b *analysis.BasicBlock) (*asm.RelocObject, bool) {
-	c.ip = b.Start
-	c.blockEnd = b.End
+func (c *jitCompiler) compile(b *analysis.BasicBlock) ([]*asm.RelocObject, []int, bool) {
+	var objs []*asm.RelocObject
+	var entryIPs []int
+
+	start := b.Start
+	for start < b.End {
+		obj, next, terminated := c.segment(c.code, start, b.End)
+		if obj != nil {
+			objs = append(objs, obj)
+			entryIPs = append(entryIPs, start)
+		}
+		if terminated {
+			return objs, entryIPs, true
+		}
+		start = next
+	}
+	return objs, entryIPs, false
+}
+
+func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, int, bool) {
+	c.ip = start
+	c.blockEnd = end
 	c.terminated = false
 	c.scratch = c.assembler.Reserve()
 
 	jit[_PROLOGUE](c)
-	c.assembler.Place(c.labels[b.Start])
+	if id, ok := c.labels[start]; ok {
+		c.assembler.Place(id)
+	}
 
-	compiled := false
-	for c.ip < b.End {
+	entryIP := -1
+	for c.ip < end {
 		prevIP := c.ip
-		ok := jit[c.code[c.ip]](c)
-
-		if c.terminated {
-			break
-		}
+		ok := jit[code[c.ip]](c)
 
 		if !ok {
-			if !compiled {
+			if entryIP == -1 {
 				c.assembler.Abort()
-				return nil, false
+				return nil, c.ip, false
 			}
 			c.blockEnd = prevIP
 			jit[_EPILOGUE](c)
 			obj, err := c.assembler.Compile()
 			if err != nil {
-				return nil, false
+				return nil, c.ip, false
 			}
-			return obj, false
+			return obj, c.ip, false
 		}
-		compiled = true
+
+		if entryIP == -1 {
+			entryIP = prevIP
+		}
+		if c.terminated {
+			break
+		}
 	}
 
+	if entryIP == -1 {
+		c.assembler.Abort()
+		return nil, c.ip, c.terminated
+	}
 	if !c.terminated {
 		jit[_EPILOGUE](c)
 	}
-
 	obj, err := c.assembler.Compile()
 	if err != nil {
-		return nil, false
+		return nil, c.ip, c.terminated
 	}
-	return obj, c.terminated
+	return obj, c.ip, c.terminated
 }
 
 func (c *jitCompiler) blocks(code []byte) []*analysis.BasicBlock {
