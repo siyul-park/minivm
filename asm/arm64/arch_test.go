@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAssembler_Build(t *testing.T) {
+func TestAssembler_Compile(t *testing.T) {
 	buffer, err := asm.NewBuffer(256)
 	require.NoError(t, err)
 	defer buffer.Free()
@@ -23,10 +23,15 @@ func TestAssembler_Build(t *testing.T) {
 	a.Emit(ADD(result, left, right))
 	a.Emit(RET())
 
-	caller, err := a.Build()
+	obj, err := a.Compile()
 	require.NoError(t, err)
 
-	out, err := caller.Call([]uint64{3, 5})
+	callers, err := a.Link([]*asm.RelocObject{obj})
+	require.NoError(t, err)
+	require.Len(t, callers, 1)
+	require.NotNil(t, callers[0])
+
+	out, err := callers[0].Call([]uint64{3, 5}, nil)
 	require.NoError(t, err)
 	require.Equal(t, []uint64{8}, out)
 }

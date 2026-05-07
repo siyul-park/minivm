@@ -896,12 +896,30 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 	// Float — move / compare
 	// -----------------------------------------------------------------------
 
-	case OpFMOV: // FMOV Dd, Dn  (register copy, double)
+	case OpFMOV:
 		d, n, err := decodeReg2(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0x1E604000 | reg(n)<<5 | reg(d)), nil
+		dFloat := d.Type() == asm.RegTypeFloat
+		nFloat := n.Type() == asm.RegTypeFloat
+		switch {
+		case dFloat && nFloat: // float → float register copy
+			if d.Width() == asm.Width32 {
+				return enc(0x1E204000 | reg(n)<<5 | reg(d)), nil // FMOV Sd, Sn
+			}
+			return enc(0x1E604000 | reg(n)<<5 | reg(d)), nil // FMOV Dd, Dn
+		case dFloat && !nFloat: // int → float (bit-copy)
+			if d.Width() == asm.Width32 {
+				return enc(0x1E270000 | reg(n)<<5 | reg(d)), nil // FMOV Sd, Wn
+			}
+			return enc(0x9E670000 | reg(n)<<5 | reg(d)), nil // FMOV Dd, Xn
+		default: // float → int (bit-copy)
+			if n.Width() == asm.Width32 {
+				return enc(0x1E260000 | reg(n)<<5 | reg(d)), nil // FMOV Wn, Sd
+			}
+			return enc(0x9E660000 | reg(n)<<5 | reg(d)), nil // FMOV Xn, Dd
+		}
 
 	case OpFCMP: // FCMP Dn, Dm — sets NZCV
 		n, m, err := decodeCmp(inst)

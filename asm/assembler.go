@@ -1,22 +1,66 @@
 package asm
 
+import (
+	"errors"
+	"fmt"
+	"unsafe"
+)
+
 type Assembler struct {
-	arch      *Arch
-	vregAlloc *VRegAlloc
-	regAlloc  *RegAlloc
-	buffer    *Buffer
-	stack     []VReg
-	params    []VReg
-	insts     []Instruction
+	arch         *Arch
+	vregAlloc    *VRegAlloc
+	regAlloc     *RegAlloc
+	buffer       *Buffer
+	stack        []VReg
+	params       []VReg
+	insts        []Instruction
+	nextLabel    int
+	globalLabels map[int]label
+	localLabels  map[int]int
+	scratch      []PReg
 }
+
+type label struct {
+	chunk  *Chunk
+	offset int
+}
+
+var ErrUnresolvedLabel = errors.New("unresolved label")
 
 func NewAssembler(arch *Arch, buffer *Buffer) *Assembler {
 	return &Assembler{
-		arch:      arch,
-		vregAlloc: NewVRegAlloc(),
-		regAlloc:  NewRegAlloc(arch.Registers),
-		buffer:    buffer,
+		arch:         arch,
+		vregAlloc:    NewVRegAlloc(),
+		regAlloc:     NewRegAlloc(arch.Registers),
+		buffer:       buffer,
+		globalLabels: make(map[int]label),
 	}
+}
+
+func (a *Assembler) NewLabel() int {
+	id := a.nextLabel
+	a.nextLabel++
+	return id
+}
+
+func (a *Assembler) Place(id int) {
+	if a.localLabels == nil {
+		a.localLabels = make(map[int]int)
+	}
+	a.localLabels[id] = len(a.insts) // points to next real instruction (0-byte pseudo)
+	a.insts = append(a.insts, Instruction{Op: OpPseudoLabel, Dst: Label(id)})
+}
+
+func (a *Assembler) Reserve() PReg {
+	mask := a.arch.Scratch
+	for range len(a.scratch) {
+		_, mask = mask.PopFirst()
+	}
+	id := mask.First()
+	preg := NewPReg(id, RegTypeInt, Width64)
+	a.scratch = append(a.scratch, preg)
+	a.regAlloc.Block(preg)
+	return preg
 }
 
 func (a *Assembler) Params() []VReg {
@@ -70,17 +114,17 @@ func (a *Assembler) Emit(inst Instruction) int {
 	return len(a.insts) - 1
 }
 
-func (a *Assembler) Build() (Caller, error) {
-	sig, err := a.signature()
-	if err != nil {
-		return nil, err
-	}
-	instrs, err := a.assign()
+func (a *Assembler) Emits(insts ...Instruction) {
+	a.insts = append(a.insts, insts...)
+}
+
+func (a *Assembler) Compile() (*RelocObject, error) {
+	sig, instrs, err := a.compile()
 	if err != nil {
 		return nil, err
 	}
 
-	code, err := Encode(a.arch.Encoder, instrs)
+	code, offsets, relocs, err := a.resolve(instrs)
 	if err != nil {
 		return nil, err
 	}
@@ -88,25 +132,194 @@ func (a *Assembler) Build() (Caller, error) {
 	if err := a.buffer.Unseal(); err != nil {
 		return nil, err
 	}
-
 	chunk, err := a.buffer.Append(code)
 	if err != nil {
 		return nil, err
 	}
-
 	if err := a.buffer.Seal(); err != nil {
 		return nil, err
 	}
 
-	a.Reset()
-	return a.arch.NewCaller(sig, chunk)
+	for id, off := range offsets {
+		a.globalLabels[id] = label{chunk: chunk, offset: off}
+	}
+
+	a.reset()
+
+	return &RelocObject{
+		Chunk:  chunk,
+		Sig:    sig,
+		Instrs: instrs,
+		Labels: offsets,
+		Relocs: relocs,
+	}, nil
+}
+
+func (a *Assembler) compile() (*Signature, []Instruction, error) {
+	stripped := make([]Instruction, 0, len(a.insts))
+	for _, inst := range a.insts {
+		if inst.Op != OpPseudoLabel {
+			stripped = append(stripped, inst)
+		}
+	}
+
+	saved := a.insts
+	a.insts = stripped
+
+	sig, err := a.signature()
+	if err != nil {
+		a.insts = saved
+		return nil, nil, err
+	}
+	assigned, err := a.assign()
+	a.insts = saved
+	if err != nil {
+		return nil, nil, err
+	}
+	return sig, assigned, nil
+}
+
+// Encodes with Imm(0) placeholders in a first pass to measure instruction byte
+// sizes without assuming a fixed width, then patches or records relocations.
+func (a *Assembler) resolve(physAssigned []Instruction) ([]byte, map[int]int, []Relocation, error) {
+	// instrIdx counts only real (non-pseudo) instructions to align with physAssigned.
+	labelAt := make(map[int]int)
+	instrIdx := 0
+	for _, inst := range a.insts {
+		if inst.Op == OpPseudoLabel {
+			if lbl, ok := inst.Dst.(LabelOperand); ok {
+				labelAt[lbl.ID] = instrIdx
+			}
+		} else {
+			instrIdx++
+		}
+	}
+
+	// Pass 1: encode with placeholder to measure byte sizes.
+	encoded := make([][]byte, len(physAssigned))
+	byteOffsets := make([]int, len(physAssigned)+1)
+	for i, inst := range physAssigned {
+		if _, ok := inst.Src2.(LabelOperand); ok {
+			inst.Src2 = Imm(0)
+		}
+		b, err := a.arch.Encoder.Encode(inst)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		encoded[i] = b
+		byteOffsets[i+1] = byteOffsets[i] + len(b)
+	}
+
+	localBytes := make(map[int]int, len(labelAt))
+	for id, idx := range labelAt {
+		localBytes[id] = byteOffsets[idx]
+	}
+
+	// Pass 2: patch local labels; record relocations for external ones.
+	var relocs []Relocation
+	code := make([]byte, 0, byteOffsets[len(physAssigned)])
+	for i, inst := range physAssigned {
+		lbl, hasLabel := inst.Src2.(LabelOperand)
+		if !hasLabel {
+			code = append(code, encoded[i]...)
+			continue
+		}
+		if off, found := localBytes[lbl.ID]; found {
+			inst.Src2 = Imm(int64(off - byteOffsets[i]))
+			b, err := a.arch.Encoder.Encode(inst)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			code = append(code, b...)
+		} else {
+			relocs = append(relocs, Relocation{
+				InstrIdx: i,
+				Offset:   byteOffsets[i],
+				Label:    lbl.ID,
+			})
+			code = append(code, encoded[i]...)
+		}
+	}
+	return code, localBytes, relocs, nil
+}
+
+// Link patches relocations across all objects and returns a Caller per object.
+// Objects that fail to link have a nil Caller; the first error is returned.
+func (a *Assembler) Link(objects []*RelocObject) ([]Caller, error) {
+	if err := a.buffer.Unseal(); err != nil {
+		return nil, err
+	}
+
+	var firstErr error
+	failed := make([]bool, len(objects))
+
+	for i, obj := range objects {
+		base := obj.Chunk.Ptr()
+		for _, r := range obj.Relocs {
+			entry, ok := a.globalLabels[r.Label]
+			if !ok {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("%w: label %d", ErrUnresolvedLabel, r.Label)
+				}
+				failed[i] = true
+				continue
+			}
+			target := unsafe.Add(
+				entry.chunk.Ptr(),
+				entry.offset,
+			)
+			src := unsafe.Add(base, r.Offset)
+			off := int64(uintptr(target)) - int64(uintptr(src))
+			inst := obj.Instrs[r.InstrIdx]
+			inst.Src2 = Imm(off)
+			patched, err := a.arch.Encoder.Encode(inst)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				failed[i] = true
+				continue
+			}
+			writeBytes(src, patched)
+		}
+	}
+	if err := a.buffer.Seal(); err != nil {
+		return nil, err
+	}
+
+	callers := make([]Caller, len(objects))
+	for i, obj := range objects {
+		if failed[i] {
+			continue
+		}
+		caller, err := a.arch.NewCaller(obj.Sig, obj.Chunk)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		callers[i] = caller
+	}
+	return callers, firstErr
+}
+
+func (a *Assembler) Abort() {
+	a.reset()
 }
 
 func (a *Assembler) Reset() {
+	a.reset()
+	a.nextLabel = 0
+	a.globalLabels = make(map[int]label)
+}
+
+func (a *Assembler) reset() {
 	a.stack = a.stack[:0]
 	a.params = a.params[:0]
 	a.insts = a.insts[:0]
-
+	a.localLabels = nil
+	a.scratch = a.scratch[:0]
 	if a.vregAlloc != nil {
 		a.vregAlloc.Reset()
 	}
@@ -116,21 +329,45 @@ func (a *Assembler) Reset() {
 }
 
 func (a *Assembler) signature() (*Signature, error) {
-	if len(a.stack) > a.arch.ABI.MaxReturns() {
-		return nil, ErrTooManyReturns
-	}
 	if len(a.params) > a.arch.ABI.MaxParams() {
 		return nil, ErrTooManyParams
 	}
-	params := make([]RegType, len(a.params))
-	for i, reg := range a.params {
-		params[i] = reg.Type()
+	if len(a.stack) > a.arch.ABI.MaxReturns() {
+		return nil, ErrTooManyReturns
 	}
-	returns := make([]RegType, len(a.stack))
-	for i, reg := range a.stack {
-		returns[i] = reg.Type()
+
+	intRegs := a.allocatable(RegTypeInt)
+	floatRegs := a.allocatable(RegTypeFloat)
+
+	params := make([]PReg, len(a.params))
+	intP, floatP := 0, 0
+	for i, v := range a.params {
+		if v.Type() == RegTypeFloat {
+			params[i] = NewPReg(floatRegs[floatP].ID(), v.Type(), v.Width())
+			floatP++
+		} else {
+			params[i] = NewPReg(intRegs[intP].ID(), v.Type(), v.Width())
+			intP++
+		}
 	}
-	return &Signature{Params: params, Returns: returns}, nil
+
+	returns := make([]PReg, len(a.stack))
+	intR, floatR := 0, 0
+	for i, v := range a.stack {
+		if v.Type() == RegTypeFloat {
+			returns[i] = NewPReg(floatRegs[floatR].ID(), v.Type(), v.Width())
+			floatR++
+		} else {
+			returns[i] = NewPReg(intRegs[intR].ID(), v.Type(), v.Width())
+			intR++
+		}
+	}
+
+	return &Signature{
+		Reserved: append([]PReg(nil), a.scratch...),
+		Params:   params,
+		Returns:  returns,
+	}, nil
 }
 
 func (a *Assembler) assign() ([]Instruction, error) {
@@ -144,7 +381,6 @@ func (a *Assembler) assign() ([]Instruction, error) {
 	intRegs := a.allocatable(RegTypeInt)
 	floatRegs := a.allocatable(RegTypeFloat)
 
-	// physical maps VReg.ID → PReg (WidthUndefined; Width is taken from VReg at rewrite time)
 	physical := make(map[int32]PReg)
 	virtual := make(map[uint8]VReg)
 	fixed := make(map[int32]PReg)
@@ -336,7 +572,6 @@ func (a *Assembler) rewrite(inst Instruction, mapping map[int32]PReg, widths map
 	}
 }
 
-// rewriteOP replaces a VRegOperand with the allocated PReg, preserving the
 func (a *Assembler) rewriteOP(op Operand, mapping map[int32]PReg, widths map[int32]RegWidth) Operand {
 	switch v := op.(type) {
 	case VRegOperand:

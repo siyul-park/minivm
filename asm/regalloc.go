@@ -102,6 +102,16 @@ func (ra *RegAlloc) Get(vreg VReg) (PReg, bool) {
 	return p, ok
 }
 
+// Block removes preg from the pool available for general VReg allocation.
+// Reset() restores all blocked registers.
+func (ra *RegAlloc) Block(preg PReg) {
+	if preg.Type() == RegTypeFloat {
+		ra.floatAvail = ra.floatAvail.Clear(preg.ID())
+	} else {
+		ra.intAvail = ra.intAvail.Clear(preg.ID())
+	}
+}
+
 func (ra *RegAlloc) Reset() {
 	clear(ra.phys)
 	ra.intAvail = ra.info.Allocatable(RegTypeInt)

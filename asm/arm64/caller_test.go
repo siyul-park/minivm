@@ -23,14 +23,14 @@ func TestCaller_Call(t *testing.T) {
 	require.NoError(t, buf.Seal())
 
 	sig := &asm.Signature{
-		Params:  []asm.RegType{asm.RegTypeInt},
-		Returns: []asm.RegType{asm.RegTypeInt},
+		Params:  []asm.PReg{asm.NewPReg(0, asm.RegTypeInt, asm.Width64)},
+		Returns: []asm.PReg{asm.NewPReg(0, asm.RegTypeInt, asm.Width64)},
 	}
 
 	c, err := NewCaller(sig, chk)
 	require.NoError(t, err)
 
-	rets, err := c.Call([]uint64{1})
+	rets, err := c.Call([]uint64{1}, nil)
 	require.NoError(t, err)
 	require.Len(t, rets, 1)
 	require.Equal(t, []uint64{2}, rets)

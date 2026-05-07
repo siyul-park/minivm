@@ -102,7 +102,7 @@ The interpreter owns all runtime state in `Interpreter`:
 
 **`threadedCompiler`** (in `threaded.go`): A `[256]func` table populated in `init()`. Each entry is a compile-time function that reads operands from `c.code[c.ip+N:]`, advances `c.ip`, and returns a runtime closure. The closure captures compile-time constants and advances `f.ip` by the instruction width when executed.
 
-**`jitCompiler`** (in `jit.go`): Architecture-agnostic driver. Runs `BasicBlocksPass` to find block boundaries, then iterates each block calling `jit[opcode](c)`. A sub-sequence of `count > 8` successively JIT-able instructions is compiled to a native chunk and installed at `compiled[entryIP]`.
+**`jitCompiler`** (in `jit.go`): Architecture-agnostic driver. Runs `BasicBlocksPass` to find block boundaries. For each block, `compile(b)` calls `segment(code, start, end)` in a loop to extract every maximal consecutive run of compilable instructions. A segment is emitted only when `count > 4` (strictly). Within each block, multiple independent segments may be produced. A two-pass strategy (non-terminated blocks first, then branch-terminated blocks) ensures branch targets have known signatures before linking decisions are made. All compiled segments across a function are linked together via `assembler.Link()`, which patches cross-segment label relocations. Each linked segment is installed as a closure at `out[entryIP]`.
 
 **`HostFunction`** (in `host.go`): Wraps a Go `func(i *Interpreter, params []Boxed) ([]Boxed, error)` as a `types.Value`. Stored in the constant table and called with `CONST_GET` + `CALL` like any `*types.Function`.
 
@@ -113,18 +113,18 @@ The interpreter owns all runtime state in `Interpreter`:
 - **`stack []VReg`**: values currently in-flight (mirrors the VM value stack within the sub-block being compiled).
 - **`params []VReg`**: VRegs that were `Take`n from an empty `stack` — these become the native function's ABI input parameters.
 
-`Build()` pipeline:
-1. `signature()` — derive param/return types from `params` and `stack`.
-2. `assign()` — linear-scan allocation: map VReg→PReg, respecting fixed return registers and freeing dead VRegs.
-3. `Encode(arch.Encoder, instrs)` — serialize instructions to bytes.
-4. `buffer.Unseal()` → `buffer.Append(code)` → `buffer.Seal()`.
-5. `arch.NewCaller(sig, chunk)` → returns a `Caller` whose `Call([]uint64)` invokes the chunk.
+`Compile()` + `Link()` pipeline:
+1. `compile()` — strip pseudo-labels; `signature()` derives `Signature` from `params` and `stack`; `assign()` performs linear-scan VReg→PReg allocation.
+2. `resolve(physAssigned)` — two-pass encode: pass 1 encodes with Imm(0) placeholders to measure architecture-agnostic byte sizes; pass 2 patches local labels and records `Relocation` entries for cross-segment references.
+3. `buffer.Unseal()` → `buffer.Append(code)` → `buffer.Seal()` — writes the segment's machine code.
+4. Returns `*RelocObject` (encoded chunk + `Signature` + relocation table).
+5. `Link([]*RelocObject)` — unseals the buffer, patches each relocation by re-encoding the branch instruction with the resolved offset, then creates a `Caller` per object whose `Call(params, reserved)` invokes the chunk.
 
 ### `asm/arm64/`
 
 Implements `asm.Arch` (the `Arch` singleton), `asm.Encoder`, `asm.ABI`, and `asm.Caller`.
 
-The `Caller` invokes native chunks via the assembly trampoline in `abi_arm64.s`. The trampoline marshals up to 8 integer + 8 float arguments per the ARM64 AAPCS64 ABI. A `header uint64` field encodes counts and float-register masks compactly.
+The `Caller` invokes native chunks via the assembly trampoline in `abi_arm64.s`. The trampoline marshals arguments from an `argv` buffer (`[header, reserved…, params…]`), calls the chunk via `BL`, then reads scratch register outputs (X10–X15) back into `argv[1..nReserved]` and return values into `argv[nReserved+1..]`. The `header uint64` encodes param/return counts, reserved count, and float-register masks. Scratch registers X8 and X9 are left outside `arch.Scratch` so the trampoline can use them as temporaries after `BL` without conflicting with the chunk's scratch outputs.
 
 Platform-specific files carry `//go:build arm64`. `abi_stub.go` (`//go:build !arm64`) keeps the package compilable on other platforms.
 
@@ -186,11 +186,21 @@ Thin cobra entry point. The root command (no subcommand) launches the REPL with 
    ├─ every 128 iters: hits[addr][0]++, hits[addr][ip+1]++
    └─ when hits[addr][0] == threshold:
        jitCompiler.Compile(instrs[addr])
-       └─ for each basic block:
-           ├─ call jit[opcode](c) per instruction
-           ├─ if count > 8: assembler.Build() → Caller
-           └─ compiled[entryIP] = func(*Interpreter){ fn.Call(...) }
+       └─ two-pass over basic blocks:
+           ├─ pass 1: for each block, segment() loop → segments with count > 4
+           │   non-terminated segments → objs; terminated blocks → deferred
+           ├─ pass 2: recompile terminated blocks with full signature knowledge
+           ├─ assembler.Link(objs) → patches cross-segment relocations → []Caller
+           └─ out[entryIP] = closure(caller, sig) for each segment
 
 5. interp.Close()
    └─ buffer.Free() → munmap
+
+## Known Gaps
+
+| Gap | Impact |
+|-----|--------|
+| JIT excludes calls, variable access | function calls and local variable ops always run threaded |
+| No x86-64 backend | JIT inactive on Linux/Windows servers |
+| No benchmark suite | 4096-tick JIT threshold is unvalidated |
 ```

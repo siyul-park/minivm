@@ -7,67 +7,108 @@ import (
 	"github.com/siyul-park/minivm/asm"
 )
 
+// Header bit layout:
+//
+//	bits[7:0]   = nParams
+//	bits[15:8]  = nReturns
+//	bits[23:16] = nReserved  (≤ 6; scratch registers X10–X15 in order)
+//	bits[31:24] = paramTypes  (float bitmask: bit i set ↔ Params[i] is float)
+//	bits[39:32] = returnTypes (float bitmask)
+//
+// argv layout passed to invoke:
+//
+//	argv[0]:              header
+//	argv[1..nReserved]:   scratch outputs — written after the call
+//	argv[nReserved+1..]:  params in / returns out
+
 type caller struct {
-	header  uint64
-	chunk   *asm.Chunk
-	params  []asm.RegType
-	returns []asm.RegType
+	header   uint64
+	chunk    *asm.Chunk
+	reserves []asm.PReg
+	params   []asm.PReg
+	returns  []asm.PReg
 }
 
 var _ asm.Caller = (*caller)(nil)
 
-const (
-	maxParams  = 8
-	maxReturns = 8
-)
+const abiRegs = 8 // X0-X7 / D0-D7
 
 func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
-	if len(sig.Params) > maxParams {
-		return nil, fmt.Errorf("%w: %d", asm.ErrTooManyParams, len(sig.Params))
+	for i, p := range sig.Params {
+		if p.ID() >= abiRegs {
+			return nil, fmt.Errorf("%w: param[%d] register %v is outside", asm.ErrTooManyParams, i, p)
+		}
 	}
-	if len(sig.Returns) > maxReturns {
-		return nil, fmt.Errorf("%w: %d", asm.ErrTooManyReturns, len(sig.Returns))
+	for i, p := range sig.Returns {
+		if p.ID() >= abiRegs {
+			return nil, fmt.Errorf("%w: return[%d] register %v is outside", asm.ErrTooManyReturns, i, p)
+		}
 	}
-
-	params := append([]asm.RegType(nil), sig.Params...)
-	returns := append([]asm.RegType(nil), sig.Returns...)
+	for i, p := range sig.Reserved {
+		if p.ID() < abiRegs {
+			return nil, fmt.Errorf("%w: reserved[%d] register %v outside", asm.ErrInvalidArgs, i, p)
+		}
+	}
 
 	var paramTypes, returnTypes uint8
-	for i, t := range params {
-		if t == asm.RegTypeFloat {
+	for i, p := range sig.Params {
+		if p.Type() == asm.RegTypeFloat {
 			paramTypes |= 1 << uint(i)
 		}
 	}
-	for i, t := range returns {
-		if t == asm.RegTypeFloat {
+	for i, p := range sig.Returns {
+		if p.Type() == asm.RegTypeFloat {
 			returnTypes |= 1 << uint(i)
 		}
 	}
 
-	header := uint64(len(params)) | uint64(len(returns))<<8 | uint64(paramTypes)<<16 | uint64(returnTypes)<<24
+	nReserved := len(sig.Reserved)
+	header := uint64(len(sig.Params)) |
+		uint64(len(sig.Returns))<<8 |
+		uint64(nReserved)<<16 |
+		uint64(paramTypes)<<24 |
+		uint64(returnTypes)<<32
 
 	return &caller{
-		header:  header,
-		chunk:   chunk,
-		params:  params,
-		returns: returns,
+		header:   header,
+		chunk:    chunk,
+		reserves: append([]asm.PReg(nil), sig.Reserved...),
+		params:   append([]asm.PReg(nil), sig.Params...),
+		returns:  append([]asm.PReg(nil), sig.Returns...),
 	}, nil
 }
 
 func (c *caller) Params() []asm.RegType {
-	return c.params
+	out := make([]asm.RegType, len(c.params))
+	for i, p := range c.params {
+		out[i] = p.Type()
+	}
+	return out
 }
 
 func (c *caller) Returns() []asm.RegType {
-	return c.returns
+	out := make([]asm.RegType, len(c.returns))
+	for i, p := range c.returns {
+		out[i] = p.Type()
+	}
+	return out
 }
 
-func (c *caller) Call(args []uint64) ([]uint64, error) {
-	var stack [1 + 8]uint64
-	needed := 1 + max(len(c.params), len(c.returns))
-	argv := stack[:needed]
+func (c *caller) Call(params []uint64, rsv *[]uint64) ([]uint64, error) {
+	nRsv := len(c.reserves)
+	nParams := len(c.params)
+	nReturns := len(c.returns)
+
+	// argv: [header, reserved×nRsv, values×max(nParams,nReturns)]
+	var stack [1 + 6 + 8]uint64 // 1 header + max 6 reserved + max 8 ABI regs
+	argv := stack[:1+nRsv+max(nParams, nReturns)]
 	argv[0] = c.header
-	copy(argv[1:], args[:min(len(args), len(c.params))])
+	copy(argv[1+nRsv:], params[:min(len(params), nParams)])
+
 	invoke(uintptr(c.chunk.Ptr()), uintptr(unsafe.Pointer(&argv[0])))
-	return argv[1 : 1+len(c.returns)], nil
+
+	if rsv != nil && nRsv > 0 {
+		copy(*rsv, argv[1:1+nRsv])
+	}
+	return argv[1+nRsv : 1+nRsv+nReturns], nil
 }

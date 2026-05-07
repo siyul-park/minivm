@@ -49,6 +49,20 @@ func (o ImmOperand) String() string {
 	return fmt.Sprintf("#%d", o.Value)
 }
 
+type LabelOperand struct {
+	ID int
+}
+
+func (LabelOperand) operand() {}
+
+func (o LabelOperand) String() string {
+	return fmt.Sprintf("label%d", o.ID)
+}
+
+func Label(id int) LabelOperand {
+	return LabelOperand{ID: id}
+}
+
 type MemOperand struct {
 	Base   Operand
 	Offset int64

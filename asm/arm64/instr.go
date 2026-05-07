@@ -569,6 +569,17 @@ func BR(reg asm.Reg) asm.Instruction  { return newReg1(OpBR, reg) }
 func BLR(reg asm.Reg) asm.Instruction { return newReg1(OpBLR, reg) }
 func RET() asm.Instruction            { return newInst(OpRET, nil, nil, nil) }
 
+// Resolved immediately if the label is already placed; otherwise becomes a
+// Relocation patched by Assembler.Link.
+func BLabel(id int) asm.Instruction {
+	return asm.Instruction{Op: uint16(OpB), Src2: asm.LabelOperand{ID: id}}
+}
+
+// condOp must be one of OpBEQ, OpBNE, OpBLT, OpBGT, OpBLE, OpBGE, …
+func BCondLabel(condOp Op, id int) asm.Instruction {
+	return asm.Instruction{Op: uint16(condOp), Src2: asm.LabelOperand{ID: id}}
+}
+
 // ---------------------------------------------------------------------------
 // Branch (compare-and-branch)
 // ---------------------------------------------------------------------------
@@ -578,6 +589,40 @@ func CBZ(reg asm.Reg, offset int32) asm.Instruction {
 }
 func CBNZ(reg asm.Reg, offset int32) asm.Instruction {
 	return newInst(OpCBNZ, nil, regOperand(reg), imm(int64(offset)))
+}
+
+func CBZLabel(reg asm.Reg, id int) asm.Instruction {
+	return asm.Instruction{Op: uint16(OpCBZ), Src1: regOperand(reg), Src2: asm.LabelOperand{ID: id}}
+}
+
+func CBNZLabel(reg asm.Reg, id int) asm.Instruction {
+	return asm.Instruction{Op: uint16(OpCBNZ), Src1: regOperand(reg), Src2: asm.LabelOperand{ID: id}}
+}
+
+// Each instruction must be passed to Emit separately.
+func LDI(dst asm.Reg, val uint64) []asm.Instruction {
+	switch {
+	case val <= 0xFFFF:
+		return []asm.Instruction{MOVZ(dst, uint16(val), 0)}
+	case val <= 0xFFFFFFFF:
+		return []asm.Instruction{
+			MOVZ(dst, uint16(val), 0),
+			MOVK(dst, uint16(val>>16), 16),
+		}
+	case val <= 0xFFFFFFFFFFFF:
+		return []asm.Instruction{
+			MOVZ(dst, uint16(val), 0),
+			MOVK(dst, uint16(val>>16), 16),
+			MOVK(dst, uint16(val>>32), 32),
+		}
+	default:
+		return []asm.Instruction{
+			MOVZ(dst, uint16(val), 0),
+			MOVK(dst, uint16(val>>16), 16),
+			MOVK(dst, uint16(val>>32), 32),
+			MOVK(dst, uint16(val>>48), 48),
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

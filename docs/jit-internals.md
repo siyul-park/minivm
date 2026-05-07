@@ -7,7 +7,7 @@ How to write threaded and JIT handlers. Read this before modifying `interp/threa
 Every opcode is compiled **twice**:
 
 1. **Threaded compilation** (at `interp.New()` time, always): the `threadedCompiler` converts bytecode to Go closures.
-2. **JIT compilation** (at runtime, lazily, ARM64 only): the `jitCompiler` replaces closures for hot blocks with native ARM64 code.
+2. **JIT compilation** (at runtime, lazily, ARM64 only): the `jitCompiler` replaces closures for hot segments with native ARM64 code.
 
 Both compilation models read the same bytecode from the same byte slice. The threaded closure at index `ip` in `i.code[addr]` is the authoritative fallback; the JIT overwrites selected entries.
 
@@ -60,21 +60,29 @@ instr.NOP: func(c *threadedCompiler) func(i *Interpreter) {
 },
 ```
 
-**NOP in JIT:** The JIT handler for NOP increments `c.ip` and returns `true` without emitting any native instruction — contributing to `count` without adding code.
+**NOP in JIT:** The JIT handler for NOP increments `c.ip` and returns `true, false` without emitting any native instruction — contributing to `count` without adding code.
 
 ## JIT Handler Contract (ARM64)
 
-The JIT table is `var jit = [256]func(c *jitCompiler) bool` populated in `jit_arm64.go`.
+The JIT table is `var jit = [256]func(c *jitCompiler) (bool, bool)` populated in `jit_arm64.go`.
 
-Each entry emits virtual-register (VReg) IR via the `asm.Assembler` and returns `true` on success or `false` to abort the current sub-block:
+Each entry emits virtual-register (VReg) IR via the `asm.Assembler` and returns two bools:
+
+| Return | Meaning |
+|--------|---------|
+| `true, false` | Instruction compiled; continue to next instruction |
+| `false, false` | Instruction not compilable; end this segment here |
+| `true, true` | Instruction compiled **and** the block terminates (branch); end this segment |
+
+`true, true` is returned by branch handlers (`BR`, `BR_IF`, `BR_TABLE`) which emit their own `RET`. The second `true` tells `segment()` to skip emitting `_EPILOGUE` — doing so would overwrite the scratch register (next IP) that the branch already set.
 
 ```go
-jit[instr.OPCODE] = func(c *jitCompiler) bool {
+jit[instr.OPCODE] = func(c *jitCompiler) (bool, bool) {
     c.ip++  // MUST advance ip unconditionally, even on failure
 
     // Pop operands from the VReg stack
     r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
-    if !ok { return false }  // type/width mismatch → abort sub-block
+    if !ok { return false, false }  // type/width mismatch → end segment
 
     // Allocate a result VReg
     r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
@@ -84,16 +92,48 @@ jit[instr.OPCODE] = func(c *jitCompiler) bool {
 
     // Push result onto VReg stack
     c.assembler.Push(r1)
-    return true
+    return true, false
 }
 ```
 
 **Critical invariants:**
 - `c.ip++` must be the **first statement**, before any early returns.
-- `Take` checks both `RegType` (Int vs Float) and `RegWidth` (32 vs 64) — a mismatch **must** return `false`, not be coerced.
-- `return false` causes the JIT to split the block at this instruction. The current sub-block (if long enough) is emitted, and a new sub-block starts after.
-- `_PROLOGUE` (ARM64): returns `true`, emits nothing — the ABI setup is handled by the trampoline.
-- `_EPILOGUE` (ARM64): emits `RET` — the trampoline handles register teardown.
+- `Take` checks both `RegType` (Int vs Float) and `RegWidth` (32 vs 64) — a mismatch **must** return `false, false`, not be coerced.
+- `return false, false` ends the current segment. If `count > 4` instructions were compiled, the segment is emitted; otherwise it is aborted.
+- Branch handlers (`BR`, `BR_IF`, `BR_TABLE`) return `true, true` and must emit their own exit (LDI + RET or a label branch). The `_EPILOGUE` is never emitted after `true, true`.
+- `_PROLOGUE` (ARM64): emits `LDI(scratch, blockEnd)` — loads the fallthrough IP into the scratch register before any instructions.
+- `_EPILOGUE` (ARM64): emits `LDI(scratch, blockEnd)` + `RET` — updates the scratch register with the (possibly truncated) exit IP and returns.
+
+## Scratch Register and Next-IP Mechanism
+
+ARM64 JIT uses a **scratch register** (allocated via `c.assembler.Reserve()` from `arch.Scratch` = X10–X15) to carry the next interpreter IP out of each compiled segment.
+
+- `_PROLOGUE` loads `c.blockEnd` into scratch.
+- `_EPILOGUE` reloads `c.blockEnd` (which may be truncated if the segment was cut short) into scratch, then returns.
+- Branch handlers load the **branch target IP** into scratch before returning.
+
+The Go closure in `jitCompiler.closure()` reads `rsv[0]` after `fn.Call()` and writes it to `i.frames[fp-1].ip`, advancing the interpreter to the correct position regardless of whether the segment ran to block end or exited via a branch.
+
+## Segment Selection
+
+`jitCompiler.Compile(code)` calls `jitCompiler.compile(b)` for each basic block. Within each block, `compile` iterates `segment(code, start, end)` to extract **multiple independent compilable segments**:
+
+```
+block [A, B, X, C, D, E, F]   (X = non-compilable)
+→ segment 1: [A, B]           count=2, below threshold → aborted
+→ segment 2: [C, D, E, F]     count=4, below threshold → aborted
+```
+
+The threshold is **count > 4** (strictly greater). Segments with ≤ 4 instructions are aborted via `assembler.Abort()`.
+
+### Two-Pass Compilation
+
+Blocks that **terminate** (end with BR/BR_IF/BR_TABLE) need to know the signatures of their branch targets to decide whether to emit a direct label branch or an exit stub. A two-pass strategy handles this:
+
+1. **Pass 1**: Compile all blocks. Non-terminated segments are immediately added to the link queue. Terminated blocks have their segments compiled (for signature extraction) but held in a `branches` list.
+2. **Pass 2**: Recompile terminated blocks now that all non-terminated block signatures are known. The branch handlers can now make correct `linkable()` decisions.
+
+`linkable(targetIP)` returns true when the current assembler's return VRegs exactly match the target block's `Signature.Params` (type and width). If linkable, a direct `BLabel` is emitted; otherwise a `LDI + RET` stub is emitted with the target IP in scratch.
 
 ## Assembler API
 
@@ -101,7 +141,7 @@ The `asm.Assembler` maintains two VReg stacks:
 
 | Stack | Purpose |
 |---|---|
-| `stack []VReg` | values currently in-flight (mirrors VM value stack within the sub-block) |
+| `stack []VReg` | values currently in-flight (mirrors VM value stack within the segment) |
 | `params []VReg` | VRegs taken from an empty stack — become native function's ABI inputs |
 
 | Method | Description |
@@ -112,56 +152,60 @@ The `asm.Assembler` maintains two VReg stacks:
 | `Pop() (VReg, bool)` | Pop the top VReg without type checking |
 | `NewVReg(typ, width) VReg` | Allocate a new VReg without touching the stack |
 | `Emit(inst Instruction) int` | Append an IR instruction; returns its index |
-| `Build() (Caller, error)` | Finalize: allocate registers, encode, write to buffer, return callable |
-| `Reset()` | Clear all state (called between sub-blocks) |
+| `Emits(insts ...Instruction)` | Append multiple IR instructions |
+| `NewLabel() int` | Allocate a symbolic label ID (resolved at Compile/Link time) |
+| `Place(id int)` | Mark the current position as the target of label `id` |
+| `Reserve() PReg` | Allocate one scratch physical register from `arch.Scratch` |
+| `Compile() (*RelocObject, error)` | Finalize: allocate registers, two-pass encode, write to buffer, return relocatable object |
+| `Link(objects) ([]Caller, error)` | Patch cross-segment label relocations; return callable `Caller` per object |
+| `Abort()` | Discard current segment state without writing to buffer |
+| `Reset()` | Full reset including global label table (call between functions, not between segments) |
 
 **`Take` vs `Pop`:**
-- `Take` is the standard operand consumer. When the stack is empty it promotes the missing operand to an ABI parameter (so it arrives as a native argument). When the top VReg's type or width does not match, it returns `false` — the JIT handler must immediately `return false` in that case.
+- `Take` is the standard operand consumer. When the stack is empty it promotes the missing operand to an ABI parameter. When the top VReg's type or width does not match, it returns `false` — the JIT handler must immediately `return false, false`.
 - `Pop` removes from the stack without type enforcement. Use only when consuming a VReg whose type you already verified via `Top`.
 
-## Sub-Block Selection
+**`Compile` vs `Build`:**
+`Build()` no longer exists. The new pipeline is:
+1. Emit instructions, call `Compile()` per segment → produces a `RelocObject`.
+2. After all segments of a function are compiled, call `Link([]*RelocObject)` → patches cross-segment branches and returns `[]Caller`.
 
-The JIT driver in `jit.go` selects which instruction sequences to compile:
-
-1. `BasicBlocksPass` divides the bytecode into basic blocks.
-2. For each block, the JIT iterates instructions left-to-right, calling `jit[opcode](c)`.
-3. A run of consecutive `true` results is a candidate sub-block. `entryIP` is the byte offset (in `c.code`) of the first instruction that returned `true`.
-4. When a `false` or end-of-block is hit: if `count > 8` (strictly greater), the sub-block is compiled via `assembler.Build()`.
-5. A new sub-block candidate starts after each `false`.
-
-The compiled closure is installed at `compiled[entryIP]` (not `b.Start`). When invoked at runtime:
-1. Pops `nParams` values from the top of `i.stack` into a `[]uint64` buffer.
-2. Calls `fn.Call(params)` — executes the native chunk.
-3. Writes `nRets` results back into `i.stack`, adjusting `i.sp`.
-4. Sets `f.ip = lastIP` (the offset of the last successfully compiled instruction, **not** `b.End` — execution continues in the threaded tier from there).
+Labels within a single segment are resolved inside `Compile()`. Labels that span segments become `Relocation` entries in the `RelocObject`, patched by `Link()`.
 
 ## Buffer Lifecycle
 
 `asm.Buffer` wraps mmap'd executable memory and must alternate between writable and executable states:
 
 ```
-NewBuffer(size)    → writable state (no Seal needed before first Append)
+NewBuffer(size)    → writable state
 
-# First JIT compilation:
+# Per-segment Compile():
+buffer.Unseal()          → mprotect PROT_WRITE
 buffer.Append(code)      → write bytes
-buffer.Seal()            → mprotect PROT_EXEC|PROT_READ → now callable
+buffer.Seal()            → mprotect PROT_EXEC|PROT_READ
 
-# Subsequent JIT compilations:
-buffer.Unseal()          → mprotect PROT_WRITE → writable again
-buffer.Append(code)      → write new bytes at current offset
-buffer.Seal()            → mprotect PROT_EXEC|PROT_READ → callable again
+# Link():
+buffer.Unseal()          → mprotect PROT_WRITE  (for patching relocations)
+writeBytes(addr, patch)  → overwrite relocation sites
+buffer.Seal()            → mprotect PROT_EXEC|PROT_READ
 
 buffer.Free()            → munmap
 ```
 
-`Build()` always calls `Unseal → Append → Seal`. On the first call, `Unseal` on an already-writable buffer is a no-op. The shared `i.buffer` across all JIT compilations means interleaved `Build()` calls are not safe — but the JIT compiles one function at a time, so this is not an issue in practice.
-
-Violating the Seal/Unseal order on Apple Silicon causes `SIGBUS` or `SIGSEGV` (due to W^X enforcement).
+Violating the Seal/Unseal order on Apple Silicon causes `SIGBUS` or `SIGSEGV` (W^X enforcement).
 
 ## ARM64 Register Usage
 
 The ARM64 ABI in `asm/arm64/` follows AAPCS64:
 - Integer arguments/returns: `X0`–`X7` (8 max)
 - Float arguments/returns: `D0`–`D7` / `S0`–`S7` (8 max)
+- Scratch registers: `X10`–`X15` (allocated by `Reserve()`; X8 and X9 are left free for the trampoline's own bookkeeping)
 
-The `Caller` header encodes param/return counts and float-register bitmasks into a `uint64`, which the assembly trampoline in `abi_arm64.s` uses to marshal arguments.
+The `argv` buffer passed to the assembly trampoline has the layout:
+```
+argv[0]:              header (nParams, nReturns, nReserved, type masks)
+argv[1..nReserved]:   scratch outputs — written by the native chunk on return
+argv[nReserved+1..]:  params in / returns out
+```
+
+The trampoline in `abi_arm64.s` marshals arguments from `argv`, calls the native chunk via `BL`, then reads scratch register values (X10–X15) back into `argv[1..nReserved]` and reads return values into `argv[nReserved+1..]`.
