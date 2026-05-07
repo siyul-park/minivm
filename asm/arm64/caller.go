@@ -22,11 +22,11 @@ import (
 //	argv[nReserved+1..]:  params in / returns out
 
 type caller struct {
-	header    uint64
-	chunk     *asm.Chunk
-	params    []asm.PReg
-	returns   []asm.PReg
-	nReserved int
+	header   uint64
+	chunk    *asm.Chunk
+	reserves []asm.PReg
+	params   []asm.PReg
+	returns  []asm.PReg
 }
 
 var _ asm.Caller = (*caller)(nil)
@@ -70,11 +70,11 @@ func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
 		uint64(returnTypes)<<32
 
 	return &caller{
-		header:    header,
-		chunk:     chunk,
-		params:    append([]asm.PReg(nil), sig.Params...),
-		returns:   append([]asm.PReg(nil), sig.Returns...),
-		nReserved: nReserved,
+		header:   header,
+		chunk:    chunk,
+		reserves: append([]asm.PReg(nil), sig.Reserved...),
+		params:   append([]asm.PReg(nil), sig.Params...),
+		returns:  append([]asm.PReg(nil), sig.Returns...),
 	}, nil
 }
 
@@ -95,9 +95,10 @@ func (c *caller) Returns() []asm.RegType {
 }
 
 func (c *caller) Call(params []uint64, rsv *[]uint64) ([]uint64, error) {
-	nRsv := c.nReserved
+	nRsv := len(c.reserves)
 	nParams := len(c.params)
 	nReturns := len(c.returns)
+
 	// argv: [header, reserved×nRsv, values×max(nParams,nReturns)]
 	var stack [1 + 6 + 8]uint64 // 1 header + max 6 reserved + max 8 ABI regs
 	argv := stack[:1+nRsv+max(nParams, nReturns)]
