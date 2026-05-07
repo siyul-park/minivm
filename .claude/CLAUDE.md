@@ -82,7 +82,6 @@ These are the non-obvious rules that cause silent bugs when violated:
 | JIT excludes control flow, calls, variable access | loops and function calls always run threaded |
 | No x86-64 backend | JIT inactive on Linux/Windows servers |
 | No benchmark suite | 4096-tick JIT threshold is unvalidated |
-| REPL stack transfer unsafe for `KindRef` values | heap pointers from one interpreter step are invalid in the next; ref-producing instructions behave incorrectly in the REPL |
 
 ## Coding Conventions (summary)
 

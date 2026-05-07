@@ -13,6 +13,7 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+
 const prompt = "> "
 const blockPrompt = "... "
 
@@ -38,14 +39,13 @@ Commands:
   .quit  /  .exit     exit the REPL
 `
 
-// REPL holds accumulated instructions, persistent stack state, constants, and types.
+// REPL holds accumulated instructions, constants, and types.
 type REPL struct {
 	in        io.Reader
 	out       io.Writer
-	instrs    []instr.Instruction // for .show and .reset
-	stack     []types.Boxed       // raw NaN-boxed stack values carried across steps
-	constants []types.Value       // constant pool passed to each step
-	typs      []types.Type        // type pool passed to each step
+	instrs    []instr.Instruction // accumulated instruction history
+	constants []types.Value       // constant pool
+	typs      []types.Type        // type pool
 }
 
 // New returns a new REPL that reads from in and writes to out.
@@ -106,7 +106,6 @@ func (r *REPL) handleMeta(scanner *bufio.Scanner, line string) (done bool, err e
 		return true, nil
 	case lower == ".reset":
 		r.instrs = nil
-		r.stack = nil
 		r.constants = nil
 		r.typs = nil
 		fmt.Fprintln(r.out, "reset.")
@@ -207,52 +206,38 @@ func (r *REPL) addType(s string) error {
 	return nil
 }
 
-// execute runs a single instruction on top of the saved stack state.
-// On success it updates r.stack and prints the result; on error it leaves
-// r.stack unchanged.
+// execute reruns the full accumulated instruction history plus inst.
+// On success appending inst to r.instrs is done by the caller (Run).
 func (r *REPL) execute(ctx context.Context, inst instr.Instruction) error {
+	all := make([]instr.Instruction, len(r.instrs)+1)
+	copy(all, r.instrs)
+	all[len(r.instrs)] = inst
+
 	prog := program.New(
-		[]instr.Instruction{inst},
+		all,
 		program.WithConstants(r.constants...),
 		program.WithTypes(r.typs...),
 	)
 	vm := interp.New(prog)
 	defer vm.Close()
 
-	// Restore saved stack into the new interpreter before running.
-	for _, v := range r.stack {
-		if err := vm.Push(v); err != nil {
-			return err
-		}
-	}
-
 	if err := vm.Run(ctx); err != nil {
 		return err
 	}
 
-	// Save resulting stack via Peek (bottom-to-top order).
-	// Peek returns raw Boxed values without unboxing, so KindRef values (e.g.
-	// function refs from const.get) stay valid when pushed into the next
-	// interpreter, which has the same constant pool heap layout.
-	n := vm.Len()
-	newStack := make([]types.Boxed, n)
-	for k := 0; k < n; k++ {
-		v, _ := vm.Peek(n - 1 - k)
-		newStack[k] = v
-	}
-	r.stack = newStack
-
-	printStack(r.out, r.stack)
+	printStack(r.out, vm)
 	return nil
 }
 
-func printStack(out io.Writer, stack []types.Boxed) {
-	if len(stack) == 0 {
+func printStack(out io.Writer, vm *interp.Interpreter) {
+	n := vm.Len()
+	if n == 0 {
 		return
 	}
-	parts := make([]string, len(stack))
-	for i, v := range stack {
-		parts[i] = types.Unbox(v).String()
+	parts := make([]string, n)
+	for k := 0; k < n; k++ {
+		v, _ := vm.Peek(k)
+		parts[n-1-k] = v.String()
 	}
 	fmt.Fprintln(out, strings.Join(parts, " "))
 }

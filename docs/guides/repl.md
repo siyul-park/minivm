@@ -93,11 +93,15 @@ Everything that operates purely on value-typed stack entries works correctly.
 | Type conversions | `i32.to_i64_s`, `f32.to_f64`, `i64.to_i32`, … |
 | Bitwise ops | `i32.and`, `i32.xor`, `i64.shl`, … |
 | Stack manipulation | `drop`, `dup`, `swap`, `nop` |
-| Branches (within one step) | `br`, `br_if`, `br_table` — but see limitation below |
+| Branches | `br`, `br_if`, `br_table` — offsets span the full accumulated history |
 | Globals | `global.get`, `global.set`, `global.tee` |
-| Locals | `local.get`, `local.set`, `local.tee` — index relative to bottom of pre-pushed stack |
+| Locals | `local.get`, `local.set`, `local.tee` |
 | Constants | `const.get N` — after declaring constant N with `.const` |
 | Functions | call a declared function with `const.get N` + `call` |
+| Arrays | `array.new`, `array.new_default`, `array.get`, `array.set`, `array.fill` |
+| Structs | `struct.new`, `struct.new_default`, `struct.get`, `struct.set` |
+| Strings | `string.new_utf32`, `string.concat`, `string.len`, string comparisons |
+| References | `ref.null`, `ref.is_null`, `ref.eq`, `ref.test`, `ref.cast` |
 
 ## Declaring Function Constants
 
@@ -189,40 +193,35 @@ type 1 added.
 
 ## What Does Not Work
 
-### Heap-producing instructions (`array.new`, `struct.new`, string ops)
+### `SELECT` instruction
 
-These instructions allocate objects on the interpreter's heap and push a
-`KindRef` (heap index) onto the stack. Each REPL step uses a fresh
-interpreter with an empty heap, so a ref saved from step N points into the
-old interpreter's heap and is invalid in step N+1.
+`SELECT` is not implemented in the threaded or JIT compiler; it panics if executed.
 
-Affected opcodes: `array.new`, `array.new_default`, `array.get`, `array.set`,
-`struct.new`, `struct.new_default`, `struct.get`, `struct.set`,
-`string.new_utf32`, `string.concat`, `ref.null`, `ref.cast`, `ref.test`, and
-all other string/array/struct operations.
+### JIT limitations
 
-### Branches that span multiple steps
-
-A `br 0x0005` instruction is compiled as part of a one-instruction program.
-The branch offset is interpreted relative to the current instruction, so a
-branch within a single step works, but you cannot branch to an instruction
-typed in a previous REPL step.
+Loops, function calls, and variable access always run in the threaded interpreter
+(JIT covers only straight-line arithmetic and comparisons).
 
 ## Execution Model
 
-Each instruction executes immediately on top of the current stack state.
-Only the new instruction runs — previous instructions are not re-executed.
+Each step reruns the **full accumulated instruction history** plus the new
+instruction from scratch in a fresh interpreter. This ensures heap-allocated
+objects (`KindRef` values from `array.new`, `struct.new`, etc.) are always
+valid across steps.
 
-Internally the REPL maintains `stack []types.Value`. For each new instruction:
+For each new instruction:
 
-1. A single-instruction `program.Program` is created.
-2. A fresh `interp.Interpreter` is initialized with saved stack values
-   pre-pushed via `Push()`.
-3. The one instruction executes and the resulting stack is saved back.
-4. On error the stack is not updated and the instruction is not added to
-   history (session remains consistent).
+1. A `program.Program` is built from all previously accepted instructions plus
+   the new one.
+2. A fresh `interp.Interpreter` runs the whole program.
+3. The resulting stack is printed.
+4. On error the new instruction is **not** added to history (session stays
+   consistent).
 
-This gives O(1) execution cost per instruction regardless of session length.
+Heap, globals, and branches work naturally because the full program is
+recompiled and re-executed each step. The execution cost is O(N) per step
+(where N is the number of accumulated instructions), which is negligible for
+interactive sessions.
 
 ## Parsing API
 

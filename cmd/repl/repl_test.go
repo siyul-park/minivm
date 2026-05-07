@@ -133,6 +133,22 @@ func TestREPL_Run(t *testing.T) {
 			input:    ".type\n[]i32\n\n.reset\n.show\n.quit\n",
 			contains: []string{"reset.", "(empty)"},
 		},
+		{
+			// array.new_default: KindRef persists across steps
+			input:    ".type\n[]i32\n\ni32.const 1\narray.new_default 0\n.quit\n",
+			excludes: []string{"error:"},
+		},
+		{
+			// struct.new_default: KindRef persists across steps
+			input:    ".type\nstruct {i32; f64}\n\nstruct.new_default 0\n.quit\n",
+			excludes: []string{"error:"},
+		},
+		{
+			// string constant accessible across steps
+			input:    ".const\nfunc() i32\ni32.const 3\nreturn\n\nconst.get 0\ncall\n.quit\n",
+			contains: []string{"3"},
+			excludes: []string{"error:"},
+		},
 	}
 
 	for _, tt := range tests {
