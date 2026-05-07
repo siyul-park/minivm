@@ -43,21 +43,6 @@ func init() {
 	}
 }
 
-// Compile compiles all basic blocks in code and returns a sparse slice of
-// closures indexed by instruction offset.
-//
-// Two passes ensure every branch (forward and backward) gets a direct native
-// link when the target compiles successfully and the register signatures are
-// compatible:
-//
-//   - Pass 1: compile in program order; backward references emit BLabel,
-//     forward references fall back to LDI+RET.  Each compiled block is marked
-//     compilable and its Signature is stored.
-//
-//   - Pass 2: recompile branch blocks only — compilable/sigs are now complete,
-//     so forward BLabels are emitted correctly.
-//
-//   - Link: patch BLabel relocations and install closures.
 func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 	if arch == nil {
 		return nil
@@ -89,7 +74,7 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 
 	var branchs []*analysis.BasicBlock
 	for _, b := range blocks {
-		obj, terminated := c.compileBlock(b)
+		obj, terminated := c.compile(b)
 		if obj == nil {
 			continue
 		}
@@ -104,7 +89,7 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 	}
 
 	for _, b := range branchs {
-		obj, _ := c.compileBlock(b)
+		obj, _ := c.compile(b)
 		if obj == nil {
 			c.compilable[b.Start] = false
 			continue
@@ -128,10 +113,7 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 	return out
 }
 
-// compileBlock compiles all instructions in b into one RelocObject.
-// Returns (obj, true) for branch blocks; (obj, false) for arithmetic/partial.
-// Returns (nil, false) when the very first instruction fails.
-func (c *jitCompiler) compileBlock(b *analysis.BasicBlock) (*asm.RelocObject, bool) {
+func (c *jitCompiler) compile(b *analysis.BasicBlock) (*asm.RelocObject, bool) {
 	c.ip = b.Start
 	c.blockEnd = b.End
 	c.terminated = false
@@ -191,8 +173,6 @@ func (c *jitCompiler) blocks(code []byte) []*analysis.BasicBlock {
 	return blocks
 }
 
-// linkable reports whether the current assembler operand stack is compatible
-// with the target block's expected Params (same count, type, width).
 func (c *jitCompiler) linkable(targetIP int) bool {
 	sig := c.sigs[targetIP]
 	if sig == nil {
