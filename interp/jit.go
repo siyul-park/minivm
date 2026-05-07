@@ -20,7 +20,6 @@ type jitCompiler struct {
 	sigs       map[int]*asm.Signature
 	blockEnd   int
 	scratch    asm.PReg
-	terminated bool
 }
 
 var (
@@ -29,15 +28,15 @@ var (
 )
 
 var arch *asm.Arch
-var jit = [256]func(c *jitCompiler) bool{}
+var jit = [256]func(c *jitCompiler) (bool, bool){}
 
 func init() {
 	for i, fn := range jit {
 		if fn == nil {
-			jit[i] = func(c *jitCompiler) bool {
+			jit[i] = func(c *jitCompiler) (bool, bool) {
 				inst := instr.Instruction(c.code[c.ip:])
 				c.ip += inst.Width()
-				return false
+				return false, false
 			}
 		}
 	}
@@ -138,7 +137,6 @@ func (c *jitCompiler) compile(b *analysis.BasicBlock) ([]*asm.RelocObject, []int
 func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, int, bool) {
 	c.ip = start
 	c.blockEnd = end
-	c.terminated = false
 	c.scratch = c.assembler.Reserve()
 
 	jit[_PROLOGUE](c)
@@ -146,13 +144,14 @@ func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, in
 		c.assembler.Place(id)
 	}
 
-	entryIP := -1
+	count := 0
+	stop := false
 	for c.ip < end {
 		prevIP := c.ip
-		ok := jit[code[c.ip]](c)
+		ok, s := jit[code[c.ip]](c)
 
 		if !ok {
-			if entryIP == -1 {
+			if count <= 4 {
 				c.assembler.Abort()
 				return nil, c.ip, false
 			}
@@ -165,26 +164,25 @@ func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, in
 			return obj, c.ip, false
 		}
 
-		if entryIP == -1 {
-			entryIP = prevIP
-		}
-		if c.terminated {
+		count++
+		stop = s
+		if stop {
 			break
 		}
 	}
 
-	if entryIP == -1 {
+	if count <= 4 {
 		c.assembler.Abort()
-		return nil, c.ip, c.terminated
+		return nil, c.ip, stop
 	}
-	if !c.terminated {
+	if !stop {
 		jit[_EPILOGUE](c)
 	}
 	obj, err := c.assembler.Compile()
 	if err != nil {
-		return nil, c.ip, c.terminated
+		return nil, c.ip, stop
 	}
-	return obj, c.ip, c.terminated
+	return obj, c.ip, stop
 }
 
 func (c *jitCompiler) blocks(code []byte) []*analysis.BasicBlock {

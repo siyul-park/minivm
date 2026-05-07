@@ -70,7 +70,7 @@ These are the non-obvious rules that cause silent bugs when violated:
 - **JIT handler: call `c.ip++` first, then `return false` on type mismatch** — never coerce mismatched types; return false to split the sub-block.
 - **`Buffer`: `Unseal` before `Append`, `Seal` before `Call`** — wrong order triggers a signal on Apple Silicon.
 - **`ConstantFoldingPass` pads with NOPs left-aligned** — threaded NOP handler absorbs the gap at compile time; do not strip this padding.
-- **JIT emits a sub-block only when `count > 8`** — exactly 8 JIT-able instructions is not enough; threshold is strictly greater.
+- **JIT emits a segment only when `count > 4`** — exactly 4 consecutive JIT-able instructions is not enough; threshold is strictly greater.
 - **`release()` is iterative, not recursive** — it uses an explicit stack to walk `Traceable.Refs()`.
 - **Errors in threaded closures should `panic`** — `interp.Run()` recovers and appends `at=<ip>` via `i.error(r)`.
 
