@@ -1,9 +1,6 @@
 package types
 
-import (
-	"fmt"
-	"strings"
-)
+import "strings"
 
 type I32Array []I32
 
@@ -53,7 +50,7 @@ func (a I32Array) String() string {
 		if j > 0 {
 			sb.WriteString(", ")
 		}
-		sb.WriteString(fmt.Sprintf("%d", int32(e)))
+		sb.WriteString(e.String())
 	}
 	sb.WriteByte('}')
 	return sb.String()
@@ -75,7 +72,7 @@ func (a I64Array) String() string {
 		if j > 0 {
 			sb.WriteString(", ")
 		}
-		sb.WriteString(fmt.Sprintf("%d", int64(e)))
+		sb.WriteString(e.String())
 	}
 	sb.WriteByte('}')
 	return sb.String()
@@ -97,7 +94,7 @@ func (a F32Array) String() string {
 		if j > 0 {
 			sb.WriteString(", ")
 		}
-		sb.WriteString(fmt.Sprintf("%g", float32(e)))
+		sb.WriteString(e.String())
 	}
 	sb.WriteByte('}')
 	return sb.String()
@@ -119,7 +116,7 @@ func (a F64Array) String() string {
 		if j > 0 {
 			sb.WriteString(", ")
 		}
-		sb.WriteString(fmt.Sprintf("%g", float64(e)))
+		sb.WriteString(e.String())
 	}
 	sb.WriteByte('}')
 	return sb.String()

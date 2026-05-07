@@ -39,28 +39,21 @@ func (p *Program) String() string {
 	var sb strings.Builder
 	sb.WriteString(instr.Format(p.Code))
 	if len(p.Constants) > 0 {
-		sb.WriteString("\n")
-		for i, c := range p.Constants {
-			lines := strings.Split(c.String(), "\n")
-			if len(lines) > 0 {
-				sb.WriteString(fmt.Sprintf("%04d:\t%s\n", i, lines[0]))
-				for _, line := range lines[1:] {
-					sb.WriteString(fmt.Sprintf("\t%s\n", line))
-				}
-			}
-		}
+		writeIndexed(&sb, p.Constants)
 	}
 	if len(p.Types) > 0 {
-		sb.WriteString("\n")
-		for i, t := range p.Types {
-			lines := strings.Split(t.String(), "\n")
-			if len(lines) > 0 {
-				sb.WriteString(fmt.Sprintf("%04d:\t%s\n", i, lines[0]))
-				for _, line := range lines[1:] {
-					sb.WriteString(fmt.Sprintf("\t%s\n", line))
-				}
-			}
-		}
+		writeIndexed(&sb, p.Types)
 	}
 	return sb.String()
+}
+
+func writeIndexed[T fmt.Stringer](sb *strings.Builder, items []T) {
+	sb.WriteString("\n")
+	for i, item := range items {
+		lines := strings.Split(item.String(), "\n")
+		sb.WriteString(fmt.Sprintf("%04d:\t%s\n", i, lines[0]))
+		for _, line := range lines[1:] {
+			sb.WriteString(fmt.Sprintf("\t%s\n", line))
+		}
+	}
 }

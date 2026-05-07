@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/siyul-park/minivm/instr"
@@ -122,10 +123,10 @@ func (r *REPL) handleMeta(scanner *bufio.Scanner, line string) (done bool, err e
 		r.typs = nil
 		fmt.Fprintln(r.out, "reset.")
 	case lower == ".show":
-		prog := program.New(r.instrs, program.WithConstants(r.constants...), program.WithTypes(r.typs...))
 		if len(r.instrs) == 0 && len(r.constants) == 0 && len(r.typs) == 0 {
 			fmt.Fprintln(r.out, "(empty)")
 		} else {
+			prog := program.New(r.instrs, program.WithConstants(r.constants...), program.WithTypes(r.typs...))
 			fmt.Fprint(r.out, prog.String())
 		}
 	case lower == ".help":
@@ -144,9 +145,9 @@ func (r *REPL) handleMeta(scanner *bufio.Scanner, line string) (done bool, err e
 	return false, nil
 }
 
-// readConstant reads a multi-line constant definition (until blank line) and
-// appends the parsed constant to r.constants.
-func (r *REPL) readConstant(scanner *bufio.Scanner) error {
+// readBlock reads lines from scanner until a blank line or EOF, printing
+// blockPrompt before each line. Returns the collected non-blank lines.
+func (r *REPL) readBlock(scanner *bufio.Scanner) []string {
 	var lines []string
 	for {
 		fmt.Fprint(r.out, blockPrompt)
@@ -159,16 +160,20 @@ func (r *REPL) readConstant(scanner *bufio.Scanner) error {
 		}
 		lines = append(lines, l)
 	}
+	return lines
+}
 
+// readConstant reads a multi-line constant definition (until blank line) and
+// appends the parsed constant to r.constants.
+func (r *REPL) readConstant(scanner *bufio.Scanner) error {
+	lines := r.readBlock(scanner)
 	if len(lines) == 0 {
 		return fmt.Errorf("empty constant definition")
 	}
-
 	fn, err := types.ParseFunction(lines)
 	if err != nil {
 		return err
 	}
-
 	r.constants = append(r.constants, fn)
 	fmt.Fprintf(r.out, "constant %d added.\n", len(r.constants)-1)
 	return nil
@@ -178,18 +183,7 @@ func (r *REPL) readConstant(scanner *bufio.Scanner) error {
 // parsed type to r.typs. Accepts the program.String() format with optional
 // "N:\t" index prefix per line.
 func (r *REPL) readTypes(scanner *bufio.Scanner) error {
-	var lines []string
-	for {
-		fmt.Fprint(r.out, blockPrompt)
-		if !scanner.Scan() {
-			break
-		}
-		l := scanner.Text()
-		if l == "" {
-			break
-		}
-		lines = append(lines, l)
-	}
+	lines := r.readBlock(scanner)
 	if len(lines) == 0 {
 		return fmt.Errorf("empty type definition")
 	}
@@ -303,7 +297,7 @@ func rewriteBranchAbsolute(line string, ip int) (string, error) {
 		if len(fields) < 2 || !strings.HasPrefix(fields[1], "@") {
 			return line, nil
 		}
-		abs, err := parseAbsTarget(fields[1][1:])
+		abs, err := parseIntLiteral(fields[1][1:])
 		if err != nil {
 			return "", fmt.Errorf("invalid absolute branch target %s: %w", fields[1], err)
 		}
@@ -328,7 +322,7 @@ func rewriteBranchAbsolute(line string, ip int) (string, error) {
 		if !hasAt {
 			return line, nil
 		}
-		count, err := parseAbsTarget(fields[1])
+		count, err := parseIntLiteral(fields[1])
 		if err != nil {
 			return "", fmt.Errorf("invalid br_table count %s: %w", fields[1], err)
 		}
@@ -339,7 +333,7 @@ func rewriteBranchAbsolute(line string, ip int) (string, error) {
 			if !strings.HasPrefix(f, "@") {
 				continue
 			}
-			abs, err := parseAbsTarget(f[1:])
+			abs, err := parseIntLiteral(f[1:])
 			if err != nil {
 				return "", fmt.Errorf("invalid absolute branch target %s: %w", f, err)
 			}
@@ -354,16 +348,10 @@ func rewriteBranchAbsolute(line string, ip int) (string, error) {
 	return line, nil
 }
 
-// parseAbsTarget parses a decimal or 0x-prefixed hex integer.
-func parseAbsTarget(s string) (int, error) {
-	var v int64
-	var n int
-	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
-		n, _ = fmt.Sscanf(s[2:], "%x", &v)
-	} else {
-		n, _ = fmt.Sscanf(s, "%d", &v)
-	}
-	if n == 0 {
+// parseIntLiteral parses a decimal or 0x-prefixed hex integer.
+func parseIntLiteral(s string) (int, error) {
+	v, err := strconv.ParseInt(s, 0, 64)
+	if err != nil {
 		return 0, fmt.Errorf("expected integer, got %q", s)
 	}
 	return int(v), nil
