@@ -1,31 +1,23 @@
 # Coding Patterns
 
-Conventions used throughout this codebase. Read before writing any new code.
+> Read before writing any new code.
 
 ---
 
-# 0. Function Design
+## 0. Function Design
 
-Four rules that apply to every function in this codebase.
+### 0.1 Single abstraction level
 
----
+Every statement in a function must sit at the same conceptual height. Never mix low-level operations (indexing, arithmetic) with high-level ones (method calls, domain logic).
 
-## 0.1 One level of abstraction per function
-
-A function must operate at a single conceptual level. Do not mix low-level
-operations (string indexing, byte arithmetic) with high-level operations
-(method calls, domain logic) in the same function.
-
-**Wrong — mixed levels:**
 ```go
+// ✗ mixed levels
 func (r *REPL) Run(ctx context.Context) error {
-    scanner := bufio.NewScanner(r.in)  // setup
+    scanner := bufio.NewScanner(r.in)
     for {
-        fmt.Fprint(r.out, "> ")        // raw I/O
+        fmt.Fprint(r.out, "> ")
         scanner.Scan()
         line := strings.TrimSpace(scanner.Text())
-
-        // high-level dispatch mixed with low-level rewrite detail:
         if strings.HasPrefix(fields[1], "@") {
             abs, _ := strconv.ParseInt(fields[1][1:], 0, 64)
             rel := int(abs) - (ip + 3)
@@ -34,112 +26,77 @@ func (r *REPL) Run(ctx context.Context) error {
         instr.Parse(line)
     }
 }
-```
 
-**Right — consistent level:**
-```go
+// ✓ consistent level
 func (r *REPL) Run(ctx context.Context) error {
     scanner := bufio.NewScanner(r.in)
     for {
         fmt.Fprint(r.out, prompt)
         if !scanner.Scan() { ... }
         line := strings.TrimSpace(scanner.Text())
-
-        inst, err := r.parse(line)   // same level as:
+        inst, err := r.parse(line)
         if err := r.exec(ctx, inst); err != nil { ... }
-        r.commit(inst)               // same level
+        r.commit(inst)
     }
 }
 ```
 
-The details of branch-address normalization belong inside `parse`, not in `Run`.
+Details like branch-address normalization belong inside `parse`, not in `Run`.
 
 ---
 
-## 0.2 Names hide implementation details
+### 0.2 Names hide implementation
 
-Function names describe **what** is achieved from the caller's perspective,
-not **how** it is done internally.
+Name functions by **what** they achieve, not **how** they do it.
 
-| Avoid (exposes mechanism) | Prefer (describes outcome) |
+| ✗ Exposes mechanism | ✓ Describes outcome |
 |---|---|
-| `rewriteBranchAbsolute` | `normalize` → `parse` calls it |
+| `rewriteBranchAbsolute` | `normalize` |
 | `makeAndCopyInstructions` | `build` |
 | `nilOutFieldsAndPrint` | `reset` |
 | `checkEmptyAndFormatProg` | `show` |
 | `appendInstrAndUpdateLen` | `commit` |
 
-Names are as short as the context allows. On a receiver `*REPL`, `r.show()`,
-`r.build()`, `r.parse()` are unambiguous; the receiver provides the missing noun.
+The receiver provides the missing noun — `r.show()`, `r.build()` are unambiguous on `*REPL`.
 
 ---
 
-## 0.3 Consistent abstraction within a function
+### 0.3 Top-down structure
 
-Every statement in a function should sit at the same conceptual height.
-If one statement calls a domain method and another does raw field mutation,
-extract the mutation into a named operation.
+Declare callers above callees. Reading downward should follow the logic without scrolling back up.
 
-**Wrong:**
+```
+Run
+  command → reset / show / readConst / readType
+               readType → block / addType
+  exec    → printStack → format
+  parse   → normalize → parseInt
+```
+
+---
+
+### 0.4 Methods vs. package-level functions
+
+If a function is only used by one receiver type, make it a method.
+
 ```go
-// handleMeta mixes direct state mutation with method calls
-case ".reset":
-    r.instrs = nil    // raw field access
-    r.codeLen = 0     // raw field access
-    r.constants = nil // raw field access
-    r.types = nil     // raw field access
-    fmt.Fprintln(r.out, "reset.")
+// ✗ package-level, only used by jitCompiler
+func makeBranchClosure(fn Caller, sig *Signature) func(*Interpreter) { ... }
 
-case ".const":
-    r.readConstant(scanner) // method call — different level
-```
-
-**Right:**
-```go
-case ".reset":
-    r.reset()           // same level as:
-case ".const":
-    r.readConstant(scanner)
+// ✓ method — ownership and context are explicit
+func (c *jitCompiler) branchClosure(fn Caller, sig *Signature) func(*Interpreter) { ... }
 ```
 
 ---
 
-## 0.4 Top-down code structure
+## 1. Type & Interface Design
 
-Declare functions in call order: callers above callees. A reader should be
-able to follow the logic downward without scrolling back up.
-
-```
-Run              ← highest level; defined first
-  command        ← called by Run
-    reset        ← called by command
-    show         ← called by command
-    readConst    ← called by command
-    readType     ← called by command
-      block      ← called by readConst and readType
-      addType    ← called by readType
-  exec           ← called by Run
-    printStack   ← called by exec
-      format     ← called by printStack
-  parse          ← called by Run
-    normalize    ← called by parse
-      parseInt   ← called by normalize
-```
-
----
-
-
-
-## 1.1 Interface-first
+### 1.1 Interface-first
 
 Define interfaces in the consuming package, not the implementing one.
 
-* Callers depend on interfaces
-* Implementations remain replaceable
-* Dependency direction is explicit
-
 ```go
-// asm/caller.go — defined where it is used, implemented in asm/arm64/
+// asm/caller.go — defined where used, implemented in asm/arm64/
 type Caller interface {
     Params() []RegType
     Returns() []RegType
@@ -149,12 +106,9 @@ type Caller interface {
 
 ---
 
-## 1.2 Private type, public instance
+### 1.2 Private type, public instance
 
-When a type has exactly one meaningful implementation:
-
-* Use an unexported struct
-* Expose a single exported instance
+When a type has exactly one meaningful implementation, use an unexported struct with a single exported instance.
 
 ```go
 type i32Type struct{}
@@ -168,24 +122,20 @@ func (i32Type) Equals(other Type) bool { return other == TypeI32 }
 
 ---
 
-## 1.3 Interface compliance assertions
+### 1.3 Interface compliance assertions
 
-Declare compliance immediately after type definition.
+Declare immediately after the type definition.
 
 ```go
-type Struct struct { ... }
-
 var _ Traceable = (*Struct)(nil)
 var _ Type      = (*StructType)(nil)
 ```
 
 ---
 
-## 1.4 File layout
+### 1.4 File layout
 
 Order declarations by abstraction level:
-
-### File layout within a package
 
 1. Exported interfaces and types
 2. Exported error variables
@@ -196,11 +146,9 @@ Order declarations by abstraction level:
 
 ---
 
-# 2. API Design
+## 2. API Design
 
-## 2.1 Constructor naming
-
-All constructors follow `New<Type>`.
+### 2.1 Constructor naming — `New<Type>`
 
 ```go
 func NewOptimizer(level Level) *Optimizer
@@ -208,71 +156,41 @@ func NewBasicBlocksPass() pass.Pass[[]*BasicBlock]
 func NewCaller(sig *Signature, chunk *Chunk) (Caller, error)
 ```
 
-Rules:
-
-* Return concrete type or primary interface
-* Do not expose raw pointers without context
-
 ---
 
-## 2.1b Parser naming
-
-Text-to-value parsers use `Parse` (not `Parse<Type>`).
+### 2.2 Parser naming — `Parse`
 
 ```go
-// types/parse.go
-func Parse(s string) (Type, error)          // parses any Type.String() output
-func ParseFunction(lines []string) (*Function, error)  // parses Function.String() lines
-
-// instr/parse.go
-func Parse(line string) (Instruction, error)
-func ParseAll(r io.Reader) ([]Instruction, error)
-
-// program/parse.go
-func Parse(r io.Reader) (*Program, error)   // round-trips Program.String()
+// base name parses the primary type of the package
+func Parse(s string) (Type, error)
+func ParseFunction(lines []string) (*Function, error)  // distinct type → needs qualifier
+func ParseAll(r io.Reader) ([]Instruction, error)       // batch variant
 ```
 
-Rules:
-
-* The base name `Parse` parses the primary type of the package (e.g. `types.Parse` → `Type`)
-* Use `Parse<Specific>` only when the package has multiple distinct parseable types
-  (e.g. `types.ParseFunction` because `types.Parse` already handles the `Type` interface)
-* `ParseAll` is the batch variant — reads from `io.Reader`, skips blank lines
+Rules: `Parse` handles the primary type. Use `Parse<Specific>` only when multiple distinct parseable types exist. `ParseAll` reads from `io.Reader` and skips blank lines.
 
 ---
 
-## 2.2 Functional options
-
-Use functional options for optional configuration.
+### 2.3 Functional options
 
 ```go
-type option struct {
-    stack     int
-    heap      int
-    threshold int
-}
+type option struct{ stack, heap, threshold int }
 
 func WithStack(val int) func(*option) {
     return func(o *option) { o.stack = val }
 }
 
 func New(prog *program.Program, opts ...func(*option)) *Interpreter {
-    opt := option{stack: 1024, heap: 128, threshold: 4096}
+    opt := option{stack: 1024, heap: 128, threshold: 4096} // apply defaults first
     for _, o := range opts { o(&opt) }
-    // ...
 }
 ```
 
-Rules:
-
-* Do not use config structs
-* Apply defaults before options
+Do not use config structs.
 
 ---
 
-## 2.3 Builder pattern
-
-Use a builder for incremental configuration.
+### 2.4 Builder pattern
 
 ```go
 fn := types.NewFunctionBuilder(&types.FunctionType{}).
@@ -282,19 +200,13 @@ fn := types.NewFunctionBuilder(&types.FunctionType{}).
     Build()
 ```
 
-Rules:
-
-* Builder is mutable
-* Result is immutable
-* Builder is discarded after `Build()`
+Builder is mutable; result is immutable; builder is discarded after `Build()`.
 
 ---
 
-# 3. Error Design
+## 3. Error Design
 
-## 3.1 Sentinel errors
-
-Declare errors at package level.
+### 3.1 Sentinel errors — package level
 
 ```go
 var (
@@ -307,9 +219,7 @@ var (
 
 ---
 
-## 3.2 Error wrapping
-
-Always wrap errors using `%w`.
+### 3.2 Always wrap with `%w`
 
 ```go
 return nil, fmt.Errorf("%w: %d", ErrTooManyParams, len(sig.Params))
@@ -319,96 +229,52 @@ return fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
 
 ---
 
-## 3.3 Panic strategy
+### 3.3 Panic strategy
 
-* Use panic in execution hot paths only
-* Recover once at the boundary (e.g. `interp.Run`)
-* Do not use panic in general logic
+Use panic only in execution hot paths. Recover once at the boundary (e.g. `interp.Run`). Do not use panic in general logic.
 
 ---
 
-### 3.4 Methods vs package-level functions
-
-If a function is only used by one receiver type, make it a method — not a package-level function.  Package-level functions are for utilities shared across multiple types or callers.
+## 4. Build Tags
 
 ```go
-// ✗ package-level function only used by jitCompiler
-func makeBranchClosure(fn Caller, sig *Signature) func(*Interpreter) { ... }
-
-// ✓ method — ownership is explicit, receiver gives context
-func (c *jitCompiler) branchClosure(fn Caller, sig *Signature) func(*Interpreter) { ... }
+//go:build arm64     // architecture-specific file
+//go:build !arm64    // required stub for other platforms
 ```
 
----
-
-# 4. Build Tags
-
-## 4.1 Architecture-specific code
-
-```go
-//go:build arm64
-
-package interp
-```
+Every architecture-specific file must have a corresponding stub.
 
 ---
 
-## 4.2 Stub requirement
+## 5. Testing
 
-```go
-//go:build !arm64
-
-package arm64
-```
-
-Every architecture-specific file must include a corresponding stub.
-
----
-
-# 5. Testing Patterns
-
----
-
-## 5.1 File Naming Rules
-
-### Go file ↔ Test file 1:1 mapping (mandatory)
-
-Each implementation file must have a corresponding test file with the exact same prefix.
+### 5.1 File naming — 1:1 mapping (mandatory)
 
 ```
-buffer.go        → buffer_test.go
-assembler.go     → assembler_test.go
-jit_arm64.go     → jit_arm64_test.go
+buffer.go      → buffer_test.go
+assembler.go   → assembler_test.go
+jit_arm64.go   → jit_arm64_test.go
 ```
 
-### Rules
-
-* `_test.go` must use the exact same prefix as its target `.go` file
-* One `_test.go` must not cover multiple `.go` files
-* Every `.go` file must have a corresponding `_test.go` file
+One `_test.go` must not cover multiple `.go` files. Every `.go` file must have a corresponding `_test.go`.
 
 ---
 
-## 5.2 One test function per public symbol
+### 5.2 One test function per public symbol
 
-Each public symbol must have exactly one test function.
+| Symbol | Test |
+|---|---|
+| `Foo` | `TestFoo` |
+| `NewFoo` | `TestNewFoo` |
+| `(Foo).Bar` | `TestFoo_Bar` |
 
-| Symbol    | Test        |
-| --------- | ----------- |
-| Foo       | TestFoo     |
-| NewFoo    | TestNewFoo  |
-| (Foo).Bar | TestFoo_Bar |
-
-### Rules
-
-* Multiple test functions per symbol are not allowed
-* All test cases must be handled within a single test function
+All cases for a symbol go inside a single test function.
 
 ---
 
-## 5.3 Test case structure
+### 5.3 Test structure
 
-### Preferred: Table-driven tests
+Prefer table-driven tests:
 
 ```go
 func TestBoxed_Kind(t *testing.T) {
@@ -419,7 +285,6 @@ func TestBoxed_Kind(t *testing.T) {
         {BoxI32(0), KindI32},
         {BoxI64(0), KindI64},
     }
-
     for _, tt := range tests {
         t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
             require.Equal(t, tt.kind, tt.val.Kind())
@@ -428,56 +293,29 @@ func TestBoxed_Kind(t *testing.T) {
 }
 ```
 
----
-
-### Fallback: explicit subtests
+Fall back to explicit subtests when inputs don't fit a table:
 
 ```go
 func TestBuffer_Append(t *testing.T) {
-    t.Run("normal", func(t *testing.T) {
-        b, err := NewBuffer(64)
-        require.NoError(t, err)
-        defer b.Free()
-
-        require.NoError(t, b.Append([]byte{1}))
-    })
-
-    t.Run("overflow", func(t *testing.T) {
-        b, err := NewBuffer(1)
-        require.NoError(t, err)
-        defer b.Free()
-
-        require.Error(t, b.Append([]byte{1, 2}))
-    })
+    t.Run("normal", func(t *testing.T) { ... })
+    t.Run("overflow", func(t *testing.T) { ... })
 }
 ```
 
----
-
-## 5.4 Subtest naming
-
-* Use `fmt.Sprint(input)` for table-driven tests
-* Use descriptive strings for explicit subtests
+Subtest names: `fmt.Sprint(input)` for table-driven; descriptive strings for explicit.
 
 ---
 
-## 5.5 Assertions
+### 5.4 Assertions & coverage
 
-* Always use `require`
-* Do not use `assert`
-
----
-
-## 5.6 Error coverage
-
-* Success cases must call `require.NoError`
-* Failure cases must use `require.Error` or `require.ErrorIs`
+- Always use `require`, never `assert`.
+- Success cases: `require.NoError`. Failure cases: `require.Error` or `require.ErrorIs`.
 
 ---
 
-## 5.7 Resource cleanup
+### 5.5 Resource cleanup
 
-Always clean up immediately after allocation.
+Clean up immediately after allocation.
 
 ```go
 b, err := NewBuffer(64)
@@ -487,15 +325,9 @@ defer b.Free()
 
 ---
 
-## 5.8 Shared test tables
+### 5.6 Architecture-specific tests
 
-Allowed only within the same `_test.go` file.
-
----
-
-## 5.9 Architecture-specific tests
-
-Tests must include matching build tags.
+Include matching build tags.
 
 ```go
 //go:build arm64
@@ -505,197 +337,84 @@ package arm64
 
 ---
 
-# 6. Test Helper Policy
+## 6. Test Helper Policy
 
-## 6.1 Principle
+Test helpers are **not allowed**. Tests must be self-contained — setup, execution, and assertions must all be visible.
 
-Test helper functions are not allowed.
+**Disallowed:** helpers scoped to a single test or file; any abstraction that hides test logic. Shared test tables are allowed only within the same `_test.go` file.
 
-Tests must function as self-contained documentation and prioritize:
+**Exception:** a helper may be introduced only if all three hold:
+1. The same logic repeats across multiple test files.
+2. The duplication significantly harms readability.
+3. The logic represents a general use case.
 
-* explicitness
-* readability
-* visibility of execution flow
-
----
-
-## 6.2 Disallowed
-
-* helper functions for specific test cases
-* helper functions scoped to a single test file
-* any abstraction that hides test logic
+Even then — improve the production API instead.
 
 ---
 
-## 6.3 Guidelines
+## 7. Git & PR Workflow
 
-* prefer explicit code over deduplication
-* keep setup, execution, and assertions visible
-* allow controlled duplication when it improves readability
+### 7.1 Branch & commit types
 
----
+| Issue type | Branch prefix | Commit type |
+|---|---|---|
+| Bug | `hotfix/<desc>` | `fix` |
+| Feature | `feature/<desc>` | `feat` |
+| Performance | `feature/<desc>` | `perf` |
+| Refactor | — | `refactor` |
+| Test | — | `test` |
+| Docs | — | `docs` |
 
-## 6.4 Exception
-
-A helper may be introduced only if all conditions are met:
-
-1. the same logic is repeated across multiple test files
-2. the duplication significantly harms readability
-3. the logic represents a general use case
-
-In this case:
-
-* do not introduce a test helper
-* improve the production API instead
+Branch names: lowercase, hyphen-separated, concise.
 
 ---
 
-## 6.5 Direction
-
-Do not hide complexity in tests.
-Eliminate it through better API design.
-
----
-
-# 7. Git & PR Workflow
-
----
-
-## 7.1 Issue Type
-
-Each change must be classified as one of:
-
-* bug
-* feature
-* performance
-
----
-
-## 7.2 Branch Naming
-
-```
-bug         → hotfix/<short-description>
-feature     → feature/<short-description>
-performance → feature/<short-description>
-```
-
-Rules:
-
-* lowercase only
-* hyphen-separated
-* concise and descriptive
-
----
-
-## 7.3 Commit Rules
-
-### Atomic commits (mandatory)
-
-Each commit must:
-
-* represent a single logical unit
-* not mix unrelated concerns
-* be independently understandable
-
----
-
-### Commit type mapping
-
-| Change type   | Commit type |
-| ------------- | ----------- |
-| Bug           | fix         |
-| Feature       | feat        |
-| Performance   | perf        |
-| Refactor      | refactor    |
-| Test          | test        |
-| Documentation | docs        |
-
----
-
-### Commit format
+### 7.2 Commit format
 
 ```
 <type>(scope): <summary>
 ```
-
-Examples:
 
 ```
 feat(interp): add trace jit support
 fix(asm): correct register allocation bug
 ```
 
-Rules:
-
-* use imperative mood
-* keep summary within 72 characters
-* clearly describe intent
-
----
-
-## 7.4 Breaking Changes
-
-If a change introduces incompatible API or behavior:
-
-* use `feat!` or `fix!`
-* include a `BREAKING CHANGE:` section in the commit body
+- Imperative mood. Summary ≤ 72 characters.
+- Each commit represents a single logical unit. Do not mix unrelated concerns.
+- Split changes within a file if they represent different concerns.
+- Breaking changes: use `feat!` / `fix!` with a `BREAKING CHANGE:` section in the body.
 
 ---
 
-## 7.5 Diff Splitting
+### 7.3 Performance changes
 
-When preparing commits:
-
-* group changes by responsibility
-* separate feature, fix, refactor, test, and performance changes
-* split changes within a file if they represent different concerns
-
----
-
-## 7.6 Performance Changes
-
-If performance-related:
-
-* benchmarks are required
-* compare before and after results
-
-Format:
+Benchmarks are required. Include before/after results and a conclusion:
 
 ```
 before: ...
-after: ...
+after:  ...
 conclusion: ...
 ```
 
 ---
 
-## 7.7 Self Review
+### 7.4 Self-review checklist
 
-Before creating a PR, verify:
+Before opening a PR, verify:
 
-* the issue is fully resolved
-* no unnecessary changes are included
-* code is consistent and readable
-* no hidden bugs exist
-* no regressions are introduced
-* tests are sufficient
+- [ ] Issue is fully resolved
+- [ ] No unnecessary or unrelated changes
+- [ ] Code is consistent and readable
+- [ ] No hidden bugs or regressions
+- [ ] Tests are sufficient
 
-If any issue is found, fix it before proceeding.
-
----
-
-## 7.8 Pull Request Rules
-
-A PR must:
-
-* follow the existing template
-* clearly describe the changes
-* include benchmark results if applicable
+Do not open a PR if self-review fails.
 
 ---
 
-## 7.9 Hard Rules
+### 7.5 Pull request rules
 
-* no unrelated changes
-* no large mixed commits
-* do not open a PR if self-review fails
+- Follow the existing PR template.
+- Clearly describe the changes.
+- Include benchmark results if applicable.
