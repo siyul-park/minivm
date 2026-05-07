@@ -9,23 +9,17 @@ import (
 )
 
 type jitCompiler struct {
-	assembler *asm.Assembler
-	types     []types.Type
-	constants []types.Boxed
-	heap      []types.Value
-	code      []byte
-	ip        int
-
-	// Shared across all blocks in a function; set before any block is compiled.
-	labels     map[int]int            // blockStart IP → label ID
-	compilable map[int]bool           // true after a block compiles successfully
-	sigs       map[int]*asm.Signature // pass-1 signatures, used by canLink()
-
-	// Set per block by compileBlock.
-	blockEnd int
-	scratch  asm.PReg // Scratch[0] — pre-allocated by compileBlock, used by _PROLOGUE/_EPILOGUE and branch handlers
-
-	// Set by jit[BR/BR_IF/BR_TABLE] when the handler emits its own RET.
+	assembler  *asm.Assembler
+	types      []types.Type
+	constants  []types.Boxed
+	heap       []types.Value
+	code       []byte
+	ip         int
+	labels     map[int]int
+	compilable map[int]bool
+	sigs       map[int]*asm.Signature
+	blockEnd   int
+	scratch    asm.PReg
 	terminated bool
 }
 
