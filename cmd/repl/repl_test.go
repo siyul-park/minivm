@@ -84,6 +84,16 @@ func TestREPL_Run(t *testing.T) {
 			contains: []string{"constant 0 added.", "func() i32"},
 		},
 		{
+			// declare a function constant without offset prefix
+			input:    ".const\nfunc() i32\ni32.const 42\nreturn\n\n.show\n.quit\n",
+			contains: []string{"constant 0 added.", "func() i32"},
+		},
+		{
+			// declare a function with locals and no offset prefix
+			input:    ".const\nfunc(i32) i32\ni32\ni32.const 42\nreturn\n\n.show\n.quit\n",
+			contains: []string{"constant 0 added.", "func(i32) i32"},
+		},
+		{
 			// .reset clears constants
 			input:    ".const\nfunc() i32\n0000:	i32.const 0x0000002A\n0005:	return\n\n.reset\n.show\n.quit\n",
 			contains: []string{"reset.", "(empty)"},
