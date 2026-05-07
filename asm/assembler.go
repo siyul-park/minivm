@@ -6,11 +6,6 @@ import (
 	"unsafe"
 )
 
-type labelEntry struct {
-	chunk  *Chunk
-	offset int
-}
-
 type Assembler struct {
 	arch         *Arch
 	vregAlloc    *VRegAlloc
@@ -20,9 +15,14 @@ type Assembler struct {
 	params       []VReg
 	insts        []Instruction
 	nextLabel    int
-	globalLabels map[int]labelEntry
+	globalLabels map[int]label
 	localLabels  map[int]int
 	scratch      []PReg
+}
+
+type label struct {
+	chunk  *Chunk
+	offset int
 }
 
 var ErrUnresolvedLabel = errors.New("unresolved label")
@@ -33,7 +33,7 @@ func NewAssembler(arch *Arch, buffer *Buffer) *Assembler {
 		vregAlloc:    NewVRegAlloc(),
 		regAlloc:     NewRegAlloc(arch.Registers),
 		buffer:       buffer,
-		globalLabels: make(map[int]labelEntry),
+		globalLabels: make(map[int]label),
 	}
 }
 
@@ -119,35 +119,12 @@ func (a *Assembler) Emits(insts ...Instruction) {
 }
 
 func (a *Assembler) Compile() (*RelocObject, error) {
-	physical, localBytes, relocs, err := a.resolve()
+	sig, instrs, err := a.compile()
 	if err != nil {
 		return nil, err
 	}
 
-	saved := a.insts
-	a.insts = physical
-
-	sig, err := a.signature()
-	if err != nil {
-		a.insts = saved
-		return nil, err
-	}
-	physAssigned, err := a.assign()
-	if err != nil {
-		a.insts = saved
-		return nil, err
-	}
-	a.insts = saved
-
-	encodable := make([]Instruction, len(physAssigned))
-	copy(encodable, physAssigned)
-	for i, inst := range encodable {
-		if _, ok := inst.Src2.(LabelOperand); ok {
-			encodable[i].Src2 = Imm(0)
-		}
-	}
-
-	code, err := Encode(a.arch.Encoder, encodable)
+	code, offsets, relocs, err := a.resolve(instrs)
 	if err != nil {
 		return nil, err
 	}
@@ -163,8 +140,8 @@ func (a *Assembler) Compile() (*RelocObject, error) {
 		return nil, err
 	}
 
-	for id, off := range localBytes {
-		a.globalLabels[id] = labelEntry{chunk: chunk, offset: off}
+	for id, off := range offsets {
+		a.globalLabels[id] = label{chunk: chunk, offset: off}
 	}
 
 	a.reset()
@@ -172,12 +149,113 @@ func (a *Assembler) Compile() (*RelocObject, error) {
 	return &RelocObject{
 		Chunk:  chunk,
 		Sig:    sig,
-		Instrs: physAssigned,
-		Labels: localBytes,
+		Instrs: instrs,
+		Labels: offsets,
 		Relocs: relocs,
 	}, nil
 }
 
+// compile strips pseudo-labels and runs signature derivation and
+// register allocation, returning the post-allocation physical instruction list.
+func (a *Assembler) compile() (*Signature, []Instruction, error) {
+	stripped := make([]Instruction, 0, len(a.insts))
+	for _, inst := range a.insts {
+		if inst.Op != OpPseudoLabel {
+			stripped = append(stripped, inst)
+		}
+	}
+
+	saved := a.insts
+	a.insts = stripped
+
+	sig, err := a.signature()
+	if err != nil {
+		a.insts = saved
+		return nil, nil, err
+	}
+	assigned, err := a.assign()
+	a.insts = saved
+	if err != nil {
+		return nil, nil, err
+	}
+	return sig, assigned, nil
+}
+
+// resolve encodes physAssigned in two passes.
+//
+// Pass 1: encode each instruction with Imm(0) substituted for any LabelOperand
+// to measure real instruction byte sizes (architecture-agnostic).
+//
+// Pass 2: for instructions that reference a label —
+//   - local label (placed within this block): re-encode with the resolved offset.
+//   - external label (placed in a different block): keep the Pass-1 bytes as a
+//     placeholder and record a Relocation for Link to patch later.
+func (a *Assembler) resolve(physAssigned []Instruction) ([]byte, map[int]int, []Relocation, error) {
+	// Build label→instrIdx from the unstripped instruction list.
+	// instrIdx counts only real (non-pseudo) instructions so it aligns with
+	// the physAssigned slice that was produced after stripping.
+	labelAt := make(map[int]int)
+	instrIdx := 0
+	for _, inst := range a.insts {
+		if inst.Op == OpPseudoLabel {
+			if lbl, ok := inst.Dst.(LabelOperand); ok {
+				labelAt[lbl.ID] = instrIdx
+			}
+		} else {
+			instrIdx++
+		}
+	}
+
+	// Pass 1: encode with placeholder to measure byte sizes.
+	encoded := make([][]byte, len(physAssigned))
+	byteOffsets := make([]int, len(physAssigned)+1)
+	for i, inst := range physAssigned {
+		if _, ok := inst.Src2.(LabelOperand); ok {
+			inst.Src2 = Imm(0)
+		}
+		b, err := a.arch.Encoder.Encode(inst)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		encoded[i] = b
+		byteOffsets[i+1] = byteOffsets[i] + len(b)
+	}
+
+	localBytes := make(map[int]int, len(labelAt))
+	for id, idx := range labelAt {
+		localBytes[id] = byteOffsets[idx]
+	}
+
+	// Pass 2: patch local labels; record relocations for external ones.
+	var relocs []Relocation
+	code := make([]byte, 0, byteOffsets[len(physAssigned)])
+	for i, inst := range physAssigned {
+		lbl, hasLabel := inst.Src2.(LabelOperand)
+		if !hasLabel {
+			code = append(code, encoded[i]...)
+			continue
+		}
+		if off, found := localBytes[lbl.ID]; found {
+			inst.Src2 = Imm(int64(off - byteOffsets[i]))
+			b, err := a.arch.Encoder.Encode(inst)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			code = append(code, b...)
+		} else {
+			relocs = append(relocs, Relocation{
+				InstrIdx: i,
+				Offset:   byteOffsets[i],
+				Label:    lbl.ID,
+			})
+			code = append(code, encoded[i]...)
+		}
+	}
+	return code, localBytes, relocs, nil
+}
+
+// Link patches relocations across all objects and returns a Caller per object.
+// Objects that fail to link have a nil Caller; the first error is returned.
 func (a *Assembler) Link(objects []*RelocObject) ([]Caller, error) {
 	if err := a.buffer.Unseal(); err != nil {
 		return nil, err
@@ -244,44 +322,7 @@ func (a *Assembler) Abort() {
 func (a *Assembler) Reset() {
 	a.reset()
 	a.nextLabel = 0
-	a.globalLabels = make(map[int]labelEntry)
-}
-
-func (a *Assembler) resolve() (physical []Instruction, localBytes map[int]int, relocs []Relocation, err error) {
-	localBytes = make(map[int]int)
-	bytePos := 0
-	for _, inst := range a.insts {
-		if inst.Op == OpPseudoLabel {
-			if lbl, ok := inst.Dst.(LabelOperand); ok {
-				localBytes[lbl.ID] = bytePos
-			}
-			continue
-		}
-		bytePos += 4
-	}
-
-	instrIdx := 0
-	bytePos = 0
-	for _, inst := range a.insts {
-		if inst.Op == OpPseudoLabel {
-			continue
-		}
-		if lbl, ok := inst.Src2.(LabelOperand); ok {
-			if off, found := localBytes[lbl.ID]; found {
-				inst.Src2 = Imm(int64(off - bytePos))
-			} else {
-				relocs = append(relocs, Relocation{
-					InstrIdx: instrIdx,
-					Offset:   bytePos,
-					Label:    lbl.ID,
-				})
-			}
-		}
-		physical = append(physical, inst)
-		instrIdx++
-		bytePos += 4
-	}
-	return
+	a.globalLabels = make(map[int]label)
 }
 
 func (a *Assembler) reset() {

@@ -72,7 +72,7 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 	var objs []*asm.RelocObject
 	var metas []meta
 
-	var branchs []*analysis.BasicBlock
+	var branches []*analysis.BasicBlock
 	for _, b := range blocks {
 		obj, terminated := c.compile(b)
 		if obj == nil {
@@ -81,14 +81,14 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 		c.compilable[b.Start] = true
 		c.sigs[b.Start] = obj.Sig
 		if terminated {
-			branchs = append(branchs, b)
+			branches = append(branches, b)
 		} else {
 			objs = append(objs, obj)
 			metas = append(metas, meta{obj, b.Start})
 		}
 	}
 
-	for _, b := range branchs {
+	for _, b := range branches {
 		obj, _ := c.compile(b)
 		if obj == nil {
 			c.compilable[b.Start] = false

@@ -11,10 +11,15 @@ import (
 //
 //	bits[7:0]   = nParams
 //	bits[15:8]  = nReturns
-//	bits[23:16] = nReserved
+//	bits[23:16] = nReserved  (≤ 6; scratch registers X10–X15 in order)
 //	bits[31:24] = paramTypes  (float bitmask: bit i set ↔ Params[i] is float)
 //	bits[39:32] = returnTypes (float bitmask)
-//	bits[47:40] = reservedTypes (always 0 — scratch regs are always int)
+//
+// argv layout passed to invoke:
+//
+//	argv[0]:              header
+//	argv[1..nReserved]:   scratch outputs — written after the call
+//	argv[nReserved+1..]:  params in / returns out
 
 type caller struct {
 	header    uint64
@@ -29,9 +34,9 @@ var _ asm.Caller = (*caller)(nil)
 const abiRegs = 8 // X0-X7 / D0-D7
 
 func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
-	for _, p := range sig.Params {
+	for i, p := range sig.Params {
 		if p.ID() >= abiRegs {
-			return nil, fmt.Errorf("%w: param[%d] register %v is outside", asm.ErrTooManyParams, len(sig.Params), p)
+			return nil, fmt.Errorf("%w: param[%d] register %v is outside", asm.ErrTooManyParams, i, p)
 		}
 	}
 	for i, p := range sig.Returns {
@@ -90,17 +95,19 @@ func (c *caller) Returns() []asm.RegType {
 }
 
 func (c *caller) Call(params []uint64, rsv *[]uint64) ([]uint64, error) {
-	var stack [1 + 8]uint64
-	needed := 1 + max(len(c.params), len(c.returns))
-	argv := stack[:needed]
+	nRsv := c.nReserved
+	nParams := len(c.params)
+	nReturns := len(c.returns)
+	// argv: [header, reserved×nRsv, values×max(nParams,nReturns)]
+	var stack [1 + 6 + 8]uint64 // 1 header + max 6 reserved + max 8 ABI regs
+	argv := stack[:1+nRsv+max(nParams, nReturns)]
 	argv[0] = c.header
-	copy(argv[1:], params[:min(len(params), len(c.params))])
+	copy(argv[1+nRsv:], params[:min(len(params), nParams)])
 
-	var rsvPtr uintptr
-	if rsv != nil && len(*rsv) > 0 {
-		rsvPtr = uintptr(unsafe.Pointer(&(*rsv)[0]))
+	invoke(uintptr(c.chunk.Ptr()), uintptr(unsafe.Pointer(&argv[0])))
+
+	if rsv != nil && nRsv > 0 {
+		copy(*rsv, argv[1:1+nRsv])
 	}
-
-	invoke(uintptr(c.chunk.Ptr()), uintptr(unsafe.Pointer(&argv[0])), rsvPtr)
-	return argv[1 : 1+len(c.returns)], nil
+	return argv[1+nRsv : 1+nRsv+nReturns], nil
 }
