@@ -104,18 +104,33 @@ func TestREPL_Run(t *testing.T) {
 			contains: []string{"error:"},
 		},
 		{
-			// declare a type and verify .show includes it
-			input:    ".type []i32\n.show\n.quit\n",
+			// block .type: single type
+			input:    ".type\n[]i32\n\n.show\n.quit\n",
 			contains: []string{"type 0 added.", "[]i32"},
 		},
 		{
-			// .type with missing argument reports error
-			input:    ".type\n.quit\n",
+			// block .type: struct type
+			input:    ".type\nstruct {i32; f64}\n\n.show\n.quit\n",
+			contains: []string{"type 0 added.", "struct {i32; f64}"},
+		},
+		{
+			// block .type: multiple types in one block
+			input:    ".type\nstruct {i32; f64}\n[]i32\n\n.show\n.quit\n",
+			contains: []string{"type 0 added.", "type 1 added."},
+		},
+		{
+			// block .type: accepts program.String() "N:\t" index prefix
+			input:    ".type\n0:\tstruct {i32; f64}\n\n.show\n.quit\n",
+			contains: []string{"type 0 added.", "struct {i32; f64}"},
+		},
+		{
+			// empty .type block reports error
+			input:    ".type\n\n.quit\n",
 			contains: []string{"error:"},
 		},
 		{
 			// .reset clears types
-			input:    ".type []i32\n.reset\n.show\n.quit\n",
+			input:    ".type\n[]i32\n\n.reset\n.show\n.quit\n",
 			contains: []string{"reset.", "(empty)"},
 		},
 	}

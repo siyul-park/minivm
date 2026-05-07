@@ -29,7 +29,9 @@ Instructions (examples):
 
 Commands:
   .const              declare a function constant (multi-line, end with blank line)
-  .type <type>        declare a type (e.g. .type struct {i32; f64})
+  .type               declare one or more types (multi-line, end with blank line)
+                        e.g.  struct {i32; f64}
+                              []i32
   .show               show disassembly of accumulated program
   .reset              clear all accumulated instructions, stack, constants, and types
   .help               show this help
@@ -121,9 +123,8 @@ func (r *REPL) handleMeta(scanner *bufio.Scanner, line string) (done bool, err e
 		if err := r.readConstant(scanner); err != nil {
 			fmt.Fprintf(r.out, "error: %v\n", err)
 		}
-	case strings.HasPrefix(lower, ".type"):
-		typeStr := strings.TrimSpace(line[5:])
-		if err := r.addType(typeStr); err != nil {
+	case lower == ".type":
+		if err := r.readTypes(scanner); err != nil {
 			fmt.Fprintf(r.out, "error: %v\n", err)
 		}
 	default:
@@ -159,6 +160,36 @@ func (r *REPL) readConstant(scanner *bufio.Scanner) error {
 
 	r.constants = append(r.constants, fn)
 	fmt.Fprintf(r.out, "constant %d added.\n", len(r.constants)-1)
+	return nil
+}
+
+// readTypes reads a multi-line type block (until blank line) and appends each
+// parsed type to r.typs. Accepts the program.String() format with optional
+// "N:\t" index prefix per line.
+func (r *REPL) readTypes(scanner *bufio.Scanner) error {
+	var lines []string
+	for {
+		fmt.Fprint(r.out, blockPrompt)
+		if !scanner.Scan() {
+			break
+		}
+		l := scanner.Text()
+		if l == "" {
+			break
+		}
+		lines = append(lines, l)
+	}
+	if len(lines) == 0 {
+		return fmt.Errorf("empty type definition")
+	}
+	for _, l := range lines {
+		if idx := strings.Index(l, ":\t"); idx >= 0 {
+			l = l[idx+2:]
+		}
+		if err := r.addType(l); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
