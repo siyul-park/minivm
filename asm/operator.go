@@ -49,8 +49,6 @@ func (o ImmOperand) String() string {
 	return fmt.Sprintf("#%d", o.Value)
 }
 
-// LabelOperand is a symbolic branch target resolved at Link time.
-// The encoder re-encodes the instruction once the target address is known.
 type LabelOperand struct {
 	ID int
 }
@@ -61,7 +59,6 @@ func (o LabelOperand) String() string {
 	return fmt.Sprintf("label%d", o.ID)
 }
 
-// Label returns a LabelOperand for the given label ID.
 func Label(id int) LabelOperand {
 	return LabelOperand{ID: id}
 }

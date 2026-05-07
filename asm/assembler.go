@@ -155,8 +155,6 @@ func (a *Assembler) Compile() (*RelocObject, error) {
 	}, nil
 }
 
-// compile strips pseudo-labels and runs signature derivation and
-// register allocation, returning the post-allocation physical instruction list.
 func (a *Assembler) compile() (*Signature, []Instruction, error) {
 	stripped := make([]Instruction, 0, len(a.insts))
 	for _, inst := range a.insts {
@@ -181,19 +179,10 @@ func (a *Assembler) compile() (*Signature, []Instruction, error) {
 	return sig, assigned, nil
 }
 
-// resolve encodes physAssigned in two passes.
-//
-// Pass 1: encode each instruction with Imm(0) substituted for any LabelOperand
-// to measure real instruction byte sizes (architecture-agnostic).
-//
-// Pass 2: for instructions that reference a label —
-//   - local label (placed within this block): re-encode with the resolved offset.
-//   - external label (placed in a different block): keep the Pass-1 bytes as a
-//     placeholder and record a Relocation for Link to patch later.
+// Encodes with Imm(0) placeholders in a first pass to measure instruction byte
+// sizes without assuming a fixed width, then patches or records relocations.
 func (a *Assembler) resolve(physAssigned []Instruction) ([]byte, map[int]int, []Relocation, error) {
-	// Build label→instrIdx from the unstripped instruction list.
-	// instrIdx counts only real (non-pseudo) instructions so it aligns with
-	// the physAssigned slice that was produced after stripping.
+	// instrIdx counts only real (non-pseudo) instructions to align with physAssigned.
 	labelAt := make(map[int]int)
 	instrIdx := 0
 	for _, inst := range a.insts {
