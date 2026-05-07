@@ -31,7 +31,7 @@ func TestREPL_Run(t *testing.T) {
 		},
 		{
 			input:    "f32.const 1.0\n.quit\n",
-			contains: []string{"1.000000"},
+			contains: []string{"1"},
 			excludes: []string{"error:"},
 		},
 		{

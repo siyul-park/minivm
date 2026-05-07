@@ -55,7 +55,7 @@ func New(in io.Reader, out io.Writer) *REPL {
 
 // Run starts the read-eval-print loop. It returns nil on clean exit.
 func (r *REPL) Run(ctx context.Context) error {
-	fmt.Fprintf(r.out, "MiniVM REPL — type '.help' for commands, '.quit' to exit\n")
+	fmt.Fprintf(r.out, "MiniVM Assembly REPL — type '.help' for commands, '.quit' to exit\n")
 
 	scanner := bufio.NewScanner(r.in)
 	for {

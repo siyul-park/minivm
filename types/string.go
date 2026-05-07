@@ -1,5 +1,7 @@
 package types
 
+import "fmt"
+
 type String string
 
 type stringType struct{}
@@ -18,7 +20,7 @@ func (s String) Type() Type {
 }
 
 func (s String) String() string {
-	return string(s)
+	return fmt.Sprintf("%q", string(s))
 }
 
 func (stringType) Kind() Kind {

@@ -55,7 +55,7 @@ func (p *Program) String() string {
 		for i, t := range p.Types {
 			lines := strings.Split(t.String(), "\n")
 			if len(lines) > 0 {
-				sb.WriteString(fmt.Sprintf("%d:\t%s\n", i, lines[0]))
+				sb.WriteString(fmt.Sprintf("%04d:\t%s\n", i, lines[0]))
 				for _, line := range lines[1:] {
 					sb.WriteString(fmt.Sprintf("\t%s\n", line))
 				}

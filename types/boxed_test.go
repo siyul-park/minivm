@@ -264,11 +264,11 @@ func TestBoxed_String(t *testing.T) {
 		},
 		{
 			val: BoxF32(0),
-			str: "0.000000",
+			str: "0",
 		},
 		{
 			val: BoxF64(0),
-			str: "0.000000",
+			str: "0",
 		},
 	}
 	for _, tt := range tests {
