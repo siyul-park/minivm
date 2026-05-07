@@ -87,6 +87,12 @@ These are the non-obvious rules that cause silent bugs when violated:
 
 Full details in [docs/coding-patterns.md](../docs/coding-patterns.md). Quick reference:
 
+**Function design** (see §0 of coding-patterns.md for examples)
+- One level of abstraction per function — do not mix raw field access with method calls in the same function
+- Names hide implementation details — describe the outcome, not the mechanism (`commit`, not `appendInstrAndUpdateLen`)
+- Consistent abstraction within a function — every statement at the same conceptual height
+- Top-down structure — callers above callees; a reader follows logic downward without scrolling up
+
 **Naming**
 - Constructors: `New<Type>` — always returns the concrete type or its primary interface
 - Options: `With<Name>() func(*option)` — functional options pattern only, no config structs
@@ -109,3 +115,16 @@ Full details in [docs/coding-patterns.md](../docs/coding-patterns.md). Quick ref
 - Never write helper functions in test files — inline all setup directly in each test or subtest
 - Always `require` (never `assert`) — fails fast
 - `defer resource.Free()` immediately after successful allocation
+
+## Documentation Maintenance
+
+When code style or quality feedback results in a change to how code is written
+in this repository, the relevant document **must be updated in the same commit**:
+
+- Style / naming / structure feedback → update `docs/coding-patterns.md`
+- Architecture or package-boundary feedback → update `docs/architecture.md`
+- Any section of CLAUDE.md that becomes stale → update it directly
+
+The rule: **code changes that encode a new convention are incomplete without
+the corresponding doc change.** Reviewers should treat an un-documented
+convention as a bug.

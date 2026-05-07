@@ -42,14 +42,13 @@ Commands:
   .quit  /  .exit     exit the REPL
 `
 
-// REPL holds accumulated instructions, constants, and types.
 type REPL struct {
 	in        io.Reader
 	out       io.Writer
 	instrs    []instr.Instruction
 	codeLen   int // byte length of instr.Marshal(instrs); updated incrementally
 	constants []types.Value
-	typs      []types.Type
+	types     []types.Type
 }
 
 // New returns a new REPL that reads from in and writes to out.
@@ -57,9 +56,9 @@ func New(in io.Reader, out io.Writer) *REPL {
 	return &REPL{in: in, out: out}
 }
 
-// Run starts the read-eval-print loop. It returns nil on clean exit.
+// Run reads and executes assembly instructions until EOF or .quit.
 func (r *REPL) Run(ctx context.Context) error {
-	fmt.Fprintf(r.out, "MiniVM Assembly REPL — type '.help' for commands, '.quit' to exit\n")
+	fmt.Fprintln(r.out, "MiniVM Assembly REPL — type '.help' for commands, '.quit' to exit")
 
 	scanner := bufio.NewScanner(r.in)
 	for {
@@ -85,15 +84,9 @@ func (r *REPL) Run(ctx context.Context) error {
 			continue
 		}
 
-		rewritten, rewErr := rewriteBranchAbsolute(line, r.codeLen)
-		if rewErr != nil {
-			fmt.Fprintf(r.out, "error: %v\n", rewErr)
-			continue
-		}
-
-		inst, err := instr.Parse(rewritten)
+		inst, err := r.parseInstr(line)
 		if err != nil {
-			fmt.Fprintf(r.out, "error: %v\n", err)
+			r.writeError(err)
 			continue
 		}
 		if inst == nil {
@@ -101,42 +94,31 @@ func (r *REPL) Run(ctx context.Context) error {
 		}
 
 		if err := r.execute(ctx, inst); err != nil {
-			fmt.Fprintf(r.out, "error: %v\n", err)
+			r.writeError(err)
 			continue
 		}
-		r.instrs = append(r.instrs, inst)
-		r.codeLen += len(inst)
+		r.commit(inst)
 	}
 }
 
-func (r *REPL) handleMeta(scanner *bufio.Scanner, line string) (done bool, err error) {
-	lower := strings.ToLower(line)
-	switch {
-	case lower == ".quit" || lower == ".exit":
+func (r *REPL) handleMeta(scanner *bufio.Scanner, line string) (bool, error) {
+	switch strings.ToLower(line) {
+	case ".quit", ".exit":
 		fmt.Fprintln(r.out, "bye")
 		return true, nil
-	case lower == ".reset":
-		r.instrs = nil
-		r.codeLen = 0
-		r.constants = nil
-		r.typs = nil
-		fmt.Fprintln(r.out, "reset.")
-	case lower == ".show":
-		if len(r.instrs) == 0 && len(r.constants) == 0 && len(r.typs) == 0 {
-			fmt.Fprintln(r.out, "(empty)")
-		} else {
-			prog := program.New(r.instrs, program.WithConstants(r.constants...), program.WithTypes(r.typs...))
-			fmt.Fprint(r.out, prog.String())
-		}
-	case lower == ".help":
+	case ".reset":
+		r.reset()
+	case ".show":
+		r.showProgram()
+	case ".help":
 		fmt.Fprint(r.out, helpText)
-	case lower == ".const":
+	case ".const":
 		if err := r.readConstant(scanner); err != nil {
-			fmt.Fprintf(r.out, "error: %v\n", err)
+			r.writeError(err)
 		}
-	case lower == ".type":
+	case ".type":
 		if err := r.readTypes(scanner); err != nil {
-			fmt.Fprintf(r.out, "error: %v\n", err)
+			r.writeError(err)
 		}
 	default:
 		fmt.Fprintf(r.out, "unknown command: %s (type '.help' for help)\n", line)
@@ -144,20 +126,14 @@ func (r *REPL) handleMeta(scanner *bufio.Scanner, line string) (done bool, err e
 	return false, nil
 }
 
-func (r *REPL) readBlock(scanner *bufio.Scanner) []string {
-	var lines []string
-	for {
-		fmt.Fprint(r.out, blockPrompt)
-		if !scanner.Scan() {
-			break
-		}
-		l := scanner.Text()
-		if l == "" {
-			break
-		}
-		lines = append(lines, l)
+func (r *REPL) execute(ctx context.Context, inst instr.Instruction) error {
+	vm := interp.New(r.buildProgram(inst))
+	defer vm.Close()
+	if err := vm.Run(ctx); err != nil {
+		return err
 	}
-	return lines
+	printStack(r.out, vm)
+	return nil
 }
 
 func (r *REPL) readConstant(scanner *bufio.Scanner) error {
@@ -180,15 +156,31 @@ func (r *REPL) readTypes(scanner *bufio.Scanner) error {
 	if len(lines) == 0 {
 		return fmt.Errorf("empty type definition")
 	}
-	for _, l := range lines {
-		if idx := strings.Index(l, ":\t"); idx >= 0 {
-			l = l[idx+2:]
+	for _, line := range lines {
+		if _, after, ok := strings.Cut(line, ":\t"); ok {
+			line = after
 		}
-		if err := r.addType(l); err != nil {
+		if err := r.addType(line); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (r *REPL) readBlock(scanner *bufio.Scanner) []string {
+	var lines []string
+	for {
+		fmt.Fprint(r.out, blockPrompt)
+		if !scanner.Scan() {
+			break
+		}
+		line := scanner.Text()
+		if line == "" {
+			break
+		}
+		lines = append(lines, line)
+	}
+	return lines
 }
 
 func (r *REPL) addType(s string) error {
@@ -199,31 +191,50 @@ func (r *REPL) addType(s string) error {
 	if err != nil {
 		return err
 	}
-	r.typs = append(r.typs, t)
-	fmt.Fprintf(r.out, "type %d added.\n", len(r.typs)-1)
+	r.types = append(r.types, t)
+	fmt.Fprintf(r.out, "type %d added.\n", len(r.types)-1)
 	return nil
 }
 
-// execute reruns the full accumulated history plus inst; the caller appends inst on success.
-func (r *REPL) execute(ctx context.Context, inst instr.Instruction) error {
-	all := make([]instr.Instruction, len(r.instrs)+1)
-	copy(all, r.instrs)
-	all[len(r.instrs)] = inst
+func (r *REPL) reset() {
+	r.instrs = nil
+	r.codeLen = 0
+	r.constants = nil
+	r.types = nil
+	fmt.Fprintln(r.out, "reset.")
+}
 
-	prog := program.New(
-		all,
-		program.WithConstants(r.constants...),
-		program.WithTypes(r.typs...),
-	)
-	vm := interp.New(prog)
-	defer vm.Close()
-
-	if err := vm.Run(ctx); err != nil {
-		return err
+func (r *REPL) showProgram() {
+	if len(r.instrs) == 0 && len(r.constants) == 0 && len(r.types) == 0 {
+		fmt.Fprintln(r.out, "(empty)")
+		return
 	}
+	fmt.Fprint(r.out, r.buildProgram().String())
+}
 
-	printStack(r.out, vm)
-	return nil
+func (r *REPL) buildProgram(extra ...instr.Instruction) *program.Program {
+	return program.New(
+		append(r.instrs, extra...),
+		program.WithConstants(r.constants...),
+		program.WithTypes(r.types...),
+	)
+}
+
+func (r *REPL) commit(inst instr.Instruction) {
+	r.instrs = append(r.instrs, inst)
+	r.codeLen += len(inst)
+}
+
+func (r *REPL) parseInstr(line string) (instr.Instruction, error) {
+	normalized, err := rewriteBranchAbsolute(line, r.codeLen)
+	if err != nil {
+		return nil, err
+	}
+	return instr.Parse(normalized)
+}
+
+func (r *REPL) writeError(err error) {
+	fmt.Fprintf(r.out, "error: %v\n", err)
 }
 
 func printStack(out io.Writer, vm *interp.Interpreter) {
@@ -232,20 +243,16 @@ func printStack(out io.Writer, vm *interp.Interpreter) {
 		return
 	}
 	parts := make([]string, n)
-	for k := 0; k < n; k++ {
-		v, _ := vm.Peek(k)
-		parts[n-1-k] = formatBoxed(v, vm)
+	for i := 0; i < n; i++ {
+		v, _ := vm.Peek(i)
+		parts[n-1-i] = formatValue(v, vm)
 	}
 	fmt.Fprintln(out, strings.Join(parts, " "))
 }
 
-// formatBoxed returns a human-readable string for a stack value.
-// KindRef values are resolved through the interpreter heap so the
-// actual object (array, struct, string, …) is displayed rather than
-// a raw heap index. Multi-line values (functions) are truncated to
-// their first line. i64/f32/f64 carry a type suffix to disambiguate
-// from the more common i32.
-func formatBoxed(v types.Boxed, vm *interp.Interpreter) string {
+// formatValue resolves KindRef through the heap (shows actual object, not raw index),
+// truncates multi-line values to the first line, and adds type suffixes to i64/f32/f64.
+func formatValue(v types.Boxed, vm *interp.Interpreter) string {
 	switch v.Kind() {
 	case types.KindI32:
 		return fmt.Sprintf("%d", v.I32())
@@ -261,8 +268,8 @@ func formatBoxed(v types.Boxed, vm *interp.Interpreter) string {
 			return "null"
 		}
 		s := val.String()
-		if idx := strings.IndexByte(s, '\n'); idx >= 0 {
-			s = s[:idx]
+		if i := strings.IndexByte(s, '\n'); i >= 0 {
+			s = s[:i]
 		}
 		return s
 	default:
@@ -270,30 +277,28 @@ func formatBoxed(v types.Boxed, vm *interp.Interpreter) string {
 	}
 }
 
-// rewriteBranchAbsolute replaces "@N" absolute byte targets in branch
-// instructions with the equivalent relative offset, given that the
-// instruction will be encoded starting at byte ip.
-// Lines with no "@" tokens are returned unchanged.
+// rewriteBranchAbsolute converts "@N" absolute byte targets in branch instructions
+// to relative offsets from ip. Lines with no "@" tokens are returned unchanged.
 func rewriteBranchAbsolute(line string, ip int) (string, error) {
-	if idx := strings.Index(line, ":\t"); idx >= 0 {
-		line = line[idx+2:]
+	if _, after, ok := strings.Cut(line, ":\t"); ok {
+		line = after
 	}
 	fields := strings.Fields(line)
 	if len(fields) == 0 {
 		return line, nil
 	}
-	opLower := strings.ToLower(fields[0])
-	switch opLower {
+	op := strings.ToLower(fields[0])
+	switch op {
 	case "br", "br_if":
 		if len(fields) < 2 || !strings.HasPrefix(fields[1], "@") {
 			return line, nil
 		}
-		abs, err := parseIntLiteral(fields[1][1:])
+		abs, err := parseInt(fields[1][1:])
 		if err != nil {
 			return "", fmt.Errorf("invalid absolute branch target %s: %w", fields[1], err)
 		}
-		const instrWidth = 3
-		rel := abs - (ip + instrWidth)
+		const width = 3
+		rel := abs - (ip + width)
 		if rel < 0 || rel > 0xFFFF {
 			return "", fmt.Errorf("branch target %s out of range from offset %d", fields[1], ip)
 		}
@@ -303,43 +308,38 @@ func rewriteBranchAbsolute(line string, ip int) (string, error) {
 		if len(fields) < 2 {
 			return line, nil
 		}
-		hasAt := false
-		for _, f := range fields[2:] {
-			if strings.HasPrefix(f, "@") {
-				hasAt = true
-				break
-			}
-		}
-		if !hasAt {
-			return line, nil
-		}
-		count, err := parseIntLiteral(fields[1])
+		count, err := parseInt(fields[1])
 		if err != nil {
 			return "", fmt.Errorf("invalid br_table count %s: %w", fields[1], err)
 		}
-		instrWidth := 4 + count*2
-		parts := make([]string, len(fields))
-		copy(parts, fields)
+		width := 4 + count*2
+		tokens := make([]string, len(fields))
+		copy(tokens, fields)
+		changed := false
 		for i, f := range fields[2:] {
 			if !strings.HasPrefix(f, "@") {
 				continue
 			}
-			abs, err := parseIntLiteral(f[1:])
+			abs, err := parseInt(f[1:])
 			if err != nil {
 				return "", fmt.Errorf("invalid absolute branch target %s: %w", f, err)
 			}
-			rel := abs - (ip + instrWidth)
+			rel := abs - (ip + width)
 			if rel < 0 || rel > 0xFFFF {
 				return "", fmt.Errorf("branch target %s out of range from offset %d", f, ip)
 			}
-			parts[2+i] = fmt.Sprintf("%d", rel)
+			tokens[2+i] = fmt.Sprintf("%d", rel)
+			changed = true
 		}
-		return strings.Join(parts, " "), nil
+		if !changed {
+			return line, nil
+		}
+		return strings.Join(tokens, " "), nil
 	}
 	return line, nil
 }
 
-func parseIntLiteral(s string) (int, error) {
+func parseInt(s string) (int, error) {
 	v, err := strconv.ParseInt(s, 0, 64)
 	if err != nil {
 		return 0, fmt.Errorf("expected integer, got %q", s)
