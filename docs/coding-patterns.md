@@ -4,7 +4,131 @@ Conventions used throughout this codebase. Read before writing any new code.
 
 ---
 
-# 1. Package & Type Design
+# 0. Function Design
+
+Four rules that apply to every function in this codebase.
+
+---
+
+## 0.1 One level of abstraction per function
+
+A function must operate at a single conceptual level. Do not mix low-level
+operations (string indexing, byte arithmetic) with high-level operations
+(method calls, domain logic) in the same function.
+
+**Wrong — mixed levels:**
+```go
+func (r *REPL) Run(ctx context.Context) error {
+    scanner := bufio.NewScanner(r.in)  // setup
+    for {
+        fmt.Fprint(r.out, "> ")        // raw I/O
+        scanner.Scan()
+        line := strings.TrimSpace(scanner.Text())
+
+        // high-level dispatch mixed with low-level rewrite detail:
+        if strings.HasPrefix(fields[1], "@") {
+            abs, _ := strconv.ParseInt(fields[1][1:], 0, 64)
+            rel := int(abs) - (ip + 3)
+            line = fmt.Sprintf("br %d", rel)
+        }
+        instr.Parse(line)
+    }
+}
+```
+
+**Right — consistent level:**
+```go
+func (r *REPL) Run(ctx context.Context) error {
+    scanner := bufio.NewScanner(r.in)
+    for {
+        fmt.Fprint(r.out, prompt)
+        if !scanner.Scan() { ... }
+        line := strings.TrimSpace(scanner.Text())
+
+        inst, err := r.parse(line)   // same level as:
+        if err := r.exec(ctx, inst); err != nil { ... }
+        r.commit(inst)               // same level
+    }
+}
+```
+
+The details of branch-address normalization belong inside `parse`, not in `Run`.
+
+---
+
+## 0.2 Names hide implementation details
+
+Function names describe **what** is achieved from the caller's perspective,
+not **how** it is done internally.
+
+| Avoid (exposes mechanism) | Prefer (describes outcome) |
+|---|---|
+| `rewriteBranchAbsolute` | `normalize` → `parse` calls it |
+| `makeAndCopyInstructions` | `build` |
+| `nilOutFieldsAndPrint` | `reset` |
+| `checkEmptyAndFormatProg` | `show` |
+| `appendInstrAndUpdateLen` | `commit` |
+
+Names are as short as the context allows. On a receiver `*REPL`, `r.show()`,
+`r.build()`, `r.parse()` are unambiguous; the receiver provides the missing noun.
+
+---
+
+## 0.3 Consistent abstraction within a function
+
+Every statement in a function should sit at the same conceptual height.
+If one statement calls a domain method and another does raw field mutation,
+extract the mutation into a named operation.
+
+**Wrong:**
+```go
+// handleMeta mixes direct state mutation with method calls
+case ".reset":
+    r.instrs = nil    // raw field access
+    r.codeLen = 0     // raw field access
+    r.constants = nil // raw field access
+    r.types = nil     // raw field access
+    fmt.Fprintln(r.out, "reset.")
+
+case ".const":
+    r.readConstant(scanner) // method call — different level
+```
+
+**Right:**
+```go
+case ".reset":
+    r.reset()           // same level as:
+case ".const":
+    r.readConstant(scanner)
+```
+
+---
+
+## 0.4 Top-down code structure
+
+Declare functions in call order: callers above callees. A reader should be
+able to follow the logic downward without scrolling back up.
+
+```
+Run              ← highest level; defined first
+  command        ← called by Run
+    reset        ← called by command
+    show         ← called by command
+    readConst    ← called by command
+    readType     ← called by command
+      block      ← called by readConst and readType
+      addType    ← called by readType
+  exec           ← called by Run
+    printStack   ← called by exec
+      format     ← called by printStack
+  parse          ← called by Run
+    normalize    ← called by parse
+      parseInt   ← called by normalize
+```
+
+---
+
+
 
 ## 1.1 Interface-first
 

@@ -17,6 +17,16 @@ func TestString_Type(t *testing.T) {
 }
 
 func TestString_String(t *testing.T) {
-	val := String("")
-	require.Equal(t, "", val.String())
+	tests := []struct {
+		val String
+		str string
+	}{
+		{val: String(""), str: `""`},
+		{val: String("hello"), str: `"hello"`},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.val), func(t *testing.T) {
+			require.Equal(t, tt.str, tt.val.String())
+		})
+	}
 }

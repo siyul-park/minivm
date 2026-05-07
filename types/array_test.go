@@ -88,11 +88,11 @@ func TestArray_String(t *testing.T) {
 		},
 		{
 			val: F32Array{1, 2, 3},
-			str: "[]f32{1.000000, 2.000000, 3.000000}",
+			str: "[]f32{1, 2, 3}",
 		},
 		{
 			val: F64Array{1, 2, 3},
-			str: "[]f64{1.000000, 2.000000, 3.000000}",
+			str: "[]f64{1, 2, 3}",
 		},
 		{
 			val: NewArray(NewArrayType(TypeRef), BoxI32(1), BoxI32(2), BoxI32(3)),

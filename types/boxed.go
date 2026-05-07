@@ -136,9 +136,9 @@ func (v Boxed) String() string {
 	case KindI64:
 		return fmt.Sprintf("%d", v.I64())
 	case KindF32:
-		return fmt.Sprintf("%f", v.F32())
+		return fmt.Sprintf("%g", v.F32())
 	case KindF64:
-		return fmt.Sprintf("%f", v.F64())
+		return fmt.Sprintf("%g", v.F64())
 	case KindRef:
 		return fmt.Sprintf("%d", v.Ref())
 	default:

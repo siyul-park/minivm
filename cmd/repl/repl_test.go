@@ -31,7 +31,7 @@ func TestREPL_Run(t *testing.T) {
 		},
 		{
 			input:    "f32.const 1.0\n.quit\n",
-			contains: []string{"1.000000"},
+			contains: []string{"1"},
 			excludes: []string{"error:"},
 		},
 		{
@@ -84,6 +84,16 @@ func TestREPL_Run(t *testing.T) {
 			contains: []string{"constant 0 added.", "func() i32"},
 		},
 		{
+			// declare a function constant without offset prefix
+			input:    ".const\nfunc() i32\ni32.const 42\nreturn\n\n.show\n.quit\n",
+			contains: []string{"constant 0 added.", "func() i32"},
+		},
+		{
+			// declare a function with locals and no offset prefix
+			input:    ".const\nfunc(i32) i32\ni32\ni32.const 42\nreturn\n\n.show\n.quit\n",
+			contains: []string{"constant 0 added.", "func(i32) i32"},
+		},
+		{
 			// .reset clears constants
 			input:    ".const\nfunc() i32\n0000:	i32.const 0x0000002A\n0005:	return\n\n.reset\n.show\n.quit\n",
 			contains: []string{"reset.", "(empty)"},
@@ -94,19 +104,99 @@ func TestREPL_Run(t *testing.T) {
 			contains: []string{"error:"},
 		},
 		{
-			// declare a type and verify .show includes it
-			input:    ".type []i32\n.show\n.quit\n",
+			// block .type: single type
+			input:    ".type\n[]i32\n\n.show\n.quit\n",
 			contains: []string{"type 0 added.", "[]i32"},
 		},
 		{
-			// .type with missing argument reports error
-			input:    ".type\n.quit\n",
+			// block .type: struct type
+			input:    ".type\nstruct {i32; f64}\n\n.show\n.quit\n",
+			contains: []string{"type 0 added.", "struct {i32; f64}"},
+		},
+		{
+			// block .type: multiple types in one block
+			input:    ".type\nstruct {i32; f64}\n[]i32\n\n.show\n.quit\n",
+			contains: []string{"type 0 added.", "type 1 added."},
+		},
+		{
+			// block .type: accepts program.String() "N:\t" index prefix
+			input:    ".type\n0:\tstruct {i32; f64}\n\n.show\n.quit\n",
+			contains: []string{"type 0 added.", "struct {i32; f64}"},
+		},
+		{
+			// empty .type block reports error
+			input:    ".type\n\n.quit\n",
 			contains: []string{"error:"},
 		},
 		{
 			// .reset clears types
-			input:    ".type []i32\n.reset\n.show\n.quit\n",
+			input:    ".type\n[]i32\n\n.reset\n.show\n.quit\n",
 			contains: []string{"reset.", "(empty)"},
+		},
+		{
+			// array.new_default: KindRef persists across steps
+			input:    ".type\n[]i32\n\ni32.const 1\narray.new_default 0\n.quit\n",
+			excludes: []string{"error:"},
+		},
+		{
+			// struct.new_default: KindRef persists across steps
+			input:    ".type\nstruct {i32; f64}\n\nstruct.new_default 0\n.quit\n",
+			excludes: []string{"error:"},
+		},
+		{
+			// string constant accessible across steps
+			input:    ".const\nfunc() i32\ni32.const 3\nreturn\n\nconst.get 0\ncall\n.quit\n",
+			contains: []string{"3"},
+			excludes: []string{"error:"},
+		},
+		{
+			// i64 value shows type suffix
+			input:    "i64.const 42\n.quit\n",
+			contains: []string{"42 (i64)"},
+			excludes: []string{"error:"},
+		},
+		{
+			// f32 value shows type suffix
+			input:    "f32.const 1.5\n.quit\n",
+			contains: []string{"1.5 (f32)"},
+			excludes: []string{"error:"},
+		},
+		{
+			// f64 value shows type suffix
+			input:    "f64.const 3.14\n.quit\n",
+			contains: []string{"3.14 (f64)"},
+			excludes: []string{"error:"},
+		},
+		{
+			// array on stack shows element content, not raw heap index
+			input:    ".type\n[]i32\n\ni32.const 3\narray.new_default 0\n.quit\n",
+			contains: []string{"[]i32{"},
+			excludes: []string{"error:"},
+		},
+		{
+			// offset-prefixed absolute branch syntax works
+			input:    "i32.const 0\n0005:\tbr_if @8\n.quit\n",
+			excludes: []string{"error:"},
+		},
+		{
+			// @-absolute branch syntax: br_if @8 at offset 5, rel=0, condition false → no error
+			input:    "i32.const 0\nbr_if @8\n.quit\n",
+			excludes: []string{"error:"},
+		},
+		{
+			// @-absolute branch syntax: br_if @8 with hex notation
+			input:    "i32.const 0\nbr_if @0x0008\n.quit\n",
+			excludes: []string{"error:"},
+		},
+		{
+			// relative branch syntax still works unchanged
+			input:    "i32.const 0\nbr_if 0x0000\n.quit\n",
+			excludes: []string{"error:"},
+		},
+		{
+			// out-of-range absolute target reports error
+			input:    "br @0x0000\n.quit\n",
+			contains: []string{"error:"},
 		},
 	}
 

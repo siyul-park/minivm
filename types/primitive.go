@@ -83,7 +83,7 @@ func (f F32) Type() Type {
 }
 
 func (f F32) String() string {
-	return fmt.Sprintf("%f", float32(f))
+	return fmt.Sprintf("%g", float32(f))
 }
 
 func (f F64) Kind() Kind {
@@ -95,7 +95,7 @@ func (f F64) Type() Type {
 }
 
 func (f F64) String() string {
-	return fmt.Sprintf("%f", float64(f))
+	return fmt.Sprintf("%g", float64(f))
 }
 
 func (r Ref) Kind() Kind {

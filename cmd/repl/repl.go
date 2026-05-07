@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/siyul-park/minivm/instr"
@@ -25,25 +26,29 @@ Instructions (examples):
   i32.const 42        push i32 constant
   i32.const 8         push another i32
   i32.add             pop two i32s, push their sum
-  br 0x0005           branch to byte offset 5
+  global.set 0        pop and store into global 0
+  global.get 0        push global 0
+  br 0x0005           branch (relative offset from instruction end)
+  br @0x0010          branch (absolute byte offset in accumulated program)
 
 Commands:
   .const              declare a function constant (multi-line, end with blank line)
-  .type <type>        declare a type (e.g. .type struct {i32; f64})
+  .type               declare one or more types (multi-line, end with blank line)
+                        e.g.  struct {i32; f64}
+                              []i32
   .show               show disassembly of accumulated program
   .reset              clear all accumulated instructions, stack, constants, and types
   .help               show this help
   .quit  /  .exit     exit the REPL
 `
 
-// REPL holds accumulated instructions, persistent stack state, constants, and types.
 type REPL struct {
 	in        io.Reader
 	out       io.Writer
-	instrs    []instr.Instruction // for .show and .reset
-	stack     []types.Boxed       // raw NaN-boxed stack values carried across steps
-	constants []types.Value       // constant pool passed to each step
-	typs      []types.Type        // type pool passed to each step
+	instrs    []instr.Instruction
+	codeLen   int // byte length of instr.Marshal(instrs); updated incrementally
+	constants []types.Value
+	types     []types.Type
 }
 
 // New returns a new REPL that reads from in and writes to out.
@@ -51,9 +56,9 @@ func New(in io.Reader, out io.Writer) *REPL {
 	return &REPL{in: in, out: out}
 }
 
-// Run starts the read-eval-print loop. It returns nil on clean exit.
+// Run reads and executes assembly instructions until EOF or .quit.
 func (r *REPL) Run(ctx context.Context) error {
-	fmt.Fprintf(r.out, "MiniVM REPL — type '.help' for commands, '.quit' to exit\n")
+	fmt.Fprintln(r.out, "MiniVM Assembly REPL — type '.help' for commands, '.quit' to exit")
 
 	scanner := bufio.NewScanner(r.in)
 	for {
@@ -69,7 +74,7 @@ func (r *REPL) Run(ctx context.Context) error {
 		}
 
 		if strings.HasPrefix(line, ".") {
-			done, err := r.handleMeta(scanner, line)
+			done, err := r.command(scanner, line)
 			if err != nil {
 				return err
 			}
@@ -79,52 +84,41 @@ func (r *REPL) Run(ctx context.Context) error {
 			continue
 		}
 
-		inst, err := instr.Parse(line)
+		inst, err := r.parse(line)
 		if err != nil {
-			fmt.Fprintf(r.out, "error: %v\n", err)
+			r.printErr(err)
 			continue
 		}
 		if inst == nil {
 			continue
 		}
 
-		if err := r.execute(ctx, inst); err != nil {
-			fmt.Fprintf(r.out, "error: %v\n", err)
+		if err := r.exec(ctx, inst); err != nil {
+			r.printErr(err)
 			continue
 		}
-		r.instrs = append(r.instrs, inst)
+		r.commit(inst)
 	}
 }
 
-func (r *REPL) handleMeta(scanner *bufio.Scanner, line string) (done bool, err error) {
-	lower := strings.ToLower(line)
-	switch {
-	case lower == ".quit" || lower == ".exit":
+func (r *REPL) command(scanner *bufio.Scanner, line string) (bool, error) {
+	switch strings.ToLower(line) {
+	case ".quit", ".exit":
 		fmt.Fprintln(r.out, "bye")
 		return true, nil
-	case lower == ".reset":
-		r.instrs = nil
-		r.stack = nil
-		r.constants = nil
-		r.typs = nil
-		fmt.Fprintln(r.out, "reset.")
-	case lower == ".show":
-		prog := program.New(r.instrs, program.WithConstants(r.constants...), program.WithTypes(r.typs...))
-		if len(r.instrs) == 0 && len(r.constants) == 0 && len(r.typs) == 0 {
-			fmt.Fprintln(r.out, "(empty)")
-		} else {
-			fmt.Fprint(r.out, prog.String())
-		}
-	case lower == ".help":
+	case ".reset":
+		r.reset()
+	case ".show":
+		r.show()
+	case ".help":
 		fmt.Fprint(r.out, helpText)
-	case lower == ".const":
-		if err := r.readConstant(scanner); err != nil {
-			fmt.Fprintf(r.out, "error: %v\n", err)
+	case ".const":
+		if err := r.readConst(scanner); err != nil {
+			r.printErr(err)
 		}
-	case strings.HasPrefix(lower, ".type"):
-		typeStr := strings.TrimSpace(line[5:])
-		if err := r.addType(typeStr); err != nil {
-			fmt.Fprintf(r.out, "error: %v\n", err)
+	case ".type":
+		if err := r.readType(scanner); err != nil {
+			r.printErr(err)
 		}
 	default:
 		fmt.Fprintf(r.out, "unknown command: %s (type '.help' for help)\n", line)
@@ -132,37 +126,63 @@ func (r *REPL) handleMeta(scanner *bufio.Scanner, line string) (done bool, err e
 	return false, nil
 }
 
-// readConstant reads a multi-line constant definition (until blank line) and
-// appends the parsed constant to r.constants.
-func (r *REPL) readConstant(scanner *bufio.Scanner) error {
+func (r *REPL) exec(ctx context.Context, inst instr.Instruction) error {
+	vm := interp.New(r.build(inst))
+	defer vm.Close()
+	if err := vm.Run(ctx); err != nil {
+		return err
+	}
+	printStack(r.out, vm)
+	return nil
+}
+
+func (r *REPL) readConst(scanner *bufio.Scanner) error {
+	lines := r.block(scanner)
+	if len(lines) == 0 {
+		return fmt.Errorf("empty constant definition")
+	}
+	fn, err := types.ParseFunction(lines)
+	if err != nil {
+		return err
+	}
+	r.constants = append(r.constants, fn)
+	fmt.Fprintf(r.out, "constant %d added.\n", len(r.constants)-1)
+	return nil
+}
+
+// readType accepts the program.String() format: optional "N:\t" index prefix is stripped.
+func (r *REPL) readType(scanner *bufio.Scanner) error {
+	lines := r.block(scanner)
+	if len(lines) == 0 {
+		return fmt.Errorf("empty type definition")
+	}
+	for _, line := range lines {
+		if _, after, ok := strings.Cut(line, ":\t"); ok {
+			line = after
+		}
+		if err := r.addType(line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *REPL) block(scanner *bufio.Scanner) []string {
 	var lines []string
 	for {
 		fmt.Fprint(r.out, blockPrompt)
 		if !scanner.Scan() {
 			break
 		}
-		l := scanner.Text()
-		if l == "" {
+		line := scanner.Text()
+		if line == "" {
 			break
 		}
-		lines = append(lines, l)
+		lines = append(lines, line)
 	}
-
-	if len(lines) == 0 {
-		return fmt.Errorf("empty constant definition")
-	}
-
-	fn, err := types.ParseFunction(lines)
-	if err != nil {
-		return err
-	}
-
-	r.constants = append(r.constants, fn)
-	fmt.Fprintf(r.out, "constant %d added.\n", len(r.constants)-1)
-	return nil
+	return lines
 }
 
-// addType parses a type string and appends it to r.typs.
 func (r *REPL) addType(s string) error {
 	if s == "" {
 		return fmt.Errorf("missing type: usage: .type <type>")
@@ -171,57 +191,159 @@ func (r *REPL) addType(s string) error {
 	if err != nil {
 		return err
 	}
-	r.typs = append(r.typs, t)
-	fmt.Fprintf(r.out, "type %d added.\n", len(r.typs)-1)
+	r.types = append(r.types, t)
+	fmt.Fprintf(r.out, "type %d added.\n", len(r.types)-1)
 	return nil
 }
 
-// execute runs a single instruction on top of the saved stack state.
-// On success it updates r.stack and prints the result; on error it leaves
-// r.stack unchanged.
-func (r *REPL) execute(ctx context.Context, inst instr.Instruction) error {
-	prog := program.New(
-		[]instr.Instruction{inst},
-		program.WithConstants(r.constants...),
-		program.WithTypes(r.typs...),
-	)
-	vm := interp.New(prog)
-	defer vm.Close()
-
-	// Restore saved stack into the new interpreter before running.
-	for _, v := range r.stack {
-		if err := vm.Push(v); err != nil {
-			return err
-		}
-	}
-
-	if err := vm.Run(ctx); err != nil {
-		return err
-	}
-
-	// Save resulting stack via Peek (bottom-to-top order).
-	// Peek returns raw Boxed values without unboxing, so KindRef values (e.g.
-	// function refs from const.get) stay valid when pushed into the next
-	// interpreter, which has the same constant pool heap layout.
-	n := vm.Len()
-	newStack := make([]types.Boxed, n)
-	for k := 0; k < n; k++ {
-		v, _ := vm.Peek(n - 1 - k)
-		newStack[k] = v
-	}
-	r.stack = newStack
-
-	printStack(r.out, r.stack)
-	return nil
+func (r *REPL) reset() {
+	r.instrs = nil
+	r.codeLen = 0
+	r.constants = nil
+	r.types = nil
+	fmt.Fprintln(r.out, "reset.")
 }
 
-func printStack(out io.Writer, stack []types.Boxed) {
-	if len(stack) == 0 {
+func (r *REPL) show() {
+	if len(r.instrs) == 0 && len(r.constants) == 0 && len(r.types) == 0 {
+		fmt.Fprintln(r.out, "(empty)")
 		return
 	}
-	parts := make([]string, len(stack))
-	for i, v := range stack {
-		parts[i] = types.Unbox(v).String()
+	fmt.Fprint(r.out, r.build().String())
+}
+
+func (r *REPL) build(extra ...instr.Instruction) *program.Program {
+	return program.New(
+		append(r.instrs, extra...),
+		program.WithConstants(r.constants...),
+		program.WithTypes(r.types...),
+	)
+}
+
+func (r *REPL) commit(inst instr.Instruction) {
+	r.instrs = append(r.instrs, inst)
+	r.codeLen += len(inst)
+}
+
+func (r *REPL) parse(line string) (instr.Instruction, error) {
+	normalized, err := normalize(line, r.codeLen)
+	if err != nil {
+		return nil, err
+	}
+	return instr.Parse(normalized)
+}
+
+func (r *REPL) printErr(err error) {
+	fmt.Fprintf(r.out, "error: %v\n", err)
+}
+
+func printStack(out io.Writer, vm *interp.Interpreter) {
+	n := vm.Len()
+	if n == 0 {
+		return
+	}
+	parts := make([]string, n)
+	for i := 0; i < n; i++ {
+		v, _ := vm.Peek(i)
+		parts[n-1-i] = format(v, vm)
 	}
 	fmt.Fprintln(out, strings.Join(parts, " "))
+}
+
+// format resolves KindRef through the heap (shows actual object, not raw index),
+// truncates multi-line values to the first line, and adds type suffixes to i64/f32/f64.
+func format(v types.Boxed, vm *interp.Interpreter) string {
+	switch v.Kind() {
+	case types.KindI32:
+		return fmt.Sprintf("%d", v.I32())
+	case types.KindI64:
+		return fmt.Sprintf("%d (i64)", v.I64())
+	case types.KindF32:
+		return fmt.Sprintf("%g (f32)", v.F32())
+	case types.KindF64:
+		return fmt.Sprintf("%g (f64)", v.F64())
+	case types.KindRef:
+		val, err := vm.Load(v.Ref())
+		if err != nil || val == nil {
+			return "null"
+		}
+		s := val.String()
+		if i := strings.IndexByte(s, '\n'); i >= 0 {
+			s = s[:i]
+		}
+		return s
+	default:
+		return "<invalid>"
+	}
+}
+
+// normalize converts "@N" absolute byte targets in branch instructions to relative
+// offsets from ip, and strips any "NNNN:\t" offset prefix. Returns the line unchanged
+// if no "@" tokens are present.
+func normalize(line string, ip int) (string, error) {
+	if _, after, ok := strings.Cut(line, ":\t"); ok {
+		line = after
+	}
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return line, nil
+	}
+	op := strings.ToLower(fields[0])
+	switch op {
+	case "br", "br_if":
+		if len(fields) < 2 || !strings.HasPrefix(fields[1], "@") {
+			return line, nil
+		}
+		abs, err := parseInt(fields[1][1:])
+		if err != nil {
+			return "", fmt.Errorf("invalid absolute branch target %s: %w", fields[1], err)
+		}
+		const width = 3
+		rel := abs - (ip + width)
+		if rel < 0 || rel > 0xFFFF {
+			return "", fmt.Errorf("branch target %s out of range from offset %d", fields[1], ip)
+		}
+		return fmt.Sprintf("%s %d", fields[0], rel), nil
+
+	case "br_table":
+		if len(fields) < 2 {
+			return line, nil
+		}
+		count, err := parseInt(fields[1])
+		if err != nil {
+			return "", fmt.Errorf("invalid br_table count %s: %w", fields[1], err)
+		}
+		width := 4 + count*2
+		tokens := make([]string, len(fields))
+		copy(tokens, fields)
+		changed := false
+		for i, f := range fields[2:] {
+			if !strings.HasPrefix(f, "@") {
+				continue
+			}
+			abs, err := parseInt(f[1:])
+			if err != nil {
+				return "", fmt.Errorf("invalid absolute branch target %s: %w", f, err)
+			}
+			rel := abs - (ip + width)
+			if rel < 0 || rel > 0xFFFF {
+				return "", fmt.Errorf("branch target %s out of range from offset %d", f, ip)
+			}
+			tokens[2+i] = fmt.Sprintf("%d", rel)
+			changed = true
+		}
+		if !changed {
+			return line, nil
+		}
+		return strings.Join(tokens, " "), nil
+	}
+	return line, nil
+}
+
+func parseInt(s string) (int, error) {
+	v, err := strconv.ParseInt(s, 0, 64)
+	if err != nil {
+		return 0, fmt.Errorf("expected integer, got %q", s)
+	}
+	return int(v), nil
 }

@@ -140,10 +140,12 @@ func ParseFunction(lines []string) (*Function, error) {
 		return nil, fmt.Errorf("expected func type, got %q", lines[0])
 	}
 
-	// Find where disassembly starts (first line matching "NNNN:\t" with hex digits).
+	// Find where disassembly starts: first line that is either offset-prefixed
+	// ("NNNN:\t…") or a plain instruction (not parseable as a type).
 	localsEnd := 1
 	for localsEnd < len(lines) {
-		if isFormatLine(lines[localsEnd]) {
+		line := strings.TrimSpace(lines[localsEnd])
+		if isFormatLine(line) || isInstrLine(line) {
 			break
 		}
 		localsEnd++
@@ -164,6 +166,17 @@ func ParseFunction(lines []string) (*Function, error) {
 	}
 
 	return NewFunction(ft, locals, codeInstrs), nil
+}
+
+// isInstrLine reports whether s looks like a plain instruction line without an
+// offset prefix. A non-empty line that cannot be parsed as a type declaration
+// is treated as an instruction.
+func isInstrLine(s string) bool {
+	if s == "" {
+		return false
+	}
+	_, err := Parse(s)
+	return err != nil
 }
 
 // isFormatLine reports whether s looks like a Format output line ("NNNx:\t…").

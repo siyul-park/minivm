@@ -85,4 +85,33 @@ func TestParseFunction(t *testing.T) {
 			require.Equal(t, lines, got)
 		})
 	}
+
+	t.Run("no offset prefix", func(t *testing.T) {
+		// Instructions written without offset prefix must parse successfully.
+		lines := []string{
+			"func() i32",
+			"i32.const 42",
+			"return",
+		}
+		fn, err := ParseFunction(lines)
+		require.NoError(t, err)
+		require.NotNil(t, fn)
+		require.Equal(t, 0, len(fn.Locals))
+		require.Equal(t, 2, len(instr.Unmarshal(fn.Code)))
+	})
+
+	t.Run("no offset prefix with locals", func(t *testing.T) {
+		lines := []string{
+			"func(i32) i32",
+			"i32",
+			"i64",
+			"i32.const 42",
+			"return",
+		}
+		fn, err := ParseFunction(lines)
+		require.NoError(t, err)
+		require.NotNil(t, fn)
+		require.Equal(t, 2, len(fn.Locals))
+		require.Equal(t, 2, len(instr.Unmarshal(fn.Code)))
+	})
 }

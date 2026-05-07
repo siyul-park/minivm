@@ -88,11 +88,11 @@ func TestPrimitive_String(t *testing.T) {
 		},
 		{
 			val: F32(0),
-			str: "0.000000",
+			str: "0",
 		},
 		{
 			val: F64(0),
-			str: "0.000000",
+			str: "0",
 		},
 		{
 			val: Ref(0),
