@@ -74,7 +74,7 @@ func (r *REPL) Run(ctx context.Context) error {
 		}
 
 		if strings.HasPrefix(line, ".") {
-			done, err := r.handleMeta(scanner, line)
+			done, err := r.command(scanner, line)
 			if err != nil {
 				return err
 			}
@@ -84,24 +84,24 @@ func (r *REPL) Run(ctx context.Context) error {
 			continue
 		}
 
-		inst, err := r.parseInstr(line)
+		inst, err := r.parse(line)
 		if err != nil {
-			r.writeError(err)
+			r.printErr(err)
 			continue
 		}
 		if inst == nil {
 			continue
 		}
 
-		if err := r.execute(ctx, inst); err != nil {
-			r.writeError(err)
+		if err := r.exec(ctx, inst); err != nil {
+			r.printErr(err)
 			continue
 		}
 		r.commit(inst)
 	}
 }
 
-func (r *REPL) handleMeta(scanner *bufio.Scanner, line string) (bool, error) {
+func (r *REPL) command(scanner *bufio.Scanner, line string) (bool, error) {
 	switch strings.ToLower(line) {
 	case ".quit", ".exit":
 		fmt.Fprintln(r.out, "bye")
@@ -109,16 +109,16 @@ func (r *REPL) handleMeta(scanner *bufio.Scanner, line string) (bool, error) {
 	case ".reset":
 		r.reset()
 	case ".show":
-		r.showProgram()
+		r.show()
 	case ".help":
 		fmt.Fprint(r.out, helpText)
 	case ".const":
-		if err := r.readConstant(scanner); err != nil {
-			r.writeError(err)
+		if err := r.readConst(scanner); err != nil {
+			r.printErr(err)
 		}
 	case ".type":
-		if err := r.readTypes(scanner); err != nil {
-			r.writeError(err)
+		if err := r.readType(scanner); err != nil {
+			r.printErr(err)
 		}
 	default:
 		fmt.Fprintf(r.out, "unknown command: %s (type '.help' for help)\n", line)
@@ -126,8 +126,8 @@ func (r *REPL) handleMeta(scanner *bufio.Scanner, line string) (bool, error) {
 	return false, nil
 }
 
-func (r *REPL) execute(ctx context.Context, inst instr.Instruction) error {
-	vm := interp.New(r.buildProgram(inst))
+func (r *REPL) exec(ctx context.Context, inst instr.Instruction) error {
+	vm := interp.New(r.build(inst))
 	defer vm.Close()
 	if err := vm.Run(ctx); err != nil {
 		return err
@@ -136,8 +136,8 @@ func (r *REPL) execute(ctx context.Context, inst instr.Instruction) error {
 	return nil
 }
 
-func (r *REPL) readConstant(scanner *bufio.Scanner) error {
-	lines := r.readBlock(scanner)
+func (r *REPL) readConst(scanner *bufio.Scanner) error {
+	lines := r.block(scanner)
 	if len(lines) == 0 {
 		return fmt.Errorf("empty constant definition")
 	}
@@ -150,9 +150,9 @@ func (r *REPL) readConstant(scanner *bufio.Scanner) error {
 	return nil
 }
 
-// readTypes accepts the program.String() format: optional "N:\t" index prefix is stripped.
-func (r *REPL) readTypes(scanner *bufio.Scanner) error {
-	lines := r.readBlock(scanner)
+// readType accepts the program.String() format: optional "N:\t" index prefix is stripped.
+func (r *REPL) readType(scanner *bufio.Scanner) error {
+	lines := r.block(scanner)
 	if len(lines) == 0 {
 		return fmt.Errorf("empty type definition")
 	}
@@ -167,7 +167,7 @@ func (r *REPL) readTypes(scanner *bufio.Scanner) error {
 	return nil
 }
 
-func (r *REPL) readBlock(scanner *bufio.Scanner) []string {
+func (r *REPL) block(scanner *bufio.Scanner) []string {
 	var lines []string
 	for {
 		fmt.Fprint(r.out, blockPrompt)
@@ -204,15 +204,15 @@ func (r *REPL) reset() {
 	fmt.Fprintln(r.out, "reset.")
 }
 
-func (r *REPL) showProgram() {
+func (r *REPL) show() {
 	if len(r.instrs) == 0 && len(r.constants) == 0 && len(r.types) == 0 {
 		fmt.Fprintln(r.out, "(empty)")
 		return
 	}
-	fmt.Fprint(r.out, r.buildProgram().String())
+	fmt.Fprint(r.out, r.build().String())
 }
 
-func (r *REPL) buildProgram(extra ...instr.Instruction) *program.Program {
+func (r *REPL) build(extra ...instr.Instruction) *program.Program {
 	return program.New(
 		append(r.instrs, extra...),
 		program.WithConstants(r.constants...),
@@ -225,15 +225,15 @@ func (r *REPL) commit(inst instr.Instruction) {
 	r.codeLen += len(inst)
 }
 
-func (r *REPL) parseInstr(line string) (instr.Instruction, error) {
-	normalized, err := rewriteBranchAbsolute(line, r.codeLen)
+func (r *REPL) parse(line string) (instr.Instruction, error) {
+	normalized, err := normalize(line, r.codeLen)
 	if err != nil {
 		return nil, err
 	}
 	return instr.Parse(normalized)
 }
 
-func (r *REPL) writeError(err error) {
+func (r *REPL) printErr(err error) {
 	fmt.Fprintf(r.out, "error: %v\n", err)
 }
 
@@ -245,14 +245,14 @@ func printStack(out io.Writer, vm *interp.Interpreter) {
 	parts := make([]string, n)
 	for i := 0; i < n; i++ {
 		v, _ := vm.Peek(i)
-		parts[n-1-i] = formatValue(v, vm)
+		parts[n-1-i] = format(v, vm)
 	}
 	fmt.Fprintln(out, strings.Join(parts, " "))
 }
 
-// formatValue resolves KindRef through the heap (shows actual object, not raw index),
+// format resolves KindRef through the heap (shows actual object, not raw index),
 // truncates multi-line values to the first line, and adds type suffixes to i64/f32/f64.
-func formatValue(v types.Boxed, vm *interp.Interpreter) string {
+func format(v types.Boxed, vm *interp.Interpreter) string {
 	switch v.Kind() {
 	case types.KindI32:
 		return fmt.Sprintf("%d", v.I32())
@@ -277,9 +277,10 @@ func formatValue(v types.Boxed, vm *interp.Interpreter) string {
 	}
 }
 
-// rewriteBranchAbsolute converts "@N" absolute byte targets in branch instructions
-// to relative offsets from ip. Lines with no "@" tokens are returned unchanged.
-func rewriteBranchAbsolute(line string, ip int) (string, error) {
+// normalize converts "@N" absolute byte targets in branch instructions to relative
+// offsets from ip, and strips any "NNNN:\t" offset prefix. Returns the line unchanged
+// if no "@" tokens are present.
+func normalize(line string, ip int) (string, error) {
 	if _, after, ok := strings.Cut(line, ":\t"); ok {
 		line = after
 	}

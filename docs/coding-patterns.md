@@ -45,14 +45,14 @@ func (r *REPL) Run(ctx context.Context) error {
         if !scanner.Scan() { ... }
         line := strings.TrimSpace(scanner.Text())
 
-        inst, err := r.parseInstr(line)   // same level as:
-        if err := r.execute(ctx, inst); err != nil { ... }
-        r.commit(inst)                    // same level
+        inst, err := r.parse(line)   // same level as:
+        if err := r.exec(ctx, inst); err != nil { ... }
+        r.commit(inst)               // same level
     }
 }
 ```
 
-The details of branch-address rewriting belong inside `parseInstr`, not in `Run`.
+The details of branch-address normalization belong inside `parse`, not in `Run`.
 
 ---
 
@@ -63,11 +63,14 @@ not **how** it is done internally.
 
 | Avoid (exposes mechanism) | Prefer (describes outcome) |
 |---|---|
-| `rewriteBranchAbsolute` | `parseInstr` (wraps normalize + parse) |
-| `makeAndCopyInstructions` | `buildProgram` |
+| `rewriteBranchAbsolute` | `normalize` → `parse` calls it |
+| `makeAndCopyInstructions` | `build` |
 | `nilOutFieldsAndPrint` | `reset` |
-| `checkEmptyAndFormatProg` | `showProgram` |
+| `checkEmptyAndFormatProg` | `show` |
 | `appendInstrAndUpdateLen` | `commit` |
+
+Names are as short as the context allows. On a receiver `*REPL`, `r.show()`,
+`r.build()`, `r.parse()` are unambiguous; the receiver provides the missing noun.
 
 ---
 
@@ -108,19 +111,19 @@ able to follow the logic downward without scrolling back up.
 
 ```
 Run              ← highest level; defined first
-  handleMeta     ← called by Run
-    reset        ← called by handleMeta
-    showProgram  ← called by handleMeta
-    readConstant ← called by handleMeta
-    readTypes    ← called by handleMeta
-      readBlock  ← called by readConstant and readTypes
-      addType    ← called by readTypes
-  execute        ← called by Run
-    printStack   ← called by execute
-      formatValue ← called by printStack
-  parseInstr     ← called by Run
-    rewriteBranchAbsolute ← called by parseInstr
-      parseInt   ← called by rewriteBranchAbsolute
+  command        ← called by Run
+    reset        ← called by command
+    show         ← called by command
+    readConst    ← called by command
+    readType     ← called by command
+      block      ← called by readConst and readType
+      addType    ← called by readType
+  exec           ← called by Run
+    printStack   ← called by exec
+      format     ← called by printStack
+  parse          ← called by Run
+    normalize    ← called by parse
+      parseInt   ← called by normalize
 ```
 
 ---
