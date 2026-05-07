@@ -77,6 +77,29 @@ br_table 0x02 0x0000 0x0005 0x0000
 | Unsigned decimal | `42`, `5` | integer operands |
 | Signed decimal | `-1` | integer operands |
 | Float literal | `1.0`, `-3.14` | `f32.const`, `f64.const` (encoded as IEEE 754 bits) |
+| Absolute address | `@8`, `@0x0010` | `br`, `br_if`, `br_table` targets only |
+
+### Branch target formats
+
+Branch instructions accept two forms for their target operands:
+
+- **Relative** (existing): `br 0x0005` — jump 5 bytes past the end of this instruction (raw operand stored in the bytecode)
+- **Absolute** (`@`-prefixed): `br @0x0010` — jump to byte offset 16 in the accumulated program; the REPL converts this to the correct relative offset before encoding
+
+The `@` prefix works with both hex and decimal:
+
+```
+> i32.const 1
+1
+> br @13
+1
+> i32.const 99
+1 99
+> i32.const 2
+1 99 2
+```
+
+In step-by-step interactive use, absolute targets must refer to instructions already in the accumulated history (or the end of the current program). Forward references to not-yet-typed instructions are not supported.
 
 ## What Works in the REPL
 

@@ -150,6 +150,35 @@ func TestREPL_Run(t *testing.T) {
 			excludes: []string{"error:"},
 		},
 		{
+			// i64 value shows type suffix
+			input:    "i64.const 42\n.quit\n",
+			contains: []string{"42 (i64)"},
+			excludes: []string{"error:"},
+		},
+		{
+			// f32 value shows type suffix
+			input:    "f32.const 1.5\n.quit\n",
+			contains: []string{"1.5 (f32)"},
+			excludes: []string{"error:"},
+		},
+		{
+			// f64 value shows type suffix
+			input:    "f64.const 3.14\n.quit\n",
+			contains: []string{"3.14 (f64)"},
+			excludes: []string{"error:"},
+		},
+		{
+			// array on stack shows element content, not raw heap index
+			input:    ".type\n[]i32\n\ni32.const 3\narray.new_default 0\n.quit\n",
+			contains: []string{"[]i32{"},
+			excludes: []string{"error:"},
+		},
+		{
+			// offset-prefixed absolute branch syntax works
+			input:    "i32.const 0\n0005:\tbr_if @8\n.quit\n",
+			excludes: []string{"error:"},
+		},
+		{
 			// @-absolute branch syntax: br_if @8 at offset 5, rel=0, condition false → no error
 			input:    "i32.const 0\nbr_if @8\n.quit\n",
 			excludes: []string{"error:"},

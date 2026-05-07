@@ -13,7 +13,6 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-
 const prompt = "> "
 const blockPrompt = "... "
 
@@ -291,6 +290,9 @@ func formatBoxed(v types.Boxed, vm *interp.Interpreter) string {
 // instruction will be encoded starting at byte ip.
 // Lines with no "@" tokens are returned unchanged.
 func rewriteBranchAbsolute(line string, ip int) (string, error) {
+	if idx := strings.Index(line, ":\t"); idx >= 0 {
+		line = line[idx+2:]
+	}
 	fields := strings.Fields(line)
 	if len(fields) == 0 {
 		return line, nil
