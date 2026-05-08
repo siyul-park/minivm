@@ -1,4 +1,4 @@
-package profile
+package prof
 
 // Func holds execution-frequency data for one function.
 type Func struct {

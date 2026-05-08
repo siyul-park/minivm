@@ -8,7 +8,7 @@ import (
 	"math"
 
 	"github.com/siyul-park/minivm/asm"
-	"github.com/siyul-park/minivm/profile"
+	profpkg "github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
@@ -18,7 +18,7 @@ type Interpreter struct {
 	buffer    *asm.Buffer
 	instrs    [][]byte
 	code      [][]func(*Interpreter)
-	prof      *profile.Profile
+	prof      *profpkg.Profile
 	frames    []frame
 	types     []types.Type
 	constants []types.Boxed
@@ -47,7 +47,7 @@ type option struct {
 	heap      int
 	tick      int
 	threshold int
-	profile   *profile.Profile
+	profile   *profpkg.Profile
 }
 
 var (
@@ -87,7 +87,7 @@ func WithThreshold(val int) func(*option) {
 	return func(o *option) { o.threshold = val }
 }
 
-func WithProfile(p *profile.Profile) func(*option) {
+func WithProfile(p *profpkg.Profile) func(*option) {
 	return func(o *option) { o.profile = p }
 }
 
@@ -109,7 +109,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 
 	prof := opt.profile
 	if prof == nil {
-		prof = profile.New()
+		prof = profpkg.New()
 	}
 
 	i := &Interpreter{
@@ -236,7 +236,7 @@ func (i *Interpreter) Context() context.Context {
 	return i.ctx
 }
 
-func (i *Interpreter) Profile() *profile.Profile {
+func (i *Interpreter) Profile() *profpkg.Profile {
 	return i.prof
 }
 

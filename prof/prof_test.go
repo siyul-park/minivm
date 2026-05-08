@@ -1,4 +1,4 @@
-package profile
+package prof
 
 import (
 	"testing"
