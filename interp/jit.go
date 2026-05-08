@@ -14,7 +14,7 @@ type jitCompiler struct {
 	types      []types.Type
 	constants  []types.Boxed
 	heap       []types.Value
-	recorder   *profpkg.Recorder
+	profile    *profpkg.Profile
 	funcIdx    int
 	code       []byte
 	ip         int

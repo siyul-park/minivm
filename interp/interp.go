@@ -18,7 +18,7 @@ type Interpreter struct {
 	buffer    *asm.Buffer
 	instrs    [][]byte
 	code      [][]func(*Interpreter)
-	prof      *profpkg.Recorder
+	prof      *profpkg.Profile
 	frames    []frame
 	types     []types.Type
 	constants []types.Boxed
@@ -47,7 +47,7 @@ type option struct {
 	heap      int
 	tick      int
 	threshold int
-	recorder  *profpkg.Recorder
+	profile   *profpkg.Profile
 }
 
 var (
@@ -87,8 +87,8 @@ func WithThreshold(val int) func(*option) {
 	return func(o *option) { o.threshold = val }
 }
 
-func WithProfiler(r *profpkg.Recorder) func(*option) {
-	return func(o *option) { o.recorder = r }
+func WithProfile(p *profpkg.Profile) func(*option) {
+	return func(o *option) { o.profile = p }
 }
 
 func New(prog *program.Program, opts ...func(*option)) *Interpreter {
@@ -107,15 +107,15 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		opt.frame = 1
 	}
 
-	recorder := opt.recorder
-	if recorder == nil {
-		recorder = profpkg.New()
+	profile := opt.profile
+	if profile == nil {
+		profile = profpkg.New()
 	}
 
 	i := &Interpreter{
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
-		prof:      recorder,
+		prof:      profile,
 		frames:    make([]frame, opt.frame),
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
@@ -212,7 +212,7 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 						types:     i.types,
 						constants: i.constants,
 						heap:      i.heap,
-						recorder:  i.prof,
+						profile:   i.prof,
 						funcIdx:   f.addr,
 					}
 					for j, fn := range c.Compile(i.instrs[f.addr]) {
@@ -236,7 +236,7 @@ func (i *Interpreter) Context() context.Context {
 	return i.ctx
 }
 
-func (i *Interpreter) Recorder() *profpkg.Recorder {
+func (i *Interpreter) Profile() *profpkg.Profile {
 	return i.prof
 }
 

@@ -1,19 +1,14 @@
 package prof
 
-// FuncProfile is an immutable snapshot of one function's execution data.
-type FuncProfile struct {
+// Func holds execution-frequency data for one function.
+type Func struct {
 	Calls  uint64
 	Blocks []uint64
 }
 
-// Profile is an immutable snapshot of execution-frequency data for a program.
-type Profile struct {
-	Funcs []FuncProfile
-}
-
-// Recorder collects execution-frequency samples during bytecode interpretation.
+// Profile records execution-frequency data during bytecode interpretation.
 // It grows automatically to accommodate any function index and instruction pointer.
-type Recorder struct {
+type Profile struct {
 	funcs []funcData
 }
 
@@ -22,51 +17,51 @@ type funcData struct {
 	blocks []uint64
 }
 
-// New returns an empty Recorder.
-func New() *Recorder {
-	return &Recorder{}
+// New returns an empty Profile.
+func New() *Profile {
+	return &Profile{}
 }
 
 // Record records one execution sample at (funcIdx, ip).
 // It automatically grows to accommodate new function indices and IPs.
-func (r *Recorder) Record(funcIdx, ip int) {
-	for len(r.funcs) <= funcIdx {
-		r.funcs = append(r.funcs, funcData{})
+func (p *Profile) Record(funcIdx, ip int) {
+	for len(p.funcs) <= funcIdx {
+		p.funcs = append(p.funcs, funcData{})
 	}
-	if len(r.funcs[funcIdx].blocks) <= ip {
+	if len(p.funcs[funcIdx].blocks) <= ip {
 		nb := make([]uint64, ip+1)
-		copy(nb, r.funcs[funcIdx].blocks)
-		r.funcs[funcIdx].blocks = nb
+		copy(nb, p.funcs[funcIdx].blocks)
+		p.funcs[funcIdx].blocks = nb
 	}
-	r.funcs[funcIdx].calls++
-	r.funcs[funcIdx].blocks[ip]++
+	p.funcs[funcIdx].calls++
+	p.funcs[funcIdx].blocks[ip]++
 }
 
 // Calls returns the aggregate sample count for funcIdx.
 // Returns 0 for an unknown index.
-func (r *Recorder) Calls(funcIdx int) uint64 {
-	if funcIdx >= len(r.funcs) {
+func (p *Profile) Calls(funcIdx int) uint64 {
+	if funcIdx >= len(p.funcs) {
 		return 0
 	}
-	return r.funcs[funcIdx].calls
+	return p.funcs[funcIdx].calls
 }
 
 // Hits returns the per-IP sample count for funcIdx at ip.
 // Returns 0 for unknown indices.
-func (r *Recorder) Hits(funcIdx, ip int) uint64 {
-	if funcIdx >= len(r.funcs) || ip >= len(r.funcs[funcIdx].blocks) {
+func (p *Profile) Hits(funcIdx, ip int) uint64 {
+	if funcIdx >= len(p.funcs) || ip >= len(p.funcs[funcIdx].blocks) {
 		return 0
 	}
-	return r.funcs[funcIdx].blocks[ip]
+	return p.funcs[funcIdx].blocks[ip]
 }
 
-// Snapshot returns an immutable deep copy of all collected data.
-func (r *Recorder) Snapshot() Profile {
-	p := Profile{Funcs: make([]FuncProfile, len(r.funcs))}
-	for i, f := range r.funcs {
+// Funcs returns an immutable deep copy of all collected function data.
+func (p *Profile) Funcs() []Func {
+	out := make([]Func, len(p.funcs))
+	for i, f := range p.funcs {
 		blocks := make([]uint64, len(f.blocks))
 		copy(blocks, f.blocks)
-		p.Funcs[i] = FuncProfile{Calls: f.calls, Blocks: blocks}
+		out[i] = Func{Calls: f.calls, Blocks: blocks}
 	}
-	return p
+	return out
 }

@@ -1852,18 +1852,18 @@ func TestInterpreter_Context(t *testing.T) {
 	require.Equal(t, ctx, i.Context())
 }
 
-func TestInterpreter_Recorder(t *testing.T) {
+func TestInterpreter_Profile(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
-		require.NotNil(t, i.Recorder())
+		require.NotNil(t, i.Profile())
 	})
 
 	t.Run("injected", func(t *testing.T) {
-		r := profpkg.New()
-		i := New(program.New(nil), WithProfiler(r))
+		p := profpkg.New()
+		i := New(program.New(nil), WithProfile(p))
 		defer i.Close()
-		require.Equal(t, r, i.Recorder())
+		require.Equal(t, p, i.Profile())
 	})
 }
 

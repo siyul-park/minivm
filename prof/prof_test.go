@@ -7,11 +7,11 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	r := New()
-	require.NotNil(t, r)
+	p := New()
+	require.NotNil(t, p)
 }
 
-func TestRecorder_Record(t *testing.T) {
+func TestProfile_Record(t *testing.T) {
 	tests := []struct {
 		funcIdx int
 		ip      int
@@ -22,16 +22,16 @@ func TestRecorder_Record(t *testing.T) {
 		{funcIdx: 2, ip: 0, n: 2},
 	}
 	for _, tt := range tests {
-		r := New()
+		p := New()
 		for range tt.n {
-			r.Record(tt.funcIdx, tt.ip)
+			p.Record(tt.funcIdx, tt.ip)
 		}
-		require.Equal(t, uint64(tt.n), r.Calls(tt.funcIdx))
-		require.Equal(t, uint64(tt.n), r.Hits(tt.funcIdx, tt.ip))
+		require.Equal(t, uint64(tt.n), p.Calls(tt.funcIdx))
+		require.Equal(t, uint64(tt.n), p.Hits(tt.funcIdx, tt.ip))
 	}
 }
 
-func TestRecorder_Calls(t *testing.T) {
+func TestProfile_Calls(t *testing.T) {
 	tests := []struct {
 		records [][2]int
 		idx     int
@@ -43,15 +43,15 @@ func TestRecorder_Calls(t *testing.T) {
 		{records: [][2]int{{1, 0}}, idx: 1, want: 1},
 	}
 	for _, tt := range tests {
-		r := New()
+		p := New()
 		for _, rec := range tt.records {
-			r.Record(rec[0], rec[1])
+			p.Record(rec[0], rec[1])
 		}
-		require.Equal(t, tt.want, r.Calls(tt.idx))
+		require.Equal(t, tt.want, p.Calls(tt.idx))
 	}
 }
 
-func TestRecorder_Hits(t *testing.T) {
+func TestProfile_Hits(t *testing.T) {
 	tests := []struct {
 		records [][2]int
 		idx     int
@@ -64,42 +64,41 @@ func TestRecorder_Hits(t *testing.T) {
 		{records: [][2]int{{0, 3}}, idx: 1, ip: 3, want: 0},
 	}
 	for _, tt := range tests {
-		r := New()
+		p := New()
 		for _, rec := range tt.records {
-			r.Record(rec[0], rec[1])
+			p.Record(rec[0], rec[1])
 		}
-		require.Equal(t, tt.want, r.Hits(tt.idx, tt.ip))
+		require.Equal(t, tt.want, p.Hits(tt.idx, tt.ip))
 	}
 }
 
-func TestRecorder_Snapshot(t *testing.T) {
+func TestProfile_Funcs(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
-		r := New()
-		p := r.Snapshot()
-		require.Empty(t, p.Funcs)
+		p := New()
+		require.Empty(t, p.Funcs())
 	})
 
 	t.Run("populated", func(t *testing.T) {
-		r := New()
-		r.Record(0, 1)
-		r.Record(0, 1)
-		r.Record(0, 3)
+		p := New()
+		p.Record(0, 1)
+		p.Record(0, 1)
+		p.Record(0, 3)
 
-		p := r.Snapshot()
-		require.Len(t, p.Funcs, 1)
-		require.Equal(t, uint64(3), p.Funcs[0].Calls)
-		require.Equal(t, uint64(2), p.Funcs[0].Blocks[1])
-		require.Equal(t, uint64(1), p.Funcs[0].Blocks[3])
+		funcs := p.Funcs()
+		require.Len(t, funcs, 1)
+		require.Equal(t, uint64(3), funcs[0].Calls)
+		require.Equal(t, uint64(2), funcs[0].Blocks[1])
+		require.Equal(t, uint64(1), funcs[0].Blocks[3])
 	})
 
 	t.Run("deep copy", func(t *testing.T) {
-		r := New()
-		r.Record(0, 0)
-		p := r.Snapshot()
+		p := New()
+		p.Record(0, 0)
+		funcs := p.Funcs()
 
-		r.Record(0, 0)
+		p.Record(0, 0)
 
-		require.Equal(t, uint64(1), p.Funcs[0].Calls)
-		require.Equal(t, uint64(2), r.Calls(0))
+		require.Equal(t, uint64(1), funcs[0].Calls)
+		require.Equal(t, uint64(2), p.Calls(0))
 	})
 }
