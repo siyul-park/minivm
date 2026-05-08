@@ -5,11 +5,14 @@ import (
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/pass"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/types"
 )
 
 type jitCompiler struct {
 	assembler  *asm.Assembler
+	profile    *prof.Stats
+	funcIdx    int
 	types      []types.Type
 	constants  []types.Boxed
 	heap       []types.Value
@@ -73,6 +76,10 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 
 	var branches []*analysis.BasicBlock
 	for _, b := range blocks {
+		if c.profile.HitsInRange(c.funcIdx, b.Start, b.End) == 0 {
+			c.compilable[b.Start] = false
+			continue
+		}
 		segObjs, entryIPs, terminated := c.compile(b)
 		for i, entryIP := range entryIPs {
 			c.compilable[entryIP] = true

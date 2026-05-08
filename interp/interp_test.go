@@ -1851,6 +1851,7 @@ func TestInterpreter_Context(t *testing.T) {
 	require.Equal(t, ctx, i.Context())
 }
 
+
 func TestInterpreter_Push(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
 		i := New(program.New(nil))

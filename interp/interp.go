@@ -8,16 +8,17 @@ import (
 	"math"
 
 	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
 
 type Interpreter struct {
 	ctx       context.Context
+	prof      *prof.Stats
 	buffer    *asm.Buffer
 	instrs    [][]byte
 	code      [][]func(*Interpreter)
-	hits      [][]uint64
 	frames    []frame
 	types     []types.Type
 	constants []types.Boxed
@@ -40,6 +41,7 @@ type frame struct {
 }
 
 type option struct {
+	profile   *prof.Stats
 	frame     int
 	globals   int
 	stack     int
@@ -85,6 +87,10 @@ func WithThreshold(val int) func(*option) {
 	return func(o *option) { o.threshold = val }
 }
 
+func WithProfile(p *prof.Stats) func(*option) {
+	return func(o *option) { o.profile = p }
+}
+
 func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	opt := option{
 		frame:     128,
@@ -101,18 +107,23 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		opt.frame = 1
 	}
 
+	p := opt.profile
+	if p == nil {
+		p = prof.New()
+	}
+
 	i := &Interpreter{
+		prof:      p,
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
-		hits:      make([][]uint64, len(prog.Constants)+1),
 		frames:    make([]frame, opt.frame),
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
 		globals:   make([]types.Boxed, 0, opt.globals),
 		stack:     make([]types.Boxed, opt.stack),
 		heap:      make([]types.Value, 0, opt.heap),
-		rc:        make([]int, 0, opt.heap),
 		free:      make([]int, 0, opt.heap),
+		rc:        make([]int, 0, opt.heap),
 		fp:        0,
 		sp:        0,
 		tick:      opt.tick,
@@ -160,11 +171,6 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	i.fp = 1
 	i.retain(0)
 
-	for j, code := range i.code {
-		if len(code) > 0 {
-			i.hits[j] = make([]uint64, len(code)+1)
-		}
-	}
 	return i
 }
 
@@ -191,10 +197,9 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 			default:
 			}
 
-			i.hits[f.addr][0]++
-			i.hits[f.addr][f.ip+1]++
+			i.prof.Record(f.addr, f.ip)
 
-			if i.hits[f.addr][0] == i.threshold {
+			if i.prof.Count(f.addr) == i.threshold {
 				if arch != nil {
 					if i.buffer == nil {
 						i.buffer, err = asm.NewBuffer(256)
@@ -204,6 +209,8 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 					}
 					c := &jitCompiler{
 						assembler: asm.NewAssembler(arch, i.buffer),
+						profile:   i.prof,
+						funcIdx:   f.addr,
 						types:     i.types,
 						constants: i.constants,
 						heap:      i.heap,
@@ -228,6 +235,7 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 func (i *Interpreter) Context() context.Context {
 	return i.ctx
 }
+
 
 func (i *Interpreter) Const(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(i.constants) {
