@@ -2,8 +2,8 @@ package prof
 
 // Func holds execution-frequency data for one function.
 type Func struct {
-	Calls  uint64
-	Blocks []uint64
+	Samples uint64
+	Blocks  []uint64
 }
 
 // Profile records execution-frequency data during bytecode interpretation.
@@ -13,8 +13,8 @@ type Profile struct {
 }
 
 type funcData struct {
-	calls  uint64
-	blocks []uint64
+	samples uint64
+	blocks  []uint64
 }
 
 // New returns an empty Profile.
@@ -33,17 +33,17 @@ func (p *Profile) Record(funcIdx, ip int) {
 		copy(nb, p.funcs[funcIdx].blocks)
 		p.funcs[funcIdx].blocks = nb
 	}
-	p.funcs[funcIdx].calls++
+	p.funcs[funcIdx].samples++
 	p.funcs[funcIdx].blocks[ip]++
 }
 
-// Calls returns the aggregate sample count for funcIdx.
+// Samples returns the aggregate tick-sample count for funcIdx.
 // Returns 0 for an unknown index.
-func (p *Profile) Calls(funcIdx int) uint64 {
+func (p *Profile) Samples(funcIdx int) uint64 {
 	if funcIdx >= len(p.funcs) {
 		return 0
 	}
-	return p.funcs[funcIdx].calls
+	return p.funcs[funcIdx].samples
 }
 
 // Hits returns the per-IP sample count for funcIdx at ip.
@@ -75,7 +75,7 @@ func (p *Profile) Funcs() []Func {
 	for i, f := range p.funcs {
 		blocks := make([]uint64, len(f.blocks))
 		copy(blocks, f.blocks)
-		out[i] = Func{Calls: f.calls, Blocks: blocks}
+		out[i] = Func{Samples: f.samples, Blocks: blocks}
 	}
 	return out
 }

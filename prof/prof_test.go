@@ -26,12 +26,12 @@ func TestProfile_Record(t *testing.T) {
 		for range tt.n {
 			p.Record(tt.funcIdx, tt.ip)
 		}
-		require.Equal(t, uint64(tt.n), p.Calls(tt.funcIdx))
+		require.Equal(t, uint64(tt.n), p.Samples(tt.funcIdx))
 		require.Equal(t, uint64(tt.n), p.Hits(tt.funcIdx, tt.ip))
 	}
 }
 
-func TestProfile_Calls(t *testing.T) {
+func TestProfile_Samples(t *testing.T) {
 	tests := []struct {
 		records [][2]int
 		idx     int
@@ -47,7 +47,7 @@ func TestProfile_Calls(t *testing.T) {
 		for _, rec := range tt.records {
 			p.Record(rec[0], rec[1])
 		}
-		require.Equal(t, tt.want, p.Calls(tt.idx))
+		require.Equal(t, tt.want, p.Samples(tt.idx))
 	}
 }
 
@@ -109,7 +109,7 @@ func TestProfile_Funcs(t *testing.T) {
 
 		funcs := p.Funcs()
 		require.Len(t, funcs, 1)
-		require.Equal(t, uint64(3), funcs[0].Calls)
+		require.Equal(t, uint64(3), funcs[0].Samples)
 		require.Equal(t, uint64(2), funcs[0].Blocks[1])
 		require.Equal(t, uint64(1), funcs[0].Blocks[3])
 	})
@@ -121,7 +121,7 @@ func TestProfile_Funcs(t *testing.T) {
 
 		p.Record(0, 0)
 
-		require.Equal(t, uint64(1), funcs[0].Calls)
-		require.Equal(t, uint64(2), p.Calls(0))
+		require.Equal(t, uint64(1), funcs[0].Samples)
+		require.Equal(t, uint64(2), p.Samples(0))
 	})
 }
