@@ -8,7 +8,7 @@ import (
 	"math"
 
 	"github.com/siyul-park/minivm/asm"
-	profpkg "github.com/siyul-park/minivm/prof"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
@@ -18,7 +18,7 @@ type Interpreter struct {
 	buffer    *asm.Buffer
 	instrs    [][]byte
 	code      [][]func(*Interpreter)
-	prof      *profpkg.Profile
+	prof      *prof.Profile
 	frames    []frame
 	types     []types.Type
 	constants []types.Boxed
@@ -47,7 +47,7 @@ type option struct {
 	heap      int
 	tick      int
 	threshold int
-	profile   *profpkg.Profile
+	profile   *prof.Profile
 }
 
 var (
@@ -87,7 +87,7 @@ func WithThreshold(val int) func(*option) {
 	return func(o *option) { o.threshold = val }
 }
 
-func WithProfile(p *profpkg.Profile) func(*option) {
+func WithProfile(p *prof.Profile) func(*option) {
 	return func(o *option) { o.profile = p }
 }
 
@@ -107,15 +107,15 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		opt.frame = 1
 	}
 
-	prof := opt.profile
-	if prof == nil {
-		prof = profpkg.New()
+	p := opt.profile
+	if p == nil {
+		p = prof.New()
 	}
 
 	i := &Interpreter{
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
-		prof:      prof,
+		prof:      p,
 		frames:    make([]frame, opt.frame),
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
@@ -236,7 +236,7 @@ func (i *Interpreter) Context() context.Context {
 	return i.ctx
 }
 
-func (i *Interpreter) Profile() *profpkg.Profile {
+func (i *Interpreter) Profile() *prof.Profile {
 	return i.prof
 }
 
