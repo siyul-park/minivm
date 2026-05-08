@@ -199,7 +199,7 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 
 			i.prof.Record(f.addr, f.ip)
 
-			if i.prof.Samples(f.addr) == i.threshold {
+			if i.prof.Count(f.addr) == i.threshold {
 				if arch != nil {
 					if i.buffer == nil {
 						i.buffer, err = asm.NewBuffer(256)
