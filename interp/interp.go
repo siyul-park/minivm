@@ -15,10 +15,10 @@ import (
 
 type Interpreter struct {
 	ctx       context.Context
+	prof      *prof.Profile
 	buffer    *asm.Buffer
 	instrs    [][]byte
 	code      [][]func(*Interpreter)
-	prof      *prof.Profile
 	frames    []frame
 	types     []types.Type
 	constants []types.Boxed
@@ -41,13 +41,13 @@ type frame struct {
 }
 
 type option struct {
+	profile   *prof.Profile
 	frame     int
 	globals   int
 	stack     int
 	heap      int
 	tick      int
 	threshold int
-	profile   *prof.Profile
 }
 
 var (

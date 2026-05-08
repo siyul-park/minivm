@@ -146,6 +146,46 @@ Order declarations by abstraction level:
 
 ---
 
+### 1.5 Struct field ordering
+
+Order fields from highest to lowest abstraction level within each struct.
+
+| Level | Examples |
+|---|---|
+| Highest — lifecycle / policy | `context.Context`, `*prof.Profile`, config/option structs |
+| High — infrastructure | `*asm.Assembler`, `*asm.Buffer`, JIT or optimizer handles |
+| Mid — program data | `[]byte` bytecode, compiled closures, type tables, constant pools |
+| Low — runtime state | call frames, value stack, heap slices |
+| Lowest — raw counters / pointers | `fp`, `sp`, `tick`, `threshold`, free-list indices |
+
+```go
+// ✗ prof buried among low-level fields
+type Interpreter struct {
+    ctx       context.Context
+    buffer    *asm.Buffer
+    instrs    [][]byte
+    code      [][]func(*Interpreter)
+    prof      *prof.Profile        // ← wrong: policy field after raw data
+    frames    []frame
+    ...
+}
+
+// ✓ higher-abstraction fields first
+type Interpreter struct {
+    ctx       context.Context      // lifecycle
+    prof      *prof.Profile        // adaptive policy
+    buffer    *asm.Buffer          // JIT infrastructure
+    instrs    [][]byte             // program data
+    code      [][]func(*Interpreter)
+    frames    []frame              // runtime state
+    ...
+}
+```
+
+Apply the same rule to option/config structs: policy fields (e.g. `profile`) precede capacity fields (e.g. `frame`, `stack`, `heap`).
+
+---
+
 ## 2. API Design
 
 ### 2.1 Constructor naming — `New<Type>`

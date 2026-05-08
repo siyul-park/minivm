@@ -11,11 +11,11 @@ import (
 
 type jitCompiler struct {
 	assembler  *asm.Assembler
+	profile    *prof.Profile
+	funcIdx    int
 	types      []types.Type
 	constants  []types.Boxed
 	heap       []types.Value
-	profile    *prof.Profile
-	funcIdx    int
 	code       []byte
 	ip         int
 	labels     map[int]int
