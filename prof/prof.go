@@ -55,6 +55,20 @@ func (p *Profile) Hits(funcIdx, ip int) uint64 {
 	return p.funcs[funcIdx].blocks[ip]
 }
 
+// HitsInRange returns the sum of per-IP hit counts for funcIdx over [start, end).
+// Returns 0 for an unknown function index.
+func (p *Profile) HitsInRange(funcIdx, start, end int) uint64 {
+	if funcIdx >= len(p.funcs) {
+		return 0
+	}
+	blocks := p.funcs[funcIdx].blocks
+	var total uint64
+	for ip := start; ip < end && ip < len(blocks); ip++ {
+		total += blocks[ip]
+	}
+	return total
+}
+
 // Funcs returns an immutable deep copy of all collected function data.
 func (p *Profile) Funcs() []Func {
 	out := make([]Func, len(p.funcs))

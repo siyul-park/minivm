@@ -76,6 +76,10 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 
 	var branches []*analysis.BasicBlock
 	for _, b := range blocks {
+		if c.profile.HitsInRange(c.funcIdx, b.Start, b.End) == 0 {
+			c.compilable[b.Start] = false
+			continue
+		}
 		segObjs, entryIPs, terminated := c.compile(b)
 		for i, entryIP := range entryIPs {
 			c.compilable[entryIP] = true

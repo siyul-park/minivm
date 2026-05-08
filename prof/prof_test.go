@@ -72,6 +72,29 @@ func TestProfile_Hits(t *testing.T) {
 	}
 }
 
+func TestProfile_HitsInRange(t *testing.T) {
+	tests := []struct {
+		records [][2]int
+		idx     int
+		start   int
+		end     int
+		want    uint64
+	}{
+		{records: [][2]int{{0, 0}, {0, 1}, {0, 2}}, idx: 0, start: 0, end: 3, want: 3},
+		{records: [][2]int{{0, 1}, {0, 1}, {0, 2}}, idx: 0, start: 1, end: 3, want: 3},
+		{records: [][2]int{{0, 0}}, idx: 0, start: 5, end: 10, want: 0},
+		{records: [][2]int{{0, 0}}, idx: 0, start: 0, end: 0, want: 0},
+		{records: nil, idx: 99, start: 0, end: 10, want: 0},
+	}
+	for _, tt := range tests {
+		p := New()
+		for _, rec := range tt.records {
+			p.Record(rec[0], rec[1])
+		}
+		require.Equal(t, tt.want, p.HitsInRange(tt.idx, tt.start, tt.end))
+	}
+}
+
 func TestProfile_Funcs(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		p := New()
