@@ -6,9 +6,9 @@ type Func struct {
 	Blocks  []uint64
 }
 
-// Profile records execution-frequency data during bytecode interpretation.
+// Stats records execution-frequency data during bytecode interpretation.
 // It grows automatically to accommodate any function index and instruction pointer.
-type Profile struct {
+type Stats struct {
 	funcs []funcData
 }
 
@@ -17,14 +17,14 @@ type funcData struct {
 	blocks  []uint64
 }
 
-// New returns an empty Profile.
-func New() *Profile {
-	return &Profile{}
+// New returns an empty Stats.
+func New() *Stats {
+	return &Stats{}
 }
 
 // Record records one execution sample at (funcIdx, ip).
 // It automatically grows to accommodate new function indices and IPs.
-func (p *Profile) Record(funcIdx, ip int) {
+func (p *Stats) Record(funcIdx, ip int) {
 	for len(p.funcs) <= funcIdx {
 		p.funcs = append(p.funcs, funcData{})
 	}
@@ -39,7 +39,7 @@ func (p *Profile) Record(funcIdx, ip int) {
 
 // Count returns the aggregate tick-sample count for funcIdx.
 // Returns 0 for an unknown index.
-func (p *Profile) Count(funcIdx int) uint64 {
+func (p *Stats) Count(funcIdx int) uint64 {
 	if funcIdx >= len(p.funcs) {
 		return 0
 	}
@@ -48,7 +48,7 @@ func (p *Profile) Count(funcIdx int) uint64 {
 
 // Hits returns the per-IP sample count for funcIdx at ip.
 // Returns 0 for unknown indices.
-func (p *Profile) Hits(funcIdx, ip int) uint64 {
+func (p *Stats) Hits(funcIdx, ip int) uint64 {
 	if funcIdx >= len(p.funcs) || ip >= len(p.funcs[funcIdx].blocks) {
 		return 0
 	}
@@ -57,7 +57,7 @@ func (p *Profile) Hits(funcIdx, ip int) uint64 {
 
 // HitsInRange returns the sum of per-IP hit counts for funcIdx over [start, end).
 // Returns 0 for an unknown function index.
-func (p *Profile) HitsInRange(funcIdx, start, end int) uint64 {
+func (p *Stats) HitsInRange(funcIdx, start, end int) uint64 {
 	if funcIdx >= len(p.funcs) {
 		return 0
 	}
@@ -70,7 +70,7 @@ func (p *Profile) HitsInRange(funcIdx, start, end int) uint64 {
 }
 
 // Funcs returns an immutable deep copy of all collected function data.
-func (p *Profile) Funcs() []Func {
+func (p *Stats) Funcs() []Func {
 	out := make([]Func, len(p.funcs))
 	for i, f := range p.funcs {
 		blocks := make([]uint64, len(f.blocks))

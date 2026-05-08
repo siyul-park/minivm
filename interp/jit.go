@@ -11,7 +11,7 @@ import (
 
 type jitCompiler struct {
 	assembler  *asm.Assembler
-	profile    *prof.Profile
+	profile    *prof.Stats
 	funcIdx    int
 	types      []types.Type
 	constants  []types.Boxed

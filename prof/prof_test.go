@@ -11,7 +11,7 @@ func TestNew(t *testing.T) {
 	require.NotNil(t, p)
 }
 
-func TestProfile_Record(t *testing.T) {
+func TestStats_Record(t *testing.T) {
 	tests := []struct {
 		funcIdx int
 		ip      int
@@ -31,7 +31,7 @@ func TestProfile_Record(t *testing.T) {
 	}
 }
 
-func TestProfile_Count(t *testing.T) {
+func TestStats_Count(t *testing.T) {
 	tests := []struct {
 		records [][2]int
 		idx     int
@@ -51,7 +51,7 @@ func TestProfile_Count(t *testing.T) {
 	}
 }
 
-func TestProfile_Hits(t *testing.T) {
+func TestStats_Hits(t *testing.T) {
 	tests := []struct {
 		records [][2]int
 		idx     int
@@ -72,7 +72,7 @@ func TestProfile_Hits(t *testing.T) {
 	}
 }
 
-func TestProfile_HitsInRange(t *testing.T) {
+func TestStats_HitsInRange(t *testing.T) {
 	tests := []struct {
 		records [][2]int
 		idx     int
@@ -95,7 +95,7 @@ func TestProfile_HitsInRange(t *testing.T) {
 	}
 }
 
-func TestProfile_Funcs(t *testing.T) {
+func TestStats_Funcs(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		p := New()
 		require.Empty(t, p.Funcs())

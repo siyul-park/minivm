@@ -15,7 +15,7 @@ import (
 
 type Interpreter struct {
 	ctx       context.Context
-	prof      *prof.Profile
+	prof      *prof.Stats
 	buffer    *asm.Buffer
 	instrs    [][]byte
 	code      [][]func(*Interpreter)
@@ -41,7 +41,7 @@ type frame struct {
 }
 
 type option struct {
-	profile   *prof.Profile
+	profile   *prof.Stats
 	frame     int
 	globals   int
 	stack     int
@@ -87,7 +87,7 @@ func WithThreshold(val int) func(*option) {
 	return func(o *option) { o.threshold = val }
 }
 
-func WithProfile(p *prof.Profile) func(*option) {
+func WithProfile(p *prof.Stats) func(*option) {
 	return func(o *option) { o.profile = p }
 }
 
