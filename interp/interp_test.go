@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
+	profpkg "github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -1849,6 +1850,21 @@ func TestInterpreter_Context(t *testing.T) {
 	ctx := context.WithValue(context.Background(), "key", "val")
 	i.ctx = ctx
 	require.Equal(t, ctx, i.Context())
+}
+
+func TestInterpreter_Recorder(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+		require.NotNil(t, i.Recorder())
+	})
+
+	t.Run("injected", func(t *testing.T) {
+		r := profpkg.New()
+		i := New(program.New(nil), WithProfiler(r))
+		defer i.Close()
+		require.Equal(t, r, i.Recorder())
+	})
 }
 
 func TestInterpreter_Push(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/pass"
+	profpkg "github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -13,6 +14,8 @@ type jitCompiler struct {
 	types      []types.Type
 	constants  []types.Boxed
 	heap       []types.Value
+	recorder   *profpkg.Recorder
+	funcIdx    int
 	code       []byte
 	ip         int
 	labels     map[int]int

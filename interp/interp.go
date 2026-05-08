@@ -8,6 +8,7 @@ import (
 	"math"
 
 	"github.com/siyul-park/minivm/asm"
+	profpkg "github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
@@ -17,7 +18,7 @@ type Interpreter struct {
 	buffer    *asm.Buffer
 	instrs    [][]byte
 	code      [][]func(*Interpreter)
-	hits      [][]uint64
+	prof      *profpkg.Recorder
 	frames    []frame
 	types     []types.Type
 	constants []types.Boxed
@@ -46,6 +47,7 @@ type option struct {
 	heap      int
 	tick      int
 	threshold int
+	recorder  *profpkg.Recorder
 }
 
 var (
@@ -85,6 +87,10 @@ func WithThreshold(val int) func(*option) {
 	return func(o *option) { o.threshold = val }
 }
 
+func WithProfiler(r *profpkg.Recorder) func(*option) {
+	return func(o *option) { o.recorder = r }
+}
+
 func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	opt := option{
 		frame:     128,
@@ -101,10 +107,15 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		opt.frame = 1
 	}
 
+	recorder := opt.recorder
+	if recorder == nil {
+		recorder = profpkg.New()
+	}
+
 	i := &Interpreter{
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
-		hits:      make([][]uint64, len(prog.Constants)+1),
+		prof:      recorder,
 		frames:    make([]frame, opt.frame),
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
@@ -160,11 +171,6 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	i.fp = 1
 	i.retain(0)
 
-	for j, code := range i.code {
-		if len(code) > 0 {
-			i.hits[j] = make([]uint64, len(code)+1)
-		}
-	}
 	return i
 }
 
@@ -191,10 +197,9 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 			default:
 			}
 
-			i.hits[f.addr][0]++
-			i.hits[f.addr][f.ip+1]++
+			i.prof.Record(f.addr, f.ip)
 
-			if i.hits[f.addr][0] == i.threshold {
+			if i.prof.Calls(f.addr) == i.threshold {
 				if arch != nil {
 					if i.buffer == nil {
 						i.buffer, err = asm.NewBuffer(256)
@@ -207,6 +212,8 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 						types:     i.types,
 						constants: i.constants,
 						heap:      i.heap,
+						recorder:  i.prof,
+						funcIdx:   f.addr,
 					}
 					for j, fn := range c.Compile(i.instrs[f.addr]) {
 						if fn != nil {
@@ -227,6 +234,10 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 
 func (i *Interpreter) Context() context.Context {
 	return i.ctx
+}
+
+func (i *Interpreter) Recorder() *profpkg.Recorder {
+	return i.prof
 }
 
 func (i *Interpreter) Const(idx int) (types.Boxed, error) {
