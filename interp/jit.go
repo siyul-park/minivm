@@ -5,7 +5,7 @@ import (
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/pass"
-	profpkg "github.com/siyul-park/minivm/prof"
+	"github.com/siyul-park/minivm/profile"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -14,7 +14,7 @@ type jitCompiler struct {
 	types      []types.Type
 	constants  []types.Boxed
 	heap       []types.Value
-	profile    *profpkg.Profile
+	profile    *profile.Profile
 	funcIdx    int
 	code       []byte
 	ip         int
