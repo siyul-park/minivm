@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -1852,20 +1851,6 @@ func TestInterpreter_Context(t *testing.T) {
 	require.Equal(t, ctx, i.Context())
 }
 
-func TestInterpreter_Profile(t *testing.T) {
-	t.Run("default", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-		require.NotNil(t, i.Profile())
-	})
-
-	t.Run("injected", func(t *testing.T) {
-		p := prof.New()
-		i := New(program.New(nil), WithProfile(p))
-		defer i.Close()
-		require.Equal(t, p, i.Profile())
-	})
-}
 
 func TestInterpreter_Push(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {

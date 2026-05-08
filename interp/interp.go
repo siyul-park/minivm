@@ -236,9 +236,6 @@ func (i *Interpreter) Context() context.Context {
 	return i.ctx
 }
 
-func (i *Interpreter) Profile() *prof.Profile {
-	return i.prof
-}
 
 func (i *Interpreter) Const(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(i.constants) {
