@@ -113,17 +113,17 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	}
 
 	i := &Interpreter{
+		prof:      p,
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
-		prof:      p,
 		frames:    make([]frame, opt.frame),
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
 		globals:   make([]types.Boxed, 0, opt.globals),
 		stack:     make([]types.Boxed, opt.stack),
 		heap:      make([]types.Value, 0, opt.heap),
-		rc:        make([]int, 0, opt.heap),
 		free:      make([]int, 0, opt.heap),
+		rc:        make([]int, 0, opt.heap),
 		fp:        0,
 		sp:        0,
 		tick:      opt.tick,
@@ -209,11 +209,11 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 					}
 					c := &jitCompiler{
 						assembler: asm.NewAssembler(arch, i.buffer),
+						profile:   i.prof,
+						funcIdx:   f.addr,
 						types:     i.types,
 						constants: i.constants,
 						heap:      i.heap,
-						profile:   i.prof,
-						funcIdx:   f.addr,
 					}
 					for j, fn := range c.Compile(i.instrs[f.addr]) {
 						if fn != nil {

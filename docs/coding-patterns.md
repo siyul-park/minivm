@@ -184,6 +184,8 @@ type Interpreter struct {
 
 Apply the same rule to option/config structs: policy fields (e.g. `profile`) precede capacity fields (e.g. `frame`, `stack`, `heap`).
 
+Struct literals must list fields in the same order as the struct declaration. Fields with zero values may be omitted, but the relative order of the remaining fields must be preserved.
+
 ---
 
 ## 2. API Design
