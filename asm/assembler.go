@@ -473,7 +473,9 @@ func (a *Assembler) assign() ([]Instruction, error) {
 							delete(live, owner.ID())
 							delete(virtual, want.ID())
 						}
-						_ = a.regAlloc.Reserve(dst, want)
+						if err := a.regAlloc.Reserve(dst, want); err != nil {
+							return nil, err
+						}
 						physical[dst.ID()] = want
 						live[dst.ID()] = want
 						virtual[want.ID()] = dst
