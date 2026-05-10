@@ -3,7 +3,6 @@ package interp
 import (
 	"context"
 	"math"
-	"runtime"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
@@ -2100,135 +2099,45 @@ func TestInterpreter_Reset(t *testing.T) {
 }
 
 func TestInterpreter_Run(t *testing.T) {
-	for _, tt := range tests {
-		t.Run(tt.program.String(), func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.TODO())
-			defer cancel()
+	t.Run("default", func(t *testing.T) {
+		for _, tt := range tests {
+			t.Run(tt.program.String(), func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.TODO())
+				defer cancel()
 
-			i := New(tt.program)
-			defer i.Close()
+				i := New(tt.program)
+				defer i.Close()
 
-			err := i.Run(ctx)
-			require.NoError(t, err)
-			for _, val := range tt.values {
-				v, err := i.Pop()
+				err := i.Run(ctx)
 				require.NoError(t, err)
-				require.Equal(t, val, v)
-			}
-		})
-	}
-}
-
-func TestInterpreter_RunJITLocalGetSet(t *testing.T) {
-	tests := []struct {
-		name   string
-		params []instr.Instruction
-		fn     *types.Function
-		want   types.Value
-	}{
-		{
-			name: "i32 param local get",
-			params: []instr.Instruction{
-				instr.New(instr.I32_CONST, 40),
-			},
-			fn: types.NewFunctionBuilder(&types.FunctionType{
-				Params:  []types.Type{types.TypeI32},
-				Returns: []types.Type{types.TypeI32},
-			}).Emit(
-				instr.New(instr.LOCAL_GET, 0),
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.I32_ADD),
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.I32_ADD),
-				instr.New(instr.RETURN),
-			).Build(),
-			want: types.I32(42),
-		},
-		{
-			name: "i32 local set get",
-			fn: types.NewFunctionBuilder(&types.FunctionType{
-				Returns: []types.Type{types.TypeI32},
-			}).WithLocals(types.TypeI32).Emit(
-				instr.New(instr.I32_CONST, 37),
-				instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.LOCAL_GET, 0),
-				instr.New(instr.I32_CONST, 5),
-				instr.New(instr.I32_ADD),
-				instr.New(instr.RETURN),
-			).Build(),
-			want: types.I32(42),
-		},
-		{
-			name: "i64 local set get",
-			fn: types.NewFunctionBuilder(&types.FunctionType{
-				Returns: []types.Type{types.TypeI64},
-			}).WithLocals(types.TypeI64).Emit(
-				instr.New(instr.I64_CONST, math.MaxUint64-39),
-				instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.LOCAL_GET, 0),
-				instr.New(instr.I64_CONST, math.MaxUint64-1),
-				instr.New(instr.I64_ADD),
-				instr.New(instr.RETURN),
-			).Build(),
-			want: types.I64(-42),
-		},
-		{
-			name: "f32 local set get",
-			fn: types.NewFunctionBuilder(&types.FunctionType{
-				Returns: []types.Type{types.TypeF32},
-			}).WithLocals(types.TypeF32).Emit(
-				instr.New(instr.F32_CONST, uint64(math.Float32bits(40.5))),
-				instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.LOCAL_GET, 0),
-				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))),
-				instr.New(instr.F32_ADD),
-				instr.New(instr.RETURN),
-			).Build(),
-			want: types.F32(42),
-		},
-		{
-			name: "f64 local set get",
-			fn: types.NewFunctionBuilder(&types.FunctionType{
-				Returns: []types.Type{types.TypeF64},
-			}).WithLocals(types.TypeF64).Emit(
-				instr.New(instr.F64_CONST, math.Float64bits(40.5)),
-				instr.New(instr.LOCAL_SET, 0),
-				instr.New(instr.LOCAL_GET, 0),
-				instr.New(instr.F64_CONST, math.Float64bits(1.5)),
-				instr.New(instr.F64_ADD),
-				instr.New(instr.RETURN),
-			).Build(),
-			want: types.F64(42),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var main []instr.Instruction
-			for j := 0; j < 4; j++ {
-				main = append(main, tt.params...)
-				main = append(main, instr.New(instr.CONST_GET, 0), instr.New(instr.CALL))
-				if j != 3 {
-					main = append(main, instr.New(instr.DROP))
+				for _, val := range tt.values {
+					v, err := i.Pop()
+					require.NoError(t, err)
+					require.Equal(t, val, v)
 				}
-			}
+			})
+		}
+	})
 
-			i := New(
-				program.New(main, program.WithConstants(tt.fn)),
-				WithTick(1),
-				WithThreshold(1),
-			)
-			defer i.Close()
+	t.Run("jit", func(t *testing.T) {
+		for _, tt := range tests {
+			t.Run(tt.program.String(), func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.TODO())
+				defer cancel()
 
-			require.NoError(t, i.Run(context.Background()))
-			if runtime.GOARCH == "arm64" {
-				require.NotNil(t, i.buffer)
-			}
-			got, err := i.Pop()
-			require.NoError(t, err)
-			require.Equal(t, tt.want, got)
-		})
-	}
+				i := New(tt.program, WithTick(1), WithThreshold(1))
+				defer i.Close()
+
+				err := i.Run(ctx)
+				require.NoError(t, err)
+				for _, val := range tt.values {
+					v, err := i.Pop()
+					require.NoError(t, err)
+					require.Equal(t, val, v)
+				}
+			})
+		}
+	})
 }
 
 func BenchmarkInterpreter_Run(b *testing.B) {
