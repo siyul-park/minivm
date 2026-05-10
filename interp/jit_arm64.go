@@ -120,7 +120,9 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		c.assembler.Push(r0)
+		dst := c.assembler.NewVReg(r0.Type(), r0.Width())
+		c.assembler.Emit(arm64.MOV(dst, r0))
+		c.assembler.Push(dst)
 		return true, false
 	}
 
@@ -156,33 +158,23 @@ func init() {
 		}
 
 		result := c.assembler.NewVReg(v1.Type(), v1.Width())
-		c.assembler.Push(result)
-
-		isFloat := v1.Type() == asm.RegTypeFloat
-		lTrue := c.assembler.NewLabel()
-		lDone := c.assembler.NewLabel()
 
 		c.assembler.Emit(arm64.CMPI(cond, 0))
-		c.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, lTrue))
+		if v1.Type() == asm.RegTypeFloat {
+			xi1 := c.assembler.NewVReg(asm.RegTypeInt, v1.Width())
+			xi2 := c.assembler.NewVReg(asm.RegTypeInt, v2.Width())
+			xr := c.assembler.NewVReg(asm.RegTypeInt, v1.Width())
 
-		if isFloat {
-			c.assembler.Emit(arm64.FMOV(result, v2))
+			c.assembler.Emit(arm64.FMOV(xi1, v1))
+			c.assembler.Emit(arm64.FMOV(xi2, v2))
+			c.assembler.Emit(arm64.CSEL(xr, xi1, xi2, arm64.CondNE))
+			c.assembler.Emit(arm64.FMOV(result, xr))
 		} else {
-			c.assembler.Emit(arm64.ADDI(result, v2, 0))
+			c.assembler.Emit(arm64.CSEL(result, v1, v2, arm64.CondNE))
 		}
-		c.assembler.Emit(arm64.BLabel(lDone))
-
-		c.assembler.Bind(lTrue)
-		if isFloat {
-			c.assembler.Emit(arm64.FMOV(result, v1))
-		} else {
-			c.assembler.Emit(arm64.ADDI(result, v1, 0))
-		}
-		c.assembler.Bind(lDone)
-
+		c.assembler.Push(result)
 		return true, false
 	}
-
 	jit[instr.BR_TABLE] = func(c *jitCompiler) (bool, bool) {
 		if len(c.assembler.Returns()) > 1 {
 			inst := instr.Instruction(c.code[c.ip:])
@@ -370,17 +362,17 @@ func init() {
 		case types.KindI32:
 			v := uint32(val.I32())
 			r0 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-			c.assembler.Push(r0)
 			c.assembler.Emit(arm64.MOVZ(r0, uint16(v&0xFFFF), 0))
 			c.assembler.Emit(arm64.MOVK(r0, uint16((v>>16)&0xFFFF), 16))
+			c.assembler.Push(r0)
 		case types.KindI64:
 			v := uint64(val.I64())
 			r0 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-			c.assembler.Push(r0)
 			c.assembler.Emit(arm64.MOVZ(r0, uint16(v&0xFFFF), 0))
 			c.assembler.Emit(arm64.MOVK(r0, uint16((v>>16)&0xFFFF), 16))
 			c.assembler.Emit(arm64.MOVK(r0, uint16((v>>32)&0xFFFF), 32))
 			c.assembler.Emit(arm64.MOVK(r0, uint16((v>>48)&0xFFFF), 48))
+			c.assembler.Push(r0)
 		case types.KindF32:
 			v := *(*uint32)(unsafe.Pointer(&val))
 			ri := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
@@ -425,9 +417,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.ADD(r2, r1, r0))
+		c.assembler.Emit(arm64.ADD(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -441,9 +432,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.SUB(r2, r1, r0))
+		c.assembler.Emit(arm64.SUB(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -457,9 +447,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.MUL(r2, r1, r0))
+		c.assembler.Emit(arm64.MUL(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -473,9 +462,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.SDIV(r2, r1, r0))
+		c.assembler.Emit(arm64.SDIV(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -489,9 +477,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.UDIV(r2, r1, r0))
+		c.assembler.Emit(arm64.UDIV(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -508,10 +495,10 @@ func init() {
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
 		r3 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
 		r4 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.SDIV(r3, r1, r0))
 		c.assembler.Emit(arm64.MUL(r4, r3, r0))
 		c.assembler.Emit(arm64.SUB(r2, r1, r4))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -528,10 +515,10 @@ func init() {
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
 		r3 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
 		r4 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.UDIV(r3, r1, r0))
 		c.assembler.Emit(arm64.MUL(r4, r3, r0))
 		c.assembler.Emit(arm64.SUB(r2, r1, r4))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -545,9 +532,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.AND(r2, r1, r0))
+		c.assembler.Emit(arm64.AND(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -561,9 +547,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.ORR(r2, r1, r0))
+		c.assembler.Emit(arm64.ORR(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -577,9 +562,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.EOR(r2, r1, r0))
+		c.assembler.Emit(arm64.EOR(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -593,9 +577,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.LSL(r2, r1, r0))
+		c.assembler.Emit(arm64.LSL(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -609,9 +592,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.ASR(r2, r1, r0))
+		c.assembler.Emit(arm64.ASR(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -625,9 +607,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.LSR(r2, r1, r0))
+		c.assembler.Emit(arm64.LSR(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -637,10 +618,9 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.CMPI(r0, 0))
-		c.assembler.Emit(arm64.CSET(r1, arm64.CondEQ))
+		c.assembler.Emit(arm64.CSET(r0, arm64.CondEQ))
+		c.assembler.Push(r0)
 		return true, false
 	}
 
@@ -654,10 +634,9 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
-		c.assembler.Emit(arm64.CSET(r2, arm64.CondEQ))
+		c.assembler.Emit(arm64.CSET(r1, arm64.CondEQ))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -671,10 +650,9 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
-		c.assembler.Emit(arm64.CSET(r2, arm64.CondNE))
+		c.assembler.Emit(arm64.CSET(r1, arm64.CondNE))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -688,10 +666,9 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
-		c.assembler.Emit(arm64.CSET(r2, arm64.CondLT))
+		c.assembler.Emit(arm64.CSET(r1, arm64.CondLT))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -705,10 +682,9 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
-		c.assembler.Emit(arm64.CSET(r2, arm64.CondCC))
+		c.assembler.Emit(arm64.CSET(r1, arm64.CondCC))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -722,10 +698,9 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
-		c.assembler.Emit(arm64.CSET(r2, arm64.CondGT))
+		c.assembler.Emit(arm64.CSET(r1, arm64.CondGT))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -739,10 +714,9 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
-		c.assembler.Emit(arm64.CSET(r2, arm64.CondHI))
+		c.assembler.Emit(arm64.CSET(r1, arm64.CondHI))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -756,10 +730,9 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
-		c.assembler.Emit(arm64.CSET(r2, arm64.CondLE))
+		c.assembler.Emit(arm64.CSET(r1, arm64.CondLE))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -773,10 +746,9 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
-		c.assembler.Emit(arm64.CSET(r2, arm64.CondLS))
+		c.assembler.Emit(arm64.CSET(r1, arm64.CondLS))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -790,10 +762,9 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
-		c.assembler.Emit(arm64.CSET(r2, arm64.CondGE))
+		c.assembler.Emit(arm64.CSET(r1, arm64.CondGE))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -807,10 +778,9 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
-		c.assembler.Emit(arm64.CSET(r2, arm64.CondCS))
+		c.assembler.Emit(arm64.CSET(r1, arm64.CondCS))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -821,8 +791,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.SXTW(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -833,8 +803,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.UXTW(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -845,8 +815,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width32)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.SCVTF(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -857,8 +827,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width32)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.UCVTF(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -869,8 +839,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width64)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.SCVTF(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -881,8 +851,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width64)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.UCVTF(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -890,11 +860,11 @@ func init() {
 		val := uint64(*(*int64)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 9
 		r0 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r0)
 		c.assembler.Emit(arm64.MOVZ(r0, uint16(val&0xFFFF), 0))
 		c.assembler.Emit(arm64.MOVK(r0, uint16((val>>16)&0xFFFF), 16))
 		c.assembler.Emit(arm64.MOVK(r0, uint16((val>>32)&0xFFFF), 32))
 		c.assembler.Emit(arm64.MOVK(r0, uint16((val>>48)&0xFFFF), 48))
+		c.assembler.Push(r0)
 		return true, false
 	}
 
@@ -908,9 +878,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.ADD(r2, r1, r0))
+		c.assembler.Emit(arm64.ADD(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -924,9 +893,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.SUB(r2, r1, r0))
+		c.assembler.Emit(arm64.SUB(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -940,9 +908,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.MUL(r2, r1, r0))
+		c.assembler.Emit(arm64.MUL(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -956,9 +923,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.SDIV(r2, r1, r0))
+		c.assembler.Emit(arm64.SDIV(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -972,9 +938,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.UDIV(r2, r1, r0))
+		c.assembler.Emit(arm64.UDIV(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -991,10 +956,10 @@ func init() {
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
 		r3 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
 		r4 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.SDIV(r3, r1, r0))
 		c.assembler.Emit(arm64.MUL(r4, r3, r0))
 		c.assembler.Emit(arm64.SUB(r2, r1, r4))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1011,10 +976,10 @@ func init() {
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
 		r3 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
 		r4 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.UDIV(r3, r1, r0))
 		c.assembler.Emit(arm64.MUL(r4, r3, r0))
 		c.assembler.Emit(arm64.SUB(r2, r1, r4))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1028,9 +993,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.LSL(r2, r1, r0))
+		c.assembler.Emit(arm64.LSL(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1044,9 +1008,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.ASR(r2, r1, r0))
+		c.assembler.Emit(arm64.ASR(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1060,9 +1023,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.LSR(r2, r1, r0))
+		c.assembler.Emit(arm64.LSR(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1073,9 +1035,9 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.CMPI(r0, 0))
 		c.assembler.Emit(arm64.CSET(r1, arm64.CondEQ))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1090,9 +1052,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondEQ))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1107,9 +1069,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondNE))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1124,9 +1086,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondLT))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1141,9 +1103,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondCC))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1158,9 +1120,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondGT))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1175,9 +1137,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondHI))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1192,9 +1154,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondLE))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1209,9 +1171,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondLS))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1226,9 +1188,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondGE))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1243,9 +1205,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.CMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondCS))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1256,8 +1218,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.UXTW(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1268,8 +1230,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width32)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.SCVTF(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1280,8 +1242,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width32)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.UCVTF(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1292,8 +1254,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width64)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.SCVTF(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1304,8 +1266,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width64)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.UCVTF(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1331,9 +1293,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width32)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.FADD(r2, r1, r0))
+		c.assembler.Emit(arm64.FADD(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1347,9 +1308,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width32)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.FSUB(r2, r1, r0))
+		c.assembler.Emit(arm64.FSUB(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1363,9 +1323,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width32)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.FMUL(r2, r1, r0))
+		c.assembler.Emit(arm64.FMUL(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1379,9 +1338,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width32)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.FDIV(r2, r1, r0))
+		c.assembler.Emit(arm64.FDIV(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1396,9 +1354,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.FCMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondEQ))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1413,9 +1371,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.FCMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondNE))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1430,9 +1388,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.FCMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondCC))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1447,9 +1405,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.FCMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondGT))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1464,9 +1422,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.FCMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondLS))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1481,9 +1439,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.FCMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondGE))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1494,8 +1452,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.FCVTZS(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1506,8 +1464,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.FCVTZU(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1518,8 +1476,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.FCVTZS(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1530,8 +1488,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.FCVTZU(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1542,8 +1500,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width64)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.FCVT(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1571,9 +1529,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width64)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.FADD(r2, r1, r0))
+		c.assembler.Emit(arm64.FADD(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1587,9 +1544,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width64)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.FSUB(r2, r1, r0))
+		c.assembler.Emit(arm64.FSUB(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1603,9 +1559,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width64)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.FMUL(r2, r1, r0))
+		c.assembler.Emit(arm64.FMUL(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1619,9 +1574,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		r2 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width64)
-		c.assembler.Push(r2)
-		c.assembler.Emit(arm64.FDIV(r2, r1, r0))
+		c.assembler.Emit(arm64.FDIV(r1, r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1636,9 +1590,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.FCMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondEQ))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1653,9 +1607,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.FCMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondNE))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1670,9 +1624,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.FCMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondCC))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1687,9 +1641,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.FCMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondGT))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1704,9 +1658,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.FCMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondLS))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1721,9 +1675,9 @@ func init() {
 			return false, false
 		}
 		r2 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r2)
 		c.assembler.Emit(arm64.FCMP(r1, r0))
 		c.assembler.Emit(arm64.CSET(r2, arm64.CondGE))
+		c.assembler.Push(r2)
 		return true, false
 	}
 
@@ -1734,8 +1688,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.FCVTZS(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1746,8 +1700,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.FCVTZU(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1758,8 +1712,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.FCVTZS(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1770,8 +1724,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.FCVTZU(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 
@@ -1782,8 +1736,8 @@ func init() {
 			return false, false
 		}
 		r1 := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width32)
-		c.assembler.Push(r1)
 		c.assembler.Emit(arm64.FCVT(r1, r0))
+		c.assembler.Push(r1)
 		return true, false
 	}
 }

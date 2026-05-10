@@ -11,6 +11,7 @@ type Instruction struct {
 	Dst  Operand
 	Src1 Operand
 	Src2 Operand
+	Src3 Operand
 }
 
 func (i Instruction) String() string {

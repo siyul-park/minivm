@@ -192,8 +192,18 @@ const (
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-func newInst(op Op, dst, src1, src2 asm.Operand) asm.Instruction {
-	return asm.Instruction{Op: uint16(op), Dst: dst, Src1: src1, Src2: src2}
+func newInst(op Op, dst asm.Operand, srcs ...asm.Operand) asm.Instruction {
+	var src1, src2, src3 asm.Operand
+	if len(srcs) > 0 {
+		src1 = srcs[0]
+	}
+	if len(srcs) > 1 {
+		src2 = srcs[1]
+	}
+	if len(srcs) > 2 {
+		src3 = srcs[2]
+	}
+	return asm.Instruction{Op: uint16(op), Dst: dst, Src1: src1, Src2: src2, Src3: src3}
 }
 
 func regOperand(reg asm.Reg) asm.Operand {
@@ -214,11 +224,11 @@ func newReg3(op Op, dst, src1, src2 asm.Reg) asm.Instruction {
 }
 
 func newReg2(op Op, dst, src asm.Reg) asm.Instruction {
-	return newInst(op, regOperand(dst), regOperand(src), nil)
+	return newInst(op, regOperand(dst), regOperand(src))
 }
 
 func newReg1(op Op, reg asm.Reg) asm.Instruction {
-	return newInst(op, nil, regOperand(reg), nil)
+	return newInst(op, nil, regOperand(reg))
 }
 
 func newRegImm(op Op, dst, src asm.Reg, v int64) asm.Instruction {
@@ -226,11 +236,11 @@ func newRegImm(op Op, dst, src asm.Reg, v int64) asm.Instruction {
 }
 
 func newRegMem(op Op, dst, base asm.Reg, offset int64) asm.Instruction {
-	return newInst(op, regOperand(dst), asm.Mem(regOperand(base), offset), nil)
+	return newInst(op, regOperand(dst), asm.Mem(regOperand(base), offset))
 }
 
 func newMemReg(op Op, src, base asm.Reg, offset int64) asm.Instruction {
-	return newInst(op, asm.Mem(regOperand(base), offset), regOperand(src), nil)
+	return newInst(op, asm.Mem(regOperand(base), offset), regOperand(src))
 }
 
 func newCmp(op Op, src1, src2 asm.Reg) asm.Instruction {
@@ -267,27 +277,12 @@ func MUL(dst, src1, src2 asm.Reg) asm.Instruction  { return newReg3(OpMUL, dst, 
 func SDIV(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpSDIV, dst, src1, src2) }
 func UDIV(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpUDIV, dst, src1, src2) }
 
-// MADD Xd, Xn, Xm, Xa  →  Xd = Xa + Xn*Xm  (Xa packed into Src2 slot via a 4-reg helper)
 func MADD(dst, src1, src2, acc asm.Reg) asm.Instruction {
-	return asm.Instruction{
-		Op:   uint16(OpMADD),
-		Dst:  regOperand(dst),
-		Src1: regOperand(src1),
-		Src2: regOperand(src2),
-		// acc is carried as an extra operand — extend Instruction if needed
-		// For now store in a dedicated Acc field if asm.Instruction supports it;
-		// otherwise callers must handle the 4th operand at decode time.
-	}
+	return newInst(OpMADD, regOperand(dst), regOperand(src1), regOperand(src2), regOperand(acc))
 }
 
-// MSUB Xd, Xn, Xm, Xa  →  Xd = Xa - Xn*Xm
 func MSUB(dst, src1, src2, acc asm.Reg) asm.Instruction {
-	return asm.Instruction{
-		Op:   uint16(OpMSUB),
-		Dst:  regOperand(dst),
-		Src1: regOperand(src1),
-		Src2: regOperand(src2),
-	}
+	return newInst(OpMSUB, regOperand(dst), regOperand(src1), regOperand(src2), regOperand(acc))
 }
 
 // MNEG Xd, Xn, Xm  →  Xd = -(Xn*Xm)
@@ -373,7 +368,7 @@ func MOV(dst, src asm.Reg) asm.Instruction { return newReg2(OpMOV, dst, src) }
 
 // MOVI dst, #imm — move 64-bit immediate (pseudo, expanded by assembler)
 func MOVI(dst asm.Reg, val int64) asm.Instruction {
-	return newInst(OpMOVI, regOperand(dst), imm(val), nil)
+	return newInst(OpMOVI, regOperand(dst), imm(val))
 }
 
 // MOVZ dst, #imm, LSL #shift  — zero other bits
@@ -495,16 +490,19 @@ func FDIV(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpFDIV, dst,
 
 // FMADD Dd, Dn, Dm, Da  →  Dd = Da + Dn*Dm
 func FMADD(dst, src1, src2, acc asm.Reg) asm.Instruction {
-	return asm.Instruction{Op: uint16(OpFMADD), Dst: regOperand(dst), Src1: regOperand(src1), Src2: regOperand(src2)}
+	return newInst(OpFMADD, regOperand(dst), regOperand(src1), regOperand(src2), regOperand(acc))
 }
+
 func FMSUB(dst, src1, src2, acc asm.Reg) asm.Instruction {
-	return asm.Instruction{Op: uint16(OpFMSUB), Dst: regOperand(dst), Src1: regOperand(src1), Src2: regOperand(src2)}
+	return newInst(OpFMSUB, regOperand(dst), regOperand(src1), regOperand(src2), regOperand(acc))
 }
+
 func FNMADD(dst, src1, src2, acc asm.Reg) asm.Instruction {
-	return asm.Instruction{Op: uint16(OpFNMADD), Dst: regOperand(dst), Src1: regOperand(src1), Src2: regOperand(src2)}
+	return newInst(OpFNMADD, regOperand(dst), regOperand(src1), regOperand(src2), regOperand(acc))
 }
+
 func FNMSUB(dst, src1, src2, acc asm.Reg) asm.Instruction {
-	return asm.Instruction{Op: uint16(OpFNMSUB), Dst: regOperand(dst), Src1: regOperand(src1), Src2: regOperand(src2)}
+	return newInst(OpFNMSUB, regOperand(dst), regOperand(src1), regOperand(src2), regOperand(acc))
 }
 
 // ---------------------------------------------------------------------------
@@ -537,7 +535,7 @@ func FCMPE(src1, src2 asm.Reg) asm.Instruction { return newCmp(OpFCMPE, src1, sr
 
 // CSEL Xd, Xn, Xm, cond  — Xd = cond ? Xn : Xm  (cond encoded in Src2 upper bits)
 func CSEL(dst, trueReg, falseReg asm.Reg, cond uint8) asm.Instruction {
-	return newInst(OpCSEL, regOperand(dst), regOperand(trueReg), regOperand(falseReg))
+	return newInst(OpCSEL, regOperand(dst), regOperand(trueReg), asm.ImmOperand{Value: int64(cond)}, regOperand(falseReg))
 }
 func CSINC(dst, trueReg, falseReg asm.Reg, cond uint8) asm.Instruction {
 	return newInst(OpCSINC, regOperand(dst), regOperand(trueReg), regOperand(falseReg))
@@ -551,12 +549,12 @@ func CSNEG(dst, trueReg, falseReg asm.Reg, cond uint8) asm.Instruction {
 
 // CSET Xd, cond  — Xd = cond ? 1 : 0
 func CSET(dst asm.Reg, cond uint8) asm.Instruction {
-	return newInst(OpCSET, regOperand(dst), imm(int64(cond)), nil)
+	return newInst(OpCSET, regOperand(dst), imm(int64(cond)))
 }
 
 // CSETM Xd, cond  — Xd = cond ? -1 : 0
 func CSETM(dst asm.Reg, cond uint8) asm.Instruction {
-	return newInst(OpCSETM, regOperand(dst), imm(int64(cond)), nil)
+	return newInst(OpCSETM, regOperand(dst), imm(int64(cond)))
 }
 
 // ---------------------------------------------------------------------------
@@ -567,7 +565,7 @@ func B(offset int32) asm.Instruction  { return newBranch(OpB, int64(offset)) }
 func BL(offset int32) asm.Instruction { return newBranch(OpBL, int64(offset)) }
 func BR(reg asm.Reg) asm.Instruction  { return newReg1(OpBR, reg) }
 func BLR(reg asm.Reg) asm.Instruction { return newReg1(OpBLR, reg) }
-func RET() asm.Instruction            { return newInst(OpRET, nil, nil, nil) }
+func RET() asm.Instruction            { return newInst(OpRET, nil) }
 
 // Resolved immediately if the label is already placed; otherwise becomes a
 // Relocation patched by Assembler.Link.
@@ -662,8 +660,8 @@ func BCC(offset int32) asm.Instruction { return newBranch(OpBCC, int64(offset)) 
 // System
 // ---------------------------------------------------------------------------
 
-func NOP() asm.Instruction { return newInst(OpNOP, nil, nil, nil) }
-func HLT() asm.Instruction { return newInst(OpHLT, nil, nil, nil) }
+func NOP() asm.Instruction { return newInst(OpNOP, nil) }
+func HLT() asm.Instruction { return newInst(OpHLT, nil) }
 
 // BRK #imm — software breakpoint
 func BRK(imm16 uint16) asm.Instruction { return newInst(OpBRK, nil, nil, imm(int64(imm16))) }
@@ -672,21 +670,21 @@ func BRK(imm16 uint16) asm.Instruction { return newInst(OpBRK, nil, nil, imm(int
 func SVC(imm16 uint16) asm.Instruction { return newInst(OpSVC, nil, nil, imm(int64(imm16))) }
 
 // ERET — exception return
-func ERET() asm.Instruction { return newInst(OpERET, nil, nil, nil) }
+func ERET() asm.Instruction { return newInst(OpERET, nil) }
 
 // MRS Xt, sysreg — move system register to GP register
 func MRS(dst asm.Reg, sysreg uint16) asm.Instruction {
-	return newInst(OpMRS, regOperand(dst), imm(int64(sysreg)), nil)
+	return newInst(OpMRS, regOperand(dst), imm(int64(sysreg)))
 }
 
 // MSR sysreg, Xt — move GP register to system register
 func MSR(sysreg uint16, src asm.Reg) asm.Instruction {
-	return newInst(OpMSR, imm(int64(sysreg)), regOperand(src), nil)
+	return newInst(OpMSR, imm(int64(sysreg)), regOperand(src))
 }
 
-func ISB() asm.Instruction { return newInst(OpISB, nil, nil, nil) }
-func DSB() asm.Instruction { return newInst(OpDSB, nil, nil, nil) }
-func DMB() asm.Instruction { return newInst(OpDMB, nil, nil, nil) }
+func ISB() asm.Instruction { return newInst(OpISB, nil) }
+func DSB() asm.Instruction { return newInst(OpDSB, nil) }
+func DMB() asm.Instruction { return newInst(OpDMB, nil) }
 
 const (
 	CondEQ uint8 = 0x0

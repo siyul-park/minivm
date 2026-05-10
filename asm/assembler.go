@@ -457,11 +457,12 @@ func (a *Assembler) assign() ([]Instruction, error) {
 		}
 
 		if dst, ok := a.dst(inst); ok {
+			// assembler.go assign() 수정 부분
 			if _, exists := physical[dst.ID()]; !exists {
 				if want, ok := fixed[dst.ID()]; ok {
 					owner, occupied := virtual[want.ID()]
 					fix := false
-					if owner.ID() != 0 {
+					if occupied {
 						if _, ok := fixed[owner.ID()]; ok {
 							fix = true
 						}
@@ -472,21 +473,17 @@ func (a *Assembler) assign() ([]Instruction, error) {
 							delete(live, owner.ID())
 							delete(virtual, want.ID())
 						}
-
-						if err := a.regAlloc.Reserve(dst, want); err == nil {
-							physical[dst.ID()] = want
-							live[dst.ID()] = want
-							virtual[want.ID()] = dst
-							continue
-						}
+						_ = a.regAlloc.Reserve(dst, want)
+						physical[dst.ID()] = want
+						live[dst.ID()] = want
+						virtual[want.ID()] = dst
+						continue
 					}
 				}
-
 				p, err := a.regAlloc.Alloc(dst)
 				if err != nil {
 					return nil, err
 				}
-
 				physical[dst.ID()] = p
 				live[dst.ID()] = p
 				virtual[p.ID()] = dst
@@ -574,6 +571,9 @@ func (a *Assembler) srcs(inst Instruction) []VReg {
 	if r, ok := a.vreg(inst.Src2); ok {
 		regs = append(regs, r)
 	}
+	if r, ok := a.vreg(inst.Src3); ok {
+		regs = append(regs, r)
+	}
 	return regs
 }
 
@@ -609,6 +609,7 @@ func (a *Assembler) rewrite(inst Instruction, mapping map[int32]PReg, widths map
 		Dst:  a.rewriteOP(inst.Dst, mapping, widths),
 		Src1: a.rewriteOP(inst.Src1, mapping, widths),
 		Src2: a.rewriteOP(inst.Src2, mapping, widths),
+		Src3: a.rewriteOP(inst.Src3, mapping, widths),
 	}
 }
 

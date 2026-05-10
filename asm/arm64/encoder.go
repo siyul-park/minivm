@@ -116,21 +116,19 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return enc(0x9B00FC00 | reg(m)<<16 | reg(n)<<5 | reg(d)), nil
 
-	case OpMADD: // MADD Xd, Xn, Xm, Xa  — Ra from Src2 field (see inst.go note)
-		d, n, m, err := decodeReg3(inst)
+	case OpMADD:
+		d, n, m, a, err := decodeReg4(inst)
 		if err != nil {
 			return nil, err
 		}
-		// Without a dedicated accumulator operand we default Ra=XZR (==MUL).
-		// When the IR is extended with an Acc field, replace 0x1F with acc.ID().
-		return enc(0x9B000000 | reg(m)<<16 | 0x1F<<10 | reg(n)<<5 | reg(d)), nil
+		return enc(0x9B000000 | reg(m)<<16 | reg(a)<<10 | reg(n)<<5 | reg(d)), nil
 
 	case OpMSUB:
-		d, n, m, err := decodeReg3(inst)
+		d, n, m, a, err := decodeReg4(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0x9B008000 | reg(m)<<16 | 0x1F<<10 | reg(n)<<5 | reg(d)), nil
+		return enc(0x9B008000 | reg(m)<<16 | reg(a)<<10 | reg(n)<<5 | reg(d)), nil
 
 	case OpSDIV:
 		d, n, m, err := decodeReg3(inst)
@@ -579,6 +577,9 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 			return nil, err
 		}
 		hw := uint32(shift/16) & 3
+		if d.Width() == asm.Width32 {
+			return enc(0x52800000 | hw<<21 | (uint32(imm)&0xFFFF)<<5 | reg(d)), nil
+		}
 		return enc(0xD2800000 | hw<<21 | (uint32(imm)&0xFFFF)<<5 | reg(d)), nil
 
 	case OpMOVK:
@@ -587,6 +588,9 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 			return nil, err
 		}
 		hw := uint32(shift/16) & 3
+		if d.Width() == asm.Width32 {
+			return enc(0x72800000 | hw<<21 | (uint32(imm)&0xFFFF)<<5 | reg(d)), nil
+		}
 		return enc(0xF2800000 | hw<<21 | (uint32(imm)&0xFFFF)<<5 | reg(d)), nil
 
 	case OpMOVN:
@@ -595,6 +599,9 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 			return nil, err
 		}
 		hw := uint32(shift/16) & 3
+		if d.Width() == asm.Width32 {
+			return enc(0x12800000 | hw<<21 | (uint32(imm)&0xFFFF)<<5 | reg(d)), nil
+		}
 		return enc(0x92800000 | hw<<21 | (uint32(imm)&0xFFFF)<<5 | reg(d)), nil
 
 	// -----------------------------------------------------------------------
@@ -748,96 +755,149 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		return enc(0x9E620000 | reg(n)<<5 | reg(d)), nil
+		if d.Width() == asm.Width32 {
+			return enc(0x1E220000 | reg(n)<<5 | reg(d)), nil // SCVTF Sd, Wn
+		}
+		return enc(0x9E620000 | reg(n)<<5 | reg(d)), nil // SCVTF Dd, Xn
 
 	case OpUCVTF: // UCVTF Dd, Xn  (unsigned integer → double)
 		d, n, err := decodeReg2(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0x9E630000 | reg(n)<<5 | reg(d)), nil
+		if d.Width() == asm.Width32 {
+			return enc(0x1E230000 | reg(n)<<5 | reg(d)), nil // UCVTF Sd, Wn
+		}
+		return enc(0x9E630000 | reg(n)<<5 | reg(d)), nil // UCVTF Dd, Xn
 
-	case OpFCVTZS: // FCVTZS Xd, Dn  (double → integer, round toward zero)
+	case OpFCVTZS:
 		d, n, err := decodeReg2(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0x9E780000 | reg(n)<<5 | reg(d)), nil
+		switch {
+		case d.Width() == asm.Width32 && n.Width() == asm.Width32:
+			return enc(0x1E380000 | reg(n)<<5 | reg(d)), nil // FCVTZS Wd, Sn
+		case d.Width() == asm.Width32 && n.Width() == asm.Width64:
+			return enc(0x1E780000 | reg(n)<<5 | reg(d)), nil // FCVTZS Wd, Dn
+		case d.Width() == asm.Width64 && n.Width() == asm.Width32:
+			return enc(0x9E380000 | reg(n)<<5 | reg(d)), nil // FCVTZS Xd, Sn
+		default:
+			return enc(0x9E780000 | reg(n)<<5 | reg(d)), nil // FCVTZS Xd, Dn
+		}
 
-	case OpFCVTZU: // FCVTZU Xd, Dn  (double → unsigned integer)
+	case OpFCVTZU:
 		d, n, err := decodeReg2(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0x9E790000 | reg(n)<<5 | reg(d)), nil
+		switch {
+		case d.Width() == asm.Width32 && n.Width() == asm.Width32:
+			return enc(0x1E390000 | reg(n)<<5 | reg(d)), nil // FCVTZU Wd, Sn
+		case d.Width() == asm.Width32 && n.Width() == asm.Width64:
+			return enc(0x1E790000 | reg(n)<<5 | reg(d)), nil // FCVTZU Wd, Dn
+		case d.Width() == asm.Width64 && n.Width() == asm.Width32:
+			return enc(0x9E390000 | reg(n)<<5 | reg(d)), nil // FCVTZU Xd, Sn
+		default:
+			return enc(0x9E790000 | reg(n)<<5 | reg(d)), nil // FCVTZU Xd, Dn
+		}
 
-	case OpFCVT: // FCVT Dd, Sn  (single → double, type=01→00)
+	case OpFCVT:
 		d, n, err := decodeReg2(inst)
 		if err != nil {
 			return nil, err
 		}
-		// FCVT (double←single): ftype=01 opc=00
-		return enc(0x1E22C000 | reg(n)<<5 | reg(d)), nil
-
-	// -----------------------------------------------------------------------
-	// Float — arithmetic (double precision)
-	// -----------------------------------------------------------------------
+		switch {
+		case d.Width() == asm.Width64 && n.Width() == asm.Width32:
+			return enc(0x1E22C000 | reg(n)<<5 | reg(d)), nil // FCVT Dd, Sn
+		case d.Width() == asm.Width32 && n.Width() == asm.Width64:
+			return enc(0x1E624000 | reg(n)<<5 | reg(d)), nil // FCVT Sd, Dn
+		default:
+			return nil, asm.ErrInvalidOperand
+		}
+		// -----------------------------------------------------------------------
+		// Float — arithmetic (double precision)
+		// -----------------------------------------------------------------------
 
 	case OpFADD:
 		d, n, m, err := decodeReg3(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0x1E602800 | reg(m)<<16 | reg(n)<<5 | reg(d)), nil
+		if d.Width() == asm.Width32 {
+			return enc(0x1E202800 | reg(m)<<16 | reg(n)<<5 | reg(d)), nil // FADD Sd, Sn, Sm
+		}
+		return enc(0x1E602800 | reg(m)<<16 | reg(n)<<5 | reg(d)), nil // FADD Dd, Dn, Dm
 
 	case OpFSUB:
 		d, n, m, err := decodeReg3(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0x1E603800 | reg(m)<<16 | reg(n)<<5 | reg(d)), nil
+		if d.Width() == asm.Width32 {
+			return enc(0x1E203800 | reg(m)<<16 | reg(n)<<5 | reg(d)), nil // FSUB Sd, Sn, Sm
+		}
+		return enc(0x1E603800 | reg(m)<<16 | reg(n)<<5 | reg(d)), nil // FSUB Dd, Dn, Dm
 
 	case OpFMUL:
 		d, n, m, err := decodeReg3(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0x1E600800 | reg(m)<<16 | reg(n)<<5 | reg(d)), nil
+		if d.Width() == asm.Width32 {
+			return enc(0x1E200800 | reg(m)<<16 | reg(n)<<5 | reg(d)), nil // FMUL Sd, Sn, Sm
+		}
+		return enc(0x1E600800 | reg(m)<<16 | reg(n)<<5 | reg(d)), nil // FMUL Dd, Dn, Dm
 
 	case OpFDIV:
 		d, n, m, err := decodeReg3(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0x1E601800 | reg(m)<<16 | reg(n)<<5 | reg(d)), nil
+		if d.Width() == asm.Width32 {
+			return enc(0x1E201800 | reg(m)<<16 | reg(n)<<5 | reg(d)), nil // FDIV Sd, Sn, Sm
+		}
+		return enc(0x1E601800 | reg(m)<<16 | reg(n)<<5 | reg(d)), nil // FDIV Dd, Dn, Dm
 
-	case OpFMADD: // FMADD Dd, Dn, Dm, Da=D0(placeholder)
-		d, n, m, err := decodeReg3(inst)
+	case OpFMADD:
+		d, n, m, a, err := decodeReg4(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0x1F400000 | reg(m)<<16 | 0x00<<10 | reg(n)<<5 | reg(d)), nil
+		if d.Width() == asm.Width32 {
+			return enc(0x1F000000 | reg(m)<<16 | reg(a)<<10 | reg(n)<<5 | reg(d)), nil // FMADD Sd, Sn, Sm, Sa
+		}
+		return enc(0x1F400000 | reg(m)<<16 | reg(a)<<10 | reg(n)<<5 | reg(d)), nil // FMADD Dd, Dn, Dm, Da
 
 	case OpFMSUB:
-		d, n, m, err := decodeReg3(inst)
+		d, n, m, a, err := decodeReg4(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0x1F408000 | reg(m)<<16 | 0x00<<10 | reg(n)<<5 | reg(d)), nil
+		if d.Width() == asm.Width32 {
+			return enc(0x1F008000 | reg(m)<<16 | reg(a)<<10 | reg(n)<<5 | reg(d)), nil // FMSUB Sd, Sn, Sm, Sa
+		}
+		return enc(0x1F408000 | reg(m)<<16 | reg(a)<<10 | reg(n)<<5 | reg(d)), nil // FMSUB Dd, Dn, Dm, Da
 
 	case OpFNMADD:
-		d, n, m, err := decodeReg3(inst)
+		d, n, m, a, err := decodeReg4(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0x1F600000 | reg(m)<<16 | 0x00<<10 | reg(n)<<5 | reg(d)), nil
+		if d.Width() == asm.Width32 {
+			return enc(0x1F200000 | reg(m)<<16 | reg(a)<<10 | reg(n)<<5 | reg(d)), nil // FNMADD Sd, Sn, Sm, Sa
+		}
+		return enc(0x1F600000 | reg(m)<<16 | reg(a)<<10 | reg(n)<<5 | reg(d)), nil // FNMADD Dd, Dn, Dm, Da
 
 	case OpFNMSUB:
-		d, n, m, err := decodeReg3(inst)
+		d, n, m, a, err := decodeReg4(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0x1F608000 | reg(m)<<16 | 0x00<<10 | reg(n)<<5 | reg(d)), nil
+		if d.Width() == asm.Width32 {
+			return enc(0x1F208000 | reg(m)<<16 | reg(a)<<10 | reg(n)<<5 | reg(d)), nil // FNMSUB Sd, Sn, Sm, Sa
+		}
+		return enc(0x1F608000 | reg(m)<<16 | reg(a)<<10 | reg(n)<<5 | reg(d)), nil // FNMSUB Dd, Dn, Dm, Da
 
 	// -----------------------------------------------------------------------
 	// Float — unary
@@ -921,30 +981,40 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 			return enc(0x9E660000 | reg(n)<<5 | reg(d)), nil // FMOV Xn, Dd
 		}
 
-	case OpFCMP: // FCMP Dn, Dm — sets NZCV
+	case OpFCMP:
 		n, m, err := decodeCmp(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0x1E602000 | reg(m)<<16 | reg(n)<<5), nil
+		if n.Width() == asm.Width32 {
+			return enc(0x1E202000 | reg(m)<<16 | reg(n)<<5), nil // FCMP Sn, Sm
+		}
+		return enc(0x1E602000 | reg(m)<<16 | reg(n)<<5), nil // FCMP Dn, Dm
 
-	case OpFCMPE: // FCMPE — also raises Invalid if either operand is NaN
+	case OpFCMPE:
 		n, m, err := decodeCmp(inst)
 		if err != nil {
 			return nil, err
 		}
-		return enc(0x1E602010 | reg(m)<<16 | reg(n)<<5), nil
+		if n.Width() == asm.Width32 {
+			return enc(0x1E202010 | reg(m)<<16 | reg(n)<<5), nil // FCMPE Sn, Sm
+		}
+		return enc(0x1E602010 | reg(m)<<16 | reg(n)<<5), nil // FCMPE Dn, Dm
 
 	// -----------------------------------------------------------------------
 	// Conditional select
 	// -----------------------------------------------------------------------
 
 	case OpCSEL: // CSEL Xd, Xn, Xm, cond(=AL)
-		d, n, m, err := decodeReg3(inst)
-		if err != nil {
-			return nil, err
+		d, ok := inst.Dst.(asm.PRegOperand)
+		n, ok1 := inst.Src1.(asm.PRegOperand)
+		condImm, ok2 := inst.Src2.(asm.ImmOperand)
+		m, ok3 := inst.Src3.(asm.PRegOperand)
+		if !ok || !ok1 || !ok2 || !ok3 {
+			return nil, ErrMissingSourceRegs
 		}
-		return enc(0x9A800000 | reg(m)<<16 | 0xE<<12 | reg(n)<<5 | reg(d)), nil
+		cond := uint32(condImm.Value) & 0xF
+		return enc(0x9A800000 | reg(m.Reg)<<16 | cond<<12 | reg(n.Reg)<<5 | reg(d.Reg)), nil
 
 	case OpCSINC: // CSINC Xd, Xn, Xm, cond
 		d, n, m, err := decodeReg3(inst)
@@ -1144,6 +1214,22 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 
 // reg extracts the 5-bit register ID from a PReg.
 func reg(r asm.PReg) uint32 { return uint32(r.ID()) & 0x1F }
+
+func decodeReg4(inst asm.Instruction) (dst, src1, src2, src3 asm.PReg, err error) {
+	dstOp, ok := inst.Dst.(asm.PRegOperand)
+	if !ok {
+		err = ErrMissingDestinationReg
+		return
+	}
+	s1, ok1 := inst.Src1.(asm.PRegOperand)
+	s2, ok2 := inst.Src2.(asm.PRegOperand)
+	s3, ok3 := inst.Src3.(asm.PRegOperand)
+	if !ok1 || !ok2 || !ok3 {
+		err = ErrMissingSourceRegs
+		return
+	}
+	return dstOp.Reg, s1.Reg, s2.Reg, s3.Reg, nil
+}
 
 func decodeReg3(inst asm.Instruction) (dst, src1, src2 asm.PReg, err error) {
 	dstOp, ok := inst.Dst.(asm.PRegOperand)
