@@ -124,7 +124,7 @@ The interpreter owns all runtime state in `Interpreter`:
 
 Implements `asm.Arch` (the `Arch` singleton), `asm.Encoder`, `asm.ABI`, and `asm.Caller`.
 
-The `Caller` invokes native chunks via the assembly trampoline in `abi_arm64.s`. The trampoline marshals arguments from an `argv` buffer (`[header, reserved…, params…]`), calls the chunk via `BL`, then reads scratch register outputs (X10–X15) back into `argv[1..nReserved]` and return values into `argv[nReserved+1..]`. The `header uint64` encodes param/return counts, reserved count, and float-register masks. Scratch registers X8 and X9 are left outside `arch.Scratch` so the trampoline can use them as temporaries after `BL` without conflicting with the chunk's scratch outputs.
+The `Caller` invokes native chunks via the assembly trampoline in `abi_arm64.s`. The trampoline marshals arguments from an `argv` buffer (`[header, reserved…, params…]`), loads scratch register inputs (X10–X15), calls the chunk via `BL`, then reads scratch register outputs back into `argv[1..nReserved]` and return values into `argv[nReserved+1..]`. The `header uint64` encodes param/return counts, reserved count, and float-register masks. Scratch registers X8 and X9 are left outside `arch.Scratch` so the trampoline can use them as temporaries without conflicting with the chunk's reserved in/out values.
 
 Platform-specific files carry `//go:build arm64`. `abi_stub.go` (`//go:build !arm64`) keeps the package compilable on other platforms.
 

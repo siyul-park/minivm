@@ -104,15 +104,18 @@ jit[instr.OPCODE] = func(c *jitCompiler) (bool, bool) {
 - `_PROLOGUE` (ARM64): emits `LDI(scratch, blockEnd)` — loads the fallthrough IP into the scratch register before any instructions.
 - `_EPILOGUE` (ARM64): emits `LDI(scratch, blockEnd)` + `RET` — updates the scratch register with the (possibly truncated) exit IP and returns.
 
-## Scratch Register and Next-IP Mechanism
+## Reserved Registers and Next-IP Mechanism
 
-ARM64 JIT uses a **scratch register** (allocated via `c.assembler.Reserve()` from `arch.Scratch` = X10–X15) to carry the next interpreter IP out of each compiled segment.
+ARM64 JIT uses **reserved registers** (allocated via `c.assembler.Reserve()` from `arch.Scratch` = X10–X15) as in/out metadata channels outside normal params and returns.
 
-- `_PROLOGUE` loads `c.blockEnd` into scratch.
-- `_EPILOGUE` reloads `c.blockEnd` (which may be truncated if the segment was cut short) into scratch, then returns.
-- Branch handlers load the **branch target IP** into scratch before returning.
+- `reserved[0]`: frame-local stack pointer (`&i.stack[f.bp]`) input.
+- `reserved[1]`: heap pointer input.
+- `reserved[2]`: next interpreter IP output.
+- `_PROLOGUE` loads `c.blockEnd` into `reserved[2]`.
+- `_EPILOGUE` reloads `c.blockEnd` (which may be truncated if the segment was cut short) into `reserved[2]`, then returns.
+- Branch handlers load the **branch target IP** into `reserved[2]` before returning.
 
-The Go closure in `jitCompiler.closure()` reads `rsv[0]` after `fn.Call()` and writes it to `i.frames[fp-1].ip`, advancing the interpreter to the correct position regardless of whether the segment ran to block end or exited via a branch.
+The Go closure in `jitCompiler.closure()` initializes reserved inputs before `fn.Call()`, then reads `rsv[2]` after the call and writes it to `i.frames[fp-1].ip`, advancing the interpreter to the correct position regardless of whether the segment ran to block end or exited via a branch.
 
 ## Segment Selection
 
@@ -155,7 +158,7 @@ The `asm.Assembler` maintains two VReg stacks:
 | `Emits(insts ...Instruction)` | Append multiple IR instructions |
 | `NewLabel() int` | Allocate a symbolic label ID (resolved at Compile/Link time) |
 | `Place(id int)` | Mark the current position as the target of label `id` |
-| `Reserve() PReg` | Allocate one scratch physical register from `arch.Scratch` |
+| `Reserve() PReg` | Allocate one scratch physical register from `arch.Scratch` for reserved in/out metadata |
 | `Compile() (*RelocObject, error)` | Finalize: allocate registers, two-pass encode, write to buffer, return relocatable object |
 | `Link(objects) ([]Caller, error)` | Patch cross-segment label relocations; return callable `Caller` per object |
 | `Abort()` | Discard current segment state without writing to buffer |
@@ -204,8 +207,8 @@ The ARM64 ABI in `asm/arm64/` follows AAPCS64:
 The `argv` buffer passed to the assembly trampoline has the layout:
 ```
 argv[0]:              header (nParams, nReturns, nReserved, type masks)
-argv[1..nReserved]:   scratch outputs — written by the native chunk on return
+argv[1..nReserved]:   scratch inputs/outputs — loaded before the native call and written back on return
 argv[nReserved+1..]:  params in / returns out
 ```
 
-The trampoline in `abi_arm64.s` marshals arguments from `argv`, calls the native chunk via `BL`, then reads scratch register values (X10–X15) back into `argv[1..nReserved]` and reads return values into `argv[nReserved+1..]`.
+The trampoline in `abi_arm64.s` marshals arguments from `argv`, loads reserved register inputs (X10–X15), calls the native chunk via `BL`, then reads scratch register values back into `argv[1..nReserved]` and reads return values into `argv[nReserved+1..]`.

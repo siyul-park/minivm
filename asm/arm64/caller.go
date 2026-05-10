@@ -18,7 +18,8 @@ import (
 // argv layout passed to invoke:
 //
 //	argv[0]:              header
-//	argv[1..nReserved]:   scratch outputs — written after the call
+//	argv[1..nReserved]:   scratch inputs/outputs — loaded before the call and
+//	                      written after the call
 //	argv[nReserved+1..]:  params in / returns out
 
 type caller struct {
@@ -103,6 +104,9 @@ func (c *caller) Call(params []uint64, rsv *[]uint64) ([]uint64, error) {
 	var stack [1 + 6 + 8]uint64 // 1 header + max 6 reserved + max 8 ABI regs
 	argv := stack[:1+nRsv+max(nParams, nReturns)]
 	argv[0] = c.header
+	if rsv != nil && nRsv > 0 {
+		copy(argv[1:1+nRsv], (*rsv)[:min(len(*rsv), nRsv)])
+	}
 	copy(argv[1+nRsv:], params[:min(len(params), nParams)])
 
 	invoke(uintptr(c.chunk.Ptr()), uintptr(unsafe.Pointer(&argv[0])))

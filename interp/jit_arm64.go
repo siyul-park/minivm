@@ -15,12 +15,12 @@ func init() {
 	arch = arm64.Arch
 
 	jit[_PROLOGUE] = func(c *jitCompiler) (bool, bool) {
-		c.assembler.Emits(arm64.LDI(c.scratch, uint64(c.blockEnd))...)
+		c.assembler.Emits(arm64.LDI(c.next, uint64(c.blockEnd))...)
 		return true, false
 	}
 
 	jit[_EPILOGUE] = func(c *jitCompiler) (bool, bool) {
-		c.assembler.Emits(arm64.LDI(c.scratch, uint64(c.blockEnd))...)
+		c.assembler.Emits(arm64.LDI(c.next, uint64(c.blockEnd))...)
 		c.assembler.Emit(arm64.RET())
 		return true, false
 	}
@@ -39,7 +39,7 @@ func init() {
 		if c.compilable[targetIP] && c.linkable(targetIP) {
 			c.assembler.Emit(arm64.BLabel(c.labels[targetIP]))
 		} else {
-			c.assembler.Emits(arm64.LDI(c.scratch, uint64(targetIP))...)
+			c.assembler.Emits(arm64.LDI(c.next, uint64(targetIP))...)
 			c.assembler.Emit(arm64.RET())
 		}
 		return true, true
@@ -74,7 +74,7 @@ func init() {
 			fallStubLabel := c.assembler.NewLabel()
 			c.assembler.Emit(arm64.CBZLabel(r0, fallStubLabel))
 			c.assembler.Emit(arm64.BLabel(c.labels[targetIP]))
-			c.assembler.Place(fallStubLabel)
+			c.assembler.Bind(fallStubLabel)
 			c.assembler.Emit(arm64.RET())
 			return true, true
 		}
@@ -83,8 +83,8 @@ func init() {
 			takenStubLabel := c.assembler.NewLabel()
 			c.assembler.Emit(arm64.CBNZLabel(r0, takenStubLabel))
 			c.assembler.Emit(arm64.BLabel(c.labels[fallIP]))
-			c.assembler.Place(takenStubLabel)
-			c.assembler.Emits(arm64.LDI(c.scratch, uint64(targetIP))...)
+			c.assembler.Bind(takenStubLabel)
+			c.assembler.Emits(arm64.LDI(c.next, uint64(targetIP))...)
 			c.assembler.Emit(arm64.RET())
 			return true, true
 		}
@@ -92,8 +92,8 @@ func init() {
 		takenStubLabel := c.assembler.NewLabel()
 		c.assembler.Emit(arm64.CBNZLabel(r0, takenStubLabel))
 		c.assembler.Emit(arm64.RET())
-		c.assembler.Place(takenStubLabel)
-		c.assembler.Emits(arm64.LDI(c.scratch, uint64(targetIP))...)
+		c.assembler.Bind(takenStubLabel)
+		c.assembler.Emits(arm64.LDI(c.next, uint64(targetIP))...)
 		c.assembler.Emit(arm64.RET())
 		return true, true
 	}
@@ -172,13 +172,13 @@ func init() {
 		}
 		c.assembler.Emit(arm64.BLabel(lDone))
 
-		c.assembler.Place(lTrue)
+		c.assembler.Bind(lTrue)
 		if isFloat {
 			c.assembler.Emit(arm64.FMOV(result, val1))
 		} else {
 			c.assembler.Emit(arm64.ADDI(result, val1, 0))
 		}
-		c.assembler.Place(lDone)
+		c.assembler.Bind(lDone)
 
 		return true, false
 	}
@@ -219,17 +219,145 @@ func init() {
 		c.assembler.Emit(arm64.BLabel(stubLabels[count]))
 
 		for j := 0; j <= count; j++ {
-			c.assembler.Place(stubLabels[j])
+			c.assembler.Bind(stubLabels[j])
 			targetIP := targetIPs[j]
 			if c.compilable[targetIP] && c.linkable(targetIP) {
 				c.assembler.Emit(arm64.BLabel(c.labels[targetIP]))
 			} else {
-				c.assembler.Emits(arm64.LDI(c.scratch, uint64(targetIP))...)
+				c.assembler.Emits(arm64.LDI(c.next, uint64(targetIP))...)
 				c.assembler.Emit(arm64.RET())
 			}
 		}
-
 		return true, true
+	}
+
+	jit[instr.LOCAL_GET] = func(c *jitCompiler) (bool, bool) {
+		idx := int(c.code[c.ip+1])
+		c.ip += 2
+
+		typ, ok := c.local(idx)
+		if !ok {
+			return false, false
+		}
+
+		offset := int16(idx * 8)
+		boxed := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
+		c.assembler.Emit(arm64.LDR(boxed, c.sp, offset))
+		switch typ.Kind() {
+		case types.KindI32:
+			r0 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
+			c.assembler.Emit(arm64.UXTW(r0, boxed))
+			c.assembler.Push(r0)
+		case types.KindI64:
+			r0 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
+			c.assembler.Emit(arm64.LSLI(r0, boxed, 64-types.VBits))
+			c.assembler.Emit(arm64.ASRI(r0, r0, 64-types.VBits))
+			c.assembler.Push(r0)
+		case types.KindF32:
+			ri := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
+			rf := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width32)
+			c.assembler.Emit(arm64.UXTW(ri, boxed))
+			c.assembler.Emit(arm64.FMOV(rf, ri))
+			c.assembler.Push(rf)
+		case types.KindF64:
+			rf := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width64)
+			c.assembler.Emit(arm64.FMOV(rf, boxed))
+			c.assembler.Push(rf)
+		default:
+			return false, false
+		}
+		return true, false
+	}
+
+	jit[instr.LOCAL_SET] = func(c *jitCompiler) (bool, bool) {
+		idx := int(c.code[c.ip+1])
+		c.ip += 2
+
+		typ, ok := c.local(idx)
+		if !ok {
+			return false, false
+		}
+
+		offset := int16(idx * 8)
+		var boxed asm.VReg
+		switch typ.Kind() {
+		case types.KindI32:
+			r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
+			if !ok {
+				return false, false
+			}
+			boxed = c.boxI32(r0)
+		case types.KindI64:
+			r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width64)
+			if !ok {
+				return false, false
+			}
+			boxed = c.boxI64(r0)
+		case types.KindF32:
+			r0, ok := c.assembler.Take(asm.RegTypeFloat, asm.Width32)
+			if !ok {
+				return false, false
+			}
+
+			boxed = c.boxF32(r0)
+		case types.KindF64:
+			r0, ok := c.assembler.Take(asm.RegTypeFloat, asm.Width64)
+			if !ok {
+				return false, false
+			}
+			boxed = c.boxF64(r0)
+		default:
+			return false, false
+		}
+		c.assembler.Emit(arm64.STR(boxed, c.sp, offset))
+		return true, false
+	}
+
+	jit[instr.LOCAL_TEE] = func(c *jitCompiler) (bool, bool) {
+		idx := int(c.code[c.ip+1])
+		c.ip += 2
+
+		typ, ok := c.local(idx)
+		if !ok {
+			return false, false
+		}
+
+		offset := int16(idx * 8)
+		var boxed asm.VReg
+		switch typ.Kind() {
+		case types.KindI32:
+			r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
+			if !ok {
+				return false, false
+			}
+			boxed = c.boxI32(r0)
+			c.assembler.Push(r0)
+		case types.KindI64:
+			r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width64)
+			if !ok {
+				return false, false
+			}
+			boxed = c.boxI64(r0)
+			c.assembler.Push(r0)
+		case types.KindF32:
+			r0, ok := c.assembler.Take(asm.RegTypeFloat, asm.Width32)
+			if !ok {
+				return false, false
+			}
+			boxed = c.boxF32(r0)
+			c.assembler.Push(r0)
+		case types.KindF64:
+			r0, ok := c.assembler.Take(asm.RegTypeFloat, asm.Width64)
+			if !ok {
+				return false, false
+			}
+			boxed = c.boxF64(r0)
+			c.assembler.Push(r0)
+		default:
+			return false, false
+		}
+		c.assembler.Emit(arm64.STR(boxed, c.sp, offset))
+		return true, false
 	}
 
 	jit[instr.CONST_GET] = func(c *jitCompiler) (bool, bool) {
@@ -1659,4 +1787,66 @@ func init() {
 		c.assembler.Emit(arm64.FCVT(r1, r0))
 		return true, false
 	}
+}
+
+func (c *jitCompiler) boxI32(r0 asm.VReg) asm.VReg {
+	payload := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
+	tag := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
+	boxed := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
+
+	c.assembler.Emit(arm64.UXTW(payload, r0))
+	c.assembler.Emits(arm64.LDI(tag, types.Tag(types.KindI32))...)
+	c.assembler.Emit(arm64.ORR(boxed, tag, payload))
+
+	return boxed
+}
+
+func (c *jitCompiler) boxI64(r0 asm.VReg) asm.VReg {
+	payload := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
+
+	c.assembler.Emit(arm64.LSLI(payload, r0, 64-types.VBits))
+	c.assembler.Emit(arm64.ASRI(payload, payload, 64-types.VBits))
+
+	slow := c.assembler.NewLabel()
+	done := c.assembler.NewLabel()
+
+	c.assembler.Emit(arm64.CMP(payload, r0))
+	c.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, slow))
+
+	tag := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
+	boxed := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
+
+	c.assembler.Emit(arm64.LSRI(payload, payload, 64-types.VBits))
+	c.assembler.Emits(arm64.LDI(tag, types.Tag(types.KindI64))...)
+	c.assembler.Emit(arm64.ORR(boxed, tag, payload))
+	c.assembler.Emit(arm64.BLabel(done))
+
+	c.assembler.Bind(slow)
+
+	c.assembler.Emits(arm64.LDI(c.next, uint64(c.ip-2))...)
+	c.assembler.Emit(arm64.RET())
+
+	c.assembler.Bind(done)
+
+	return boxed
+}
+
+func (c *jitCompiler) boxF32(r0 asm.VReg) asm.VReg {
+	bits := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
+	payload := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
+	tag := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
+	boxed := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
+
+	c.assembler.Emit(arm64.FMOV(bits, r0))
+	c.assembler.Emit(arm64.UXTW(payload, bits))
+	c.assembler.Emits(arm64.LDI(tag, types.Tag(types.KindF32))...)
+	c.assembler.Emit(arm64.ORR(boxed, tag, payload))
+
+	return boxed
+}
+
+func (c *jitCompiler) boxF64(r0 asm.VReg) asm.VReg {
+	boxed := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
+	c.assembler.Emit(arm64.FMOV(boxed, r0))
+	return boxed
 }

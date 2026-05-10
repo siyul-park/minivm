@@ -43,7 +43,7 @@ func (a *Assembler) NewLabel() int {
 	return id
 }
 
-func (a *Assembler) Place(id int) {
+func (a *Assembler) Bind(id int) {
 	if a.localLabels == nil {
 		a.localLabels = make(map[int]int)
 	}
@@ -538,6 +538,9 @@ func (a *Assembler) allocatable(typ RegType) []PReg {
 
 func (a *Assembler) srcs(inst Instruction) []VReg {
 	var regs []VReg
+	if r, ok := a.memBase(inst.Dst); ok {
+		regs = append(regs, r)
+	}
 	if r, ok := a.vreg(inst.Src1); ok {
 		regs = append(regs, r)
 	}
@@ -548,7 +551,10 @@ func (a *Assembler) srcs(inst Instruction) []VReg {
 }
 
 func (a *Assembler) dst(inst Instruction) (VReg, bool) {
-	return a.vreg(inst.Dst)
+	if r, ok := inst.Dst.(VRegOperand); ok {
+		return r.Reg, true
+	}
+	return VReg{}, false
 }
 
 func (a *Assembler) vreg(op Operand) (VReg, bool) {
@@ -556,7 +562,14 @@ func (a *Assembler) vreg(op Operand) (VReg, bool) {
 	case VRegOperand:
 		return v.Reg, true
 	case MemOperand:
-		if b, ok := v.Base.(VRegOperand); ok {
+		return a.memBase(v)
+	}
+	return VReg{}, false
+}
+
+func (a *Assembler) memBase(op Operand) (VReg, bool) {
+	if m, ok := op.(MemOperand); ok {
+		if b, ok := m.Base.(VRegOperand); ok {
 			return b.Reg, true
 		}
 	}

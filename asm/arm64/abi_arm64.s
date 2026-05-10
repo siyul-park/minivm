@@ -11,7 +11,8 @@
 //
 // argv layout:
 //   argv[0]:              header
-//   argv[1..nReserved]:   scratch outputs — written after the call
+//   argv[1..nReserved]:   scratch inputs/outputs — loaded before the call and
+//                         written after the call
 //   argv[nReserved+1..]:  params in / returns out (max(nParams,nReturns) slots)
 //
 // Scratch registers are X10–X15. X8 and X9 are free for use as temporaries
@@ -29,44 +30,64 @@ TEXT ·invoke(SB), NOSPLIT, $0-16
     AND $0xFF, R9, R10           // R10 = nParams
     UBFX $24, R9, $8, R12       // R12 = paramTypes
 
-    CBZ R10, call
+    CBZ R10, load_reserved
     TBZ $0, R12, 1(PC); FMOVD 0(R14), F0
     TBZ $0, R12, 2(PC); B 2(PC); MOVD 0(R14), R0
-    SUB $1, R10; CBZ R10, call
+    SUB $1, R10; CBZ R10, load_reserved
 
     TBZ $1, R12, 1(PC); FMOVD 8(R14), F1
     TBZ $1, R12, 2(PC); B 2(PC); MOVD 8(R14), R1
-    SUB $1, R10; CBZ R10, call
+    SUB $1, R10; CBZ R10, load_reserved
 
     TBZ $2, R12, 1(PC); FMOVD 16(R14), F2
     TBZ $2, R12, 2(PC); B 2(PC); MOVD 16(R14), R2
-    SUB $1, R10; CBZ R10, call
+    SUB $1, R10; CBZ R10, load_reserved
 
     TBZ $3, R12, 1(PC); FMOVD 24(R14), F3
     TBZ $3, R12, 2(PC); B 2(PC); MOVD 24(R14), R3
-    SUB $1, R10; CBZ R10, call
+    SUB $1, R10; CBZ R10, load_reserved
 
     TBZ $4, R12, 1(PC); FMOVD 32(R14), F4
     TBZ $4, R12, 2(PC); B 2(PC); MOVD 32(R14), R4
-    SUB $1, R10; CBZ R10, call
+    SUB $1, R10; CBZ R10, load_reserved
 
     TBZ $5, R12, 1(PC); FMOVD 40(R14), F5
     TBZ $5, R12, 2(PC); B 2(PC); MOVD 40(R14), R5
-    SUB $1, R10; CBZ R10, call
+    SUB $1, R10; CBZ R10, load_reserved
 
     TBZ $6, R12, 1(PC); FMOVD 48(R14), F6
     TBZ $6, R12, 2(PC); B 2(PC); MOVD 48(R14), R6
-    SUB $1, R10; CBZ R10, call
+    SUB $1, R10; CBZ R10, load_reserved
 
     TBZ $7, R12, 1(PC); FMOVD 56(R14), F7
     TBZ $7, R12, 2(PC); B 2(PC); MOVD 56(R14), R7
 
-call:
-    MOVD addr+0(FP), R15
-    BL (R15)
+load_reserved:
+    // Load scratch inputs (X10-X15) from argv[1..nReserved].
+    MOVD argv+8(FP), R8         // R8 = argv
+    MOVD 0(R8), R9              // R9 = header
+    UBFX $16, R9, $8, R9        // R9 = nReserved
+    ADD $8, R8, R8              // R8 = argv+8 (scratch slots base)
 
-    // Save scratch outputs (X10–X15) to argv[1..nReserved].
-    // X8 and X9 are not scratch outputs, so R8 and R9 are free as temporaries.
+    CBZ R9, call
+    MOVD 0(R8), R10
+    SUB $1, R9; CBZ R9, call
+    MOVD 8(R8), R11
+    SUB $1, R9; CBZ R9, call
+    MOVD 16(R8), R12
+    SUB $1, R9; CBZ R9, call
+    MOVD 24(R8), R13
+    SUB $1, R9; CBZ R9, call
+    MOVD 32(R8), R14
+    SUB $1, R9; CBZ R9, call
+    MOVD 40(R8), R15
+
+call:
+    MOVD addr+0(FP), R9
+    BL (R9)
+
+    // Save reserved outputs (X10–X15) to argv[1..nReserved].
+    // X8 and X9 are not reserved inputs/outputs, so R8 and R9 are free as temporaries.
     MOVD argv+8(FP), R8         // R8 = argv
     MOVD 0(R8), R9              // R9 = header
     UBFX $16, R9, $8, R9       // R9 = nReserved

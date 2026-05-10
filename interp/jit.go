@@ -1,6 +1,8 @@
 package interp
 
 import (
+	"unsafe"
+
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
@@ -12,7 +14,7 @@ import (
 type jitCompiler struct {
 	assembler  *asm.Assembler
 	profile    *prof.Stats
-	funcIdx    int
+	addr       int
 	types      []types.Type
 	constants  []types.Boxed
 	heap       []types.Value
@@ -22,12 +24,20 @@ type jitCompiler struct {
 	compilable map[int]bool
 	sigs       map[int]*asm.Signature
 	blockEnd   int
-	scratch    asm.PReg
+	sp         asm.PReg
+	hp         asm.PReg
+	next       asm.PReg
 }
 
 var (
 	_PROLOGUE = len(jit) - 2
 	_EPILOGUE = len(jit) - 1
+)
+
+const (
+	reservedStack = iota
+	reservedHeap
+	reservedNextIP
 )
 
 var arch *asm.Arch
@@ -76,7 +86,7 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 
 	var branches []*analysis.BasicBlock
 	for _, b := range blocks {
-		if c.profile.HitsInRange(c.funcIdx, b.Start, b.End) == 0 {
+		if c.profile.HitsInRange(c.addr, b.Start, b.End) == 0 {
 			c.compilable[b.Start] = false
 			continue
 		}
@@ -144,11 +154,13 @@ func (c *jitCompiler) compile(b *analysis.BasicBlock) ([]*asm.RelocObject, []int
 func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, int, bool) {
 	c.ip = start
 	c.blockEnd = end
-	c.scratch = c.assembler.Reserve()
+	c.sp = c.assembler.Reserve()
+	c.hp = c.assembler.Reserve()
+	c.next = c.assembler.Reserve()
 
 	jit[_PROLOGUE](c)
 	if id, ok := c.labels[start]; ok {
-		c.assembler.Place(id)
+		c.assembler.Bind(id)
 	}
 
 	count := 0
@@ -235,6 +247,17 @@ func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpret
 		for j := range nParams {
 			params[j] = i.unbox64(i.stack[base+j])
 		}
+		if len(rsv) > reservedStack {
+			f := i.frame()
+			rsv[reservedStack] = uint64(uintptr(unsafe.Pointer(&i.stack[f.bp])))
+		}
+		if len(rsv) > reservedHeap {
+			if len(i.heap) > 0 {
+				rsv[reservedHeap] = uint64(uintptr(unsafe.Pointer(&i.heap[0])))
+			} else {
+				rsv[reservedHeap] = 0
+			}
+		}
 		rets, err := fn.Call(params, &rsv)
 		if err != nil {
 			panic(err)
@@ -243,7 +266,7 @@ func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpret
 			i.stack[base+j] = i.box64(rets[j], kind)
 		}
 		i.sp = base + len(kinds)
-		i.frames[i.fp-1].ip = int(rsv[0])
+		i.frames[i.fp-1].ip = int(rsv[reservedNextIP])
 	}
 }
 
@@ -266,4 +289,26 @@ func (c *jitCompiler) kinds(regs []asm.PReg) []types.Kind {
 		}
 	}
 	return kinds
+}
+
+func (c *jitCompiler) local(idx int) (types.Type, bool) {
+	if c.addr <= 0 || c.addr >= len(c.heap) {
+		return nil, false
+	}
+
+	fn, ok := c.heap[c.addr].(*types.Function)
+	if !ok || fn.Typ == nil {
+		return nil, false
+	}
+
+	if idx < len(fn.Typ.Params) {
+		return fn.Typ.Params[idx], true
+	}
+
+	idx -= len(fn.Typ.Params)
+	if idx < 0 || idx >= len(fn.Locals) {
+		return nil, false
+	}
+
+	return fn.Locals[idx], true
 }

@@ -14,16 +14,20 @@ var (
 )
 
 const (
-	tBits = 3
-	tMask = (1 << tBits) - 1
-	vBits = 52 - tBits
-	vMask = (1 << vBits) - 1
+	TBits = 3
+	TMask = (1 << TBits) - 1
+	VBits = 52 - TBits
+	VMask = (1 << VBits) - 1
 )
 
 var _ Value = Boxed(0)
 
+func Tag(kind Kind) uint64 {
+	return uint64(0x7FF)<<52 | uint64(kind)<<VBits
+}
+
 func IsBoxable(v int64) bool {
-	return uint64(v+vMask) <= 2*vMask
+	return uint64(v+VMask) <= 2*VMask
 }
 
 func BoxI32(v int32) Boxed {
@@ -31,7 +35,7 @@ func BoxI32(v int32) Boxed {
 }
 
 func BoxI64(v int64) Boxed {
-	return Box(uint64(v)&vMask, KindI64)
+	return Box(uint64(v)&VMask, KindI64)
 }
 
 func BoxF32(v float32) Boxed {
@@ -54,7 +58,7 @@ func BoxBool(b bool) Boxed {
 }
 
 func Box(v uint64, kind Kind) Boxed {
-	m := (uint64(kind) << vBits) | v
+	m := (uint64(kind) << VBits) | v
 	u := (uint64(0x7FF) << 52) | m
 	return Boxed(u)
 }
@@ -79,7 +83,7 @@ func Unbox(v Boxed) Value {
 func (v Boxed) Kind() Kind {
 	u := uint64(v)
 	if u>>52 == 0x7FF && u&0x000FFFFFFFFFFFFF != 0 {
-		return Kind((u >> vBits) & tMask)
+		return Kind((u >> VBits) & TMask)
 	}
 	return KindF64
 }
@@ -102,19 +106,19 @@ func (v Boxed) Type() Type {
 }
 
 func (v Boxed) I32() int32 {
-	return int32(v & vMask)
+	return int32(v & VMask)
 }
 
 func (v Boxed) I64() int64 {
-	i := int64(v & vMask)
-	if i>>(vBits-1) != 0 {
-		i |= ^vMask
+	i := int64(v & VMask)
+	if i>>(VBits-1) != 0 {
+		i |= ^VMask
 	}
 	return i
 }
 
 func (v Boxed) F32() float32 {
-	return math.Float32frombits(uint32(v & vMask))
+	return math.Float32frombits(uint32(v & VMask))
 }
 
 func (v Boxed) F64() float64 {
@@ -122,11 +126,11 @@ func (v Boxed) F64() float64 {
 }
 
 func (v Boxed) Bool() bool {
-	return (uint64(v) & vMask) != 0
+	return (uint64(v) & VMask) != 0
 }
 
 func (v Boxed) Ref() int {
-	return int(int32(v & vMask))
+	return int(int32(v & VMask))
 }
 
 func (v Boxed) String() string {

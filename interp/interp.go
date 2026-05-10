@@ -210,7 +210,7 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 					c := &jitCompiler{
 						assembler: asm.NewAssembler(arch, i.buffer),
 						profile:   i.prof,
-						funcIdx:   f.addr,
+						addr:      f.addr,
 						types:     i.types,
 						constants: i.constants,
 						heap:      i.heap,
@@ -235,7 +235,6 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 func (i *Interpreter) Context() context.Context {
 	return i.ctx
 }
-
 
 func (i *Interpreter) Const(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(i.constants) {

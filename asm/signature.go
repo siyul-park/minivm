@@ -11,7 +11,8 @@ package asm
 //	outputs: Returns[0], Returns[1], … — same registers (different direction)
 //
 // Reserved registers (Arch.Scratch) live outside the ABI range and carry
-// out-of-band metadata (e.g. next interpreter IP).
+// out-of-band inputs/outputs (e.g. VM context pointers in, next interpreter IP
+// out).
 type Signature struct {
 	Reserved []PReg
 	Params   []PReg

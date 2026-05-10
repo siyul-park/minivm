@@ -204,17 +204,17 @@ func init() {
     arch = <arch>.Arch
 
     // PROLOGUE: emitted at the start of each segment.
-    // Load the segment's exit IP into the scratch register so it is always set
+    // Load the segment's exit IP into the reserved nextIP register so it is always set
     // on return, even if the segment is later truncated.
     jit[_PROLOGUE] = func(c *jitCompiler) (bool, bool) {
-        c.assembler.Emits(<arch>.LDI(c.scratch, uint64(c.blockEnd))...)
+        c.assembler.Emits(<arch>.LDI(c.nextIP, uint64(c.blockEnd))...)
         return true, false
     }
 
     // EPILOGUE: emitted at the end of each non-terminating segment.
-    // Reload the (possibly truncated) exit IP into scratch, then return.
+    // Reload the (possibly truncated) exit IP into nextIP, then return.
     jit[_EPILOGUE] = func(c *jitCompiler) (bool, bool) {
-        c.assembler.Emits(<arch>.LDI(c.scratch, uint64(c.blockEnd))...)
+        c.assembler.Emits(<arch>.LDI(c.nextIP, uint64(c.blockEnd))...)
         c.assembler.Emit(<arch>.RET())
         return true, false
     }
