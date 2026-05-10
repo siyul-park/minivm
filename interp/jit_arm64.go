@@ -146,19 +146,19 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		val2, ok2 := c.assembler.Pop()
-		val1, ok1 := c.assembler.Pop()
+		v2, ok2 := c.assembler.Pop()
+		v1, ok1 := c.assembler.Pop()
 		if !ok1 || !ok2 {
 			return false, false
 		}
-		if val1.Type() != val2.Type() || val1.Width() != val2.Width() {
+		if v1.Type() != v2.Type() || v1.Width() != v2.Width() {
 			return false, false
 		}
 
-		result := c.assembler.NewVReg(val1.Type(), val1.Width())
+		result := c.assembler.NewVReg(v1.Type(), v1.Width())
 		c.assembler.Push(result)
 
-		isFloat := val1.Type() == asm.RegTypeFloat
+		isFloat := v1.Type() == asm.RegTypeFloat
 		lTrue := c.assembler.NewLabel()
 		lDone := c.assembler.NewLabel()
 
@@ -166,17 +166,17 @@ func init() {
 		c.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, lTrue))
 
 		if isFloat {
-			c.assembler.Emit(arm64.FMOV(result, val2))
+			c.assembler.Emit(arm64.FMOV(result, v2))
 		} else {
-			c.assembler.Emit(arm64.ADDI(result, val2, 0))
+			c.assembler.Emit(arm64.ADDI(result, v2, 0))
 		}
 		c.assembler.Emit(arm64.BLabel(lDone))
 
 		c.assembler.Bind(lTrue)
 		if isFloat {
-			c.assembler.Emit(arm64.FMOV(result, val1))
+			c.assembler.Emit(arm64.FMOV(result, v1))
 		} else {
-			c.assembler.Emit(arm64.ADDI(result, val1, 0))
+			c.assembler.Emit(arm64.ADDI(result, v1, 0))
 		}
 		c.assembler.Bind(lDone)
 

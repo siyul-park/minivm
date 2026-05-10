@@ -188,7 +188,7 @@ func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, in
 		}
 	}
 
-	if count < 4 {
+	if count <= 4 {
 		c.assembler.Abort()
 		return nil, c.ip, stop
 	}

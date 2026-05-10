@@ -126,16 +126,18 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			cond := i.stack[i.sp-1].I32()
-			var val types.Boxed
+			v2 := i.stack[i.sp-2]
+			v1 := i.stack[i.sp-3]
+			var result types.Boxed
 			if cond == 0 {
-				val = i.stack[i.sp-3]
-				i.stack[i.sp-3] = i.stack[i.sp-2]
+				result = v2
 			} else {
-				val = i.stack[i.sp-2]
+				result = v1
 			}
-			if val.Kind() == types.KindRef {
-				i.release(val.Ref())
+			if result.Kind() == types.KindRef {
+				i.release(result.Ref())
 			}
+			i.stack[i.sp-3] = result
 			i.sp -= 2
 			i.frames[i.fp-1].ip++
 		}
