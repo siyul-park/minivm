@@ -15,12 +15,12 @@ func init() {
 	arch = arm64.Arch
 
 	jit[_PROLOGUE] = func(c *jitCompiler) (bool, bool) {
-		c.assembler.Emits(arm64.LDI(c.next, uint64(c.blockEnd))...)
+		c.assembler.Emits(arm64.LDI(c.next, uint64(c.end))...)
 		return true, false
 	}
 
 	jit[_EPILOGUE] = func(c *jitCompiler) (bool, bool) {
-		c.assembler.Emits(arm64.LDI(c.next, uint64(c.blockEnd))...)
+		c.assembler.Emits(arm64.LDI(c.next, uint64(c.end))...)
 		c.assembler.Emit(arm64.RET())
 		return true, false
 	}

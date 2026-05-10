@@ -23,7 +23,7 @@ type jitCompiler struct {
 	labels     map[int]int
 	compilable map[int]bool
 	sigs       map[int]*asm.Signature
-	blockEnd   int
+	end        int
 	sp         asm.PReg
 	hp         asm.PReg
 	next       asm.PReg
@@ -153,7 +153,7 @@ func (c *jitCompiler) compile(b *analysis.BasicBlock) ([]*asm.RelocObject, []int
 
 func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, int, bool) {
 	c.ip = start
-	c.blockEnd = end
+	c.end = end
 	c.sp = c.assembler.Reserve()
 	c.hp = c.assembler.Reserve()
 	c.next = c.assembler.Reserve()
@@ -174,7 +174,7 @@ func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, in
 				c.assembler.Abort()
 				return nil, c.ip, false
 			}
-			c.blockEnd = prevIP
+			c.end = prevIP
 			jit[_EPILOGUE](c)
 			obj, err := c.assembler.Compile()
 			if err != nil {
