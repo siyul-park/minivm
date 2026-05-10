@@ -54,8 +54,8 @@ func (ra *RegAlloc) Alloc(vreg VReg) (PReg, error) {
 }
 
 func (ra *RegAlloc) Reserve(vreg VReg, preg PReg) error {
-	existing, ok := ra.phys[vreg.ID()]
-	if ok && existing == preg {
+	p, ok := ra.phys[vreg.ID()]
+	if ok && p == preg {
 		return nil
 	}
 	if ok {
