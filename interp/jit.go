@@ -37,7 +37,7 @@ var (
 const (
 	reservedStack = iota
 	reservedHeap
-	reservedNextIP
+	reservedNext
 )
 
 var arch *asm.Arch
@@ -266,7 +266,7 @@ func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpret
 			i.stack[base+j] = i.box64(rets[j], kind)
 		}
 		i.sp = base + len(kinds)
-		i.frames[i.fp-1].ip = int(rsv[reservedNextIP])
+		i.frames[i.fp-1].ip = int(rsv[reservedNext])
 	}
 }
 

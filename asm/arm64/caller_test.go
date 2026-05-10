@@ -44,8 +44,8 @@ func TestCaller_CallReservedInputOutput(t *testing.T) {
 	a := asm.NewAssembler(Arch, buf)
 	stack := a.Reserve()
 	heap := a.Reserve()
-	nextIP := a.Reserve()
-	a.Emit(ADD(nextIP, stack, heap))
+	next := a.Reserve()
+	a.Emit(ADD(next, stack, heap))
 	a.Emit(RET())
 
 	obj, err := a.Compile()
