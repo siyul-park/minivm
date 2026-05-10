@@ -18,16 +18,16 @@ import (
 // argv layout passed to invoke:
 //
 //	argv[0]:              header
-//	argv[1..nReserved]:   scratch inputs/outputs — loaded before the call and
+//	argv[1..nScratch]:   scratch inputs/outputs — loaded before the call and
 //	                      written after the call
-//	argv[nReserved+1..]:  params in / returns out
+//	argv[nScratch+1..]:  params in / returns out
 
 type caller struct {
-	header   uint64
-	chunk    *asm.Chunk
-	reserves []asm.PReg
-	params   []asm.PReg
-	returns  []asm.PReg
+	header  uint64
+	chunk   *asm.Chunk
+	params  []asm.PReg
+	returns []asm.PReg
+	scratch []asm.PReg
 }
 
 var _ asm.Caller = (*caller)(nil)
@@ -45,9 +45,9 @@ func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
 			return nil, fmt.Errorf("%w: return[%d] register %v is outside", asm.ErrTooManyReturns, i, p)
 		}
 	}
-	for i, p := range sig.Reserved {
+	for i, p := range sig.Scratch {
 		if p.ID() < abiRegs {
-			return nil, fmt.Errorf("%w: reserved[%d] register %v outside", asm.ErrInvalidArgs, i, p)
+			return nil, fmt.Errorf("%w: scratch[%d] register %v outside", asm.ErrInvalidArgs, i, p)
 		}
 	}
 
@@ -63,7 +63,7 @@ func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
 		}
 	}
 
-	nReserved := len(sig.Reserved)
+	nReserved := len(sig.Scratch)
 	header := uint64(len(sig.Params)) |
 		uint64(len(sig.Returns))<<8 |
 		uint64(nReserved)<<16 |
@@ -71,11 +71,11 @@ func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
 		uint64(returnTypes)<<32
 
 	return &caller{
-		header:   header,
-		chunk:    chunk,
-		reserves: append([]asm.PReg(nil), sig.Reserved...),
-		params:   append([]asm.PReg(nil), sig.Params...),
-		returns:  append([]asm.PReg(nil), sig.Returns...),
+		header:  header,
+		chunk:   chunk,
+		scratch: append([]asm.PReg(nil), sig.Scratch...),
+		params:  append([]asm.PReg(nil), sig.Params...),
+		returns: append([]asm.PReg(nil), sig.Returns...),
 	}, nil
 }
 
@@ -96,23 +96,23 @@ func (c *caller) Returns() []asm.RegType {
 }
 
 func (c *caller) Call(params []uint64, rsv *[]uint64) ([]uint64, error) {
-	nRsv := len(c.reserves)
 	nParams := len(c.params)
 	nReturns := len(c.returns)
+	nScratch := len(c.scratch)
 
 	// argv: [header, reserved×nRsv, values×max(nParams,nReturns)]
 	var stack [1 + 6 + 8]uint64 // 1 header + max 6 reserved + max 8 ABI regs
-	argv := stack[:1+nRsv+max(nParams, nReturns)]
+	argv := stack[:1+nScratch+max(nParams, nReturns)]
 	argv[0] = c.header
-	if rsv != nil && nRsv > 0 {
-		copy(argv[1:1+nRsv], (*rsv)[:min(len(*rsv), nRsv)])
+	if rsv != nil && nScratch > 0 {
+		copy(argv[1:1+nScratch], (*rsv)[:min(len(*rsv), nScratch)])
 	}
-	copy(argv[1+nRsv:], params[:min(len(params), nParams)])
+	copy(argv[1+nScratch:], params[:min(len(params), nParams)])
 
 	invoke(uintptr(c.chunk.Ptr()), uintptr(unsafe.Pointer(&argv[0])))
 
-	if rsv != nil && nRsv > 0 {
-		copy(*rsv, argv[1:1+nRsv])
+	if rsv != nil && nScratch > 0 {
+		copy(*rsv, argv[1:1+nScratch])
 	}
-	return argv[1+nRsv : 1+nRsv+nReturns], nil
+	return argv[1+nScratch : 1+nScratch+nReturns], nil
 }

@@ -23,10 +23,8 @@ type jitCompiler struct {
 	labels     map[int]int
 	compilable map[int]bool
 	sigs       map[int]*asm.Signature
+	scratch    []asm.PReg
 	end        int
-	sp         asm.PReg
-	hp         asm.PReg
-	next       asm.PReg
 }
 
 var (
@@ -35,9 +33,9 @@ var (
 )
 
 const (
-	reservedStack = iota
-	reservedHeap
-	reservedNext
+	rStack = iota
+	rHeap
+	rNext
 )
 
 var arch *asm.Arch
@@ -154,9 +152,9 @@ func (c *jitCompiler) compile(b *analysis.BasicBlock) ([]*asm.RelocObject, []int
 func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, int, bool) {
 	c.ip = start
 	c.end = end
-	c.sp = c.assembler.Reserve()
-	c.hp = c.assembler.Reserve()
-	c.next = c.assembler.Reserve()
+	c.scratch = append(c.scratch[:0], c.assembler.Scratch())
+	c.scratch = append(c.scratch, c.assembler.Scratch())
+	c.scratch = append(c.scratch, c.assembler.Scratch())
 
 	jit[_PROLOGUE](c)
 	if id, ok := c.labels[start]; ok {
@@ -190,7 +188,7 @@ func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, in
 		}
 	}
 
-	if count <= 4 {
+	if count < 4 {
 		c.assembler.Abort()
 		return nil, c.ip, stop
 	}
@@ -240,25 +238,25 @@ func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpret
 	nParams := len(sig.Params)
 	kinds := c.kinds(sig.Returns)
 	params := make([]uint64, nParams)
-	rsv := make([]uint64, len(sig.Reserved))
+	scratch := make([]uint64, len(sig.Scratch))
 
 	return func(i *Interpreter) {
 		base := i.sp - nParams
 		for j := range nParams {
 			params[j] = i.unbox64(i.stack[base+j])
 		}
-		if len(rsv) > reservedStack {
+		if len(scratch) > rStack {
 			f := i.frame()
-			rsv[reservedStack] = uint64(uintptr(unsafe.Pointer(&i.stack[f.bp])))
+			scratch[rStack] = uint64(uintptr(unsafe.Pointer(&i.stack[f.bp])))
 		}
-		if len(rsv) > reservedHeap {
+		if len(scratch) > rHeap {
 			if len(i.heap) > 0 {
-				rsv[reservedHeap] = uint64(uintptr(unsafe.Pointer(&i.heap[0])))
+				scratch[rHeap] = uint64(uintptr(unsafe.Pointer(&i.heap[0])))
 			} else {
-				rsv[reservedHeap] = 0
+				scratch[rHeap] = 0
 			}
 		}
-		rets, err := fn.Call(params, &rsv)
+		rets, err := fn.Call(params, &scratch)
 		if err != nil {
 			panic(err)
 		}
@@ -266,7 +264,7 @@ func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpret
 			i.stack[base+j] = i.box64(rets[j], kind)
 		}
 		i.sp = base + len(kinds)
-		i.frames[i.fp-1].ip = int(rsv[reservedNext])
+		i.frames[i.fp-1].ip = int(scratch[rNext])
 	}
 }
 

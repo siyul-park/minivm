@@ -117,3 +117,16 @@ func (ra *RegAlloc) Reset() {
 	ra.intAvail = ra.info.Allocatable(RegTypeInt)
 	ra.floatAvail = ra.info.Allocatable(RegTypeFloat)
 }
+
+func (ra *RegAlloc) Clone() *RegAlloc {
+	clone := &RegAlloc{
+		info:       ra.info,
+		phys:       make(map[int32]PReg),
+		intAvail:   ra.intAvail,
+		floatAvail: ra.floatAvail,
+	}
+	for k, v := range ra.phys {
+		clone.phys[k] = v
+	}
+	return clone
+}

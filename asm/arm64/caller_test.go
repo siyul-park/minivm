@@ -42,9 +42,9 @@ func TestCaller_CallReservedInputOutput(t *testing.T) {
 	defer buf.Free()
 
 	a := asm.NewAssembler(Arch, buf)
-	stack := a.Reserve()
-	heap := a.Reserve()
-	next := a.Reserve()
+	stack := a.Scratch()
+	heap := a.Scratch()
+	next := a.Scratch()
 	a.Emit(ADD(next, stack, heap))
 	a.Emit(RET())
 

@@ -47,11 +47,11 @@ func (a *Assembler) Bind(id int) {
 	if a.localLabels == nil {
 		a.localLabels = make(map[int]int)
 	}
-	a.localLabels[id] = len(a.insts) // points to next real instruction (0-byte pseudo)
+	a.localLabels[id] = len(a.insts)
 	a.insts = append(a.insts, Instruction{Op: OpPseudoLabel, Dst: Label(id)})
 }
 
-func (a *Assembler) Reserve() PReg {
+func (a *Assembler) Scratch() PReg {
 	mask := a.arch.Scratch
 	for range len(a.scratch) {
 		_, mask = mask.PopFirst()
@@ -164,15 +164,18 @@ func (a *Assembler) compile() (*Signature, []Instruction, error) {
 	}
 
 	saved := a.insts
+	snap := a.regAlloc.Clone()
 	a.insts = stripped
 
 	sig, err := a.signature()
 	if err != nil {
 		a.insts = saved
+		a.regAlloc = snap
 		return nil, nil, err
 	}
 	assigned, err := a.assign()
 	a.insts = saved
+	a.regAlloc = snap
 	if err != nil {
 		return nil, nil, err
 	}
@@ -364,15 +367,24 @@ func (a *Assembler) signature() (*Signature, error) {
 	}
 
 	return &Signature{
-		Reserved: append([]PReg(nil), a.scratch...),
-		Params:   params,
-		Returns:  returns,
+		Scratch: append([]PReg(nil), a.scratch...),
+		Params:  params,
+		Returns: returns,
 	}, nil
 }
 
 func (a *Assembler) assign() ([]Instruction, error) {
+	// Compute last-use index for each vreg.
+	// dst is registered first so that a write-only vreg is not freed before
+	// rewrite. src overwrites dst at the same index, which is correct: a vreg
+	// consumed as src at index i stays live until i.
 	last := make(map[int32]int)
 	for i, inst := range a.insts {
+		if dst, ok := a.dst(inst); ok {
+			if cur, ok := last[dst.ID()]; !ok || cur < i {
+				last[dst.ID()] = i
+			}
+		}
 		for _, v := range a.srcs(inst) {
 			last[v.ID()] = i
 		}
@@ -381,7 +393,11 @@ func (a *Assembler) assign() ([]Instruction, error) {
 	intRegs := a.allocatable(RegTypeInt)
 	floatRegs := a.allocatable(RegTypeFloat)
 
+	// physical: vreg → preg for the full lifetime, used by rewrite.
+	// live: currently allocated subset of physical, used to track frees.
+	// virtual: inverse of live (preg id → vreg), used for eviction checks.
 	physical := make(map[int32]PReg)
+	live := make(map[int32]PReg)
 	virtual := make(map[uint8]VReg)
 	fixed := make(map[int32]PReg)
 
@@ -420,6 +436,7 @@ func (a *Assembler) assign() ([]Instruction, error) {
 		}
 
 		physical[v.ID()] = p
+		live[v.ID()] = p
 		virtual[p.ID()] = v
 	}
 
@@ -435,6 +452,7 @@ func (a *Assembler) assign() ([]Instruction, error) {
 			}
 
 			physical[v.ID()] = p
+			live[v.ID()] = p
 			virtual[p.ID()] = v
 		}
 
@@ -451,11 +469,13 @@ func (a *Assembler) assign() ([]Instruction, error) {
 					if !occupied || owner.ID() == dst.ID() || (last[owner.ID()] == i && !fix) {
 						if occupied && owner.ID() != dst.ID() {
 							a.regAlloc.Free(owner)
+							delete(live, owner.ID())
 							delete(virtual, want.ID())
 						}
 
 						if err := a.regAlloc.Reserve(dst, want); err == nil {
 							physical[dst.ID()] = want
+							live[dst.ID()] = want
 							virtual[want.ID()] = dst
 							continue
 						}
@@ -468,6 +488,7 @@ func (a *Assembler) assign() ([]Instruction, error) {
 				}
 
 				physical[dst.ID()] = p
+				live[dst.ID()] = p
 				virtual[p.ID()] = dst
 			}
 		}
@@ -479,10 +500,11 @@ func (a *Assembler) assign() ([]Instruction, error) {
 			if _, ok := fixed[v.ID()]; ok {
 				continue
 			}
-			if p, ok := physical[v.ID()]; ok {
+			if p, ok := live[v.ID()]; ok {
 				a.regAlloc.Free(v)
-				delete(physical, v.ID())
+				delete(live, v.ID())
 				delete(virtual, p.ID())
+				// physical is intentionally kept for rewrite
 			}
 		}
 	}
@@ -495,6 +517,7 @@ func (a *Assembler) assign() ([]Instruction, error) {
 			return nil, err
 		}
 		physical[vid] = p
+		live[vid] = p
 	}
 
 	widths := make(map[int32]RegWidth, len(physical))
@@ -517,8 +540,12 @@ func (a *Assembler) assign() ([]Instruction, error) {
 		}
 	}
 
+	// Rewrite vregs to pregs, skipping pseudo-label instructions.
 	out := make([]Instruction, 0, len(a.insts))
 	for _, inst := range a.insts {
+		if inst.Op == OpPseudoLabel {
+			continue
+		}
 		out = append(out, a.rewrite(inst, physical, widths))
 	}
 

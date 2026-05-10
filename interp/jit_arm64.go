@@ -15,12 +15,12 @@ func init() {
 	arch = arm64.Arch
 
 	jit[_PROLOGUE] = func(c *jitCompiler) (bool, bool) {
-		c.assembler.Emits(arm64.LDI(c.next, uint64(c.end))...)
+		c.assembler.Emits(arm64.LDI(c.scratch[rNext], uint64(c.end))...)
 		return true, false
 	}
 
 	jit[_EPILOGUE] = func(c *jitCompiler) (bool, bool) {
-		c.assembler.Emits(arm64.LDI(c.next, uint64(c.end))...)
+		c.assembler.Emits(arm64.LDI(c.scratch[rNext], uint64(c.end))...)
 		c.assembler.Emit(arm64.RET())
 		return true, false
 	}
@@ -39,7 +39,7 @@ func init() {
 		if c.compilable[targetIP] && c.linkable(targetIP) {
 			c.assembler.Emit(arm64.BLabel(c.labels[targetIP]))
 		} else {
-			c.assembler.Emits(arm64.LDI(c.next, uint64(targetIP))...)
+			c.assembler.Emits(arm64.LDI(c.scratch[rNext], uint64(targetIP))...)
 			c.assembler.Emit(arm64.RET())
 		}
 		return true, true
@@ -84,7 +84,7 @@ func init() {
 			c.assembler.Emit(arm64.CBNZLabel(r0, takenStubLabel))
 			c.assembler.Emit(arm64.BLabel(c.labels[fallIP]))
 			c.assembler.Bind(takenStubLabel)
-			c.assembler.Emits(arm64.LDI(c.next, uint64(targetIP))...)
+			c.assembler.Emits(arm64.LDI(c.scratch[rNext], uint64(targetIP))...)
 			c.assembler.Emit(arm64.RET())
 			return true, true
 		}
@@ -93,7 +93,7 @@ func init() {
 		c.assembler.Emit(arm64.CBNZLabel(r0, takenStubLabel))
 		c.assembler.Emit(arm64.RET())
 		c.assembler.Bind(takenStubLabel)
-		c.assembler.Emits(arm64.LDI(c.next, uint64(targetIP))...)
+		c.assembler.Emits(arm64.LDI(c.scratch[rNext], uint64(targetIP))...)
 		c.assembler.Emit(arm64.RET())
 		return true, true
 	}
@@ -224,7 +224,7 @@ func init() {
 			if c.compilable[targetIP] && c.linkable(targetIP) {
 				c.assembler.Emit(arm64.BLabel(c.labels[targetIP]))
 			} else {
-				c.assembler.Emits(arm64.LDI(c.next, uint64(targetIP))...)
+				c.assembler.Emits(arm64.LDI(c.scratch[rNext], uint64(targetIP))...)
 				c.assembler.Emit(arm64.RET())
 			}
 		}
@@ -242,7 +242,7 @@ func init() {
 
 		offset := int16(idx * 8)
 		boxed := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Emit(arm64.LDR(boxed, c.sp, offset))
+		c.assembler.Emit(arm64.LDR(boxed, c.scratch[rStack], offset))
 		switch typ.Kind() {
 		case types.KindI32:
 			r0 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
@@ -308,7 +308,7 @@ func init() {
 		default:
 			return false, false
 		}
-		c.assembler.Emit(arm64.STR(boxed, c.sp, offset))
+		c.assembler.Emit(arm64.STR(boxed, c.scratch[rStack], offset))
 		return true, false
 	}
 
@@ -355,7 +355,7 @@ func init() {
 		default:
 			return false, false
 		}
-		c.assembler.Emit(arm64.STR(boxed, c.sp, offset))
+		c.assembler.Emit(arm64.STR(boxed, c.scratch[rStack], offset))
 		return true, false
 	}
 
@@ -1821,7 +1821,7 @@ func (c *jitCompiler) boxI64(r0 asm.VReg) asm.VReg {
 	c.assembler.Emit(arm64.BLabel(done))
 
 	c.assembler.Bind(slow)
-	c.assembler.Emits(arm64.LDI(c.next, uint64(c.ip-2))...)
+	c.assembler.Emits(arm64.LDI(c.scratch[rNext], uint64(c.ip-2))...)
 	c.assembler.Emit(arm64.RET())
 
 	c.assembler.Bind(done)
