@@ -457,7 +457,6 @@ func (a *Assembler) assign() ([]Instruction, error) {
 		}
 
 		if dst, ok := a.dst(inst); ok {
-			// assembler.go assign() 수정 부분
 			if _, exists := physical[dst.ID()]; !exists {
 				if want, ok := fixed[dst.ID()]; ok {
 					owner, occupied := virtual[want.ID()]

@@ -3,14 +3,10 @@ package asm
 import "errors"
 
 type RegAlloc struct {
-	info RegInfo
-
-	phys map[int32]PReg
-
-	intAvail   RegMask
-	floatAvail RegMask
-
-	// block은 mask와 독립적으로 관리해야 안전함
+	info         RegInfo
+	phys         map[int32]PReg
+	intAvail     RegMask
+	floatAvail   RegMask
 	blockedInt   RegMask
 	blockedFloat RegMask
 }
@@ -28,20 +24,15 @@ func NewRegAlloc(info RegInfo) *RegAlloc {
 	}
 }
 
-// 내부 helper: 실제 사용 가능한 mask 계산
-func (ra *RegAlloc) effectiveMask(t RegType) RegMask {
-	if t == RegTypeFloat {
-		return ra.floatAvail &^ ra.blockedFloat
-	}
-	return ra.intAvail &^ ra.blockedInt
-}
-
 func (ra *RegAlloc) Alloc(vreg VReg) (PReg, error) {
 	if phys, ok := ra.phys[vreg.ID()]; ok {
 		return phys, nil
 	}
 
-	mask := ra.effectiveMask(vreg.Type())
+	mask := ra.intAvail &^ ra.blockedInt
+	if vreg.Type() == RegTypeFloat {
+		mask = ra.floatAvail &^ ra.blockedFloat
+	}
 
 	id := mask.First()
 	if id == 0xFF {
