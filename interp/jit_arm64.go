@@ -298,7 +298,6 @@ func init() {
 			if !ok {
 				return false, false
 			}
-
 			boxed = c.boxF32(r0)
 		case types.KindF64:
 			r0, ok := c.assembler.Take(asm.RegTypeFloat, asm.Width64)
@@ -1822,12 +1821,10 @@ func (c *jitCompiler) boxI64(r0 asm.VReg) asm.VReg {
 	c.assembler.Emit(arm64.BLabel(done))
 
 	c.assembler.Bind(slow)
-
 	c.assembler.Emits(arm64.LDI(c.next, uint64(c.ip-2))...)
 	c.assembler.Emit(arm64.RET())
 
 	c.assembler.Bind(done)
-
 	return boxed
 }
 
