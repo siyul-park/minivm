@@ -2125,7 +2125,7 @@ func TestInterpreter_Run(t *testing.T) {
 				ctx, cancel := context.WithCancel(context.TODO())
 				defer cancel()
 
-				i := New(tt.program, WithTick(1), WithThreshold(1))
+				i := New(tt.program, WithTick(1), WithThreshold(1), WithEmit(1))
 				defer i.Close()
 
 				err := i.Run(ctx)

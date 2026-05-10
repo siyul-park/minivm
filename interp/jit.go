@@ -20,6 +20,7 @@ type jitCompiler struct {
 	heap       []types.Value
 	code       []byte
 	ip         int
+	emit       int
 	labels     map[int]int
 	compilable map[int]bool
 	sigs       map[int]*asm.Signature
@@ -188,7 +189,7 @@ func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, in
 		}
 	}
 
-	if count <= 4 {
+	if count < c.emit {
 		c.assembler.Abort()
 		return nil, c.ip, stop
 	}
