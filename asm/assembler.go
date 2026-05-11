@@ -519,7 +519,7 @@ func (a *Assembler) allocatable(typ RegType) []PReg {
 
 func (a *Assembler) uses(inst Instruction) []VReg {
 	var regs []VReg
-	if r, ok := a.memBase(inst.Dst); ok {
+	if r, ok := a.mbase(inst.Dst); ok {
 		regs = append(regs, r)
 	}
 	for _, op := range []Operand{inst.Src1, inst.Src2, inst.Src3} {
@@ -540,12 +540,12 @@ func (a *Assembler) vreg(op Operand) (VReg, bool) {
 	case VRegOperand:
 		return v.Reg, true
 	case MemOperand:
-		return a.memBase(v)
+		return a.mbase(v)
 	}
 	return VReg{}, false
 }
 
-func (a *Assembler) memBase(op Operand) (VReg, bool) {
+func (a *Assembler) mbase(op Operand) (VReg, bool) {
 	m, ok := op.(MemOperand)
 	if !ok {
 		return VReg{}, false

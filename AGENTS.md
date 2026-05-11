@@ -1,125 +1,163 @@
 # AGENTS.md
 
-This file provides guidance to AI coding agents (Claude Code, Codex, Cursor, etc.) working in this repository.
+This file guides AI coding agents working in this repository (`Claude Code`, `Codex`, `Cursor`, etc.).
 
 ---
 
 ## Quick Commands
 
 ```bash
-make test                                        # go test -race ./...
-go test -race -run TestFoo ./interp/...          # run a single test
-make benchmark                                   # go test -run="-" -bench=".*" -benchmem ./...
-make lint                                        # goimports -w . && go vet ./...
-make coverage                                    # produces coverage.out
-make build                                       # builds ./dist/minivm
-./dist/minivm                                    # launch the interactive assembly REPL
+make test                      # go test -race ./...
+make benchmark                 # go test -run="-" -bench=".*" -benchmem ./...
+make lint                      # goimports -w . && go vet ./...
+make coverage                  # generate coverage.out
+make build                     # build ./dist/minivm
+
+go test -race ./...
+go test -race -run TestFoo ./interp/...
+
+./dist/minivm                  # interactive assembly REPL
 ```
 
 ---
 
 ## Documentation Index
 
-**Read docs on demand — do not pre-load all of them.** Each entry states exactly when it is relevant.
+Read only what is relevant to the task.
 
-| Document | Read when… |
-|---|---|
-| [docs/architecture.md](../docs/architecture.md) | tracing execution flow, debugging across packages, understanding component boundaries |
-| [docs/value-representation.md](../docs/value-representation.md) | working in `types/`, passing values through JIT, debugging boxing/unboxing |
-| [docs/memory-model.md](../docs/memory-model.md) | writing threaded closures that touch refs, implementing host functions, modifying GC |
-| [docs/instruction-set.md](../docs/instruction-set.md) | adding or modifying opcodes, checking JIT coverage, debugging specific instructions |
-| [docs/jit-internals.md](../docs/jit-internals.md) | modifying `threaded.go` or `jit_arm64.go`, writing new opcode handlers |
-| [docs/pass-system.md](../docs/pass-system.md) | adding optimization passes, modifying `transform/` or `analysis/` |
-| [docs/coding-patterns.md](../docs/coding-patterns.md) | writing **any** new code in this repository |
-| [docs/guides/add-opcode.md](../docs/guides/add-opcode.md) | adding a new instruction end-to-end |
-| [docs/guides/add-architecture.md](../docs/guides/add-architecture.md) | adding a new JIT backend (e.g. x86-64) |
-| [docs/guides/repl.md](../docs/guides/repl.md) | using or extending the interactive REPL (`cmd/minivm`, `cmd/repl`) |
+| Document                                                              | Read when…                                        |
+| --------------------------------------------------------------------- | ------------------------------------------------- |
+| [docs/architecture.md](../docs/architecture.md)                       | tracing execution flow, debugging across packages |
+| [docs/value-representation.md](../docs/value-representation.md)       | modifying boxed values, JIT value passing         |
+| [docs/memory-model.md](../docs/memory-model.md)                       | touching refs, closures, GC, host functions       |
+| [docs/instruction-set.md](../docs/instruction-set.md)                 | adding or debugging opcodes                       |
+| [docs/jit-internals.md](../docs/jit-internals.md)                     | modifying threaded/JIT compilation                |
+| [docs/pass-system.md](../docs/pass-system.md)                         | adding optimization or analysis passes            |
+| [docs/coding-patterns.md](../docs/coding-patterns.md)                 | writing any new code                              |
+| [docs/guides/add-opcode.md](../docs/guides/add-opcode.md)             | implementing a new instruction                    |
+| [docs/guides/add-architecture.md](../docs/guides/add-architecture.md) | adding a new JIT backend                          |
+| [docs/guides/repl.md](../docs/guides/repl.md)                         | extending or debugging the REPL                   |
 
 ---
 
 ## Architecture Overview
 
-minivm is a bytecode VM with an adaptive JIT. Every function runs through a two-tier pipeline:
+minivm is a bytecode VM with an adaptive JIT.
 
-```
-program.Program (bytecode []byte + constants)
+```text
+program.Program
     │
-    ▼ interp.New()
-threadedCompiler → []func(*Interpreter)   one closure per byte offset, always
-    │
-    ▼ Interpreter.Run() — every 128 ticks, count hot-block hits
-    │ when hits reach threshold (default 4096 ticks):
     ▼
-jitCompiler → native ARM64               replaces closures in-place for hot segments
+threadedCompiler
+    │
+    ▼
+[]func(*Interpreter)
+    │
+    ▼
+Interpreter.Run()
+    │
+    ├─ executes threaded closures
+    └─ promotes hot blocks to JIT
+           │
+           ▼
+      native ARM64
 ```
 
-### Package Responsibilities
+Hot-block compilation:
 
-| Package | Responsibility |
-|---|---|
-| `program/` | Bytecode + constants container; entry point for program construction |
-| `instr/` | Opcode definitions, variable-width encoding/decoding, text formatter (`Format`), text parser (`Parse`/`ParseAll`) |
-| `types/` | Value types (`Boxed`, `Function`, `Array`, `Struct`, `String`) and NaN boxing |
-| `interp/` | Interpreter state, threaded compiler, JIT driver, host function bridge |
-| `asm/` | Virtual-register IR, linear-scan register allocator, executable memory buffer |
-| `asm/arm64/` | ARM64 encoder, ABI, caller trampoline |
-| `pass/` | Reflection-based pipeline (`Manager`, `Pass[T]`) |
-| `analysis/` | `BasicBlocksPass` (shared by JIT and optimizer) |
-| `transform/` | `ConstantFoldingPass`, `ConstantDeduplicationPass`, `DeadCodeEliminationPass` |
-| `optimize/` | `Optimizer` that wires passes into O0/O1 levels |
-| `cmd/repl/` | Interactive assembly REPL (`REPL` type, `Run` loop) |
-| `cmd/minivm/` | CLI entry point (cobra root command) |
+* execution counters update every 128 ticks
+* JIT threshold defaults to 4096 ticks
+* compiled native handlers replace threaded closures in-place
 
 ---
 
-## Self-Maintenance: Keeping Docs Accurate
+## Package Responsibilities
 
-When a user reports a mistake or an agent discovers a gap during a task, **consider** updating the relevant documentation. This is a judgment call — not every mistake requires a doc change.
-
-### When a doc update is worth it
-
-- The same mistake is likely to happen again without a written reminder.
-- A command, invariant, or package description in this file is factually wrong or outdated.
-- A useful doc exists but is missing from the [Documentation Index](#documentation-index).
-- A non-obvious constraint was discovered that no existing doc covers.
-
-### Which file to update
-
-There is no requirement to edit `AGENTS.md` specifically. Update whichever file is the most natural home for the information:
-
-- **Recurring gotcha or silent bug** → [Key Invariants](#key-invariants) in this file, or the relevant `docs/` page.
-- **Wrong or missing command** → [Quick Commands](#quick-commands) in this file.
-- **Architectural detail** → `docs/architecture.md` or the relevant doc listed in the index.
-- **Coding pattern or style rule** → `docs/coding-patterns.md`.
-- **New doc worth consulting conditionally** → add a row to the [Documentation Index](#documentation-index).
-
-If no existing doc is a good fit, add a minimal note here. If the fix is minor and self-evident, skip the doc update entirely.
-
-### Style rules when editing
-
-- Match the terse, imperative style of existing content.
-- One entry per distinct fact — do not bundle unrelated changes.
-- Document only what is concretely true in the current codebase; no speculative notes.
-- After editing, verify the file is valid Markdown (tables aligned, code fences closed).
+| Package       | Responsibility                                               |
+| ------------- | ------------------------------------------------------------ |
+| `program/`    | bytecode + constants container                               |
+| `instr/`      | opcode definitions, encoding, parsing, formatting            |
+| `types/`      | boxed values, arrays, structs, strings, NaN boxing           |
+| `interp/`     | interpreter, threaded compiler, JIT driver                   |
+| `asm/`        | virtual-register IR, register allocation, executable buffers |
+| `asm/arm64/`  | ARM64 encoder, ABI, trampolines                              |
+| `pass/`       | generic pass pipeline                                        |
+| `analysis/`   | shared analysis passes                                       |
+| `transform/`  | optimization transforms                                      |
+| `optimize/`   | optimization pipeline wiring                                 |
+| `cmd/repl/`   | interactive REPL                                             |
+| `cmd/minivm/` | CLI entrypoint                                               |
 
 ---
 
 ## Key Invariants
 
-> ⚠️ These are non-obvious rules that cause **silent bugs** when violated. Read before touching any related code.
+These rules cause silent corruption or invalid execution when violated.
 
-- **Heap index 0 is permanently `Null`** — allocated in `interp.New()`, never free it.
+### Runtime
 
-- **Threaded closure: advance `c.ip` at compile time, advance `f.ip` at runtime** — missing either causes wrong execution or infinite loops.
+* Heap index `0` is permanently `Null`.
+* `release()` must remain iterative, never recursive.
+* Threaded closure errors should `panic`; `interp.Run()` recovers and annotates `at=<ip>`.
 
-- **JIT handler: call `c.ip++` first, then `return false, false` on type mismatch** — never coerce mismatched types; the second bool signals termination (`true, true` for branch terminators).
+### Threaded Compiler
 
-- **`Buffer` ordering: `Unseal` → `Append` → `Seal` → `Call`** — wrong order triggers a signal on Apple Silicon.
+* Advance `c.ip` during compile time.
+* Advance `f.ip` during runtime execution.
+* Missing either causes invalid execution or infinite loops.
 
-- **`ConstantFoldingPass` pads with NOPs left-aligned** — the threaded NOP handler absorbs the gap at compile time; do not strip this padding.
+### JIT
 
-- **JIT emits a segment only when `count > 4`** — exactly 4 consecutive JIT-able instructions is not enough; threshold is strictly greater-than.
+* JIT handlers must call `c.ip++` first.
+* On type mismatch, return `false, false`.
+* Never coerce mismatched types.
+* Branch terminators return `true, true`.
+* JIT emits only when `count > 4`.
 
-- **`release()` is iterative, not recursive** — it uses an explicit stack to walk `Traceable.Refs()`.
+### Executable Buffers
 
-- **Errors in threaded closures should `panic`** — `interp.Run()` recovers and appends `at=<ip>` via `i.error(r)`.
+Always follow this order:
+
+```text
+Unseal → Append → Seal → Call
+```
+
+Incorrect ordering crashes on Apple Silicon.
+
+### Optimization
+
+* `ConstantFoldingPass` pads folded regions using left-aligned NOPs.
+* Do not strip folded padding.
+* Threaded NOP handlers absorb gaps during compilation.
+
+---
+
+## Coding Expectations
+
+* Match existing package structure and naming.
+* Prefer small, cohesive packages.
+* Avoid unnecessary abstractions.
+* Keep opcode handlers explicit and predictable.
+* Preserve interpreter/JIT behavioral parity.
+* Prefer table-driven tests where practical.
+* Avoid hidden control flow.
+
+---
+
+## Documentation Maintenance
+
+Update docs when:
+
+* an invariant caused a bug
+* a command became outdated
+* architecture changed
+* a recurring pitfall was discovered
+* a new important doc should be indexed
+
+Guidelines:
+
+* keep edits terse and factual
+* document only current behavior
+* avoid speculative notes
+* preserve formatting consistency
+* verify Markdown after edits
