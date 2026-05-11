@@ -34,20 +34,20 @@ var _ Value = F64Array(nil)
 var _ Traceable = (*Array)(nil)
 var _ Type = (*ArrayType)(nil)
 
-func (a I32Array) Kind() Kind  { return KindRef }
-func (a I32Array) Type() Type  { return TypeI32Array }
+func (a I32Array) Kind() Kind     { return KindRef }
+func (a I32Array) Type() Type     { return TypeI32Array }
 func (a I32Array) String() string { return joinElems(a.Type(), []I32(a)) }
 
-func (a I64Array) Kind() Kind  { return KindRef }
-func (a I64Array) Type() Type  { return TypeI64Array }
+func (a I64Array) Kind() Kind     { return KindRef }
+func (a I64Array) Type() Type     { return TypeI64Array }
 func (a I64Array) String() string { return joinElems(a.Type(), []I64(a)) }
 
-func (a F32Array) Kind() Kind  { return KindRef }
-func (a F32Array) Type() Type  { return TypeF32Array }
+func (a F32Array) Kind() Kind     { return KindRef }
+func (a F32Array) Type() Type     { return TypeF32Array }
 func (a F32Array) String() string { return joinElems(a.Type(), []F32(a)) }
 
-func (a F64Array) Kind() Kind  { return KindRef }
-func (a F64Array) Type() Type  { return TypeF64Array }
+func (a F64Array) Kind() Kind     { return KindRef }
+func (a F64Array) Type() Type     { return TypeF64Array }
 func (a F64Array) String() string { return joinElems(a.Type(), []F64(a)) }
 
 func NewArray(typ *ArrayType, elems ...Boxed) *Array {

@@ -2,8 +2,8 @@ package prof
 
 // Func holds execution-frequency data for one function.
 type Func struct {
-	Count uint64
-	Blocks  []uint64
+	Count  uint64
+	Blocks []uint64
 }
 
 // Stats records execution-frequency data during bytecode interpretation.
@@ -13,8 +13,8 @@ type Stats struct {
 }
 
 type funcData struct {
-	count uint64
-	blocks  []uint64
+	count  uint64
+	blocks []uint64
 }
 
 // New returns an empty Stats.

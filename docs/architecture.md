@@ -202,5 +202,5 @@ Thin cobra entry point. The root command (no subcommand) launches the REPL with 
 |-----|--------|
 | JIT excludes calls, variable access | function calls and local variable ops always run threaded |
 | No x86-64 backend | JIT inactive on Linux/Windows servers |
-| No benchmark suite | 4096-tick JIT threshold is unvalidated |
+| No benchmark suite | 8192-tick JIT threshold is unvalidated |
 ```
