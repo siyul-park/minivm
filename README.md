@@ -178,7 +178,7 @@ vm := interp.New(prog,
     interp.WithStack(4096),      // value stack slots    (default: 1024)
     interp.WithHeap(512),        // initial heap capacity (default: 128)
     interp.WithFrame(256),       // max call depth        (default: 128)
-    interp.WithThreshold(8192),  // ticks before JIT      (default: 4096)
+    interp.WithThreshold(4096),  // ticks before JIT      (default: 4096)
 )
 ```
 

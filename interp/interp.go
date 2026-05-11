@@ -104,7 +104,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		heap:      128,
 		tick:      128,
 		threshold: 4096,
-		emit:      4,
+		emit:      8,
 	}
 	for _, o := range opts {
 		o(&opt)
