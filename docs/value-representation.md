@@ -2,6 +2,16 @@
 
 How minivm represents all runtime values as a single `uint64`.
 
+## Agent Checklist
+
+Read this before editing `types/boxed.go`, numeric opcode handlers, JIT value passing, or code that converts between `types.Value` and `types.Boxed`.
+
+- `Boxed` is the VM stack/global currency.
+- `KindF64` is raw IEEE-754 unless the bits are tagged NaN space.
+- Large `I64` values can spill to heap as `types.I64` refs.
+- Unbox methods do not validate kind; check `Kind()` first.
+- Use `Interpreter.Load(ref)` for the heap object behind a `KindRef`.
+
 ## NaN Boxing
 
 `types.Boxed` is a `uint64`. The encoding exploits the IEEE-754 quiet-NaN space:

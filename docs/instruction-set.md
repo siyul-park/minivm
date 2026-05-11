@@ -2,6 +2,15 @@
 
 Complete opcode reference for minivm.
 
+## Agent Usage
+
+Use this as the semantic source of truth when adding or debugging opcodes.
+
+- Opcode byte order lives in `instr/opcode.go`; append new opcodes, do not insert between existing ones.
+- Operand widths live in `instr/type.go`; handler widths must match exactly.
+- Threaded behavior lives in `interp/threaded.go`; JIT status comes from `interp/jit_arm64.go`.
+- When changing semantics, update this table plus tests in `instr/` and `interp/`.
+
 All opcodes are 1 byte.
 Operands are fixed-width or length-prefixed.
 
@@ -75,7 +84,7 @@ skips 5 bytes past the end of the 3-byte `BR` instruction.
 | `DUP` | `{}` | `x → x x` | ✅ | Duplicate the top value. |
 | `SWAP` | `{}` | `a b → b a` | ✅ | Swap the top two stack values. |
 | `SELECT` | `{}` | `a b cond → x` | ✅ | Push `a` if `cond ≠ 0`, otherwise `b`. |
-| `UNREACHABLE` | `{}` | `→` | ⬜ | Trap with `ErrUnreachableExecuted`. Used as dead-code filler by DCE. |
+| `UNREACHABLE` | `{}` | `→` | ⬜ | Trap with `ErrUnreachableExecuted`. Used as dead-code filler before DCE compaction removes unreachable bytes. |
 
 ---
 
@@ -83,9 +92,9 @@ skips 5 bytes past the end of the 3-byte `BR` instruction.
 
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|
-| `BR` | `{2}` | `→` | ⬜ | Unconditional relative jump. |
-| `BR_IF` | `{2}` | `cond →` | ⬜ | Jump if `cond ≠ 0`, otherwise fall through. |
-| `BR_TABLE` | `{-2, 2}` | `index →` | ⬜ | Jump through a jump table. Out-of-range indices use the default target. |
+| `BR` | `{2}` | `→` | ◐ | Unconditional relative jump. JIT compiles only when the current segment has no pending return values. |
+| `BR_IF` | `{2}` | `cond →` | ◐ | Jump if `cond ≠ 0`, otherwise fall through. JIT compiles only simple stack shapes. |
+| `BR_TABLE` | `{-2, 2}` | `index →` | ◐ | Jump through a jump table. Out-of-range indices use the default target. JIT compiles only simple stack shapes. |
 | `CALL` | `{}` | `fn →` | ⬜ | Call `*Function` or `*HostFunction`. Pushes a new frame. |
 | `RETURN` | `{}` | `→` | ⬜ | Return from the current frame. |
 
@@ -98,10 +107,10 @@ skips 5 bytes past the end of the 3-byte `BR` instruction.
 | `GLOBAL_GET` | `{2}` | `→ x` | ⬜ | Push global at u16 index. |
 | `GLOBAL_SET` | `{2}` | `x →` | ⬜ | Store value to global at u16 index. |
 | `GLOBAL_TEE` | `{2}` | `x → x` | ⬜ | Store value to global and leave it on the stack. |
-| `LOCAL_GET` | `{1}` | `→ x` | ✅ | Push local at u8 index relative to the frame base pointer. |
-| `LOCAL_SET` | `{1}` | `x →` | ✅ | Store value to local at u8 index. |
-| `LOCAL_TEE` | `{1}` | `x → x` | ✅ | Store value to local and leave it on the stack. |
-| `CONST_GET` | `{2}` | `→ x` | ✅ | Push constant at u16 index. |
+| `LOCAL_GET` | `{1}` | `→ x` | ◐ | Push local at u8 index relative to the frame base pointer. JIT supports numeric function params/locals. |
+| `LOCAL_SET` | `{1}` | `x →` | ◐ | Store value to local at u8 index. JIT supports numeric function params/locals. |
+| `LOCAL_TEE` | `{1}` | `x → x` | ◐ | Store value to local and leave it on the stack. JIT supports numeric function params/locals. |
+| `CONST_GET` | `{2}` | `→ x` | ◐ | Push constant at u16 index. JIT supports boxed numeric constants. |
 
 ---
 

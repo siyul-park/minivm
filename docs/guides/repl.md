@@ -3,6 +3,16 @@
 The `minivm` binary provides an interactive REPL for writing and executing
 assembly instructions one at a time.
 
+## Agent Checklist
+
+Read this before editing `cmd/repl/`, `cmd/minivm/`, or text parsing behavior in `instr/`.
+
+- REPL execution reruns the full accumulated program each step.
+- `.const` parses function constants; `.type` parses type descriptors.
+- Absolute branch syntax (`@N`) is REPL sugar and normalizes to relative byte offsets before `instr.Parse`.
+- Keep formatted output pasteable back into the parser.
+- Verify with `go test ./cmd/repl ./cmd/minivm ./instr`.
+
 ## Usage
 
 ```bash
@@ -214,16 +224,9 @@ type 0 added.
 type 1 added.
 ```
 
-## What Does Not Work
+## JIT Limitations
 
-### `SELECT` instruction
-
-`SELECT` is not implemented in the threaded or JIT compiler; it panics if executed.
-
-### JIT limitations
-
-Loops, function calls, and variable access always run in the threaded interpreter
-(JIT covers only straight-line arithmetic and comparisons).
+Function calls, globals, references, arrays, structs, strings, and other heap-object operations always run in the threaded interpreter. ARM64 JIT covers straight-line numeric work plus selected stack operations, locals, constants, `select`, and branch instructions when the current stack shape can be represented by the native segment signature.
 
 ## Execution Model
 

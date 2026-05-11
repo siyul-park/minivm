@@ -2,6 +2,22 @@
 
 > Read before writing any new code.
 
+## Agent Fast Path
+
+Use this file as the style authority, but do not read all sections for every task.
+
+| If you are changing | Read |
+| --- | --- |
+| Function shape or helper extraction | 0. Core Principles, 1. Function Design |
+| Public APIs, constructors, builders, parsers | 2. Type & Interface Design, 3. API Design |
+| Errors or panic/recover behavior | 4. Error Design |
+| Architecture-specific files | 5. Build Tags |
+| Tests | 6. Testing |
+| Commits/PR text | 7. Git & PR Workflow |
+| Docs | 8. Documentation Maintenance |
+
+Default rule: match nearby code first; use this document when local style is unclear or a new pattern is needed.
+
 This repository prioritizes:
 
 - readability over cleverness

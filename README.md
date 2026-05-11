@@ -13,7 +13,7 @@ minivm gives your Go service a programmable runtime: assemble bytecode, expose G
 go get github.com/siyul-park/minivm
 ```
 
-> Requires Go 1.25+. Zero external dependencies.
+> Requires Go 1.25+. The VM core uses only the Go standard library; the CLI and tests use small Go module dependencies.
 
 ---
 
@@ -136,10 +136,10 @@ minivm runs a **two-tier pipeline** that requires no decisions from you:
                 startup
 bytecode ──────────────────► threaded closures
                                     │
-                            every 128 iterations:
-                            count hits per basic block
+                            every 128 instructions:
+                            record a function/IP sample
                                     │
-                    hits reach threshold (default 4096 ticks)
+                    samples reach threshold (default 4096 ticks)
                                     │
                                     ▼
                           jit compiler runs
@@ -147,9 +147,9 @@ bytecode ──────────────────► threaded clos
                           replaces closures in-place
 ```
 
-The JIT compiles numeric computation — arithmetic, bitwise ops, comparisons, and type conversions across i32/i64/f32/f64 — to native code. Control flow, function calls, and reference operations continue through the threaded tier. The threaded interpreter itself uses closure dispatch rather than a switch table, so it's fast even before JIT kicks in.
+The JIT compiles numeric computation — arithmetic, bitwise ops, comparisons, and type conversions across i32/i64/f32/f64 — to native code. It also handles selected stack operations, locals, constants, `select`, and branch instructions when the current stack shape can be represented by the native segment signature. Function calls, globals, references, and heap-object operations continue through the threaded tier. The threaded interpreter itself uses closure dispatch rather than a switch table, so it's fast even before JIT kicks in.
 
-**What this means in practice:** a compute-heavy loop will be slow for its first ~4096 iterations, then native-speed thereafter. There is nothing to tune unless you want to.
+**What this means in practice:** a compute-heavy loop runs in the interpreter for roughly its first 4096 executed instructions, then hot native segments take over. There is nothing to tune unless you want to.
 
 ---
 
@@ -179,6 +179,8 @@ vm := interp.New(prog,
     interp.WithHeap(512),        // initial heap capacity (default: 128)
     interp.WithFrame(256),       // max call depth        (default: 128)
     interp.WithThreshold(4096),  // ticks before JIT      (default: 4096)
+    interp.WithTick(128),        // profile sample period (default: 128)
+    interp.WithEmit(4),          // min JIT segment ops   (default: 4)
 )
 ```
 
@@ -190,8 +192,8 @@ vm := interp.New(prog,
 |---|---|
 | Threaded interpreter | ✅ |
 | AOT optimizer (O1) | ✅ |
-| ARM64 JIT — numeric ops | ✅ |
-| ARM64 JIT — control flow, calls | 🔲 planned |
+| ARM64 JIT — numeric ops, locals, branches | ✅ |
+| ARM64 JIT — calls, globals, refs | 🔲 planned |
 | x86-64 JIT | 🔲 planned |
 
 ---

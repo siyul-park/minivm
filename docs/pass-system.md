@@ -2,6 +2,18 @@
 
 How the analysis/transform/optimization pipeline works and how to write new passes.
 
+## Agent Checklist
+
+Before editing:
+- Identify whether the pass consumes `*program.Program`, `*types.Function`, or another cached type.
+- Use `m.Load` for current state and `m.Convert` for sub-pipelines.
+- Preserve in-place mutation expectations unless the existing pass returns a replacement.
+
+After editing:
+- Add package-local tests in `analysis/`, `transform/`, `optimize/`, or `pass/`.
+- For bytecode rewrites, verify branch offsets and constant/type indexes separately.
+- Run `go test ./analysis ./transform ./optimize ./pass`.
+
 ## pass.Manager Internals
 
 `pass.Manager` is a reflection-based pipeline dispatcher. It maps result types to the passes that produce them.
@@ -124,7 +136,7 @@ Before:  [I32_CONST 3][I32_CONST 4][I32_ADD]   (11 bytes)
 After:   [NOP][NOP][NOP][NOP][NOP][NOP][I32_CONST 7]  (11 bytes)
 ```
 
-The threaded NOP handler fast-forwards past all consecutive NOPs at compile time, making the padding free at runtime.
+The threaded NOP handler fast-forwards past all consecutive NOPs at runtime, so the left padding takes one dispatch for the whole run.
 
 Supported folds:
 - `I32_CONST × I32_CONST × op` for all arithmetic/bitwise/comparison ops
@@ -142,6 +154,6 @@ Scans all `CONST_GET` operands across all functions. If two constant indices poi
 ## DeadCodeEliminationPass
 
 1. Identifies basic blocks with no predecessors (`len(blk.Preds) == 0`) and marks all their bytes as `UNREACHABLE`.
-2. Compacts the bytecode: removes NOP runs and unreachable sequences by rewriting all branch offsets to account for the new byte positions.
+2. Compacts the bytecode: removes NOP runs and unreachable sequences by rewriting branch offsets to account for the new byte positions.
 
-The compaction step rewrites `BR`, `BR_IF`, `BR_TABLE`, `LOCAL_GET/SET/TEE`, `GLOBAL_GET/SET/TEE`, `CONST_GET`, `ARRAY_NEW`, `ARRAY_NEW_DEFAULT`, `STRUCT_NEW`, `STRUCT_NEW_DEFAULT`, `REF_TEST`, `REF_CAST` offsets.
+The compaction step rewrites only branch operands (`BR`, `BR_IF`, `BR_TABLE`). Other operands keep their original meaning because bytecode compaction changes instruction positions, not constant, type, global, or local indexes.

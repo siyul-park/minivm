@@ -2,6 +2,19 @@
 
 Detailed component design and data flow for minivm.
 
+## Agent Quick Map
+
+Read this when a change crosses package boundaries or you need to know where state lives.
+
+| If you touch | Also read |
+| --- | --- |
+| `interp/` runtime state, frames, globals | [memory-model.md](memory-model.md), [value-representation.md](value-representation.md) |
+| `interp/threaded.go` or `interp/jit*.go` | [jit-internals.md](jit-internals.md), [instruction-set.md](instruction-set.md) |
+| `analysis/`, `transform/`, `optimize/`, `pass/` | [pass-system.md](pass-system.md) |
+| `cmd/repl/` or `cmd/minivm/` | [guides/repl.md](guides/repl.md) |
+
+Keep package boundaries stable: `instr` must stay leaf-like, `types` must not import `interp`, and optimizer code should flow through `pass.Manager`.
+
 ## Package Dependency Graph
 
 Arrows show import direction (A → B means package A imports package B).
@@ -17,6 +30,7 @@ interp ──► types    asm ──► asm/arm64                        │    
    │       │         ▲                                        │        │
    ├───────┘         │                                        │        │
    ├────────────────►┘  (jit_arm64.go via init())            │        │
+   ├──► prof                                                  │        │
    │                                                          │        │
    ├──► pass                                                  │        │
    │    └── manager.go  (reflection-based pipeline)           │        │
@@ -35,7 +49,7 @@ optimize ──► transform, analysis, pass, program
 cmd/repl ──► instr, interp, program, types
    ▲
    │
-cmd/minivm ──► cmd/repl   (cobra CLI entry point)
+cmd/minivm ──► cmd/repl, cobra
 ```
 
 **Simplified view** (most important paths):
@@ -91,7 +105,7 @@ The interpreter owns all runtime state in `Interpreter`:
 |---|---|
 | `instrs [][]byte` | raw bytecode per function slot |
 | `code [][]func(*Interpreter)` | threaded closures per function slot |
-| `hits [][]uint64` | hot-block hit counters per function slot |
+| `prof *prof.Stats` | aggregate and per-IP execution samples |
 | `frames []frame` | call stack (addr, ip, bp) |
 | `stack []Boxed` | value stack |
 | `heap []Value` | flat heap array |
@@ -102,7 +116,7 @@ The interpreter owns all runtime state in `Interpreter`:
 
 **`threadedCompiler`** (in `threaded.go`): A `[256]func` table populated in `init()`. Each entry is a compile-time function that reads operands from `c.code[c.ip+N:]`, advances `c.ip`, and returns a runtime closure. The closure captures compile-time constants and advances `f.ip` by the instruction width when executed.
 
-**`jitCompiler`** (in `jit.go`): Architecture-agnostic driver. Runs `BasicBlocksPass` to find block boundaries. For each block, `compile(b)` calls `segment(code, start, end)` in a loop to extract every maximal consecutive run of compilable instructions. A segment is emitted only when `count > 4` (strictly). Within each block, multiple independent segments may be produced. A two-pass strategy (non-terminated blocks first, then branch-terminated blocks) ensures branch targets have known signatures before linking decisions are made. All compiled segments across a function are linked together via `assembler.Link()`, which patches cross-segment label relocations. Each linked segment is installed as a closure at `out[entryIP]`.
+**`jitCompiler`** (in `jit.go`): Architecture-agnostic driver. Runs `BasicBlocksPass` to find block boundaries. For each block, `compile(b)` calls `segment(code, start, end)` in a loop to extract every maximal consecutive run of compilable instructions. Completed segments emit when they reach `WithEmit`'s minimum instruction count (default 4); a segment cut short by an unsupported instruction is kept only after more than 4 compiled instructions. Within each block, multiple independent segments may be produced. A two-pass strategy (non-terminated blocks first, then branch-terminated blocks) ensures branch targets have known signatures before linking decisions are made. All compiled segments across a function are linked together via `assembler.Link()`, which patches cross-segment label relocations. Each linked segment is installed as a closure at `out[entryIP]`.
 
 **`HostFunction`** (in `host.go`): Wraps a Go `func(i *Interpreter, params []Boxed) ([]Boxed, error)` as a `types.Value`. Stored in the constant table and called with `CONST_GET` + `CALL` like any `*types.Function`.
 
@@ -157,15 +171,17 @@ All transform passes operate on `*program.Program` in-place by mutating `prog.Co
 | Field | Purpose |
 |---|---|
 | `instrs []instr.Instruction` | accumulated instruction history (used only by `.show` and `.reset`) |
-| `stack []types.Value` | stack values carried across instruction steps |
+| `codeLen int` | byte length of accumulated instruction history, used for absolute branch normalization |
+| `constants []types.Value` | function constants declared with `.const` |
+| `types []types.Type` | type descriptors declared with `.type` |
 
-For each new instruction the REPL creates a fresh single-instruction `program.Program`, initializes a new `interp.Interpreter`, pre-pushes the saved stack values, runs the one instruction, then collects the resulting stack back. This keeps execution cost O(1) per step.
+For each new instruction the REPL builds a fresh `program.Program` from the accumulated history plus the new instruction, initializes a new `interp.Interpreter`, runs the full program, and prints the resulting stack. Accepted instructions, constants, and types are kept as source history; heap objects are recreated on each step so references remain valid. Execution cost is O(N) per step for N accumulated instructions.
 
-On error the stack and history are not updated, so the session remains consistent. `.reset` sets both fields to `nil`.
+On error the new instruction is not committed, so the session remains consistent. `.reset` clears instruction history, code length, constants, and types.
 
 ### `cmd/minivm/`
 
-Thin cobra entry point. The root command (no subcommand) launches the REPL with `os.Stdin` / `os.Stdout`. Cobra provides `--help` and `--version` automatically. Future subcommands (e.g. `run <file>`) can be added here with no changes to `cmd/repl`.
+Thin cobra entry point. The root command (no subcommand) launches the REPL with `os.Stdin` / `os.Stdout`. Cobra provides `--help`. Future subcommands (e.g. `run <file>`) can be added here with no changes to `cmd/repl`.
 
 ## Execution Flow (detailed)
 
@@ -183,11 +199,11 @@ Thin cobra entry point. The root command (no subcommand) launches the REPL with 
 
 4. interp.Run(ctx)
    ├─ main loop: code[f.ip](i)
-   ├─ every 128 iters: hits[addr][0]++, hits[addr][ip+1]++
-   └─ when hits[addr][0] == threshold:
+   ├─ every 128 instructions: prof.Record(addr, ip)
+   └─ when prof.Count(addr) == threshold/tick:
        jitCompiler.Compile(instrs[addr])
        └─ two-pass over basic blocks:
-           ├─ pass 1: for each block, segment() loop → segments with count > 4
+           ├─ pass 1: for each sampled block, segment() loop → emit eligible segments
            │   non-terminated segments → objs; terminated blocks → deferred
            ├─ pass 2: recompile terminated blocks with full signature knowledge
            ├─ assembler.Link(objs) → patches cross-segment relocations → []Caller
@@ -195,12 +211,12 @@ Thin cobra entry point. The root command (no subcommand) launches the REPL with 
 
 5. interp.Close()
    └─ buffer.Free() → munmap
+```
 
 ## Known Gaps
 
 | Gap | Impact |
 |-----|--------|
-| JIT excludes calls, variable access | function calls and local variable ops always run threaded |
+| JIT excludes calls, globals, refs, heap objects | these operations always run threaded |
 | No x86-64 backend | JIT inactive on Linux/Windows servers |
-| No benchmark suite | 4096-tick JIT threshold is unvalidated |
-```
+| Benchmark coverage is narrow | default JIT thresholds are still workload-dependent |
