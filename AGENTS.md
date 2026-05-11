@@ -29,6 +29,10 @@ go test -race -run TestFoo ./interp/...
 4. Update docs when behavior, invariants, commands, or recurring pitfalls change.
 5. Run the narrow test first, then `go test ./...` or `make test` when risk is broader.
 
+## Local Hooks
+
+`.codex/hooks.json` runs `goimports` after `Edit`, `MultiEdit`, or `Write` touches a `.go` file, using either `goimports` on `PATH` or `$HOME/go/bin/goimports`. Still run `make lint` before finishing code changes because hooks are best-effort.
+
 ## Task Router
 
 | Task | Start here | Usually edit | Verify |

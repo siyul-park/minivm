@@ -96,6 +96,7 @@ func WithThreshold(val int) func(*option) {
 func WithEmit(val int) func(*option) {
 	return func(o *option) { o.emit = val }
 }
+
 func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	opt := option{
 		frame:     128,
