@@ -1851,7 +1851,6 @@ func TestInterpreter_Context(t *testing.T) {
 	require.Equal(t, ctx, i.Context())
 }
 
-
 func TestInterpreter_Push(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
 		i := New(program.New(nil))
@@ -2100,23 +2099,45 @@ func TestInterpreter_Reset(t *testing.T) {
 }
 
 func TestInterpreter_Run(t *testing.T) {
-	for _, tt := range tests {
-		t.Run(tt.program.String(), func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.TODO())
-			defer cancel()
+	t.Run("default", func(t *testing.T) {
+		for _, tt := range tests {
+			t.Run(tt.program.String(), func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.TODO())
+				defer cancel()
 
-			i := New(tt.program)
-			defer i.Close()
+				i := New(tt.program)
+				defer i.Close()
 
-			err := i.Run(ctx)
-			require.NoError(t, err)
-			for _, val := range tt.values {
-				v, err := i.Pop()
+				err := i.Run(ctx)
 				require.NoError(t, err)
-				require.Equal(t, val, v)
-			}
-		})
-	}
+				for _, val := range tt.values {
+					v, err := i.Pop()
+					require.NoError(t, err)
+					require.Equal(t, val, v)
+				}
+			})
+		}
+	})
+
+	t.Run("jit", func(t *testing.T) {
+		for _, tt := range tests {
+			t.Run(tt.program.String(), func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.TODO())
+				defer cancel()
+
+				i := New(tt.program, WithTick(1), WithThreshold(1), WithEmit(1))
+				defer i.Close()
+
+				err := i.Run(ctx)
+				require.NoError(t, err)
+				for _, val := range tt.values {
+					v, err := i.Pop()
+					require.NoError(t, err)
+					require.Equal(t, val, v)
+				}
+			})
+		}
+	})
 }
 
 func BenchmarkInterpreter_Run(b *testing.B) {

@@ -2,6 +2,18 @@
 
 Step-by-step checklist for adding a new instruction end-to-end.
 
+## Agent Summary
+
+Files usually touched, in order:
+
+1. `instr/opcode.go`
+2. `instr/type.go`
+3. `interp/threaded.go`
+4. `interp/jit_arm64.go` if ARM64 JIT support is practical
+5. `instr/*_test.go`, `interp/interp_test.go`, and this guide/reference docs
+
+Do not skip threaded support. JIT is optional; threaded fallback is mandatory.
+
 ## Before You Start
 
 Read [docs/jit-internals.md](../jit-internals.md) for the threaded/JIT handler contracts.  
@@ -111,7 +123,7 @@ Add an entry to the `jit [256]func` table inside the `init()` function. If JIT i
 
 ```go
 jit[instr.I32_MY_OP] = func(c *jitCompiler) (bool, bool) {
-    c.ip++  // MUST be first, even if returning false, false
+    c.ip++  // MUST happen before any return, even false, false
 
     // Pop operands from the VReg stack
     r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
@@ -135,7 +147,7 @@ The two return bools are `(ok, stop)`:
 - `true, true` — compiled and block terminates (branch instructions only; they emit their own `RET`)
 
 **Checklist for the JIT handler:**
-- [ ] `c.ip++` is the first statement
+- [ ] `c.ip` advances before every return path
 - [ ] `Take` called with correct `RegType` and `RegWidth` — returns `false, false` on mismatch
 - [ ] All VRegs used in `Emit` were obtained from `Take` or `NewVReg`
 - [ ] Result VReg pushed with `Push`

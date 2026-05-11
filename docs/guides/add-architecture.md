@@ -2,6 +2,16 @@
 
 Step-by-step checklist for adding a JIT backend for a new CPU architecture (e.g. x86-64).
 
+## Agent Summary
+
+Adding an architecture is a cross-cutting change. Keep the write set explicit:
+
+- `asm/<arch>/`: register model, encoder, ABI, trampoline/caller, stubs, tests
+- `interp/jit_<arch>.go`: `arch` selection, prologue/epilogue, opcode handlers
+- docs: this guide plus [jit-internals.md](../jit-internals.md) if the backend contract changes
+
+Do not change ARM64 behavior while adding another backend unless a shared `asm/` contract requires it.
+
 ## Before You Start
 
 Read [docs/jit-internals.md](../jit-internals.md) — particularly the Assembler API, Buffer lifecycle, and JIT handler contract sections.  
@@ -36,7 +46,7 @@ var Arch = &asm.Arch{
     Registers: NewRegInfo(),
     Encoder:   NewEncoder(),
     ABI:       NewABI(),
-    // Scratch lists caller-saved registers reserved for out-of-band JIT metadata
+    // Scratch lists caller-saved registers used for out-of-band JIT metadata
     // (e.g., the next interpreter IP). These must NOT overlap with the ABI
     // param/return range. Leave at least 2 registers outside Scratch free for
     // use as temporaries in the invoke trampoline after BL.
@@ -204,17 +214,17 @@ func init() {
     arch = <arch>.Arch
 
     // PROLOGUE: emitted at the start of each segment.
-    // Load the segment's exit IP into the scratch register so it is always set
+    // Load the segment's exit IP into the scratch next register so it is always set
     // on return, even if the segment is later truncated.
     jit[_PROLOGUE] = func(c *jitCompiler) (bool, bool) {
-        c.assembler.Emits(<arch>.LDI(c.scratch, uint64(c.blockEnd))...)
+        c.assembler.Emits(<arch>.LDI(c.scratch[rNext], uint64(c.end))...)
         return true, false
     }
 
     // EPILOGUE: emitted at the end of each non-terminating segment.
-    // Reload the (possibly truncated) exit IP into scratch, then return.
+    // Reload the (possibly truncated) exit IP into next, then return.
     jit[_EPILOGUE] = func(c *jitCompiler) (bool, bool) {
-        c.assembler.Emits(<arch>.LDI(c.scratch, uint64(c.blockEnd))...)
+        c.assembler.Emits(<arch>.LDI(c.scratch[rNext], uint64(c.end))...)
         c.assembler.Emit(<arch>.RET())
         return true, false
     }
@@ -261,8 +271,8 @@ func init() {
 make test
 make lint
 
-# Check that JIT is active (buffer should be non-nil after hot-block threshold):
+# Check that JIT is active (buffer should be non-nil after hot-function threshold):
 GOARCH=<arch> go test -race -v ./interp/... -run TestInterpreter_Run
 ```
 
-The JIT activates after a function's hot-block counter crosses the threshold (default 4096 ticks). Tests that run programs in a loop will exercise the JIT path.
+The interpreter records one profile sample every `WithTick` instructions (default 128). The JIT activates for a function when its aggregate sample count reaches `WithThreshold / WithTick` (default 4096 / 128 = 32 samples), and compiles only basic blocks that have at least one sample.

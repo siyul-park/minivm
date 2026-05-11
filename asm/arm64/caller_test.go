@@ -35,3 +35,27 @@ func TestCaller_Call(t *testing.T) {
 	require.Len(t, rets, 1)
 	require.Equal(t, []uint64{2}, rets)
 }
+
+func TestCaller_CallReservedInputOutput(t *testing.T) {
+	buf, err := asm.NewBuffer(128)
+	require.NoError(t, err)
+	defer buf.Free()
+
+	a := asm.NewAssembler(Arch, buf)
+	stack := a.Scratch()
+	heap := a.Scratch()
+	next := a.Scratch()
+	a.Emit(ADD(next, stack, heap))
+	a.Emit(RET())
+
+	obj, err := a.Compile()
+	require.NoError(t, err)
+	callers, err := a.Link([]*asm.RelocObject{obj})
+	require.NoError(t, err)
+	require.Len(t, callers, 1)
+
+	rsv := []uint64{11, 31, 0}
+	_, err = callers[0].Call(nil, &rsv)
+	require.NoError(t, err)
+	require.Equal(t, uint64(42), rsv[2])
+}

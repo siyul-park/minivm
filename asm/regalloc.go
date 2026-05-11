@@ -3,20 +3,24 @@ package asm
 import "errors"
 
 type RegAlloc struct {
-	info       RegInfo
-	phys       map[int32]PReg
-	intAvail   RegMask
-	floatAvail RegMask
+	info         RegInfo
+	phys         map[int32]PReg
+	intAvail     RegMask
+	floatAvail   RegMask
+	blockedInt   RegMask
+	blockedFloat RegMask
 }
 
 var ErrNoRegistersAvailable = errors.New("no registers available")
 
 func NewRegAlloc(info RegInfo) *RegAlloc {
 	return &RegAlloc{
-		info:       info,
-		phys:       make(map[int32]PReg),
-		intAvail:   info.Allocatable(RegTypeInt),
-		floatAvail: info.Allocatable(RegTypeFloat),
+		info:         info,
+		phys:         make(map[int32]PReg),
+		intAvail:     info.Allocatable(RegTypeInt),
+		floatAvail:   info.Allocatable(RegTypeFloat),
+		blockedInt:   0,
+		blockedFloat: 0,
 	}
 }
 
@@ -25,11 +29,9 @@ func (ra *RegAlloc) Alloc(vreg VReg) (PReg, error) {
 		return phys, nil
 	}
 
-	var mask RegMask
+	mask := ra.intAvail &^ ra.blockedInt
 	if vreg.Type() == RegTypeFloat {
-		mask = ra.floatAvail
-	} else {
-		mask = ra.intAvail
+		mask = ra.floatAvail &^ ra.blockedFloat
 	}
 
 	id := mask.First()
@@ -37,12 +39,12 @@ func (ra *RegAlloc) Alloc(vreg VReg) (PReg, error) {
 		return PReg{}, ErrNoRegistersAvailable
 	}
 
-	_, mask = mask.PopFirst()
+	_, newMask := mask.PopFirst()
 
 	if vreg.Type() == RegTypeFloat {
-		ra.floatAvail = mask
+		ra.floatAvail = newMask
 	} else {
-		ra.intAvail = mask
+		ra.intAvail = newMask
 	}
 
 	p := NewPReg(id, vreg.Type(), vreg.Width())
@@ -52,30 +54,27 @@ func (ra *RegAlloc) Alloc(vreg VReg) (PReg, error) {
 }
 
 func (ra *RegAlloc) Reserve(vreg VReg, preg PReg) error {
-	if existing, ok := ra.phys[vreg.ID()]; ok {
-		if existing == preg {
-			return nil
-		}
-		return ErrNoRegistersAvailable
+	p, ok := ra.phys[vreg.ID()]
+	if ok && p == preg {
+		return nil
+	}
+	if ok {
+		ra.Free(vreg)
 	}
 
 	var mask RegMask
 	if preg.Type() == RegTypeFloat {
 		mask = ra.floatAvail
+		if !mask.Contains(preg.ID()) || ra.blockedFloat.Contains(preg.ID()) {
+			return ErrNoRegistersAvailable
+		}
+		ra.floatAvail = mask.Clear(preg.ID())
 	} else {
 		mask = ra.intAvail
-	}
-
-	if !mask.Contains(preg.ID()) {
-		return ErrNoRegistersAvailable
-	}
-
-	mask = mask.Clear(preg.ID())
-
-	if preg.Type() == RegTypeFloat {
-		ra.floatAvail = mask
-	} else {
-		ra.intAvail = mask
+		if !mask.Contains(preg.ID()) || ra.blockedInt.Contains(preg.ID()) {
+			return ErrNoRegistersAvailable
+		}
+		ra.intAvail = mask.Clear(preg.ID())
 	}
 
 	ra.phys[vreg.ID()] = preg
@@ -90,10 +89,15 @@ func (ra *RegAlloc) Free(vreg VReg) {
 
 	delete(ra.phys, vreg.ID())
 
-	if preg.Type() == RegTypeFloat {
-		ra.floatAvail = ra.floatAvail.Set(preg.ID())
-	} else {
-		ra.intAvail = ra.intAvail.Set(preg.ID())
+	switch preg.Type() {
+	case RegTypeFloat:
+		if !ra.blockedFloat.Contains(preg.ID()) {
+			ra.floatAvail = ra.floatAvail.Set(preg.ID())
+		}
+	default:
+		if !ra.blockedInt.Contains(preg.ID()) {
+			ra.intAvail = ra.intAvail.Set(preg.ID())
+		}
 	}
 }
 
@@ -102,18 +106,40 @@ func (ra *RegAlloc) Get(vreg VReg) (PReg, bool) {
 	return p, ok
 }
 
-// Block removes preg from the pool available for general VReg allocation.
-// Reset() restores all blocked registers.
 func (ra *RegAlloc) Block(preg PReg) {
-	if preg.Type() == RegTypeFloat {
+	switch preg.Type() {
+	case RegTypeFloat:
+		ra.blockedFloat = ra.blockedFloat.Set(preg.ID())
 		ra.floatAvail = ra.floatAvail.Clear(preg.ID())
-	} else {
+	default:
+		ra.blockedInt = ra.blockedInt.Set(preg.ID())
 		ra.intAvail = ra.intAvail.Clear(preg.ID())
 	}
 }
 
 func (ra *RegAlloc) Reset() {
 	clear(ra.phys)
+
 	ra.intAvail = ra.info.Allocatable(RegTypeInt)
 	ra.floatAvail = ra.info.Allocatable(RegTypeFloat)
+
+	ra.blockedInt = 0
+	ra.blockedFloat = 0
+}
+
+func (ra *RegAlloc) Clone() *RegAlloc {
+	clone := &RegAlloc{
+		info:         ra.info,
+		phys:         make(map[int32]PReg),
+		intAvail:     ra.intAvail,
+		floatAvail:   ra.floatAvail,
+		blockedInt:   ra.blockedInt,
+		blockedFloat: ra.blockedFloat,
+	}
+
+	for k, v := range ra.phys {
+		clone.phys[k] = v
+	}
+
+	return clone
 }

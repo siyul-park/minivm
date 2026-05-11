@@ -31,6 +31,7 @@ type Interpreter struct {
 	sp        int
 	tick      int
 	threshold uint64
+	emit      int
 }
 
 type frame struct {
@@ -48,6 +49,7 @@ type option struct {
 	heap      int
 	tick      int
 	threshold int
+	emit      int
 }
 
 var (
@@ -62,6 +64,10 @@ var (
 	ErrDivideByZero        = errors.New("divide by zero")
 	ErrIndexOutOfRange     = errors.New("index out of range")
 )
+
+func WithProfile(p *prof.Stats) func(*option) {
+	return func(o *option) { o.profile = p }
+}
 
 func WithFrame(val int) func(*option) {
 	return func(o *option) { o.frame = val }
@@ -87,8 +93,8 @@ func WithThreshold(val int) func(*option) {
 	return func(o *option) { o.threshold = val }
 }
 
-func WithProfile(p *prof.Stats) func(*option) {
-	return func(o *option) { o.profile = p }
+func WithEmit(val int) func(*option) {
+	return func(o *option) { o.emit = val }
 }
 
 func New(prog *program.Program, opts ...func(*option)) *Interpreter {
@@ -99,6 +105,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		heap:      128,
 		tick:      128,
 		threshold: 4096,
+		emit:      4,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -128,6 +135,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		sp:        0,
 		tick:      opt.tick,
 		threshold: uint64(opt.threshold / opt.tick),
+		emit:      opt.emit,
 	}
 
 	i.alloc(types.Null)
@@ -210,10 +218,11 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 					c := &jitCompiler{
 						assembler: asm.NewAssembler(arch, i.buffer),
 						profile:   i.prof,
-						funcIdx:   f.addr,
+						addr:      f.addr,
 						types:     i.types,
 						constants: i.constants,
 						heap:      i.heap,
+						emit:      i.emit,
 					}
 					for j, fn := range c.Compile(i.instrs[f.addr]) {
 						if fn != nil {
@@ -235,7 +244,6 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 func (i *Interpreter) Context() context.Context {
 	return i.ctx
 }
-
 
 func (i *Interpreter) Const(idx int) (types.Boxed, error) {
 	if idx < 0 || idx >= len(i.constants) {

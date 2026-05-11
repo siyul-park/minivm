@@ -2,6 +2,16 @@
 
 How the minivm heap works, including reference counting, GC, and key invariants.
 
+## Agent Checklist
+
+Read this before editing `interp/threaded.go`, `interp/host.go`, `types/array.go`, `types/struct.go`, or any code that retains, releases, allocates, loads, or stores refs.
+
+- Only `KindRef` values participate in RC.
+- Every stack/global/local ownership change needs symmetric retain/release behavior.
+- Keep `release()` iterative.
+- Heap index `0` is `Null` forever.
+- Do not keep pointers into `heap`; keep integer refs because allocation may grow slices.
+
 ## Heap Structure
 
 The heap is three parallel slices inside `Interpreter`:

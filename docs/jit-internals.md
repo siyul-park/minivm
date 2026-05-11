@@ -2,6 +2,19 @@
 
 How to write threaded and JIT handlers. Read this before modifying `interp/threaded.go` or `interp/jit_arm64.go`.
 
+## Agent Checklist
+
+Before editing:
+- Confirm opcode width in `instr/type.go`.
+- Check threaded and JIT behavior for interpreter/JIT parity.
+- Read [value-representation.md](value-representation.md) before unboxing, boxing, or passing JIT values.
+- Read [memory-model.md](memory-model.md) before touching refs, heap objects, locals/globals that may hold refs, or host functions.
+
+After editing:
+- Add or update table-driven cases in `interp/interp_test.go`.
+- On ARM64/JIT changes, run `go test ./asm/... ./interp`; otherwise run `go test ./interp`.
+- Keep the threaded fallback correct even when JIT rejects a segment.
+
 ## Two-Phase Compilation Model
 
 Every opcode is compiled **twice**:
@@ -45,7 +58,7 @@ instr.OPCODE: func(c *threadedCompiler) func(i *Interpreter) {
 - Reference counting: call `i.retain(addr)` when a ref enters the stack, `i.release(addr)` when consumed.
 - Do not catch errors inside closures — `panic(ErrX)` and let `interp.Run`'s `recover` handle it.
 
-**Special case — NOP (threaded):** Each NOP scans forward to count all consecutive NOPs starting at its own position, then advances `c.ip` by 1. This means `n` consecutive NOPs produce `n` closures, but only the first is ever reached in execution — it jumps `n` bytes forward, bypassing the rest. The NOP-padding that `ConstantFoldingPass` inserts is therefore free at runtime.
+**Special case — NOP (threaded):** Each NOP scans forward to count all consecutive NOPs starting at its own position, then advances `c.ip` by 1. This means `n` consecutive NOPs produce `n` closures, but only the first is reached in execution — it jumps `n` bytes forward, bypassing the rest. The NOP-padding that `ConstantFoldingPass` inserts therefore takes one dispatch for the whole run.
 
 ```go
 instr.NOP: func(c *threadedCompiler) func(i *Interpreter) {
@@ -78,7 +91,7 @@ Each entry emits virtual-register (VReg) IR via the `asm.Assembler` and returns 
 
 ```go
 jit[instr.OPCODE] = func(c *jitCompiler) (bool, bool) {
-    c.ip++  // MUST advance ip unconditionally, even on failure
+    c.ip++  // MUST advance ip unconditionally before returning
 
     // Pop operands from the VReg stack
     r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
@@ -97,22 +110,25 @@ jit[instr.OPCODE] = func(c *jitCompiler) (bool, bool) {
 ```
 
 **Critical invariants:**
-- `c.ip++` must be the **first statement**, before any early returns.
+- `c.ip` must be advanced before any return path, including failure paths. Fixed-width no-operand handlers usually do this as the first statement; operand-reading handlers advance after reading their operands.
 - `Take` checks both `RegType` (Int vs Float) and `RegWidth` (32 vs 64) — a mismatch **must** return `false, false`, not be coerced.
-- `return false, false` ends the current segment. If `count > 4` instructions were compiled, the segment is emitted; otherwise it is aborted.
+- `return false, false` ends the current segment. Segments cut short by an unsupported instruction are kept only after more than 4 compiled instructions; otherwise they are aborted.
 - Branch handlers (`BR`, `BR_IF`, `BR_TABLE`) return `true, true` and must emit their own exit (LDI + RET or a label branch). The `_EPILOGUE` is never emitted after `true, true`.
-- `_PROLOGUE` (ARM64): emits `LDI(scratch, blockEnd)` — loads the fallthrough IP into the scratch register before any instructions.
-- `_EPILOGUE` (ARM64): emits `LDI(scratch, blockEnd)` + `RET` — updates the scratch register with the (possibly truncated) exit IP and returns.
+- `_PROLOGUE` (ARM64): emits `LDI(scratch, c.end)` — loads the fallthrough IP into the scratch register before any instructions.
+- `_EPILOGUE` (ARM64): emits `LDI(scratch, c.end)` + `RET` — updates the scratch register with the (possibly truncated) exit IP and returns.
 
-## Scratch Register and Next-IP Mechanism
+## Reserved Registers and Next-IP Mechanism
 
-ARM64 JIT uses a **scratch register** (allocated via `c.assembler.Reserve()` from `arch.Scratch` = X10–X15) to carry the next interpreter IP out of each compiled segment.
+ARM64 JIT uses **scratch registers** (allocated via `c.assembler.Scratch()` from `arch.Scratch` = X10–X15) as in/out metadata channels outside normal params and returns.
 
-- `_PROLOGUE` loads `c.blockEnd` into scratch.
-- `_EPILOGUE` reloads `c.blockEnd` (which may be truncated if the segment was cut short) into scratch, then returns.
-- Branch handlers load the **branch target IP** into scratch before returning.
+- `scratch[0]`: frame-local stack pointer (`&i.stack[f.bp]`) input.
+- `scratch[1]`: heap pointer input.
+- `scratch[2]`: next interpreter IP output.
+- `_PROLOGUE` loads `c.end` into `scratch[2]`.
+- `_EPILOGUE` reloads `c.end` (which may be truncated if the segment was cut short) into `scratch[2]`, then returns.
+- Branch handlers load the **branch target IP** into `scratch[2]` before returning.
 
-The Go closure in `jitCompiler.closure()` reads `rsv[0]` after `fn.Call()` and writes it to `i.frames[fp-1].ip`, advancing the interpreter to the correct position regardless of whether the segment ran to block end or exited via a branch.
+The Go closure in `jitCompiler.closure()` initializes scratch inputs before `fn.Call()`, then reads `scratch[2]` after the call and writes it to `i.frames[fp-1].ip`, advancing the interpreter to the correct position regardless of whether the segment ran to segment end or exited via a branch.
 
 ## Segment Selection
 
@@ -121,10 +137,10 @@ The Go closure in `jitCompiler.closure()` reads `rsv[0]` after `fn.Call()` and w
 ```
 block [A, B, X, C, D, E, F]   (X = non-compilable)
 → segment 1: [A, B]           count=2, below threshold → aborted
-→ segment 2: [C, D, E, F]     count=4, below threshold → aborted
+→ segment 2: [C, D, E, F]     count=4, emitted if the block ends here and WithEmit is 4
 ```
 
-The threshold is **count > 4** (strictly greater). Segments with ≤ 4 instructions are aborted via `assembler.Abort()`.
+Completed segments emit when their compiled instruction count is at least `WithEmit` (default 4). If a segment stops because the next opcode is not compilable, the current implementation keeps it only when `count > 4`; shorter truncated segments are aborted via `assembler.Abort()`.
 
 ### Two-Pass Compilation
 
@@ -155,7 +171,7 @@ The `asm.Assembler` maintains two VReg stacks:
 | `Emits(insts ...Instruction)` | Append multiple IR instructions |
 | `NewLabel() int` | Allocate a symbolic label ID (resolved at Compile/Link time) |
 | `Place(id int)` | Mark the current position as the target of label `id` |
-| `Reserve() PReg` | Allocate one scratch physical register from `arch.Scratch` |
+| `Scratch() PReg` | Allocate one scratch physical register from `arch.Scratch` for metadata |
 | `Compile() (*RelocObject, error)` | Finalize: allocate registers, two-pass encode, write to buffer, return relocatable object |
 | `Link(objects) ([]Caller, error)` | Patch cross-segment label relocations; return callable `Caller` per object |
 | `Abort()` | Discard current segment state without writing to buffer |
@@ -199,13 +215,13 @@ Violating the Seal/Unseal order on Apple Silicon causes `SIGBUS` or `SIGSEGV` (W
 The ARM64 ABI in `asm/arm64/` follows AAPCS64:
 - Integer arguments/returns: `X0`–`X7` (8 max)
 - Float arguments/returns: `D0`–`D7` / `S0`–`S7` (8 max)
-- Scratch registers: `X10`–`X15` (allocated by `Reserve()`; X8 and X9 are left free for the trampoline's own bookkeeping)
+- Scratch registers: `X10`–`X15` (allocated by `Scratch()`; X8 and X9 are left free for the trampoline's own bookkeeping)
 
 The `argv` buffer passed to the assembly trampoline has the layout:
 ```
 argv[0]:              header (nParams, nReturns, nReserved, type masks)
-argv[1..nReserved]:   scratch outputs — written by the native chunk on return
+argv[1..nReserved]:   scratch inputs/outputs — loaded before the native call and written back on return
 argv[nReserved+1..]:  params in / returns out
 ```
 
-The trampoline in `abi_arm64.s` marshals arguments from `argv`, calls the native chunk via `BL`, then reads scratch register values (X10–X15) back into `argv[1..nReserved]` and reads return values into `argv[nReserved+1..]`.
+The trampoline in `abi_arm64.s` marshals arguments from `argv`, loads reserved register inputs (X10–X15), calls the native chunk via `BL`, then reads scratch register values back into `argv[1..nReserved]` and reads return values into `argv[nReserved+1..]`.
