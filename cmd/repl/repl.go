@@ -305,9 +305,9 @@ func printProfile(out io.Writer, snap prof.Snapshot) {
 	if hasJIT(snap.JIT) {
 		jit := snap.JIT
 		fmt.Fprintln(out, "jit:")
-		fmt.Fprintln(out, "attempts\temits\tlinks\taborts\terrors\tbytes\ttime")
-		fmt.Fprintf(out, "%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
-			jit.Attempts, jit.Emits, jit.Links, jit.Aborts, jit.Errors, jit.Bytes, jit.Time)
+		fmt.Fprintln(out, "attempts\temits\tlinks\tskips\taborts\terrors\tbytes\ttime")
+		fmt.Fprintf(out, "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
+			jit.Attempts, jit.Emits, jit.Links, jit.Skips, jit.Aborts, jit.Errors, jit.Bytes, jit.Time)
 	}
 }
 
@@ -327,6 +327,7 @@ func hasJIT(jit prof.JIT) bool {
 	return jit.Attempts != 0 ||
 		jit.Emits != 0 ||
 		jit.Links != 0 ||
+		jit.Skips != 0 ||
 		jit.Aborts != 0 ||
 		jit.Errors != 0 ||
 		jit.Bytes != 0 ||

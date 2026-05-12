@@ -179,6 +179,7 @@ func TestStats_JIT(t *testing.T) {
 	p.JITEmit(12)
 	p.JITEmit(-1)
 	p.JITLink()
+	p.JITSkip()
 	p.JITAbort()
 	p.JITError()
 	p.JITTime(3 * time.Millisecond)
@@ -187,6 +188,7 @@ func TestStats_JIT(t *testing.T) {
 		Attempts: 1,
 		Emits:    2,
 		Links:    1,
+		Skips:    1,
 		Aborts:   1,
 		Errors:   1,
 		Bytes:    12,

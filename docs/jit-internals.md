@@ -7,6 +7,7 @@ How to write threaded and JIT handlers. Read this before modifying `interp/threa
 Before editing:
 - Confirm opcode width in `instr/type.go`.
 - Check threaded and JIT behavior for interpreter/JIT parity.
+- Read [profile.md](profile.md) before changing hotness thresholds, sampling, or profile-guided segment selection.
 - Read [value-representation.md](value-representation.md) before unboxing, boxing, or passing JIT values.
 - Read [memory-model.md](memory-model.md) before touching refs, heap objects, locals/globals that may hold refs, or host functions.
 
@@ -132,7 +133,7 @@ The Go closure in `jitCompiler.closure()` initializes scratch inputs before `fn.
 
 ## Segment Selection
 
-`jitCompiler.Compile(code)` calls `jitCompiler.compile(b)` for each basic block. Within each block, `compile` iterates `segment(code, start, end)` to extract **multiple independent compilable segments**:
+`jitCompiler.Compile(code)` computes each basic block's profile heat with `Stats.Range(addr, start, end)`, skips blocks with no samples, then compiles hotter blocks first. Within each hot block, `compile` iterates `segment(code, start, end)` to extract **multiple independent compilable segments**:
 
 ```
 block [A, B, X, C, D, E, F]   (X = non-compilable)
@@ -140,7 +141,7 @@ block [A, B, X, C, D, E, F]   (X = non-compilable)
 → segment 2: [C, D, E, F]     count=4, emitted if the block ends here and WithCutoff is 4
 ```
 
-Completed segments emit when their compiled instruction count is at least `WithCutoff` (default 4). If a segment stops because the next opcode is not compilable, the current implementation keeps it only when `count > 4`; shorter truncated segments are aborted via `assembler.Abort()`.
+Completed segments emit when their compiled instruction count is at least `WithCutoff` (default 4) and their own byte range has at least one profile sample. If a segment stops because the next opcode is not compilable, the current implementation keeps it only when `count > 4`; shorter truncated segments are aborted via `assembler.Abort()`. Cold segments inside a sampled block are skipped without emitting native code. The JIT does not currently recompile or tier-up code after the first function-level compilation attempt.
 
 ### Two-Pass Compilation
 

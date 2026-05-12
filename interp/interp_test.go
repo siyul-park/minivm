@@ -2371,6 +2371,37 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NotZero(t, jit.Bytes)
 	})
 
+	t.Run("jit skips cold segments", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		p := prof.New()
+		p.Add(0, 0, byte(instr.NOP))
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.CALL),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+
+		err := i.jit(0)
+		require.NoError(t, err)
+
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Attempts)
+		require.Equal(t, uint64(1), jit.Emits)
+		require.Equal(t, uint64(1), jit.Links)
+		require.Equal(t, uint64(1), jit.Skips)
+	})
+
 	t.Run("hook cancel is observed on next jit tick", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()

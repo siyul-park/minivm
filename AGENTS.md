@@ -56,6 +56,7 @@ Read only what is relevant to the task.
 | [docs/architecture.md](docs/architecture.md)                         | tracing execution flow, debugging across packages |
 | [docs/value-representation.md](docs/value-representation.md)         | modifying boxed values, JIT value passing         |
 | [docs/memory-model.md](docs/memory-model.md)                         | touching refs, closures, GC, host functions       |
+| [docs/profile.md](docs/profile.md)                                   | modifying profiling, tick cadence, or JIT profile guidance |
 | [docs/instruction-set.md](docs/instruction-set.md)                   | adding or debugging opcodes                       |
 | [docs/jit-internals.md](docs/jit-internals.md)                       | modifying threaded/JIT compilation                |
 | [docs/pass-system.md](docs/pass-system.md)                           | adding optimization or analysis passes            |

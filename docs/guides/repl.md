@@ -75,6 +75,8 @@ stack produces no output.
 | `.type` | Declare one or more types (multi-line block, end with blank line) |
 | `.quit` / `.exit` | Exit the REPL |
 
+See [Profiling](../profile.md) for the sampling model and report fields.
+
 ## Instruction Syntax
 
 The REPL accepts the same text format that `instr.Format` produces, so

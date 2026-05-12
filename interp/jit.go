@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"sort"
 	"time"
 	"unsafe"
 
@@ -27,6 +28,11 @@ type jitCompiler struct {
 	sigs       map[int]*asm.Signature
 	scratch    []asm.PReg
 	end        int
+}
+
+type profiledBlock struct {
+	block *analysis.BasicBlock
+	heat  uint64
 }
 
 var (
@@ -88,19 +94,15 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 	var objs []*asm.RelocObject
 	var metas []meta
 
-	var branches []*analysis.BasicBlock
-	for _, b := range blocks {
-		if c.profile.Range(c.addr, b.Start, b.End) == 0 {
-			c.compilable[b.Start] = false
-			continue
-		}
-		segObjs, entryIPs, terminated := c.compile(b)
+	var branches []profiledBlock
+	for _, pb := range c.hotBlocks(blocks) {
+		segObjs, entryIPs, terminated := c.compile(pb.block)
 		for i, entryIP := range entryIPs {
 			c.compilable[entryIP] = true
 			c.sigs[entryIP] = segObjs[i].Sig
 		}
 		if terminated {
-			branches = append(branches, b)
+			branches = append(branches, pb)
 		} else {
 			for i, obj := range segObjs {
 				objs = append(objs, obj)
@@ -109,10 +111,10 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 		}
 	}
 
-	for _, b := range branches {
-		segObjs, entryIPs, _ := c.compile(b)
+	for _, pb := range branches {
+		segObjs, entryIPs, _ := c.compile(pb.block)
 		if len(segObjs) == 0 {
-			c.compilable[b.Start] = false
+			c.compilable[pb.block.Start] = false
 			continue
 		}
 		for i, obj := range segObjs {
@@ -138,6 +140,25 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 		out[m.entryIP] = c.closure(callers[i], m.obj.Sig)
 	}
 
+	return out
+}
+
+func (c *jitCompiler) hotBlocks(blocks []*analysis.BasicBlock) []profiledBlock {
+	out := make([]profiledBlock, 0, len(blocks))
+	for _, b := range blocks {
+		heat := c.profile.Range(c.addr, b.Start, b.End)
+		if heat == 0 {
+			c.compilable[b.Start] = false
+			continue
+		}
+		out = append(out, profiledBlock{block: b, heat: heat})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].heat != out[j].heat {
+			return out[i].heat > out[j].heat
+		}
+		return out[i].block.Start < out[j].block.Start
+	})
 	return out
 }
 
@@ -184,6 +205,11 @@ func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, in
 				c.profile.JITAbort()
 				return nil, c.ip, false
 			}
+			if c.profile.Range(c.addr, start, prevIP) == 0 {
+				c.assembler.Abort()
+				c.profile.JITSkip()
+				return nil, c.ip, false
+			}
 			c.end = prevIP
 			jit[_EPILOGUE](c)
 			obj, err := c.assembler.Compile()
@@ -205,6 +231,11 @@ func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, in
 	if count < c.cutoff {
 		c.assembler.Abort()
 		c.profile.JITAbort()
+		return nil, c.ip, stop
+	}
+	if c.profile.Range(c.addr, start, c.ip) == 0 {
+		c.assembler.Abort()
+		c.profile.JITSkip()
 		return nil, c.ip, stop
 	}
 	if !stop {

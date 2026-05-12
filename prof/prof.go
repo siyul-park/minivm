@@ -37,6 +37,7 @@ type JIT struct {
 	Attempts uint64
 	Emits    uint64
 	Links    uint64
+	Skips    uint64
 	Aborts   uint64
 	Errors   uint64
 	Bytes    uint64
@@ -171,6 +172,11 @@ func (p *Stats) JITEmit(bytes int) {
 // JITLink records one linked native entry.
 func (p *Stats) JITLink() {
 	p.jit.Links++
+}
+
+// JITSkip records one cold JIT segment skipped by profile-guided selection.
+func (p *Stats) JITSkip() {
+	p.jit.Skips++
 }
 
 // JITAbort records one aborted JIT segment.

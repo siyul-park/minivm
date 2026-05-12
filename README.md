@@ -201,6 +201,9 @@ vm := interp.New(prog,
 
 `WithTick` controls profiling samples, context-cancellation polling, hook cadence, and fuel consumption. `WithFuel` accepts an expected instruction budget and rounds it up to the nearest tick interval internally; `WithFuel(0)` is unlimited. Hooks run synchronously on the `Run` goroutine and receive the live interpreter; avoid concurrent interpreter access and preserve VM invariants when mutating state.
 
+For profile snapshots, JIT counters, and REPL `.profile` output, see
+[`docs/profile.md`](docs/profile.md).
+
 ---
 
 ## Status
