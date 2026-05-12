@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
@@ -2119,6 +2120,69 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("canceled context", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+		}), WithTick(1))
+		defer i.Close()
+
+		err := i.Run(ctx)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("canceled recursive execution", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		entered := make(chan struct{}, 1)
+		release := make(chan struct{})
+		gate := NewHostFunction(&types.FunctionType{}, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			<-release
+			return nil, nil
+		})
+		fn := types.NewFunctionBuilder(nil).Emit(
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CALL),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		).Build()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fn, gate),
+		), WithFrame(1024))
+		defer i.Close()
+
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- i.Run(ctx)
+		}()
+
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for recursive run to start")
+		}
+		cancel()
+		close(release)
+
+		select {
+		case err := <-errCh:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for canceled run")
+		}
+	})
+
 	t.Run("jit", func(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.program.String(), func(t *testing.T) {
@@ -2136,6 +2200,71 @@ func TestInterpreter_Run(t *testing.T) {
 					require.Equal(t, val, v)
 				}
 			})
+		}
+	})
+
+	t.Run("canceled jit execution", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		entered := make(chan struct{}, 1)
+		release := make(chan struct{})
+		calls := 0
+		gate := NewHostFunction(&types.FunctionType{}, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
+			calls++
+			if calls < 64 {
+				return nil, nil
+			}
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			<-release
+			return nil, nil
+		})
+		fn := types.NewFunctionBuilder(nil).Emit(
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 3),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 4),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 5),
+			instr.New(instr.DROP),
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CALL),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		).Build()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fn, gate),
+		), WithFrame(1024), WithTick(1), WithThreshold(1), WithEmit(1))
+		defer i.Close()
+
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- i.Run(ctx)
+		}()
+
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for jit run to start")
+		}
+		cancel()
+		close(release)
+
+		select {
+		case err := <-errCh:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for canceled run")
 		}
 	})
 }
