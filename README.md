@@ -191,6 +191,7 @@ vm := interp.New(prog,
     interp.WithFrame(256),       // max call depth        (default: 128)
     interp.WithThreshold(4096),  // ticks before JIT      (default: 4096)
     interp.WithTick(128),        // sample/poll cadence   (default: 128)
+    interp.WithFuel(10_000),     // instruction budget   (default: unlimited)
     interp.WithHook(func(vm *interp.Interpreter) error {
         return nil              // inspect or enforce host policy inline
     }),
@@ -198,7 +199,7 @@ vm := interp.New(prog,
 )
 ```
 
-`WithTick` controls profiling samples, context-cancellation polling, and hook cadence. Hooks run synchronously on the `Run` goroutine and receive the live interpreter; avoid concurrent interpreter access and preserve VM invariants when mutating state.
+`WithTick` controls profiling samples, context-cancellation polling, hook cadence, and fuel consumption. `WithFuel` accepts an expected instruction budget and rounds it up to the nearest tick interval internally; `WithFuel(0)` is unlimited. Hooks run synchronously on the `Run` goroutine and receive the live interpreter; avoid concurrent interpreter access and preserve VM invariants when mutating state.
 
 ---
 

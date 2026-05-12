@@ -2230,6 +2230,79 @@ func TestInterpreter_Run(t *testing.T) {
 		require.ErrorIs(t, err, errHook)
 	})
 
+	t.Run("fuel zero is unlimited", func(t *testing.T) {
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.I32_CONST, 8),
+			instr.New(instr.I32_ADD),
+		}), WithTick(1), WithFuel(0))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.NoError(t, err)
+
+		val, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(15), val)
+	})
+
+	t.Run("fuel exhausts recursive execution", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(nil).Emit(
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		).Build()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fn),
+		), WithTick(1), WithFuel(2))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.ErrorIs(t, err, ErrFuelExhausted)
+	})
+
+	t.Run("fuel rounds up to tick interval", func(t *testing.T) {
+		calls := 0
+		fn := types.NewFunctionBuilder(nil).Emit(
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		).Build()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fn),
+		), WithTick(2), WithFuel(3), WithHook(func(i *Interpreter) error {
+			calls++
+			return nil
+		}))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.ErrorIs(t, err, ErrFuelExhausted)
+		require.Equal(t, 2, calls)
+	})
+
+	t.Run("reset restores fuel", func(t *testing.T) {
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+			instr.New(instr.I32_CONST, 7),
+		}), WithTick(1), WithFuel(1))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.ErrorIs(t, err, ErrFuelExhausted)
+
+		i.Reset()
+
+		err = i.Run(context.Background())
+		require.ErrorIs(t, err, ErrFuelExhausted)
+	})
+
 	t.Run("jit", func(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.program.String(), func(t *testing.T) {
@@ -2280,6 +2353,29 @@ func TestInterpreter_Run(t *testing.T) {
 		err := i.Run(ctx)
 		require.ErrorIs(t, err, context.Canceled)
 		require.Equal(t, 1, calls)
+	})
+
+	t.Run("fuel exhausts jit execution", func(t *testing.T) {
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 3),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 4),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 5),
+			instr.New(instr.DROP),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(NewHostFunction(&types.FunctionType{}, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
+			return nil, nil
+		}))), WithTick(1), WithThreshold(1), WithEmit(1), WithFuel(1))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.ErrorIs(t, err, ErrFuelExhausted)
 	})
 
 	t.Run("canceled jit execution", func(t *testing.T) {

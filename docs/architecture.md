@@ -199,7 +199,7 @@ Thin cobra entry point. The root command (no subcommand) launches the REPL with 
 
 4. interp.Run(ctx)
    ├─ main loop: code[f.ip](i)
-   ├─ every 128 instructions: check ctx, call hook, prof.Record(addr, ip)
+   ├─ every 128 instructions: check ctx, consume fuel, call hook, prof.Record(addr, ip)
    └─ when prof.Count(addr) == threshold/tick:
        jitCompiler.Compile(instrs[addr])
        └─ two-pass over basic blocks:
@@ -222,6 +222,6 @@ Thin cobra entry point. The root command (no subcommand) launches the REPL with 
 | Benchmarks | broaden coverage across numeric loops, host calls, and heap-object workloads |
 | Program format | keep `instr`/`program` as the compact Go-native bytecode surface |
 | Host integration | keep `interp.NewHostFunction` as the primary typed bridge into Go applications |
-| Resource policy | document how `context.Context`, hooks, stack/heap/frame limits, and host-side policy work together |
+| Resource policy | document how `context.Context`, fuel, hooks, stack/heap/frame limits, and host-side policy work together |
 
 See [`docs/roadmap.md`](roadmap.md) for current priorities.

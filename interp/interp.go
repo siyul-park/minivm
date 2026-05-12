@@ -32,6 +32,7 @@ type Interpreter struct {
 	sp        int
 	tick      int
 	threshold uint64
+	fuel      int64
 	emit      int
 }
 
@@ -51,6 +52,7 @@ type option struct {
 	heap      int
 	tick      int
 	threshold int
+	fuel      uint64
 	emit      int
 }
 
@@ -65,6 +67,7 @@ var (
 	ErrTypeMismatch        = errors.New("type mismatch")
 	ErrDivideByZero        = errors.New("divide by zero")
 	ErrIndexOutOfRange     = errors.New("index out of range")
+	ErrFuelExhausted       = errors.New("fuel exhausted")
 )
 
 func WithProfile(p *prof.Stats) func(*option) {
@@ -99,6 +102,10 @@ func WithThreshold(val int) func(*option) {
 	return func(o *option) { o.threshold = val }
 }
 
+func WithFuel(val uint64) func(*option) {
+	return func(o *option) { o.fuel = val }
+}
+
 func WithEmit(val int) func(*option) {
 	return func(o *option) { o.emit = val }
 }
@@ -125,6 +132,16 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		p = prof.New()
 	}
 
+	var fuel int64 = -1
+	if opt.fuel > 0 {
+		ticks := (opt.fuel-1)/uint64(opt.tick) + 1
+		const max = uint64(1<<63 - 1)
+		if ticks > max {
+			fuel = int64(max)
+		}
+		fuel = int64(ticks)
+	}
+
 	i := &Interpreter{
 		prof:      p,
 		hook:      opt.hook,
@@ -142,6 +159,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		sp:        0,
 		tick:      opt.tick,
 		threshold: uint64(opt.threshold / opt.tick),
+		fuel:      fuel,
 		emit:      opt.emit,
 	}
 
@@ -201,6 +219,7 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 	f := i.frame()
 	code := f.code
 	tick := i.tick
+	fuel := i.fuel
 
 	for f.ip < len(code) {
 		tick--
@@ -210,6 +229,13 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
+			}
+
+			if fuel >= 0 {
+				if fuel == 0 {
+					return ErrFuelExhausted
+				}
+				fuel--
 			}
 
 			if i.hook != nil {
