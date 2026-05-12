@@ -10,6 +10,7 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/interp"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
@@ -37,6 +38,7 @@ Commands:
                         e.g.  struct {i32; f64}
                               []i32
   .show               show disassembly of accumulated program
+  .profile            profile accumulated program
   .reset              clear all accumulated instructions, stack, constants, and types
   .help               show this help
   .quit  /  .exit     exit the REPL
@@ -74,7 +76,7 @@ func (r *REPL) Run(ctx context.Context) error {
 		}
 
 		if strings.HasPrefix(line, ".") {
-			done, err := r.command(scanner, line)
+			done, err := r.command(ctx, scanner, line)
 			if err != nil {
 				return err
 			}
@@ -101,7 +103,7 @@ func (r *REPL) Run(ctx context.Context) error {
 	}
 }
 
-func (r *REPL) command(scanner *bufio.Scanner, line string) (bool, error) {
+func (r *REPL) command(ctx context.Context, scanner *bufio.Scanner, line string) (bool, error) {
 	switch strings.ToLower(line) {
 	case ".quit", ".exit":
 		fmt.Fprintln(r.out, "bye")
@@ -110,6 +112,10 @@ func (r *REPL) command(scanner *bufio.Scanner, line string) (bool, error) {
 		r.reset()
 	case ".show":
 		r.show()
+	case ".profile":
+		if err := r.profile(ctx); err != nil {
+			r.printErr(err)
+		}
 	case ".help":
 		fmt.Fprint(r.out, helpText)
 	case ".const":
@@ -212,6 +218,23 @@ func (r *REPL) show() {
 	fmt.Fprint(r.out, r.build().String())
 }
 
+func (r *REPL) profile(ctx context.Context) error {
+	if len(r.instrs) == 0 {
+		fmt.Fprintln(r.out, "(empty)")
+		return nil
+	}
+
+	p := prof.New()
+	vm := interp.New(r.build(), interp.WithProfile(p), interp.WithTick(1))
+	defer vm.Close()
+	if err := vm.Run(ctx); err != nil {
+		return err
+	}
+
+	printProfile(r.out, p.Snapshot())
+	return nil
+}
+
 func (r *REPL) build(extra ...instr.Instruction) *program.Program {
 	return program.New(
 		append(r.instrs, extra...),
@@ -248,6 +271,66 @@ func printStack(out io.Writer, vm *interp.Interpreter) {
 		parts[n-1-i] = format(v, vm)
 	}
 	fmt.Fprintln(out, strings.Join(parts, " "))
+}
+
+func printProfile(out io.Writer, snap prof.Snapshot) {
+	fmt.Fprintf(out, "profile samples: %d\n", snap.Samples)
+	if len(snap.Funcs) > 0 {
+		fmt.Fprintln(out, "functions:")
+		fmt.Fprintln(out, "func\tsamples\t%")
+		for _, fn := range snap.Funcs {
+			if fn.Samples == 0 {
+				continue
+			}
+			fmt.Fprintf(out, "%d\t%d\t%s\n", fn.Index, fn.Samples, formatPercent(fn.Percent))
+		}
+	}
+	for _, fn := range snap.Funcs {
+		if len(fn.IPs) == 0 {
+			continue
+		}
+		fmt.Fprintf(out, "func %d ips:\n", fn.Index)
+		fmt.Fprintln(out, "ip\tsamples\t%")
+		for _, ip := range fn.IPs {
+			fmt.Fprintf(out, "%04d\t%d\t%s\n", ip.Offset, ip.Samples, formatPercent(ip.Percent))
+		}
+	}
+	if len(snap.Opcodes) > 0 {
+		fmt.Fprintln(out, "opcodes:")
+		fmt.Fprintln(out, "opcode\tsamples\t%")
+		for _, op := range snap.Opcodes {
+			fmt.Fprintf(out, "%s\t%d\t%s\n", opcodeLabel(op.Code), op.Samples, formatPercent(op.Percent))
+		}
+	}
+	if hasJIT(snap.JIT) {
+		jit := snap.JIT
+		fmt.Fprintln(out, "jit:")
+		fmt.Fprintln(out, "attempts\temits\tlinks\taborts\terrors\tbytes\ttime")
+		fmt.Fprintf(out, "%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
+			jit.Attempts, jit.Emits, jit.Links, jit.Aborts, jit.Errors, jit.Bytes, jit.Time)
+	}
+}
+
+func formatPercent(v float64) string {
+	return fmt.Sprintf("%.1f%%", v)
+}
+
+func opcodeLabel(code byte) string {
+	op := instr.Opcode(code)
+	if typ := instr.TypeOf(op); typ.Mnemonic != "" {
+		return typ.Mnemonic
+	}
+	return fmt.Sprintf("0x%02X", code)
+}
+
+func hasJIT(jit prof.JIT) bool {
+	return jit.Attempts != 0 ||
+		jit.Emits != 0 ||
+		jit.Links != 0 ||
+		jit.Aborts != 0 ||
+		jit.Errors != 0 ||
+		jit.Bytes != 0 ||
+		jit.Time != 0
 }
 
 // format resolves KindRef through the heap (shows actual object, not raw index),
