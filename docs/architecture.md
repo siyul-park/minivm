@@ -9,6 +9,7 @@ Read this when a change crosses package boundaries or you need to know where sta
 | If you touch | Also read |
 | --- | --- |
 | `interp/` runtime state, frames, globals | [memory-model.md](memory-model.md), [value-representation.md](value-representation.md) |
+| `interp/` debugger API or bytecode stepping | [debugging.md](debugging.md), [profile.md](profile.md) |
 | `prof/` or profile options | [profile.md](profile.md) |
 | `interp/threaded.go` or `interp/jit*.go` | [jit-internals.md](jit-internals.md), [instruction-set.md](instruction-set.md) |
 | `analysis/`, `transform/`, `optimize/`, `pass/` | [pass-system.md](pass-system.md) |
@@ -201,7 +202,7 @@ Thin cobra entry point. The root command (no subcommand) launches the REPL with 
 4. interp.Run(ctx)
    ├─ main loop: code[f.ip](i)
    ├─ every 128 instructions: check ctx, consume fuel, call hook, prof.Add(addr, ip, opcode)
-   └─ when prof.Samples(addr) == threshold/tick:
+   └─ when JIT is enabled and prof.Samples(addr) reaches threshold rounded to tick cadence:
        jitCompiler.Compile(instrs[addr])
        └─ heat-sorted two-pass over sampled basic blocks:
            ├─ pass 1: for each hot block, segment() loop → emit sampled eligible segments
@@ -213,6 +214,11 @@ Thin cobra entry point. The root command (no subcommand) launches the REPL with 
 5. interp.Close()
    └─ buffer.Free() → munmap
 ```
+
+`WithThreshold(0)` activates JIT on the first sample; negative thresholds
+disable JIT compilation. Bytecode-level debugging uses
+`NewDebugger` through `WithDebugger`, which configures instruction-accurate
+hooks and disables JIT for exact instruction-boundary stops.
 
 ## Focus Areas
 

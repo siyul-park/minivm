@@ -189,7 +189,7 @@ vm := interp.New(prog,
     interp.WithStack(4096),      // value stack slots    (default: 1024)
     interp.WithHeap(512),        // initial heap capacity (default: 128)
     interp.WithFrame(256),       // max call depth        (default: 128)
-    interp.WithThreshold(4096),  // ticks before JIT      (default: 4096)
+    interp.WithThreshold(4096),  // ticks before JIT; 0 = first sample, negative disables JIT
     interp.WithTick(128),        // sample/poll cadence   (default: 128)
     interp.WithFuel(10_000),     // instruction budget   (default: unlimited)
     interp.WithHook(func(vm *interp.Interpreter) error {
@@ -200,6 +200,11 @@ vm := interp.New(prog,
 ```
 
 `WithTick` controls profiling samples, context-cancellation polling, hook cadence, and fuel consumption. `WithFuel` accepts an expected instruction budget and rounds it up to the nearest tick interval internally; `WithFuel(0)` is unlimited. Hooks run synchronously on the `Run` goroutine and receive the live interpreter; avoid concurrent interpreter access and preserve VM invariants when mutating state.
+
+For bytecode-level debugging, use `NewDebugger` with `WithDebugger`. The
+debugger provides breakpoints plus `Step`, `Next`, and `Finish`;
+`WithDebugger` configures instruction-accurate hooks and disables JIT. See
+[`docs/debugging.md`](docs/debugging.md).
 
 For profile snapshots, JIT counters, and REPL `.profile` output, see
 [`docs/profile.md`](docs/profile.md).

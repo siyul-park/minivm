@@ -189,7 +189,7 @@ vm := interp.New(prog,
     interp.WithStack(4096),      // 값 스택 슬롯 수    (기본값: 1024)
     interp.WithHeap(512),        // 초기 힙 용량       (기본값: 128)
     interp.WithFrame(256),       // 최대 호출 깊이     (기본값: 128)
-    interp.WithThreshold(4096),  // JIT 트리거 틱 수   (기본값: 4096)
+    interp.WithThreshold(4096),  // JIT 트리거 틱 수; 0은 첫 샘플, 음수이면 JIT 비활성화
     interp.WithTick(128),        // 샘플/폴링 주기     (기본값: 128)
     interp.WithFuel(10_000),     // 명령어 예산       (기본값: 무제한)
     interp.WithHook(func(vm *interp.Interpreter) error {
@@ -200,6 +200,11 @@ vm := interp.New(prog,
 ```
 
 `WithTick`은 프로파일 샘플, context 취소 확인, hook 호출 주기, fuel 소비를 함께 제어합니다. `WithFuel`은 기대 명령어 예산을 받고 내부에서 가장 가까운 tick 간격으로 올림 변환합니다. `WithFuel(0)`은 무제한입니다. Hook은 `Run` 고루틴에서 동기적으로 실행되며 실행 중인 인터프리터를 받습니다. 인터프리터에 대한 동시 접근은 피하고, 상태를 변경할 때는 VM 불변식을 유지해야 합니다.
+
+바이트코드 단위 디버깅은 `NewDebugger`를 `WithDebugger`와 함께 사용합니다.
+디버거는 breakpoint와 `Step`, `Next`, `Finish`를 제공하며, `WithDebugger`는
+명령어 단위 hook을 설정하고 JIT를 비활성화합니다. 자세한 내용은
+[`docs/debugging.md`](docs/debugging.md)를 참고하세요.
 
 ---
 

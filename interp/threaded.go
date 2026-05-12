@@ -13,13 +13,17 @@ type threadedCompiler struct {
 	heap      []types.Value
 	code      []byte
 	ip        int
+	precise   bool
 }
 
 var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.NOP: func(c *threadedCompiler) func(i *Interpreter) {
 		skip := 0
-		for c.ip+skip < len(c.code) && instr.Opcode(c.code[c.ip+skip]) == instr.NOP {
+		for !c.precise && c.ip+skip < len(c.code) && instr.Opcode(c.code[c.ip+skip]) == instr.NOP {
 			skip++
+		}
+		if c.precise {
+			skip = 1
 		}
 		c.ip++
 		return func(i *Interpreter) {
@@ -393,7 +397,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		val := c.constants[idx]
 		if val.Kind() == types.KindRef {
 			addr := val.Ref()
-			if c.ip < len(c.code) {
+			if !c.precise && c.ip < len(c.code) {
 				switch instr.Opcode(c.code[c.ip]) {
 				case instr.CALL:
 					switch fn := c.heap[addr].(type) {

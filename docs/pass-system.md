@@ -136,7 +136,7 @@ Before:  [I32_CONST 3][I32_CONST 4][I32_ADD]   (11 bytes)
 After:   [NOP][NOP][NOP][NOP][NOP][NOP][I32_CONST 7]  (11 bytes)
 ```
 
-The threaded NOP handler fast-forwards past all consecutive NOPs at runtime, so the left padding takes one dispatch for the whole run.
+The normal threaded NOP handler fast-forwards past all consecutive NOPs at runtime, so the left padding takes one dispatch for the whole run. `WithTick(1)` preserves per-instruction boundaries for exact hooks and debugging.
 
 Supported folds:
 - `I32_CONST × I32_CONST × op` for all arithmetic/bitwise/comparison ops

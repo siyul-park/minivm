@@ -2201,6 +2201,42 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, []int{0, 1}, lens)
 	})
 
+	t.Run("normal tick keeps threaded nop fusion", func(t *testing.T) {
+		var ips []int
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.I32_CONST, 7),
+		}), WithTick(2), WithThreshold(-1), WithHook(func(i *Interpreter) error {
+			ips = append(ips, i.IP())
+			return nil
+		}))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, []int{3}, ips)
+	})
+
+	t.Run("tick one preserves threaded nop boundaries", func(t *testing.T) {
+		var ips []int
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.I32_CONST, 7),
+		}), WithTick(1), WithThreshold(-1), WithHook(func(i *Interpreter) error {
+			ips = append(ips, i.IP())
+			return nil
+		}))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, []int{0, 1, 2, 3}, ips)
+	})
+
 	t.Run("profile records opcode samples", func(t *testing.T) {
 		p := prof.New()
 		i := New(program.New([]instr.Instruction{
@@ -2254,6 +2290,183 @@ func TestInterpreter_Run(t *testing.T) {
 
 		err := i.Run(context.Background())
 		require.ErrorIs(t, err, errHook)
+	})
+
+	t.Run("debugger breakpoint stops before instruction", func(t *testing.T) {
+		dbg := NewDebugger()
+		id := dbg.Break(0, 0)
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7),
+		}), WithDebugger(dbg))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.ErrorIs(t, err, ErrStopped)
+		require.Equal(t, Stop{Func: 0, IP: 0, Breakpoint: id}, dbg.Stop())
+		require.Equal(t, 0, i.Len())
+
+		dbg.Continue()
+		err = i.Run(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, 1, i.Len())
+		require.Equal(t, uint64(1), dbg.Breakpoints()[0].Hits)
+	})
+
+	t.Run("debugger conditional breakpoint", func(t *testing.T) {
+		dbg := NewDebugger()
+		id := dbg.BreakIf(0, 5, func(i *Interpreter) bool {
+			return i.Len() == 1
+		})
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.DROP),
+		}), WithDebugger(dbg))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.ErrorIs(t, err, ErrStopped)
+		require.Equal(t, id, dbg.Stop().Breakpoint)
+		require.Equal(t, 1, i.Len())
+	})
+
+	t.Run("debugger breakpoint management", func(t *testing.T) {
+		var dbg Debugger
+		first := dbg.Break(0, 0)
+		second := dbg.Break(0, 1)
+
+		require.True(t, dbg.Enable(first, false))
+		require.False(t, dbg.Enable(99, false))
+		require.True(t, dbg.Clear(second))
+		require.False(t, dbg.Clear(second))
+
+		bps := dbg.Breakpoints()
+		require.Len(t, bps, 1)
+		require.Equal(t, first, bps[0].ID)
+		require.False(t, bps[0].Enabled)
+	})
+
+	t.Run("debugger helpers inspect current frame", func(t *testing.T) {
+		dbg := NewDebugger()
+		dbg.Break(0, 0)
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7),
+		}), WithDebugger(dbg))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.ErrorIs(t, err, ErrStopped)
+
+		require.Equal(t, 0, i.Func())
+		require.Equal(t, 0, i.IP())
+		require.Equal(t, 1, i.FrameDepth())
+		op, err := i.Opcode()
+		require.NoError(t, err)
+		require.Equal(t, instr.I32_CONST, op)
+		fn, ip, bp, err := i.Frame(0)
+		require.NoError(t, err)
+		require.Equal(t, 0, fn)
+		require.Equal(t, 0, ip)
+		require.Equal(t, 0, bp)
+		_, _, _, err = i.Frame(1)
+		require.ErrorIs(t, err, ErrFrameUnderflow)
+	})
+
+	t.Run("debugger step next and finish around calls", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.RETURN),
+		).Build()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.DROP),
+		}, program.WithConstants(fn))
+
+		t.Run("step enters call", func(t *testing.T) {
+			dbg := NewDebugger()
+			dbg.Break(0, 3)
+			i := New(prog, WithDebugger(dbg))
+			defer i.Close()
+
+			require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
+			dbg.Step()
+			require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
+			require.Equal(t, 1, i.Func())
+			require.Equal(t, 0, i.IP())
+			require.Equal(t, 2, i.FrameDepth())
+			fn, ip, _, err := i.Frame(0)
+			require.NoError(t, err)
+			require.Equal(t, 1, fn)
+			require.Equal(t, 0, ip)
+			fn, ip, _, err = i.Frame(1)
+			require.NoError(t, err)
+			require.Equal(t, 0, fn)
+			require.Equal(t, 4, ip)
+		})
+
+		t.Run("next steps over call", func(t *testing.T) {
+			dbg := NewDebugger()
+			dbg.Break(0, 3)
+			i := New(prog, WithDebugger(dbg))
+			defer i.Close()
+
+			require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
+			dbg.Next()
+			require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
+			require.Equal(t, 0, i.Func())
+			require.Equal(t, 4, i.IP())
+			require.Equal(t, 1, i.FrameDepth())
+			require.Equal(t, 1, i.Len())
+		})
+
+		t.Run("finish stops in caller", func(t *testing.T) {
+			dbg := NewDebugger()
+			dbg.Break(0, 3)
+			i := New(prog, WithDebugger(dbg))
+			defer i.Close()
+
+			require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
+			dbg.Step()
+			require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
+			dbg.Finish()
+			require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
+			require.Equal(t, 0, i.Func())
+			require.Equal(t, 4, i.IP())
+			require.Equal(t, 1, i.FrameDepth())
+		})
+	})
+
+	t.Run("negative threshold disables jit", func(t *testing.T) {
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+		}), WithProfile(p), WithTick(1), WithThreshold(-1), WithCutoff(1))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.NoError(t, err)
+		require.Zero(t, p.Snapshot().JIT.Attempts)
+	})
+
+	t.Run("threshold zero attempts jit on first sample", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+		}), WithProfile(p), WithTick(1), WithThreshold(0), WithCutoff(1))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), p.Snapshot().JIT.Attempts)
 	})
 
 	t.Run("fuel zero is unlimited", func(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"math"
 
 	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -31,7 +32,7 @@ type Interpreter struct {
 	fp        int
 	sp        int
 	tick      int
-	threshold uint64
+	threshold int64
 	fuel      int64
 	cutoff    int
 }
@@ -126,6 +127,9 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	if opt.frame <= 0 {
 		opt.frame = 1
 	}
+	if opt.tick <= 0 {
+		opt.tick = 1
+	}
 
 	p := opt.profile
 	if p == nil {
@@ -135,11 +139,18 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	var fuel int64 = -1
 	if opt.fuel > 0 {
 		ticks := (opt.fuel-1)/uint64(opt.tick) + 1
-		const max = uint64(1<<63 - 1)
-		if ticks > max {
-			fuel = int64(max)
+		m := uint64(1<<63 - 1)
+		if ticks > m {
+			fuel = int64(m)
 		}
 		fuel = int64(ticks)
+	}
+
+	var threshold int64 = int64(opt.threshold)
+	if threshold == 0 {
+		threshold = 1
+	} else if threshold > 0 {
+		threshold = (threshold-1)/int64(opt.tick) + 1
 	}
 
 	i := &Interpreter{
@@ -158,7 +169,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		fp:        0,
 		sp:        0,
 		tick:      opt.tick,
-		threshold: uint64(opt.threshold / opt.tick),
+		threshold: threshold,
 		fuel:      fuel,
 		cutoff:    opt.cutoff,
 	}
@@ -188,6 +199,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		types:     i.types,
 		constants: i.constants,
 		heap:      i.heap,
+		precise:   opt.tick == 1,
 	}
 
 	i.instrs[0] = prog.Code
@@ -245,7 +257,7 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 			}
 
 			i.prof.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
-			if i.prof.Samples(f.addr) == i.threshold {
+			if i.threshold >= 0 && i.prof.Samples(f.addr) == uint64(i.threshold) {
 				if err := i.jit(f.addr); err != nil {
 					return err
 				}
@@ -262,6 +274,34 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 
 func (i *Interpreter) Context() context.Context {
 	return i.ctx
+}
+
+func (i *Interpreter) Func() int {
+	return i.frame().addr
+}
+
+func (i *Interpreter) IP() int {
+	return i.frame().ip
+}
+
+func (i *Interpreter) FrameDepth() int {
+	return i.fp
+}
+
+func (i *Interpreter) Opcode() (instr.Opcode, error) {
+	fn, ip := i.Func(), i.IP()
+	if fn < 0 || fn >= len(i.instrs) || ip < 0 || ip >= len(i.instrs[fn]) {
+		return 0, ErrSegmentationFault
+	}
+	return instr.Opcode(i.instrs[fn][ip]), nil
+}
+
+func (i *Interpreter) Frame(n int) (fn, ip, bp int, err error) {
+	if n < 0 || n >= i.fp {
+		return 0, 0, 0, ErrFrameUnderflow
+	}
+	f := i.frames[i.fp-1-n]
+	return f.addr, f.ip, f.bp, nil
 }
 
 func (i *Interpreter) Const(idx int) (types.Boxed, error) {

@@ -79,7 +79,7 @@ skips 5 bytes past the end of the 3-byte `BR` instruction.
 
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|
-| `NOP` | `{}` | `→` | ✅ | No-op. Threaded execution collapses consecutive NOP runs into a single dispatch step. JIT emits no native instruction. |
+| `NOP` | `{}` | `→` | ✅ | No-op. Normal threaded execution collapses consecutive NOP runs into a single dispatch step; `WithTick(1)` preserves per-instruction hooks. JIT emits no native instruction. |
 | `DROP` | `{}` | `x →` | ✅ | Pop and discard the top value. |
 | `DUP` | `{}` | `x → x x` | ✅ | Duplicate the top value. |
 | `SWAP` | `{}` | `a b → b a` | ✅ | Swap the top two stack values. |
