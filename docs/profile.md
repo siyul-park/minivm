@@ -26,8 +26,9 @@ default tick is 128. Each sample records:
 
 The same tick cadence also drives context polling, fuel accounting, and hook
 callbacks. Lower ticks give denser profile data but add more polling and
-sampling overhead. The REPL `.profile` command intentionally uses `WithTick(1)`
-so small examples show exact per-instruction samples.
+sampling overhead. `WithDebugger` configures instruction-accurate hooks for
+bytecode debugging. The REPL `.profile` command also uses `WithTick(1)` so
+small examples show exact per-instruction samples.
 
 ## Library API
 
@@ -86,8 +87,11 @@ decisions. Treat them separately when tuning thresholds.
 
 ## Profile-Guided JIT
 
-The JIT activates for a function when `Samples(fn) == WithThreshold / WithTick`.
-The default is `4096 / 128 = 32` samples.
+The JIT activates for a function when `Samples(fn)` reaches the configured
+threshold rounded up to the tick cadence. The default is `4096 / 128 = 32`
+samples.
+`WithThreshold(0)` activates on the first sample. Negative thresholds disable
+JIT compilation.
 
 At compilation time, the JIT uses profile data in two places:
 

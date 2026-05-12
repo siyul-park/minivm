@@ -59,7 +59,9 @@ instr.OPCODE: func(c *threadedCompiler) func(i *Interpreter) {
 - Reference counting: call `i.retain(addr)` when a ref enters the stack, `i.release(addr)` when consumed.
 - Do not catch errors inside closures — `panic(ErrX)` and let `interp.Run`'s `recover` handle it.
 
-**Special case — NOP (threaded):** Each NOP scans forward to count all consecutive NOPs starting at its own position, then advances `c.ip` by 1. This means `n` consecutive NOPs produce `n` closures, but only the first is reached in execution — it jumps `n` bytes forward, bypassing the rest. The NOP-padding that `ConstantFoldingPass` inserts therefore takes one dispatch for the whole run.
+**Special case — NOP (threaded):** In normal execution, each NOP scans forward to count all consecutive NOPs starting at its own position, then advances `c.ip` by 1. This means `n` consecutive NOPs produce `n` closures, but only the first is reached in execution — it jumps `n` bytes forward, bypassing the rest. The NOP-padding that `ConstantFoldingPass` inserts therefore takes one dispatch for the whole run.
+
+When `WithTick(1)` is configured, threaded compilation preserves exact bytecode instruction boundaries for hooks, profiling, and debugging. In that mode each NOP advances by one byte.
 
 ```go
 instr.NOP: func(c *threadedCompiler) func(i *Interpreter) {
