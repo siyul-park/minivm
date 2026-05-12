@@ -190,10 +190,15 @@ vm := interp.New(prog,
     interp.WithHeap(512),        // 초기 힙 용량       (기본값: 128)
     interp.WithFrame(256),       // 최대 호출 깊이     (기본값: 128)
     interp.WithThreshold(4096),  // JIT 트리거 틱 수   (기본값: 4096)
-    interp.WithTick(128),        // 프로파일 샘플 주기 (기본값: 128)
+    interp.WithTick(128),        // 샘플/폴링 주기     (기본값: 128)
+    interp.WithHook(func(vm *interp.Interpreter) error {
+        return nil              // 상태 확인 또는 호스트 정책 적용
+    }),
     interp.WithEmit(4),          // 최소 JIT 세그먼트  (기본값: 4)
 )
 ```
+
+`WithTick`은 프로파일 샘플, context 취소 확인, hook 호출 주기를 함께 제어합니다. Hook은 `Run` 고루틴에서 동기적으로 실행되며 실행 중인 인터프리터를 받습니다. 인터프리터에 대한 동시 접근은 피하고, 상태를 변경할 때는 VM 불변식을 유지해야 합니다.
 
 ---
 

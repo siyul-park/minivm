@@ -16,6 +16,7 @@ import (
 type Interpreter struct {
 	ctx       context.Context
 	prof      *prof.Stats
+	hook      func(*Interpreter) error
 	buffer    *asm.Buffer
 	instrs    [][]byte
 	code      [][]func(*Interpreter)
@@ -43,6 +44,7 @@ type frame struct {
 
 type option struct {
 	profile   *prof.Stats
+	hook      func(*Interpreter) error
 	frame     int
 	globals   int
 	stack     int
@@ -67,6 +69,10 @@ var (
 
 func WithProfile(p *prof.Stats) func(*option) {
 	return func(o *option) { o.profile = p }
+}
+
+func WithHook(fn func(*Interpreter) error) func(*option) {
+	return func(o *option) { o.hook = fn }
 }
 
 func WithFrame(val int) func(*option) {
@@ -121,6 +127,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 
 	i := &Interpreter{
 		prof:      p,
+		hook:      opt.hook,
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
 		frames:    make([]frame, opt.frame),
@@ -205,30 +212,16 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 			default:
 			}
 
-			i.prof.Record(f.addr, f.ip)
+			if i.hook != nil {
+				if err := i.hook(i); err != nil {
+					return err
+				}
+			}
 
+			i.prof.Record(f.addr, f.ip)
 			if i.prof.Count(f.addr) == i.threshold {
-				if arch != nil {
-					if i.buffer == nil {
-						i.buffer, err = asm.NewBuffer(256)
-						if err != nil {
-							return err
-						}
-					}
-					c := &jitCompiler{
-						assembler: asm.NewAssembler(arch, i.buffer),
-						profile:   i.prof,
-						addr:      f.addr,
-						types:     i.types,
-						constants: i.constants,
-						heap:      i.heap,
-						emit:      i.emit,
-					}
-					for j, fn := range c.Compile(i.instrs[f.addr]) {
-						if fn != nil {
-							i.code[f.addr][j] = fn
-						}
-					}
+				if err := i.jit(f.addr); err != nil {
+					return err
 				}
 			}
 		}
@@ -412,6 +405,34 @@ func (i *Interpreter) Reset() {
 		i.rc[j] = 1
 	}
 	i.free = i.free[:0]
+}
+
+func (i *Interpreter) jit(addr int) error {
+	if arch == nil {
+		return nil
+	}
+	if i.buffer == nil {
+		buffer, err := asm.NewBuffer(256)
+		if err != nil {
+			return err
+		}
+		i.buffer = buffer
+	}
+	c := &jitCompiler{
+		assembler: asm.NewAssembler(arch, i.buffer),
+		profile:   i.prof,
+		addr:      addr,
+		types:     i.types,
+		constants: i.constants,
+		heap:      i.heap,
+		emit:      i.emit,
+	}
+	for j, fn := range c.Compile(i.instrs[addr]) {
+		if fn != nil {
+			i.code[addr][j] = fn
+		}
+	}
+	return nil
 }
 
 func (i *Interpreter) frame() *frame {

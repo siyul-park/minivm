@@ -2,6 +2,7 @@ package interp
 
 import (
 	"context"
+	"errors"
 	"math"
 	"testing"
 	"time"
@@ -2183,6 +2184,52 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("hook inspects interpreter", func(t *testing.T) {
+		var lens []int
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.NOP),
+		}), WithTick(1), WithHook(func(i *Interpreter) error {
+			lens = append(lens, i.Len())
+			return nil
+		}))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, []int{0, 1}, lens)
+	})
+
+	t.Run("hook cancel is observed on next tick", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+			instr.New(instr.I32_CONST, 0),
+		}), WithTick(1), WithHook(func(i *Interpreter) error {
+			cancel()
+			return nil
+		}))
+		defer i.Close()
+
+		err := i.Run(ctx)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("hook returns error", func(t *testing.T) {
+		errHook := errors.New("hook failed")
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+		}), WithTick(1), WithHook(func(i *Interpreter) error {
+			return errHook
+		}))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.ErrorIs(t, err, errHook)
+	})
+
 	t.Run("jit", func(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.program.String(), func(t *testing.T) {
@@ -2201,6 +2248,38 @@ func TestInterpreter_Run(t *testing.T) {
 				}
 			})
 		}
+	})
+
+	t.Run("hook cancel is observed on next jit tick", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		calls := 0
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 3),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 4),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 5),
+			instr.New(instr.DROP),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(NewHostFunction(&types.FunctionType{}, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
+			return nil, nil
+		}))), WithTick(1), WithThreshold(1), WithEmit(1), WithHook(func(i *Interpreter) error {
+			calls++
+			cancel()
+			return nil
+		}))
+		defer i.Close()
+
+		err := i.Run(ctx)
+		require.ErrorIs(t, err, context.Canceled)
+		require.Equal(t, 1, calls)
 	})
 
 	t.Run("canceled jit execution", func(t *testing.T) {

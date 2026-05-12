@@ -190,10 +190,15 @@ vm := interp.New(prog,
     interp.WithHeap(512),        // initial heap capacity (default: 128)
     interp.WithFrame(256),       // max call depth        (default: 128)
     interp.WithThreshold(4096),  // ticks before JIT      (default: 4096)
-    interp.WithTick(128),        // profile sample period (default: 128)
+    interp.WithTick(128),        // sample/poll cadence   (default: 128)
+    interp.WithHook(func(vm *interp.Interpreter) error {
+        return nil              // inspect or enforce host policy inline
+    }),
     interp.WithEmit(4),          // min JIT segment ops   (default: 4)
 )
 ```
+
+`WithTick` controls profiling samples, context-cancellation polling, and hook cadence. Hooks run synchronously on the `Run` goroutine and receive the live interpreter; avoid concurrent interpreter access and preserve VM invariants when mutating state.
 
 ---
 

@@ -275,4 +275,4 @@ make lint
 GOARCH=<arch> go test -race -v ./interp/... -run TestInterpreter_Run
 ```
 
-The interpreter records one profile sample every `WithTick` instructions (default 128). The JIT activates for a function when its aggregate sample count reaches `WithThreshold / WithTick` (default 4096 / 128 = 32 samples), and compiles only basic blocks that have at least one sample.
+The interpreter records one profile sample every `WithTick` instructions (default 128). The same cadence also drives context-cancellation polling and `WithHook` callbacks. The JIT activates for a function when its aggregate sample count reaches `WithThreshold / WithTick` (default 4096 / 128 = 32 samples), and compiles only basic blocks that have at least one sample.
