@@ -195,7 +195,7 @@ vm := interp.New(prog,
     interp.WithHook(func(vm *interp.Interpreter) error {
         return nil              // inspect or enforce host policy inline
     }),
-    interp.WithEmit(4),          // min JIT segment ops   (default: 4)
+    interp.WithCutoff(4),          // min JIT segment ops   (default: 4)
 )
 ```
 

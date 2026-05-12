@@ -195,7 +195,7 @@ vm := interp.New(prog,
     interp.WithHook(func(vm *interp.Interpreter) error {
         return nil              // 상태 확인 또는 호스트 정책 적용
     }),
-    interp.WithEmit(4),          // 최소 JIT 세그먼트  (기본값: 4)
+    interp.WithCutoff(4),          // 최소 JIT 세그먼트  (기본값: 4)
 )
 ```
 

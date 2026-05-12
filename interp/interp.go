@@ -33,7 +33,7 @@ type Interpreter struct {
 	tick      int
 	threshold uint64
 	fuel      int64
-	emit      int
+	cutoff    int
 }
 
 type frame struct {
@@ -53,7 +53,7 @@ type option struct {
 	tick      int
 	threshold int
 	fuel      uint64
-	emit      int
+	cutoff    int
 }
 
 var (
@@ -106,8 +106,8 @@ func WithFuel(val uint64) func(*option) {
 	return func(o *option) { o.fuel = val }
 }
 
-func WithEmit(val int) func(*option) {
-	return func(o *option) { o.emit = val }
+func WithCutoff(val int) func(*option) {
+	return func(o *option) { o.cutoff = val }
 }
 
 func New(prog *program.Program, opts ...func(*option)) *Interpreter {
@@ -118,7 +118,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		heap:      128,
 		tick:      128,
 		threshold: 4096,
-		emit:      4,
+		cutoff:    4,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -160,7 +160,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		tick:      opt.tick,
 		threshold: uint64(opt.threshold / opt.tick),
 		fuel:      fuel,
-		emit:      opt.emit,
+		cutoff:    opt.cutoff,
 	}
 
 	i.alloc(types.Null)
@@ -451,7 +451,7 @@ func (i *Interpreter) jit(addr int) error {
 		types:     i.types,
 		constants: i.constants,
 		heap:      i.heap,
-		emit:      i.emit,
+		cutoff:    i.cutoff,
 	}
 	for j, fn := range c.Compile(i.instrs[addr]) {
 		if fn != nil {

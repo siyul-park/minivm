@@ -2309,7 +2309,7 @@ func TestInterpreter_Run(t *testing.T) {
 				ctx, cancel := context.WithCancel(context.TODO())
 				defer cancel()
 
-				i := New(tt.program, WithTick(1), WithThreshold(1), WithEmit(1))
+				i := New(tt.program, WithTick(1), WithThreshold(1), WithCutoff(1))
 				defer i.Close()
 
 				err := i.Run(ctx)
@@ -2343,7 +2343,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(NewHostFunction(&types.FunctionType{}, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
 			return nil, nil
-		}))), WithTick(1), WithThreshold(1), WithEmit(1), WithHook(func(i *Interpreter) error {
+		}))), WithTick(1), WithThreshold(1), WithCutoff(1), WithHook(func(i *Interpreter) error {
 			calls++
 			cancel()
 			return nil
@@ -2371,7 +2371,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(NewHostFunction(&types.FunctionType{}, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
 			return nil, nil
-		}))), WithTick(1), WithThreshold(1), WithEmit(1), WithFuel(1))
+		}))), WithTick(1), WithThreshold(1), WithCutoff(1), WithFuel(1))
 		defer i.Close()
 
 		err := i.Run(context.Background())
@@ -2419,7 +2419,7 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(fn, gate),
-		), WithFrame(1024), WithTick(1), WithThreshold(1), WithEmit(1))
+		), WithFrame(1024), WithTick(1), WithThreshold(1), WithCutoff(1))
 		defer i.Close()
 
 		errCh := make(chan error, 1)

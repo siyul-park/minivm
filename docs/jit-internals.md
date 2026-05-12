@@ -137,10 +137,10 @@ The Go closure in `jitCompiler.closure()` initializes scratch inputs before `fn.
 ```
 block [A, B, X, C, D, E, F]   (X = non-compilable)
 → segment 1: [A, B]           count=2, below threshold → aborted
-→ segment 2: [C, D, E, F]     count=4, emitted if the block ends here and WithEmit is 4
+→ segment 2: [C, D, E, F]     count=4, emitted if the block ends here and WithCutoff is 4
 ```
 
-Completed segments emit when their compiled instruction count is at least `WithEmit` (default 4). If a segment stops because the next opcode is not compilable, the current implementation keeps it only when `count > 4`; shorter truncated segments are aborted via `assembler.Abort()`.
+Completed segments emit when their compiled instruction count is at least `WithCutoff` (default 4). If a segment stops because the next opcode is not compilable, the current implementation keeps it only when `count > 4`; shorter truncated segments are aborted via `assembler.Abort()`.
 
 ### Two-Pass Compilation
 
