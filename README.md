@@ -7,7 +7,7 @@
 
 **Ship a scripting engine without writing a compiler.**
 
-minivm gives your Go service a programmable runtime: assemble bytecode, expose Go functions to it, and run. Hot paths automatically upgrade from a threaded interpreter to native ARM64 code — no flags, no warmup, no configuration.
+minivm gives your Go service a lightweight programmable runtime: assemble bytecode, expose Go functions to it, and run. Hot paths automatically upgrade from a threaded interpreter to native ARM64 code — no flags, no warmup, no configuration.
 
 ```bash
 go get github.com/siyul-park/minivm
@@ -19,10 +19,21 @@ go get github.com/siyul-park/minivm
 
 ## What you can build
 
-- **Scripting engines** — let users write logic your application executes safely
+- **Scripting engines** — let users write logic your application executes under your host policy
 - **Rule engines** — evaluate complex conditions at runtime without redeployment  
 - **DSL runtimes** — define your own instruction set on top of a proven VM foundation
-- **Plugin systems** — run untrusted bytecode in an isolated, GC-managed environment
+- **Plugin systems** — run application-defined bytecode in an isolated, GC-managed environment
+
+## Designed for Go embedding
+
+minivm is intentionally shaped around Go services:
+
+- **Simple embedding** — build programs with Go APIs and run them in-process
+- **Typed host calls** — expose Go functions through the `[]Boxed` bridge without reflection
+- **Compact runtime model** — use a small custom bytecode format with a GC-managed heap
+- **Automatic tiering** — start in the threaded interpreter and promote hot ARM64 numeric paths
+
+The instruction set borrows familiar ideas from WebAssembly while staying focused on Go-native scripting, rules, and DSL execution. See [docs/roadmap.md](docs/roadmap.md) for the current direction.
 
 ---
 
@@ -155,7 +166,7 @@ The JIT compiles numeric computation — arithmetic, bitwise ops, comparisons, a
 
 ## Instruction set
 
-Inspired by WebAssembly. Every opcode is one byte; operands are fixed-width or length-prefixed.
+Inspired by WebAssembly, but intentionally custom. Every opcode is one byte; operands are fixed-width or length-prefixed.
 
 | Category | |
 |---|---|
@@ -195,6 +206,8 @@ vm := interp.New(prog,
 | ARM64 JIT — numeric ops, locals, branches | ✅ |
 | ARM64 JIT — calls, globals, refs | 🔲 planned |
 | x86-64 JIT | 🔲 planned |
+
+See [docs/roadmap.md](docs/roadmap.md) for roadmap priorities and future direction.
 
 ---
 

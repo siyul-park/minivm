@@ -213,10 +213,15 @@ Thin cobra entry point. The root command (no subcommand) launches the REPL with 
    └─ buffer.Free() → munmap
 ```
 
-## Known Gaps
+## Focus Areas
 
-| Gap | Impact |
-|-----|--------|
-| JIT excludes calls, globals, refs, heap objects | these operations always run threaded |
-| No x86-64 backend | JIT inactive on Linux/Windows servers |
-| Benchmark coverage is narrow | default JIT thresholds are still workload-dependent |
+| Area | Direction |
+|------|-----------|
+| JIT coverage | calls, globals, refs, and heap objects stay threaded until benchmarks justify native handling |
+| Architecture support | ARM64 is the optimized JIT path; x86-64 can follow once target users and benchmarks are clear |
+| Benchmarks | broaden coverage across numeric loops, host calls, and heap-object workloads |
+| Program format | keep `instr`/`program` as the compact Go-native bytecode surface |
+| Host integration | keep `interp.NewHostFunction` as the primary typed bridge into Go applications |
+| Resource policy | document how `context.Context`, stack/heap/frame limits, and host-side policy work together |
+
+See [`docs/roadmap.md`](roadmap.md) for current priorities.
