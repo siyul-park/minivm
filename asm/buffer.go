@@ -87,6 +87,10 @@ func (c *Chunk) Ptr() unsafe.Pointer {
 	return unsafe.Pointer(&c.buf.mem[c.offset])
 }
 
+func (c *Chunk) Size() int {
+	return c.size
+}
+
 func (b *Buffer) grow(s int) error {
 	size := len(b.mem) * 2
 	if size < s {

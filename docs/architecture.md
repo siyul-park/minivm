@@ -105,7 +105,7 @@ The interpreter owns all runtime state in `Interpreter`:
 |---|---|
 | `instrs [][]byte` | raw bytecode per function slot |
 | `code [][]func(*Interpreter)` | threaded closures per function slot |
-| `prof *prof.Stats` | aggregate and per-IP execution samples |
+| `prof *prof.Stats` | aggregate function, IP, opcode, and JIT profile samples |
 | `frames []frame` | call stack (addr, ip, bp) |
 | `stack []Boxed` | value stack |
 | `heap []Value` | flat heap array |
@@ -199,8 +199,8 @@ Thin cobra entry point. The root command (no subcommand) launches the REPL with 
 
 4. interp.Run(ctx)
    ├─ main loop: code[f.ip](i)
-   ├─ every 128 instructions: check ctx, consume fuel, call hook, prof.Record(addr, ip)
-   └─ when prof.Count(addr) == threshold/tick:
+   ├─ every 128 instructions: check ctx, consume fuel, call hook, prof.Add(addr, ip, opcode)
+   └─ when prof.Samples(addr) == threshold/tick:
        jitCompiler.Compile(instrs[addr])
        └─ two-pass over basic blocks:
            ├─ pass 1: for each sampled block, segment() loop → emit eligible segments

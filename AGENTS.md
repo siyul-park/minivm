@@ -91,7 +91,7 @@ Interpreter.Run()
 
 Hot-segment compilation:
 
-* profile samples record `(function, ip)` every 128 executed instructions
+* profile samples record `(function, ip, opcode)` every 128 executed instructions
 * JIT threshold defaults to 4096 ticks, i.e. 32 profile samples
 * compiled native handlers replace threaded closures in-place
 

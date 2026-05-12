@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"time"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/analysis"
@@ -58,6 +59,10 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 	if arch == nil {
 		return nil
 	}
+	started := time.Now()
+	defer func() {
+		c.profile.JITTime(time.Since(started))
+	}()
 
 	c.assembler.Reset()
 	c.code, c.ip = code, 0
@@ -85,7 +90,7 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 
 	var branches []*analysis.BasicBlock
 	for _, b := range blocks {
-		if c.profile.HitsInRange(c.addr, b.Start, b.End) == 0 {
+		if c.profile.Range(c.addr, b.Start, b.End) == 0 {
 			c.compilable[b.Start] = false
 			continue
 		}
@@ -120,11 +125,16 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 		return nil
 	}
 
-	callers, _ := c.assembler.Link(objs)
+	callers, err := c.assembler.Link(objs)
+	if err != nil {
+		c.profile.JITError()
+		return nil
+	}
 	for i, m := range metas {
 		if callers[i] == nil {
 			continue
 		}
+		c.profile.JITLink()
 		out[m.entryIP] = c.closure(callers[i], m.obj.Sig)
 	}
 
@@ -171,14 +181,17 @@ func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, in
 		if !ok {
 			if count <= 4 {
 				c.assembler.Abort()
+				c.profile.JITAbort()
 				return nil, c.ip, false
 			}
 			c.end = prevIP
 			jit[_EPILOGUE](c)
 			obj, err := c.assembler.Compile()
 			if err != nil {
+				c.profile.JITError()
 				return nil, c.ip, false
 			}
+			c.profile.JITEmit(obj.Chunk.Size())
 			return obj, c.ip, false
 		}
 
@@ -191,6 +204,7 @@ func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, in
 
 	if count < c.cutoff {
 		c.assembler.Abort()
+		c.profile.JITAbort()
 		return nil, c.ip, stop
 	}
 	if !stop {
@@ -198,8 +212,10 @@ func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, in
 	}
 	obj, err := c.assembler.Compile()
 	if err != nil {
+		c.profile.JITError()
 		return nil, c.ip, stop
 	}
+	c.profile.JITEmit(obj.Chunk.Size())
 	return obj, c.ip, stop
 }
 
