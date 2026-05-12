@@ -244,8 +244,8 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 				}
 			}
 
-			i.prof.Record(f.addr, f.ip)
-			if i.prof.Count(f.addr) == i.threshold {
+			i.prof.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
+			if i.prof.Samples(f.addr) == i.threshold {
 				if err := i.jit(f.addr); err != nil {
 					return err
 				}
@@ -437,9 +437,11 @@ func (i *Interpreter) jit(addr int) error {
 	if arch == nil {
 		return nil
 	}
+	i.prof.JITAttempt()
 	if i.buffer == nil {
 		buffer, err := asm.NewBuffer(256)
 		if err != nil {
+			i.prof.JITError()
 			return err
 		}
 		i.buffer = buffer

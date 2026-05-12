@@ -40,6 +40,20 @@ MiniVM REPL — type '.help' for commands, '.quit' to exit
 0000:	i32.const 0x0000002A
 0005:	i32.const 0x00000008
 0010:	i32.add
+> .profile
+profile samples: 3
+functions:
+func	samples	%
+0	3	100.0%
+func 0 ips:
+ip	samples	%
+0000	1	33.3%
+0005	1	33.3%
+0010	1	33.3%
+opcodes:
+opcode	samples	%
+i32.const	2	66.7%
+i32.add	1	33.3%
 > .reset
 reset.
 > .quit
@@ -55,10 +69,13 @@ stack produces no output.
 |---|---|
 | `.help` | Print command reference |
 | `.show` | Format (disassemble) the accumulated instruction history (includes constants and types) |
+| `.profile` | Run the accumulated program once with exact sampling and print a profile report |
 | `.reset` | Clear accumulated instructions, constants, types, and stack state |
 | `.const` | Declare a function constant (multi-line block, end with blank line) |
 | `.type` | Declare one or more types (multi-line block, end with blank line) |
 | `.quit` / `.exit` | Exit the REPL |
+
+See [Profiling](../profile.md) for the sampling model and report fields.
 
 ## Instruction Syntax
 

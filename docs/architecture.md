@@ -9,6 +9,7 @@ Read this when a change crosses package boundaries or you need to know where sta
 | If you touch | Also read |
 | --- | --- |
 | `interp/` runtime state, frames, globals | [memory-model.md](memory-model.md), [value-representation.md](value-representation.md) |
+| `prof/` or profile options | [profile.md](profile.md) |
 | `interp/threaded.go` or `interp/jit*.go` | [jit-internals.md](jit-internals.md), [instruction-set.md](instruction-set.md) |
 | `analysis/`, `transform/`, `optimize/`, `pass/` | [pass-system.md](pass-system.md) |
 | `cmd/repl/` or `cmd/minivm/` | [guides/repl.md](guides/repl.md) |
@@ -105,7 +106,7 @@ The interpreter owns all runtime state in `Interpreter`:
 |---|---|
 | `instrs [][]byte` | raw bytecode per function slot |
 | `code [][]func(*Interpreter)` | threaded closures per function slot |
-| `prof *prof.Stats` | aggregate and per-IP execution samples |
+| `prof *prof.Stats` | aggregate function, IP, opcode, and JIT profile samples |
 | `frames []frame` | call stack (addr, ip, bp) |
 | `stack []Boxed` | value stack |
 | `heap []Value` | flat heap array |
@@ -116,7 +117,7 @@ The interpreter owns all runtime state in `Interpreter`:
 
 **`threadedCompiler`** (in `threaded.go`): A `[256]func` table populated in `init()`. Each entry is a compile-time function that reads operands from `c.code[c.ip+N:]`, advances `c.ip`, and returns a runtime closure. The closure captures compile-time constants and advances `f.ip` by the instruction width when executed.
 
-**`jitCompiler`** (in `jit.go`): Architecture-agnostic driver. Runs `BasicBlocksPass` to find block boundaries. For each block, `compile(b)` calls `segment(code, start, end)` in a loop to extract every maximal consecutive run of compilable instructions. Completed segments emit when they reach `WithCutoff`'s minimum instruction count (default 4); a segment cut short by an unsupported instruction is kept only after more than 4 compiled instructions. Within each block, multiple independent segments may be produced. A two-pass strategy (non-terminated blocks first, then branch-terminated blocks) ensures branch targets have known signatures before linking decisions are made. All compiled segments across a function are linked together via `assembler.Link()`, which patches cross-segment label relocations. Each linked segment is installed as a closure at `out[entryIP]`.
+**`jitCompiler`** (in `jit.go`): Architecture-agnostic driver. Runs `BasicBlocksPass` to find block boundaries, ranks sampled blocks by profile heat, and compiles hotter blocks first. For each hot block, `compile(b)` calls `segment(code, start, end)` in a loop to extract every maximal consecutive run of compilable sampled instructions. Completed segments emit when they reach `WithCutoff`'s minimum instruction count (default 4); a segment cut short by an unsupported instruction is kept only after more than 4 compiled instructions. Cold segments inside an otherwise hot block are skipped instead of emitted. A two-pass strategy (non-terminated blocks first, then branch-terminated blocks) ensures branch targets have known signatures before linking decisions are made. All compiled segments across a function are linked together via `assembler.Link()`, which patches cross-segment label relocations. Each linked segment is installed as a closure at `out[entryIP]`. The JIT does not currently recompile or tier-up previously compiled code.
 
 **`HostFunction`** (in `host.go`): Wraps a Go `func(i *Interpreter, params []Boxed) ([]Boxed, error)` as a `types.Value`. Stored in the constant table and called with `CONST_GET` + `CALL` like any `*types.Function`.
 
@@ -199,11 +200,11 @@ Thin cobra entry point. The root command (no subcommand) launches the REPL with 
 
 4. interp.Run(ctx)
    ├─ main loop: code[f.ip](i)
-   ├─ every 128 instructions: check ctx, consume fuel, call hook, prof.Record(addr, ip)
-   └─ when prof.Count(addr) == threshold/tick:
+   ├─ every 128 instructions: check ctx, consume fuel, call hook, prof.Add(addr, ip, opcode)
+   └─ when prof.Samples(addr) == threshold/tick:
        jitCompiler.Compile(instrs[addr])
-       └─ two-pass over basic blocks:
-           ├─ pass 1: for each sampled block, segment() loop → emit eligible segments
+       └─ heat-sorted two-pass over sampled basic blocks:
+           ├─ pass 1: for each hot block, segment() loop → emit sampled eligible segments
            │   non-terminated segments → objs; terminated blocks → deferred
            ├─ pass 2: recompile terminated blocks with full signature knowledge
            ├─ assembler.Link(objs) → patches cross-segment relocations → []Caller

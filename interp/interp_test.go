@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -2200,6 +2201,31 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, []int{0, 1}, lens)
 	})
 
+	t.Run("profile records opcode samples", func(t *testing.T) {
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.DROP),
+		}), WithProfile(p), WithTick(1))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.NoError(t, err)
+
+		snap := p.Snapshot()
+		require.Equal(t, uint64(2), snap.Samples)
+		require.Equal(t, uint64(2), snap.Funcs[0].Samples)
+		require.Equal(t, uint64(1), p.IP(0, 0).Samples)
+		require.Equal(t, uint64(1), p.IP(0, 5).Samples)
+
+		opcodes := map[byte]uint64{}
+		for _, op := range snap.Opcodes {
+			opcodes[op.Code] = op.Samples
+		}
+		require.Equal(t, uint64(1), opcodes[byte(instr.I32_CONST)])
+		require.Equal(t, uint64(1), opcodes[byte(instr.DROP)])
+	})
+
 	t.Run("hook cancel is observed on next tick", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -2321,6 +2347,59 @@ func TestInterpreter_Run(t *testing.T) {
 				}
 			})
 		}
+	})
+
+	t.Run("profile records jit counters", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+		}), WithProfile(p), WithTick(1), WithThreshold(1), WithCutoff(1))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.NoError(t, err)
+
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Attempts)
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+		require.NotZero(t, jit.Bytes)
+	})
+
+	t.Run("jit skips cold segments", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		p := prof.New()
+		p.Add(0, 0, byte(instr.NOP))
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.CALL),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+
+		err := i.jit(0)
+		require.NoError(t, err)
+
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Attempts)
+		require.Equal(t, uint64(1), jit.Emits)
+		require.Equal(t, uint64(1), jit.Links)
+		require.Equal(t, uint64(1), jit.Skips)
 	})
 
 	t.Run("hook cancel is observed on next jit tick", func(t *testing.T) {

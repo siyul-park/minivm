@@ -56,6 +56,7 @@ Read only what is relevant to the task.
 | [docs/architecture.md](docs/architecture.md)                         | tracing execution flow, debugging across packages |
 | [docs/value-representation.md](docs/value-representation.md)         | modifying boxed values, JIT value passing         |
 | [docs/memory-model.md](docs/memory-model.md)                         | touching refs, closures, GC, host functions       |
+| [docs/profile.md](docs/profile.md)                                   | modifying profiling, tick cadence, or JIT profile guidance |
 | [docs/instruction-set.md](docs/instruction-set.md)                   | adding or debugging opcodes                       |
 | [docs/jit-internals.md](docs/jit-internals.md)                       | modifying threaded/JIT compilation                |
 | [docs/pass-system.md](docs/pass-system.md)                           | adding optimization or analysis passes            |
@@ -91,7 +92,7 @@ Interpreter.Run()
 
 Hot-segment compilation:
 
-* profile samples record `(function, ip)` every 128 executed instructions
+* profile samples record `(function, ip, opcode)` every 128 executed instructions
 * JIT threshold defaults to 4096 ticks, i.e. 32 profile samples
 * compiled native handlers replace threaded closures in-place
 

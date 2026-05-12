@@ -1,12 +1,14 @@
 package repl
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/siyul-park/minivm/instr"
 	"github.com/stretchr/testify/require"
 )
 
@@ -56,7 +58,24 @@ func TestREPL_Run(t *testing.T) {
 		},
 		{
 			input:    ".help\n.quit\n",
-			contains: []string{".quit", ".reset"},
+			contains: []string{".quit", ".reset", ".profile"},
+		},
+		{
+			input:    ".profile\n.quit\n",
+			contains: []string{"(empty)"},
+		},
+		{
+			input: "i32.const 7\ndrop\n.profile\n.quit\n",
+			contains: []string{
+				"profile samples: 2",
+				"functions:",
+				"func 0 ips:",
+				"0000\t1\t50.0%",
+				"0005\t1\t50.0%",
+				"opcodes:",
+				"i32.const\t1\t50.0%",
+				"drop\t1\t50.0%",
+			},
 		},
 		{
 			input:    "i32.const 42\n.reset\n.show\n.quit\n",
@@ -234,5 +253,23 @@ func TestREPL_Run(t *testing.T) {
 			}
 		}
 		require.Equal(t, []string{"10", "10 20"}, valLines)
+	})
+
+	t.Run("profile does not mutate history", func(t *testing.T) {
+		var out bytes.Buffer
+		r := New(strings.NewReader("i32.const 1\n.profile\n.quit\n"), &out)
+		require.NoError(t, r.Run(context.Background()))
+		require.Len(t, r.instrs, 1)
+		require.Equal(t, 5, r.codeLen)
+	})
+
+	t.Run("profile command renders runtime errors", func(t *testing.T) {
+		var out bytes.Buffer
+		r := New(strings.NewReader(""), &out)
+		r.instrs = []instr.Instruction{instr.New(instr.DROP)}
+		done, err := r.command(context.Background(), bufio.NewScanner(strings.NewReader("")), ".profile")
+		require.NoError(t, err)
+		require.False(t, done)
+		require.Contains(t, out.String(), "error: stack underflow")
 	})
 }
