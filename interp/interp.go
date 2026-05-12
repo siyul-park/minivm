@@ -139,9 +139,9 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	var fuel int64 = -1
 	if opt.fuel > 0 {
 		ticks := (opt.fuel-1)/uint64(opt.tick) + 1
-		const max = uint64(1<<63 - 1)
-		if ticks > max {
-			fuel = int64(max)
+		m := uint64(1<<63 - 1)
+		if ticks > m {
+			fuel = int64(m)
 		}
 		fuel = int64(ticks)
 	}
