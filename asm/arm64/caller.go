@@ -133,9 +133,14 @@ func (c *caller) Call(params []asm.Value, rsv *[]uint64) ([]asm.Value, error) {
 		}
 	}
 
+	rregs := c.sig.Returns(c.sig.Entry)
+	if len(rregs) < nReturns {
+		rregs = append(rregs, make([]asm.PReg, nReturns-len(rregs))...)
+	}
+
 	// argv layout: [ header | scratch×nScratch | values×slots ]
 	argv := make([]uint64, 1+nScratch+slots)
-	argv[0] = Header(pregs, c.sig.Returns(c.sig.Entry), nScratch)
+	argv[0] = Header(pregs, rregs, nScratch)
 
 	if rsv != nil && nScratch > 0 {
 		copy(argv[1:], (*rsv)[:min(nScratch, len(*rsv))])
