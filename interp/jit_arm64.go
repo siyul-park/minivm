@@ -223,6 +223,77 @@ func init() {
 		return true, true
 	}
 
+	jit[instr.GLOBAL_GET] = func(c *jitCompiler) (bool, bool) {
+		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+		c.ip += 3
+		offset, ok := c.global(idx)
+		if !ok {
+			return false, false
+		}
+		kind, ok := c.globalKinds[idx]
+		if !ok {
+			return false, false
+		}
+		boxed := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
+		c.assembler.Emit(arm64.LDR(boxed, c.scratch[rGlobals], offset))
+		r0, ok := c.unbox64(boxed, kind)
+		if !ok {
+			return false, false
+		}
+		c.assembler.Push(r0)
+		return true, false
+	}
+
+	jit[instr.GLOBAL_SET] = func(c *jitCompiler) (bool, bool) {
+		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+		c.ip += 3
+		offset, ok := c.global(idx)
+		if !ok {
+			return false, false
+		}
+		r0, ok := c.assembler.Pop()
+		if !ok {
+			return false, false
+		}
+		kind, ok := c.kind(r0)
+		if !ok {
+			return false, false
+		}
+		boxed, ok := c.box64(r0, kind, c.ip-3)
+		if !ok {
+			return false, false
+		}
+
+		c.assembler.Emit(arm64.STR(boxed, c.scratch[rGlobals], offset))
+		c.globalKinds[idx] = kind
+		return true, false
+	}
+
+	jit[instr.GLOBAL_TEE] = func(c *jitCompiler) (bool, bool) {
+		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+		c.ip += 3
+		offset, ok := c.global(idx)
+		if !ok {
+			return false, false
+		}
+		r0, ok := c.assembler.Top(0)
+		if !ok {
+			return false, false
+		}
+		kind, ok := c.kind(r0)
+		if !ok {
+			return false, false
+		}
+		boxed, ok := c.box64(r0, kind, c.ip-3)
+		if !ok {
+			return false, false
+		}
+
+		c.assembler.Emit(arm64.STR(boxed, c.scratch[rGlobals], offset))
+		c.globalKinds[idx] = kind
+		return true, false
+	}
+
 	jit[instr.LOCAL_GET] = func(c *jitCompiler) (bool, bool) {
 		idx := int(c.code[c.ip+1])
 		c.ip += 2
@@ -1742,6 +1813,59 @@ func init() {
 	}
 }
 
+func (c *jitCompiler) unbox64(boxed asm.VReg, kind types.Kind) (asm.VReg, bool) {
+	switch kind {
+	case types.KindI32:
+		r0 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
+		c.assembler.Emit(arm64.UXTW(r0, boxed))
+		return r0, true
+	case types.KindI64:
+		r0 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
+		c.assembler.Emit(arm64.LSLI(r0, boxed, 64-types.VBits))
+		c.assembler.Emit(arm64.ASRI(r0, r0, 64-types.VBits))
+		return r0, true
+	case types.KindF32:
+		ri := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
+		rf := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width32)
+		c.assembler.Emit(arm64.UXTW(ri, boxed))
+		c.assembler.Emit(arm64.FMOV(rf, ri))
+		return rf, true
+	case types.KindF64:
+		rf := c.assembler.NewVReg(asm.RegTypeFloat, asm.Width64)
+		c.assembler.Emit(arm64.FMOV(rf, boxed))
+		return rf, true
+	default:
+		return asm.VReg{}, false
+	}
+}
+
+func (c *jitCompiler) box64(r0 asm.VReg, kind types.Kind, fallbackIP int) (asm.VReg, bool) {
+	switch kind {
+	case types.KindI32:
+		if r0.Type() != asm.RegTypeInt || r0.Width() != asm.Width32 {
+			return asm.VReg{}, false
+		}
+		return c.boxI32(r0), true
+	case types.KindI64:
+		if r0.Type() != asm.RegTypeInt || r0.Width() != asm.Width64 {
+			return asm.VReg{}, false
+		}
+		return c.boxI64At(r0, fallbackIP), true
+	case types.KindF32:
+		if r0.Type() != asm.RegTypeFloat || r0.Width() != asm.Width32 {
+			return asm.VReg{}, false
+		}
+		return c.boxF32(r0), true
+	case types.KindF64:
+		if r0.Type() != asm.RegTypeFloat || r0.Width() != asm.Width64 {
+			return asm.VReg{}, false
+		}
+		return c.boxF64(r0), true
+	default:
+		return asm.VReg{}, false
+	}
+}
+
 func (c *jitCompiler) boxI32(r0 asm.VReg) asm.VReg {
 	payload := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
 	tag := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
@@ -1755,6 +1879,10 @@ func (c *jitCompiler) boxI32(r0 asm.VReg) asm.VReg {
 }
 
 func (c *jitCompiler) boxI64(r0 asm.VReg) asm.VReg {
+	return c.boxI64At(r0, c.ip-2)
+}
+
+func (c *jitCompiler) boxI64At(r0 asm.VReg, fallbackIP int) asm.VReg {
 	payload := c.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
 
 	c.assembler.Emit(arm64.LSLI(payload, r0, 64-types.VBits))
@@ -1775,7 +1903,7 @@ func (c *jitCompiler) boxI64(r0 asm.VReg) asm.VReg {
 	c.assembler.Emit(arm64.BLabel(done))
 
 	c.assembler.Bind(slow)
-	c.assembler.Emits(arm64.LDI(c.scratch[rNext], uint64(c.ip-2))...)
+	c.assembler.Emits(arm64.LDI(c.scratch[rNext], uint64(fallbackIP))...)
 	c.assembler.Emit(arm64.RET())
 
 	c.assembler.Bind(done)

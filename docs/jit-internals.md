@@ -125,9 +125,12 @@ ARM64 JIT uses scratch registers from `arch.Scratch = X10–X15` as metadata cha
 |---|---|
 | `scratch[0]` | frame-local stack pointer `&i.stack[f.bp]` input |
 | `scratch[1]` | heap pointer input |
-| `scratch[2]` | next interpreter IP output |
+| `scratch[2]` | globals pointer input |
+| `scratch[3]` | next interpreter IP output |
 
-`_PROLOGUE` loads `c.end` into `scratch[2]`; `_EPILOGUE` reloads possibly truncated `c.end`; branch handlers load branch target IP. `jitCompiler.closure()` initializes scratch inputs, calls `fn.Call()`, reads `scratch[2]`, and writes `i.frames[fp-1].ip`.
+`_PROLOGUE` loads `c.end` into the next-IP scratch; `_EPILOGUE` reloads possibly truncated `c.end`; branch handlers load branch target IP. `jitCompiler.closure()` initializes scratch inputs, calls `fn.Call()`, reads the next-IP scratch, and writes `i.frames[fp-1].ip`.
+
+Mutable globals have no declared type. JIT `GLOBAL_SET`/`GLOBAL_TEE` use the source register kind, and JIT `GLOBAL_GET` compiles only when an earlier same-segment store proves the kind. Do not specialize `GLOBAL_GET` from the current global value; dynamic kind changes would need deopt stack reconstruction, which the current JIT ABI does not provide.
 
 ## Segment Selection
 

@@ -14,20 +14,23 @@ import (
 )
 
 type jitCompiler struct {
-	assembler  *asm.Assembler
-	profile    *prof.Stats
-	addr       int
-	types      []types.Type
-	constants  []types.Boxed
-	heap       []types.Value
-	code       []byte
-	ip         int
-	cutoff     int
-	labels     map[int]int
-	compilable map[int]bool
-	sigs       map[int]*asm.Signature
-	scratch    []asm.PReg
-	end        int
+	assembler   *asm.Assembler
+	profile     *prof.Stats
+	addr        int
+	types       []types.Type
+	constants   []types.Boxed
+	globals     []types.Boxed
+	heap        []types.Value
+	code        []byte
+	ip          int
+	cutoff      int
+	entry       int
+	labels      map[int]int
+	compilable  map[int]bool
+	sigs        map[int]*asm.Signature
+	globalKinds map[int]types.Kind
+	scratch     []asm.PReg
+	end         int
 }
 
 type profiledBlock struct {
@@ -43,6 +46,7 @@ var (
 const (
 	rStack = iota
 	rHeap
+	rGlobals
 	rNext
 )
 
@@ -183,8 +187,11 @@ func (c *jitCompiler) compile(b *analysis.BasicBlock) ([]*asm.RelocObject, []int
 
 func (c *jitCompiler) segment(code []byte, start, end int) (*asm.RelocObject, int, bool) {
 	c.ip = start
+	c.entry = start
 	c.end = end
+	c.globalKinds = make(map[int]types.Kind)
 	c.scratch = append(c.scratch[:0], c.assembler.Scratch())
+	c.scratch = append(c.scratch, c.assembler.Scratch())
 	c.scratch = append(c.scratch, c.assembler.Scratch())
 	c.scratch = append(c.scratch, c.assembler.Scratch())
 
@@ -284,9 +291,17 @@ func (c *jitCompiler) linkable(targetIP int) bool {
 
 func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpreter) {
 	nParams := len(sig.Params)
-	kinds := c.kinds(sig.Returns)
 	params := make([]uint64, nParams)
 	scratch := make([]uint64, len(sig.Scratch))
+
+	kinds := make([]types.Kind, nParams)
+	for i, p := range sig.Params {
+		p, ok := c.kind(p)
+		if !ok {
+			return nil
+		}
+		kinds[i] = p
+	}
 
 	return func(i *Interpreter) {
 		base := i.sp - nParams
@@ -304,6 +319,13 @@ func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpret
 				scratch[rHeap] = 0
 			}
 		}
+		if len(scratch) > rGlobals {
+			if len(i.globals) > 0 {
+				scratch[rGlobals] = uint64(uintptr(unsafe.Pointer(&i.globals[0])))
+			} else {
+				scratch[rGlobals] = 0
+			}
+		}
 		rets, err := fn.Call(params, &scratch)
 		if err != nil {
 			panic(err)
@@ -316,25 +338,15 @@ func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpret
 	}
 }
 
-func (c *jitCompiler) kinds(regs []asm.PReg) []types.Kind {
-	kinds := make([]types.Kind, len(regs))
-	for i, p := range regs {
-		switch p.Type() {
-		case asm.RegTypeFloat:
-			if p.Width() == asm.Width32 {
-				kinds[i] = types.KindF32
-			} else {
-				kinds[i] = types.KindF64
-			}
-		default:
-			if p.Width() == asm.Width32 {
-				kinds[i] = types.KindI32
-			} else {
-				kinds[i] = types.KindI64
-			}
-		}
+func (c *jitCompiler) global(idx int) (int16, bool) {
+	if idx < 0 || idx >= len(c.globals) {
+		return 0, false
 	}
-	return kinds
+	offset := idx * 8
+	if offset > int(^uint16(0)>>1) {
+		return 0, false
+	}
+	return int16(offset), true
 }
 
 func (c *jitCompiler) local(idx int) (types.Type, bool) {
@@ -357,4 +369,21 @@ func (c *jitCompiler) local(idx int) (types.Type, bool) {
 	}
 
 	return fn.Locals[idx], true
+}
+
+func (c *jitCompiler) kind(r0 asm.Reg) (types.Kind, bool) {
+	switch r0.Type() {
+	case asm.RegTypeFloat:
+		if r0.Width() == asm.Width32 {
+			return types.KindF32, true
+		}
+		return types.KindF64, true
+	case asm.RegTypeInt:
+		if r0.Width() == asm.Width32 {
+			return types.KindI32, true
+		}
+		return types.KindI64, true
+	default:
+		return 0, false
+	}
 }

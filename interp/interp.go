@@ -492,6 +492,7 @@ func (i *Interpreter) jit(addr int) error {
 		addr:      addr,
 		types:     i.types,
 		constants: i.constants,
+		globals:   i.globals,
 		heap:      i.heap,
 		cutoff:    i.cutoff,
 	}
