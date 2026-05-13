@@ -1,134 +1,147 @@
 # Memory Model
 
-How the minivm heap works, including reference counting, GC, and key invariants.
+How minivm heap, reference counting, GC, and invariants work.
 
 ## Agent Checklist
 
-Read this before editing `interp/threaded.go`, `interp/host.go`, `types/array.go`, `types/struct.go`, or any code that retains, releases, allocates, loads, or stores refs.
+Read before editing `interp/threaded.go`, `interp/host.go`, `types/array.go`, `types/struct.go`, or code that retains, releases, allocates, loads, or stores refs.
 
-- Only `KindRef` values participate in RC.
-- Every stack/global/local ownership change needs symmetric retain/release behavior.
-- Keep `release()` iterative.
-- Heap index `0` is `Null` forever.
-- Do not keep pointers into `heap`; keep integer refs because allocation may grow slices.
+- only `KindRef` values participate in RC
+- stack/global/local ownership changes need symmetric retain/release
+- keep `release()` iterative
+- heap index `0` is always `Null`
+- never keep pointers into `heap`; keep integer refs because allocation may grow slices
 
 ## Heap Structure
 
-The heap is three parallel slices inside `Interpreter`:
+`Interpreter` stores heap state in parallel slices:
 
 ```go
-heap []types.Value  // the object at this index
-rc   []int          // reference count for this index (0 = free/collected)
-free []int          // stack of free indices available for reuse
+heap []types.Value // object at index
+rc   []int         // ref count; 0 = free/collected
+free []int         // reusable indices
 ```
 
-Allocation always returns a stable integer index. Indices never move — this is critical because `KindRef` values embedded in bytecode constants and stack slots hold raw heap indices that remain valid across GC.
+Allocation returns stable integer indices. Indices never move, because `KindRef` values in constants and stack slots hold raw heap indices that must survive GC.
 
 ## Reference Counting Protocol
 
-RC is managed manually in every threaded closure that touches references. The rule:
+RC is manually handled in every threaded closure touching refs.
 
 | Operation | RC change |
 |---|---|
-| Value enters the stack (push) | `retain(addr)` — increment RC |
-| Value is consumed from the stack (pop/use) | `release(addr)` — decrement RC |
-| Value is duplicated (`DUP`) | `retain(addr)` — one more reference |
-| Value is dropped (`DROP`) | `release(addr)` — one fewer reference |
-| Value stored to local/global | `retain(addr)` for the new slot, `release(addr)` for the old slot |
+| push ref to stack | `retain(addr)` |
+| pop/use ref from stack | `release(addr)` |
+| `DUP` ref | `retain(addr)` |
+| `DROP` ref | `release(addr)` |
+| store ref to local/global | `retain(new)`, `release(old)` |
 
-**`retain(addr)`**: increments `rc[addr]`.
+`retain(addr)` increments `rc[addr]`.
 
-**`release(addr)`**: decrements `rc[addr]`. If RC reaches 0:
-1. Calls `Refs()` on the object (if `Traceable`) and adds each referenced addr to a work stack.
-2. Calls `Close()` on the object (if `io.Closer`).
-3. Sets `heap[addr] = nil` and appends `addr` to the `free` list.
-4. Repeats for every addr on the work stack (cascading release of nested references).
+`release(addr)` decrements `rc[addr]`. When RC reaches `0`, it:
 
-`release` is **iterative** using an explicit `[]int` work stack — it does not recurse. This prevents stack overflow on deep object graphs.
+1. gets nested refs from `Refs()` if object is `Traceable`
+2. calls `Close()` if object is `io.Closer`
+3. clears `heap[addr]` and appends `addr` to `free`
+4. repeats for nested refs using an explicit work stack
+
+`release` must stay iterative, not recursive, to avoid stack overflow on deep object graphs.
 
 ## Allocation
 
 `alloc(val types.Value) int`:
-1. If `free` is non-empty: pop an index, store `val`, return.
-2. If `heap` has capacity: append `val`, set `rc[addr] = 1`, return.
-3. If at capacity: run `gc()`. If `gc` freed slots, pop one and return. Otherwise, double the heap/rc slices and append.
 
-## GC Algorithm (Mark-and-Sweep via Sign Flip)
+1. reuse from `free` if available
+2. append if heap has capacity, with `rc[addr] = 1`
+3. if full, run `gc()`
+4. if GC freed slots, reuse one
+5. otherwise double `heap`/`rc` capacity and append
 
-`gc()` runs when the heap is full and the free list is empty. It avoids allocating a separate mark array by using the sign of `rc` values as the mark bit:
+## GC Algorithm: Mark-and-Sweep via Sign Flip
 
-**Phase 1 — Mark all as unreachable:**
+`gc()` runs when the heap is full and `free` is empty. It uses the sign of `rc` as the mark bit, avoiding a separate mark array.
+
+### 1. Mark all live slots unreachable
+
+```text
+for each heap slot j, except 0:
+    if rc[j] != 0:
+        rc[j] = -abs(rc[j])
 ```
-for each heap slot j (skip j=0):
-    if rc[j] != 0: rc[j] = -|rc[j]|   (negate, making it negative)
-```
 
-**Phase 2 — Trace roots and mark reachable:**
-```
-roots: stack values, constants, globals (any KindRef)
+### 2. Trace roots and mark reachable
+
+```text
+roots = stack values + constants + globals
+
 for each root KindRef addr:
-    if rc[addr] < 0: rc[addr] = -rc[addr]  (restore positive = "reachable")
-    recurse into Traceable.Refs()
+    if rc[addr] < 0:
+        rc[addr] = -rc[addr]
+    recursively trace Traceable.Refs()
 ```
 
-**Phase 3 — Sweep:**
-```
+### 3. Sweep
+
+```text
 for each heap slot j:
-    if rc[j] < 0:   (still negative = unreachable)
+    if rc[j] < 0:
         heap[j] = nil
         rc[j] = 0
         free.append(j)
 ```
 
-**Properties:**
-- No separate mark array — O(1) extra space.
-- Handles reference cycles (mark-and-sweep vs. pure RC).
-- No compaction — heap indices remain stable.
-- GC pauses are proportional to heap size, not live-set size.
+Properties:
+
+- O(1) extra space; no mark array
+- handles reference cycles
+- no compaction, so heap indices stay stable
+- pause cost is proportional to heap size, not live-set size
 
 ## Key Invariants
 
-**`heap[0]` is always `Null`** — allocated in `interp.New()` with RC=1 before any user code runs. It is never freed and never appears in the free list. `BoxedNull = BoxRef(0)`.
+### `heap[0]` is always `Null`
 
-**RC must be symmetric** — every `retain` must have a matching `release`. Asymmetry causes either premature collection (RC=0 too early) or permanent leaks (RC never reaches 0).
+`interp.New()` allocates heap index `0` with RC `1` before user code. It is never freed and never enters `free`. `BoxedNull = BoxRef(0)`.
 
-**No RC tracking for primitive `Boxed` values** — only `KindRef` values have heap objects that need RC management. Non-ref kinds (`KindI32`, `KindI64`, `KindF32`, `KindF64`) are value types; ignore them in RC logic.
+### RC must be symmetric
 
-**Heap indices are stable across GC** — never cache a pointer into `heap` slice across a potential `alloc` call (slice may be reallocated). Always use the integer index.
+Every `retain` needs a matching `release`. Asymmetry causes premature collection or leaks.
+
+### Primitive `Boxed` values do not use RC
+
+Only `KindRef` values need RC. `KindI32`, `KindI64`, `KindF32`, and `KindF64` are value types and ignored by RC logic.
+
+### Heap indices are stable
+
+Never cache a pointer into `heap` across potential `alloc`; the slice may reallocate. Keep integer indices.
 
 ## Host Function Memory Access
 
-Host functions interact with the heap through the `Interpreter` API:
+Host functions use the `Interpreter` API:
 
 ```go
-// Allocate a new object and get its index
-addr, err := vm.Alloc(val)    // if val is BoxedRef, returns existing index
+addr, err := vm.Alloc(val)  // allocate object; BoxedRef returns existing index
+obj, err := vm.Load(addr)   // read object; validates RC > 0
+err = vm.Store(addr, val)   // write existing slot
 
-// Read an object (validates RC > 0)
-obj, err := vm.Load(addr)
-
-// Write to an existing slot
-err = vm.Store(addr, val)
-
-// Manual RC control (for long-lived references)
-obj, err := vm.Retain(addr)   // increments RC, returns object
-err = vm.Release(addr)        // decrements RC
+obj, err := vm.Retain(addr) // manual long-lived retain
+err = vm.Release(addr)      // matching release
 ```
 
-Always call `Release` when a retained reference is no longer needed, otherwise objects leak.
+Always `Release` retained refs when done, or objects leak.
 
 ## I64 Heap Spilling
 
-Large `int64` values that don't fit in the 49-bit NaN-boxable range are heap-allocated as `types.I64`:
+Large `int64` values outside the 49-bit NaN-boxable range are heap-allocated as `types.I64`.
 
 ```go
 func (i *Interpreter) boxI64(val int64) types.Boxed {
     if types.IsBoxable(val) {
-        return types.BoxI64(val)     // fits in Boxed, no allocation
+        return types.BoxI64(val)
     }
-    addr := i.alloc(types.I64(val)) // spill to heap
+    addr := i.alloc(types.I64(val))
     return types.BoxRef(addr)
 }
 ```
 
-Each I64 arithmetic operation on spilled values costs one heap alloc + RC operations. This is transparent to bytecode but affects throughput in tight loops. Approximately: values in `[-2^48, 2^48-1]` are stack-allocated; outside this range, heap-allocated.
+Spilled I64 arithmetic costs one heap allocation plus RC work per operation. Bytecode behavior is unchanged, but tight-loop throughput can drop. Roughly, `[-2^48, 2^48-1]` stays stack-allocated; outside that range spills to heap.

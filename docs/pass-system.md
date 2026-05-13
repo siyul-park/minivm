@@ -1,92 +1,89 @@
 # Pass System
 
-How the analysis/transform/optimization pipeline works and how to write new passes.
+How the analysis/transform/optimization pipeline works and how to write passes.
 
 ## Agent Checklist
 
 Before editing:
-- Identify whether the pass consumes `*program.Program`, `*types.Function`, or another cached type.
-- Use `m.Load` for current state and `m.Convert` for sub-pipelines.
-- Preserve in-place mutation expectations unless the existing pass returns a replacement.
+
+- identify whether the pass consumes `*program.Program`, `*types.Function`, or another cached type
+- use `m.Load` for current state and `m.Convert` for sub-pipelines
+- preserve in-place mutation unless an existing pass returns a replacement
 
 After editing:
-- Add package-local tests in `analysis/`, `transform/`, `optimize/`, or `pass/`.
-- For bytecode rewrites, verify branch offsets and constant/type indexes separately.
-- Run `go test ./analysis ./transform ./optimize ./pass`.
 
-## pass.Manager Internals
+- add package-local tests in `analysis/`, `transform/`, `optimize/`, or `pass/`
+- for bytecode rewrites, verify branch offsets and constant/type indexes separately
+- run `go test ./analysis ./transform ./optimize ./pass`
 
-`pass.Manager` is a reflection-based pipeline dispatcher. It maps result types to the passes that produce them.
+## `pass.Manager` Internals
+
+`pass.Manager` is a reflection-based pipeline dispatcher mapping result types to producing passes.
 
 ```go
 type Manager struct {
-    passes map[reflect.Type][]reflect.Value  // type → []Pass
-    cache  map[reflect.Type]reflect.Value    // type → cached result
+    passes map[reflect.Type][]reflect.Value // type → []Pass
+    cache  map[reflect.Type]reflect.Value   // type → cached result
     parent *Manager
 }
 ```
 
-**`Register(pass)`**: inspects the pass's `Run(*Manager) (T, error)` method signature via reflection and stores it under `reflect.TypeOf(T)`.
-
-**`Run(value)`**: seeds the cache with `value` as the starting input (keyed by `reflect.TypeOf(value)`). Running a pass that transforms `T → T` overwrites the cached `T`.
-
-**`Load(&result)`**: finds all passes registered for `typeof(*result)`, runs them in registration order, caches the output, and sets `*result`. Subsequent calls to `Load` for the same type return the cached value without re-running passes.
-
-**`Convert(src, dst)`**: creates a child manager (shares registered passes, has its own cache), calls `child.Run(src)`, then `child.Load(dst)`. Used when a pass needs to run a sub-pipeline on a different input type.
-
-**Caching semantics**: each pass runs **at most once per `Manager.Run` call**. Passes that read a cached value via `Load` see the output of the most recently executed pass for that type.
+- `Register(pass)`: inspects `Run(*Manager) (T, error)` and registers the pass under `reflect.TypeOf(T)`.
+- `Run(value)`: seeds cache with `value` by `reflect.TypeOf(value)`. A `T → T` pass overwrites cached `T`.
+- `Load(&result)`: runs all passes producing `typeof(*result)` in registration order, caches output, and sets `*result`; later loads return cache.
+- `Convert(src,dst)`: creates a child manager sharing passes but with its own cache, runs `src`, then loads `dst`.
+- Caching: each pass runs at most once per `Manager.Run`; passes reading via `Load` see the latest cached value for that type.
 
 ## Writing a Pass
 
-A pass is any type with a `Run(*Manager) (T, error)` method. The type parameter `T` is the output type.
+A pass is any type with `Run(*Manager) (T, error)`.
 
 ```go
 type MyPass struct{}
 
-// Declare interface compliance immediately after the type declaration.
 var _ pass.Pass[*program.Program] = (*MyPass)(nil)
 
 func NewMyPass() *MyPass { return &MyPass{} }
 
 func (p *MyPass) Run(m *pass.Manager) (*program.Program, error) {
-    // 1. Read the current program from the cache.
     var prog *program.Program
     if err := m.Load(&prog); err != nil {
         return nil, err
     }
 
-    // 2. Run a sub-pipeline to get BasicBlocks for the main code.
-    //    Wrap prog.Code in a Function so BasicBlocksPass can consume it.
     fn := &types.Function{Typ: &types.FunctionType{}, Code: prog.Code}
+
     var blocks []*analysis.BasicBlock
     if err := m.Convert(fn, &blocks); err != nil {
         return nil, err
     }
 
-    // 3. Transform prog in-place (mutate Code bytes or Constants).
-    // ...
+    // mutate prog.Code or prog.Constants in-place
+    _ = blocks
 
-    // 4. Return the (possibly same) transformed program.
     return prog, nil
 }
 ```
 
-**Rules:**
-- Always `m.Load` before modifying — you may not be the first pass for this type.
-- Construct `*types.Function{Typ: &types.FunctionType{}, Code: slice}` when you need `BasicBlocksPass` to analyze a code slice.
-- Return `nil, err` on any failure — the manager propagates it and stops the pipeline.
-- Return the input value unchanged if you make no modifications.
-- Do not hold references to the manager after `Run` returns.
+Rules:
 
-## Using pass.New for One-Off Passes
+- always `m.Load` before modifying; another pass may have already transformed the value
+- wrap code slices as `*types.Function{Typ: &types.FunctionType{}, Code: slice}` for `BasicBlocksPass`
+- return `nil, err` on failure; manager stops and propagates it
+- return input unchanged if no modifications were made
+- do not retain the manager after `Run` returns
 
-For simple cases, use the generic constructor instead of a named type:
+## One-Off Passes
+
+Use `pass.New` for simple inline passes.
 
 ```go
 customPass := pass.New(func(m *pass.Manager) (*program.Program, error) {
     var prog *program.Program
-    if err := m.Load(&prog); err != nil { return nil, err }
-    // ... transform ...
+    if err := m.Load(&prog); err != nil {
+        return nil, err
+    }
+    // transform
     return prog, nil
 })
 
@@ -95,65 +92,68 @@ _ = opt.Register(customPass)
 prog, _ = opt.Optimize(prog)
 ```
 
-## Optimizer Pipeline (O1)
+## Optimizer Pipeline `O1`
 
-`optimize.NewOptimizer(O1)` registers passes in this order:
+`optimize.NewOptimizer(O1)` registers:
 
+```text
+BasicBlocksPass            analysis  → []*BasicBlock
+ConstantFoldingPass        transform → *program.Program
+ConstantDeduplicationPass  transform → *program.Program
+DeadCodeEliminationPass    transform → *program.Program
 ```
-BasicBlocksPass          analysis  →  []*BasicBlock
-ConstantFoldingPass      transform →  *program.Program
-ConstantDeduplicationPass transform → *program.Program
-DeadCodeEliminationPass  transform →  *program.Program
-```
 
-All transform passes receive the latest `*program.Program` from the cache and return a (possibly mutated) `*program.Program`. Because caching is by type, each pass sees the output of the previous one.
+Transform passes load the latest cached `*program.Program` and return a possibly mutated one. Because caching is by type, each pass sees the previous pass output.
 
-## BasicBlocksPass
+## `BasicBlocksPass`
 
-Used by both the optimizer and `jitCompiler` — the same pass instance type, the same block boundary rules.
+Shared by optimizer and `jitCompiler`; same pass type and boundary rules.
 
-Input: `*types.Function` (seeded via `m.Run(fn)` or `m.Convert(fn, &blocks)`).
+Input: `*types.Function` via `m.Run(fn)` or `m.Convert(fn, &blocks)`.
 
-Output: `[]*analysis.BasicBlock`, where each block has:
-- `Start int` — byte offset of first instruction (inclusive)
-- `End int` — byte offset past last instruction (exclusive)
-- `Succs []int` — indices of successor blocks in the blocks slice
-- `Preds []int` — indices of predecessor blocks
+Output: `[]*analysis.BasicBlock`:
 
-Block boundaries are placed at:
-- Offset 0 (always)
-- The byte immediately following any `BR`, `BR_IF`, `BR_TABLE`, `UNREACHABLE`, or `RETURN` instruction
-- Every branch target offset (the destination of a `BR`, `BR_IF`, or `BR_TABLE` operand)
+- `Start`: first instruction byte offset, inclusive
+- `End`: byte offset past last instruction, exclusive
+- `Succs`: successor block indices
+- `Preds`: predecessor block indices
 
-## ConstantFoldingPass
+Block boundaries:
+
+- offset `0`
+- byte after `BR`, `BR_IF`, `BR_TABLE`, `UNREACHABLE`, or `RETURN`
+- every branch target offset from `BR`, `BR_IF`, or `BR_TABLE`
+
+## `ConstantFoldingPass`
 
 Folds 2- and 3-instruction windows: `CONST CONST OP` → `CONST result`.
 
-The folded sequence is **right-aligned** in the original byte range, with NOPs filling the left:
+Folded output is right-aligned in the original byte range; left side is padded with NOPs.
 
-```
-Before:  [I32_CONST 3][I32_CONST 4][I32_ADD]   (11 bytes)
-After:   [NOP][NOP][NOP][NOP][NOP][NOP][I32_CONST 7]  (11 bytes)
+```text
+Before: [I32_CONST 3][I32_CONST 4][I32_ADD]             11 bytes
+After:  [NOP][NOP][NOP][NOP][NOP][NOP][I32_CONST 7]    11 bytes
 ```
 
-The normal threaded NOP handler fast-forwards past all consecutive NOPs at runtime, so the left padding takes one dispatch for the whole run. `WithTick(1)` preserves per-instruction boundaries for exact hooks and debugging.
+Normal threaded NOP fast-forwards consecutive NOPs as one dispatch. `WithTick(1)` preserves exact per-instruction boundaries for hooks/debugging.
 
 Supported folds:
-- `I32_CONST × I32_CONST × op` for all arithmetic/bitwise/comparison ops
-- `I64_CONST × I64_CONST × op` same
-- `F32_CONST × F32_CONST × op` same
-- `F64_CONST × F64_CONST × op` same
-- `I32_CONST × I32_EQZ` (unary)
-- Various type conversion folds (`I32_CONST × I32_TO_F32_S`, etc.)
-- `CONST_GET (String) × CONST_GET (String) × STRING_CONCAT/EQ/...`
 
-## ConstantDeduplicationPass
+- `I32_CONST × I32_CONST × op`: arithmetic, bitwise, comparisons
+- `I64_CONST × I64_CONST × op`: same
+- `F32_CONST × F32_CONST × op`: same
+- `F64_CONST × F64_CONST × op`: same
+- `I32_CONST × I32_EQZ`
+- type conversions such as `I32_CONST × I32_TO_F32_S`
+- `CONST_GET(String) × CONST_GET(String) × STRING_CONCAT/EQ/...`
 
-Scans all `CONST_GET` operands across all functions. If two constant indices point to equal values (`types.Value`), rewrites all references to use the lower index. Reduces constant table size and improves cache locality.
+## `ConstantDeduplicationPass`
 
-## DeadCodeEliminationPass
+Scans all `CONST_GET` operands in all functions. If multiple constant indices point to equal `types.Value`s, rewrites references to the lowest index. This shrinks the constant table and improves cache locality.
 
-1. Identifies basic blocks with no predecessors (`len(blk.Preds) == 0`) and marks all their bytes as `UNREACHABLE`.
-2. Compacts the bytecode: removes NOP runs and unreachable sequences by rewriting branch offsets to account for the new byte positions.
+## `DeadCodeEliminationPass`
 
-The compaction step rewrites only branch operands (`BR`, `BR_IF`, `BR_TABLE`). Other operands keep their original meaning because bytecode compaction changes instruction positions, not constant, type, global, or local indexes.
+1. Mark bytes in basic blocks with no predecessors as `UNREACHABLE`.
+2. Compact bytecode by removing NOP runs and unreachable sequences, rewriting branch offsets for new positions.
+
+Compaction rewrites only branch operands: `BR`, `BR_IF`, `BR_TABLE`. Other operands keep their meaning because compaction changes instruction positions, not constant/type/global/local indexes.

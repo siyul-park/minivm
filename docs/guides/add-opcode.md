@@ -1,166 +1,150 @@
 # Guide: Adding a New Opcode
 
-Step-by-step checklist for adding a new instruction end-to-end.
+End-to-end checklist for adding a new instruction.
 
 ## Agent Summary
 
-Files usually touched, in order:
+Usually edit, in order:
 
 1. `instr/opcode.go`
 2. `instr/type.go`
 3. `interp/threaded.go`
 4. `interp/jit_arm64.go` if ARM64 JIT support is practical
-5. `instr/*_test.go`, `interp/interp_test.go`, and this guide/reference docs
+5. `instr/*_test.go`, `interp/interp_test.go`, this guide/reference docs
 
-Do not skip threaded support. JIT is optional; threaded fallback is mandatory.
+Threaded support is mandatory. JIT support is optional.
 
 ## Before You Start
 
-Read [docs/jit-internals.md](../jit-internals.md) for the threaded/JIT handler contracts.  
-Read [docs/instruction-set.md](../instruction-set.md) for existing opcode patterns to mirror.
-
----
+Read `docs/jit-internals.md` for threaded/JIT contracts and `docs/instruction-set.md` for opcode patterns.
 
 ## Step 1 — Define the Opcode
 
-**File: `instr/opcode.go`**
+File: `instr/opcode.go`
 
-Append the constant inside the existing `const ( ... )` block, in the appropriate category group:
+Append inside the existing `const` block, in the right category.
 
 ```go
 const (
     // ...existing opcodes...
 
-    I32_MY_OP  // ← add here, in the i32 section
+    I32_MY_OP
 )
 ```
 
-The iota value is the opcode byte. Order within the block matters — do not insert between existing opcodes.
-
----
+The `iota` value is the opcode byte. Order matters; never insert between existing opcodes.
 
 ## Step 2 — Declare Operand Width
 
-**File: `instr/type.go`**
+File: `instr/type.go`
 
-Add an entry to the `types` map:
+Add to the `types` map.
 
 ```go
 var types = map[Opcode]Type{
     // ...existing entries...
 
-    I32_MY_OP: {"i32.my_op", []int{}},        // no operands
-    // or:
-    I32_MY_OP: {"i32.my_op", []int{4}},       // one 4-byte operand
-    // or:
-    I32_MY_OP: {"i32.my_op", []int{2}},       // one 2-byte operand
-    // or (BR_TABLE pattern):
-    I32_MY_OP: {"i32.my_op", []int{-2, 2}},  // count byte + count×2-byte values
+    I32_MY_OP: {"i32.my_op", []int{}},       // no operands
+    I32_MY_OP: {"i32.my_op", []int{4}},      // one 4-byte operand
+    I32_MY_OP: {"i32.my_op", []int{2}},      // one 2-byte operand
+    I32_MY_OP: {"i32.my_op", []int{-2, 2}}, // count byte + count×2-byte values
 }
 ```
 
-Width values: `1`, `2`, `4`, `8` for fixed-width operands. Negative `-n` means a length-prefixed array with `n`-byte elements.
+Fixed widths: `1`, `2`, `4`, `8`. Negative `-n` means length-prefixed array with `n`-byte elements.
 
----
+## Step 3 — Implement Threaded Handler
 
-## Step 3 — Implement the Threaded Handler
+File: `interp/threaded.go`
 
-**File: `interp/threaded.go`**
-
-Add an entry to the `threaded [256]func` table in `init()`. Mirror the style of adjacent opcodes.
+Add an entry to the `threaded [256]func` table in `init()`. Mirror nearby opcode style.
 
 ```go
 instr.I32_MY_OP: func(c *threadedCompiler) func(i *Interpreter) {
-    // COMPILE TIME: read operand bytes, advance c.ip
-    // (omit operand reads if there are no operands)
     operand := int32(*(*int32)(unsafe.Pointer(&c.code[c.ip+1])))
-    c.ip += 5  // 1 opcode + 4 operand bytes
+    c.ip += 5 // 1 opcode + 4 operand bytes
 
-    // RUNTIME: return closure capturing compile-time values
     return func(i *Interpreter) {
         f := &i.frames[i.fp-1]
 
-        // bounds-check (match the style in threaded.go: i.sp == 0, not i.sp < 1)
         if i.sp == 0 {
             panic(ErrStackUnderflow)
         }
 
-        // pop operand (release heap ref if KindRef)
         val := i.stack[i.sp-1]
         if val.Kind() == types.KindRef {
             i.release(val.Ref())
         }
         i.sp--
 
-        // compute result and push (retain if result is KindRef)
         result := types.BoxI32(val.I32() + int32(operand))
+
         if i.sp == len(i.stack) {
             panic(ErrStackOverflow)
         }
         i.stack[i.sp] = result
         i.sp++
 
-        f.ip += 5  // advance by exact instruction width
+        f.ip += 5
     }
 },
 ```
 
-**Checklist for the threaded handler:**
-- [ ] `c.ip` advanced before returning
-- [ ] `f.ip` advanced by the exact instruction width inside the closure
-- [ ] Stack bounds checked (`ErrStackUnderflow`, `ErrStackOverflow`)
-- [ ] `i.retain(addr)` called when a `KindRef` enters the stack
-- [ ] `i.release(addr)` called when a `KindRef` is consumed
-- [ ] No panic caught — let `interp.Run`'s `recover` handle it
+Checklist:
 
----
+- [ ] advance `c.ip` before returning
+- [ ] advance `f.ip` by exact instruction width
+- [ ] check stack bounds with `ErrStackUnderflow` / `ErrStackOverflow`
+- [ ] call `i.retain(addr)` when a `KindRef` enters stack
+- [ ] call `i.release(addr)` when a `KindRef` is consumed
+- [ ] do not catch panics; let `interp.Run` recover
 
-## Step 4 — Implement the JIT Handler (Optional, ARM64 only)
+## Step 4 — Implement JIT Handler
 
-**File: `interp/jit_arm64.go`**
+File: `interp/jit_arm64.go`
 
-Add an entry to the `jit [256]func` table inside the `init()` function. If JIT is not feasible (e.g. the opcode requires access to `*Interpreter` fields), skip this step — the threaded fallback is always correct.
+Optional, ARM64 only. Skip if the opcode needs hard-to-compile interpreter access; threaded fallback remains correct.
 
 ```go
 jit[instr.I32_MY_OP] = func(c *jitCompiler) (bool, bool) {
-    c.ip++  // MUST happen before any return, even false, false
+    c.ip++ // before every return path
 
-    // Pop operands from the VReg stack
     r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
-    if !ok { return false, false }
+    if !ok {
+        return false, false
+    }
 
-    // Allocate result VReg
     r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-
-    // Emit ARM64 instructions
-    c.assembler.Emit(arm64.ADD(r1, r0, r0))  // example
-
-    // Push result
+    c.assembler.Emit(arm64.ADD(r1, r0, r0))
     c.assembler.Push(r1)
-    return true, false  // compiled ok, block continues
+
+    return true, false
 }
 ```
 
-The two return bools are `(ok, stop)`:
-- `true, false` — compiled, continue to next instruction
-- `false, false` — not compilable, end this segment
-- `true, true` — compiled and block terminates (branch instructions only; they emit their own `RET`)
+Return values are `(ok, stop)`:
 
-**Checklist for the JIT handler:**
-- [ ] `c.ip` advances before every return path
-- [ ] `Take` called with correct `RegType` and `RegWidth` — returns `false, false` on mismatch
-- [ ] All VRegs used in `Emit` were obtained from `Take` or `NewVReg`
-- [ ] Result VReg pushed with `Push`
-- [ ] `return false, false` used (not `panic`) when emission is not possible
-- [ ] Non-branch instructions always return `(ok, false)` — only branch terminators return `(true, true)`
+| Return | Meaning |
+|---|---|
+| `true, false` | compiled; continue |
+| `false, false` | not compilable; end segment |
+| `true, true` | compiled branch terminator; emits own `RET` |
 
----
+Checklist:
+
+- [ ] advance `c.ip` before every return
+- [ ] call `Take` with correct `RegType` and `RegWidth`
+- [ ] return `false, false` on type/width mismatch
+- [ ] use only VRegs from `Take` or `NewVReg`
+- [ ] push result VReg with `Push`
+- [ ] use `return false, false`, not `panic`, when emission is impossible
+- [ ] non-branch instructions return `(ok, false)`; only branch terminators return `(true, true)`
 
 ## Step 5 — Write Tests
 
-**File: `interp/interp_test.go`**
+File: `interp/interp_test.go`
 
-Add test cases to the package-level `var tests` slice (not a new test function). Each case is a `program` and the expected `values` remaining on the stack after execution:
+Add cases to package-level `var tests`, not a new test function.
 
 ```go
 {
@@ -174,15 +158,13 @@ Add test cases to the package-level `var tests` slice (not a new test function).
 },
 ```
 
-Cover: normal case, edge cases (zero, min/max int32), error cases (stack underflow) if applicable.
-
----
+Cover normal behavior, edge cases such as zero and min/max values, and error cases such as stack underflow when applicable.
 
 ## Step 6 — Verify
 
 ```bash
-make test          # all tests, race detector
-make lint          # goimports + go vet
+make test
+make lint
 ```
 
-If you added a JIT handler, test on ARM64 hardware (or an ARM64 runner) — the JIT tests have a `//go:build arm64` tag and only run on that platform.
+If adding JIT support, test on ARM64 hardware or runner. JIT tests use `//go:build arm64` and only run there.
