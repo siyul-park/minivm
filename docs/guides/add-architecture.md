@@ -25,6 +25,8 @@ A new architecture needs:
 3. non-target platform stubs
 4. `interp/jit_<arch>.go` setting `arch` and registering opcode handlers
 
+Follow the JIT file boundary rules in `docs/coding-patterns.md`.
+
 ## Step 1 — Create `asm/<arch>/`
 
 Mirror `asm/arm64/`.

@@ -79,9 +79,9 @@ target = instruction_start + instruction_width + operand
 
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|
-| `GLOBAL_GET` | `{2}` | `→ x` | ⬜ | Push global at u16 index. |
-| `GLOBAL_SET` | `{2}` | `x →` | ⬜ | Store global at u16 index. |
-| `GLOBAL_TEE` | `{2}` | `x → x` | ⬜ | Store global and keep value. |
+| `GLOBAL_GET` | `{2}` | `→ x` | ◐ | Push global at u16 index. JIT supports same-segment proven numeric globals. |
+| `GLOBAL_SET` | `{2}` | `x →` | ◐ | Store global at u16 index. JIT supports numeric globals. |
+| `GLOBAL_TEE` | `{2}` | `x → x` | ◐ | Store global and keep value. JIT supports numeric globals. |
 | `LOCAL_GET` | `{1}` | `→ x` | ◐ | Push u8 local relative to frame base. JIT supports numeric params/locals. |
 | `LOCAL_SET` | `{1}` | `x →` | ◐ | Store u8 local. JIT supports numeric params/locals. |
 | `LOCAL_TEE` | `{1}` | `x → x` | ◐ | Store local and keep value. JIT supports numeric params/locals. |

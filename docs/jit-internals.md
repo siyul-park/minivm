@@ -1,94 +1,64 @@
 # JIT Internals
 
-How to write threaded and JIT handlers. Read before editing `interp/threaded.go` or `interp/jit_arm64.go`.
+Threaded interpreter and ARM64 JIT contracts. Read before editing `interp/threaded.go`, `interp/jit.go`, `interp/jit_arm64.go`, or `asm/`.
 
-## Agent Checklist
+## Checklist
 
-Before editing:
+Before editing: check opcode width in `instr/type.go`; preserve threaded/JIT parity; keep threaded fallback correct; read `profile.md` for ticks, thresholds, or hot-block choice; read `value-representation.md` for boxing/unboxing/native values; read `memory-model.md` for refs, heap objects, host functions, or ref-holding locals/globals.
 
-- confirm opcode width in `instr/type.go`
-- check threaded/JIT parity
-- read `profile.md` before changing thresholds, sampling, or profile-guided segment selection
-- read `value-representation.md` before unboxing, boxing, or passing JIT values
-- read `memory-model.md` before touching refs, heap objects, ref-holding locals/globals, or host functions
+After editing: add/update nearby table-driven tests, usually `interp/interp_test.go`; run `go test ./interp` for interpreter changes; run `go test ./asm/... ./interp` for ARM64/JIT/assembler changes.
 
-After editing:
+## Execution Model
 
-- add/update table-driven cases in `interp/interp_test.go`
-- ARM64/JIT changes: `go test ./asm/... ./interp`; otherwise `go test ./interp`
-- keep threaded fallback correct even when JIT rejects a segment
+```text
+program.Program
+  -> threadedCompiler -> []func(*Interpreter)        always, portable fallback
+  -> jitCompiler      -> []func(*Interpreter)|nil    lazy, ARM64 only
+```
 
-## Two-Phase Compilation Model
+Both compilers read same bytecode. `i.code[addr][ip]` remains fallback; JIT replaces only emitted entry IPs. Rejected or failed JIT segments must fall back cleanly to threaded code.
 
-Every opcode is compiled twice:
+## Threaded Handlers
 
-1. **Threaded compilation**: at `interp.New()`, always; bytecode → Go closures.
-2. **JIT compilation**: runtime, lazy, ARM64 only; hot closures replaced with native code.
+`threaded` is `[256]func(*threadedCompiler) func(*Interpreter)`, populated in `threaded.go:init()`.
 
-Both read the same bytecode slice. The threaded closure at `i.code[addr][ip]` is the authoritative fallback; JIT overwrites selected entries.
-
-## Threaded Handler Contract
-
-`threaded` is `var threaded = [256]func(c *threadedCompiler) func(*Interpreter)`, populated in `threaded.go:init()`.
-
-Each entry has compile-time operand decoding and runtime execution:
+Handler shape:
 
 ```go
 instr.OPCODE: func(c *threadedCompiler) func(i *Interpreter) {
     offset := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
     width := 3
-
-    c.ip += width // must advance before return
+    c.ip += width
 
     return func(i *Interpreter) {
         f := &i.frames[i.fp-1]
         _ = offset
-        f.ip += width // exact instruction width
+        f.ip += width
     }
 },
 ```
 
-Invariants:
+Rules:
 
-- advance `c.ip` before returning the closure
-- advance `f.ip` by exact instruction width
-- closure must not capture `c` or read `c.code`; capture locals only
-- retain refs entering the stack with `i.retain(addr)`
-- release consumed refs with `i.release(addr)`
-- do not catch closure errors; `panic(ErrX)` and let `interp.Run` recover
+- compile time: decode operands, capture locals, advance `c.ip` before return
+- runtime: advance `f.ip` by exact instruction width
+- closure must not capture `c` or read `c.code`
+- refs entering stack need `i.retain(addr)`; consumed refs need `i.release(addr)`
+- closure errors panic; `Interpreter.Run` recovers and annotates `at=<ip>`
 
-### NOP
+`NOP`: normal threaded compile emits one closure per NOP byte, but first closure skips whole consecutive NOP run. Dead-code padding costs one dispatch. `WithTick(1)` disables run skipping and preserves exact byte boundaries. JIT `NOP` advances `c.ip`, returns `true,false`, emits nothing, and counts toward segment length.
 
-Normal threaded `NOP` scans consecutive NOPs from its own position, advances compile-time `c.ip` by `1`, and returns a closure that jumps over the whole run. Thus `n` NOPs produce `n` closures, but only the first executes, so DCE padding costs one dispatch.
+## JIT Handlers
 
-With `WithTick(1)`, threaded compilation preserves exact instruction boundaries; each NOP advances one byte.
-
-```go
-instr.NOP: func(c *threadedCompiler) func(i *Interpreter) {
-    skip := 0
-    for c.ip+skip < len(c.code) && instr.Opcode(c.code[c.ip+skip]) == instr.NOP {
-        skip++
-    }
-    c.ip++
-    return func(i *Interpreter) {
-        i.frames[i.fp-1].ip += skip
-    }
-},
-```
-
-JIT `NOP` increments `c.ip`, returns `true, false`, emits no native instruction, and still contributes to segment `count`.
-
-## JIT Handler Contract
-
-`jit` is `var jit = [256]func(c *jitCompiler) (bool, bool)`, populated in `jit_arm64.go`.
+`jit` is `[256]func(*jitCompiler) (ok bool, stop bool)`, populated in `jit_arm64.go`.
 
 | Return | Meaning |
 |---|---|
-| `true, false` | compiled; continue |
-| `false, false` | not compilable; end segment |
-| `true, true` | compiled branch terminator; end segment |
+| `true,false` | compiled; continue segment |
+| `false,false` | unsupported or type mismatch; end segment |
+| `true,true` | compiled terminator; end segment |
 
-Branch handlers (`BR`, `BR_IF`, `BR_TABLE`) return `true, true`, emit their own `RET`, and skip `_EPILOGUE`; otherwise `_EPILOGUE` would overwrite the branch-set scratch next IP.
+Handler shape:
 
 ```go
 jit[instr.OPCODE] = func(c *jitCompiler) (bool, bool) {
@@ -98,7 +68,6 @@ jit[instr.OPCODE] = func(c *jitCompiler) (bool, bool) {
     if !ok {
         return false, false
     }
-
     r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
     c.assembler.Emit(arm64.ADD(r1, r0, r0))
     c.assembler.Push(r1)
@@ -106,124 +75,116 @@ jit[instr.OPCODE] = func(c *jitCompiler) (bool, bool) {
 }
 ```
 
-Invariants:
+Rules:
 
-- advance `c.ip` before every return, including failures
-- operand-reading handlers advance after reading operands
-- `Take` checks type and width; mismatches return `false, false`, never coerce
-- `false, false` ends the segment
-- unsupported-truncated segments are kept only when `count > 4`; otherwise aborted
-- branches return `true, true` and emit their own exit
-- `_PROLOGUE`: `LDI(scratch, c.end)` loads fallthrough IP into scratch
-- `_EPILOGUE`: `LDI(scratch, c.end)` + `RET`
+- advance `c.ip` before every return, including failure paths
+- operand handlers read operands, then advance by exact width
+- type/width mismatch returns `false,false`; never coerce
+- `false,false` stops current segment
+- branch terminators return `true,true`, emit their own exit, and skip `_EPILOGUE`
+- non-branch segments use `_EPILOGUE`
+- `_PROLOGUE` seeds next-IP scratch with `c.end`; `_EPILOGUE` reloads final `c.end` and emits `RET`
 
-## Reserved Registers and Next IP
+## Scratch And Next IP
 
-ARM64 JIT uses scratch registers from `arch.Scratch = X10–X15` as metadata channels outside normal params/returns.
+ARM64 JIT reserves `arch.Scratch = X10-X15` as metadata channels outside normal params/returns.
 
 | Scratch | Purpose |
 |---|---|
-| `scratch[0]` | frame-local stack pointer `&i.stack[f.bp]` input |
-| `scratch[1]` | heap pointer input |
-| `scratch[2]` | next interpreter IP output |
+| `rStack` | `&i.stack[f.bp]` input |
+| `rHeap` | heap pointer input |
+| `rGlobals` | globals pointer input |
+| `rNext` | next interpreter IP output |
 
-`_PROLOGUE` loads `c.end` into `scratch[2]`; `_EPILOGUE` reloads possibly truncated `c.end`; branch handlers load branch target IP. `jitCompiler.closure()` initializes scratch inputs, calls `fn.Call()`, reads `scratch[2]`, and writes `i.frames[fp-1].ip`.
+`jitCompiler.closure()` writes scratch inputs, calls native code, reads `rNext`, then sets `i.frames[fp-1].ip`.
+
+## Branches And Globals
+
+Branches (`BR`, `BR_IF`, `BR_TABLE`) terminate segments. They emit direct label branches only when target segment compiled and current `assembler.Returns()` exactly matches target `Signature.Params` by type and width. Otherwise they load target IP into `rNext` and emit `RET`.
+
+Branch limits: `BR` rejects non-empty native returns; `BR_IF` and `BR_TABLE` reject when more than one return would need reconstruction. Branch handlers must not fall through `_EPILOGUE`, because that would overwrite branch-selected `rNext`.
+
+Mutable globals have no declared runtime kind. `GLOBAL_SET` / `GLOBAL_TEE` infer kind from source register and store it in same-segment `c.globalKinds`. `GLOBAL_GET` compiles only after same-segment store proves kind. Never specialize `GLOBAL_GET` from current global value; dynamic kind changes would need deopt stack reconstruction, which current JIT ABI lacks.
 
 ## Segment Selection
 
-`jitCompiler.Compile(code)` computes basic-block heat with `Stats.Range(addr,start,end)`, skips unsampled blocks, and compiles hotter blocks first. Within a hot block, `compile` repeatedly calls `segment(code,start,end)` to extract independent compilable runs.
+`jitCompiler.Compile(code)` builds basic blocks, scores each with `profile.Range(addr,start,end)`, skips unsampled blocks, compiles hotter blocks first, and extracts independent compilable segments inside each block.
+
+Emit rules:
+
+- completed segment emits when `count >= c.cutoff` (default `4`) and segment range has a profile sample
+- truncated segment stopped by unsupported opcode emits only when `count > 4` and range from start to last compiled IP is sampled
+- otherwise `assembler.Abort()` discards segment state
+- JIT makes one function-level compilation attempt; no later tier-up/retry
 
 ```text
-block [A, B, X, C, D, E, F]  (X = non-compilable)
-→ segment 1 [A, B]           count=2, below cutoff → aborted
-→ segment 2 [C, D, E, F]     count=4, emitted if block ends here and cutoff is 4
+block [A B X C D E F]  X unsupported
+-> [A B]        count=2  abort
+-> [C D E F]    count=4  emit only if completed and sampled
 ```
 
-Completed segments emit when `count >= WithCutoff` default `4` and the segment range has at least one profile sample. If stopped by a non-compilable opcode, the segment is kept only when `count > 4`; shorter ones call `assembler.Abort()`. Cold segments inside sampled blocks are skipped. JIT does not recompile or tier-up after the first function-level compilation attempt.
+## Two-Pass Linking
 
-### Two-Pass Compilation
+Branch-terminated blocks need target signatures before choosing direct branch vs exit stub.
 
-Branch-terminated blocks need target signatures to choose direct label branch vs exit stub.
+1. Pass 1 compiles hot blocks. Non-terminated segments are kept and expose signatures; terminated blocks are held.
+2. Pass 2 recompiles terminated blocks after signatures are known.
 
-1. **Pass 1**: compile all blocks; enqueue non-terminated segments; hold terminated segments in `branches` for signature extraction.
-2. **Pass 2**: recompile terminated blocks after non-terminated signatures are known.
+`linkable(targetIP)` compares current returns with target params by type and width.
 
-`linkable(targetIP)` is true when current return VRegs exactly match target `Signature.Params` by type and width. If linkable, emit direct `BLabel`; otherwise emit `LDI + RET` with target IP in scratch.
+## Assembler
 
-## Assembler API
+`asm.Assembler` tracks VM-stack shape inside one segment: `stack []VReg` holds in-flight stack values; `params []VReg` holds values taken from empty stack and becomes native ABI inputs.
 
-`asm.Assembler` maintains:
+Core methods:
 
-| Stack | Purpose |
+| Method | Use |
 |---|---|
-| `stack []VReg` | in-flight values mirroring VM stack within the segment |
-| `params []VReg` | VRegs taken from empty stack; native ABI inputs |
+| `Take(type,width)` | pop matching stack value or create param when stack empty |
+| `Top(i)` | inspect i-th value from top |
+| `Push(reg)` / `Pop()` | push or unchecked pop |
+| `NewVReg(type,width)` | allocate virtual register |
+| `Emit` / `Emits` | append IR |
+| `NewLabel` / `Bind` / `Place` | create/place branch targets |
+| `Scratch()` | allocate reserved metadata PReg |
+| `Compile()` | allocate physical regs, encode, append buffer, return `RelocObject` |
+| `Link(objects)` | patch cross-segment relocs, return native callers |
+| `Abort()` / `Reset()` | discard segment / reset function assembler state |
 
-| Method | Description |
-|---|---|
-| `Take(typ,width)` | if stack empty, create param; if top matches, pop; if mismatch, return false |
-| `Top(i)` | peek i-th from top |
-| `Push(reg)` | push VReg |
-| `Pop()` | pop without type check |
-| `NewVReg(typ,width)` | allocate VReg |
-| `Emit(inst)` | append IR, return index |
-| `Emits(insts...)` | append IRs |
-| `NewLabel()` | allocate symbolic label |
-| `Place(id)` | mark label target |
-| `Scratch()` | allocate metadata scratch PReg |
-| `Compile()` | allocate regs, encode, write buffer, return `RelocObject` |
-| `Link(objects)` | patch cross-segment relocations, return `Caller`s |
-| `Abort()` | discard current segment state |
-| `Reset()` | full reset including global labels; use between functions, not segments |
+Use `Take` for typed operands. Use `Pop` only after `Top` or another proof of stack shape.
 
-`Take` is the standard operand consumer: empty stack becomes ABI param; type/width mismatch returns false and the JIT handler must return `false, false`.
-
-`Pop` skips type checks; use only after verifying with `Top`.
-
-`Build()` no longer exists. Pipeline:
-
-1. emit IR, `Compile()` per segment → `RelocObject`
-2. after all function segments, `Link([]*RelocObject)` → patch branches and return `[]Caller`
-
-Intra-segment labels resolve in `Compile()`. Cross-segment labels become `Relocation`s patched by `Link()`.
-
-## Buffer Lifecycle
-
-`asm.Buffer` wraps mmap executable memory and must alternate writable/executable states.
+Pipeline:
 
 ```text
-NewBuffer(size) → writable
-
-Compile():
-  buffer.Unseal() → PROT_WRITE
-  buffer.Append(code)
-  buffer.Seal()   → PROT_EXEC|PROT_READ
-
-Link():
-  buffer.Unseal()
-  writeBytes(addr, patch)
-  buffer.Seal()
-
-buffer.Free() → munmap
+emit IR per segment -> Compile() -> RelocObject
+all function objects -> Link([]*RelocObject) -> []Caller
 ```
 
-Violating Seal/Unseal order on Apple Silicon causes `SIGBUS` or `SIGSEGV` due to W^X enforcement.
+Intra-segment labels resolve in `Compile()`. Cross-segment labels become relocations patched by `Link()`.
 
-## ARM64 Register Usage
+## Executable Buffer
 
-`asm/arm64/` follows AAPCS64:
+`asm.Buffer` wraps mmap memory and must alternate writable/executable states.
 
-- integer args/returns: `X0`–`X7`
-- float args/returns: `D0`–`D7` / `S0`–`S7`
-- scratch: `X10`–`X15` via `Scratch()`
-- `X8`, `X9` reserved for trampoline bookkeeping
+```text
+NewBuffer(size) -> writable
+Compile(): Unseal() -> Append(code) -> Seal()
+Link():    Unseal() -> patch reloc bytes -> Seal()
+Free():    munmap
+```
+
+Apple Silicon enforces W^X. Wrong `Unseal -> Append/Patch -> Seal -> Call` order can crash with `SIGBUS` or `SIGSEGV`.
+
+## ARM64 ABI
+
+`asm/arm64` follows AAPCS64: integer args/returns use `X0-X7`; float args/returns use `D0-D7` / `S0-S7`; metadata scratch uses `X10-X15`; trampoline bookkeeping reserves `X8`, `X9`.
 
 Trampoline `argv` layout:
 
 ```text
-argv[0]:             header: nParams, nReturns, nReserved, type masks
-argv[1..nReserved]:  scratch inputs/outputs
-argv[nReserved+1..]: params in / returns out
+argv[0]            header: nParams, nReturns, nReserved, type masks
+argv[1..reserved]  scratch inputs/outputs
+argv[reserved+1..] params in / returns out
 ```
 
-`abi_arm64.s` marshals args from `argv`, loads reserved inputs `X10–X15`, calls native chunk via `BL`, then writes scratch outputs to `argv[1..nReserved]` and return values to `argv[nReserved+1..]`.
+`abi_arm64.s` marshals args from `argv`, loads reserved `X10-X15`, calls native chunk via `BL`, then writes scratch outputs and return values back to `argv`.

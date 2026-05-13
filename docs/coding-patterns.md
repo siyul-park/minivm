@@ -163,6 +163,8 @@ func (c *jitCompiler) branchClosure(fn Caller, sig *Signature) func(*Interpreter
 }
 ```
 
+For JIT code, keep architecture-neutral `jitCompiler` state and helpers in `interp/jit.go`. Put only architecture selection, opcode handlers, and ISA-specific emission helpers in `interp/jit_<arch>.go`.
+
 ## 2. Type & Interface Design
 
 ### 2.1 Interface-first

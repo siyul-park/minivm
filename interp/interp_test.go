@@ -178,6 +178,37 @@ var tests = []struct {
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 7),
+				instr.New(instr.GLOBAL_TEE, 0),
+				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.I64_ADD),
+			},
+		),
+		values: []types.Value{types.I64(14)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))),
+				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.GLOBAL_GET, 0),
+			},
+		),
+		values: []types.Value{types.F32(1.5)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(1.5)),
+				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.GLOBAL_GET, 0),
+			},
+		),
+		values: []types.Value{types.F64(1.5)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.CALL),
 			},
@@ -2613,6 +2644,91 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, uint64(1), jit.Emits)
 		require.Equal(t, uint64(1), jit.Links)
 		require.Equal(t, uint64(1), jit.Skips)
+	})
+
+	t.Run("jit compiles numeric globals", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		p := prof.New()
+		p.Add(0, 0, byte(instr.I32_CONST))
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 9),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.GLOBAL_GET, 0),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		i.globals = append(i.globals, types.BoxI32(1))
+
+		err := i.jit(0)
+		require.NoError(t, err)
+
+		err = i.Run(context.Background())
+		require.NoError(t, err)
+		val, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(9), val)
+
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Attempts)
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
+	t.Run("jit skips ref globals", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		p := prof.New()
+		p.Add(0, 0, byte(instr.GLOBAL_GET))
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.GLOBAL_GET, 0),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		i.globals = append(i.globals, types.BoxedNull)
+
+		err := i.jit(0)
+		require.NoError(t, err)
+
+		err = i.Run(context.Background())
+		require.NoError(t, err)
+		val, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.Null, val)
+
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Attempts)
+		require.Zero(t, jit.Emits)
+		require.Zero(t, jit.Links)
+	})
+
+	t.Run("jit skips global get without proven kind", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		p := prof.New()
+		p.Add(0, 0, byte(instr.NOP))
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+			instr.New(instr.GLOBAL_GET, 0),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		i.globals = append(i.globals, types.BoxI32(1))
+
+		err := i.jit(0)
+		require.NoError(t, err)
+		i.globals[0] = types.BoxF32(2.5)
+
+		err = i.Run(context.Background())
+		require.NoError(t, err)
+		val, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.F32(2.5), val)
+
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Attempts)
+		require.Zero(t, jit.Emits)
+		require.Zero(t, jit.Links)
 	})
 
 	t.Run("hook cancel is observed on next jit tick", func(t *testing.T) {
