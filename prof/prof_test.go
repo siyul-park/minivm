@@ -13,34 +13,36 @@ func TestNew(t *testing.T) {
 }
 
 func TestStats_Add(t *testing.T) {
-	tests := []struct {
-		fn int
-		ip int
-		op byte
-		n  int
-	}{
-		{fn: 0, ip: 0, op: 1, n: 1},
-		{fn: 0, ip: 5, op: 2, n: 3},
-		{fn: 2, ip: 0, op: 3, n: 2},
-	}
-	for _, tt := range tests {
-		p := New()
-		for range tt.n {
-			p.Add(tt.fn, tt.ip, tt.op)
+	t.Run("counts samples", func(t *testing.T) {
+		tests := []struct {
+			fn int
+			ip int
+			op byte
+			n  int
+		}{
+			{fn: 0, ip: 0, op: 1, n: 1},
+			{fn: 0, ip: 5, op: 2, n: 3},
+			{fn: 2, ip: 0, op: 3, n: 2},
 		}
-		require.Equal(t, uint64(tt.n), p.Samples(tt.fn))
-		require.Equal(t, uint64(tt.n), p.IP(tt.fn, tt.ip).Samples)
-		require.Equal(t, uint64(tt.n), p.Snapshot().Opcodes[0].Samples)
-	}
-}
+		for _, tt := range tests {
+			p := New()
+			for range tt.n {
+				p.Add(tt.fn, tt.ip, tt.op)
+			}
+			require.Equal(t, uint64(tt.n), p.Samples(tt.fn))
+			require.Equal(t, uint64(tt.n), p.IP(tt.fn, tt.ip).Samples)
+			require.Equal(t, uint64(tt.n), p.Snapshot().Opcodes[0].Samples)
+		}
+	})
 
-func TestStats_AddIgnoresNegativeIndexes(t *testing.T) {
-	p := New()
-	p.Add(-1, 0, 1)
-	p.Add(0, -1, 1)
+	t.Run("ignores negative indexes", func(t *testing.T) {
+		p := New()
+		p.Add(-1, 0, 1)
+		p.Add(0, -1, 1)
 
-	require.Zero(t, p.Snapshot().Samples)
-	require.Zero(t, p.Samples(0))
+		require.Zero(t, p.Snapshot().Samples)
+		require.Zero(t, p.Samples(0))
+	})
 }
 
 func TestStats_Samples(t *testing.T) {

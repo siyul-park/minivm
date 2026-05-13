@@ -20,8 +20,8 @@ go test -race -run TestFoo ./interp/...
 ## Agent Workflow
 
 1. Check `git status --short`; do not overwrite unrelated user changes.
-2. Read only task-relevant docs.
-3. Mirror nearby tests in the edited package.
+2. **Read task-relevant docs from the Documentation Index before writing any code or tests.**
+3. Mirror nearby tests in the edited package; follow Test Conventions (one function per exported symbol, sub-cases as `t.Run`).
 4. Update docs when behavior, invariants, commands, or recurring pitfalls change.
 5. Run narrow tests first, then `go test ./...` or `make test` for broader risk.
 
@@ -138,8 +138,30 @@ Incorrect ordering crashes on Apple Silicon.
 - Avoid unnecessary abstractions.
 - Keep opcode handlers explicit and predictable.
 - Preserve interpreter/JIT behavioral parity.
-- Prefer table-driven tests where practical.
 - Avoid hidden control flow.
+
+## Test Conventions
+
+**Before writing or modifying tests, read the relevant docs from the Documentation Index and Task Router above.**
+
+**One test function per exported symbol.** Sub-cases go inside as `t.Run` subtests, not as separate top-level functions.
+
+```go
+// CORRECT
+func TestAssembler_Take(t *testing.T) {
+    t.Run("from stack", func(t *testing.T) { ... })
+    t.Run("fresh alloc", func(t *testing.T) { ... })
+    t.Run("type mismatch", func(t *testing.T) { ... })
+}
+
+// WRONG — do not split into multiple top-level functions
+func TestAssembler_Take_FromStack(t *testing.T)    { ... }
+func TestAssembler_Take_FreshAlloc(t *testing.T)  { ... }
+func TestAssembler_Take_TypeMismatch(t *testing.T) { ... }
+```
+
+- Name: `Test<Type>_<Method>` for methods, `Test<Func>` for functions.
+- Use table-driven loops inside `t.Run` for repetitive cases.
 
 ## Documentation Maintenance
 

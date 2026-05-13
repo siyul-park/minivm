@@ -115,27 +115,27 @@ func (c *caller) Call(params []asm.Value, rsv *[]uint64) ([]asm.Value, error) {
 	slots := max(nParams, nReturns)
 
 	// Build param physical registers and validate ABI range.
-	paramRegs := make([]asm.PReg, nParams)
+	pregs := make([]asm.PReg, nParams)
 	iReg, fReg := uint8(0), uint8(0)
 	for i, v := range params {
 		if v.RegType() == asm.RegTypeFloat {
 			if fReg >= abiRegs {
 				return nil, fmt.Errorf("%w: too many float params", asm.ErrTooManyParams)
 			}
-			paramRegs[i] = asm.NewPReg(fReg, v.RegType(), v.Width())
+			pregs[i] = asm.NewPReg(fReg, v.RegType(), v.Width())
 			fReg++
 		} else {
 			if iReg >= abiRegs {
 				return nil, fmt.Errorf("%w: too many int params", asm.ErrTooManyParams)
 			}
-			paramRegs[i] = asm.NewPReg(iReg, v.RegType(), v.Width())
+			pregs[i] = asm.NewPReg(iReg, v.RegType(), v.Width())
 			iReg++
 		}
 	}
 
 	// argv layout: [ header | scratch×nScratch | values×slots ]
 	argv := make([]uint64, 1+nScratch+slots)
-	argv[0] = Header(paramRegs, c.sig.Returns(c.sig.Entry), nScratch)
+	argv[0] = Header(pregs, c.sig.Returns(c.sig.Entry), nScratch)
 
 	if rsv != nil && nScratch > 0 {
 		copy(argv[1:], (*rsv)[:min(nScratch, len(*rsv))])
