@@ -14,7 +14,26 @@ package asm
 // out-of-band inputs/outputs (e.g. VM context pointers in, next interpreter IP
 // out).
 type Signature struct {
-	Params  []PReg
-	Returns []PReg
+	Entry   int
+	Inputs  map[int][]PReg
+	Outputs map[int][]PReg
 	Scratch []PReg
+}
+
+func (s *Signature) Params(idx int) []PReg {
+	return append([]PReg(nil), s.Inputs[idx]...)
+}
+
+func (s *Signature) Returns(idx int) []PReg {
+	return append([]PReg(nil), s.Outputs[idx]...)
+}
+
+func (s *Signature) MaxReturns() int {
+	n := 0
+	for _, regs := range s.Outputs {
+		if len(regs) > n {
+			n = len(regs)
+		}
+	}
+	return n
 }

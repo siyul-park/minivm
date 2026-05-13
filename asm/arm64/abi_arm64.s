@@ -4,7 +4,7 @@
 //
 // argv layout:
 //   argv[0]              : header (packed uint64)
-//   argv[1..nScratch]    : scratch save slots (X10–X15), in/out
+//   argv[1..nScratch]    : scratch save slots (X10–X14), in/out
 //   argv[1+nScratch+...] : param inputs / return outputs
 //
 // Header bit layout:
@@ -20,6 +20,7 @@
 //   R8  = argv base (reloaded after BL)
 //   R9  = header / call target
 //   R14 = values_base
+//   R15 = header register (in/out)
 //   R19 = param/return count
 //   R20 = scratch base pointer
 //   R21 = scratch count
@@ -131,8 +132,9 @@ p7_f32:
 p7_int:
     MOVD  56(R14), R7
 
-    // ---- Load scratch registers (X10–X15) ----
+    // ---- Load header and scratch registers (X10–X14) ----
 load_scratch:
+    MOVD (R8), R15
     ADD  $8, R8, R20
     MOVD R21, R10
     CBZ  R10, call
@@ -141,8 +143,7 @@ load_scratch:
     MOVD  8(R20), R11; SUB $1, R21; CBZ R21, call
     MOVD 16(R20), R12; SUB $1, R21; CBZ R21, call
     MOVD 24(R20), R13; SUB $1, R21; CBZ R21, call
-    MOVD 32(R20), R14; SUB $1, R21; CBZ R21, call
-    MOVD 40(R20), R15
+    MOVD 32(R20), R14
 
 call:
     MOVD addr+0(FP), R9
@@ -150,7 +151,8 @@ call:
 
     // ---- Save scratch registers ----
     MOVD argv+8(FP), R8
-    MOVD (R8), R9
+    MOVD R15, (R8)
+    MOVD R15, R9
     UBFX $16, R9, $8, R21
     ADD  $8, R8, R20
 
@@ -159,8 +161,7 @@ call:
     MOVD R11,  8(R20); SUB $1, R21; CBZ R21, store
     MOVD R12, 16(R20); SUB $1, R21; CBZ R21, store
     MOVD R13, 24(R20); SUB $1, R21; CBZ R21, store
-    MOVD R14, 32(R20); SUB $1, R21; CBZ R21, store
-    MOVD R15, 40(R20)
+    MOVD R14, 32(R20)
 
     // ---- Store return values ----
 store:

@@ -96,11 +96,11 @@ ARM64 JIT reserves `arch.Scratch = X10-X15` as metadata channels outside normal 
 | `rGlobals` | globals pointer input |
 | `rNext` | next interpreter IP output |
 
-`jitCompiler.closure()` writes scratch inputs, calls native code, reads `rNext`, then sets `i.frames[fp-1].ip`.
+`jitCompiler.closure()` writes scratch inputs, calls native code, receives typed `asm.Value` results, reads JIT-owned `rNext`, restores stack values, then sets `i.frames[fp-1].ip`.
 
 ## Branches And Globals
 
-Branches (`BR`, `BR_IF`, `BR_TABLE`) terminate segments. They emit direct label branches only when target segment compiled and current `assembler.Returns()` exactly matches target `Signature.Params` by type and width. Otherwise they load target IP into `rNext` and emit `RET`.
+Branches (`BR`, `BR_IF`, `BR_TABLE`) terminate segments. They emit direct label branches only when target segment compiled and current `assembler.Returns(idx)` exactly matches target `Signature.Params(entry)` by type and width. Otherwise arch-specific JIT return code records the current return point, writes target IP into JIT-owned `rNext`, writes the arch header register, and emits `RET`.
 
 Branch limits: `BR` rejects non-empty native returns; `BR_IF` and `BR_TABLE` reject when more than one return would need reconstruction. Branch handlers must not fall through `_EPILOGUE`, because that would overwrite branch-selected `rNext`.
 
@@ -134,7 +134,7 @@ Branch-terminated blocks need target signatures before choosing direct branch vs
 
 ## Assembler
 
-`asm.Assembler` tracks VM-stack shape inside one segment: `stack []VReg` holds in-flight stack values; `params []VReg` holds values taken from empty stack and becomes native ABI inputs.
+`asm.Assembler` tracks VM-stack shape inside one segment: `stack []VReg` holds in-flight stack values; `params []VReg` holds values taken from empty stack and becomes native ABI inputs. `Params(idx)` and `Returns(idx)` expose VReg state at recorded program points; `Return(idx)` records a return point for ABI signature generation.
 
 Core methods:
 
@@ -177,14 +177,14 @@ Apple Silicon enforces W^X. Wrong `Unseal -> Append/Patch -> Seal -> Call` order
 
 ## ARM64 ABI
 
-`asm/arm64` follows AAPCS64: integer args/returns use `X0-X7`; float args/returns use `D0-D7` / `S0-S7`; metadata scratch uses `X10-X15`; trampoline bookkeeping reserves `X8`, `X9`.
+`asm/arm64` follows AAPCS64: integer args/returns use `X0-X7`; float args/returns use `D0-D7` / `S0-S7`; metadata scratch uses `X10-X14`; trampoline bookkeeping reserves `X8`, `X9`, and the header register `X15`.
 
 Trampoline `argv` layout:
 
 ```text
-argv[0]            header: nParams, nReturns, nReserved, type masks
+argv[0]            header: nParams, nReturns, nReserved, type/width masks
 argv[1..reserved]  scratch inputs/outputs
 argv[reserved+1..] params in / returns out
 ```
 
-`abi_arm64.s` marshals args from `argv`, loads reserved `X10-X15`, calls native chunk via `BL`, then writes scratch outputs and return values back to `argv`.
+`abi_arm64.s` marshals args from `argv`, copies `argv[0]` into `X15`, loads reserved `X10-X14`, calls native chunk via `BL`, copies `X15` back to `argv[0]`, then writes scratch outputs and return values back to `argv` using the updated header.

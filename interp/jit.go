@@ -277,12 +277,13 @@ func (c *jitCompiler) linkable(targetIP int) bool {
 	if sig == nil {
 		return false
 	}
-	src := c.assembler.Returns()
-	if len(src) != len(sig.Params) {
+	src := c.assembler.Returns(c.assembler.Index())
+	params := sig.Params(sig.Entry)
+	if len(src) != len(params) {
 		return false
 	}
 	for i, v := range src {
-		if v.Type() != sig.Params[i].Type() || v.Width() != sig.Params[i].Width() {
+		if v.Type() != params[i].Type() || v.Width() != params[i].Width() {
 			return false
 		}
 	}
@@ -290,12 +291,12 @@ func (c *jitCompiler) linkable(targetIP int) bool {
 }
 
 func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpreter) {
-	nParams := len(sig.Params)
-	params := make([]uint64, nParams)
+	pregs := fn.Params(sig.Entry)
+	nParams := len(pregs)
 	scratch := make([]uint64, len(sig.Scratch))
 
 	kinds := make([]types.Kind, nParams)
-	for i, p := range sig.Params {
+	for i, p := range pregs {
 		p, ok := c.kind(p)
 		if !ok {
 			return nil
@@ -303,10 +304,21 @@ func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpret
 		kinds[i] = p
 	}
 
+	params := make([]asm.Value, nParams) // single goroutine: allocate once outside closure
 	return func(i *Interpreter) {
 		base := i.sp - nParams
 		for j := range nParams {
-			params[j] = i.unbox64(i.stack[base+j])
+			bits := i.unbox64(i.stack[base+j])
+			switch kinds[j] {
+			case types.KindI32:
+				params[j] = asm.I32(uint32(bits))
+			case types.KindI64:
+				params[j] = asm.I64(bits)
+			case types.KindF32:
+				params[j] = asm.F32(uint32(bits))
+			default:
+				params[j] = asm.F64(bits)
+			}
 		}
 		if len(scratch) > rStack {
 			f := i.frame()
@@ -330,10 +342,21 @@ func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpret
 		if err != nil {
 			panic(err)
 		}
-		for j, kind := range kinds {
-			i.stack[base+j] = i.box64(rets[j], kind)
+		for j, val := range rets {
+			var kind types.Kind
+			switch {
+			case val.RegType() == asm.RegTypeFloat && val.Width() == asm.Width64:
+				kind = types.KindF64
+			case val.RegType() == asm.RegTypeFloat:
+				kind = types.KindF32
+			case val.Width() == asm.Width64:
+				kind = types.KindI64
+			default:
+				kind = types.KindI32
+			}
+			i.stack[base+j] = i.box64(val.Bits(), kind)
 		}
-		i.sp = base + len(kinds)
+		i.sp = base + len(rets)
 		i.frames[i.fp-1].ip = int(scratch[rNext])
 	}
 }

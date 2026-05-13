@@ -23,17 +23,21 @@ func TestCaller_Call(t *testing.T) {
 	require.NoError(t, buf.Seal())
 
 	sig := &asm.Signature{
-		Params:  []asm.PReg{asm.NewPReg(0, asm.RegTypeInt, asm.Width64)},
-		Returns: []asm.PReg{asm.NewPReg(0, asm.RegTypeInt, asm.Width64)},
+		Inputs: map[int][]asm.PReg{
+			0: {asm.NewPReg(0, asm.RegTypeInt, asm.Width64)},
+		},
+		Outputs: map[int][]asm.PReg{
+			0: {asm.NewPReg(0, asm.RegTypeInt, asm.Width64)},
+		},
 	}
 
 	c, err := NewCaller(sig, chk)
 	require.NoError(t, err)
 
-	rets, err := c.Call([]uint64{1}, nil)
+	rets, err := c.Call([]asm.Value{asm.I64(1)}, nil)
 	require.NoError(t, err)
 	require.Len(t, rets, 1)
-	require.Equal(t, []uint64{2}, rets)
+	require.Equal(t, []asm.Value{asm.I64(2)}, rets)
 }
 
 func TestCaller_CallReservedInputOutput(t *testing.T) {
@@ -58,4 +62,34 @@ func TestCaller_CallReservedInputOutput(t *testing.T) {
 	_, err = callers[0].Call(nil, &rsv)
 	require.NoError(t, err)
 	require.Equal(t, uint64(42), rsv[2])
+}
+
+func TestCaller_CallUsesUpdatedHeader(t *testing.T) {
+	buf, err := asm.NewBuffer(256)
+	require.NoError(t, err)
+	defer buf.Free()
+
+	a := asm.NewAssembler(Arch, buf)
+	a.Emits(LDI(X15, Header(nil, []asm.PReg{X0, X1}, 0))...)
+	a.Emits(LDI(X0, 11)...)
+	a.Emits(LDI(X1, 31)...)
+	a.Emit(RET())
+	obj, err := a.Compile()
+	require.NoError(t, err)
+
+	sig := &asm.Signature{
+		Inputs: map[int][]asm.PReg{
+			0: nil,
+		},
+		Outputs: map[int][]asm.PReg{
+			0: {X0},
+			1: {X0, X1},
+		},
+	}
+	c, err := NewCaller(sig, obj.Chunk)
+	require.NoError(t, err)
+
+	out, err := c.Call(nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, []asm.Value{asm.I64(11), asm.I64(31)}, out)
 }

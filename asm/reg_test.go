@@ -13,6 +13,19 @@ func TestNewPReg(t *testing.T) {
 	require.Equal(t, Width64, r.Width())
 }
 
+func TestValue(t *testing.T) {
+	require.Equal(t, RegTypeInt, I32(7).RegType())
+	require.Equal(t, Width32, I32(7).Width())
+	require.Equal(t, uint64(7), I32(7).Bits())
+	require.Equal(t, "i32", I32(7).String())
+	require.Equal(t, RegTypeInt, I64(9).RegType())
+	require.Equal(t, Width64, I64(9).Width())
+	require.Equal(t, RegTypeFloat, F32(11).RegType())
+	require.Equal(t, Width32, F32(11).Width())
+	require.Equal(t, RegTypeFloat, F64(13).RegType())
+	require.Equal(t, Width64, F64(13).Width())
+}
+
 func TestPReg_String(t *testing.T) {
 	tests := []struct {
 		reg PReg
