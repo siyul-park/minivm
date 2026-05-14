@@ -1,170 +1,120 @@
-# Guide: Adding a New Opcode
+# Guide: REPL
 
-End-to-end checklist for adding a new instruction.
+Interactive assembly REPL for the MiniVM bytecode interpreter.
 
-## Agent Summary
-
-Usually edit, in order:
-
-1. `instr/opcode.go`
-2. `instr/type.go`
-3. `interp/threaded.go`
-4. `interp/jit_arm64.go` if ARM64 JIT support is practical
-5. `instr/*_test.go`, `interp/interp_test.go`, this guide/reference docs
-
-Threaded support is mandatory. JIT support is optional.
-
-## Before You Start
-
-Read `docs/jit-internals.md` for threaded/JIT contracts and `docs/instruction-set.md` for opcode patterns.
-
-## Step 1 — Define the Opcode
-
-File: `instr/opcode.go`
-
-Append inside the existing `const` block, in the right category.
-
-```go
-const (
-    // ...existing opcodes...
-
-    I32_MY_OP
-)
-```
-
-The `iota` value is the opcode byte. Order matters; never insert between existing opcodes.
-
-## Step 2 — Declare Operand Width
-
-File: `instr/type.go`
-
-Add to the `types` map.
-
-```go
-var types = map[Opcode]Type{
-    // ...existing entries...
-
-    I32_MY_OP: {"i32.my_op", []int{}},       // no operands
-    I32_MY_OP: {"i32.my_op", []int{4}},      // one 4-byte operand
-    I32_MY_OP: {"i32.my_op", []int{2}},      // one 2-byte operand
-    I32_MY_OP: {"i32.my_op", []int{-2, 2}}, // count byte + count×2-byte values
-}
-```
-
-Fixed widths: `1`, `2`, `4`, `8`. Negative `-n` means length-prefixed array with `n`-byte elements.
-
-## Step 3 — Implement Threaded Handler
-
-File: `interp/threaded.go`
-
-Add an entry to the `threaded [256]func` table in `init()`. Mirror nearby opcode style.
-
-```go
-instr.I32_MY_OP: func(c *threadedCompiler) func(i *Interpreter) {
-    operand := int32(*(*int32)(unsafe.Pointer(&c.code[c.ip+1])))
-    c.ip += 5 // 1 opcode + 4 operand bytes
-
-    return func(i *Interpreter) {
-        f := &i.frames[i.fp-1]
-
-        if i.sp == 0 {
-            panic(ErrStackUnderflow)
-        }
-
-        val := i.stack[i.sp-1]
-        if val.Kind() == types.KindRef {
-            i.release(val.Ref())
-        }
-        i.sp--
-
-        result := types.BoxI32(val.I32() + int32(operand))
-
-        if i.sp == len(i.stack) {
-            panic(ErrStackOverflow)
-        }
-        i.stack[i.sp] = result
-        i.sp++
-
-        f.ip += 5
-    }
-},
-```
-
-Checklist:
-
-- [ ] advance `c.ip` before returning
-- [ ] advance `f.ip` by exact instruction width
-- [ ] check stack bounds with `ErrStackUnderflow` / `ErrStackOverflow`
-- [ ] call `i.retain(addr)` when a `KindRef` enters stack
-- [ ] call `i.release(addr)` when a `KindRef` is consumed
-- [ ] do not catch panics; let `interp.Run` recover
-
-## Step 4 — Implement JIT Handler
-
-File: `interp/jit_arm64.go`
-
-Optional, ARM64 only. Skip if the opcode needs hard-to-compile interpreter access; threaded fallback remains correct.
-
-```go
-jit[instr.I32_MY_OP] = func(c *jitCompiler) (bool, bool) {
-    c.ip++ // before every return path
-
-    r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
-    if !ok {
-        return false, false
-    }
-
-    r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-    c.assembler.Emit(arm64.ADD(r1, r0, r0))
-    c.assembler.Push(r1)
-
-    return true, false
-}
-```
-
-Return values are `(ok, stop)`:
-
-| Return | Meaning |
-|---|---|
-| `true, false` | compiled; continue |
-| `false, false` | not compilable; end segment |
-| `true, true` | compiled branch terminator; emits own `RET` |
-
-Checklist:
-
-- [ ] advance `c.ip` before every return
-- [ ] call `Take` with correct `RegType` and `RegWidth`
-- [ ] return `false, false` on type/width mismatch
-- [ ] use only VRegs from `Take` or `NewVReg`
-- [ ] push result VReg with `Push`
-- [ ] use `return false, false`, not `panic`, when emission is impossible
-- [ ] non-branch instructions return `(ok, false)`; only branch terminators return `(true, true)`
-
-## Step 5 — Write Tests
-
-File: `interp/interp_test.go`
-
-Add cases to package-level `var tests`, not a new test function.
-
-```go
-{
-    program: program.New(
-        []instr.Instruction{
-            instr.New(instr.I32_CONST, 21),
-            instr.New(instr.I32_MY_OP),
-        },
-    ),
-    values: []types.Value{types.I32(42)},
-},
-```
-
-Cover normal behavior, edge cases such as zero and min/max values, and error cases such as stack underflow when applicable.
-
-## Step 6 — Verify
+## Running
 
 ```bash
-make test
-make lint
+./dist/minivm
 ```
 
-If adding JIT support, test on ARM64 hardware or runner. JIT tests use `//go:build arm64` and only run there.
+## Basic Usage
+
+Enter assembly instructions one per line. Each instruction executes immediately and the current stack is printed after each step.
+
+```
+> i32.const 42
+42
+> i32.const 8
+42 8
+> i32.add
+50
+```
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `.const` | Declare a function constant (multi-line, end with blank line) |
+| `.type` | Declare type descriptors (multi-line, end with blank line) |
+| `.show` | Disassemble the accumulated program |
+| `.profile` | Re-execute with profiling and print function/IP/opcode samples |
+| `.reset` | Clear all instructions, constants, types, and breakpoints |
+| `.help` | Show help |
+| `.quit` / `.exit` | Exit the REPL |
+
+## Debugging
+
+The REPL integrates `interp.Debugger` for GDB-style bytecode-level debugging. Breakpoints persist across `.debug` sessions; `.reset` clears them.
+
+### Setting Breakpoints
+
+```
+> .break 5          set breakpoint at func=0, ip=5
+> .break 1:10       set breakpoint at func=1, ip=10
+> .breaks           list all breakpoints
+> .clear 1          remove breakpoint 1
+> .enable 1         enable breakpoint 1
+> .disable 1        disable breakpoint 1
+```
+
+Breakpoint offsets match the byte offsets shown by `.show`.
+
+### Starting a Debug Session
+
+`.debug` runs the accumulated program under the debugger. Execution always stops at the first instruction (step mode), regardless of breakpoints.
+
+```
+> i32.const 42
+42
+> i32.const 8
+42 8
+> .break 5
+breakpoint 1 set at func=0 ip=5
+> .debug
+stopped at func=0 ip=0000 (i32.const)
+debug> continue
+breakpoint 1 at func=0 ip=0005 (i32.const)
+debug> stack
+42
+debug> continue
+42 8
+```
+
+### Debug Sub-loop Commands
+
+| Command | Shorthand | Effect |
+|---|---|---|
+| `step` | `s` | Execute one instruction, entering calls |
+| `next` | `n` | Execute one instruction, stepping over calls |
+| `finish` | `f` | Run until current frame returns |
+| `continue` | `c` | Run until next breakpoint or program end |
+| `stack` | | Print the operand stack |
+| `locals` | | Print local variables of the current frame |
+| `globals` | | Print all global variables |
+| `frames` | | Print the call stack |
+| `breaks` | | List all breakpoints |
+| `break <spec>` | `b` | Add a breakpoint (also persists to REPL) |
+| `clear <id>` | | Remove a breakpoint |
+| `quit` / `q` | | Exit the debug session |
+
+An empty line re-prints the current stopped location.
+
+### Inspection
+
+All stops occur **before** the indicated instruction executes. The displayed ip is the bytecode offset of the next instruction to run.
+
+`locals` and `globals` iterate until an out-of-range index is reached (no explicit count needed).
+
+`frames` prints the full call stack with `>` marking the innermost frame:
+
+```
+debug> frames
+> frame[0] func=0 ip=0005
+  frame[1] func=1 ip=0012
+```
+
+### JIT and Precision
+
+`.debug` automatically disables JIT and sets tick=1 (via `interp.WithDebugger`), preserving exact bytecode instruction boundaries for step-level control.
+
+## Branch Syntax
+
+Both relative and absolute branch targets are accepted:
+
+```
+br 10           relative offset from instruction end
+br @0x0010      absolute byte offset in accumulated program
+```
+
+`.show` output uses absolute offsets; the REPL normalizes them to relative on input.

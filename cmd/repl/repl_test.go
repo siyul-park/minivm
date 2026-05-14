@@ -217,6 +217,108 @@ func TestREPL_Run(t *testing.T) {
 			input:    "br @0x0000\n.quit\n",
 			contains: []string{"error:"},
 		},
+
+		// --- debug commands ---
+		{
+			// .debug with empty program
+			input:    ".debug\n.quit\n",
+			contains: []string{"(empty)"},
+		},
+		{
+			// .breaks with no breakpoints set
+			input:    ".breaks\n.quit\n",
+			contains: []string{"no breakpoints"},
+		},
+		{
+			// .break sets a breakpoint, .breaks lists it
+			input:    ".break 0\n.breaks\n.quit\n",
+			contains: []string{"breakpoint 1", "func=0 ip=0"},
+		},
+		{
+			// .break with fn:ip notation
+			input:    ".break 0:5\n.breaks\n.quit\n",
+			contains: []string{"breakpoint 1", "func=0 ip=5"},
+		},
+		{
+			// .clear removes a breakpoint
+			input:    ".break 0\n.clear 1\n.breaks\n.quit\n",
+			contains: []string{"no breakpoints"},
+		},
+		{
+			// .clear nonexistent id reports error
+			input:    ".clear 99\n.quit\n",
+			contains: []string{"error:"},
+		},
+		{
+			// .disable and .enable change state
+			input:    ".break 0\n.disable 1\n.breaks\n.enable 1\n.breaks\n.quit\n",
+			contains: []string{"disabled", "enabled"},
+		},
+		{
+			// .reset clears breakpoints
+			input:    ".break 0\n.reset\n.breaks\n.quit\n",
+			contains: []string{"reset.", "no breakpoints"},
+		},
+		{
+			// .debug stops at first instruction in step mode
+			input:    "i32.const 42\n.debug\nstep\n.quit\n",
+			contains: []string{"stopped at", "42"},
+			excludes: []string{"error:"},
+		},
+		{
+			// .debug quit exits session cleanly
+			input:    "i32.const 42\n.debug\nquit\n.quit\n",
+			contains: []string{"stopped at", "debug session ended"},
+			excludes: []string{"error:"},
+		},
+		{
+			// .debug with breakpoint hit shows breakpoint info
+			input:    "i32.const 42\ni32.const 8\n.break 5\n.debug\ncontinue\nquit\n.quit\n",
+			contains: []string{"breakpoint"},
+			excludes: []string{"error:"},
+		},
+		{
+			// stack command in debug sub-loop shows values
+			input:    "i32.const 42\ni32.const 8\n.debug\nstep\nstack\nquit\n.quit\n",
+			contains: []string{"stopped at", "42"},
+			excludes: []string{"error:"},
+		},
+		{
+			// frames command shows call stack
+			input:    "i32.const 42\n.debug\nframes\nquit\n.quit\n",
+			contains: []string{"frame[0]"},
+			excludes: []string{"error:"},
+		},
+		{
+			// continue in debug sub-loop runs to completion
+			input:    "i32.const 42\n.debug\ncontinue\n.quit\n",
+			contains: []string{"stopped at", "42"},
+			excludes: []string{"error:"},
+		},
+		{
+			// shorthand: s for step, c for continue, q for quit (two instrs needed so s stops mid-program)
+			input:    "i32.const 42\ni32.const 8\n.debug\ns\nc\n.quit\n",
+			contains: []string{"stopped at", "42"},
+			excludes: []string{"error:"},
+		},
+		{
+			// unknown debug command reports error without crashing
+			input:    "i32.const 42\n.debug\nbadcmd\nquit\n.quit\n",
+			contains: []string{"unknown debug command"},
+			excludes: []string{"error:"},
+		},
+		{
+			// globals command shows (no globals) when none set
+			input:    "i32.const 42\n.debug\nglobals\nquit\n.quit\n",
+			contains: []string{"(no globals)"},
+			excludes: []string{"error:"},
+		},
+		{
+			// locals command shows (no locals) at top level
+			input:    "i32.const 42\n.debug\nlocals\nquit\n.quit\n",
+			contains: []string{"(no locals)"},
+			excludes: []string{"error:"},
+		},
 	}
 
 	for _, tt := range tests {
