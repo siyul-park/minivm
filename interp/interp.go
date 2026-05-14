@@ -490,7 +490,6 @@ func (i *Interpreter) jit(addr int) error {
 		assembler: asm.NewAssembler(arch, i.buffer),
 		profile:   i.prof,
 		addr:      addr,
-		types:     i.types,
 		constants: i.constants,
 		globals:   i.globals,
 		heap:      i.heap,

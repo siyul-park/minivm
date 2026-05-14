@@ -97,6 +97,65 @@ func TestDeadCodeEliminationPass_Run(t *testing.T) {
 				},
 			),
 		},
+		{
+			program: program.New(
+				[]instr.Instruction{
+					instr.Marshal([]instr.Instruction{
+						instr.New(instr.NOP),
+						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.BR, uint64(uint16(-9+1<<16))),
+					}),
+				},
+			),
+			expected: program.New(
+				[]instr.Instruction{
+					instr.Marshal([]instr.Instruction{
+						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.BR, uint64(uint16(-8+1<<16))),
+					}),
+				},
+			),
+		},
+		{
+			program: program.New(
+				[]instr.Instruction{
+					instr.Marshal([]instr.Instruction{
+						instr.New(instr.NOP),
+						instr.New(instr.I32_CONST, 0),
+						instr.New(instr.BR_IF, uint64(uint16(-9+1<<16))),
+					}),
+				},
+			),
+			expected: program.New(
+				[]instr.Instruction{
+					instr.Marshal([]instr.Instruction{
+						instr.New(instr.I32_CONST, 0),
+						instr.New(instr.BR_IF, uint64(uint16(-8+1<<16))),
+					}),
+				},
+			),
+		},
+		{
+			program: program.New(
+				[]instr.Instruction{
+					instr.Marshal([]instr.Instruction{
+						instr.New(instr.NOP),
+						instr.New(instr.I32_CONST, 0),
+						instr.New(instr.BR_TABLE, 1, uint64(uint16(-11+1<<16)), 0),
+						instr.New(instr.I32_CONST, 2),
+					}),
+				},
+			),
+			expected: program.New(
+				[]instr.Instruction{
+					instr.Marshal([]instr.Instruction{
+						instr.New(instr.I32_CONST, 0),
+						instr.New(instr.BR_TABLE, 1, uint64(uint16(-11+1<<16)), 0),
+						instr.New(instr.I32_CONST, 2),
+					}),
+				},
+			),
+		},
 	}
 
 	for _, tt := range tests {

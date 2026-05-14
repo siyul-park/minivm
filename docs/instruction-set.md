@@ -42,7 +42,7 @@ Declared in `instr/type.go`.
 | `{n}` | fixed `n`-byte operand |
 | `{-n, n}` | count byte + `count × n`-byte values |
 
-Examples: `{2}` = one u16; `{-2, 2}` = count byte + repeated u16 operands.
+Examples: `{2}` = one u16; branch opcodes interpret it as i16. `{-2, 2}` = count byte + repeated u16 operands.
 
 ## Branch Offsets
 
@@ -52,7 +52,7 @@ Branch operands are relative to instruction end:
 target = instruction_start + instruction_width + operand
 ```
 
-`BR 5` skips 5 bytes past the 3-byte `BR`; `BR 0` is fall-through.
+Offsets are signed 16-bit values encoded little-endian. `BR 5` skips 5 bytes past the 3-byte `BR`; `BR 0` is fall-through; `BR -3` jumps back to the branch instruction.
 
 ## Stack Manipulation
 
@@ -71,7 +71,7 @@ target = instruction_start + instruction_width + operand
 |---|---|---|---|---|
 | `BR` | `{2}` | `→` | ◐ | Unconditional relative jump. JIT only when current segment has no pending return values. |
 | `BR_IF` | `{2}` | `cond →` | ◐ | Jump if `cond ≠ 0`, else fall through. JIT only for simple stack shapes. |
-| `BR_TABLE` | `{-2, 2}` | `index →` | ◐ | Jump table; out-of-range uses default target. JIT only for simple stack shapes. |
+| `BR_TABLE` | `{-2, 2}` | `index →` | ◐ | Jump table; negative or out-of-range index uses default target. JIT only for simple stack shapes. |
 | `CALL` | `{}` | `fn →` | ⬜ | Call `*Function` or `*HostFunction`; pushes a frame. |
 | `RETURN` | `{}` | `→` | ⬜ | Return from current frame. |
 

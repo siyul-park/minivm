@@ -83,29 +83,27 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error)
 
 			switch inst.Opcode() {
 			case instr.BR, instr.BR_IF:
-				offset := read + int(inst.Operand(0)) + inst.Width()
-				for offset < len(offsets) && offsets[offset] == -1 {
-					offset++
+				target := read + instr.S16(inst.Operand(0)) + inst.Width()
+				for target >= 0 && target < len(offsets) && offsets[target] == -1 {
+					target++
 				}
-				if offset >= len(offsets) {
+				if target < 0 || target >= len(offsets) {
 					return nil, invalidJumpError(read)
 				}
-				offset = offsets[offset] - write - inst.Width()
-				inst.SetOperand(0, uint64(offset))
+				inst.SetOperand(0, uint64(offsets[target]-write-inst.Width()))
 			case instr.BR_TABLE:
 				width := inst.Width()
 				operands := inst.Operands()
 				count := int(operands[0])
 				for j := 0; j <= count; j++ {
-					offset := read + int(operands[j+1]) + width
-					for offset < len(offsets) && offsets[offset] == -1 {
-						offset++
+					target := read + instr.S16(operands[j+1]) + width
+					for target >= 0 && target < len(offsets) && offsets[target] == -1 {
+						target++
 					}
-					if offset >= len(offsets) {
+					if target < 0 || target >= len(offsets) {
 						return nil, invalidJumpError(read)
 					}
-					offset = offsets[offset] - write - width
-					inst.SetOperand(j+1, uint64(offset))
+					inst.SetOperand(j+1, uint64(offsets[target]-write-width))
 				}
 			default:
 			}

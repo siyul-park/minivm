@@ -94,7 +94,9 @@ func (a *Assembler) Returns(idx int) []VReg {
 func (a *Assembler) Take(typ RegType, w RegWidth) (VReg, bool) {
 	if len(a.stack) == 0 {
 		r := a.vregAlloc.Alloc(typ, w)
-		a.params = append(a.params, r)
+		a.params = append(a.params, VReg{})
+		copy(a.params[1:], a.params[:len(a.params)-1])
+		a.params[0] = r
 		return r, true
 	}
 	top := a.stack[len(a.stack)-1]
@@ -335,37 +337,26 @@ func (a *Assembler) signature() (*Signature, error) {
 		}
 	}
 
-	intRegs := a.allocatable(RegTypeInt)
-	floatRegs := a.allocatable(RegTypeFloat)
-
-	pick := func(vregs []VReg, ii, fi *int) []PReg {
+	pick := func(vregs []VReg) []PReg {
 		out := make([]PReg, len(vregs))
-		for j, v := range vregs {
-			if v.Type() == RegTypeFloat {
-				out[j] = NewPReg(floatRegs[*fi].ID(), v.Type(), v.Width())
-				(*fi)++
-			} else {
-				out[j] = NewPReg(intRegs[*ii].ID(), v.Type(), v.Width())
-				(*ii)++
-			}
+		for i, v := range vregs {
+			out[i] = NewPReg(uint8(i), v.Type(), v.Width())
 		}
 		return out
 	}
 
-	iP, fP, iR, fR := 0, 0, 0, 0
 	outputs := make(map[int][]PReg, max(len(a.returns), 1))
 	if len(a.returns) == 0 {
-		outputs[0] = pick(a.stack, &iR, &fR)
+		outputs[0] = pick(a.stack)
 	} else {
 		for idx, regs := range a.returns {
-			iR, fR = 0, 0
-			outputs[idx] = pick(regs, &iR, &fR)
+			outputs[idx] = pick(regs)
 		}
 	}
 
 	return &Signature{
 		Scratch: append([]PReg(nil), a.scratch...),
-		Inputs:  map[int][]PReg{0: pick(a.params, &iP, &fP)},
+		Inputs:  map[int][]PReg{0: pick(a.params)},
 		Outputs: outputs,
 	}, nil
 }
@@ -373,28 +364,16 @@ func (a *Assembler) signature() (*Signature, error) {
 func (a *Assembler) assign() ([]Instruction, error) {
 	last := a.lastRefs()
 
-	intRegs := a.allocatable(RegTypeInt)
-	floatRegs := a.allocatable(RegTypeFloat)
-
 	physical := make(map[int32]PReg)
 	live := make(map[int32]PReg)
 	virtual := make(map[uint8]VReg)
 	fixed := make(map[int32]PReg)
 
-	iR, fR := 0, 0
 	pinReturns := func(vregs []VReg) error {
-		iR, fR = 0, 0
-		for _, v := range vregs {
-			var p PReg
-			if v.Type() == RegTypeFloat {
-				p = floatRegs[fR]
-				fR++
-			} else {
-				p = intRegs[iR]
-				iR++
-			}
+		for i, v := range vregs {
+			p := NewPReg(uint8(i), v.Type(), v.Width())
 			if existing, ok := fixed[v.ID()]; ok && existing.ID() != p.ID() {
-				return fmt.Errorf("vreg %v pinned to conflicting physical registers %v and %v across return sites", v, existing, p)
+				return fmt.Errorf("%w: conflicting return register pin for %v", ErrInvalidArgs, v)
 			}
 			fixed[v.ID()] = p
 		}
@@ -412,25 +391,16 @@ func (a *Assembler) assign() ([]Instruction, error) {
 		}
 	}
 
-	iP, fP := 0, 0
-	for _, v := range a.params {
-		var p PReg
-		if v.Type() == RegTypeFloat {
-			if fP >= a.arch.ABI.MaxParams() {
-				return nil, ErrTooManyParams
-			}
-			p = floatRegs[fP]
-			fP++
-		} else {
-			if iP >= a.arch.ABI.MaxParams() {
-				return nil, ErrTooManyParams
-			}
-			p = intRegs[iP]
-			iP++
+	for i, v := range a.params {
+		if i >= a.arch.ABI.MaxParams() {
+			return nil, ErrTooManyParams
 		}
+
+		p := NewPReg(uint8(i), v.Type(), v.Width())
 		if err := a.regAlloc.Reserve(v, p); err != nil {
 			return nil, err
 		}
+
 		physical[v.ID()] = p
 		live[v.ID()] = p
 		virtual[p.ID()] = v

@@ -80,7 +80,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		}
 	},
 	instr.BR: func(c *threadedCompiler) func(i *Interpreter) {
-		offset := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+		offset := instr.ParseI16(c.code, c.ip+1)
 		c.ip += 3
 		return func(i *Interpreter) {
 			f := &i.frames[i.fp-1]
@@ -88,7 +88,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		}
 	},
 	instr.BR_IF: func(c *threadedCompiler) func(i *Interpreter) {
-		offset := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+		offset := instr.ParseI16(c.code, c.ip+1)
 		c.ip += 3
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -107,7 +107,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		count := int(c.code[c.ip+1])
 		offsets := make([]int, count+1)
 		for i := 0; i < len(offsets); i++ {
-			offsets[i] = int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+i*2+2])))
+			at := c.ip + i*2 + 2
+			offsets[i] = instr.ParseI16(c.code, at)
 		}
 		c.ip += count*2 + 4
 		return func(i *Interpreter) {
@@ -117,8 +118,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			f := &i.frames[i.fp-1]
 			i.sp--
 			cond := int(i.stack[i.sp].I32())
-			if cond > count {
-				cond = count + 1
+			if cond < 0 || cond >= count {
+				cond = count
 			}
 			f.ip += offsets[cond] + count*2 + 4
 		}
@@ -2174,40 +2175,40 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					panic(ErrIndexOutOfRange)
 				}
 				v := types.I32(val.I32())
-				for i := idx; i < idx+size; i++ {
-					arr[i] = v
+				for k := idx; k < idx+size; k++ {
+					arr[k] = v
 				}
 			case types.I64Array:
 				if idx < 0 || idx+size > len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
 				v := types.I64(i.unboxI64(val))
-				for i := idx; i < idx+size; i++ {
-					arr[i] = v
+				for k := idx; k < idx+size; k++ {
+					arr[k] = v
 				}
 			case types.F32Array:
 				if idx < 0 || idx+size > len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
 				v := types.F32(val.F32())
-				for i := idx; i < idx+size; i++ {
-					arr[i] = v
+				for k := idx; k < idx+size; k++ {
+					arr[k] = v
 				}
 			case types.F64Array:
 				if idx < 0 || idx+size > len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
 				v := types.F64(val.F64())
-				for i := idx; i < idx+size; i++ {
-					arr[i] = v
+				for k := idx; k < idx+size; k++ {
+					arr[k] = v
 				}
 			case *types.Array:
 				if idx < 0 || idx+size > len(arr.Elems) {
 					panic(ErrIndexOutOfRange)
 				}
 				elem := arr.Elems[idx]
-				for i := idx; i < idx+size; i++ {
-					arr.Elems[i] = val
+				for k := idx; k < idx+size; k++ {
+					arr.Elems[k] = val
 				}
 				if val.Kind() == types.KindRef {
 					i.retains(val.Ref(), size-1)

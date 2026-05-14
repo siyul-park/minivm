@@ -100,7 +100,7 @@ ARM64 JIT reserves `arch.Scratch = X10-X15` as metadata channels outside normal 
 
 ## Branches And Globals
 
-Branches (`BR`, `BR_IF`, `BR_TABLE`) terminate segments. They emit direct label branches only when target segment compiled and current `assembler.Returns(idx)` exactly matches target `Signature.Params(entry)` by type and width. Otherwise arch-specific JIT return code records the current return point, writes target IP into JIT-owned `rNext`, writes the arch header register, and emits `RET`.
+Branches (`BR`, `BR_IF`, `BR_TABLE`) terminate segments. Branch offsets are signed i16 relative to instruction end. They emit direct label branches only when target segment compiled and current `assembler.Returns(idx)` exactly matches target `Signature.Params(entry)` by type and width. Otherwise arch-specific JIT return code records the current return point, writes target IP into JIT-owned `rNext`, writes the arch header register, and emits `RET`.
 
 Branch limits: `BR` rejects non-empty native returns; `BR_IF` and `BR_TABLE` reject when more than one return would need reconstruction. Branch handlers must not fall through `_EPILOGUE`, because that would overwrite branch-selected `rNext`.
 
@@ -108,11 +108,12 @@ Mutable globals have no declared runtime kind. `GLOBAL_SET` / `GLOBAL_TEE` infer
 
 ## Segment Selection
 
-`jitCompiler.Compile(code)` builds basic blocks, scores each with `profile.Range(addr,start,end)`, skips unsampled blocks, compiles hotter blocks first, and extracts independent compilable segments inside each block.
+`jitCompiler.Compile(code)` builds basic blocks, scores each with `profile.Range(addr,start,end)`, compiles hot blocks plus their direct CFG successors, and extracts independent compilable segments inside each block.
 
 Emit rules:
 
 - completed segment emits when `count >= c.cutoff` (default `4`) and segment range has a profile sample
+- direct-successor entry segments and branch terminators may emit with one compilable instruction so linked branches can enter them
 - truncated segment stopped by unsupported opcode emits only when `count > 4` and range from start to last compiled IP is sampled
 - otherwise `assembler.Abort()` discards segment state
 - JIT makes one function-level compilation attempt; no later tier-up/retry
@@ -127,8 +128,8 @@ block [A B X C D E F]  X unsupported
 
 Branch-terminated blocks need target signatures before choosing direct branch vs exit stub.
 
-1. Pass 1 compiles hot blocks. Non-terminated segments are kept and expose signatures; terminated blocks are held.
-2. Pass 2 recompiles terminated blocks after signatures are known.
+1. Pass 1 compiles candidates into a throwaway buffer with direct branch linking disabled. Successful segments expose signatures only.
+2. Pass 2 recompiles candidates into the executable buffer after signatures are known, enabling direct branch labels where signatures match.
 
 `linkable(targetIP)` compares current returns with target params by type and width.
 

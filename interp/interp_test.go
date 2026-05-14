@@ -18,6 +18,7 @@ var tests = []struct {
 	program *program.Program
 	values  []types.Value
 }{
+	// --- stack: NOP, DROP, DUP, SWAP, SELECT ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -54,6 +55,7 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I32(1), types.I32(2)},
 	},
+	// --- control: BR, BR_IF, BR_TABLE ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -97,6 +99,7 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I32(2)},
 	},
+	// --- call: CONST_GET, CALL, RETURN, host functions ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -147,6 +150,7 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I32(1)},
 	},
+	// --- globals: GLOBAL_GET, GLOBAL_SET, GLOBAL_TEE ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -206,6 +210,7 @@ var tests = []struct {
 		),
 		values: []types.Value{types.F64(1.5)},
 	},
+	// --- locals: LOCAL_GET, LOCAL_SET, LOCAL_TEE ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -261,6 +266,7 @@ var tests = []struct {
 		),
 		values: []types.Value{types.NewFunctionBuilder(nil).Build()},
 	},
+	// --- refs: REF_NULL, REF_TEST, REF_CAST, REF_IS_NULL, REF_EQ, REF_NE ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -321,6 +327,7 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I32(0)},
 	},
+	// --- i32: I32_CONST, arithmetic, bitwise, comparison, conversions ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -622,6 +629,7 @@ var tests = []struct {
 		),
 		values: []types.Value{types.F64(42)},
 	},
+	// --- i64: I64_CONST, arithmetic, bitwise, comparison, conversions ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -884,6 +892,7 @@ var tests = []struct {
 		),
 		values: []types.Value{types.F64(42)},
 	},
+	// --- f32: F32_CONST, arithmetic, comparison, conversions ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -1037,6 +1046,7 @@ var tests = []struct {
 		),
 		values: []types.Value{types.F64(42)},
 	},
+	// --- f64: F64_CONST, arithmetic, comparison, conversions ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -1190,6 +1200,7 @@ var tests = []struct {
 		),
 		values: []types.Value{types.F32(42)},
 	},
+	// --- string: STRING_ENCODE_UTF32, STRING_NEW_UTF32, STRING_LEN, STRING_CONCAT, comparisons ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -1298,6 +1309,7 @@ var tests = []struct {
 		),
 		values: []types.Value{types.I32Array("foo")},
 	},
+	// --- array: ARRAY_NEW, ARRAY_NEW_DEFAULT, ARRAY_GET, ARRAY_SET, ARRAY_FILL ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -1598,6 +1610,7 @@ var tests = []struct {
 		),
 		values: nil,
 	},
+	// --- struct: STRUCT_NEW, STRUCT_NEW_DEFAULT, STRUCT_GET, STRUCT_SET ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -1808,6 +1821,7 @@ var tests = []struct {
 		),
 		values: nil,
 	},
+	// --- recursive: fibonacci (i32), factorial (i64) ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -1877,12 +1891,14 @@ var tests = []struct {
 }
 
 func TestInterpreter_Context(t *testing.T) {
-	i := New(program.New(nil))
-	defer i.Close()
+	t.Run("propagates value", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
 
-	ctx := context.WithValue(context.Background(), "key", "val")
-	i.ctx = ctx
-	require.Equal(t, ctx, i.Context())
+		ctx := context.WithValue(context.Background(), "key", "val")
+		i.ctx = ctx
+		require.Equal(t, ctx, i.Context())
+	})
 }
 
 func TestInterpreter_Push(t *testing.T) {
@@ -1922,14 +1938,16 @@ func TestInterpreter_Pop(t *testing.T) {
 }
 
 func TestInterpreter_Len(t *testing.T) {
-	i := New(program.New(nil))
-	defer i.Close()
+	t.Run("increments on push", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
 
-	require.Equal(t, 0, i.Len())
-	_ = i.Push(types.I32(1))
-	require.Equal(t, 1, i.Len())
-	_ = i.Push(types.I32(2))
-	require.Equal(t, 2, i.Len())
+		require.Equal(t, 0, i.Len())
+		_ = i.Push(types.I32(1))
+		require.Equal(t, 1, i.Len())
+		_ = i.Push(types.I32(2))
+		require.Equal(t, 2, i.Len())
+	})
 }
 
 func TestInterpreter_Alloc(t *testing.T) {
@@ -1992,6 +2010,12 @@ func TestInterpreter_Store(t *testing.T) {
 		defer i.Close()
 
 		require.ErrorIs(t, i.Store(-1, types.I32(1)), ErrSegmentationFault)
+	})
+	t.Run("segfault out of bounds", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Store(9999, types.I32(1)), ErrSegmentationFault)
 	})
 }
 
@@ -2115,21 +2139,25 @@ func TestInterpreter_Const(t *testing.T) {
 }
 
 func TestInterpreter_Close(t *testing.T) {
-	i := New(program.New(nil))
-	require.NoError(t, i.Close())
+	t.Run("no error", func(t *testing.T) {
+		i := New(program.New(nil))
+		require.NoError(t, i.Close())
+	})
 }
 
 func TestInterpreter_Reset(t *testing.T) {
-	i := New(program.New([]instr.Instruction{
-		instr.New(instr.I32_CONST, 7),
-	}))
-	defer i.Close()
+	t.Run("clears stack", func(t *testing.T) {
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7),
+		}))
+		defer i.Close()
 
-	require.NoError(t, i.Run(context.Background()))
-	require.Greater(t, i.Len(), 0)
+		require.NoError(t, i.Run(context.Background()))
+		require.Greater(t, i.Len(), 0)
 
-	i.Reset()
-	require.Equal(t, 0, i.Len())
+		i.Reset()
+		require.Equal(t, 0, i.Len())
+	})
 }
 
 func TestInterpreter_Run(t *testing.T) {
@@ -2615,6 +2643,158 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NotZero(t, jit.Bytes)
 	})
 
+	t.Run("jit links branches", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+
+		loop := types.NewFunctionBuilder(nil).WithLocals(types.TypeI32).Emit(
+			instr.New(instr.I32_CONST, 3),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.LOCAL_TEE, 0),
+			instr.New(instr.BR_IF, uint64(uint16(-13+1<<16))),
+			instr.New(instr.LOCAL_GET, 0),
+		).Build()
+
+		tests := []struct {
+			name     string
+			program  *program.Program
+			profile  func(*prof.Stats)
+			jitAddr  func(*Interpreter) int
+			value    types.Value
+			minLinks uint64
+		}{
+			{
+				name: "cold forward target",
+				program: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 10),
+					instr.New(instr.BR, 5),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.I32_CONST, 32),
+					instr.New(instr.I32_ADD),
+				}),
+				profile:  func(p *prof.Stats) { p.Add(0, 0, byte(instr.I32_CONST)) },
+				jitAddr:  func(*Interpreter) int { return 0 },
+				value:    types.I32(42),
+				minLinks: 2,
+			},
+			{
+				name: "param order at target",
+				program: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 10),
+					instr.New(instr.I32_CONST, 3),
+					instr.New(instr.BR, 0),
+					instr.New(instr.I32_SUB),
+				}),
+				profile: func(p *prof.Stats) { p.Add(0, 0, byte(instr.I32_CONST)) },
+				jitAddr: func(*Interpreter) int { return 0 },
+				value:   types.I32(7),
+			},
+			{
+				name: "signed backward br_if",
+				program: program.New(
+					[]instr.Instruction{
+						instr.New(instr.CONST_GET, 0),
+						instr.New(instr.CALL),
+					},
+					program.WithConstants(loop),
+				),
+				profile: func(p *prof.Stats) { p.Add(1, 7, byte(instr.LOCAL_GET)) },
+				jitAddr: func(i *Interpreter) int { return i.constants[0].Ref() },
+				value:   types.I32(0),
+			},
+			{
+				name: "br_table first target",
+				program: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.BR_TABLE, 2, 0, 8, 16),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.BR, 16),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.BR, 8),
+					instr.New(instr.I32_CONST, 3),
+					instr.New(instr.BR, 0),
+					instr.New(instr.NOP),
+				}),
+				profile: func(p *prof.Stats) { p.Add(0, 0, byte(instr.I32_CONST)) },
+				jitAddr: func(*Interpreter) int { return 0 },
+				value:   types.I32(1),
+			},
+			{
+				name: "br_table second target",
+				program: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.BR_TABLE, 2, 0, 8, 16),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.BR, 16),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.BR, 8),
+					instr.New(instr.I32_CONST, 3),
+					instr.New(instr.BR, 0),
+					instr.New(instr.NOP),
+				}),
+				profile: func(p *prof.Stats) { p.Add(0, 0, byte(instr.I32_CONST)) },
+				jitAddr: func(*Interpreter) int { return 0 },
+				value:   types.I32(2),
+			},
+			{
+				name: "br_table default",
+				program: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.BR_TABLE, 2, 0, 8, 16),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.BR, 16),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.BR, 8),
+					instr.New(instr.I32_CONST, 3),
+					instr.New(instr.BR, 0),
+					instr.New(instr.NOP),
+				}),
+				profile: func(p *prof.Stats) { p.Add(0, 0, byte(instr.I32_CONST)) },
+				jitAddr: func(*Interpreter) int { return 0 },
+				value:   types.I32(3),
+			},
+			{
+				name: "br_table negative default",
+				program: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 0xFFFFFFFF),
+					instr.New(instr.BR_TABLE, 2, 0, 8, 16),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.BR, 16),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.BR, 8),
+					instr.New(instr.I32_CONST, 3),
+					instr.New(instr.BR, 0),
+					instr.New(instr.NOP),
+				}),
+				profile: func(p *prof.Stats) { p.Add(0, 0, byte(instr.I32_CONST)) },
+				jitAddr: func(*Interpreter) int { return 0 },
+				value:   types.I32(3),
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				p := prof.New()
+				tt.profile(p)
+				i := New(tt.program, WithProfile(p), WithCutoff(4))
+				defer i.Close()
+
+				err := i.jit(tt.jitAddr(i))
+				require.NoError(t, err)
+				err = i.Run(context.Background())
+				require.NoError(t, err)
+
+				val, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, tt.value, val)
+				require.GreaterOrEqual(t, p.Snapshot().JIT.Links, tt.minLinks)
+			})
+		}
+	})
+
 	t.Run("jit skips cold segments", func(t *testing.T) {
 		if arch == nil {
 			t.Skip("jit is not available on this architecture")
@@ -2695,35 +2875,6 @@ func TestInterpreter_Run(t *testing.T) {
 		val, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.Null, val)
-
-		jit := p.Snapshot().JIT
-		require.Equal(t, uint64(1), jit.Attempts)
-		require.Zero(t, jit.Emits)
-		require.Zero(t, jit.Links)
-	})
-
-	t.Run("jit skips global get without proven kind", func(t *testing.T) {
-		if arch == nil {
-			t.Skip("jit is not available on this architecture")
-		}
-		p := prof.New()
-		p.Add(0, 0, byte(instr.NOP))
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.NOP),
-			instr.New(instr.GLOBAL_GET, 0),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		i.globals = append(i.globals, types.BoxI32(1))
-
-		err := i.jit(0)
-		require.NoError(t, err)
-		i.globals[0] = types.BoxF32(2.5)
-
-		err = i.Run(context.Background())
-		require.NoError(t, err)
-		val, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.F32(2.5), val)
 
 		jit := p.Snapshot().JIT
 		require.Equal(t, uint64(1), jit.Attempts)

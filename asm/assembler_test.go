@@ -74,6 +74,19 @@ func TestAssembler_Take(t *testing.T) {
 		require.Len(t, params, 1)
 		require.Equal(t, taken, params[0])
 	})
+	t.Run("empty stack params preserve vm order", func(t *testing.T) {
+		buf, err := NewBuffer(256)
+		require.NoError(t, err)
+		defer buf.Free()
+		a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil)}, buf)
+
+		top, ok := a.Take(RegTypeInt, Width64)
+		require.True(t, ok)
+		bottom, ok := a.Take(RegTypeInt, Width64)
+		require.True(t, ok)
+
+		require.Equal(t, []VReg{bottom, top}, a.Params(a.Index()))
+	})
 }
 
 func TestAssembler_Top(t *testing.T) {

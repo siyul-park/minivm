@@ -82,33 +82,6 @@ func TestBasicBlockPass_Run(t *testing.T) {
 		},
 		{
 			fn: types.NewFunctionBuilder(nil).Emit(
-				instr.New(instr.BR, 5),
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.I32_CONST, 2),
-			).Build(),
-			blocks: []*BasicBlock{
-				{
-					Start: 0,
-					End:   3,
-					Succs: []int{2},
-					Preds: nil,
-				},
-				{
-					Start: 3,
-					End:   8,
-					Succs: []int{2},
-					Preds: nil,
-				},
-				{
-					Start: 8,
-					End:   13,
-					Succs: nil,
-					Preds: []int{0, 1},
-				},
-			},
-		},
-		{
-			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.BR_IF, 5),
 				instr.New(instr.I32_CONST, 2),
@@ -161,6 +134,64 @@ func TestBasicBlockPass_Run(t *testing.T) {
 					End:   21,
 					Succs: nil,
 					Preds: []int{0, 1},
+				},
+			},
+		},
+		{
+			fn: types.NewFunctionBuilder(nil).Emit(
+				instr.New(instr.NOP),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.BR, uint64(uint16(-9+1<<16))),
+			).Build(),
+			blocks: []*BasicBlock{
+				{
+					Start: 0,
+					End:   9,
+					Succs: []int{0},
+					Preds: []int{0},
+				},
+			},
+		},
+		{
+			fn: types.NewFunctionBuilder(nil).Emit(
+				instr.New(instr.NOP),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.BR_IF, uint64(uint16(-9+1<<16))),
+				instr.New(instr.I32_CONST, 2),
+			).Build(),
+			blocks: []*BasicBlock{
+				{
+					Start: 0,
+					End:   9,
+					Succs: []int{0, 1},
+					Preds: []int{0},
+				},
+				{
+					Start: 9,
+					End:   14,
+					Succs: nil,
+					Preds: []int{0},
+				},
+			},
+		},
+		{
+			fn: types.NewFunctionBuilder(nil).Emit(
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.BR_TABLE, 1, uint64(uint16(-11+1<<16)), 0),
+				instr.New(instr.I32_CONST, 2),
+			).Build(),
+			blocks: []*BasicBlock{
+				{
+					Start: 0,
+					End:   11,
+					Succs: []int{0, 1},
+					Preds: []int{0},
+				},
+				{
+					Start: 11,
+					End:   16,
+					Succs: nil,
+					Preds: []int{0},
 				},
 			},
 		},

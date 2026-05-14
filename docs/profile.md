@@ -75,7 +75,7 @@ JIT activates when `Samples(fn)` reaches the configured threshold rounded up to 
 
 At compile time, profile data is used to:
 
-1. rank basic blocks by `Range(fn, block.Start, block.End)`; zero-sample blocks are skipped, hotter blocks compile first
+1. rank basic blocks by `Range(fn, block.Start, block.End)`; hotter blocks compile first, and direct successors of hot blocks are included for branch linking
 2. emit candidate native segments only when their byte range has at least one sample; cold segments inside hot blocks are skipped
 
 JIT does not currently recompile or tier-up after the first function-level compilation attempt.

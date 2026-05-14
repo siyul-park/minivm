@@ -14,22 +14,22 @@ import (
 func init() {
 	arch = arm64.Arch
 
-	jit[_PROLOGUE] = func(c *jitCompiler) (bool, bool) {
+	jit[opPrologue] = func(c *jitCompiler) (bool, bool) {
 		c.assembler.Emits(arm64.LDI(c.scratch[rNext], uint64(c.end))...)
 		return true, false
 	}
 
-	jit[_EPILOGUE] = func(c *jitCompiler) (bool, bool) {
+	jit[opEpilogue] = func(c *jitCompiler) (bool, bool) {
 		c.ret(c.end)
 		return true, false
 	}
 
 	jit[instr.BR] = func(c *jitCompiler) (bool, bool) {
-		offset := int(uint16(c.code[c.ip+1]) | uint16(c.code[c.ip+2])<<8)
+		offset := instr.ParseI16(c.code, c.ip+1)
 		targetIP := c.ip + 3 + offset
 		c.ip += 3
 
-		if c.linkable(targetIP) {
+		if c.linkable(targetIP, false) {
 			c.assembler.Emit(arm64.BLabel(c.labels[targetIP]))
 		} else {
 			c.ret(targetIP)
@@ -38,18 +38,18 @@ func init() {
 	}
 
 	jit[instr.BR_IF] = func(c *jitCompiler) (bool, bool) {
+		offset := instr.ParseI16(c.code, c.ip+1)
+		targetIP := c.ip + 3 + offset
+		fallIP := c.ip + 3
+		c.ip += 3
+
 		r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
 		if !ok {
 			return false, false
 		}
 
-		offset := int(uint16(c.code[c.ip+1]) | uint16(c.code[c.ip+2])<<8)
-		targetIP := c.ip + 3 + offset
-		fallIP := c.ip + 3
-		c.ip += 3
-
-		targetLink := c.linkable(targetIP)
-		fallLink := c.linkable(fallIP)
+		targetLink := c.linkable(targetIP, false)
+		fallLink := c.linkable(fallIP, false)
 
 		if targetLink && fallLink {
 			c.assembler.Emit(arm64.CBNZLabel(r0, c.labels[targetIP]))
@@ -164,7 +164,8 @@ func init() {
 		count := int(c.code[c.ip+1])
 		offsets := make([]int, count+1)
 		for j := 0; j <= count; j++ {
-			offsets[j] = int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+j*2+2])))
+			at := c.ip + j*2 + 2
+			offsets[j] = instr.ParseI16(c.code, at)
 		}
 		c.ip += count*2 + 4
 
@@ -192,7 +193,7 @@ func init() {
 		for j := 0; j <= count; j++ {
 			c.assembler.Bind(stubLabels[j])
 			targetIP := targetIPs[j]
-			if c.compilable[targetIP] && c.linkable(targetIP) {
+			if c.linkable(targetIP, false) {
 				c.assembler.Emit(arm64.BLabel(c.labels[targetIP]))
 			} else {
 				c.ret(targetIP)
@@ -208,7 +209,7 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		kind, ok := c.globalKinds[idx]
+		kind, ok := c.facts[idx]
 		if !ok {
 			return false, false
 		}
@@ -243,7 +244,7 @@ func init() {
 		}
 
 		c.assembler.Emit(arm64.STR(boxed, c.scratch[rGlobals], offset))
-		c.globalKinds[idx] = kind
+		c.facts[idx] = kind
 		return true, false
 	}
 
@@ -266,9 +267,8 @@ func init() {
 		if !ok {
 			return false, false
 		}
-
 		c.assembler.Emit(arm64.STR(boxed, c.scratch[rGlobals], offset))
-		c.globalKinds[idx] = kind
+		c.facts[idx] = kind
 		return true, false
 	}
 
@@ -1907,17 +1907,12 @@ func (c *jitCompiler) boxF64(r0 asm.VReg) asm.VReg {
 
 func (c *jitCompiler) ret(nextIP int) {
 	stack := c.assembler.Returns(c.assembler.Index())
+
 	regs := make([]asm.PReg, len(stack))
-	iReg, fReg := uint8(0), uint8(0)
 	for i, v := range stack {
-		if v.Type() == asm.RegTypeFloat {
-			regs[i] = asm.NewPReg(fReg, asm.RegTypeFloat, v.Width())
-			fReg++
-		} else {
-			regs[i] = asm.NewPReg(iReg, asm.RegTypeInt, v.Width())
-			iReg++
-		}
+		regs[i] = asm.NewPReg(uint8(i), v.Type(), v.Width())
 	}
+
 	c.assembler.Emits(arm64.LDI(c.scratch[rNext], uint64(nextIP))...)
 	c.assembler.Emits(arm64.LDI(arm64.X15, arm64.Header(nil, regs, len(c.scratch)))...)
 	c.assembler.Emit(arm64.RET())

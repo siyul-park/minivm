@@ -45,6 +45,26 @@ func TestInstruction_Operands(t *testing.T) {
 	})
 }
 
+func TestInstruction_Operand(t *testing.T) {
+	t.Run("in range", func(t *testing.T) {
+		instr := New(BR, 5)
+		require.Equal(t, uint64(5), instr.Operand(0))
+	})
+	t.Run("out of range", func(t *testing.T) {
+		instr := New(BR, 5)
+		require.Zero(t, instr.Operand(1))
+	})
+}
+
+func TestS16(t *testing.T) {
+	require.Equal(t, -9, S16(uint64(uint16(-9+1<<16))))
+}
+
+func TestParseI16(t *testing.T) {
+	instr := New(BR, uint64(uint16(-9+1<<16)))
+	require.Equal(t, -9, ParseI16(instr, 1))
+}
+
 func TestInstruction_Width(t *testing.T) {
 	t.Run("static", func(t *testing.T) {
 		instr := New(NOP)

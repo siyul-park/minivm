@@ -112,25 +112,14 @@ func (c *caller) Call(params []asm.Value, rsv *[]uint64) ([]asm.Value, error) {
 	nParams := len(params)
 	nReturns := c.sig.MaxReturns()
 	nScratch := len(c.scratch)
-	slots := max(nParams, nReturns)
+	slots := abiRegs
 
-	// Build param physical registers and validate ABI range.
 	pregs := make([]asm.PReg, nParams)
-	iReg, fReg := uint8(0), uint8(0)
 	for i, v := range params {
-		if v.RegType() == asm.RegTypeFloat {
-			if fReg >= abiRegs {
-				return nil, fmt.Errorf("%w: too many float params", asm.ErrTooManyParams)
-			}
-			pregs[i] = asm.NewPReg(fReg, v.RegType(), v.Width())
-			fReg++
-		} else {
-			if iReg >= abiRegs {
-				return nil, fmt.Errorf("%w: too many int params", asm.ErrTooManyParams)
-			}
-			pregs[i] = asm.NewPReg(iReg, v.RegType(), v.Width())
-			iReg++
+		if i >= abiRegs {
+			return nil, fmt.Errorf("%w: too many params", asm.ErrTooManyParams)
 		}
+		pregs[i] = asm.NewPReg(uint8(i), v.RegType(), v.Width())
 	}
 
 	rregs := c.sig.Returns(c.sig.Entry)
