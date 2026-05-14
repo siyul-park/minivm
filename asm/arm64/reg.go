@@ -105,7 +105,6 @@ var (
 	D30 = asm.NewPReg(30, asm.RegTypeFloat, asm.Width64)
 	D31 = asm.NewPReg(31, asm.RegTypeFloat, asm.Width64)
 
-	// 부동소수점 32비트 (S 레지스터)
 	S0  = asm.NewPReg(0, asm.RegTypeFloat, asm.Width32)
 	S1  = asm.NewPReg(1, asm.RegTypeFloat, asm.Width32)
 	S2  = asm.NewPReg(2, asm.RegTypeFloat, asm.Width32)

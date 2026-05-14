@@ -27,14 +27,16 @@ func TestImm(t *testing.T) {
 }
 
 func TestMem(t *testing.T) {
-	r := NewPReg(1, RegTypeInt, Width64)
-	op := Mem(P(r), 16)
-	require.Equal(t, int64(16), op.Offset)
-	require.Equal(t, "[x1, #16]", op.String())
-}
+	t.Run("with offset", func(t *testing.T) {
+		r := NewPReg(1, RegTypeInt, Width64)
+		op := Mem(P(r), 16)
+		require.Equal(t, int64(16), op.Offset)
+		require.Equal(t, "[x1, #16]", op.String())
+	})
 
-func TestMem_ZeroOffset(t *testing.T) {
-	r := NewPReg(2, RegTypeInt, Width64)
-	op := Mem(P(r), 0)
-	require.Equal(t, "[x2]", op.String())
+	t.Run("zero offset", func(t *testing.T) {
+		r := NewPReg(2, RegTypeInt, Width64)
+		op := Mem(P(r), 0)
+		require.Equal(t, "[x2]", op.String())
+	})
 }

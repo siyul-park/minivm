@@ -37,6 +37,51 @@ const (
 	Width64        RegWidth = 64
 )
 
+type Value struct {
+	typ   RegType
+	width RegWidth
+	bits  uint64
+}
+
+func I32(v uint32) Value { return Value{typ: RegTypeInt, width: Width32, bits: uint64(v)} }
+func I64(v uint64) Value { return Value{typ: RegTypeInt, width: Width64, bits: v} }
+func F32(v uint32) Value { return Value{typ: RegTypeFloat, width: Width32, bits: uint64(v)} }
+func F64(v uint64) Value { return Value{typ: RegTypeFloat, width: Width64, bits: v} }
+
+func (v Value) RegType() RegType { return v.typ }
+func (v Value) Width() RegWidth  { return v.width }
+func (v Value) Valid() bool      { return v.width != WidthUndefined }
+func (v Value) Bits() uint64     { return v.bits }
+func (v Value) String() string {
+	switch {
+	case v.typ == RegTypeInt && v.width == Width32:
+		return "i32"
+	case v.typ == RegTypeInt && v.width == Width64:
+		return "i64"
+	case v.typ == RegTypeFloat && v.width == Width32:
+		return "f32"
+	case v.typ == RegTypeFloat && v.width == Width64:
+		return "f64"
+	default:
+		return "<invalid>"
+	}
+}
+
+func (v Value) GoString() string {
+	switch {
+	case v.typ == RegTypeInt && v.width == Width32:
+		return fmt.Sprintf("I32(%d)", uint32(v.bits))
+	case v.typ == RegTypeInt && v.width == Width64:
+		return fmt.Sprintf("I64(%d)", v.bits)
+	case v.typ == RegTypeFloat && v.width == Width32:
+		return fmt.Sprintf("F32(%08x)", uint32(v.bits))
+	case v.typ == RegTypeFloat && v.width == Width64:
+		return fmt.Sprintf("F64(%016x)", v.bits)
+	default:
+		return "<invalid>"
+	}
+}
+
 func NewPReg(id uint8, typ RegType, w RegWidth) PReg {
 	return PReg{id: id, typ: typ, width: w}
 }

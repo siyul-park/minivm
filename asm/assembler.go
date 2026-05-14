@@ -18,6 +18,7 @@ type Assembler struct {
 	globalLabels map[int]label
 	localLabels  map[int]int
 	scratch      []PReg
+	returns      map[int][]VReg // return-site stacks, auto-populated by Returns(Index())
 }
 
 type label struct {
@@ -48,7 +49,7 @@ func (a *Assembler) Bind(id int) {
 		a.localLabels = make(map[int]int)
 	}
 	a.localLabels[id] = len(a.insts)
-	a.insts = append(a.insts, Instruction{Op: OpPseudoLabel, Dst: Label(id)})
+	a.Emit(Instruction{Op: OpPseudoLabel, Dst: Label(id)})
 }
 
 func (a *Assembler) Scratch() PReg {
@@ -66,8 +67,29 @@ func (a *Assembler) NewVReg(typ RegType, w RegWidth) VReg {
 	return a.vregAlloc.Alloc(typ, w)
 }
 
-func (a *Assembler) Params() []VReg  { return append([]VReg(nil), a.params...) }
-func (a *Assembler) Returns() []VReg { return append([]VReg(nil), a.stack...) }
+func (a *Assembler) Index() int { return len(a.insts) }
+
+func (a *Assembler) Params(idx int) []VReg {
+	if idx == a.Index() {
+		return append([]VReg(nil), a.params...)
+	}
+	return nil
+}
+
+// Returns returns the virtual register stack at idx.
+// For the live position (idx == Index()), it always reflects the current stack
+// and auto-registers it as a return site for signature() and assign().
+func (a *Assembler) Returns(idx int) []VReg {
+	if idx == a.Index() {
+		regs := append([]VReg(nil), a.stack...)
+		if a.returns == nil {
+			a.returns = make(map[int][]VReg)
+		}
+		a.returns[idx] = regs
+		return regs
+	}
+	return append([]VReg(nil), a.returns[idx]...)
+}
 
 func (a *Assembler) Take(typ RegType, w RegWidth) (VReg, bool) {
 	if len(a.stack) == 0 {
@@ -295,6 +317,7 @@ func (a *Assembler) reset() {
 	a.insts = a.insts[:0]
 	a.localLabels = nil
 	a.scratch = a.scratch[:0]
+	a.returns = nil
 	a.vregAlloc.Reset()
 	a.regAlloc.Reset()
 }
@@ -305,6 +328,11 @@ func (a *Assembler) signature() (*Signature, error) {
 	}
 	if len(a.stack) > a.arch.ABI.MaxReturns() {
 		return nil, ErrTooManyReturns
+	}
+	for _, regs := range a.returns {
+		if len(regs) > a.arch.ABI.MaxReturns() {
+			return nil, ErrTooManyReturns
+		}
 	}
 
 	intRegs := a.allocatable(RegTypeInt)
@@ -325,10 +353,20 @@ func (a *Assembler) signature() (*Signature, error) {
 	}
 
 	iP, fP, iR, fR := 0, 0, 0, 0
+	outputs := make(map[int][]PReg, max(len(a.returns), 1))
+	if len(a.returns) == 0 {
+		outputs[0] = pick(a.stack, &iR, &fR)
+	} else {
+		for idx, regs := range a.returns {
+			iR, fR = 0, 0
+			outputs[idx] = pick(regs, &iR, &fR)
+		}
+	}
+
 	return &Signature{
 		Scratch: append([]PReg(nil), a.scratch...),
-		Params:  pick(a.params, &iP, &fP),
-		Returns: pick(a.stack, &iR, &fR),
+		Inputs:  map[int][]PReg{0: pick(a.params, &iP, &fP)},
+		Outputs: outputs,
 	}, nil
 }
 
@@ -344,16 +382,34 @@ func (a *Assembler) assign() ([]Instruction, error) {
 	fixed := make(map[int32]PReg)
 
 	iR, fR := 0, 0
-	for _, v := range a.stack {
-		var p PReg
-		if v.Type() == RegTypeFloat {
-			p = floatRegs[fR]
-			fR++
-		} else {
-			p = intRegs[iR]
-			iR++
+	pinReturns := func(vregs []VReg) error {
+		iR, fR = 0, 0
+		for _, v := range vregs {
+			var p PReg
+			if v.Type() == RegTypeFloat {
+				p = floatRegs[fR]
+				fR++
+			} else {
+				p = intRegs[iR]
+				iR++
+			}
+			if existing, ok := fixed[v.ID()]; ok && existing.ID() != p.ID() {
+				return fmt.Errorf("vreg %v pinned to conflicting physical registers %v and %v across return sites", v, existing, p)
+			}
+			fixed[v.ID()] = p
 		}
-		fixed[v.ID()] = p
+		return nil
+	}
+	if len(a.returns) == 0 {
+		if err := pinReturns(a.stack); err != nil {
+			return nil, err
+		}
+	} else {
+		for _, vregs := range a.returns {
+			if err := pinReturns(vregs); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	iP, fP := 0, 0

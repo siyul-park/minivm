@@ -110,17 +110,17 @@ Two layers:
 
 `Compile()` + `Link()` pipeline:
 
-1. `compile()`: strip pseudo-labels; `signature()` derives `Signature` from `params` and `stack`; `assign()` linear-scans VReg→PReg.
+1. `compile()`: strip pseudo-labels; `signature()` derives label/index keyed ABI register shapes from `params` and recorded return points; `assign()` linear-scans VReg→PReg.
 2. `resolve(physAssigned)`: two-pass encode. Pass 1 uses `Imm(0)` placeholders to measure byte sizes; pass 2 patches local labels and records cross-segment `Relocation`s.
 3. `buffer.Unseal()` → `buffer.Append(code)` → `buffer.Seal()`.
 4. Return `*RelocObject` with encoded chunk, `Signature`, relocations.
-5. `Link([]*RelocObject)`: unseal, patch relocations by re-encoding branch offsets, then create one `Caller` per object; `Caller.Call(params, reserved)` invokes the chunk.
+5. `Link([]*RelocObject)`: unseal, patch relocations by re-encoding branch offsets, then create one `Caller` per object; `Caller.Call(params, reserved)` invokes the chunk and returns typed `asm.Value` results.
 
 ### `asm/arm64/`
 
 Implements `asm.Arch` (`Arch` singleton), `asm.Encoder`, `asm.ABI`, and `asm.Caller`.
 
-`Caller` invokes native chunks through `abi_arm64.s`. The trampoline marshals `argv` as `[header, reserved…, params…]`, loads scratch inputs `X10–X15`, calls with `BL`, then writes scratch outputs to `argv[1..nReserved]` and returns to `argv[nReserved+1..]`. `header uint64` encodes param/return counts, reserved count, and float masks. `X8` and `X9` are excluded from `arch.Scratch` for trampoline temporaries, avoiding conflicts with reserved in/out values.
+`Caller` invokes native chunks through `abi_arm64.s`. The trampoline marshals `argv` as `[header, reserved…, params…]`, copies `argv[0]` into the header register, loads scratch inputs `X10–X14`, calls with `BL`, copies the header register back to `argv[0]`, then writes scratch outputs and return values. `header uint64` encodes param/return counts, reserved count, and float/width masks. `X8` and `X9` are excluded from `arch.Scratch` for trampoline temporaries; `X15` is reserved for the header register.
 
 ARM64-specific files use `//go:build arm64`; `abi_stub.go` with `//go:build !arm64` keeps other platforms compilable.
 

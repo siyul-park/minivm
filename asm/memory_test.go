@@ -7,21 +7,42 @@ import (
 )
 
 func TestAlloc(t *testing.T) {
-	m, err := Alloc(64)
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(m), 64)
-	require.NoError(t, m.Free())
+	t.Run("valid", func(t *testing.T) {
+		m, err := Alloc(64)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, len(m), 64)
+		require.NoError(t, m.Free())
+	})
+
+	t.Run("invalid size", func(t *testing.T) {
+		_, err := Alloc(0)
+		require.ErrorIs(t, err, ErrInvalidSize)
+
+		_, err = Alloc(-1)
+		require.ErrorIs(t, err, ErrInvalidSize)
+	})
 }
 
 func TestWrite(t *testing.T) {
-	m, err := Alloc(64)
-	require.NoError(t, err)
-	defer m.Free()
+	t.Run("valid", func(t *testing.T) {
+		m, err := Alloc(64)
+		require.NoError(t, err)
+		defer m.Free()
 
-	code := []byte{0x90, 0x90, 0x90}
-	err = m.Write(code)
-	require.NoError(t, err)
-	require.Equal(t, Memory(code), m[:len(code)])
+		code := []byte{0x90, 0x90, 0x90}
+		err = m.Write(code)
+		require.NoError(t, err)
+		require.Equal(t, Memory(code), m[:len(code)])
+	})
+
+	t.Run("too large", func(t *testing.T) {
+		m, err := Alloc(4)
+		require.NoError(t, err)
+		defer m.Free()
+
+		err = m.Write(make([]byte, len(m)+1))
+		require.ErrorIs(t, err, ErrCodeTooLarge)
+	})
 }
 
 func TestExecutable(t *testing.T) {
@@ -39,14 +60,6 @@ func TestFree(t *testing.T) {
 
 	err = m.Free()
 	require.NoError(t, err)
-}
-
-func TestAlloc_InvalidSize(t *testing.T) {
-	_, err := Alloc(0)
-	require.ErrorIs(t, err, ErrInvalidSize)
-
-	_, err = Alloc(-1)
-	require.ErrorIs(t, err, ErrInvalidSize)
 }
 
 func TestMemory_Writable(t *testing.T) {
@@ -67,13 +80,4 @@ func TestMemory_Ptr(t *testing.T) {
 	defer m.Free()
 
 	require.NotNil(t, m.Ptr())
-}
-
-func TestWrite_TooLarge(t *testing.T) {
-	m, err := Alloc(4)
-	require.NoError(t, err)
-	defer m.Free()
-
-	err = m.Write(make([]byte, len(m)+1))
-	require.ErrorIs(t, err, ErrCodeTooLarge)
 }

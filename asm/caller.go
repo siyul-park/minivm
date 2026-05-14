@@ -3,9 +3,9 @@ package asm
 import "errors"
 
 type Caller interface {
-	Params() []RegType
-	Returns() []RegType
-	Call(params []uint64, reserved *[]uint64) ([]uint64, error)
+	Params(idx int) []PReg
+	Returns(idx int) []PReg
+	Call(params []Value, reserved *[]uint64) ([]Value, error)
 }
 
 var ErrInvalidArgs = errors.New("invalid arguments")

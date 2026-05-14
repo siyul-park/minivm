@@ -4,7 +4,7 @@
 //
 // argv layout:
 //   argv[0]              : header (packed uint64)
-//   argv[1..nScratch]    : scratch save slots (X10–X15), in/out
+//   argv[1..nScratch]    : scratch save slots (X10–X14), in/out
 //   argv[1+nScratch+...] : param inputs / return outputs
 //
 // Header bit layout:
@@ -20,6 +20,7 @@
 //   R8  = argv base (reloaded after BL)
 //   R9  = header / call target
 //   R14 = values_base
+//   R15 = header register (in/out)
 //   R19 = param/return count
 //   R20 = scratch base pointer
 //   R21 = scratch count
@@ -44,7 +45,7 @@ TEXT ·invoke(SB), NOSPLIT, $0-16
     ADD  R10, R14, R14
 
     // ---- Load params into ABI registers ----
-    CBZ R19, load_scratch
+    CBZ R19, load
 
     AND  $1, R22, R10; CBZ R10, p0_int
     AND  $1, R23, R10; CBZ R10, p0_f32
@@ -55,7 +56,7 @@ p0_int:
     MOVD   0(R14), R0
 p0_done:
     LSR $1, R22, R22; LSR $1, R23, R23
-    SUB $1, R19; CBZ R19, load_scratch
+    SUB $1, R19; CBZ R19, load
 
     AND  $1, R22, R10; CBZ R10, p1_int
     AND  $1, R23, R10; CBZ R10, p1_f32
@@ -66,7 +67,7 @@ p1_int:
     MOVD   8(R14), R1
 p1_done:
     LSR $1, R22, R22; LSR $1, R23, R23
-    SUB $1, R19; CBZ R19, load_scratch
+    SUB $1, R19; CBZ R19, load
 
     AND  $1, R22, R10; CBZ R10, p2_int
     AND  $1, R23, R10; CBZ R10, p2_f32
@@ -77,7 +78,7 @@ p2_int:
     MOVD  16(R14), R2
 p2_done:
     LSR $1, R22, R22; LSR $1, R23, R23
-    SUB $1, R19; CBZ R19, load_scratch
+    SUB $1, R19; CBZ R19, load
 
     AND  $1, R22, R10; CBZ R10, p3_int
     AND  $1, R23, R10; CBZ R10, p3_f32
@@ -88,7 +89,7 @@ p3_int:
     MOVD  24(R14), R3
 p3_done:
     LSR $1, R22, R22; LSR $1, R23, R23
-    SUB $1, R19; CBZ R19, load_scratch
+    SUB $1, R19; CBZ R19, load
 
     AND  $1, R22, R10; CBZ R10, p4_int
     AND  $1, R23, R10; CBZ R10, p4_f32
@@ -99,7 +100,7 @@ p4_int:
     MOVD  32(R14), R4
 p4_done:
     LSR $1, R22, R22; LSR $1, R23, R23
-    SUB $1, R19; CBZ R19, load_scratch
+    SUB $1, R19; CBZ R19, load
 
     AND  $1, R22, R10; CBZ R10, p5_int
     AND  $1, R23, R10; CBZ R10, p5_f32
@@ -110,7 +111,7 @@ p5_int:
     MOVD  40(R14), R5
 p5_done:
     LSR $1, R22, R22; LSR $1, R23, R23
-    SUB $1, R19; CBZ R19, load_scratch
+    SUB $1, R19; CBZ R19, load
 
     AND  $1, R22, R10; CBZ R10, p6_int
     AND  $1, R23, R10; CBZ R10, p6_f32
@@ -121,18 +122,19 @@ p6_int:
     MOVD  48(R14), R6
 p6_done:
     LSR $1, R22, R22; LSR $1, R23, R23
-    SUB $1, R19; CBZ R19, load_scratch
+    SUB $1, R19; CBZ R19, load
 
     AND  $1, R22, R10; CBZ R10, p7_int
     AND  $1, R23, R10; CBZ R10, p7_f32
-    FMOVD 56(R14), F7; B load_scratch
+    FMOVD 56(R14), F7; B load
 p7_f32:
-    FMOVS 56(R14), F7; B load_scratch
+    FMOVS 56(R14), F7; B load
 p7_int:
     MOVD  56(R14), R7
 
-    // ---- Load scratch registers (X10–X15) ----
-load_scratch:
+    // ---- Load header and scratch registers (X10–X14) ----
+load:
+    MOVD (R8), R15
     ADD  $8, R8, R20
     MOVD R21, R10
     CBZ  R10, call
@@ -141,8 +143,7 @@ load_scratch:
     MOVD  8(R20), R11; SUB $1, R21; CBZ R21, call
     MOVD 16(R20), R12; SUB $1, R21; CBZ R21, call
     MOVD 24(R20), R13; SUB $1, R21; CBZ R21, call
-    MOVD 32(R20), R14; SUB $1, R21; CBZ R21, call
-    MOVD 40(R20), R15
+    MOVD 32(R20), R14
 
 call:
     MOVD addr+0(FP), R9
@@ -150,7 +151,8 @@ call:
 
     // ---- Save scratch registers ----
     MOVD argv+8(FP), R8
-    MOVD (R8), R9
+    MOVD R15, (R8)
+    MOVD R15, R9
     UBFX $16, R9, $8, R21
     ADD  $8, R8, R20
 
@@ -159,8 +161,7 @@ call:
     MOVD R11,  8(R20); SUB $1, R21; CBZ R21, store
     MOVD R12, 16(R20); SUB $1, R21; CBZ R21, store
     MOVD R13, 24(R20); SUB $1, R21; CBZ R21, store
-    MOVD R14, 32(R20); SUB $1, R21; CBZ R21, store
-    MOVD R15, 40(R20)
+    MOVD R14, 32(R20)
 
     // ---- Store return values ----
 store:
