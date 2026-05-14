@@ -273,6 +273,9 @@ func (c *jitCompiler) blocks(code []byte) []*analysis.BasicBlock {
 }
 
 func (c *jitCompiler) linkable(targetIP int) bool {
+	if !c.compilable[targetIP] {
+		return false
+	}
 	sig := c.sigs[targetIP]
 	if sig == nil {
 		return false

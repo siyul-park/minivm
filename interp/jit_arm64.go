@@ -29,7 +29,7 @@ func init() {
 		targetIP := c.ip + 3 + offset
 		c.ip += 3
 
-		if c.compilable[targetIP] && c.linkable(targetIP) {
+		if c.linkable(targetIP) {
 			c.assembler.Emit(arm64.BLabel(c.labels[targetIP]))
 		} else {
 			c.ret(targetIP)
@@ -48,8 +48,8 @@ func init() {
 		fallIP := c.ip + 3
 		c.ip += 3
 
-		targetLink := c.compilable[targetIP] && c.linkable(targetIP)
-		fallLink := c.compilable[fallIP] && c.linkable(fallIP)
+		targetLink := c.linkable(targetIP)
+		fallLink := c.linkable(fallIP)
 
 		if targetLink && fallLink {
 			c.assembler.Emit(arm64.CBNZLabel(r0, c.labels[targetIP]))
