@@ -3,22 +3,25 @@ package asm
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"unsafe"
 )
 
 type Assembler struct {
-	arch         *Arch
-	vregAlloc    *VRegAlloc
-	regAlloc     *RegAlloc
-	buffer       *Buffer
-	stack        []VReg
-	params       []VReg
-	insts        []Instruction
-	nextLabel    int
-	globalLabels map[int]label
-	localLabels  map[int]int
-	scratch      []PReg
-	returns      map[int][]VReg // return-site stacks, auto-populated by Returns(Index())
+	arch   *Arch
+	buffer *Buffer
+	vregs  *VRegAlloc
+
+	stack   []VReg
+	params  []VReg
+	insts   []Instruction
+	scratch []PReg
+	returns map[int][]VReg
+
+	nextLabel int
+	global    map[int]label
+	local     map[int]int
 }
 
 type label struct {
@@ -26,15 +29,36 @@ type label struct {
 	offset int
 }
 
-var ErrUnresolvedLabel = errors.New("unresolved label")
+type program struct {
+	insts   []Instruction
+	params  []VReg
+	stack   []VReg
+	scratch []PReg
+	returns map[int][]VReg
+	labels  map[int]int
+}
+
+type compiler struct {
+	arch *Arch
+	regs *RegAlloc
+	prog program
+
+	phys map[int32]PReg
+	live map[int32]PReg
+	own  map[uint8]VReg
+}
+
+var (
+	ErrUnresolvedLabel      = errors.New("unresolved label")
+	ErrConflictingReturnPin = fmt.Errorf("%w: conflicting return register pin", ErrInvalidArgs)
+)
 
 func NewAssembler(arch *Arch, buffer *Buffer) *Assembler {
 	return &Assembler{
-		arch:         arch,
-		vregAlloc:    NewVRegAlloc(),
-		regAlloc:     NewRegAlloc(arch.Registers),
-		buffer:       buffer,
-		globalLabels: make(map[int]label),
+		arch:   arch,
+		buffer: buffer,
+		vregs:  NewVRegAlloc(),
+		global: make(map[int]label),
 	}
 }
 
@@ -45,11 +69,10 @@ func (a *Assembler) NewLabel() int {
 }
 
 func (a *Assembler) Bind(id int) {
-	if a.localLabels == nil {
-		a.localLabels = make(map[int]int)
+	if a.local == nil {
+		a.local = make(map[int]int)
 	}
-	a.localLabels[id] = len(a.insts)
-	a.Emit(Instruction{Op: OpPseudoLabel, Dst: Label(id)})
+	a.local[id] = len(a.insts)
 }
 
 func (a *Assembler) Scratch() PReg {
@@ -57,72 +80,78 @@ func (a *Assembler) Scratch() PReg {
 	for range len(a.scratch) {
 		_, mask = mask.PopFirst()
 	}
+
 	p := NewPReg(mask.First(), RegTypeInt, Width64)
 	a.scratch = append(a.scratch, p)
-	a.regAlloc.Block(p)
 	return p
 }
 
-func (a *Assembler) NewVReg(typ RegType, w RegWidth) VReg {
-	return a.vregAlloc.Alloc(typ, w)
+func (a *Assembler) NewVReg(typ RegType, width RegWidth) VReg {
+	return a.vregs.Alloc(typ, width)
 }
 
-func (a *Assembler) Index() int { return len(a.insts) }
+func (a *Assembler) Index() int {
+	return len(a.insts)
+}
+
+func (a *Assembler) Mark() int {
+	idx := a.Index()
+	if a.returns == nil {
+		a.returns = make(map[int][]VReg)
+	}
+	a.returns[idx] = slices.Clone(a.stack)
+	return idx
+}
 
 func (a *Assembler) Params(idx int) []VReg {
-	if idx == a.Index() {
-		return append([]VReg(nil), a.params...)
+	if idx != a.Index() {
+		return nil
 	}
-	return nil
+	return slices.Clone(a.params)
 }
 
-// Returns returns the virtual register stack at idx.
-// For the live position (idx == Index()), it always reflects the current stack
-// and auto-registers it as a return site for signature() and assign().
 func (a *Assembler) Returns(idx int) []VReg {
 	if idx == a.Index() {
-		regs := append([]VReg(nil), a.stack...)
-		if a.returns == nil {
-			a.returns = make(map[int][]VReg)
-		}
-		a.returns[idx] = regs
-		return regs
+		return slices.Clone(a.stack)
 	}
-	return append([]VReg(nil), a.returns[idx]...)
+	return slices.Clone(a.returns[idx])
 }
 
-func (a *Assembler) Take(typ RegType, w RegWidth) (VReg, bool) {
+func (a *Assembler) Take(typ RegType, width RegWidth) (VReg, bool) {
 	if len(a.stack) == 0 {
-		r := a.vregAlloc.Alloc(typ, w)
-		a.params = append(a.params, VReg{})
-		copy(a.params[1:], a.params[:len(a.params)-1])
-		a.params[0] = r
+		r := a.NewVReg(typ, width)
+		a.params = append([]VReg{r}, a.params...)
 		return r, true
 	}
-	top := a.stack[len(a.stack)-1]
-	if top.Type() != typ || top.Width() != w {
+
+	r := a.stack[len(a.stack)-1]
+	if r.Type() != typ || r.Width() != width {
 		return VReg{}, false
 	}
+
 	a.stack = a.stack[:len(a.stack)-1]
-	return top, true
+	return r, true
 }
 
 func (a *Assembler) Top(i int) (VReg, bool) {
-	if len(a.stack) <= i {
+	if i < 0 || i >= len(a.stack) {
 		return VReg{}, false
 	}
 	return a.stack[len(a.stack)-1-i], true
 }
 
-func (a *Assembler) Push(r VReg) { a.stack = append(a.stack, r) }
+func (a *Assembler) Push(r VReg) {
+	a.stack = append(a.stack, r)
+}
 
 func (a *Assembler) Pop() (VReg, bool) {
 	if len(a.stack) == 0 {
 		return VReg{}, false
 	}
-	top := a.stack[len(a.stack)-1]
+
+	r := a.stack[len(a.stack)-1]
 	a.stack = a.stack[:len(a.stack)-1]
-	return top, true
+	return r, true
 }
 
 func (a *Assembler) Emit(inst Instruction) int {
@@ -135,155 +164,88 @@ func (a *Assembler) Emits(insts ...Instruction) {
 }
 
 func (a *Assembler) Compile() (*RelocObject, error) {
-	sig, instrs, err := a.compile()
+	p := a.snapshot()
+
+	sig, instrs, err := newCompiler(a.arch, p).compile()
 	if err != nil {
 		return nil, err
 	}
-	code, offsets, relocs, err := a.resolve(instrs)
+
+	code, labels, relocs, err := p.resolve(a.arch, instrs)
 	if err != nil {
 		return nil, err
 	}
+
 	if err := a.buffer.Unseal(); err != nil {
 		return nil, err
 	}
+
 	chunk, err := a.buffer.Append(code)
 	if err != nil {
+		_ = a.buffer.Seal()
 		return nil, err
 	}
+
 	if err := a.buffer.Seal(); err != nil {
 		return nil, err
 	}
-	for id, off := range offsets {
-		a.globalLabels[id] = label{chunk: chunk, offset: off}
+
+	for id, offset := range labels {
+		a.global[id] = label{chunk: chunk, offset: offset}
 	}
+
 	a.reset()
+
 	return &RelocObject{
 		Chunk:  chunk,
 		Sig:    sig,
 		Instrs: instrs,
-		Labels: offsets,
+		Labels: labels,
 		Relocs: relocs,
 	}, nil
 }
 
-// compile strips pseudo-labels, derives the signature, and runs register
-// allocation, restoring assembler state afterwards.
-func (a *Assembler) compile() (*Signature, []Instruction, error) {
-	real := make([]Instruction, 0, len(a.insts))
-	for _, inst := range a.insts {
-		if inst.Op != OpPseudoLabel {
-			real = append(real, inst)
-		}
-	}
-
-	savedInsts, savedAlloc := a.insts, a.regAlloc.Clone()
-	a.insts = real
-
-	sig, err := a.signature()
-	if err != nil {
-		a.insts, a.regAlloc = savedInsts, savedAlloc
-		return nil, nil, err
-	}
-	assigned, err := a.assign()
-	a.insts, a.regAlloc = savedInsts, savedAlloc
-	if err != nil {
-		return nil, nil, err
-	}
-	return sig, assigned, nil
-}
-
-func (a *Assembler) resolve(phys []Instruction) (code []byte, offsets map[int]int, relocs []Relocation, err error) {
-	labelAt := make(map[int]int, len(a.localLabels))
-	idx := 0
-	for _, inst := range a.insts {
-		if inst.Op == OpPseudoLabel {
-			if lbl, ok := inst.Dst.(LabelOperand); ok {
-				labelAt[lbl.ID] = idx
-			}
-		} else {
-			idx++
-		}
-	}
-
-	encoded := make([][]byte, len(phys))
-	byteOff := make([]int, len(phys)+1)
-	for i, inst := range phys {
-		if _, ok := inst.Src2.(LabelOperand); ok {
-			inst.Src2 = Imm(0)
-		}
-		b, e := a.arch.Encoder.Encode(inst)
-		if e != nil {
-			return nil, nil, nil, e
-		}
-		encoded[i] = b
-		byteOff[i+1] = byteOff[i] + len(b)
-	}
-
-	localBytes := make(map[int]int, len(labelAt))
-	for id, i := range labelAt {
-		localBytes[id] = byteOff[i]
-	}
-
-	code = make([]byte, 0, byteOff[len(phys)])
-	for i, inst := range phys {
-		lbl, ok := inst.Src2.(LabelOperand)
-		if !ok {
-			code = append(code, encoded[i]...)
-			continue
-		}
-		if off, local := localBytes[lbl.ID]; local {
-			inst.Src2 = Imm(int64(off - byteOff[i]))
-			b, e := a.arch.Encoder.Encode(inst)
-			if e != nil {
-				return nil, nil, nil, e
-			}
-			code = append(code, b...)
-		} else {
-			relocs = append(relocs, Relocation{InstrIdx: i, Offset: byteOff[i], Label: lbl.ID})
-			code = append(code, encoded[i]...)
-		}
-	}
-	return code, localBytes, relocs, nil
-}
-
-// Link patches cross-object relocations and returns a Caller per object.
-// Objects that fail have a nil Caller; the first error is returned.
 func (a *Assembler) Link(objects []*RelocObject) ([]Caller, error) {
 	if err := a.buffer.Unseal(); err != nil {
 		return nil, err
 	}
 
-	var firstErr error
 	failed := make([]bool, len(objects))
+	var firstErr error
 
 	for i, obj := range objects {
 		base := obj.Chunk.Ptr()
-		for _, r := range obj.Relocs {
-			entry, ok := a.globalLabels[r.Label]
-			if !ok {
-				if firstErr == nil {
-					firstErr = fmt.Errorf("%w: label %d", ErrUnresolvedLabel, r.Label)
-				}
-				failed[i] = true
-				continue
-			}
-			target := unsafe.Add(entry.chunk.Ptr(), entry.offset)
-			src := unsafe.Add(base, r.Offset)
-			rel := int64(uintptr(target)) - int64(uintptr(src))
 
-			inst := obj.Instrs[r.InstrIdx]
-			inst.Src2 = Imm(rel)
-			patched, e := a.arch.Encoder.Encode(inst)
-			if e != nil {
-				if firstErr == nil {
-					firstErr = e
-				}
+		for _, reloc := range obj.Relocs {
+			target, ok := a.global[reloc.Label]
+			if !ok {
 				failed[i] = true
+				if firstErr == nil {
+					firstErr = fmt.Errorf("%w: label %d", ErrUnresolvedLabel, reloc.Label)
+				}
 				continue
 			}
-			writeBytes(src, patched)
+
+			src := unsafe.Add(base, reloc.Offset)
+			dst := unsafe.Add(target.chunk.Ptr(), target.offset)
+			rel := int64(uintptr(dst)) - int64(uintptr(src))
+
+			inst := obj.Instrs[reloc.InstrIdx]
+			inst.Src2 = Imm(rel)
+
+			code, err := a.arch.Encoder.Encode(inst)
+			if err != nil {
+				failed[i] = true
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+
+			writeBytes(src, code)
 		}
 	}
+
 	if err := a.buffer.Seal(); err != nil {
 		return nil, err
 	}
@@ -293,322 +255,494 @@ func (a *Assembler) Link(objects []*RelocObject) ([]Caller, error) {
 		if failed[i] {
 			continue
 		}
-		caller, e := a.arch.NewCaller(obj.Sig, obj.Chunk)
-		if e != nil {
+
+		caller, err := a.arch.NewCaller(obj.Sig, obj.Chunk)
+		if err != nil {
 			if firstErr == nil {
-				firstErr = e
+				firstErr = err
 			}
 			continue
 		}
+
 		callers[i] = caller
 	}
+
 	return callers, firstErr
 }
 
-func (a *Assembler) Abort() { a.reset() }
+func (a *Assembler) Abort() {
+	a.reset()
+}
 
 func (a *Assembler) Reset() {
 	a.reset()
 	a.nextLabel = 0
-	a.globalLabels = make(map[int]label)
+	a.global = make(map[int]label)
 }
 
 func (a *Assembler) reset() {
 	a.stack = a.stack[:0]
 	a.params = a.params[:0]
 	a.insts = a.insts[:0]
-	a.localLabels = nil
 	a.scratch = a.scratch[:0]
 	a.returns = nil
-	a.vregAlloc.Reset()
-	a.regAlloc.Reset()
+	a.local = nil
+	a.vregs.Reset()
 }
 
-func (a *Assembler) signature() (*Signature, error) {
-	if len(a.params) > a.arch.ABI.MaxParams() {
-		return nil, ErrTooManyParams
+func (a *Assembler) snapshot() program {
+	return program{
+		insts:   slices.Clone(a.insts),
+		params:  slices.Clone(a.params),
+		stack:   slices.Clone(a.stack),
+		scratch: slices.Clone(a.scratch),
+		returns: cloneReturns(a.returns),
+		labels:  maps.Clone(a.local),
 	}
-	if len(a.stack) > a.arch.ABI.MaxReturns() {
-		return nil, ErrTooManyReturns
-	}
-	for _, regs := range a.returns {
-		if len(regs) > a.arch.ABI.MaxReturns() {
-			return nil, ErrTooManyReturns
-		}
-	}
-
-	pick := func(vregs []VReg) []PReg {
-		out := make([]PReg, len(vregs))
-		for i, v := range vregs {
-			out[i] = NewPReg(uint8(i), v.Type(), v.Width())
-		}
-		return out
-	}
-
-	outputs := make(map[int][]PReg, max(len(a.returns), 1))
-	if len(a.returns) == 0 {
-		outputs[0] = pick(a.stack)
-	} else {
-		for idx, regs := range a.returns {
-			outputs[idx] = pick(regs)
-		}
-	}
-
-	return &Signature{
-		Scratch: append([]PReg(nil), a.scratch...),
-		Inputs:  map[int][]PReg{0: pick(a.params)},
-		Outputs: outputs,
-	}, nil
 }
 
-func (a *Assembler) assign() ([]Instruction, error) {
-	last := a.lastRefs()
-
-	physical := make(map[int32]PReg)
-	live := make(map[int32]PReg)
-	virtual := make(map[uint8]VReg)
-	fixed := make(map[int32]PReg)
-
-	pinReturns := func(vregs []VReg) error {
-		for i, v := range vregs {
-			p := NewPReg(uint8(i), v.Type(), v.Width())
-			if existing, ok := fixed[v.ID()]; ok && existing.ID() != p.ID() {
-				return fmt.Errorf("%w: conflicting return register pin for %v", ErrInvalidArgs, v)
-			}
-			fixed[v.ID()] = p
-		}
-		return nil
+func newCompiler(arch *Arch, p program) *compiler {
+	c := &compiler{
+		arch: arch,
+		regs: NewRegAlloc(arch.Registers),
+		prog: p,
+		phys: make(map[int32]PReg),
+		live: make(map[int32]PReg),
+		own:  make(map[uint8]VReg),
 	}
-	if len(a.returns) == 0 {
-		if err := pinReturns(a.stack); err != nil {
-			return nil, err
-		}
-	} else {
-		for _, vregs := range a.returns {
-			if err := pinReturns(vregs); err != nil {
-				return nil, err
-			}
+
+	for _, p := range p.scratch {
+		c.regs.Block(p)
+	}
+
+	return c
+}
+
+func (c *compiler) compile() (*Signature, []Instruction, error) {
+	if len(c.prog.params) > c.arch.ABI.MaxParams() {
+		return nil, nil, ErrTooManyParams
+	}
+
+	for _, regs := range c.prog.returnSites() {
+		if len(regs) > c.arch.ABI.MaxReturns() {
+			return nil, nil, ErrTooManyReturns
 		}
 	}
 
-	for i, v := range a.params {
-		if i >= a.arch.ABI.MaxParams() {
-			return nil, ErrTooManyParams
+	if err := c.reserveParams(); err != nil {
+		return nil, nil, err
+	}
+
+	fixed, err := c.fixedReturns()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	instrs, err := c.assign(fixed)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	sig := c.signature()
+	return sig, instrs, nil
+}
+
+func (c *compiler) reserveParams() error {
+	for i, v := range c.prog.params {
+		if i >= c.arch.ABI.MaxParams() {
+			return ErrTooManyParams
 		}
 
 		p := NewPReg(uint8(i), v.Type(), v.Width())
-		if err := a.regAlloc.Reserve(v, p); err != nil {
-			return nil, err
+		if err := c.regs.Reserve(v, p); err != nil {
+			return err
 		}
 
-		physical[v.ID()] = p
-		live[v.ID()] = p
-		virtual[p.ID()] = v
+		c.bind(v, p)
 	}
 
-	for i, inst := range a.insts {
-		for _, v := range a.uses(inst) {
-			if _, ok := physical[v.ID()]; ok {
-				continue
+	return nil
+}
+
+func (c *compiler) fixedReturns() (map[int32]PReg, error) {
+	fixed := make(map[int32]PReg)
+
+	for _, regs := range c.prog.returnSites() {
+		for i, v := range regs {
+			p := NewPReg(uint8(i), v.Type(), v.Width())
+
+			if existing, ok := fixed[v.ID()]; ok && existing.ID() != p.ID() {
+				return nil, ErrConflictingReturnPin
 			}
-			p, err := a.regAlloc.Alloc(v)
-			if err != nil {
+
+			fixed[v.ID()] = p
+		}
+	}
+
+	return fixed, nil
+}
+
+func (c *compiler) assign(fixed map[int32]PReg) ([]Instruction, error) {
+	last := c.lastRefs()
+
+	for i, inst := range c.prog.insts {
+		for _, v := range c.uses(inst) {
+			if err := c.ensure(v); err != nil {
 				return nil, err
 			}
-			physical[v.ID()] = p
-			live[v.ID()] = p
-			virtual[p.ID()] = v
 		}
 
-		if dst, ok := a.def(inst); ok {
-			if _, exists := physical[dst.ID()]; !exists {
-				want, pinned := fixed[dst.ID()]
-				placed := false
-				if pinned {
-					owner, occupied := virtual[want.ID()]
-					_, ownerPinned := fixed[owner.ID()]
-					if !occupied || owner.ID() == dst.ID() || (last[owner.ID()] == i && !ownerPinned) {
-						if occupied && owner.ID() != dst.ID() {
-							a.regAlloc.Free(owner)
-							delete(live, owner.ID())
-							delete(virtual, want.ID())
-						}
-						if err := a.regAlloc.Reserve(dst, want); err != nil {
-							return nil, err
-						}
-						physical[dst.ID()] = want
-						live[dst.ID()] = want
-						virtual[want.ID()] = dst
-						placed = true
-					}
-				}
-				if !placed {
-					p, err := a.regAlloc.Alloc(dst)
-					if err != nil {
-						return nil, err
-					}
-					physical[dst.ID()] = p
-					live[dst.ID()] = p
-					virtual[p.ID()] = dst
-				}
+		if dst, ok := c.def(inst); ok {
+			if err := c.ensurePlaced(dst, fixed, last, i); err != nil {
+				return nil, err
 			}
 		}
 
-		for _, v := range a.uses(inst) {
+		for _, v := range c.uses(inst) {
 			if last[v.ID()] != i {
 				continue
 			}
 			if _, pinned := fixed[v.ID()]; pinned {
 				continue
 			}
-			if p, ok := live[v.ID()]; ok {
-				a.regAlloc.Free(v)
-				delete(live, v.ID())
-				delete(virtual, p.ID())
-			}
+			c.free(v)
 		}
 	}
 
-	for vid, p := range fixed {
-		if _, ok := physical[vid]; ok {
+	for id, p := range fixed {
+		if _, ok := c.phys[id]; ok {
 			continue
 		}
-		v := NewVReg(vid, p.Type(), p.Width())
-		if err := a.regAlloc.Reserve(v, p); err != nil {
+
+		v := NewVReg(id, p.Type(), p.Width())
+		if err := c.regs.Reserve(v, p); err != nil {
 			return nil, err
 		}
-		physical[vid] = p
-		live[vid] = p
+
+		c.bind(v, p)
 	}
 
-	widths := a.vregWidths()
-
-	out := make([]Instruction, 0, len(a.insts))
-	for _, inst := range a.insts {
-		if inst.Op == OpPseudoLabel {
-			continue
-		}
-		out = append(out, a.rewrite(inst, physical, widths))
-	}
-	return out, nil
+	return c.rewriteAll(), nil
 }
 
-func (a *Assembler) lastRefs() map[int32]int {
-	last := make(map[int32]int, len(a.insts))
-	for i, inst := range a.insts {
-		if dst, ok := a.def(inst); ok {
-			if cur, ok := last[dst.ID()]; !ok || cur < i {
-				last[dst.ID()] = i
-			}
+func (c *compiler) ensure(v VReg) error {
+	if _, ok := c.phys[v.ID()]; ok {
+		return nil
+	}
+
+	p, err := c.regs.Alloc(v)
+	if err != nil {
+		return err
+	}
+
+	c.bind(v, p)
+	return nil
+}
+
+func (c *compiler) ensurePlaced(v VReg, fixed map[int32]PReg, last map[int32]int, idx int) error {
+	if _, ok := c.phys[v.ID()]; ok {
+		return nil
+	}
+
+	p, err := c.place(v, fixed, last, idx)
+	if err != nil {
+		return err
+	}
+
+	c.bind(v, p)
+	return nil
+}
+
+func (c *compiler) place(v VReg, fixed map[int32]PReg, last map[int32]int, idx int) (PReg, error) {
+	want, pinned := fixed[v.ID()]
+	if !pinned {
+		return c.regs.Alloc(v)
+	}
+
+	owner, occupied := c.own[want.ID()]
+	_, ownerPinned := fixed[owner.ID()]
+
+	if occupied && owner.ID() != v.ID() && (last[owner.ID()] != idx || ownerPinned) {
+		return c.regs.Alloc(v)
+	}
+
+	if occupied && owner.ID() != v.ID() {
+		c.free(owner)
+	}
+
+	if err := c.regs.Reserve(v, want); err != nil {
+		return PReg{}, err
+	}
+
+	return want, nil
+}
+
+func (c *compiler) bind(v VReg, p PReg) {
+	c.phys[v.ID()] = p
+	c.live[v.ID()] = p
+	c.own[p.ID()] = v
+}
+
+func (c *compiler) free(v VReg) {
+	p, ok := c.live[v.ID()]
+	if !ok {
+		return
+	}
+
+	c.regs.Free(v)
+	delete(c.live, v.ID())
+	delete(c.own, p.ID())
+}
+
+func (c *compiler) signature() *Signature {
+	inputs := map[int][]PReg{
+		0: abiRegs(c.prog.params),
+	}
+
+	outputs := make(map[int][]PReg)
+	for idx, regs := range c.prog.returnSites() {
+		outputs[idx] = abiRegs(regs)
+	}
+
+	return &Signature{
+		Scratch: slices.Clone(c.prog.scratch),
+		Inputs:  inputs,
+		Outputs: outputs,
+	}
+}
+
+func (c *compiler) lastRefs() map[int32]int {
+	last := make(map[int32]int)
+
+	for i, inst := range c.prog.insts {
+		if dst, ok := c.def(inst); ok {
+			last[dst.ID()] = i
 		}
-		for _, v := range a.uses(inst) {
+		for _, v := range c.uses(inst) {
 			last[v.ID()] = i
 		}
 	}
+
 	return last
 }
 
-func (a *Assembler) vregWidths() map[int32]RegWidth {
+func (c *compiler) rewriteAll() []Instruction {
+	widths := c.widths()
+
+	out := make([]Instruction, 0, len(c.prog.insts))
+	for _, inst := range c.prog.insts {
+		out = append(out, c.rewrite(inst, widths))
+	}
+
+	return out
+}
+
+func (c *compiler) rewrite(inst Instruction, widths map[int32]RegWidth) Instruction {
+	return Instruction{
+		Op:   inst.Op,
+		Dst:  c.rewriteOp(inst.Dst, widths),
+		Src1: c.rewriteOp(inst.Src1, widths),
+		Src2: c.rewriteOp(inst.Src2, widths),
+		Src3: c.rewriteOp(inst.Src3, widths),
+	}
+}
+
+func (c *compiler) rewriteOp(op Operand, widths map[int32]RegWidth) Operand {
+	switch v := op.(type) {
+	case VRegOperand:
+		p, ok := c.phys[v.Reg.ID()]
+		if !ok {
+			return op
+		}
+		return P(c.withWidth(p, v.Reg, widths))
+
+	case MemOperand:
+		base, ok := v.Base.(VRegOperand)
+		if !ok {
+			return op
+		}
+
+		p, ok := c.phys[base.Reg.ID()]
+		if !ok {
+			return op
+		}
+
+		return Mem(P(c.withWidth(p, base.Reg, widths)), v.Offset)
+
+	default:
+		return op
+	}
+}
+
+func (c *compiler) withWidth(p PReg, v VReg, widths map[int32]RegWidth) PReg {
+	width := v.Width()
+	if width == WidthUndefined {
+		width = widths[v.ID()]
+	}
+	return NewPReg(p.ID(), p.Type(), width)
+}
+
+func (c *compiler) widths() map[int32]RegWidth {
 	widths := make(map[int32]RegWidth)
+
 	set := func(v VReg) {
 		if _, ok := widths[v.ID()]; !ok {
 			widths[v.ID()] = v.Width()
 		}
 	}
-	for _, v := range a.params {
+
+	for _, v := range c.prog.params {
 		set(v)
 	}
-	for _, v := range a.stack {
+	for _, v := range c.prog.stack {
 		set(v)
 	}
-	for _, inst := range a.insts {
-		for _, v := range a.uses(inst) {
+	for _, regs := range c.prog.returns {
+		for _, v := range regs {
 			set(v)
 		}
-		if dst, ok := a.def(inst); ok {
+	}
+	for _, inst := range c.prog.insts {
+		if dst, ok := c.def(inst); ok {
 			set(dst)
 		}
+		for _, v := range c.uses(inst) {
+			set(v)
+		}
 	}
+
 	return widths
 }
 
-func (a *Assembler) allocatable(typ RegType) []PReg {
-	mask := a.arch.Registers.Allocatable(typ)
-	regs := make([]PReg, 0, mask.Count())
-	for !mask.Empty() {
-		var id uint8
-		id, mask = mask.PopFirst()
-		regs = append(regs, NewPReg(id, typ, WidthUndefined))
-	}
-	return regs
-}
-
-func (a *Assembler) uses(inst Instruction) []VReg {
+func (c *compiler) uses(inst Instruction) []VReg {
 	var regs []VReg
-	if r, ok := a.mbase(inst.Dst); ok {
+
+	if r, ok := c.mbase(inst.Dst); ok {
 		regs = append(regs, r)
 	}
+
 	for _, op := range []Operand{inst.Src1, inst.Src2, inst.Src3} {
-		if r, ok := a.vreg(op); ok {
+		if r, ok := c.vreg(op); ok {
 			regs = append(regs, r)
 		}
 	}
+
 	return regs
 }
 
-func (a *Assembler) def(inst Instruction) (VReg, bool) {
-	r, ok := inst.Dst.(VRegOperand)
-	return r.Reg, ok
+func (c *compiler) def(inst Instruction) (VReg, bool) {
+	dst, ok := inst.Dst.(VRegOperand)
+	return dst.Reg, ok
 }
 
-func (a *Assembler) vreg(op Operand) (VReg, bool) {
+func (c *compiler) vreg(op Operand) (VReg, bool) {
 	switch v := op.(type) {
 	case VRegOperand:
 		return v.Reg, true
 	case MemOperand:
-		return a.mbase(v)
+		return c.mbase(v)
+	default:
+		return VReg{}, false
 	}
-	return VReg{}, false
 }
 
-func (a *Assembler) mbase(op Operand) (VReg, bool) {
-	m, ok := op.(MemOperand)
+func (c *compiler) mbase(op Operand) (VReg, bool) {
+	mem, ok := op.(MemOperand)
 	if !ok {
 		return VReg{}, false
 	}
-	b, ok := m.Base.(VRegOperand)
-	return b.Reg, ok
+
+	base, ok := mem.Base.(VRegOperand)
+	if !ok {
+		return VReg{}, false
+	}
+
+	return base.Reg, true
 }
 
-func (a *Assembler) rewrite(inst Instruction, mapping map[int32]PReg, widths map[int32]RegWidth) Instruction {
-	rw := func(op Operand) Operand { return a.rewriteOp(op, mapping, widths) }
-	return Instruction{
-		Op:   inst.Op,
-		Dst:  rw(inst.Dst),
-		Src1: rw(inst.Src1),
-		Src2: rw(inst.Src2),
-		Src3: rw(inst.Src3),
+func (p program) returnSites() map[int][]VReg {
+	if len(p.returns) != 0 {
+		return p.returns
+	}
+
+	return map[int][]VReg{
+		0: p.stack,
 	}
 }
 
-func (a *Assembler) rewriteOp(op Operand, mapping map[int32]PReg, widths map[int32]RegWidth) Operand {
-	width := func(v VReg) RegWidth {
-		if w := v.Width(); w != WidthUndefined {
-			return w
+func (p program) resolve(arch *Arch, phys []Instruction) ([]byte, map[int]int, []Relocation, error) {
+	encoded := make([][]byte, len(phys))
+	offsets := make([]int, len(phys)+1)
+
+	for i, inst := range phys {
+		if _, ok := inst.Src2.(LabelOperand); ok {
+			inst.Src2 = Imm(0)
 		}
-		return widths[v.ID()]
+
+		code, err := arch.Encoder.Encode(inst)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+
+		encoded[i] = code
+		offsets[i+1] = offsets[i] + len(code)
 	}
-	switch v := op.(type) {
-	case VRegOperand:
-		if p, ok := mapping[v.Reg.ID()]; ok {
-			return P(NewPReg(p.ID(), p.Type(), width(v.Reg)))
-		}
-	case MemOperand:
-		if vr, ok := v.Base.(VRegOperand); ok {
-			if p, ok := mapping[vr.Reg.ID()]; ok {
-				return Mem(P(NewPReg(p.ID(), p.Type(), width(vr.Reg))), v.Offset)
-			}
-		}
+
+	labels := make(map[int]int, len(p.labels))
+	for id, idx := range p.labels {
+		labels[id] = offsets[idx]
 	}
-	return op
+
+	code := make([]byte, 0, offsets[len(phys)])
+	var relocs []Relocation
+
+	for i, inst := range phys {
+		lbl, ok := inst.Src2.(LabelOperand)
+		if !ok {
+			code = append(code, encoded[i]...)
+			continue
+		}
+
+		target, local := labels[lbl.ID]
+		if !local {
+			relocs = append(relocs, Relocation{
+				InstrIdx: i,
+				Offset:   offsets[i],
+				Label:    lbl.ID,
+			})
+			code = append(code, encoded[i]...)
+			continue
+		}
+
+		inst.Src2 = Imm(int64(target - offsets[i]))
+
+		patch, err := arch.Encoder.Encode(inst)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+
+		code = append(code, patch...)
+	}
+
+	return code, labels, relocs, nil
+}
+
+func abiRegs(vregs []VReg) []PReg {
+	regs := make([]PReg, len(vregs))
+	for i, v := range vregs {
+		regs[i] = NewPReg(uint8(i), v.Type(), v.Width())
+	}
+	return regs
+}
+
+func cloneReturns(in map[int][]VReg) map[int][]VReg {
+	if len(in) == 0 {
+		return nil
+	}
+
+	out := make(map[int][]VReg, len(in))
+	for idx, regs := range in {
+		out[idx] = slices.Clone(regs)
+	}
+	return out
 }
