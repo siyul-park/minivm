@@ -149,17 +149,33 @@ Split when abstraction level changes, naming becomes hard, comments explain sect
 
 ### 1.5 Methods vs package-level functions
 
-Behavior belongs with the type that owns required context. Repeatedly passing the same receiver usually means the helper should be a method.
+Behavior belongs with the type that owns required context.
+
+**Rule**: Functions used by only one type should be methods on that type. Repeatedly passing the same receiver means the helper should be a method.
 
 ```go
-// ✗ package-level helper
+// ✗ package-level helper (used only by jitCompiler)
 func makeBranchClosure(fn Caller, sig *Signature) func(*Interpreter) {
     ...
 }
 
-// ✓ ownership is explicit
+// ✓ ownership is explicit (method on jitCompiler)
 func (c *jitCompiler) branchClosure(fn Caller, sig *Signature) func(*Interpreter) {
     ...
+}
+```
+
+**Exception**: Constructors for types (not methods on other types) can remain standalone:
+
+```go
+// ✓ standalone constructor (not a method on Assembler)
+func newCompiler(arch *Arch, p program) *compiler {
+    ...
+}
+
+// ✗ would be unclear if written as:
+func (a *Assembler) newCompiler(arch *Arch, p program) *compiler {
+    // "new" suggests constructor, but receiver suggests method
 }
 ```
 

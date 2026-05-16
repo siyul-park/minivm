@@ -2,6 +2,7 @@ package interp
 
 import (
 	"math"
+	"slices"
 	"sort"
 	"time"
 	"unsafe"
@@ -32,7 +33,7 @@ type jitPlan struct {
 	forced map[*analysis.BasicBlock]bool
 }
 
-type jitPass struct {
+type jitRun struct {
 	c    *jitCompiler
 	a    *asm.Assembler
 	code []byte
@@ -43,7 +44,7 @@ type jitPass struct {
 }
 
 type jitSeg struct {
-	pass *jitPass
+	r *jitRun
 
 	assembler *asm.Assembler
 	code      []byte
@@ -55,14 +56,11 @@ type jitSeg struct {
 	ip    int
 	force bool
 
+	stack   []asm.VReg
+	params  []asm.VReg
 	facts   map[int]types.Kind
 	scratch []asm.PReg
 }
-
-const (
-	opPrologue = len(jit) - 2
-	opEpilogue = len(jit) - 1
-)
 
 const (
 	rStack = iota
@@ -73,8 +71,12 @@ const (
 
 type jitOp func(*jitSeg) (ok bool, stop bool)
 
-var arch *asm.Arch
-var jit = [256]jitOp{}
+var (
+	arch        *asm.Arch
+	jit         = [256]jitOp{}
+	jitPrologue func(*jitSeg)
+	jitEpilogue func(*jitSeg)
+)
 
 func init() {
 	for i, fn := range jit {
@@ -144,10 +146,10 @@ func (c *jitCompiler) scan(plan jitPlan) (map[int]*asm.Signature, bool) {
 	}
 	defer buf.Free()
 
-	pass := newJITPass(c, asm.NewAssembler(arch, buf), plan.code, nil, true)
-	pass.bind(plan.blocks)
+	r := newJITRun(c, asm.NewAssembler(arch, buf), plan.code, nil, true)
+	r.bind(plan.blocks)
 
-	objs, entries := pass.compile(plan)
+	objs, entries := r.compile(plan)
 	sigs := make(map[int]*asm.Signature, len(objs))
 	for i, obj := range objs {
 		sigs[entries[i]] = obj.Sig
@@ -158,10 +160,10 @@ func (c *jitCompiler) scan(plan jitPlan) (map[int]*asm.Signature, bool) {
 func (c *jitCompiler) emit(plan jitPlan, sigs map[int]*asm.Signature) ([]*asm.RelocObject, []int) {
 	c.assembler.Reset()
 
-	pass := newJITPass(c, c.assembler, plan.code, sigs, false)
-	pass.bind(plan.blocks)
+	r := newJITRun(c, c.assembler, plan.code, sigs, false)
+	r.bind(plan.blocks)
 
-	return pass.compile(plan)
+	return r.compile(plan)
 }
 
 func (c *jitCompiler) link(code []byte, objs []*asm.RelocObject, entries []int) []func(*Interpreter) {
@@ -244,8 +246,8 @@ func (c *jitCompiler) hot(blocks []*analysis.BasicBlock) ([]*analysis.BasicBlock
 	return out, forced
 }
 
-func newJITPass(c *jitCompiler, a *asm.Assembler, code []byte, sigs map[int]*asm.Signature, scan bool) *jitPass {
-	return &jitPass{
+func newJITRun(c *jitCompiler, a *asm.Assembler, code []byte, sigs map[int]*asm.Signature, scan bool) *jitRun {
+	return &jitRun{
 		c:    c,
 		a:    a,
 		code: code,
@@ -254,19 +256,19 @@ func newJITPass(c *jitCompiler, a *asm.Assembler, code []byte, sigs map[int]*asm
 	}
 }
 
-func (p *jitPass) bind(blocks []*analysis.BasicBlock) {
-	p.labels = make(map[int]int, len(blocks))
+func (r *jitRun) bind(blocks []*analysis.BasicBlock) {
+	r.labels = make(map[int]int, len(blocks))
 	for _, b := range blocks {
-		p.labels[b.Start] = p.a.NewLabel()
+		r.labels[b.Start] = r.a.NewLabel()
 	}
 }
 
-func (p *jitPass) compile(plan jitPlan) ([]*asm.RelocObject, []int) {
+func (r *jitRun) compile(plan jitPlan) ([]*asm.RelocObject, []int) {
 	var objs []*asm.RelocObject
 	var entries []int
 
 	for _, b := range plan.hot {
-		blockObjs, blockEntries, _ := p.block(b, plan.forced[b])
+		blockObjs, blockEntries, _ := r.block(b, plan.forced[b])
 		objs = append(objs, blockObjs...)
 		entries = append(entries, blockEntries...)
 	}
@@ -274,12 +276,12 @@ func (p *jitPass) compile(plan jitPlan) ([]*asm.RelocObject, []int) {
 	return objs, entries
 }
 
-func (p *jitPass) block(b *analysis.BasicBlock, force bool) ([]*asm.RelocObject, []int, bool) {
+func (r *jitRun) block(b *analysis.BasicBlock, force bool) ([]*asm.RelocObject, []int, bool) {
 	var objs []*asm.RelocObject
 	var entries []int
 
 	for start := b.Start; start < b.End; {
-		obj, next, stop := p.segment(start, b.End, force && start == b.Start)
+		obj, next, stop := r.segment(start, b.End, force && start == b.Start)
 		if obj != nil {
 			objs = append(objs, obj)
 			entries = append(entries, start)
@@ -288,7 +290,7 @@ func (p *jitPass) block(b *analysis.BasicBlock, force bool) ([]*asm.RelocObject,
 			return objs, entries, true
 		}
 		if next <= start {
-			next = p.next(start)
+			next = r.next(start)
 			if next <= start {
 				return objs, entries, false
 			}
@@ -299,13 +301,13 @@ func (p *jitPass) block(b *analysis.BasicBlock, force bool) ([]*asm.RelocObject,
 	return objs, entries, false
 }
 
-func (p *jitPass) segment(start, end int, force bool) (*asm.RelocObject, int, bool) {
+func (r *jitRun) segment(start, end int, force bool) (*asm.RelocObject, int, bool) {
 	s := &jitSeg{
-		pass:      p,
-		assembler: p.a,
-		code:      p.code,
-		constants: p.c.constants,
-		labels:    p.labels,
+		r:         r,
+		assembler: r.a,
+		code:      r.code,
+		constants: r.c.constants,
+		labels:    r.labels,
 		start:     start,
 		end:       end,
 		ip:        start,
@@ -317,11 +319,53 @@ func (p *jitPass) segment(start, end int, force bool) (*asm.RelocObject, int, bo
 	return s.run()
 }
 
-func (p *jitPass) next(ip int) int {
-	if ip < 0 || ip >= len(p.code) {
+func (r *jitRun) next(ip int) int {
+	if ip < 0 || ip >= len(r.code) {
 		return ip + 1
 	}
-	return ip + instr.Instruction(p.code[ip:]).Width()
+	return ip + instr.Instruction(r.code[ip:]).Width()
+}
+
+// Take pops the top of the eval stack if its type/width matches; if the
+// stack is empty, a fresh VReg becomes a function-entry parameter and is
+// prepended to the param list (the VM pushes args in reverse).
+func (s *jitSeg) Take(typ asm.RegType, width asm.RegWidth) (asm.VReg, bool) {
+	if len(s.stack) == 0 {
+		r := s.assembler.NewVReg(typ, width)
+		s.params = append([]asm.VReg{r}, s.params...)
+		return r, true
+	}
+
+	r := s.stack[len(s.stack)-1]
+	if r.Type() != typ || r.Width() != width {
+		return asm.VReg{}, false
+	}
+
+	s.stack = s.stack[:len(s.stack)-1]
+	return r, true
+}
+
+// Top peeks at the i-th element from the stack top (0 = topmost).
+func (s *jitSeg) Top(i int) (asm.VReg, bool) {
+	if i < 0 || i >= len(s.stack) {
+		return asm.VReg{}, false
+	}
+	return s.stack[len(s.stack)-1-i], true
+}
+
+// Push appends to the eval stack.
+func (s *jitSeg) Push(r asm.VReg) {
+	s.stack = append(s.stack, r)
+}
+
+// Pop pops the top of the eval stack.
+func (s *jitSeg) Pop() (asm.VReg, bool) {
+	if len(s.stack) == 0 {
+		return asm.VReg{}, false
+	}
+	r := s.stack[len(s.stack)-1]
+	s.stack = s.stack[:len(s.stack)-1]
+	return r, true
 }
 
 func (s *jitSeg) init() {
@@ -330,7 +374,9 @@ func (s *jitSeg) init() {
 		s.scratch = append(s.scratch, s.assembler.Scratch())
 	}
 
-	jit[opPrologue](s)
+	if jitPrologue != nil {
+		jitPrologue(s)
+	}
 	if id, ok := s.labels[s.start]; ok {
 		s.assembler.Bind(id)
 	}
@@ -357,7 +403,9 @@ func (s *jitSeg) run() (*asm.RelocObject, int, bool) {
 		return nil, s.ip, false
 	}
 
-	jit[opEpilogue](s)
+	if jitEpilogue != nil {
+		jitEpilogue(s)
+	}
 	return s.compileAt(s.ip, false)
 }
 
@@ -369,7 +417,9 @@ func (s *jitSeg) partial(fail, count int) (*asm.RelocObject, int, bool) {
 	}
 
 	s.end = fail
-	jit[opEpilogue](s)
+	if jitEpilogue != nil {
+		jitEpilogue(s)
+	}
 	return s.compileAt(next, false)
 }
 
@@ -377,7 +427,7 @@ func (s *jitSeg) can(end, count int) (bool, bool) {
 	if count == 0 {
 		return false, false
 	}
-	if !s.force && count < s.pass.c.cutoff {
+	if !s.force && count < s.r.c.cutoff {
 		return false, false
 	}
 	if !s.force && s.hot(s.start, end) == 0 {
@@ -387,71 +437,85 @@ func (s *jitSeg) can(end, count int) (bool, bool) {
 }
 
 func (s *jitSeg) hot(start, end int) uint64 {
-	return s.pass.c.profile.Range(s.pass.c.addr, start, end)
+	return s.r.c.profile.Range(s.r.c.addr, start, end)
 }
 
 func (s *jitSeg) abort(skip bool) {
 	s.assembler.Abort()
-	if s.pass.scan {
+	if s.r.scan {
 		return
 	}
 	if skip {
-		s.pass.c.profile.JITSkip()
+		s.r.c.profile.JITSkip()
 	} else {
-		s.pass.c.profile.JITAbort()
+		s.r.c.profile.JITAbort()
 	}
 }
 
 func (s *jitSeg) compileAt(next int, stop bool) (*asm.RelocObject, int, bool) {
+	s.finalize()
+
 	obj, err := s.assembler.Compile()
 	if err != nil {
 		s.assembler.Abort()
-		if !s.pass.scan {
-			s.pass.c.profile.JITError()
+		if !s.r.scan {
+			s.r.c.profile.JITError()
 		}
 		return nil, next, false
 	}
 
-	if !s.pass.scan {
-		s.pass.c.profile.JITEmit(obj.Chunk.Size())
+	if !s.r.scan {
+		s.r.c.profile.JITEmit(obj.Chunk.Size())
 	}
 	return obj, next, stop
 }
 
+// finalize pins discovered function-entry parameters to ABI slots and
+// registers them as Site(0). The only place the assembler learns the VM's
+// eval-stack-derived call convention.
+func (s *jitSeg) finalize() {
+	for i, v := range s.params {
+		_ = s.assembler.Pin(v, asm.NewPReg(uint8(i), v.Type(), v.Width()))
+	}
+	if len(s.params) > 0 {
+		s.assembler.Site(0, s.params)
+	}
+}
+
+// PinReturn pins the current eval-stack regs to ABI return slots and marks
+// the current instruction index as a return Site. Called from architecture-
+// specific ret() helpers.
+func (s *jitSeg) PinReturn() int {
+	idx := s.assembler.Index()
+	for i, v := range s.stack {
+		_ = s.assembler.Pin(v, asm.NewPReg(uint8(i), v.Type(), v.Width()))
+	}
+	s.assembler.Site(idx, slices.Clone(s.stack))
+	return idx
+}
+
 func (s *jitSeg) linkable(target int, _ bool) bool {
-	if s.pass.scan || target < 0 || target >= len(s.code) {
+	if s.r.scan || target < 0 || target >= len(s.code) {
 		return false
 	}
 
-	sig := s.pass.sigs[target]
+	sig := s.r.sigs[target]
 	if sig == nil {
 		return false
 	}
 
-	src := s.assembler.Returns(s.assembler.Index())
+	src := s.stack
 	dst := sig.Params(sig.Entry)
-	if !s.same(src, dst) {
+	if !sameStack(src, dst) {
 		return false
 	}
 
-	s.assembler.Mark()
-	return true
-}
-
-func (s *jitSeg) same(src []asm.VReg, dst []asm.PReg) bool {
-	if len(src) != len(dst) {
-		return false
-	}
-	for i, v := range src {
-		if v.Type() != dst[i].Type() || v.Width() != dst[i].Width() {
-			return false
-		}
-	}
+	_ = s.PinReturn()
 	return true
 }
 
 func (s *jitSeg) global(idx int) (int16, bool) {
-	if idx < 0 || idx >= len(s.pass.c.globals) {
+	if idx < 0 || idx >= len(s.r.c.globals) {
 		return 0, false
 	}
 	offset := int16(idx * 8)
@@ -462,7 +526,7 @@ func (s *jitSeg) global(idx int) (int16, bool) {
 }
 
 func (s *jitSeg) local(idx int) (types.Type, bool) {
-	c := s.pass.c
+	c := s.r.c
 	if c.addr <= 0 || c.addr >= len(c.heap) {
 		return nil, false
 	}
@@ -483,30 +547,30 @@ func (s *jitSeg) local(idx int) (types.Type, bool) {
 }
 
 func (s *jitSeg) kind(r asm.Reg) (types.Kind, bool) {
-	switch r.Type() {
-	case asm.RegTypeFloat:
-		if r.Width() == asm.Width32 {
-			return types.KindF32, true
-		}
-		return types.KindF64, true
-	case asm.RegTypeInt:
-		if r.Width() == asm.Width32 {
-			return types.KindI32, true
-		}
-		return types.KindI64, true
-	default:
-		return 0, false
+	return s.r.c.regKind(r)
+}
+
+func sameStack(src []asm.VReg, dst []asm.PReg) bool {
+	if len(src) != len(dst) {
+		return false
 	}
+	for i, v := range src {
+		if v.Type() != dst[i].Type() || v.Width() != dst[i].Width() {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpreter) {
-	pregs := fn.Params(sig.Entry)
 	if len(sig.Scratch) <= rNext {
 		return nil
 	}
+
+	pregs := fn.Params(sig.Entry)
 	pkinds := make([]types.Kind, len(pregs))
 	for i, r := range pregs {
-		kind, ok := c.kind(r)
+		kind, ok := c.regKind(r)
 		if !ok {
 			return nil
 		}
@@ -516,7 +580,7 @@ func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpret
 	rregs := fn.Returns(sig.Entry)
 	rkinds := make([]types.Kind, len(rregs))
 	for i, r := range rregs {
-		kind, ok := c.kind(r)
+		kind, ok := c.regKind(r)
 		if !ok {
 			return nil
 		}
@@ -587,33 +651,7 @@ func (c *jitCompiler) scratch(i *Interpreter, scratch []uint64) {
 	scratch[rGlobals] = uint64(uintptr(unsafe.Pointer(unsafe.SliceData(i.globals))))
 }
 
-func (c *jitCompiler) value(bits uint64, kind types.Kind) asm.Value {
-	switch kind {
-	case types.KindI32:
-		return asm.I32(uint32(bits))
-	case types.KindI64:
-		return asm.I64(bits)
-	case types.KindF32:
-		return asm.F32(uint32(bits))
-	default:
-		return asm.F64(bits)
-	}
-}
-
-func (c *jitCompiler) valueKind(v asm.Value) types.Kind {
-	switch {
-	case v.RegType() == asm.RegTypeFloat && v.Width() == asm.Width64:
-		return types.KindF64
-	case v.RegType() == asm.RegTypeFloat:
-		return types.KindF32
-	case v.Width() == asm.Width64:
-		return types.KindI64
-	default:
-		return types.KindI32
-	}
-}
-
-func (c *jitCompiler) kind(r asm.Reg) (types.Kind, bool) {
+func (c *jitCompiler) regKind(r asm.Reg) (types.Kind, bool) {
 	switch r.Type() {
 	case asm.RegTypeFloat:
 		if r.Width() == asm.Width32 {
@@ -627,5 +665,18 @@ func (c *jitCompiler) kind(r asm.Reg) (types.Kind, bool) {
 		return types.KindI64, true
 	default:
 		return 0, false
+	}
+}
+
+func (c *jitCompiler) valueKind(v asm.Value) types.Kind {
+	switch {
+	case v.RegType() == asm.RegTypeFloat && v.Width() == asm.Width64:
+		return types.KindF64
+	case v.RegType() == asm.RegTypeFloat:
+		return types.KindF32
+	case v.Width() == asm.Width64:
+		return types.KindI64
+	default:
+		return types.KindI32
 	}
 }

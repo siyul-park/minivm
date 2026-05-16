@@ -23,6 +23,10 @@ func (testABI) NewCaller(*Signature, *Chunk) (Caller, error) {
 	return nil, nil
 }
 
+type testEncoder struct{}
+
+func (testEncoder) Encode(Instruction) ([]byte, error) { return []byte{0}, nil }
+
 func TestAssembler_NewVReg(t *testing.T) {
 	buf, err := NewBuffer(256)
 	require.NoError(t, err)
@@ -37,160 +41,28 @@ func TestAssembler_NewVReg(t *testing.T) {
 	require.Equal(t, RegTypeFloat, r1.Type())
 }
 
-func TestAssembler_Take(t *testing.T) {
-	t.Run("from stack", func(t *testing.T) {
+func TestAssembler_Pin(t *testing.T) {
+	t.Run("single", func(t *testing.T) {
 		buf, err := NewBuffer(256)
 		require.NoError(t, err)
 		defer buf.Free()
-		a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil)}, buf)
+		a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil), ABI: testABI{}}, buf)
 
-		r := a.NewVReg(RegTypeInt, Width64)
-		a.Push(r)
-		taken, ok := a.Take(RegTypeInt, Width64)
-		require.True(t, ok)
-		require.Equal(t, r, taken)
-		require.Empty(t, a.Params(a.Index()))
+		v := a.NewVReg(RegTypeInt, Width64)
+		require.NoError(t, a.Pin(v, NewPReg(0, RegTypeInt, Width64)))
 	})
-	t.Run("type mismatch", func(t *testing.T) {
+
+	t.Run("conflict", func(t *testing.T) {
 		buf, err := NewBuffer(256)
 		require.NoError(t, err)
 		defer buf.Free()
-		a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil)}, buf)
+		a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil), ABI: testABI{}}, buf)
 
-		a.Push(a.NewVReg(RegTypeInt, Width64))
-		_, ok := a.Take(RegTypeFloat, Width32)
-		require.False(t, ok)
+		v := a.NewVReg(RegTypeInt, Width64)
+		require.NoError(t, a.Pin(v, NewPReg(0, RegTypeInt, Width64)))
+		err = a.Pin(v, NewPReg(1, RegTypeInt, Width64))
+		require.ErrorIs(t, err, ErrConflictingPin)
 	})
-	t.Run("empty stack creates param", func(t *testing.T) {
-		buf, err := NewBuffer(256)
-		require.NoError(t, err)
-		defer buf.Free()
-		a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil)}, buf)
-
-		taken, ok := a.Take(RegTypeInt, Width64)
-		require.True(t, ok)
-		require.Equal(t, RegTypeInt, taken.Type())
-		params := a.Params(a.Index())
-		require.Len(t, params, 1)
-		require.Equal(t, taken, params[0])
-	})
-	t.Run("empty stack params preserve vm order", func(t *testing.T) {
-		buf, err := NewBuffer(256)
-		require.NoError(t, err)
-		defer buf.Free()
-		a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil)}, buf)
-
-		top, ok := a.Take(RegTypeInt, Width64)
-		require.True(t, ok)
-		bottom, ok := a.Take(RegTypeInt, Width64)
-		require.True(t, ok)
-
-		require.Equal(t, []VReg{bottom, top}, a.Params(a.Index()))
-	})
-}
-
-func TestAssembler_Top(t *testing.T) {
-	t.Run("empty stack", func(t *testing.T) {
-		buf, err := NewBuffer(256)
-		require.NoError(t, err)
-		defer buf.Free()
-		a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil)}, buf)
-
-		_, ok := a.Top(0)
-		require.False(t, ok)
-	})
-	t.Run("first and second element", func(t *testing.T) {
-		buf, err := NewBuffer(256)
-		require.NoError(t, err)
-		defer buf.Free()
-		a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil)}, buf)
-
-		r0, r1 := a.NewVReg(RegTypeInt, Width64), a.NewVReg(RegTypeInt, Width64)
-		a.Push(r0)
-		a.Push(r1)
-		top0, ok := a.Top(0)
-		require.True(t, ok)
-		require.Equal(t, r1, top0)
-		top1, ok := a.Top(1)
-		require.True(t, ok)
-		require.Equal(t, r0, top1)
-	})
-}
-
-func TestAssembler_Push(t *testing.T) {
-	buf, err := NewBuffer(256)
-	require.NoError(t, err)
-	defer buf.Free()
-	a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil), ABI: testABI{}}, buf)
-
-	r := a.NewVReg(RegTypeInt, Width64)
-	a.Push(r)
-	require.Len(t, a.Returns(a.Index()), 1)
-}
-
-func TestAssembler_Pop(t *testing.T) {
-	t.Run("non-empty stack", func(t *testing.T) {
-		buf, err := NewBuffer(256)
-		require.NoError(t, err)
-		defer buf.Free()
-		a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil)}, buf)
-
-		r := a.NewVReg(RegTypeInt, Width64)
-		a.Push(r)
-		got, ok := a.Pop()
-		require.True(t, ok)
-		require.Equal(t, r, got)
-	})
-	t.Run("empty stack", func(t *testing.T) {
-		buf, err := NewBuffer(256)
-		require.NoError(t, err)
-		defer buf.Free()
-		a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil)}, buf)
-
-		_, ok := a.Pop()
-		require.False(t, ok)
-	})
-}
-
-func TestAssembler_Params(t *testing.T) {
-	buf, err := NewBuffer(256)
-	require.NoError(t, err)
-	defer buf.Free()
-	a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil)}, buf)
-
-	require.Empty(t, a.Params(a.Index()))
-	a.Take(RegTypeInt, Width64)
-	require.Len(t, a.Params(a.Index()), 1)
-}
-
-func TestAssembler_Returns(t *testing.T) {
-	buf, err := NewBuffer(256)
-	require.NoError(t, err)
-	defer buf.Free()
-	a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil)}, buf)
-
-	require.Empty(t, a.Returns(a.Index()))
-	a.Push(a.NewVReg(RegTypeInt, Width64))
-	require.Len(t, a.Returns(a.Index()), 1)
-}
-
-func TestAssembler_SignatureIndexes(t *testing.T) {
-	buf, err := NewBuffer(256)
-	require.NoError(t, err)
-	defer buf.Free()
-	a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil), ABI: testABI{}}, buf)
-
-	param, ok := a.Take(RegTypeInt, Width64)
-	require.True(t, ok)
-	a.Push(param)
-	idx := a.Index()
-	a.Returns(idx)
-
-	obj, err := a.Compile()
-	require.NoError(t, err)
-	require.Equal(t, []PReg{NewPReg(0, RegTypeInt, Width64)}, obj.Sig.Params(obj.Sig.Entry))
-	require.Equal(t, []PReg{NewPReg(0, RegTypeInt, Width64)}, obj.Sig.Returns(idx))
-	require.Equal(t, Width64, obj.Sig.Returns(idx)[0].Width())
 }
 
 func TestAssembler_Emit(t *testing.T) {
@@ -207,18 +79,39 @@ func TestAssembler_Emit(t *testing.T) {
 	require.Equal(t, 1, idx1)
 }
 
+func TestAssembler_SiteSignature(t *testing.T) {
+	buf, err := NewBuffer(256)
+	require.NoError(t, err)
+	defer buf.Free()
+	a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil), ABI: testABI{}, Encoder: testEncoder{}}, buf)
+
+	v := a.NewVReg(RegTypeInt, Width64)
+	require.NoError(t, a.Pin(v, NewPReg(0, RegTypeInt, Width64)))
+	a.Site(0, []VReg{v})
+
+	a.Emit(Instruction{Op: 1})
+	idx := a.Index()
+	a.Site(idx, []VReg{v})
+
+	obj, err := a.Compile()
+	require.NoError(t, err)
+	require.Equal(t, []PReg{NewPReg(0, RegTypeInt, Width64)}, obj.Sig.Params(obj.Sig.Entry))
+	require.Equal(t, []PReg{NewPReg(0, RegTypeInt, Width64)}, obj.Sig.Returns(idx))
+	require.Equal(t, Width64, obj.Sig.Returns(idx)[0].Width())
+}
+
 func TestAssembler_Reset(t *testing.T) {
 	buf, err := NewBuffer(256)
 	require.NoError(t, err)
 	defer buf.Free()
 	a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil)}, buf)
 
-	a.Take(RegTypeInt, Width64)
-	a.Push(a.NewVReg(RegTypeInt, Width64))
+	v := a.NewVReg(RegTypeInt, Width64)
+	_ = a.Pin(v, NewPReg(0, RegTypeInt, Width64))
+	a.Site(0, []VReg{v})
 	a.Emit(Instruction{Op: 1})
 	a.Reset()
 
-	require.Empty(t, a.Params(a.Index()))
-	require.Empty(t, a.Returns(a.Index()))
 	require.Equal(t, int32(0), a.NewVReg(RegTypeInt, Width64).ID())
+	require.Equal(t, 0, a.Index())
 }

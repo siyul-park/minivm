@@ -8,16 +8,20 @@ import (
 	"unsafe"
 )
 
+// Assembler emits target-architecture assembly. It owns only assembly state:
+// instructions, virtual registers, scratch registers, labels, and ABI sites.
+// External call-convention policy (mapping VRegs to ABI PReg slots) is the
+// caller's responsibility; the assembler simply honors Pin/Site declarations.
 type Assembler struct {
 	arch   *Arch
 	buffer *Buffer
 	vregs  *VRegAlloc
 
-	stack   []VReg
-	params  []VReg
 	insts   []Instruction
 	scratch []PReg
-	returns map[int][]VReg
+	pins    map[int32]PReg
+	sites   map[int][]VReg
+	err     error
 
 	nextLabel int
 	global    map[int]label
@@ -31,10 +35,9 @@ type label struct {
 
 type program struct {
 	insts   []Instruction
-	params  []VReg
-	stack   []VReg
 	scratch []PReg
-	returns map[int][]VReg
+	pins    map[int32]PReg
+	sites   map[int][]VReg
 	labels  map[int]int
 }
 
@@ -49,8 +52,8 @@ type compiler struct {
 }
 
 var (
-	ErrUnresolvedLabel      = errors.New("unresolved label")
-	ErrConflictingReturnPin = fmt.Errorf("%w: conflicting return register pin", ErrInvalidArgs)
+	ErrUnresolvedLabel = errors.New("unresolved label")
+	ErrConflictingPin  = fmt.Errorf("%w: conflicting pin", ErrInvalidArgs)
 )
 
 func NewAssembler(arch *Arch, buffer *Buffer) *Assembler {
@@ -58,23 +61,18 @@ func NewAssembler(arch *Arch, buffer *Buffer) *Assembler {
 		arch:   arch,
 		buffer: buffer,
 		vregs:  NewVRegAlloc(),
+		pins:   make(map[int32]PReg),
 		global: make(map[int]label),
 	}
 }
 
-func (a *Assembler) NewLabel() int {
-	id := a.nextLabel
-	a.nextLabel++
-	return id
+// NewVReg allocates a fresh virtual register.
+func (a *Assembler) NewVReg(typ RegType, width RegWidth) VReg {
+	return a.vregs.Alloc(typ, width)
 }
 
-func (a *Assembler) Bind(id int) {
-	if a.local == nil {
-		a.local = make(map[int]int)
-	}
-	a.local[id] = len(a.insts)
-}
-
+// Scratch reserves the next architecture scratch register. Scratch slots
+// are pre-blocked from regalloc and surfaced in Signature.Scratch.
 func (a *Assembler) Scratch() PReg {
 	mask := a.arch.Scratch
 	for range len(a.scratch) {
@@ -86,84 +84,73 @@ func (a *Assembler) Scratch() PReg {
 	return p
 }
 
-func (a *Assembler) NewVReg(typ RegType, width RegWidth) VReg {
-	return a.vregs.Alloc(typ, width)
+// NewLabel reserves a label identifier; bind it later with Bind.
+func (a *Assembler) NewLabel() int {
+	id := a.nextLabel
+	a.nextLabel++
+	return id
 }
 
-func (a *Assembler) Index() int {
-	return len(a.insts)
-}
-
-func (a *Assembler) Mark() int {
-	idx := a.Index()
-	if a.returns == nil {
-		a.returns = make(map[int][]VReg)
+// Bind anchors a label at the current instruction index.
+func (a *Assembler) Bind(id int) {
+	if a.local == nil {
+		a.local = make(map[int]int)
 	}
-	a.returns[idx] = slices.Clone(a.stack)
-	return idx
+	a.local[id] = len(a.insts)
 }
 
-func (a *Assembler) Params(idx int) []VReg {
-	if idx != a.Index() {
-		return nil
-	}
-	return slices.Clone(a.params)
-}
-
-func (a *Assembler) Returns(idx int) []VReg {
-	if idx == a.Index() {
-		return slices.Clone(a.stack)
-	}
-	return slices.Clone(a.returns[idx])
-}
-
-func (a *Assembler) Take(typ RegType, width RegWidth) (VReg, bool) {
-	if len(a.stack) == 0 {
-		r := a.NewVReg(typ, width)
-		a.params = append([]VReg{r}, a.params...)
-		return r, true
-	}
-
-	r := a.stack[len(a.stack)-1]
-	if r.Type() != typ || r.Width() != width {
-		return VReg{}, false
-	}
-
-	a.stack = a.stack[:len(a.stack)-1]
-	return r, true
-}
-
-func (a *Assembler) Top(i int) (VReg, bool) {
-	if i < 0 || i >= len(a.stack) {
-		return VReg{}, false
-	}
-	return a.stack[len(a.stack)-1-i], true
-}
-
-func (a *Assembler) Push(r VReg) {
-	a.stack = append(a.stack, r)
-}
-
-func (a *Assembler) Pop() (VReg, bool) {
-	if len(a.stack) == 0 {
-		return VReg{}, false
-	}
-
-	r := a.stack[len(a.stack)-1]
-	a.stack = a.stack[:len(a.stack)-1]
-	return r, true
-}
-
+// Emit appends one instruction and returns its index.
 func (a *Assembler) Emit(inst Instruction) int {
 	a.insts = append(a.insts, inst)
 	return len(a.insts) - 1
 }
 
+// Emits appends multiple instructions.
 func (a *Assembler) Emits(insts ...Instruction) {
 	a.insts = append(a.insts, insts...)
 }
 
+// Index returns the next instruction slot (equivalent to len(insts)).
+func (a *Assembler) Index() int {
+	return len(a.insts)
+}
+
+// Pin binds a VReg to a specific PReg for the lifetime of this compile.
+// Returns ErrConflictingPin if v was already pinned to a different PReg;
+// the first conflict is also retained and re-surfaced by Compile so callers
+// that batch many Pin calls can defer checking.
+func (a *Assembler) Pin(v VReg, p PReg) error {
+	if existing, ok := a.pins[v.ID()]; ok && existing.ID() != p.ID() {
+		err := fmt.Errorf("%w: %v to %v and %v", ErrConflictingPin, v, existing, p)
+		if a.err == nil {
+			a.err = err
+		}
+		return err
+	}
+	a.pins[v.ID()] = p
+	return nil
+}
+
+// Site declares an ABI boundary at instruction index idx. The given VRegs
+// describe the values live across that boundary (entry params for idx=0,
+// return values for branch/exit sites). Subsequent calls at the same idx
+// overwrite.
+func (a *Assembler) Site(idx int, live []VReg) {
+	if a.sites == nil {
+		a.sites = make(map[int][]VReg)
+	}
+	a.sites[idx] = slices.Clone(live)
+}
+
+// Compile finalizes the current instruction list into a RelocObject, runs
+// register allocation, encodes the result into the buffer, and resets per-
+// compile state. Labels declared by NewLabel/Bind remain globally resolvable
+// across subsequent Compile calls via Link.
 func (a *Assembler) Compile() (*RelocObject, error) {
+	if a.err != nil {
+		return nil, a.err
+	}
+
 	p := a.snapshot()
 
 	sig, instrs, err := newCompiler(a.arch, p).compile()
@@ -205,6 +192,10 @@ func (a *Assembler) Compile() (*RelocObject, error) {
 	}, nil
 }
 
+// Link resolves cross-object label references and constructs a Caller for
+// each successfully linked object. Objects with unresolved labels yield a
+// nil Caller in the corresponding slot; the first error encountered is
+// returned alongside the partial result.
 func (a *Assembler) Link(objects []*RelocObject) ([]Caller, error) {
 	if err := a.buffer.Unseal(); err != nil {
 		return nil, err
@@ -270,10 +261,12 @@ func (a *Assembler) Link(objects []*RelocObject) ([]Caller, error) {
 	return callers, firstErr
 }
 
+// Abort discards the current Compile's pending state.
 func (a *Assembler) Abort() {
 	a.reset()
 }
 
+// Reset clears all assembler state including globally tracked labels.
 func (a *Assembler) Reset() {
 	a.reset()
 	a.nextLabel = 0
@@ -281,22 +274,30 @@ func (a *Assembler) Reset() {
 }
 
 func (a *Assembler) reset() {
-	a.stack = a.stack[:0]
-	a.params = a.params[:0]
 	a.insts = a.insts[:0]
 	a.scratch = a.scratch[:0]
-	a.returns = nil
+	a.pins = make(map[int32]PReg)
+	a.sites = nil
+	a.err = nil
 	a.local = nil
 	a.vregs.Reset()
 }
 
 func (a *Assembler) snapshot() program {
+	sites := a.sites
+	if len(sites) > 0 {
+		out := make(map[int][]VReg, len(sites))
+		for idx, regs := range sites {
+			out[idx] = slices.Clone(regs)
+		}
+		sites = out
+	}
+
 	return program{
 		insts:   slices.Clone(a.insts),
-		params:  slices.Clone(a.params),
-		stack:   slices.Clone(a.stack),
 		scratch: slices.Clone(a.scratch),
-		returns: cloneReturns(a.returns),
+		pins:    maps.Clone(a.pins),
+		sites:   sites,
 		labels:  maps.Clone(a.local),
 	}
 }
@@ -319,26 +320,20 @@ func newCompiler(arch *Arch, p program) *compiler {
 }
 
 func (c *compiler) compile() (*Signature, []Instruction, error) {
-	if len(c.prog.params) > c.arch.ABI.MaxParams() {
+	if entry, ok := c.prog.sites[0]; ok && len(entry) > c.arch.ABI.MaxParams() {
 		return nil, nil, ErrTooManyParams
 	}
 
-	for _, regs := range c.prog.returnSites() {
+	for idx, regs := range c.prog.sites {
+		if idx == 0 {
+			continue
+		}
 		if len(regs) > c.arch.ABI.MaxReturns() {
 			return nil, nil, ErrTooManyReturns
 		}
 	}
 
-	if err := c.reserveParams(); err != nil {
-		return nil, nil, err
-	}
-
-	fixed, err := c.fixedReturns()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	instrs, err := c.assign(fixed)
+	instrs, err := c.assign()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -347,43 +342,25 @@ func (c *compiler) compile() (*Signature, []Instruction, error) {
 	return sig, instrs, nil
 }
 
-func (c *compiler) reserveParams() error {
-	for i, v := range c.prog.params {
-		if i >= c.arch.ABI.MaxParams() {
-			return ErrTooManyParams
-		}
+func (c *compiler) assign() ([]Instruction, error) {
+	last := c.lastRefs()
+	exitPins := c.exitPins()
 
-		p := NewPReg(uint8(i), v.Type(), v.Width())
+	// Reserve entry-site pins upfront so subsequent allocation cannot
+	// claim their physical slots before they are used.
+	for _, v := range c.prog.sites[0] {
+		p, ok := c.prog.pins[v.ID()]
+		if !ok {
+			continue
+		}
+		if _, bound := c.phys[v.ID()]; bound {
+			continue
+		}
 		if err := c.regs.Reserve(v, p); err != nil {
-			return err
+			return nil, err
 		}
-
 		c.bind(v, p)
 	}
-
-	return nil
-}
-
-func (c *compiler) fixedReturns() (map[int32]PReg, error) {
-	fixed := make(map[int32]PReg)
-
-	for _, regs := range c.prog.returnSites() {
-		for i, v := range regs {
-			p := NewPReg(uint8(i), v.Type(), v.Width())
-
-			if existing, ok := fixed[v.ID()]; ok && existing.ID() != p.ID() {
-				return nil, ErrConflictingReturnPin
-			}
-
-			fixed[v.ID()] = p
-		}
-	}
-
-	return fixed, nil
-}
-
-func (c *compiler) assign(fixed map[int32]PReg) ([]Instruction, error) {
-	last := c.lastRefs()
 
 	for i, inst := range c.prog.insts {
 		for _, v := range c.uses(inst) {
@@ -393,7 +370,7 @@ func (c *compiler) assign(fixed map[int32]PReg) ([]Instruction, error) {
 		}
 
 		if dst, ok := c.def(inst); ok {
-			if err := c.ensurePlaced(dst, fixed, last, i); err != nil {
+			if err := c.ensurePlaced(dst, exitPins, last, i); err != nil {
 				return nil, err
 			}
 		}
@@ -402,15 +379,18 @@ func (c *compiler) assign(fixed map[int32]PReg) ([]Instruction, error) {
 			if last[v.ID()] != i {
 				continue
 			}
-			if _, pinned := fixed[v.ID()]; pinned {
+			if exitPins[v.ID()] {
 				continue
 			}
 			c.free(v)
 		}
 	}
 
-	for id, p := range fixed {
+	for id, p := range c.prog.pins {
 		if _, ok := c.phys[id]; ok {
+			continue
+		}
+		if !exitPins[id] {
 			continue
 		}
 
@@ -425,8 +405,34 @@ func (c *compiler) assign(fixed map[int32]PReg) ([]Instruction, error) {
 	return c.rewriteAll(), nil
 }
 
+// exitPins returns the set of VRegs whose pin must be honored at a return
+// site (idx > 0). Entry-site (idx 0) pins only matter on function entry and
+// can be reclaimed once their last use passes.
+func (c *compiler) exitPins() map[int32]bool {
+	out := make(map[int32]bool)
+	for idx, regs := range c.prog.sites {
+		if idx == 0 {
+			continue
+		}
+		for _, v := range regs {
+			if _, ok := c.prog.pins[v.ID()]; ok {
+				out[v.ID()] = true
+			}
+		}
+	}
+	return out
+}
+
 func (c *compiler) ensure(v VReg) error {
 	if _, ok := c.phys[v.ID()]; ok {
+		return nil
+	}
+
+	if pinned, ok := c.prog.pins[v.ID()]; ok {
+		if err := c.regs.Reserve(v, pinned); err != nil {
+			return err
+		}
+		c.bind(v, pinned)
 		return nil
 	}
 
@@ -439,12 +445,12 @@ func (c *compiler) ensure(v VReg) error {
 	return nil
 }
 
-func (c *compiler) ensurePlaced(v VReg, fixed map[int32]PReg, last map[int32]int, idx int) error {
+func (c *compiler) ensurePlaced(v VReg, exitPins map[int32]bool, last map[int32]int, idx int) error {
 	if _, ok := c.phys[v.ID()]; ok {
 		return nil
 	}
 
-	p, err := c.place(v, fixed, last, idx)
+	p, err := c.place(v, exitPins, last, idx)
 	if err != nil {
 		return err
 	}
@@ -453,14 +459,14 @@ func (c *compiler) ensurePlaced(v VReg, fixed map[int32]PReg, last map[int32]int
 	return nil
 }
 
-func (c *compiler) place(v VReg, fixed map[int32]PReg, last map[int32]int, idx int) (PReg, error) {
-	want, pinned := fixed[v.ID()]
+func (c *compiler) place(v VReg, exitPins map[int32]bool, last map[int32]int, idx int) (PReg, error) {
+	want, pinned := c.prog.pins[v.ID()]
 	if !pinned {
 		return c.regs.Alloc(v)
 	}
 
 	owner, occupied := c.own[want.ID()]
-	_, ownerPinned := fixed[owner.ID()]
+	ownerPinned := exitPins[owner.ID()]
 
 	if occupied && owner.ID() != v.ID() && (last[owner.ID()] != idx || ownerPinned) {
 		return c.regs.Alloc(v)
@@ -495,13 +501,20 @@ func (c *compiler) free(v VReg) {
 }
 
 func (c *compiler) signature() *Signature {
-	inputs := map[int][]PReg{
-		0: abiRegs(c.prog.params),
+	inputs := make(map[int][]PReg)
+	outputs := make(map[int][]PReg)
+
+	for idx, regs := range c.prog.sites {
+		pregs := c.pregs(regs)
+		if idx == 0 {
+			inputs[idx] = pregs
+		} else {
+			outputs[idx] = pregs
+		}
 	}
 
-	outputs := make(map[int][]PReg)
-	for idx, regs := range c.prog.returnSites() {
-		outputs[idx] = abiRegs(regs)
+	if _, ok := inputs[0]; !ok {
+		inputs[0] = nil
 	}
 
 	return &Signature{
@@ -591,13 +604,7 @@ func (c *compiler) widths() map[int32]RegWidth {
 		}
 	}
 
-	for _, v := range c.prog.params {
-		set(v)
-	}
-	for _, v := range c.prog.stack {
-		set(v)
-	}
-	for _, regs := range c.prog.returns {
+	for _, regs := range c.prog.sites {
 		for _, v := range regs {
 			set(v)
 		}
@@ -660,16 +667,6 @@ func (c *compiler) mbase(op Operand) (VReg, bool) {
 	return base.Reg, true
 }
 
-func (p program) returnSites() map[int][]VReg {
-	if len(p.returns) != 0 {
-		return p.returns
-	}
-
-	return map[int][]VReg{
-		0: p.stack,
-	}
-}
-
 func (p program) resolve(arch *Arch, phys []Instruction) ([]byte, map[int]int, []Relocation, error) {
 	encoded := make([][]byte, len(phys))
 	offsets := make([]int, len(phys)+1)
@@ -727,22 +724,14 @@ func (p program) resolve(arch *Arch, phys []Instruction) ([]byte, map[int]int, [
 	return code, labels, relocs, nil
 }
 
-func abiRegs(vregs []VReg) []PReg {
+func (c *compiler) pregs(vregs []VReg) []PReg {
 	regs := make([]PReg, len(vregs))
 	for i, v := range vregs {
+		if p, ok := c.prog.pins[v.ID()]; ok {
+			regs[i] = p
+			continue
+		}
 		regs[i] = NewPReg(uint8(i), v.Type(), v.Width())
 	}
 	return regs
-}
-
-func cloneReturns(in map[int][]VReg) map[int][]VReg {
-	if len(in) == 0 {
-		return nil
-	}
-
-	out := make(map[int][]VReg, len(in))
-	for idx, regs := range in {
-		out[idx] = slices.Clone(regs)
-	}
-	return out
 }

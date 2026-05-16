@@ -50,7 +50,7 @@ Rules:
 
 ## JIT Handlers
 
-`jit` is `[256]func(*jitCompiler) (ok bool, stop bool)`, populated in `jit_arm64.go`.
+`jit` is `[256]func(*jitSeg) (ok bool, stop bool)`, populated in `jit_arm64.go`.
 
 | Return | Meaning |
 |---|---|
@@ -61,16 +61,16 @@ Rules:
 Handler shape:
 
 ```go
-jit[instr.OPCODE] = func(c *jitCompiler) (bool, bool) {
-    c.ip++ // before every return path
+jit[instr.OPCODE] = func(s *jitSeg) (bool, bool) {
+    s.ip++ // before every return path
 
-    r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
+    r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
     if !ok {
         return false, false
     }
-    r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-    c.assembler.Emit(arm64.ADD(r1, r0, r0))
-    c.assembler.Push(r1)
+    r1 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
+    s.assembler.Emit(arm64.ADD(r1, r0, r0))
+    s.Push(r1)
     return true, false
 }
 ```
@@ -133,32 +133,40 @@ Branch-terminated blocks need target signatures before choosing direct branch vs
 
 `linkable(targetIP)` compares current returns with target params by type and width.
 
-## Assembler
+## Assembler And JIT Segment
 
-`asm.Assembler` tracks VM-stack shape inside one segment: `stack []VReg` holds in-flight stack values; `params []VReg` holds values taken from empty stack and becomes native ABI inputs. `Params(idx)` and `Returns(idx)` expose VReg state at recorded program points; `Return(idx)` records a return point for ABI signature generation.
+Two-layer IR emission:
 
-Core methods:
+**`asm.Assembler`** (low-level): allocate VRegs, emit instructions, declare ABI boundaries. No VM stack semantics.
+
+| Method | Use |
+|---|---|
+| `NewVReg(type,width)` | allocate virtual register |
+| `Emit(inst)` | append instruction |
+| `NewLabel()` / `Bind(id)` | create/place branch targets |
+| `Scratch()` | allocate reserved metadata PReg |
+| `Pin(vreg, preg)` | bind VReg to physical register (ABI slots) |
+| `Site(idx, live)` | declare ABI boundary at instruction idx with live values |
+| `Compile()` | allocate physical regs, encode, append buffer, return `RelocObject` |
+| `Link(objects)` | patch cross-segment relocs, return native callers |
+| `Abort()` / `Reset()` | discard segment / reset function assembler state |
+
+**`jitSeg`** (high-level): track VM stack shape, manage operands and results.
 
 | Method | Use |
 |---|---|
 | `Take(type,width)` | pop matching stack value or create param when stack empty |
 | `Top(i)` | inspect i-th value from top |
 | `Push(reg)` / `Pop()` | push or unchecked pop |
-| `NewVReg(type,width)` | allocate virtual register |
-| `Emit` / `Emits` | append IR |
-| `NewLabel` / `Bind` / `Place` | create/place branch targets |
-| `Scratch()` | allocate reserved metadata PReg |
-| `Compile()` | allocate physical regs, encode, append buffer, return `RelocObject` |
-| `Link(objects)` | patch cross-segment relocs, return native callers |
-| `Abort()` / `Reset()` | discard segment / reset function assembler state |
 
-Use `Take` for typed operands. Use `Pop` only after `Top` or another proof of stack shape.
+`jitSeg.assembler` delegates IR emission to `Assembler`; `jitSeg.stack` and `jitSeg.params` track VM stack shape. `Site()` called at function entry and return points to expose ABI signatures.
 
 Pipeline:
 
 ```text
-emit IR per segment -> Compile() -> RelocObject
-all function objects -> Link([]*RelocObject) -> []Caller
+per segment: jitSeg.Take/Push/Pop -> assembler.Emit() -> IR list
+Compile(): IR list -> Assembler.Compile() -> RelocObject
+Link(): []*RelocObject -> Assembler.Link() -> []Caller
 ```
 
 Intra-segment labels resolve in `Compile()`. Cross-segment labels become relocations patched by `Link()`.

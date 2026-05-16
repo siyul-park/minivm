@@ -106,17 +106,17 @@ File: `interp/jit_arm64.go`
 Optional, ARM64 only. Skip if the opcode needs hard-to-compile interpreter access; threaded fallback remains correct.
 
 ```go
-jit[instr.I32_MY_OP] = func(c *jitCompiler) (bool, bool) {
-    c.ip++ // before every return path
+jit[instr.I32_MY_OP] = func(s *jitSeg) (bool, bool) {
+    s.ip++ // before every return path
 
-    r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
+    r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
     if !ok {
         return false, false
     }
 
-    r1 := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-    c.assembler.Emit(arm64.ADD(r1, r0, r0))
-    c.assembler.Push(r1)
+    r1 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
+    s.assembler.Emit(arm64.ADD(r1, r0, r0))
+    s.Push(r1)
 
     return true, false
 }

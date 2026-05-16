@@ -103,18 +103,25 @@ Two layers:
 
 ### `asm/`
 
-`Assembler` keeps two VReg stacks:
+`Assembler` is low-level IR emission: allocate VRegs, emit instructions, declare ABI boundaries. No VM stack semantics.
 
-- `stack []VReg`: in-flight values, mirroring VM stack within the sub-block.
-- `params []VReg`: VRegs `Take`n from empty `stack`; become native ABI input params.
+Core API:
+
+- `NewVReg(type,width)`: allocate virtual register.
+- `Emit(inst)`: append instruction.
+- `Pin(vreg, preg)`: bind VReg to physical register (JIT uses for ABI slots).
+- `Site(idx, live)`: declare ABI boundary at instruction idx with live values.
+- `Compile()`: allocate physical regs, encode, append buffer, return `RelocObject`.
+- `Link([]*RelocObject)`: patch cross-segment labels, return native `Caller`s.
 
 `Compile()` + `Link()` pipeline:
 
-1. `compile()`: strip pseudo-labels; `signature()` derives label/index keyed ABI register shapes from `params` and recorded return points; `assign()` linear-scans VReg→PReg.
-2. `resolve(physAssigned)`: two-pass encode. Pass 1 uses `Imm(0)` placeholders to measure byte sizes; pass 2 patches local labels and records cross-segment `Relocation`s.
-3. `buffer.Unseal()` → `buffer.Append(code)` → `buffer.Seal()`.
-4. Return `*RelocObject` with encoded chunk, `Signature`, relocations.
-5. `Link([]*RelocObject)`: unseal, patch relocations by re-encoding branch offsets, then create one `Caller` per object; `Caller.Call(params, reserved)` invokes the chunk and returns typed `asm.Value` results.
+1. `snapshot()`: capture instruction list and VReg pins into immutable `program`.
+2. `newCompiler()`: allocate physical regs via `RegAlloc`, encode IR to machine code.
+3. `resolve()`: two-pass encode. Pass 1 measures sizes via `Imm(0)` placeholders; Pass 2 patches labels and records `Relocation`s.
+4. `buffer.Unseal()` → `buffer.Append(code)` → `buffer.Seal()`: write to executable memory.
+5. Return `*RelocObject` with chunk, `Signature` (from `Site` declarations), relocations.
+6. `Link([]*RelocObject)`: unseal, patch relocations, seal, create one `Caller` per object.
 
 ### `asm/arm64/`
 

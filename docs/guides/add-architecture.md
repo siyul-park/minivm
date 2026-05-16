@@ -214,38 +214,38 @@ import (
 func init() {
     arch = <arch>.Arch
 
-    jit[_PROLOGUE] = func(c *jitCompiler) (bool, bool) {
-        c.assembler.Emits(<arch>.LDI(c.scratch[rNext], uint64(c.end))...)
+    jit[_PROLOGUE] = func(s *jitSeg) (bool, bool) {
+        s.assembler.Emits(<arch>.LDI(s.scratch[rNext], uint64(s.end))...)
         return true, false
     }
 
-    jit[_EPILOGUE] = func(c *jitCompiler) (bool, bool) {
-        c.assembler.Emits(<arch>.LDI(c.scratch[rNext], uint64(c.end))...)
-        c.assembler.Emit(<arch>.RET())
+    jit[_EPILOGUE] = func(s *jitSeg) (bool, bool) {
+        s.assembler.Emits(<arch>.LDI(s.scratch[rNext], uint64(s.end))...)
+        s.assembler.Emit(<arch>.RET())
         return true, false
     }
 
-    jit[instr.NOP] = func(c *jitCompiler) (bool, bool) {
-        c.ip++
+    jit[instr.NOP] = func(s *jitSeg) (bool, bool) {
+        s.ip++
         return true, false
     }
 
-    jit[instr.I32_ADD] = func(c *jitCompiler) (bool, bool) {
-        c.ip++
+    jit[instr.I32_ADD] = func(s *jitSeg) (bool, bool) {
+        s.ip++
 
-        r1, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
+        r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
         if !ok {
             return false, false
         }
 
-        r0, ok := c.assembler.Take(asm.RegTypeInt, asm.Width32)
+        r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
         if !ok {
             return false, false
         }
 
-        dst := c.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-        c.assembler.Emit(<arch>.ADD(dst, r0, r1))
-        c.assembler.Push(dst)
+        dst := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
+        s.assembler.Emit(<arch>.ADD(dst, r0, r1))
+        s.Push(dst)
 
         return true, false
     }

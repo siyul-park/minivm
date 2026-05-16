@@ -76,7 +76,15 @@ func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
 	}
 	nReturns := sig.MaxReturns()
 	nScratch := len(sig.Scratch)
+	// Default initial header is derived from the longest output site so
+	// callees that omit an X15 write still produce a usable header layout
+	// for trivial single-exit functions.
 	rregs := sig.Returns(sig.Entry)
+	for _, regs := range sig.Outputs {
+		if len(regs) > len(rregs) {
+			rregs = regs
+		}
+	}
 	if len(rregs) < nReturns {
 		rregs = append(rregs, make([]asm.PReg, nReturns-len(rregs))...)
 	}

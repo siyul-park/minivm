@@ -16,11 +16,17 @@ func TestAssembler_Compile(t *testing.T) {
 
 	a := asm.NewAssembler(Arch, buffer)
 
-	left, _ := a.Take(asm.RegTypeInt, asm.Width64)
-	right, _ := a.Take(asm.RegTypeInt, asm.Width64)
+	left := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	right := a.NewVReg(asm.RegTypeInt, asm.Width64)
 	result := a.NewVReg(asm.RegTypeInt, asm.Width64)
-	a.Push(result)
+	require.NoError(t, a.Pin(left, asm.NewPReg(0, asm.RegTypeInt, asm.Width64)))
+	require.NoError(t, a.Pin(right, asm.NewPReg(1, asm.RegTypeInt, asm.Width64)))
+	require.NoError(t, a.Pin(result, asm.NewPReg(0, asm.RegTypeInt, asm.Width64)))
+	a.Site(0, []asm.VReg{right, left})
+
 	a.Emit(ADD(result, left, right))
+	idx := a.Index()
+	a.Site(idx, []asm.VReg{result})
 	a.Emit(RET())
 
 	obj, err := a.Compile()
