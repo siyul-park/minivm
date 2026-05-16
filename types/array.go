@@ -1,14 +1,17 @@
 package types
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
-type I32Array []I32
+type I32Array []int32
 
-type I64Array []I64
+type I64Array []int64
 
-type F32Array []F32
+type F32Array []float32
 
-type F64Array []F64
+type F64Array []float64
 
 type Array struct {
 	Typ   *ArrayType
@@ -34,21 +37,29 @@ var _ Value = F64Array(nil)
 var _ Traceable = (*Array)(nil)
 var _ Type = (*ArrayType)(nil)
 
-func (a I32Array) Kind() Kind     { return KindRef }
-func (a I32Array) Type() Type     { return TypeI32Array }
-func (a I32Array) String() string { return joinElems(a.Type(), []I32(a)) }
+func (a I32Array) Kind() Kind { return KindRef }
+func (a I32Array) Type() Type { return TypeI32Array }
+func (a I32Array) String() string {
+	return formatSlice(TypeI32Array, len(a), func(i int) string { return fmt.Sprintf("%d", a[i]) })
+}
 
-func (a I64Array) Kind() Kind     { return KindRef }
-func (a I64Array) Type() Type     { return TypeI64Array }
-func (a I64Array) String() string { return joinElems(a.Type(), []I64(a)) }
+func (a I64Array) Kind() Kind { return KindRef }
+func (a I64Array) Type() Type { return TypeI64Array }
+func (a I64Array) String() string {
+	return formatSlice(TypeI64Array, len(a), func(i int) string { return fmt.Sprintf("%d", a[i]) })
+}
 
-func (a F32Array) Kind() Kind     { return KindRef }
-func (a F32Array) Type() Type     { return TypeF32Array }
-func (a F32Array) String() string { return joinElems(a.Type(), []F32(a)) }
+func (a F32Array) Kind() Kind { return KindRef }
+func (a F32Array) Type() Type { return TypeF32Array }
+func (a F32Array) String() string {
+	return formatSlice(TypeF32Array, len(a), func(i int) string { return fmt.Sprintf("%g", a[i]) })
+}
 
-func (a F64Array) Kind() Kind     { return KindRef }
-func (a F64Array) Type() Type     { return TypeF64Array }
-func (a F64Array) String() string { return joinElems(a.Type(), []F64(a)) }
+func (a F64Array) Kind() Kind { return KindRef }
+func (a F64Array) Type() Type { return TypeF64Array }
+func (a F64Array) String() string {
+	return formatSlice(TypeF64Array, len(a), func(i int) string { return fmt.Sprintf("%g", a[i]) })
+}
 
 func NewArray(typ *ArrayType, elems ...Boxed) *Array {
 	return &Array{Typ: typ, Elems: elems}
@@ -66,6 +77,20 @@ func (a *Array) Refs() []Ref {
 		}
 	}
 	return refs
+}
+
+func formatSlice(typ Type, n int, elem func(int) string) string {
+	var sb strings.Builder
+	sb.WriteString(typ.String())
+	sb.WriteByte('{')
+	for i := range n {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(elem(i))
+	}
+	sb.WriteByte('}')
+	return sb.String()
 }
 
 func joinElems[T interface{ String() string }](typ Type, elems []T) string {

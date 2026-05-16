@@ -1,26 +1,23 @@
 package types
 
 import (
+	"math"
 	"strings"
-	"unsafe"
 )
 
 type Struct struct {
 	Typ  *StructType
-	Data []byte
+	Data []uint64
 }
 
 type StructType struct {
 	Fields []StructField
-	Size   int
 }
 
 type StructField struct {
-	Name   string
-	Type   Type
-	Kind   Kind
-	Size   int
-	Offset int
+	Name string
+	Type Type
+	Kind Kind
 }
 
 var _ Traceable = (*Struct)(nil)
@@ -35,7 +32,7 @@ func FieldWithName(name string) func(*StructField) {
 func NewStruct(typ *StructType, fields ...Boxed) *Struct {
 	s := &Struct{
 		Typ:  typ,
-		Data: make([]byte, typ.Size),
+		Data: make([]uint64, len(typ.Fields)),
 	}
 	for i, field := range fields {
 		s.SetField(i, field)
@@ -44,40 +41,55 @@ func NewStruct(typ *StructType, fields ...Boxed) *Struct {
 }
 
 func (s *Struct) FieldByName(name string) Boxed {
-	f, ok := s.Typ.FieldByName(name)
-	if !ok {
-		return 0
+	for i, f := range s.Typ.Fields {
+		if f.Name == name {
+			return s.field(i, f)
+		}
 	}
-	return s.field(f)
+	return 0
 }
 
 func (s *Struct) Field(i int) Boxed {
-	typ := s.Typ
-	if i < 0 || i >= len(typ.Fields) {
+	if i < 0 || i >= len(s.Typ.Fields) {
 		return 0
 	}
-	return s.field(typ.Fields[i])
+	return s.field(i, s.Typ.Fields[i])
 }
 
 func (s *Struct) SetField(i int, val Boxed) {
-	typ := s.Typ
-	if i < 0 || i >= len(typ.Fields) {
+	if i < 0 || i >= len(s.Typ.Fields) {
 		return
 	}
-	f := typ.Fields[i]
-	offset := f.Offset
-	switch f.Kind {
+	switch s.Typ.Fields[i].Kind {
 	case KindI32:
-		*(*int32)(unsafe.Pointer(&s.Data[offset])) = val.I32()
+		s.Data[i] = uint64(uint32(val.I32()))
 	case KindI64:
-		*(*int64)(unsafe.Pointer(&s.Data[offset])) = val.I64()
+		s.Data[i] = uint64(val.I64())
 	case KindF32:
-		*(*float32)(unsafe.Pointer(&s.Data[offset])) = val.F32()
+		s.Data[i] = uint64(math.Float32bits(val.F32()))
 	case KindF64:
-		*(*float64)(unsafe.Pointer(&s.Data[offset])) = val.F64()
+		s.Data[i] = math.Float64bits(val.F64())
 	case KindRef:
-		*(*uint64)(unsafe.Pointer(&s.Data[offset])) = uint64(val)
+		s.Data[i] = uint64(val)
 	}
+}
+
+// Raw returns the raw 64-bit slot for field i without per-kind decoding.
+// Used by the interpreter when it needs the underlying bits (e.g. to box
+// an i64 through its sidetable, or to inspect a ref slot for retain/release).
+func (s *Struct) Raw(i int) uint64 {
+	if i < 0 || i >= len(s.Data) {
+		return 0
+	}
+	return s.Data[i]
+}
+
+// SetRaw writes raw 64-bit bits into slot i without per-kind encoding.
+func (s *Struct) SetRaw(i int, bits uint64) {
+	if i < 0 || i >= len(s.Data) {
+		return
+	}
+	s.Data[i] = bits
 }
 
 func (s *Struct) Kind() Kind {
@@ -96,7 +108,7 @@ func (s *Struct) String() string {
 		if i > 0 {
 			sb.WriteString(", ")
 		}
-		sb.WriteString(s.field(f).String())
+		sb.WriteString(s.field(i, f).String())
 	}
 	sb.WriteString("}")
 	return sb.String()
@@ -104,55 +116,38 @@ func (s *Struct) String() string {
 
 func (s *Struct) Refs() []Ref {
 	refs := make([]Ref, 0, len(s.Typ.Fields))
-	for _, f := range s.Typ.Fields {
-		if f.Kind == KindRef {
-			val := Boxed(*(*uint64)(unsafe.Pointer(&s.Data[f.Offset])))
-			if val.Kind() == KindRef {
-				refs = append(refs, Ref(val.Ref()))
-			}
+	for i, f := range s.Typ.Fields {
+		if f.Kind != KindRef {
+			continue
+		}
+		val := Boxed(s.Data[i])
+		if val.Kind() == KindRef {
+			refs = append(refs, Ref(val.Ref()))
 		}
 	}
 	return refs
 }
 
-func (s *Struct) field(f StructField) Boxed {
-	offset := f.Offset
+func (s *Struct) field(i int, f StructField) Boxed {
+	bits := s.Data[i]
 	switch f.Kind {
 	case KindI32:
-		return BoxI32(*(*int32)(unsafe.Pointer(&s.Data[offset])))
+		return BoxI32(int32(uint32(bits)))
 	case KindI64:
-		return BoxI64(*(*int64)(unsafe.Pointer(&s.Data[offset])))
+		return BoxI64(int64(bits))
 	case KindF32:
-		return BoxF32(*(*float32)(unsafe.Pointer(&s.Data[offset])))
+		return BoxF32(math.Float32frombits(uint32(bits)))
 	case KindF64:
-		return BoxF64(*(*float64)(unsafe.Pointer(&s.Data[offset])))
+		return BoxF64(math.Float64frombits(bits))
 	case KindRef:
-		return Boxed(*(*uint64)(unsafe.Pointer(&s.Data[offset])))
+		return Boxed(bits)
 	default:
 		return 0
 	}
 }
 
 func NewStructType(fields ...StructField) *StructType {
-	offset := 0
-	for i := 0; i < len(fields); i++ {
-		fields[i].Offset = offset
-		align := fields[i].Size
-		if align > 0 && offset%align != 0 {
-			offset += align - (offset % align)
-		}
-		offset += fields[i].Size
-	}
-	align := 1
-	for _, f := range fields {
-		if f.Size > align {
-			align = f.Size
-		}
-	}
-	if offset%align != 0 {
-		offset += align - (offset % align)
-	}
-	return &StructType{Fields: fields, Size: offset}
+	return &StructType{Fields: fields}
 }
 
 func (t *StructType) FieldByName(name string) (StructField, bool) {
@@ -218,15 +213,9 @@ func (t *StructType) Equals(other Type) bool {
 }
 
 func NewStructField(typ Type, opts ...func(field *StructField)) StructField {
-	kind := typ.Kind()
-	size := kind.Size()
-	if kind == KindRef {
-		size = 8
-	}
 	s := StructField{
 		Type: typ,
-		Kind: kind,
-		Size: size,
+		Kind: typ.Kind(),
 	}
 	for _, opt := range opts {
 		opt(&s)

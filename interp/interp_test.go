@@ -1319,7 +1319,7 @@ var tests = []struct {
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI32)),
 		),
-		values: []types.Value{types.I32Array{types.I32(1)}},
+		values: []types.Value{types.I32Array{1}},
 	},
 	{
 		program: program.New(
@@ -1330,7 +1330,7 @@ var tests = []struct {
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI64)),
 		),
-		values: []types.Value{types.I64Array{types.I64(1)}},
+		values: []types.Value{types.I64Array{1}},
 	},
 	{
 		program: program.New(
@@ -1341,7 +1341,7 @@ var tests = []struct {
 			},
 			program.WithTypes(types.NewArrayType(types.TypeF32)),
 		),
-		values: []types.Value{types.F32Array{types.F32(42)}},
+		values: []types.Value{types.F32Array{42}},
 	},
 	{
 		program: program.New(
@@ -1352,7 +1352,7 @@ var tests = []struct {
 			},
 			program.WithTypes(types.NewArrayType(types.TypeF64)),
 		),
-		values: []types.Value{types.F64Array{types.F64(42)}},
+		values: []types.Value{types.F64Array{42}},
 	},
 	{
 		program: program.New(
