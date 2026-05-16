@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"math"
 	"sort"
 	"time"
 	"unsafe"
@@ -499,29 +500,53 @@ func (s *jitSeg) kind(r asm.Reg) (types.Kind, bool) {
 }
 
 func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpreter) {
-	regs := fn.Params(sig.Entry)
+	pregs := fn.Params(sig.Entry)
 	if len(sig.Scratch) <= rNext {
 		return nil
 	}
-
-	kinds := make([]types.Kind, len(regs))
-	for i, r := range regs {
+	pkinds := make([]types.Kind, len(pregs))
+	for i, r := range pregs {
 		kind, ok := c.kind(r)
 		if !ok {
 			return nil
 		}
-		kinds[i] = kind
+		pkinds[i] = kind
 	}
 
+	rregs := fn.Returns(sig.Entry)
+	rkinds := make([]types.Kind, len(rregs))
+	for i, r := range rregs {
+		kind, ok := c.kind(r)
+		if !ok {
+			return nil
+		}
+		rkinds[i] = kind
+	}
+
+	params := make([]asm.Value, len(pregs))
+	scratch := make([]uint64, len(sig.Scratch))
+
 	return func(i *Interpreter) {
-		base := i.sp - len(regs)
-		params := make([]asm.Value, len(regs))
-		for j := range regs {
-			bits := i.unbox64(i.stack[base+j])
-			params[j] = c.value(bits, kinds[j])
+		base := i.sp - len(pregs)
+		for j := range pregs {
+			v := i.stack[base+j]
+			switch pkinds[j] {
+			case types.KindI32:
+				params[j] = asm.I32(uint32(v.I32()))
+			case types.KindI64:
+				params[j] = asm.I64(uint64(i.unboxI64(v)))
+			case types.KindF32:
+				params[j] = asm.F32(math.Float32bits(v.F32()))
+			case types.KindF64:
+				params[j] = asm.F64(math.Float64bits(v.F64()))
+			default:
+				params[j] = asm.I64(uint64(v))
+			}
 		}
 
-		scratch := make([]uint64, len(sig.Scratch))
+		for j := range scratch {
+			scratch[j] = 0
+		}
 		c.scratch(i, scratch)
 
 		rets, err := fn.Call(params, &scratch)
@@ -530,7 +555,25 @@ func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpret
 		}
 
 		for j, val := range rets {
-			i.stack[base+j] = i.box64(val.Bits(), c.valueKind(val))
+			bits := val.Bits()
+			var kind types.Kind
+			if j < len(rkinds) {
+				kind = rkinds[j]
+			} else {
+				kind = c.valueKind(val)
+			}
+			switch kind {
+			case types.KindI32:
+				i.stack[base+j] = types.BoxI32(int32(bits))
+			case types.KindI64:
+				i.stack[base+j] = i.boxI64(int64(bits))
+			case types.KindF32:
+				i.stack[base+j] = types.BoxF32(math.Float32frombits(uint32(bits)))
+			case types.KindF64:
+				i.stack[base+j] = types.BoxF64(math.Float64frombits(bits))
+			default:
+				i.stack[base+j] = i.box64(bits, kind)
+			}
 		}
 		i.sp = base + len(rets)
 		i.frames[i.fp-1].ip = int(scratch[rNext])

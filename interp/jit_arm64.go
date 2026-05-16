@@ -43,7 +43,7 @@ func init() {
 		fallIP := s.ip + 3
 		s.ip += 3
 
-		r0, ok := s.assembler.Take(asm.RegTypeInt, asm.Width32)
+		cond, ok := s.assembler.Take(asm.RegTypeInt, asm.Width32)
 		if !ok {
 			return false, false
 		}
@@ -51,35 +51,29 @@ func init() {
 		targetLink := s.linkable(targetIP, false)
 		fallLink := s.linkable(fallIP, false)
 
-		if targetLink && fallLink {
-			s.assembler.Emit(arm64.CBNZLabel(r0, s.labels[targetIP]))
+		switch {
+		case targetLink && fallLink:
+			s.assembler.Emit(arm64.CBNZLabel(cond, s.labels[targetIP]))
 			s.assembler.Emit(arm64.BLabel(s.labels[fallIP]))
-			return true, true
-		}
-
-		if targetLink {
-			fallStubLabel := s.assembler.NewLabel()
-			s.assembler.Emit(arm64.CBZLabel(r0, fallStubLabel))
+		case targetLink:
+			stub := s.assembler.NewLabel()
+			s.assembler.Emit(arm64.CBZLabel(cond, stub))
 			s.assembler.Emit(arm64.BLabel(s.labels[targetIP]))
-			s.assembler.Bind(fallStubLabel)
+			s.assembler.Bind(stub)
 			s.ret(fallIP)
-			return true, true
-		}
-
-		if fallLink {
-			takenStubLabel := s.assembler.NewLabel()
-			s.assembler.Emit(arm64.CBNZLabel(r0, takenStubLabel))
+		case fallLink:
+			stub := s.assembler.NewLabel()
+			s.assembler.Emit(arm64.CBNZLabel(cond, stub))
 			s.assembler.Emit(arm64.BLabel(s.labels[fallIP]))
-			s.assembler.Bind(takenStubLabel)
+			s.assembler.Bind(stub)
 			s.ret(targetIP)
-			return true, true
+		default:
+			stub := s.assembler.NewLabel()
+			s.assembler.Emit(arm64.CBNZLabel(cond, stub))
+			s.ret(fallIP)
+			s.assembler.Bind(stub)
+			s.ret(targetIP)
 		}
-
-		takenStubLabel := s.assembler.NewLabel()
-		s.assembler.Emit(arm64.CBNZLabel(r0, takenStubLabel))
-		s.ret(fallIP)
-		s.assembler.Bind(takenStubLabel)
-		s.ret(targetIP)
 		return true, true
 	}
 
@@ -192,11 +186,10 @@ func init() {
 
 		for j := 0; j <= count; j++ {
 			s.assembler.Bind(stubLabels[j])
-			targetIP := targetIPs[j]
-			if s.linkable(targetIP, false) {
-				s.assembler.Emit(arm64.BLabel(s.labels[targetIP]))
+			if s.linkable(targetIPs[j], false) {
+				s.assembler.Emit(arm64.BLabel(s.labels[targetIPs[j]]))
 			} else {
-				s.ret(targetIP)
+				s.ret(targetIPs[j])
 			}
 		}
 		return true, true

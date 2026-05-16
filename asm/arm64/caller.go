@@ -21,6 +21,12 @@ type caller struct {
 	chunk   *asm.Chunk
 	sig     *asm.Signature
 	scratch []asm.PReg
+
+	header   uint64
+	argv     []uint64
+	rets     []asm.Value
+	nParams  int
+	nScratch int
 }
 
 var _ asm.Caller = (*caller)(nil)
@@ -68,10 +74,22 @@ func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
 				asm.ErrInvalidArgs, i, p, p.ID(), abiRegs)
 		}
 	}
+	nReturns := sig.MaxReturns()
+	nScratch := len(sig.Scratch)
+	rregs := sig.Returns(sig.Entry)
+	if len(rregs) < nReturns {
+		rregs = append(rregs, make([]asm.PReg, nReturns-len(rregs))...)
+	}
+
 	return &caller{
-		chunk:   chunk,
-		sig:     sig,
-		scratch: append([]asm.PReg(nil), sig.Scratch...),
+		chunk:    chunk,
+		sig:      sig,
+		scratch:  append([]asm.PReg(nil), sig.Scratch...),
+		header:   Header(params, rregs, nScratch),
+		argv:     make([]uint64, 1+nScratch+abiRegs),
+		rets:     make([]asm.Value, abiRegs),
+		nParams:  len(params),
+		nScratch: nScratch,
 	}, nil
 }
 
@@ -109,30 +127,17 @@ func (c *caller) Params(idx int) []asm.PReg  { return c.sig.Params(idx) }
 func (c *caller) Returns(idx int) []asm.PReg { return c.sig.Returns(idx) }
 
 func (c *caller) Call(params []asm.Value, rsv *[]uint64) ([]asm.Value, error) {
-	nParams := len(params)
-	nReturns := c.sig.MaxReturns()
-	nScratch := len(c.scratch)
-	slots := abiRegs
-
-	pregs := make([]asm.PReg, nParams)
-	for i, v := range params {
-		if i >= abiRegs {
-			return nil, fmt.Errorf("%w: too many params", asm.ErrTooManyParams)
-		}
-		pregs[i] = asm.NewPReg(uint8(i), v.RegType(), v.Width())
+	if len(params) > abiRegs {
+		return nil, fmt.Errorf("%w: too many params", asm.ErrTooManyParams)
 	}
 
-	rregs := c.sig.Returns(c.sig.Entry)
-	if len(rregs) < nReturns {
-		rregs = append(rregs, make([]asm.PReg, nReturns-len(rregs))...)
-	}
-
-	// argv layout: [ header | scratch×nScratch | values×slots ]
-	argv := make([]uint64, 1+nScratch+slots)
-	argv[0] = Header(pregs, rregs, nScratch)
+	nScratch := c.nScratch
+	argv := c.argv
+	// argv layout: [ header | scratch×nScratch | values×abiRegs ]
+	argv[0] = c.header
 
 	if rsv != nil && nScratch > 0 {
-		copy(argv[1:], (*rsv)[:min(nScratch, len(*rsv))])
+		copy(argv[1:1+nScratch], (*rsv)[:min(nScratch, len(*rsv))])
 	}
 	for i, v := range params {
 		argv[1+nScratch+i] = v.Bits()
@@ -141,11 +146,10 @@ func (c *caller) Call(params []asm.Value, rsv *[]uint64) ([]asm.Value, error) {
 	invoke(uintptr(c.chunk.Ptr()), uintptr(unsafe.Pointer(&argv[0])))
 
 	h := argv[0]
-	nReturns = int((h >> 8) & 0xFF)
-	if nReturns > slots {
-		return nil, fmt.Errorf("callee returned %d values but argv only has %d slots", nReturns, slots)
+	nReturns := int((h >> 8) & 0xFF)
+	if nReturns > abiRegs {
+		return nil, fmt.Errorf("callee returned %d values but argv only has %d slots", nReturns, abiRegs)
 	}
-
 	if rsv != nil && nScratch > 0 {
 		if len(*rsv) < nScratch {
 			*rsv = append(*rsv, make([]uint64, nScratch-len(*rsv))...)
@@ -155,7 +159,7 @@ func (c *caller) Call(params []asm.Value, rsv *[]uint64) ([]asm.Value, error) {
 
 	retTypes := uint8((h >> 32) & 0xFF)
 	retWidths := uint8((h >> 48) & 0xFF)
-	rets := make([]asm.Value, nReturns)
+	rets := c.rets[:nReturns]
 	for i, b := range argv[1+nScratch : 1+nScratch+nReturns] {
 		isFloat := retTypes&(1<<uint(i)) != 0
 		is64 := retWidths&(1<<uint(i)) != 0
