@@ -113,7 +113,7 @@ Violations can cause silent corruption or invalid execution.
 - JIT handlers must advance `c.ip` before every return path.
 - On type mismatch, return `false, false`; never coerce mismatched types.
 - Branch terminators return `true, true`.
-- Completed JIT segments emit when `count >= emit` default `4`; truncated segments emit only when `count > 4`.
+- Completed JIT segments emit when `count >= emit` default `8`; truncated and branch-terminated segments use the same cutoff.
 
 ### Executable Buffers
 

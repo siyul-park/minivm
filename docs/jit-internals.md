@@ -112,16 +112,16 @@ Mutable globals have no declared runtime kind. `GLOBAL_SET` / `GLOBAL_TEE` infer
 
 Emit rules:
 
-- completed segment emits when `count >= c.cutoff` (default `4`) and segment range has a profile sample
-- direct-successor entry segments and branch terminators may emit with one compilable instruction so linked branches can enter them
-- truncated segment stopped by unsupported opcode emits only when `count > 4` and range from start to last compiled IP is sampled
+- completed segment emits when `count >= c.cutoff` (default `8`) and segment range has a profile sample
+- direct-successor entry segments may emit with one compilable instruction so linked branches can enter them
+- truncated or branch-terminated segments emit only when they meet the same cutoff and range from start to last compiled IP is sampled
 - otherwise `assembler.Abort()` discards segment state
 - JIT makes one function-level compilation attempt; no later tier-up/retry
 
 ```text
 block [A B X C D E F]  X unsupported
 -> [A B]        count=2  abort
--> [C D E F]    count=4  emit only if completed and sampled
+-> [C D E F]    count=4  abort unless forced by a linked branch or lowered cutoff
 ```
 
 ## Two-Pass Linking

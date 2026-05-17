@@ -29,6 +29,7 @@ type Interpreter struct {
 	heap      []types.Value
 	free      []int
 	rc        []int
+	fr        *frame
 	fp        int
 	sp        int
 	tick      int
@@ -38,10 +39,12 @@ type Interpreter struct {
 }
 
 type frame struct {
-	code []func(*Interpreter)
-	addr int
-	ip   int
-	bp   int
+	code    []func(*Interpreter)
+	addr    int
+	ip      int
+	bp      int
+	returns int
+	release bool
 }
 
 type option struct {
@@ -119,7 +122,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		heap:      128,
 		tick:      128,
 		threshold: 4096,
-		cutoff:    4,
+		cutoff:    8,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -203,17 +206,30 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	}
 
 	i.instrs[0] = prog.Code
-	i.code[0] = c.Compile(prog.Code)
+	i.code[0] = c.Compile(prog.Code, nil)
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
+			var locals []types.Kind
+			if fn.Typ != nil {
+				if size := len(fn.Typ.Params) + len(fn.Locals); size != 0 {
+					locals = make([]types.Kind, 0, size)
+					for _, typ := range fn.Typ.Params {
+						locals = append(locals, typ.Kind())
+					}
+					for _, typ := range fn.Locals {
+						locals = append(locals, typ.Kind())
+					}
+				}
+			}
 			i.instrs[j+1] = fn.Code
-			i.code[j+1] = c.Compile(fn.Code)
+			i.code[j+1] = c.Compile(fn.Code, locals)
 		}
 	}
 
 	i.frames[0].code = i.code[0]
 	i.frames[0].bp = i.sp
 	i.fp = 1
+	i.fr = &i.frames[0]
 	i.retain(0)
 
 	return i
@@ -228,7 +244,7 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 		}
 	}()
 
-	f := i.frame()
+	f := i.fr
 	code := f.code
 	tick := i.tick
 	fuel := i.fuel
@@ -266,7 +282,7 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 
 		code[f.ip](i)
 
-		f = &i.frames[i.fp-1]
+		f = i.fr
 		code = f.code
 	}
 	return nil
@@ -450,6 +466,7 @@ func (i *Interpreter) Reset() {
 	}
 	i.frames[i.fp-1].bp = i.sp
 	i.frames[i.fp-1].ip = 0
+	i.fr = &i.frames[i.fp-1]
 
 	for idx := range i.globals {
 		i.globals[idx] = 0
@@ -504,7 +521,7 @@ func (i *Interpreter) jit(addr int) error {
 }
 
 func (i *Interpreter) frame() *frame {
-	return &i.frames[i.fp-1]
+	return i.fr
 }
 
 func (i *Interpreter) error(r any) error {

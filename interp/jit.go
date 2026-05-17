@@ -394,6 +394,10 @@ func (s *jitSeg) run() (*asm.RelocObject, int, bool) {
 
 		count++
 		if stop {
+			if ok, skip := s.can(s.ip, count); !ok {
+				s.abort(skip)
+				return nil, s.ip, true
+			}
 			return s.compileAt(s.ip, true)
 		}
 	}
@@ -640,7 +644,7 @@ func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpret
 			}
 		}
 		i.sp = base + len(rets)
-		i.frames[i.fp-1].ip = int(scratch[rNext])
+		i.fr.ip = int(scratch[rNext])
 	}
 }
 

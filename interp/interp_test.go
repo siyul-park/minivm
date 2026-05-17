@@ -2779,7 +2779,7 @@ func TestInterpreter_Run(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				p := prof.New()
 				tt.profile(p)
-				i := New(tt.program, WithProfile(p), WithCutoff(4))
+				i := New(tt.program, WithProfile(p), WithCutoff(1))
 				defer i.Close()
 
 				err := i.jit(tt.jitAddr(i))
