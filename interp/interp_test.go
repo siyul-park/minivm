@@ -2321,6 +2321,60 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, uint64(1), opcodes[byte(instr.DROP)])
 	})
 
+	t.Run("fused local get arithmetic returns from callee", func(t *testing.T) {
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 41),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(
+				types.NewFunctionBuilder(&types.FunctionType{
+					Params:  []types.Type{types.TypeI32},
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.I32_ADD),
+					instr.New(instr.RETURN),
+				).Build(),
+			),
+		), WithThreshold(-1))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.NoError(t, err)
+
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(42), v)
+	})
+
+	t.Run("fused local get arithmetic preserves divide by zero", func(t *testing.T) {
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(
+				types.NewFunctionBuilder(&types.FunctionType{
+					Params:  []types.Type{types.TypeI32},
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.I32_DIV_S),
+					instr.New(instr.RETURN),
+				).Build(),
+			),
+		), WithThreshold(-1))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.ErrorIs(t, err, ErrDivideByZero)
+	})
+
 	t.Run("hook cancel is observed on next tick", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
