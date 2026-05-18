@@ -384,6 +384,13 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				f.ip += 2
 			}
 		}
+		if idx < len(c.locals) && c.locals[idx] == types.KindRef {
+			if fused := c.fuseRef(func(i *Interpreter) types.Boxed {
+				return i.stack[i.fr.bp+idx]
+			}, 2); fused != nil {
+				return fused
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
@@ -541,6 +548,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					}
 				default:
 				}
+			}
+			if fused := c.fuseRef(func(_ *Interpreter) types.Boxed { return val }, 3); fused != nil {
+				return fused
 			}
 			return func(i *Interpreter) {
 				if i.sp == len(i.stack) {
@@ -2158,6 +2168,31 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 		}
 	},
+	instr.ARRAY_LEN: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			var n int32
+			switch arr := i.unbox(i.stack[i.sp-1]).(type) {
+			case types.I32Array:
+				n = int32(len(arr))
+			case types.I64Array:
+				n = int32(len(arr))
+			case types.F32Array:
+				n = int32(len(arr))
+			case types.F64Array:
+				n = int32(len(arr))
+			case *types.Array:
+				n = int32(len(arr.Elems))
+			default:
+				panic(ErrTypeMismatch)
+			}
+			i.stack[i.sp-1] = types.BoxI32(n)
+			i.frames[i.fp-1].ip++
+		}
+	},
 	instr.ARRAY_GET: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
@@ -2546,6 +2581,24 @@ func init() {
 	}
 }
 
+func (c *threadedCompiler) Compile(code []byte, locals []types.Kind) []func(*Interpreter) {
+	c.code = code
+	c.locals = locals
+	c.ip = 0
+
+	compiled := make([]func(*Interpreter), len(code))
+	for c.ip < len(code) {
+		ip := c.ip
+		compiled[ip] = threaded[code[ip]](c)
+	}
+	for ip := 0; ip < len(code); ip++ {
+		if compiled[ip] == nil {
+			compiled[ip] = unknown
+		}
+	}
+	return compiled
+}
+
 // fuseI32 peeks the next opcode and, when it is a fusible I32 binary op,
 // consumes it and returns a closure that loads the right-hand operand via
 // `load`, pops the left-hand from the stack, and pushes the result.
@@ -2819,20 +2872,260 @@ func (c *threadedCompiler) fuseF64(load func(*Interpreter) float64, advance int)
 	}
 }
 
-func (c *threadedCompiler) Compile(code []byte, locals []types.Kind) []func(*Interpreter) {
-	c.code = code
-	c.locals = locals
-	c.ip = 0
-
-	compiled := make([]func(*Interpreter), len(code))
-	for c.ip < len(code) {
-		ip := c.ip
-		compiled[ip] = threaded[code[ip]](c)
+// fuseRef peeks ahead of the current ip and, when the layout matches a
+// ref-producer chain ending in a ref op, returns a single fused closure for
+// the whole sequence. `loadRef` reads the boxed ref produced by the outer
+// instruction (LOCAL_GET ref / CONST_GET ref); `advance` is the byte width of
+// that producer. Mirrors the shape of fuseI32 / fuseI64 / fuseF32 / fuseF64.
+func (c *threadedCompiler) fuseRef(loadRef func(*Interpreter) types.Boxed, advance int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
 	}
-	for ip := 0; ip < len(code); ip++ {
-		if compiled[ip] == nil {
-			compiled[ip] = unknown
+
+	// 1-arg ref op directly after the outer producer.
+	var op1 func(*Interpreter, types.Boxed) types.Boxed
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.STRING_LEN:
+		op1 = func(i *Interpreter, b types.Boxed) types.Boxed {
+			s, _ := i.heap[b.Ref()].(types.String)
+			return types.BoxI32(int32(len(s)))
+		}
+	case instr.ARRAY_LEN:
+		op1 = func(i *Interpreter, b types.Boxed) types.Boxed {
+			switch arr := i.heap[b.Ref()].(type) {
+			case types.I32Array:
+				return types.BoxI32(int32(len(arr)))
+			case types.I64Array:
+				return types.BoxI32(int32(len(arr)))
+			case types.F32Array:
+				return types.BoxI32(int32(len(arr)))
+			case types.F64Array:
+				return types.BoxI32(int32(len(arr)))
+			case *types.Array:
+				return types.BoxI32(int32(len(arr.Elems)))
+			default:
+				panic(ErrTypeMismatch)
+			}
+		}
+	case instr.REF_IS_NULL:
+		op1 = func(_ *Interpreter, b types.Boxed) types.Boxed {
+			return types.BoxBool(b.Ref() == 0)
 		}
 	}
-	return compiled
+	if op1 != nil {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			i.stack[i.sp] = op1(i, loadRef(i))
+			i.sp++
+			i.fr.ip += advance + 1
+		}
+	}
+
+	// Peek a second loader. Either i32 (for ARRAY_GET / STRUCT_GET) or ref
+	// (for 2-arg ref ops). Only one of loadIdx / loadRef2 is populated.
+	var (
+		loadIdx  func(*Interpreter) int32
+		loadRef2 func(*Interpreter) types.Boxed
+		w2       int
+	)
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.LOCAL_GET:
+		if c.ip+1 >= len(c.code) {
+			return nil
+		}
+		lidx := int(c.code[c.ip+1])
+		if lidx < 0 || lidx >= len(c.locals) {
+			return nil
+		}
+		switch c.locals[lidx] {
+		case types.KindI32:
+			loadIdx = func(i *Interpreter) int32 {
+				return i.stack[i.fr.bp+lidx].I32()
+			}
+			w2 = 2
+		case types.KindRef:
+			loadRef2 = func(i *Interpreter) types.Boxed {
+				return i.stack[i.fr.bp+lidx]
+			}
+			w2 = 2
+		}
+	case instr.CONST_GET:
+		if c.ip+2 >= len(c.code) {
+			return nil
+		}
+		cidx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+		if cidx < 0 || cidx >= len(c.constants) {
+			return nil
+		}
+		v := c.constants[cidx]
+		switch v.Kind() {
+		case types.KindI32:
+			iv := v.I32()
+			loadIdx = func(_ *Interpreter) int32 { return iv }
+			w2 = 3
+		case types.KindRef:
+			loadRef2 = func(_ *Interpreter) types.Boxed { return v }
+			w2 = 3
+		}
+	case instr.I32_CONST:
+		if c.ip+4 >= len(c.code) {
+			return nil
+		}
+		v := *(*int32)(unsafe.Pointer(&c.code[c.ip+1]))
+		loadIdx = func(_ *Interpreter) int32 { return v }
+		w2 = 5
+	}
+	if w2 == 0 {
+		return nil
+	}
+	opIp := c.ip + w2
+	if opIp >= len(c.code) {
+		return nil
+	}
+
+	// (ref) ; (i32 loader) ; ARRAY_GET | STRUCT_GET
+	if loadIdx != nil {
+		var op2 func(i *Interpreter, ref types.Boxed, idx int) types.Boxed
+		switch instr.Opcode(c.code[opIp]) {
+		case instr.ARRAY_GET:
+			op2 = func(i *Interpreter, ref types.Boxed, idx int) types.Boxed {
+				addr := ref.Ref()
+				switch arr := i.heap[addr].(type) {
+				case types.I32Array:
+					if idx < 0 || idx >= len(arr) {
+						panic(ErrIndexOutOfRange)
+					}
+					return types.BoxI32(int32(arr[idx]))
+				case types.I64Array:
+					if idx < 0 || idx >= len(arr) {
+						panic(ErrIndexOutOfRange)
+					}
+					return i.boxI64(int64(arr[idx]))
+				case types.F32Array:
+					if idx < 0 || idx >= len(arr) {
+						panic(ErrIndexOutOfRange)
+					}
+					return types.BoxF32(float32(arr[idx]))
+				case types.F64Array:
+					if idx < 0 || idx >= len(arr) {
+						panic(ErrIndexOutOfRange)
+					}
+					return types.BoxF64(float64(arr[idx]))
+				case *types.Array:
+					if idx < 0 || idx >= len(arr.Elems) {
+						panic(ErrIndexOutOfRange)
+					}
+					elem := arr.Elems[idx]
+					if elem.Kind() == types.KindRef {
+						i.retain(elem.Ref())
+					}
+					return elem
+				default:
+					panic(ErrTypeMismatch)
+				}
+			}
+		case instr.STRUCT_GET:
+			op2 = func(i *Interpreter, ref types.Boxed, idx int) types.Boxed {
+				s, ok := i.heap[ref.Ref()].(*types.Struct)
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+				if idx < 0 || idx >= len(s.Typ.Fields) {
+					panic(ErrSegmentationFault)
+				}
+				switch s.Typ.Fields[idx].Kind {
+				case types.KindI32, types.KindF32, types.KindF64:
+					return s.Field(idx)
+				case types.KindI64:
+					return i.boxI64(int64(s.Raw(idx)))
+				case types.KindRef:
+					v := types.Boxed(s.Raw(idx))
+					if v.Kind() == types.KindRef {
+						i.retain(v.Ref())
+					}
+					return v
+				default:
+					panic(ErrTypeMismatch)
+				}
+			}
+		}
+		if op2 != nil {
+			c.ip = opIp + 1
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				i.stack[i.sp] = op2(i, loadRef(i), int(loadIdx(i)))
+				i.sp++
+				i.fr.ip += advance + w2 + 1
+			}
+		}
+	}
+
+	// (ref) ; (ref loader) ; 2-arg ref op
+	if loadRef2 != nil {
+		var op2 func(*Interpreter, types.Boxed, types.Boxed) types.Boxed
+		switch instr.Opcode(c.code[opIp]) {
+		case instr.REF_EQ:
+			op2 = func(_ *Interpreter, a, b types.Boxed) types.Boxed {
+				return types.BoxBool(a == b)
+			}
+		case instr.REF_NE:
+			op2 = func(_ *Interpreter, a, b types.Boxed) types.Boxed {
+				return types.BoxBool(a != b)
+			}
+		case instr.STRING_EQ:
+			op2 = func(i *Interpreter, a, b types.Boxed) types.Boxed {
+				sa, _ := i.heap[a.Ref()].(types.String)
+				sb, _ := i.heap[b.Ref()].(types.String)
+				return types.BoxBool(sa == sb)
+			}
+		case instr.STRING_NE:
+			op2 = func(i *Interpreter, a, b types.Boxed) types.Boxed {
+				sa, _ := i.heap[a.Ref()].(types.String)
+				sb, _ := i.heap[b.Ref()].(types.String)
+				return types.BoxBool(sa != sb)
+			}
+		case instr.STRING_LT:
+			op2 = func(i *Interpreter, a, b types.Boxed) types.Boxed {
+				sa, _ := i.heap[a.Ref()].(types.String)
+				sb, _ := i.heap[b.Ref()].(types.String)
+				return types.BoxBool(sa < sb)
+			}
+		case instr.STRING_GT:
+			op2 = func(i *Interpreter, a, b types.Boxed) types.Boxed {
+				sa, _ := i.heap[a.Ref()].(types.String)
+				sb, _ := i.heap[b.Ref()].(types.String)
+				return types.BoxBool(sa > sb)
+			}
+		case instr.STRING_LE:
+			op2 = func(i *Interpreter, a, b types.Boxed) types.Boxed {
+				sa, _ := i.heap[a.Ref()].(types.String)
+				sb, _ := i.heap[b.Ref()].(types.String)
+				return types.BoxBool(sa <= sb)
+			}
+		case instr.STRING_GE:
+			op2 = func(i *Interpreter, a, b types.Boxed) types.Boxed {
+				sa, _ := i.heap[a.Ref()].(types.String)
+				sb, _ := i.heap[b.Ref()].(types.String)
+				return types.BoxBool(sa >= sb)
+			}
+		}
+		if op2 != nil {
+			c.ip = opIp + 1
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				i.stack[i.sp] = op2(i, loadRef(i), loadRef2(i))
+				i.sp++
+				i.fr.ip += advance + w2 + 1
+			}
+		}
+	}
+
+	return nil
 }
