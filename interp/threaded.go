@@ -384,6 +384,23 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				f.ip += 2
 			}
 		}
+		if idx < len(c.locals) && c.locals[idx] == types.KindRef {
+			loadRef := func(i *Interpreter) types.Boxed {
+				return i.stack[i.fr.bp+idx]
+			}
+			if fused := c.fuse1ArgRefOp(loadRef, 2); fused != nil {
+				return fused
+			}
+			if fused := c.fuseArrayGet(loadRef, 2); fused != nil {
+				return fused
+			}
+			if fused := c.fuseStructGet(loadRef, 2); fused != nil {
+				return fused
+			}
+			if fused := c.fuse2ArgRefOp(loadRef, 2); fused != nil {
+				return fused
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
@@ -541,6 +558,19 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					}
 				default:
 				}
+			}
+			loadRef := func(_ *Interpreter) types.Boxed { return val }
+			if fused := c.fuse1ArgRefOp(loadRef, 3); fused != nil {
+				return fused
+			}
+			if fused := c.fuseArrayGet(loadRef, 3); fused != nil {
+				return fused
+			}
+			if fused := c.fuseStructGet(loadRef, 3); fused != nil {
+				return fused
+			}
+			if fused := c.fuse2ArgRefOp(loadRef, 3); fused != nil {
+				return fused
 			}
 			return func(i *Interpreter) {
 				if i.sp == len(i.stack) {
@@ -2158,6 +2188,31 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 		}
 	},
+	instr.ARRAY_LEN: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			var n int32
+			switch arr := i.unbox(i.stack[i.sp-1]).(type) {
+			case types.I32Array:
+				n = int32(len(arr))
+			case types.I64Array:
+				n = int32(len(arr))
+			case types.F32Array:
+				n = int32(len(arr))
+			case types.F64Array:
+				n = int32(len(arr))
+			case *types.Array:
+				n = int32(len(arr.Elems))
+			default:
+				panic(ErrTypeMismatch)
+			}
+			i.stack[i.sp-1] = types.BoxI32(n)
+			i.frames[i.fp-1].ip++
+		}
+	},
 	instr.ARRAY_GET: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
@@ -2816,6 +2871,329 @@ func (c *threadedCompiler) fuseF64(load func(*Interpreter) float64, advance int)
 		lhs := i.stack[i.sp-1].F64()
 		i.stack[i.sp-1] = op(i, lhs, rhs)
 		i.fr.ip += advance + 1
+	}
+}
+
+// peekRefLoader looks at the instruction at `ip` and, if it is a LOCAL_GET of a
+// Ref-typed local or a CONST_GET of a Ref-typed constant, returns a closure
+// that loads the boxed ref onto the stack-less, the byte width of the loader,
+// and true. The returned closure does not retain — callers must not push the
+// ref onto the stack permanently.
+func (c *threadedCompiler) peekRefLoader(ip int) (func(*Interpreter) types.Boxed, int, bool) {
+	if ip >= len(c.code) {
+		return nil, 0, false
+	}
+	switch instr.Opcode(c.code[ip]) {
+	case instr.LOCAL_GET:
+		if ip+1 >= len(c.code) {
+			return nil, 0, false
+		}
+		idx := int(c.code[ip+1])
+		if idx < 0 || idx >= len(c.locals) || c.locals[idx] != types.KindRef {
+			return nil, 0, false
+		}
+		return func(i *Interpreter) types.Boxed {
+			return i.stack[i.fr.bp+idx]
+		}, 2, true
+	case instr.CONST_GET:
+		if ip+2 >= len(c.code) {
+			return nil, 0, false
+		}
+		cidx := int(*(*uint16)(unsafe.Pointer(&c.code[ip+1])))
+		if cidx < 0 || cidx >= len(c.constants) || c.constants[cidx].Kind() != types.KindRef {
+			return nil, 0, false
+		}
+		val := c.constants[cidx]
+		return func(_ *Interpreter) types.Boxed {
+			return val
+		}, 3, true
+	}
+	return nil, 0, false
+}
+
+// peekI32Loader is the I32 counterpart of peekRefLoader. It accepts LOCAL_GET
+// of an I32-typed local, CONST_GET of an I32-typed constant, and the literal
+// I32_CONST instruction.
+func (c *threadedCompiler) peekI32Loader(ip int) (func(*Interpreter) int32, int, bool) {
+	if ip >= len(c.code) {
+		return nil, 0, false
+	}
+	switch instr.Opcode(c.code[ip]) {
+	case instr.LOCAL_GET:
+		if ip+1 >= len(c.code) {
+			return nil, 0, false
+		}
+		idx := int(c.code[ip+1])
+		if idx < 0 || idx >= len(c.locals) || c.locals[idx] != types.KindI32 {
+			return nil, 0, false
+		}
+		return func(i *Interpreter) int32 {
+			return i.stack[i.fr.bp+idx].I32()
+		}, 2, true
+	case instr.CONST_GET:
+		if ip+2 >= len(c.code) {
+			return nil, 0, false
+		}
+		cidx := int(*(*uint16)(unsafe.Pointer(&c.code[ip+1])))
+		if cidx < 0 || cidx >= len(c.constants) || c.constants[cidx].Kind() != types.KindI32 {
+			return nil, 0, false
+		}
+		v := c.constants[cidx].I32()
+		return func(_ *Interpreter) int32 { return v }, 3, true
+	case instr.I32_CONST:
+		if ip+4 >= len(c.code) {
+			return nil, 0, false
+		}
+		v := *(*int32)(unsafe.Pointer(&c.code[ip+1]))
+		return func(_ *Interpreter) int32 { return v }, 5, true
+	}
+	return nil, 0, false
+}
+
+// fuse1ArgRefOp peeks the next opcode and, when it is a 1-arg ref op
+// (STRING_LEN, ARRAY_LEN, REF_IS_NULL), consumes it and returns a closure that
+// loads the ref via `loadRef`, applies the op directly against the heap value,
+// and pushes the result. `advance` is the producer's instruction width.
+func (c *threadedCompiler) fuse1ArgRefOp(loadRef func(*Interpreter) types.Boxed, advance int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	var op func(*Interpreter, types.Boxed) types.Boxed
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.STRING_LEN:
+		op = func(i *Interpreter, b types.Boxed) types.Boxed {
+			s, _ := i.heap[b.Ref()].(types.String)
+			return types.BoxI32(int32(len(s)))
+		}
+	case instr.ARRAY_LEN:
+		op = func(i *Interpreter, b types.Boxed) types.Boxed {
+			switch arr := i.heap[b.Ref()].(type) {
+			case types.I32Array:
+				return types.BoxI32(int32(len(arr)))
+			case types.I64Array:
+				return types.BoxI32(int32(len(arr)))
+			case types.F32Array:
+				return types.BoxI32(int32(len(arr)))
+			case types.F64Array:
+				return types.BoxI32(int32(len(arr)))
+			case *types.Array:
+				return types.BoxI32(int32(len(arr.Elems)))
+			default:
+				panic(ErrTypeMismatch)
+			}
+		}
+	case instr.REF_IS_NULL:
+		op = func(_ *Interpreter, b types.Boxed) types.Boxed {
+			return types.BoxBool(b.Ref() == 0)
+		}
+	default:
+		return nil
+	}
+	c.ip++
+	return func(i *Interpreter) {
+		if i.sp == len(i.stack) {
+			panic(ErrStackOverflow)
+		}
+		i.stack[i.sp] = op(i, loadRef(i))
+		i.sp++
+		i.fr.ip += advance + 1
+	}
+}
+
+// fuse2ArgRefOp peeks the next loader and the op after it. When the layout is
+// (outer producer) ; (ref loader) ; (REF_EQ|REF_NE|STRING_EQ|NE|LT|GT|LE|GE),
+// consumes both consecutive ops and returns a single fused closure.
+func (c *threadedCompiler) fuse2ArgRefOp(loadRef1 func(*Interpreter) types.Boxed, advance int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	loadRef2, w2, ok := c.peekRefLoader(c.ip)
+	if !ok {
+		return nil
+	}
+	opIp := c.ip + w2
+	if opIp >= len(c.code) {
+		return nil
+	}
+	var op func(*Interpreter, types.Boxed, types.Boxed) types.Boxed
+	switch instr.Opcode(c.code[opIp]) {
+	case instr.REF_EQ:
+		op = func(_ *Interpreter, a, b types.Boxed) types.Boxed {
+			return types.BoxBool(a == b)
+		}
+	case instr.REF_NE:
+		op = func(_ *Interpreter, a, b types.Boxed) types.Boxed {
+			return types.BoxBool(a != b)
+		}
+	case instr.STRING_EQ:
+		op = func(i *Interpreter, a, b types.Boxed) types.Boxed {
+			sa, _ := i.heap[a.Ref()].(types.String)
+			sb, _ := i.heap[b.Ref()].(types.String)
+			return types.BoxBool(sa == sb)
+		}
+	case instr.STRING_NE:
+		op = func(i *Interpreter, a, b types.Boxed) types.Boxed {
+			sa, _ := i.heap[a.Ref()].(types.String)
+			sb, _ := i.heap[b.Ref()].(types.String)
+			return types.BoxBool(sa != sb)
+		}
+	case instr.STRING_LT:
+		op = func(i *Interpreter, a, b types.Boxed) types.Boxed {
+			sa, _ := i.heap[a.Ref()].(types.String)
+			sb, _ := i.heap[b.Ref()].(types.String)
+			return types.BoxBool(sa < sb)
+		}
+	case instr.STRING_GT:
+		op = func(i *Interpreter, a, b types.Boxed) types.Boxed {
+			sa, _ := i.heap[a.Ref()].(types.String)
+			sb, _ := i.heap[b.Ref()].(types.String)
+			return types.BoxBool(sa > sb)
+		}
+	case instr.STRING_LE:
+		op = func(i *Interpreter, a, b types.Boxed) types.Boxed {
+			sa, _ := i.heap[a.Ref()].(types.String)
+			sb, _ := i.heap[b.Ref()].(types.String)
+			return types.BoxBool(sa <= sb)
+		}
+	case instr.STRING_GE:
+		op = func(i *Interpreter, a, b types.Boxed) types.Boxed {
+			sa, _ := i.heap[a.Ref()].(types.String)
+			sb, _ := i.heap[b.Ref()].(types.String)
+			return types.BoxBool(sa >= sb)
+		}
+	default:
+		return nil
+	}
+	c.ip = opIp + 1
+	return func(i *Interpreter) {
+		if i.sp == len(i.stack) {
+			panic(ErrStackOverflow)
+		}
+		a := loadRef1(i)
+		b := loadRef2(i)
+		i.stack[i.sp] = op(i, a, b)
+		i.sp++
+		i.fr.ip += advance + w2 + 1
+	}
+}
+
+// fuseArrayGet peeks the next i32 loader and ARRAY_GET. When the layout is
+// (outer producer) ; (i32 loader) ; ARRAY_GET, consumes them and returns a
+// fused closure that loads the array ref, the index, performs the bounds and
+// type-switched element access, and pushes the result.
+func (c *threadedCompiler) fuseArrayGet(loadRef func(*Interpreter) types.Boxed, advance int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	loadIdx, w2, ok := c.peekI32Loader(c.ip)
+	if !ok {
+		return nil
+	}
+	opIp := c.ip + w2
+	if opIp >= len(c.code) {
+		return nil
+	}
+	if instr.Opcode(c.code[opIp]) != instr.ARRAY_GET {
+		return nil
+	}
+	c.ip = opIp + 1
+	return func(i *Interpreter) {
+		if i.sp == len(i.stack) {
+			panic(ErrStackOverflow)
+		}
+		ref := loadRef(i)
+		idx := int(loadIdx(i))
+		addr := ref.Ref()
+		var val types.Boxed
+		switch arr := i.heap[addr].(type) {
+		case types.I32Array:
+			if idx < 0 || idx >= len(arr) {
+				panic(ErrIndexOutOfRange)
+			}
+			val = types.BoxI32(int32(arr[idx]))
+		case types.I64Array:
+			if idx < 0 || idx >= len(arr) {
+				panic(ErrIndexOutOfRange)
+			}
+			val = i.boxI64(int64(arr[idx]))
+		case types.F32Array:
+			if idx < 0 || idx >= len(arr) {
+				panic(ErrIndexOutOfRange)
+			}
+			val = types.BoxF32(float32(arr[idx]))
+		case types.F64Array:
+			if idx < 0 || idx >= len(arr) {
+				panic(ErrIndexOutOfRange)
+			}
+			val = types.BoxF64(float64(arr[idx]))
+		case *types.Array:
+			if idx < 0 || idx >= len(arr.Elems) {
+				panic(ErrIndexOutOfRange)
+			}
+			elem := arr.Elems[idx]
+			if elem.Kind() == types.KindRef {
+				i.retain(elem.Ref())
+			}
+			val = elem
+		default:
+			panic(ErrTypeMismatch)
+		}
+		i.stack[i.sp] = val
+		i.sp++
+		i.fr.ip += advance + w2 + 1
+	}
+}
+
+// fuseStructGet mirrors fuseArrayGet for STRUCT_GET. The field kind is read
+// from the struct's runtime type metadata.
+func (c *threadedCompiler) fuseStructGet(loadRef func(*Interpreter) types.Boxed, advance int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	loadIdx, w2, ok := c.peekI32Loader(c.ip)
+	if !ok {
+		return nil
+	}
+	opIp := c.ip + w2
+	if opIp >= len(c.code) {
+		return nil
+	}
+	if instr.Opcode(c.code[opIp]) != instr.STRUCT_GET {
+		return nil
+	}
+	c.ip = opIp + 1
+	return func(i *Interpreter) {
+		if i.sp == len(i.stack) {
+			panic(ErrStackOverflow)
+		}
+		ref := loadRef(i)
+		idx := int(loadIdx(i))
+		addr := ref.Ref()
+		s, ok := i.heap[addr].(*types.Struct)
+		if !ok {
+			panic(ErrTypeMismatch)
+		}
+		if idx < 0 || idx >= len(s.Typ.Fields) {
+			panic(ErrSegmentationFault)
+		}
+		field := s.Typ.Fields[idx]
+		var val types.Boxed
+		switch field.Kind {
+		case types.KindI32, types.KindF32, types.KindF64:
+			val = s.Field(idx)
+		case types.KindI64:
+			val = i.boxI64(int64(s.Raw(idx)))
+		case types.KindRef:
+			val = types.Boxed(s.Raw(idx))
+			if val.Kind() == types.KindRef {
+				i.retain(val.Ref())
+			}
+		default:
+			panic(ErrTypeMismatch)
+		}
+		i.stack[i.sp] = val
+		i.sp++
+		i.fr.ip += advance + w2 + 1
 	}
 }
 
