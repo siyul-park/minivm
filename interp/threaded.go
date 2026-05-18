@@ -385,7 +385,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 		}
 		if idx < len(c.locals) && c.locals[idx] == types.KindRef {
-			if fused := c.fuseRefOp(func(i *Interpreter) types.Boxed {
+			if fused := c.fuseRef(func(i *Interpreter) types.Boxed {
 				return i.stack[i.fr.bp+idx]
 			}, 2); fused != nil {
 				return fused
@@ -549,7 +549,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				default:
 				}
 			}
-			if fused := c.fuseRefOp(func(_ *Interpreter) types.Boxed { return val }, 3); fused != nil {
+			if fused := c.fuseRef(func(_ *Interpreter) types.Boxed { return val }, 3); fused != nil {
 				return fused
 			}
 			return func(i *Interpreter) {
@@ -2581,6 +2581,24 @@ func init() {
 	}
 }
 
+func (c *threadedCompiler) Compile(code []byte, locals []types.Kind) []func(*Interpreter) {
+	c.code = code
+	c.locals = locals
+	c.ip = 0
+
+	compiled := make([]func(*Interpreter), len(code))
+	for c.ip < len(code) {
+		ip := c.ip
+		compiled[ip] = threaded[code[ip]](c)
+	}
+	for ip := 0; ip < len(code); ip++ {
+		if compiled[ip] == nil {
+			compiled[ip] = unknown
+		}
+	}
+	return compiled
+}
+
 // fuseI32 peeks the next opcode and, when it is a fusible I32 binary op,
 // consumes it and returns a closure that loads the right-hand operand via
 // `load`, pops the left-hand from the stack, and pushes the result.
@@ -2854,12 +2872,12 @@ func (c *threadedCompiler) fuseF64(load func(*Interpreter) float64, advance int)
 	}
 }
 
-// fuseRefOp peeks ahead of the current ip and, when the layout matches a
+// fuseRef peeks ahead of the current ip and, when the layout matches a
 // ref-producer chain ending in a ref op, returns a single fused closure for
 // the whole sequence. `loadRef` reads the boxed ref produced by the outer
 // instruction (LOCAL_GET ref / CONST_GET ref); `advance` is the byte width of
 // that producer. Mirrors the shape of fuseI32 / fuseI64 / fuseF32 / fuseF64.
-func (c *threadedCompiler) fuseRefOp(loadRef func(*Interpreter) types.Boxed, advance int) func(*Interpreter) {
+func (c *threadedCompiler) fuseRef(loadRef func(*Interpreter) types.Boxed, advance int) func(*Interpreter) {
 	if c.precise || c.ip >= len(c.code) {
 		return nil
 	}
@@ -3110,22 +3128,4 @@ func (c *threadedCompiler) fuseRefOp(loadRef func(*Interpreter) types.Boxed, adv
 	}
 
 	return nil
-}
-
-func (c *threadedCompiler) Compile(code []byte, locals []types.Kind) []func(*Interpreter) {
-	c.code = code
-	c.locals = locals
-	c.ip = 0
-
-	compiled := make([]func(*Interpreter), len(code))
-	for c.ip < len(code) {
-		ip := c.ip
-		compiled[ip] = threaded[code[ip]](c)
-	}
-	for ip := 0; ip < len(code); ip++ {
-		if compiled[ip] == nil {
-			compiled[ip] = unknown
-		}
-	}
-	return compiled
 }
