@@ -332,6 +332,44 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 		}
 		if idx < len(c.locals) && c.locals[idx] != types.KindRef {
+			var fused func(*Interpreter)
+			switch c.locals[idx] {
+			case types.KindI32:
+				fused = c.fuseI32(func(i *Interpreter) int32 {
+					addr := i.fr.bp + idx
+					if addr > i.sp {
+						panic(ErrSegmentationFault)
+					}
+					return i.stack[addr].I32()
+				}, 2)
+			case types.KindI64:
+				fused = c.fuseI64(func(i *Interpreter) int64 {
+					addr := i.fr.bp + idx
+					if addr > i.sp {
+						panic(ErrSegmentationFault)
+					}
+					return i.stack[addr].I64()
+				}, 2)
+			case types.KindF32:
+				fused = c.fuseF32(func(i *Interpreter) float32 {
+					addr := i.fr.bp + idx
+					if addr > i.sp {
+						panic(ErrSegmentationFault)
+					}
+					return i.stack[addr].F32()
+				}, 2)
+			case types.KindF64:
+				fused = c.fuseF64(func(i *Interpreter) float64 {
+					addr := i.fr.bp + idx
+					if addr > i.sp {
+						panic(ErrSegmentationFault)
+					}
+					return i.stack[addr].F64()
+				}, 2)
+			}
+			if fused != nil {
+				return fused
+			}
 			return func(i *Interpreter) {
 				if i.sp == len(i.stack) {
 					panic(ErrStackOverflow)
@@ -514,6 +552,24 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				i.frames[i.fp-1].ip += 3
 			}
 		}
+		var fused func(*Interpreter)
+		switch val.Kind() {
+		case types.KindI32:
+			v := val.I32()
+			fused = c.fuseI32(func(*Interpreter) int32 { return v }, 3)
+		case types.KindI64:
+			v := val.I64()
+			fused = c.fuseI64(func(*Interpreter) int64 { return v }, 3)
+		case types.KindF32:
+			v := val.F32()
+			fused = c.fuseF32(func(*Interpreter) float32 { return v }, 3)
+		case types.KindF64:
+			v := val.F64()
+			fused = c.fuseF64(func(*Interpreter) float64 { return v }, 3)
+		}
+		if fused != nil {
+			return fused
+		}
 		return func(i *Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
@@ -627,8 +683,12 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		}
 	},
 	instr.I32_CONST: func(c *threadedCompiler) func(i *Interpreter) {
-		val := types.BoxI32(*(*int32)(unsafe.Pointer(&c.code[c.ip+1])))
+		raw := *(*int32)(unsafe.Pointer(&c.code[c.ip+1]))
+		val := types.BoxI32(raw)
 		c.ip += 5
+		if fused := c.fuseI32(func(*Interpreter) int32 { return raw }, 5); fused != nil {
+			return fused
+		}
 		return func(i *Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
@@ -1030,6 +1090,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.I64_CONST: func(c *threadedCompiler) func(i *Interpreter) {
 		val := int64(*(*uint64)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 9
+		if fused := c.fuseI64(func(*Interpreter) int64 { return val }, 9); fused != nil {
+			return fused
+		}
 		if types.IsBoxable(val) {
 			v := types.BoxI64(val)
 			return func(i *Interpreter) {
@@ -1390,8 +1453,12 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		}
 	},
 	instr.F32_CONST: func(c *threadedCompiler) func(i *Interpreter) {
-		val := types.BoxF32(*(*float32)(unsafe.Pointer(&c.code[c.ip+1])))
+		raw := *(*float32)(unsafe.Pointer(&c.code[c.ip+1]))
+		val := types.BoxF32(raw)
 		c.ip += 5
+		if fused := c.fuseF32(func(*Interpreter) float32 { return raw }, 5); fused != nil {
+			return fused
+		}
 		return func(i *Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
@@ -1590,8 +1657,12 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		}
 	},
 	instr.F64_CONST: func(c *threadedCompiler) func(i *Interpreter) {
-		val := types.BoxF64(*(*float64)(unsafe.Pointer(&c.code[c.ip+1])))
+		raw := *(*float64)(unsafe.Pointer(&c.code[c.ip+1]))
+		val := types.BoxF64(raw)
 		c.ip += 9
+		if fused := c.fuseF64(func(*Interpreter) float64 { return raw }, 9); fused != nil {
+			return fused
+		}
 		return func(i *Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
@@ -2472,6 +2543,279 @@ func init() {
 				return unknown
 			}
 		}
+	}
+}
+
+// fuseI32 peeks the next opcode and, when it is a fusible I32 binary op,
+// consumes it and returns a closure that loads the right-hand operand via
+// `load`, pops the left-hand from the stack, and pushes the result.
+// `advance` is the byte width of the producer instruction.
+func (c *threadedCompiler) fuseI32(load func(*Interpreter) int32, advance int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	var op func(_ *Interpreter, lhs, rhs int32) types.Boxed
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.I32_ADD:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxI32(a + b) }
+	case instr.I32_SUB:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxI32(a - b) }
+	case instr.I32_MUL:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxI32(a * b) }
+	case instr.I32_DIV_S:
+		op = func(_ *Interpreter, a, b int32) types.Boxed {
+			if b == 0 {
+				panic(ErrDivideByZero)
+			}
+			return types.BoxI32(a / b)
+		}
+	case instr.I32_DIV_U:
+		op = func(_ *Interpreter, a, b int32) types.Boxed {
+			if b == 0 {
+				panic(ErrDivideByZero)
+			}
+			return types.BoxI32(int32(uint32(a) / uint32(b)))
+		}
+	case instr.I32_REM_S:
+		op = func(_ *Interpreter, a, b int32) types.Boxed {
+			if b == 0 {
+				panic(ErrDivideByZero)
+			}
+			return types.BoxI32(a % b)
+		}
+	case instr.I32_REM_U:
+		op = func(_ *Interpreter, a, b int32) types.Boxed {
+			if b == 0 {
+				panic(ErrDivideByZero)
+			}
+			return types.BoxI32(int32(uint32(a) % uint32(b)))
+		}
+	case instr.I32_SHL:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxI32(a << (b & 0x1F)) }
+	case instr.I32_SHR_S:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxI32(a >> (b & 0x1F)) }
+	case instr.I32_SHR_U:
+		op = func(_ *Interpreter, a, b int32) types.Boxed {
+			return types.BoxI32(int32(uint32(a) >> (b & 0x1F)))
+		}
+	case instr.I32_XOR:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxI32(a ^ b) }
+	case instr.I32_AND:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxI32(a & b) }
+	case instr.I32_OR:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxI32(a | b) }
+	case instr.I32_EQ:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxBool(a == b) }
+	case instr.I32_NE:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxBool(a != b) }
+	case instr.I32_LT_S:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxBool(a < b) }
+	case instr.I32_LT_U:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxBool(uint32(a) < uint32(b)) }
+	case instr.I32_GT_S:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxBool(a > b) }
+	case instr.I32_GT_U:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxBool(uint32(a) > uint32(b)) }
+	case instr.I32_LE_S:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxBool(a <= b) }
+	case instr.I32_LE_U:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxBool(uint32(a) <= uint32(b)) }
+	case instr.I32_GE_S:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxBool(a >= b) }
+	case instr.I32_GE_U:
+		op = func(_ *Interpreter, a, b int32) types.Boxed { return types.BoxBool(uint32(a) >= uint32(b)) }
+	default:
+		return nil
+	}
+	c.ip++
+	return func(i *Interpreter) {
+		if i.sp == 0 {
+			panic(ErrStackUnderflow)
+		}
+		rhs := load(i)
+		lhs := i.stack[i.sp-1].I32()
+		i.stack[i.sp-1] = op(i, lhs, rhs)
+		i.fr.ip += advance + 1
+	}
+}
+
+// fuseI64 mirrors fuseI32 for 64-bit integer ops. The left-hand operand uses
+// unboxI64 (releasing any heap-boxed I64 reference) and the result uses
+// boxI64 (allocating only when the value is out of the boxable range).
+func (c *threadedCompiler) fuseI64(load func(*Interpreter) int64, advance int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	var op func(i *Interpreter, lhs, rhs int64) types.Boxed
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.I64_ADD:
+		op = func(i *Interpreter, a, b int64) types.Boxed { return i.boxI64(a + b) }
+	case instr.I64_SUB:
+		op = func(i *Interpreter, a, b int64) types.Boxed { return i.boxI64(a - b) }
+	case instr.I64_MUL:
+		op = func(i *Interpreter, a, b int64) types.Boxed { return i.boxI64(a * b) }
+	case instr.I64_DIV_S:
+		op = func(i *Interpreter, a, b int64) types.Boxed {
+			if b == 0 {
+				panic(ErrDivideByZero)
+			}
+			return i.boxI64(a / b)
+		}
+	case instr.I64_DIV_U:
+		op = func(i *Interpreter, a, b int64) types.Boxed {
+			if b == 0 {
+				panic(ErrDivideByZero)
+			}
+			return i.boxI64(int64(uint64(a) / uint64(b)))
+		}
+	case instr.I64_REM_S:
+		op = func(i *Interpreter, a, b int64) types.Boxed {
+			if b == 0 {
+				panic(ErrDivideByZero)
+			}
+			return i.boxI64(a % b)
+		}
+	case instr.I64_REM_U:
+		op = func(i *Interpreter, a, b int64) types.Boxed {
+			if b == 0 {
+				panic(ErrDivideByZero)
+			}
+			return i.boxI64(int64(uint64(a) % uint64(b)))
+		}
+	case instr.I64_SHL:
+		op = func(i *Interpreter, a, b int64) types.Boxed { return i.boxI64(a << (b & 0x3F)) }
+	case instr.I64_SHR_S:
+		op = func(i *Interpreter, a, b int64) types.Boxed { return i.boxI64(a >> (b & 0x3F)) }
+	case instr.I64_SHR_U:
+		op = func(i *Interpreter, a, b int64) types.Boxed {
+			return i.boxI64(int64(uint64(a) >> (b & 0x3F)))
+		}
+	case instr.I64_EQ:
+		op = func(_ *Interpreter, a, b int64) types.Boxed { return types.BoxBool(a == b) }
+	case instr.I64_NE:
+		op = func(_ *Interpreter, a, b int64) types.Boxed { return types.BoxBool(a != b) }
+	case instr.I64_LT_S:
+		op = func(_ *Interpreter, a, b int64) types.Boxed { return types.BoxBool(a < b) }
+	case instr.I64_LT_U:
+		op = func(_ *Interpreter, a, b int64) types.Boxed { return types.BoxBool(uint64(a) < uint64(b)) }
+	case instr.I64_GT_S:
+		op = func(_ *Interpreter, a, b int64) types.Boxed { return types.BoxBool(a > b) }
+	case instr.I64_GT_U:
+		op = func(_ *Interpreter, a, b int64) types.Boxed { return types.BoxBool(uint64(a) > uint64(b)) }
+	case instr.I64_LE_S:
+		op = func(_ *Interpreter, a, b int64) types.Boxed { return types.BoxBool(a <= b) }
+	case instr.I64_LE_U:
+		op = func(_ *Interpreter, a, b int64) types.Boxed { return types.BoxBool(uint64(a) <= uint64(b)) }
+	case instr.I64_GE_S:
+		op = func(_ *Interpreter, a, b int64) types.Boxed { return types.BoxBool(a >= b) }
+	case instr.I64_GE_U:
+		op = func(_ *Interpreter, a, b int64) types.Boxed { return types.BoxBool(uint64(a) >= uint64(b)) }
+	default:
+		return nil
+	}
+	c.ip++
+	return func(i *Interpreter) {
+		if i.sp == 0 {
+			panic(ErrStackUnderflow)
+		}
+		rhs := load(i)
+		lhs := i.unboxI64(i.stack[i.sp-1])
+		i.stack[i.sp-1] = op(i, lhs, rhs)
+		i.fr.ip += advance + 1
+	}
+}
+
+// fuseF32 mirrors fuseI32 for 32-bit floating-point ops.
+func (c *threadedCompiler) fuseF32(load func(*Interpreter) float32, advance int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	var op func(_ *Interpreter, lhs, rhs float32) types.Boxed
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.F32_ADD:
+		op = func(_ *Interpreter, a, b float32) types.Boxed { return types.BoxF32(a + b) }
+	case instr.F32_SUB:
+		op = func(_ *Interpreter, a, b float32) types.Boxed { return types.BoxF32(a - b) }
+	case instr.F32_MUL:
+		op = func(_ *Interpreter, a, b float32) types.Boxed { return types.BoxF32(a * b) }
+	case instr.F32_DIV:
+		op = func(_ *Interpreter, a, b float32) types.Boxed {
+			if b == 0 {
+				panic(ErrDivideByZero)
+			}
+			return types.BoxF32(a / b)
+		}
+	case instr.F32_EQ:
+		op = func(_ *Interpreter, a, b float32) types.Boxed { return types.BoxBool(a == b) }
+	case instr.F32_NE:
+		op = func(_ *Interpreter, a, b float32) types.Boxed { return types.BoxBool(a != b) }
+	case instr.F32_LT:
+		op = func(_ *Interpreter, a, b float32) types.Boxed { return types.BoxBool(a < b) }
+	case instr.F32_GT:
+		op = func(_ *Interpreter, a, b float32) types.Boxed { return types.BoxBool(a > b) }
+	case instr.F32_LE:
+		op = func(_ *Interpreter, a, b float32) types.Boxed { return types.BoxBool(a <= b) }
+	case instr.F32_GE:
+		op = func(_ *Interpreter, a, b float32) types.Boxed { return types.BoxBool(a >= b) }
+	default:
+		return nil
+	}
+	c.ip++
+	return func(i *Interpreter) {
+		if i.sp == 0 {
+			panic(ErrStackUnderflow)
+		}
+		rhs := load(i)
+		lhs := i.stack[i.sp-1].F32()
+		i.stack[i.sp-1] = op(i, lhs, rhs)
+		i.fr.ip += advance + 1
+	}
+}
+
+// fuseF64 mirrors fuseI32 for 64-bit floating-point ops.
+func (c *threadedCompiler) fuseF64(load func(*Interpreter) float64, advance int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	var op func(_ *Interpreter, lhs, rhs float64) types.Boxed
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.F64_ADD:
+		op = func(_ *Interpreter, a, b float64) types.Boxed { return types.BoxF64(a + b) }
+	case instr.F64_SUB:
+		op = func(_ *Interpreter, a, b float64) types.Boxed { return types.BoxF64(a - b) }
+	case instr.F64_MUL:
+		op = func(_ *Interpreter, a, b float64) types.Boxed { return types.BoxF64(a * b) }
+	case instr.F64_DIV:
+		op = func(_ *Interpreter, a, b float64) types.Boxed {
+			if b == 0 {
+				panic(ErrDivideByZero)
+			}
+			return types.BoxF64(a / b)
+		}
+	case instr.F64_EQ:
+		op = func(_ *Interpreter, a, b float64) types.Boxed { return types.BoxBool(a == b) }
+	case instr.F64_NE:
+		op = func(_ *Interpreter, a, b float64) types.Boxed { return types.BoxBool(a != b) }
+	case instr.F64_LT:
+		op = func(_ *Interpreter, a, b float64) types.Boxed { return types.BoxBool(a < b) }
+	case instr.F64_GT:
+		op = func(_ *Interpreter, a, b float64) types.Boxed { return types.BoxBool(a > b) }
+	case instr.F64_LE:
+		op = func(_ *Interpreter, a, b float64) types.Boxed { return types.BoxBool(a <= b) }
+	case instr.F64_GE:
+		op = func(_ *Interpreter, a, b float64) types.Boxed { return types.BoxBool(a >= b) }
+	default:
+		return nil
+	}
+	c.ip++
+	return func(i *Interpreter) {
+		if i.sp == 0 {
+			panic(ErrStackUnderflow)
+		}
+		rhs := load(i)
+		lhs := i.stack[i.sp-1].F64()
+		i.stack[i.sp-1] = op(i, lhs, rhs)
+		i.fr.ip += advance + 1
 	}
 }
 
