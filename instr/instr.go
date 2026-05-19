@@ -8,16 +8,6 @@ import (
 
 type Instruction []byte
 
-// S16 returns v sign-extended from 16 bits.
-func S16(v uint64) int {
-	return int(int16(uint16(v)))
-}
-
-// ParseI16 reads a little-endian signed 16-bit value from code[offset:].
-func ParseI16(code []byte, offset int) int {
-	return int(int16(uint16(code[offset]) | uint16(code[offset+1])<<8))
-}
-
 func New(op Opcode, operands ...uint64) Instruction {
 	typ, ok := types[op]
 	if !ok {

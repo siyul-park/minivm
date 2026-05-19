@@ -83,7 +83,7 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error)
 
 			switch inst.Opcode() {
 			case instr.BR, instr.BR_IF:
-				target := read + instr.S16(inst.Operand(0)) + inst.Width()
+				target := read + instr.ReadI16(inst.Operand(0)) + inst.Width()
 				for target >= 0 && target < len(offsets) && offsets[target] == -1 {
 					target++
 				}
@@ -96,7 +96,7 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error)
 				operands := inst.Operands()
 				count := int(operands[0])
 				for j := 0; j <= count; j++ {
-					target := read + instr.S16(operands[j+1]) + width
+					target := read + instr.ReadI16(operands[j+1]) + width
 					for target >= 0 && target < len(offsets) && offsets[target] == -1 {
 						target++
 					}

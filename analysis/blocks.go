@@ -43,7 +43,7 @@ func (p *BasicBlocksPass) Run(m *pass.Manager) ([]*BasicBlock, error) {
 				offsets = append(offsets, next)
 			}
 		case instr.BR, instr.BR_IF:
-			offset := ip + inst.Width() + instr.S16(inst.Operand(0))
+			offset := ip + inst.Width() + instr.ReadI16(inst.Operand(0))
 			if offset < 0 || offset >= len(fn.Code) {
 				return nil, invalidJumpError(ip, offset)
 			}
@@ -55,13 +55,13 @@ func (p *BasicBlocksPass) Run(m *pass.Manager) ([]*BasicBlock, error) {
 			operands := inst.Operands()
 			count := int(operands[0])
 			for j := range count {
-				offset := ip + inst.Width() + instr.S16(operands[j+1])
+				offset := ip + inst.Width() + instr.ReadI16(operands[j+1])
 				if offset < 0 || offset >= len(fn.Code) {
 					return nil, invalidJumpError(ip, offset)
 				}
 				offsets = append(offsets, offset)
 			}
-			offset := ip + inst.Width() + instr.S16(operands[len(operands)-1])
+			offset := ip + inst.Width() + instr.ReadI16(operands[len(operands)-1])
 			if offset < 0 || offset >= len(fn.Code) {
 				return nil, invalidJumpError(ip, offset)
 			}
@@ -103,7 +103,7 @@ func (p *BasicBlocksPass) Run(m *pass.Manager) ([]*BasicBlock, error) {
 		switch inst.Opcode() {
 		case instr.UNREACHABLE, instr.RETURN:
 		case instr.BR, instr.BR_IF:
-			offset := ip + inst.Width() + instr.S16(inst.Operand(0))
+			offset := ip + inst.Width() + instr.ReadI16(inst.Operand(0))
 			if !p.link(blocks, j, offset) {
 				return nil, invalidJumpError(ip, offset)
 			}
@@ -116,12 +116,12 @@ func (p *BasicBlocksPass) Run(m *pass.Manager) ([]*BasicBlock, error) {
 			operands := inst.Operands()
 			count := int(operands[0])
 			for k := range count {
-				offset := ip + instr.S16(operands[k+1]) + width
+				offset := ip + instr.ReadI16(operands[k+1]) + width
 				if !p.link(blocks, j, offset) {
 					return nil, invalidJumpError(ip, offset)
 				}
 			}
-			offset := ip + instr.S16(operands[len(operands)-1]) + width
+			offset := ip + instr.ReadI16(operands[len(operands)-1]) + width
 			if !p.link(blocks, j, offset) {
 				return nil, invalidJumpError(ip, offset)
 			}

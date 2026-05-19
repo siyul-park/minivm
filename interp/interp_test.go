@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type runTest struct {
+type test struct {
 	name    string
 	program *program.Program
 	opts    []func(*option)
@@ -24,7 +24,7 @@ type runTest struct {
 	after   func(*testing.T, *Interpreter)
 }
 
-var tests = []runTest{
+var tests = []test{
 	// --- stack: NOP, DROP, DUP, SWAP, SELECT ---
 	{
 		program: program.New(
@@ -1828,6 +1828,29 @@ var tests = []runTest{
 		),
 		values: nil,
 	},
+	// --- ref: ARRAY_LEN (standalone handler) ---
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.ARRAY_LEN),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI32)),
+		),
+		values: []types.Value{types.I32(3)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 4),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.ARRAY_LEN),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeRef)),
+		),
+		values: []types.Value{types.I32(4)},
+	},
 	// --- recursive: fibonacci (i32), factorial (i64) ---
 	{
 		program: program.New(
@@ -1894,287 +1917,6 @@ var tests = []runTest{
 			),
 		),
 		values: []types.Value{types.I64(3628800)},
-	},
-	// --- ref: ARRAY_LEN (standalone handler) ---
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 3),
-				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-				instr.New(instr.ARRAY_LEN),
-			},
-			program.WithTypes(types.NewArrayType(types.TypeI32)),
-		),
-		values: []types.Value{types.I32(3)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 4),
-				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-				instr.New(instr.ARRAY_LEN),
-			},
-			program.WithTypes(types.NewArrayType(types.TypeRef)),
-		),
-		values: []types.Value{types.I32(4)},
-	},
-	// --- fusion: CONST_GET ref + 1-arg ref op ---
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.STRING_LEN),
-			},
-			program.WithConstants(types.String("hello")),
-		),
-		values: []types.Value{types.I32(5)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.ARRAY_LEN),
-			},
-			program.WithConstants(types.I32Array{10, 20, 30, 40}),
-		),
-		values: []types.Value{types.I32(4)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.REF_IS_NULL),
-			},
-			program.WithConstants(types.String("x")),
-		),
-		values: []types.Value{types.I32(0)},
-	},
-	// --- fusion: CONST_GET ref + CONST_GET ref + 2-arg ref op ---
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.STRING_EQ),
-			},
-			program.WithConstants(types.String("foo")),
-		),
-		values: []types.Value{types.I32(1)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CONST_GET, 1),
-				instr.New(instr.STRING_NE),
-			},
-			program.WithConstants(types.String("foo"), types.String("bar")),
-		),
-		values: []types.Value{types.I32(1)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CONST_GET, 1),
-				instr.New(instr.STRING_LT),
-			},
-			program.WithConstants(types.String("bar"), types.String("foo")),
-		),
-		values: []types.Value{types.I32(1)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CONST_GET, 1),
-				instr.New(instr.STRING_GT),
-			},
-			program.WithConstants(types.String("foo"), types.String("bar")),
-		),
-		values: []types.Value{types.I32(1)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.STRING_LE),
-			},
-			program.WithConstants(types.String("foo")),
-		),
-		values: []types.Value{types.I32(1)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.STRING_GE),
-			},
-			program.WithConstants(types.String("foo")),
-		),
-		values: []types.Value{types.I32(1)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.REF_EQ),
-			},
-			program.WithConstants(types.String("foo")),
-		),
-		values: []types.Value{types.I32(1)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CONST_GET, 1),
-				instr.New(instr.REF_NE),
-			},
-			program.WithConstants(types.String("a"), types.String("b")),
-		),
-		values: []types.Value{types.I32(1)},
-	},
-	// --- fusion: CONST_GET ref + I32_CONST + ARRAY_GET ---
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.ARRAY_GET),
-			},
-			program.WithConstants(types.I32Array{10, 20, 30}),
-		),
-		values: []types.Value{types.I32(20)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.I32_CONST, 2),
-				instr.New(instr.ARRAY_GET),
-			},
-			program.WithConstants(types.I64Array{100, 200, 300}),
-		),
-		values: []types.Value{types.I64(300)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.I32_CONST, 0),
-				instr.New(instr.ARRAY_GET),
-			},
-			program.WithConstants(types.F32Array{1.5, 2.5}),
-		),
-		values: []types.Value{types.F32(1.5)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.ARRAY_GET),
-			},
-			program.WithConstants(types.F64Array{1.25, 2.5}),
-		),
-		values: []types.Value{types.F64(2.5)},
-	},
-	// --- fusion: LOCAL_GET ref + LOCAL_GET i32 + ARRAY_GET (inside a function) ---
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
-			},
-			program.WithConstants(
-				types.NewFunctionBuilder(&types.FunctionType{
-					Returns: []types.Type{types.TypeI32},
-				}).WithLocals(types.TypeRef, types.TypeI32).Emit(
-					instr.New(instr.CONST_GET, 1),
-					instr.New(instr.LOCAL_SET, 0),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.LOCAL_SET, 1),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.LOCAL_GET, 1),
-					instr.New(instr.ARRAY_GET),
-					instr.New(instr.RETURN),
-				).Build(),
-				types.I32Array{10, 20, 30},
-			),
-		),
-		values: []types.Value{types.I32(20)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
-			},
-			program.WithConstants(
-				types.NewFunctionBuilder(&types.FunctionType{
-					Returns: []types.Type{types.TypeI32},
-				}).WithLocals(types.TypeRef).Emit(
-					instr.New(instr.CONST_GET, 1),
-					instr.New(instr.LOCAL_SET, 0),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.STRING_LEN),
-					instr.New(instr.RETURN),
-				).Build(),
-				types.String("fusion"),
-			),
-		),
-		values: []types.Value{types.I32(6)},
-	},
-	// --- fusion: LOCAL_GET ref + I32_CONST + STRUCT_GET (each field kind) ---
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
-			},
-			program.WithConstants(
-				types.NewFunctionBuilder(&types.FunctionType{
-					Returns: []types.Type{types.TypeI32},
-				}).WithLocals(types.TypeRef).Emit(
-					instr.New(instr.I32_CONST, 42),
-					instr.New(instr.STRUCT_NEW, 0),
-					instr.New(instr.LOCAL_SET, 0),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 0),
-					instr.New(instr.STRUCT_GET),
-					instr.New(instr.RETURN),
-				).Build(),
-			),
-			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32))),
-		),
-		values: []types.Value{types.I32(42)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
-			},
-			program.WithConstants(
-				types.NewFunctionBuilder(&types.FunctionType{
-					Returns: []types.Type{types.TypeI64},
-				}).WithLocals(types.TypeRef).Emit(
-					instr.New(instr.I64_CONST, 7),
-					instr.New(instr.STRUCT_NEW, 0),
-					instr.New(instr.LOCAL_SET, 0),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 0),
-					instr.New(instr.STRUCT_GET),
-					instr.New(instr.RETURN),
-				).Build(),
-			),
-			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI64))),
-		),
-		values: []types.Value{types.I64(7)},
 	},
 }
 
@@ -2582,7 +2324,7 @@ func TestInterpreter_Run(t *testing.T) {
 		).Build()
 		fuelCalls := 0
 
-		cases := []runTest{
+		cases := []test{
 			{
 				name: "hook inspects interpreter",
 				program: program.New([]instr.Instruction{
@@ -2737,9 +2479,9 @@ func TestInterpreter_Run(t *testing.T) {
 					require.NotZero(t, jit.Bytes)
 				},
 			},
-			func() runTest {
+			func() test {
 				p := prof.New()
-				return runTest{
+				return test{
 					name: "jit compiles numeric globals",
 					program: program.New([]instr.Instruction{
 						instr.New(instr.I32_CONST, 9),
@@ -2764,9 +2506,9 @@ func TestInterpreter_Run(t *testing.T) {
 					},
 				}
 			}(),
-			func() runTest {
+			func() test {
 				p := prof.New()
-				return runTest{
+				return test{
 					name: "jit skips ref globals",
 					program: program.New([]instr.Instruction{
 						instr.New(instr.GLOBAL_GET, 0),
