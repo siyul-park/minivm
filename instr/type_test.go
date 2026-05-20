@@ -175,6 +175,16 @@ func TestTypeOf(t *testing.T) {
 
 		{opcode: STRUCT_GET},
 		{opcode: STRUCT_SET},
+
+		{opcode: MAP_NEW},
+		{opcode: MAP_NEW_DEFAULT},
+
+		{opcode: MAP_LEN},
+		{opcode: MAP_GET},
+		{opcode: MAP_LOOKUP},
+		{opcode: MAP_SET},
+		{opcode: MAP_DELETE},
+		{opcode: MAP_CLEAR},
 	}
 
 	for _, tt := range tests {

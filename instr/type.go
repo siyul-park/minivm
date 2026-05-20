@@ -176,6 +176,16 @@ var types = map[Opcode]Type{
 
 	STRUCT_GET: {"struct.get", []int{}},
 	STRUCT_SET: {"struct.set", []int{}},
+
+	MAP_NEW:         {"map.new", []int{2}},
+	MAP_NEW_DEFAULT: {"map.new_default", []int{2}},
+
+	MAP_LEN:    {"map.len", []int{}},
+	MAP_GET:    {"map.get", []int{}},
+	MAP_LOOKUP: {"map.lookup", []int{}},
+	MAP_SET:    {"map.set", []int{}},
+	MAP_DELETE: {"map.delete", []int{}},
+	MAP_CLEAR:  {"map.clear", []int{}},
 }
 
 func TypeOf(op Opcode) Type {

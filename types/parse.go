@@ -9,7 +9,7 @@ import (
 
 // Parse parses a type string produced by Type.String().
 // Supported: "i32", "i64", "f32", "f64", "ref", "[]<elem>",
-// "func(params) returns", "struct {fields}".
+// "map[key]elem", "func(params) returns", "struct {fields}".
 func Parse(s string) (Type, error) {
 	s = strings.TrimSpace(s)
 	switch s {
@@ -23,6 +23,8 @@ func Parse(s string) (Type, error) {
 		return TypeF64, nil
 	case "ref":
 		return TypeRef, nil
+	case "string":
+		return TypeString, nil
 	}
 	if strings.HasPrefix(s, "[]") {
 		elem, err := Parse(s[2:])
@@ -31,6 +33,9 @@ func Parse(s string) (Type, error) {
 		}
 		return NewArrayType(elem), nil
 	}
+	if strings.HasPrefix(s, "map[") {
+		return parseMapType(s)
+	}
 	if strings.HasPrefix(s, "func(") {
 		return parseFunctionType(s)
 	}
@@ -38,6 +43,36 @@ func Parse(s string) (Type, error) {
 		return parseStructType(s)
 	}
 	return nil, fmt.Errorf("unknown type: %q", s)
+}
+
+func parseMapType(s string) (*MapType, error) {
+	end := -1
+	depth := 0
+	for i := len("map["); i < len(s); i++ {
+		switch s[i] {
+		case '[':
+			depth++
+		case ']':
+			if depth == 0 {
+				end = i
+				i = len(s)
+			} else {
+				depth--
+			}
+		}
+	}
+	if end < 0 || end == len("map[") || end == len(s)-1 {
+		return nil, fmt.Errorf("invalid map type: %q", s)
+	}
+	key, err := Parse(s[len("map["):end])
+	if err != nil {
+		return nil, fmt.Errorf("map key type: %w", err)
+	}
+	elem, err := Parse(s[end+1:])
+	if err != nil {
+		return nil, fmt.Errorf("map elem type: %w", err)
+	}
+	return NewMapType(key, elem), nil
 }
 
 func parseFunctionType(s string) (*FunctionType, error) {
