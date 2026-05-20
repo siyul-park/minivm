@@ -13,7 +13,7 @@ minivm gives your Go service a lightweight programmable runtime: assemble byteco
 go get github.com/siyul-park/minivm
 ```
 
-> Requires Go 1.25+. The VM core uses only the Go standard library; the CLI and tests use small Go module dependencies.
+> Requires Go 1.26.2+. The VM core uses only the Go standard library; the CLI and tests use small Go module dependencies.
 
 ---
 
