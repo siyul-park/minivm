@@ -2459,6 +2459,223 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.frames[i.fp-1].ip++
 		}
 	},
+	instr.MAP_NEW: func(c *threadedCompiler) func(i *Interpreter) {
+		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+		c.ip += 3
+		if idx < 0 || idx >= len(c.types) {
+			return func(i *Interpreter) {
+				panic(ErrSegmentationFault)
+			}
+		}
+		typ, ok := c.types[idx].(*types.MapType)
+		if !ok || !types.IsComparableMapKeyType(typ.Key) {
+			return func(i *Interpreter) {
+				panic(ErrTypeMismatch)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp < 1 {
+				panic(ErrStackUnderflow)
+			}
+			size := int(i.stack[i.sp-1].I32())
+			if size < 0 {
+				panic(ErrIndexOutOfRange)
+			}
+			if i.sp < size*2+1 {
+				panic(ErrStackUnderflow)
+			}
+			m := types.NewMapWithCapacity(typ, size)
+			base := i.sp - 1 - size*2
+			for j := 0; j < size; j++ {
+				key := i.stack[base+j*2]
+				val := i.stack[base+j*2+1]
+				i.mapSet(m, key, val)
+			}
+			i.sp = base + 1
+			i.stack[base] = types.BoxRef(i.alloc(m))
+			i.frames[i.fp-1].ip += 3
+		}
+	},
+	instr.MAP_NEW_DEFAULT: func(c *threadedCompiler) func(i *Interpreter) {
+		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+		c.ip += 3
+		if idx < 0 || idx >= len(c.types) {
+			return func(i *Interpreter) {
+				panic(ErrSegmentationFault)
+			}
+		}
+		typ, ok := c.types[idx].(*types.MapType)
+		if !ok || !types.IsComparableMapKeyType(typ.Key) {
+			return func(i *Interpreter) {
+				panic(ErrTypeMismatch)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp < 1 {
+				panic(ErrStackUnderflow)
+			}
+			capacity := int(i.stack[i.sp-1].I32())
+			if capacity < 0 {
+				panic(ErrIndexOutOfRange)
+			}
+			i.stack[i.sp-1] = types.BoxRef(i.alloc(types.NewMapWithCapacity(typ, capacity)))
+			i.frames[i.fp-1].ip += 3
+		}
+	},
+	instr.MAP_LEN: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 1 {
+				panic(ErrStackUnderflow)
+			}
+			ref := i.stack[i.sp-1]
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			m, ok := i.heap[addr].(*types.Map)
+			if !ok {
+				panic(ErrTypeMismatch)
+			}
+			i.release(addr)
+			i.stack[i.sp-1] = types.BoxI32(int32(len(m.Entries)))
+			i.frames[i.fp-1].ip++
+		}
+	},
+	instr.MAP_GET: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			keyVal := i.stack[i.sp-1]
+			ref := i.stack[i.sp-2]
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			m, ok := i.heap[addr].(*types.Map)
+			if !ok {
+				panic(ErrTypeMismatch)
+			}
+			key, _ := i.mapKey(m.Typ.Key, keyVal)
+			val, ok := m.Entries[key]
+			var result types.Boxed
+			if ok {
+				result = val.Value
+				if result.Kind() == types.KindRef {
+					i.retain(result.Ref())
+				}
+			} else {
+				result = i.zeroMapValue(m.Typ.Elem)
+			}
+			i.releaseMapKeyArg(m.Typ.Key, keyVal)
+			i.release(addr)
+			i.sp--
+			i.stack[i.sp-1] = result
+			i.frames[i.fp-1].ip++
+		}
+	},
+	instr.MAP_LOOKUP: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			keyVal := i.stack[i.sp-1]
+			ref := i.stack[i.sp-2]
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			m, ok := i.heap[addr].(*types.Map)
+			if !ok {
+				panic(ErrTypeMismatch)
+			}
+			key, _ := i.mapKey(m.Typ.Key, keyVal)
+			val, ok := m.Entries[key]
+			var result types.Boxed
+			if ok {
+				result = val.Value
+				if result.Kind() == types.KindRef {
+					i.retain(result.Ref())
+				}
+			} else {
+				result = i.zeroMapValue(m.Typ.Elem)
+			}
+			i.releaseMapKeyArg(m.Typ.Key, keyVal)
+			i.release(addr)
+			i.stack[i.sp-2] = result
+			i.stack[i.sp-1] = types.BoxBool(ok)
+			i.frames[i.fp-1].ip++
+		}
+	},
+	instr.MAP_SET: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 3 {
+				panic(ErrStackUnderflow)
+			}
+			val := i.stack[i.sp-1]
+			keyVal := i.stack[i.sp-2]
+			ref := i.stack[i.sp-3]
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			m, ok := i.heap[addr].(*types.Map)
+			if !ok {
+				panic(ErrTypeMismatch)
+			}
+			i.mapSet(m, keyVal, val)
+			i.release(addr)
+			i.sp -= 3
+			i.frames[i.fp-1].ip++
+		}
+	},
+	instr.MAP_DELETE: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			keyVal := i.stack[i.sp-1]
+			ref := i.stack[i.sp-2]
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			m, ok := i.heap[addr].(*types.Map)
+			if !ok {
+				panic(ErrTypeMismatch)
+			}
+			i.mapDelete(m, keyVal)
+			i.release(addr)
+			i.sp -= 2
+			i.frames[i.fp-1].ip++
+		}
+	},
+	instr.MAP_CLEAR: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 1 {
+				panic(ErrStackUnderflow)
+			}
+			ref := i.stack[i.sp-1]
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			m, ok := i.heap[addr].(*types.Map)
+			if !ok {
+				panic(ErrTypeMismatch)
+			}
+			i.mapClear(m)
+			i.release(addr)
+			i.sp--
+			i.frames[i.fp-1].ip++
+		}
+	},
 }
 
 var unknown = func(_ *Interpreter) {

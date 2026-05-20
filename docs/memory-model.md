@@ -35,6 +35,7 @@ RC is manually handled in every threaded closure touching refs.
 | `DUP` ref | `retain(addr)` |
 | `DROP` ref | `release(addr)` |
 | store ref to local/global | `retain(new)`, `release(old)` |
+| map insert/replace/delete/clear | transfer or release map-owned ref keys/values |
 
 `retain(addr)` increments `rc[addr]`.
 

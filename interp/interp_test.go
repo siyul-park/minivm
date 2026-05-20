@@ -1851,6 +1851,132 @@ var tests = []test{
 		),
 		values: []types.Value{types.I32(4)},
 	},
+	// --- map: MAP_NEW, MAP_NEW_DEFAULT, MAP_LEN, MAP_GET, MAP_LOOKUP, MAP_SET, MAP_DELETE, MAP_CLEAR ---
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.MAP_LEN),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 4),
+				instr.New(instr.MAP_NEW_DEFAULT, 0),
+				instr.New(instr.MAP_LEN),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_GET),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.MAP_GET),
+			},
+			program.WithConstants(types.String("key"), types.String("key")),
+			program.WithTypes(types.NewMapType(types.TypeString, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_LOOKUP),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(1), types.I32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.MAP_LOOKUP),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(0), types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.MAP_NEW_DEFAULT, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.MAP_SET),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.DUP),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_DELETE),
+				instr.New(instr.MAP_LEN),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.DUP),
+				instr.New(instr.MAP_CLEAR),
+				instr.New(instr.MAP_LEN),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(0)},
+	},
 	// --- recursive: fibonacci (i32), factorial (i64) ---
 	{
 		program: program.New(
@@ -3134,5 +3260,4 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			})
 		}
 	})
-
 }

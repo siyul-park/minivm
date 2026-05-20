@@ -12,7 +12,7 @@ jobs:
     strategy:
       matrix:
         os: [ ubuntu-24.04 ]
-        go: [ '1.25' ]
+        go: [ '1.26.2' ]
     name: Check ${{ matrix.os }} @ Go ${{ matrix.go }}
     runs-on: ${{ matrix.os }}
     steps:
@@ -30,8 +30,8 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ runner.os }}-${{ runner.go }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: ${{ runner.os }}-${{ runner.go }}-${{ hashFiles('**/go.sum') }}
+          key: ${{ runner.os }}-${{ matrix.go }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.go }}-${{ hashFiles('**/go.sum') }}
 
       - name: Initialize Project
         run: make init
@@ -55,7 +55,7 @@ jobs:
     strategy:
       matrix:
         os: [ ubuntu-24.04 ]
-        go: [ '1.25' ]
+        go: [ '1.26.2' ]
     name: Benchmark Comparison ${{ matrix.os }} @ Go ${{ matrix.go }}
     runs-on: ${{ matrix.os }}
     continue-on-error: true

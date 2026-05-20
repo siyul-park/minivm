@@ -121,6 +121,7 @@ Heap objects implement `types.Value`.
 | `types.String` | `KindRef` | `TypeString` | `Value` |
 | `*types.Array` | `KindRef` | `*ArrayType` | `Value`, `Traceable` |
 | `*types.Struct` | `KindRef` | `*StructType` | `Value`, `Traceable` |
+| `*types.Map` | `KindRef` | `*MapType` | `Value`, `Traceable` |
 | `*types.Function` | `KindRef` | `*FunctionType` | `Value` |
 | `*interp.HostFunction` | `KindRef` | `*FunctionType` | `Value` |
 

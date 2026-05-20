@@ -219,3 +219,18 @@ Offsets are signed 16-bit values encoded little-endian. `BR 5` skips 5 bytes pas
 | `STRUCT_NEW_DEFAULT` | `{2}` | `→ struct` | ⬜ | Create zero-initialized struct. |
 | `STRUCT_GET` | `{}` | `struct index → value` | ⬜ | Load struct field. |
 | `STRUCT_SET` | `{}` | `struct index value →` | ⬜ | Store struct field. |
+
+## Map Operations
+
+Map keys must be comparable: `i32`, `i64`, `f32`, `f64`, `string`, or `ref` identity. Missing keys read as the element zero value. `MAP_LOOKUP` also returns `I32(1)` for present and `I32(0)` for missing.
+
+| Opcode | Widths | Stack | JIT | Description |
+|---|---|---|---|---|
+| `MAP_NEW` | `{2}` | `k1 v1 ... kn vn count → map` | ⬜ | Create typed map from key/value pairs; later duplicate keys overwrite earlier values. |
+| `MAP_NEW_DEFAULT` | `{2}` | `capacity → map` | ⬜ | Create empty typed map with capacity hint. |
+| `MAP_LEN` | `{}` | `map → i32` | ⬜ | Push entry count. |
+| `MAP_GET` | `{}` | `map key → value` | ⬜ | Load value or element zero value when key is missing. |
+| `MAP_LOOKUP` | `{}` | `map key → value ok` | ⬜ | Load value plus presence flag. |
+| `MAP_SET` | `{}` | `map key value →` | ⬜ | Insert or replace entry. |
+| `MAP_DELETE` | `{}` | `map key →` | ⬜ | Delete entry; missing key is a no-op. |
+| `MAP_CLEAR` | `{}` | `map →` | ⬜ | Delete all entries. |
