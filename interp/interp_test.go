@@ -1909,6 +1909,20 @@ var tests = []test{
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(float32(math.Copysign(0, -1))))),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(0))),
+				instr.New(instr.MAP_GET),
+			},
+			program.WithTypes(types.NewMapType(types.TypeF32, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_CONST, 42),
 				instr.New(instr.I32_CONST, 1),
@@ -1919,6 +1933,22 @@ var tests = []test{
 			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
 		),
 		values: []types.Value{types.I32(1), types.I32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 41),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_GET),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(42)},
 	},
 	{
 		program: program.New(
