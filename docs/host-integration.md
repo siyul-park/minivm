@@ -115,7 +115,9 @@ v, err := vm.Marshal(myGoValue)
 | `[]float64` | `F64Array` | no heap allocation |
 | `[]T` (other) | `*Array` (ref) | elements heap-allocated if ref-typed |
 | `map[K]V` | `*Map` (ref) | heap-allocated |
-| `struct` | `*Struct` (ref) | exported fields only |
+| `struct` (exported fields only, no methods) | `*Struct` (ref) | data-only snapshot |
+| `struct` with methods or unexported fields | `*HostObject` (ref) | see Host Objects below |
+| named scalar with methods (e.g. `type Celsius float64`) | `*HostObject` (ref) | data fields empty, methods bound |
 | `*T` | same as `T`, or `Null` if nil | pointer dereferenced |
 | `func(...)` | `*HostFunction` (ref) | see below |
 | `types.Value` | passthrough | returned as-is |
@@ -146,6 +148,40 @@ VM-native types (`types.I32`, `types.F32`, etc.) used directly in Go func signat
 add := func(a, b types.I32) types.I32 { return a + b }
 fn, err := vm.Marshal(add)
 ```
+
+### Host Objects
+
+`*HostObject` surfaces a Go value to the VM with both **data fields** and **bound methods** behind the same indexed-field protocol used by `*Struct`. `STRUCT_GET` / `STRUCT_SET` dispatch through the `types.Fielded` interface so opcodes are unchanged.
+
+```go
+type Counter struct{ Count int32 }
+
+func (c *Counter) Bump(n int32) int32 {
+    c.Count += n
+    return c.Count
+}
+
+v, _ := vm.Marshal(Counter{Count: 1})
+ho := v.(*interp.HostObject)
+// ho.Typ.Fields = [Count: I32, Bump: func(I32) I32]
+```
+
+**Routing rules:** `Marshal` routes a Go value to `*HostObject` when **either**:
+
+- The type has methods on `T` or `*T`.
+- The type is a struct with unexported fields (would lose info via `*Struct`).
+
+**Field layout:**
+
+- Exported data fields first, in declaration order. Only fields whose Go kind maps to a VM primitive (`bool`, `int*`, `uint*`, `float*`, `string`) or implements `types.Value` are exposed; others are skipped.
+- Methods second. Methods whose name collides with an exported data field are skipped.
+
+**Receiver semantics:**
+
+- `Receiver` is an **addressable copy** of the marshaled Go value, owned by the `HostObject`. Pointer-receiver method calls mutate this copy.
+- The caller's original Go value is not mutated by VM-side writes. Round-trip via `Unmarshal(ho, &dst)` to recover the current state into a new Go value.
+
+**Field access:** every `Field` / `SetField` reflects against `Receiver` through the interpreter's injected `Marshaler`. Methods are pre-bound as `*HostFunction` values allocated on the VM heap at marshal time; they are retained for the lifetime of the `HostObject` via `Refs`.
 
 ### `Unmarshal`
 

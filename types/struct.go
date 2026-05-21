@@ -21,6 +21,7 @@ type StructField struct {
 }
 
 var _ Traceable = (*Struct)(nil)
+var _ Fielded = (*Struct)(nil)
 var _ Type = (*StructType)(nil)
 
 func FieldWithName(name string) func(*StructField) {
@@ -97,6 +98,11 @@ func (s *Struct) Kind() Kind {
 }
 
 func (s *Struct) Type() Type {
+	return s.Typ
+}
+
+// StructType returns the underlying *StructType. Satisfies Fielded.
+func (s *Struct) StructType() *StructType {
 	return s.Typ
 }
 

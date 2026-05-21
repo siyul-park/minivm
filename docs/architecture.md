@@ -76,7 +76,7 @@ Two layers:
 
 `types.Boxed` (`uint64`) is VM stack/global currency. Heap objects are `types.Value` referenced by `KindRef` in `Boxed`. See `value-representation.md`.
 
-`types.Traceable` marks heap objects containing refs (`Array`, `Struct`); GC walks them via `Refs() []Ref`.
+`types.Traceable` marks heap objects containing refs (`Array`, `Struct`, `HostObject`); GC walks them via `Refs() []Ref`. `types.Fielded` is the indexed field-access contract used by `STRUCT_GET`/`STRUCT_SET`, implemented by `*Struct` and `*HostObject`.
 
 ### `interp/`
 
@@ -100,6 +100,8 @@ Two layers:
 `jitCompiler` (`jit.go`): architecture-agnostic. Runs `BasicBlocksPass`, ranks blocks by heat, compiles hotter blocks first. `compile(b)` loops `segment(code,start,end)` to extract maximal compilable sampled runs. Completed segments emit at `WithCutoff` min count, default `8`; truncated and branch-terminated segments emit only when meeting same cutoff. Cold segments in hot blocks skipped. Two-pass: non-terminated blocks first, then branch-terminated, so branch targets have known signatures. `assembler.Link()` patches cross-segment labels. Each linked segment installs closure at `out[entryIP]`. JIT does not recompile or tier-up.
 
 `HostFunction` (`host.go`): wraps `func(i *Interpreter, params []Boxed) ([]Boxed, error)` as `types.Value`. Lives in constants, called by `CONST_GET` + `CALL`. Use `Interpreter.Marshal`/`Unmarshal` to convert Go values; Go `func` marshals to `HostFunction`, final `error` return propagated as host-call error. `WithMarshaler` replaces default reflection-based converter.
+
+`HostObject` (`host.go`): wraps a Go value that carries methods or unexported fields. Implements `types.Fielded` so `STRUCT_GET`/`STRUCT_SET` dispatch through the same indexed-field protocol used by `*types.Struct`. Field reads/writes reflect against an internal addressable copy of the receiver through the interpreter's `Marshaler`; methods are pre-bound as `*HostFunction` values allocated on the VM heap.
 
 ### `asm/`
 
