@@ -3285,14 +3285,13 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 	t.Run("struct exported fields", func(t *testing.T) {
 		type sample struct {
-			Name   string
-			Count  int32
-			hidden int32
+			Name  string
+			Count int32
 		}
 		i := New(program.New(nil))
 		defer i.Close()
 
-		got, err := i.Marshal(sample{Name: "go", Count: 3, hidden: 9})
+		got, err := i.Marshal(sample{Name: "go", Count: 3})
 		require.NoError(t, err)
 
 		s, ok := got.(*types.Struct)
@@ -3303,6 +3302,26 @@ func TestInterpreter_Marshal(t *testing.T) {
 		require.True(t, s.Typ.Fields[0].Type.Equals(types.TypeString))
 		require.True(t, s.Typ.Fields[1].Type.Equals(types.TypeI32))
 		require.Equal(t, types.BoxI32(3), s.FieldByName("Count"))
+	})
+
+	t.Run("struct with private field routes to HostObject", func(t *testing.T) {
+		type sample struct {
+			Name   string
+			Count  int32
+			hidden int32
+		}
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(sample{Name: "go", Count: 3, hidden: 9})
+		require.NoError(t, err)
+
+		ho, ok := got.(*HostObject)
+		require.True(t, ok)
+		require.Len(t, ho.Typ.Fields, 2)
+		require.Equal(t, "Name", ho.Typ.Fields[0].Name)
+		require.Equal(t, "Count", ho.Typ.Fields[1].Name)
+		require.Equal(t, types.BoxI32(3), ho.Field(1))
 	})
 
 	t.Run("struct ref field", func(t *testing.T) {

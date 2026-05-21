@@ -105,7 +105,41 @@ func (s *marshalState) value(v reflect.Value) (types.Value, error) {
 			return val, err
 		}
 	}
+	if s.hostable(v) {
+		return s.hostObject(v)
+	}
 	return s.concrete(v)
+}
+
+// hostable reports whether v should be marshaled as a HostObject — i.e. a
+// type that carries methods on T or *T, or a struct that holds unexported
+// fields (which the plain *types.Struct path would silently drop).
+func (s *marshalState) hostable(v reflect.Value) bool {
+	t := v.Type()
+	if t == nil {
+		return false
+	}
+	if _, ok := s.runtimeType(t); ok {
+		return false
+	}
+	if t.Implements(typeValue) || reflect.PointerTo(t).Implements(typeValue) {
+		return false
+	}
+	switch t.Kind() {
+	case reflect.Func, reflect.Chan, reflect.Map, reflect.Slice, reflect.Interface, reflect.Pointer:
+		return false
+	}
+	if reflect.PointerTo(t).NumMethod() > 0 {
+		return true
+	}
+	if t.Kind() == reflect.Struct {
+		for idx := 0; idx < t.NumField(); idx++ {
+			if t.Field(idx).PkgPath != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *marshalState) runtimeValue(v reflect.Value) (types.Value, bool, error) {
@@ -157,47 +191,7 @@ func (s *marshalState) concrete(v reflect.Value) (types.Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		return NewHostFunction(typ, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
-			fnType := v.Type()
-			if len(params) != fnType.NumIn() {
-				return nil, fmt.Errorf("%w: got %d params, want %d", ErrTypeMismatch, len(params), fnType.NumIn())
-			}
-			in := make([]reflect.Value, fnType.NumIn())
-			unmarshal := newUnmarshalState(i)
-			for idx := range in {
-				arg := reflect.New(fnType.In(idx)).Elem()
-				if err := unmarshal.value(params[idx], arg); err != nil {
-					return nil, fmt.Errorf("function param %d: %w", idx, err)
-				}
-				in[idx] = arg
-			}
-
-			out := v.Call(in)
-			if len(out) > 0 && out[len(out)-1].Type().Implements(typeError) {
-				err := out[len(out)-1]
-				nilable := false
-				switch err.Kind() {
-				case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-					nilable = true
-				}
-				if !nilable || !err.IsNil() {
-					return nil, err.Interface().(error)
-				}
-				out = out[:len(out)-1]
-			}
-
-			returns := make([]types.Boxed, len(out))
-			marshal := newMarshalState(i)
-			defer marshal.close()
-			for idx := range out {
-				boxed, err := marshal.boxAs(out[idx], typ.Returns[idx])
-				if err != nil {
-					return nil, fmt.Errorf("function return %d: %w", idx, err)
-				}
-				returns[idx] = boxed
-			}
-			return returns, nil
-		}), nil
+		return s.reflectFunc(v, typ), nil
 	case reflect.Array, reflect.Slice:
 		return s.array(v)
 	case reflect.Map:
@@ -332,6 +326,123 @@ func (s *marshalState) mapKey(typ types.Type, v reflect.Value) (types.MapKey, ty
 	default:
 		return types.MapKey{}, 0, fmt.Errorf("%w: map key type=%s", ErrUnsupportedMarshalType, typ)
 	}
+}
+
+func (s *marshalState) reflectFunc(fn reflect.Value, typ *types.FunctionType) *HostFunction {
+	return NewHostFunction(typ, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
+		fnType := fn.Type()
+		if len(params) != fnType.NumIn() {
+			return nil, fmt.Errorf("%w: got %d params, want %d", ErrTypeMismatch, len(params), fnType.NumIn())
+		}
+		in := make([]reflect.Value, fnType.NumIn())
+		unmarshal := newUnmarshalState(i)
+		for idx := range in {
+			arg := reflect.New(fnType.In(idx)).Elem()
+			if err := unmarshal.value(params[idx], arg); err != nil {
+				return nil, fmt.Errorf("function param %d: %w", idx, err)
+			}
+			in[idx] = arg
+		}
+
+		out := fn.Call(in)
+		if len(out) > 0 && out[len(out)-1].Type().Implements(typeError) {
+			err := out[len(out)-1]
+			nilable := false
+			switch err.Kind() {
+			case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+				nilable = true
+			}
+			if !nilable || !err.IsNil() {
+				return nil, err.Interface().(error)
+			}
+			out = out[:len(out)-1]
+		}
+
+		returns := make([]types.Boxed, len(out))
+		marshal := newMarshalState(i)
+		defer marshal.close()
+		for idx := range out {
+			boxed, err := marshal.boxAs(out[idx], typ.Returns[idx])
+			if err != nil {
+				return nil, fmt.Errorf("function return %d: %w", idx, err)
+			}
+			returns[idx] = boxed
+		}
+		return returns, nil
+	})
+}
+
+func (s *marshalState) hostObject(v reflect.Value) (types.Value, error) {
+	rt := v.Type()
+	ptr := reflect.New(rt)
+	ptr.Elem().Set(v)
+
+	var fields []types.StructField
+	var slots []hostSlot
+	names := make(map[string]bool)
+
+	if rt.Kind() == reflect.Struct {
+		for idx := 0; idx < rt.NumField(); idx++ {
+			f := rt.Field(idx)
+			if f.PkgPath != "" {
+				continue
+			}
+			ft, ok := hostFieldType(f.Type)
+			if !ok {
+				continue
+			}
+			fields = append(fields, types.NewStructField(ft, types.FieldWithName(f.Name)))
+			slots = append(slots, hostSlot{field: idx})
+			names[f.Name] = true
+		}
+	}
+
+	methodType := reflect.PointerTo(rt)
+	for j := 0; j < methodType.NumMethod(); j++ {
+		m := methodType.Method(j)
+		if !m.IsExported() || names[m.Name] {
+			continue
+		}
+		boundFn := ptr.Method(j)
+		ft, err := s.functionType(boundFn.Type())
+		if err != nil {
+			return nil, fmt.Errorf("method %s: %w", m.Name, err)
+		}
+		hf := s.reflectFunc(boundFn, ft)
+		addr := s.alloc(hf)
+		fields = append(fields, types.NewStructField(ft, types.FieldWithName(m.Name)))
+		slots = append(slots, hostSlot{field: -1, addr: addr})
+		names[m.Name] = true
+	}
+
+	return &HostObject{
+		Typ:      types.NewStructType(fields...),
+		Receiver: ptr,
+		slots:    slots,
+		interp:   s.i,
+	}, nil
+}
+
+// hostFieldType maps the reflect type of a HostObject data field to the VM
+// type that drives field.Kind dispatch in STRUCT_GET / STRUCT_SET. Returns
+// (_, false) for kinds the live reflect path does not support yet.
+func hostFieldType(t reflect.Type) (types.Type, bool) {
+	switch t.Kind() {
+	case reflect.Bool, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Uint8, reflect.Uint16:
+		return types.TypeI32, true
+	case reflect.Int, reflect.Int64, reflect.Uint, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return types.TypeI64, true
+	case reflect.Float32:
+		return types.TypeF32, true
+	case reflect.Float64:
+		return types.TypeF64, true
+	case reflect.String:
+		return types.TypeString, true
+	}
+	if t.Implements(typeValue) {
+		return types.TypeRef, true
+	}
+	return nil, false
 }
 
 func (s *marshalState) structValue(v reflect.Value) (types.Value, error) {
@@ -596,6 +707,19 @@ func (s *unmarshalState) value(val types.Value, dst reflect.Value) error {
 	if err != nil {
 		return err
 	}
+	if ho, ok := value.(*HostObject); ok && ho.Receiver.IsValid() {
+		rv := ho.Receiver
+		if rv.Kind() == reflect.Pointer && !rv.IsNil() {
+			if rv.Elem().Type() == dst.Type() {
+				dst.Set(rv.Elem())
+				return nil
+			}
+			if rv.Type() == dst.Type() {
+				dst.Set(rv)
+				return nil
+			}
+		}
+	}
 	return s.concrete(value, dst)
 }
 
@@ -730,27 +854,28 @@ func (s *unmarshalState) mapValue(value types.Value, dst reflect.Value) error {
 }
 
 func (s *unmarshalState) structValue(value types.Value, dst reflect.Value) error {
-	strct, ok := value.(*types.Struct)
+	strct, ok := value.(types.Fielded)
 	if !ok {
 		return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, value, dst.Type())
 	}
-	used := make([]bool, len(strct.Typ.Fields))
+	typ := strct.StructType()
+	used := make([]bool, len(typ.Fields))
 	for idx := 0; idx < dst.NumField(); idx++ {
 		field := dst.Type().Field(idx)
 		if field.PkgPath != "" {
 			continue
 		}
 		src, ok := 0, false
-		for idx, vmField := range strct.Typ.Fields {
+		for i, vmField := range typ.Fields {
 			if vmField.Name == field.Name {
-				src, ok = idx, true
+				src, ok = i, true
 				break
 			}
 		}
 		if !ok {
-			for idx := range strct.Typ.Fields {
-				if !used[idx] {
-					src, ok = idx, true
+			for i := range typ.Fields {
+				if !used[i] {
+					src, ok = i, true
 					break
 				}
 			}
@@ -760,7 +885,7 @@ func (s *unmarshalState) structValue(value types.Value, dst reflect.Value) error
 		}
 		used[src] = true
 		var val types.Value
-		if strct.Typ.Fields[src].Kind == types.KindI64 {
+		if typ.Fields[src].Kind == types.KindI64 {
 			val = types.I64(int64(strct.Raw(src)))
 		} else {
 			var err error

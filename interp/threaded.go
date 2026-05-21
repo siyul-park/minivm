@@ -2389,11 +2389,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrTypeMismatch)
 			}
 			addr := ref.Ref()
-			s, ok := i.heap[addr].(*types.Struct)
+			s, ok := i.heap[addr].(types.Fielded)
 			if !ok {
 				panic(ErrTypeMismatch)
 			}
-			typ := s.Typ
+			typ := s.StructType()
 			if idx < 0 || idx >= len(typ.Fields) {
 				panic(ErrSegmentationFault)
 			}
@@ -2431,11 +2431,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrTypeMismatch)
 			}
 			addr := ref.Ref()
-			s, ok := i.heap[addr].(*types.Struct)
+			s, ok := i.heap[addr].(types.Fielded)
 			if !ok {
 				panic(ErrTypeMismatch)
 			}
-			typ := s.Typ
+			typ := s.StructType()
 			if idx < 0 || idx >= len(typ.Fields) {
 				panic(ErrSegmentationFault)
 			}

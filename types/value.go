@@ -18,6 +18,16 @@ type Traceable interface {
 	Refs() []Ref
 }
 
+// Fielded is the indexed field-access contract used by STRUCT_GET / STRUCT_SET.
+type Fielded interface {
+	Value
+	StructType() *StructType
+	Field(i int) Boxed
+	SetField(i int, val Boxed)
+	Raw(i int) uint64
+	SetRaw(i int, bits uint64)
+}
+
 func IsNull(v Value) bool {
 	switch v := v.(type) {
 	case Ref:
