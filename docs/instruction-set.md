@@ -222,7 +222,7 @@ Offsets are signed 16-bit values encoded little-endian. `BR 5` skips 5 bytes pas
 
 ## Map Operations
 
-Map keys must be comparable: `i32`, `i64`, `f32`, `f64`, `string`, or `ref` identity. Missing keys read as the element zero value. `MAP_LOOKUP` also returns `I32(1)` for present and `I32(0)` for missing.
+Map keys must be comparable: `i32`, `i64`, `f32`, `f64`, `string`, or `ref` identity. Missing keys read as element zero value. `MAP_LOOKUP` also returns `I32(1)` for present and `I32(0)` for missing.
 
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|

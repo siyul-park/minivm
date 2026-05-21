@@ -1,14 +1,14 @@
 # Pass System
 
-How the analysis/transform/optimization pipeline works and how to write passes.
+How analysis/transform/optimization pipeline works and how to write passes.
 
 ## Agent Checklist
 
 Before editing:
 
-- identify whether the pass consumes `*program.Program`, `*types.Function`, or another cached type
+- identify whether pass consumes `*program.Program`, `*types.Function`, or another cached type
 - use `m.Load` for current state and `m.Convert` for sub-pipelines
-- preserve in-place mutation unless an existing pass returns a replacement
+- preserve in-place mutation unless existing pass returns a replacement
 
 After editing:
 
@@ -18,7 +18,7 @@ After editing:
 
 ## `pass.Manager` Internals
 
-`pass.Manager` is a reflection-based pipeline dispatcher mapping result types to producing passes.
+`pass.Manager`: reflection-based pipeline dispatcher mapping result types to producing passes.
 
 ```go
 type Manager struct {
@@ -28,11 +28,11 @@ type Manager struct {
 }
 ```
 
-- `Register(pass)`: inspects `Run(*Manager) (T, error)` and registers the pass under `reflect.TypeOf(T)`.
+- `Register(pass)`: inspects `Run(*Manager) (T, error)` and registers pass under `reflect.TypeOf(T)`.
 - `Run(value)`: seeds cache with `value` by `reflect.TypeOf(value)`. A `T → T` pass overwrites cached `T`.
-- `Load(&result)`: runs all passes producing `typeof(*result)` in registration order, caches output, and sets `*result`; later loads return cache.
-- `Convert(src,dst)`: creates a child manager sharing passes but with its own cache, runs `src`, then loads `dst`.
-- Caching: each pass runs at most once per `Manager.Run`; passes reading via `Load` see the latest cached value for that type.
+- `Load(&result)`: runs all passes producing `typeof(*result)` in registration order, caches output, sets `*result`; later loads return cache.
+- `Convert(src,dst)`: creates child manager sharing passes but own cache, runs `src`, then loads `dst`.
+- Caching: each pass runs at most once per `Manager.Run`; passes reading via `Load` see latest cached value for that type.
 
 ## Writing a Pass
 
@@ -70,8 +70,8 @@ Rules:
 - always `m.Load` before modifying; another pass may have already transformed the value
 - wrap code slices as `*types.Function{Typ: &types.FunctionType{}, Code: slice}` for `BasicBlocksPass`
 - return `nil, err` on failure; manager stops and propagates it
-- return input unchanged if no modifications were made
-- do not retain the manager after `Run` returns
+- return input unchanged if no modifications made
+- do not retain manager after `Run` returns
 
 ## One-Off Passes
 
@@ -103,7 +103,7 @@ ConstantDeduplicationPass  transform → *program.Program
 DeadCodeEliminationPass    transform → *program.Program
 ```
 
-Transform passes load the latest cached `*program.Program` and return a possibly mutated one. Because caching is by type, each pass sees the previous pass output.
+Transform passes load latest cached `*program.Program` and return possibly mutated one. Because caching is by type, each pass sees previous pass output.
 
 ## `BasicBlocksPass`
 
@@ -128,7 +128,7 @@ Block boundaries:
 
 Folds 2- and 3-instruction windows: `CONST CONST OP` → `CONST result`.
 
-Folded output is right-aligned in the original byte range; left side is padded with NOPs.
+Folded output is right-aligned in original byte range; left side padded with NOPs.
 
 ```text
 Before: [I32_CONST 3][I32_CONST 4][I32_ADD]             11 bytes
@@ -149,11 +149,11 @@ Supported folds:
 
 ## `ConstantDeduplicationPass`
 
-Scans all `CONST_GET` operands in all functions. If multiple constant indices point to equal `types.Value`s, rewrites references to the lowest index. This shrinks the constant table and improves cache locality.
+Scans all `CONST_GET` operands in all functions. If multiple constant indices point to equal `types.Value`s, rewrites references to lowest index. Shrinks constant table and improves cache locality.
 
 ## `DeadCodeEliminationPass`
 
 1. Mark bytes in basic blocks with no predecessors as `UNREACHABLE`.
 2. Compact bytecode by removing NOP runs and unreachable sequences, rewriting branch offsets for new positions.
 
-Compaction rewrites only branch operands: `BR`, `BR_IF`, `BR_TABLE`. Other operands keep their meaning because compaction changes instruction positions, not constant/type/global/local indexes.
+Compaction rewrites only branch operands: `BR`, `BR_IF`, `BR_TABLE`. Other operands keep meaning because compaction changes instruction positions, not constant/type/global/local indexes.

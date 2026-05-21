@@ -6,15 +6,15 @@ How minivm represents all runtime values as one `uint64`.
 
 Read before editing `types/boxed.go`, numeric opcode handlers, JIT value passing, or conversions between `types.Value` and `types.Boxed`.
 
-- `Boxed` is the VM stack/global currency.
+- `Boxed` is VM stack/global currency.
 - `KindF64` is raw IEEE-754 unless bits are in tagged NaN space.
 - Large `I64` values can spill to heap as `types.I64` refs.
 - Unbox methods do not validate kind; check `Kind()` first.
-- Use `Interpreter.Load(ref)` to access the heap object behind `KindRef`.
+- Use `Interpreter.Load(ref)` to access heap object behind `KindRef`.
 
 ## NaN Boxing
 
-`types.Boxed` is a `uint64` using IEEE-754 quiet-NaN space.
+`types.Boxed` is `uint64` using IEEE-754 quiet-NaN space.
 
 - **F64**: if bits `63–52` are not `0x7FF`, or mantissa is `0`, value is raw `float64`; `BoxF64(v)` stores `math.Float64bits(v)`.
 - **Non-F64**: if bits `63–52 == 0x7FF` and mantissa is non-zero, bits `51–49` store 3-bit `Kind`; bits `48–0` store 49-bit payload.
@@ -63,7 +63,7 @@ func IsBoxable(v int64) bool {
 
 Approximate range: `-2^48 ≤ v ≤ 2^48 - 1`.
 
-When `!IsBoxable(v)`, the interpreter heap-allocates `types.I64` and returns a `KindRef`. This is bytecode-transparent but costs heap allocation and RC work per out-of-range integer operation. Avoid tight loops over large I64 values when possible.
+When `!IsBoxable(v)`, interpreter heap-allocates `types.I64` and returns `KindRef`. Bytecode-transparent but costs heap allocation and RC work per out-of-range integer operation. Avoid tight loops over large I64 values when possible.
 
 ## Boxing Functions
 
@@ -107,6 +107,8 @@ var BoxedFalse = BoxI32(0)
 var BoxedTrue  = BoxI32(1)
 ```
 
+Use `types.IsNull(v)` when accepting either `types.Null` or `types.BoxedNull`.
+
 ## Type System Values
 
 Heap objects implement `types.Value`.
@@ -137,4 +139,4 @@ Heap objects implement `types.Value`.
 - `KindF64` → `F64`
 - `KindRef` → `Ref`, only the index, not the heap object
 
-Use `Interpreter.Load(addr)` to retrieve the actual heap object from a `KindRef`.
+Use `Interpreter.Load(addr)` to retrieve actual heap object from `KindRef`.

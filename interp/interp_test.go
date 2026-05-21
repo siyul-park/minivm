@@ -3,6 +3,7 @@ package interp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -2046,6 +2047,26 @@ var tests = []test{
 	},
 }
 
+type recordingMarshaler struct {
+	marshalCalled   bool
+	unmarshalCalled bool
+}
+
+func (m *recordingMarshaler) MarshalValue(_ *Interpreter, _ any) (types.Value, error) {
+	m.marshalCalled = true
+	return types.I32(9), nil
+}
+
+func (m *recordingMarshaler) UnmarshalValue(_ *Interpreter, _ types.Value, dst any) error {
+	m.unmarshalCalled = true
+	out, ok := dst.(*int32)
+	if !ok {
+		return errors.New("unexpected destination")
+	}
+	*out = 12
+	return nil
+}
+
 func TestInterpreter_Context(t *testing.T) {
 	t.Run("propagates value", func(t *testing.T) {
 		i := New(program.New(nil))
@@ -2094,35 +2115,25 @@ func TestInterpreter_Pop(t *testing.T) {
 }
 
 func TestInterpreter_Len(t *testing.T) {
-	t.Run("increments on push", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
+	i := New(program.New(nil))
+	defer i.Close()
 
-		require.Equal(t, 0, i.Len())
-		_ = i.Push(types.I32(1))
-		require.Equal(t, 1, i.Len())
-		_ = i.Push(types.I32(2))
-		require.Equal(t, 2, i.Len())
-	})
+	require.Equal(t, 0, i.Len())
+	_ = i.Push(types.I32(1))
+	require.Equal(t, 1, i.Len())
+	_ = i.Push(types.I32(2))
+	require.Equal(t, 2, i.Len())
 }
 
 func TestInterpreter_Alloc(t *testing.T) {
-	t.Run("basic", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
+	i := New(program.New(nil))
+	defer i.Close()
 
-		addr, err := i.Alloc(types.I32(7))
+	for _, v := range []types.Value{types.I32(7), types.BoxI32(3)} {
+		addr, err := i.Alloc(v)
 		require.NoError(t, err)
 		require.Greater(t, addr, 0)
-	})
-	t.Run("boxed ref returns its ref", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-
-		addr, err := i.Alloc(types.BoxI32(3))
-		require.NoError(t, err)
-		require.Greater(t, addr, 0)
-	})
+	}
 }
 
 func TestInterpreter_Load(t *testing.T) {
@@ -2135,19 +2146,14 @@ func TestInterpreter_Load(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(7), v)
 	})
-	t.Run("segfault negative", func(t *testing.T) {
+	t.Run("segfault", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
 
-		_, err := i.Load(-1)
-		require.ErrorIs(t, err, ErrSegmentationFault)
-	})
-	t.Run("segfault out of bounds", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-
-		_, err := i.Load(9999)
-		require.ErrorIs(t, err, ErrSegmentationFault)
+		for _, addr := range []int{-1, 9999} {
+			_, err := i.Load(addr)
+			require.ErrorIs(t, err, ErrSegmentationFault)
+		}
 	})
 }
 
@@ -2161,17 +2167,13 @@ func TestInterpreter_Store(t *testing.T) {
 		v, _ := i.Load(addr)
 		require.Equal(t, types.I64(99), v)
 	})
-	t.Run("segfault negative", func(t *testing.T) {
+	t.Run("segfault", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
 
-		require.ErrorIs(t, i.Store(-1, types.I32(1)), ErrSegmentationFault)
-	})
-	t.Run("segfault out of bounds", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-
-		require.ErrorIs(t, i.Store(9999, types.I32(1)), ErrSegmentationFault)
+		for _, addr := range []int{-1, 9999} {
+			require.ErrorIs(t, i.Store(addr, types.I32(1)), ErrSegmentationFault)
+		}
 	})
 }
 
@@ -2227,19 +2229,14 @@ func TestInterpreter_Global(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int32(42), v.I32())
 	})
-	t.Run("segfault negative", func(t *testing.T) {
+	t.Run("segfault", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
 
-		_, err := i.Global(-1)
-		require.ErrorIs(t, err, ErrSegmentationFault)
-	})
-	t.Run("segfault out of bounds", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-
-		_, err := i.Global(9999)
-		require.ErrorIs(t, err, ErrSegmentationFault)
+		for _, idx := range []int{-1, 9999} {
+			_, err := i.Global(idx)
+			require.ErrorIs(t, err, ErrSegmentationFault)
+		}
 	})
 }
 
@@ -2278,91 +2275,71 @@ func TestInterpreter_Const(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int32(42), v.I32())
 	})
-	t.Run("segfault negative", func(t *testing.T) {
+	t.Run("segfault", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
 
-		_, err := i.Const(-1)
-		require.ErrorIs(t, err, ErrSegmentationFault)
-	})
-	t.Run("segfault out of bounds", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-
-		_, err := i.Const(9999)
-		require.ErrorIs(t, err, ErrSegmentationFault)
+		for _, idx := range []int{-1, 9999} {
+			_, err := i.Const(idx)
+			require.ErrorIs(t, err, ErrSegmentationFault)
+		}
 	})
 }
 
 func TestInterpreter_Close(t *testing.T) {
-	t.Run("no error", func(t *testing.T) {
-		i := New(program.New(nil))
-		require.NoError(t, i.Close())
-	})
+	i := New(program.New(nil))
+	require.NoError(t, i.Close())
 }
 
 func TestInterpreter_Reset(t *testing.T) {
-	t.Run("clears stack", func(t *testing.T) {
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7),
-		}))
-		defer i.Close()
+	i := New(program.New([]instr.Instruction{
+		instr.New(instr.I32_CONST, 7),
+	}))
+	defer i.Close()
 
-		require.NoError(t, i.Run(context.Background()))
-		require.Greater(t, i.Len(), 0)
-
-		i.Reset()
-		require.Equal(t, 0, i.Len())
-	})
+	require.NoError(t, i.Run(context.Background()))
+	require.Greater(t, i.Len(), 0)
+	i.Reset()
+	require.Equal(t, 0, i.Len())
 }
 
-func TestInterpreter_Run(t *testing.T) {
-	modes := []struct {
-		name string
-		opts []func(*option)
-	}{
-		{name: "default"},
-		{name: "jit", opts: []func(*option){WithTick(1), WithThreshold(1), WithCutoff(1)}},
-	}
-	for _, mode := range modes {
-		mode := mode
-		t.Run(mode.name, func(t *testing.T) {
-			for _, tt := range tests {
-				tt := tt
-				name := tt.name
-				if name == "" {
-					name = tt.program.String()
+func runAll(t *testing.T, modeOpts ...func(*option)) {
+	t.Helper()
+	for _, tt := range tests {
+		tt := tt
+		name := tt.name
+		if name == "" {
+			name = tt.program.String()
+		}
+		t.Run(name, func(t *testing.T) {
+			opts := append([]func(*option){}, tt.opts...)
+			opts = append(opts, modeOpts...)
+			i := New(tt.program, opts...)
+			defer i.Close()
+			if tt.before != nil {
+				tt.before(t, i)
+			}
+			err := i.Run(context.Background())
+			if tt.err != nil {
+				require.ErrorIs(t, err, tt.err)
+			} else {
+				require.NoError(t, err)
+				for _, val := range tt.values {
+					v, err := i.Pop()
+					require.NoError(t, err)
+					require.Equal(t, val, v)
 				}
-				t.Run(name, func(t *testing.T) {
-					opts := append([]func(*option){}, tt.opts...)
-					opts = append(opts, mode.opts...)
-
-					i := New(tt.program, opts...)
-					defer i.Close()
-
-					if tt.before != nil {
-						tt.before(t, i)
-					}
-
-					err := i.Run(context.Background())
-					if tt.err != nil {
-						require.ErrorIs(t, err, tt.err)
-					} else {
-						require.NoError(t, err)
-						for _, val := range tt.values {
-							v, err := i.Pop()
-							require.NoError(t, err)
-							require.Equal(t, val, v)
-						}
-					}
-
-					if tt.after != nil {
-						tt.after(t, i)
-					}
-				})
+			}
+			if tt.after != nil {
+				tt.after(t, i)
 			}
 		})
 	}
+}
+
+func TestInterpreter_Run(t *testing.T) {
+	t.Run("default", func(t *testing.T) { runAll(t) })
+	t.Run("jit", func(t *testing.T) { runAll(t, WithTick(1), WithThreshold(1), WithCutoff(1)) })
 
 	t.Run("canceled context", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -2427,391 +2404,305 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 	})
 
-	t.Run("single run cases", func(t *testing.T) {
+}
+
+func TestInterpreter_WithHook(t *testing.T) {
+	t.Run("inspects interpreter", func(t *testing.T) {
 		var lens []int
-		var ips []int
-		var preciseIPs []int
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.NOP),
+		}), WithTick(1), WithHook(func(i *Interpreter) error {
+			lens = append(lens, i.Len())
+			return nil
+		}))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, []int{0, 1}, lens)
+	})
+
+	t.Run("returns error", func(t *testing.T) {
 		errHook := errors.New("hook failed")
-		profile := prof.New()
-		refProgram := program.New(
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+		}), WithTick(1), WithHook(func(i *Interpreter) error {
+			return errHook
+		}))
+		defer i.Close()
+		require.ErrorIs(t, i.Run(context.Background()), errHook)
+	})
+
+	t.Run("cancel observed on tick threaded", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		calls := 0
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+			instr.New(instr.I32_CONST, 0),
+		}), WithTick(1), WithHook(func(i *Interpreter) error {
+			calls++
+			cancel()
+			return nil
+		}))
+		defer i.Close()
+		require.ErrorIs(t, i.Run(ctx), context.Canceled)
+		require.Equal(t, 1, calls)
+	})
+
+	t.Run("cancel observed on tick jit", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		calls := 0
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 3),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 4),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 5),
+			instr.New(instr.DROP),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(NewHostFunction(&types.FunctionType{}, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
+			return nil, nil
+		}))), WithTick(1), WithThreshold(1), WithCutoff(1), WithHook(func(i *Interpreter) error {
+			calls++
+			cancel()
+			return nil
+		}))
+		defer i.Close()
+		require.ErrorIs(t, i.Run(ctx), context.Canceled)
+		require.Equal(t, 1, calls)
+	})
+}
+
+func TestInterpreter_WithTick(t *testing.T) {
+	t.Run("normal tick keeps threaded nop fusion", func(t *testing.T) {
+		var ips []int
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.I32_CONST, 7),
+		}), WithTick(2), WithThreshold(-1), WithHook(func(i *Interpreter) error {
+			ips = append(ips, i.IP())
+			return nil
+		}))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, []int{3}, ips)
+	})
+
+	t.Run("tick one preserves threaded nop boundaries", func(t *testing.T) {
+		var ips []int
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.I32_CONST, 7),
+		}), WithTick(1), WithThreshold(-1), WithHook(func(i *Interpreter) error {
+			ips = append(ips, i.IP())
+			return nil
+		}))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, []int{0, 1, 2, 3}, ips)
+	})
+}
+
+func TestInterpreter_WithThreshold(t *testing.T) {
+	t.Run("precise", func(t *testing.T) {
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.ARRAY_GET),
 			},
 			program.WithConstants(types.I32Array{10, 20, 30}),
-		)
-		jitDisabledProfile := prof.New()
-		thresholdProfile := prof.New()
-		counterProfile := prof.New()
+		), WithTick(1), WithThreshold(-1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(20), v)
+	})
+
+	t.Run("fused outside precise mode", func(t *testing.T) {
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithConstants(types.I32Array{10, 20, 30}),
+		), WithThreshold(-1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(20), v)
+	})
+
+	t.Run("negative disables jit", func(t *testing.T) {
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+		}), WithProfile(p), WithTick(1), WithThreshold(-1), WithCutoff(1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		require.Zero(t, p.Snapshot().JIT.Attempts)
+	})
+
+	t.Run("zero attempts jit on first sample", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+		}), WithProfile(p), WithTick(1), WithThreshold(0), WithCutoff(1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, uint64(1), p.Snapshot().JIT.Attempts)
+	})
+}
+
+func TestInterpreter_WithProfile(t *testing.T) {
+	t.Run("records opcode samples", func(t *testing.T) {
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.DROP),
+		}), WithProfile(p), WithTick(1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+
+		snap := p.Snapshot()
+		require.Equal(t, uint64(2), snap.Samples)
+		require.Equal(t, uint64(2), snap.Funcs[0].Samples)
+		require.Equal(t, uint64(1), p.IP(0, 0).Samples)
+		require.Equal(t, uint64(1), p.IP(0, 5).Samples)
+		opcodes := map[byte]uint64{}
+		for _, op := range snap.Opcodes {
+			opcodes[op.Code] = op.Samples
+		}
+		require.Equal(t, uint64(1), opcodes[byte(instr.I32_CONST)])
+		require.Equal(t, uint64(1), opcodes[byte(instr.DROP)])
+	})
+
+	t.Run("records jit counters", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+		}), WithProfile(p), WithTick(1), WithThreshold(1), WithCutoff(1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Attempts)
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+		require.NotZero(t, jit.Bytes)
+	})
+}
+
+func TestInterpreter_WithFuel(t *testing.T) {
+	t.Run("zero is unlimited", func(t *testing.T) {
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.I32_CONST, 8),
+			instr.New(instr.I32_ADD),
+		}), WithTick(1), WithFuel(0))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(15), v)
+	})
+
+	t.Run("exhausts recursive execution", func(t *testing.T) {
 		recursiveFn := types.NewFunctionBuilder(nil).Emit(
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
 		).Build()
-		fuelCalls := 0
-
-		cases := []test{
-			{
-				name: "hook inspects interpreter",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 7),
-					instr.New(instr.NOP),
-				}),
-				opts: []func(*option){
-					WithTick(1),
-					WithHook(func(i *Interpreter) error {
-						lens = append(lens, i.Len())
-						return nil
-					}),
-				},
-				after: func(t *testing.T, i *Interpreter) {
-					require.Equal(t, []int{0, 1}, lens)
-				},
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
 			},
-			{
-				name: "normal tick keeps threaded nop fusion",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.NOP),
-					instr.New(instr.NOP),
-					instr.New(instr.NOP),
-					instr.New(instr.I32_CONST, 7),
-				}),
-				opts: []func(*option){
-					WithTick(2),
-					WithThreshold(-1),
-					WithHook(func(i *Interpreter) error {
-						ips = append(ips, i.IP())
-						return nil
-					}),
-				},
-				after: func(t *testing.T, i *Interpreter) {
-					require.Equal(t, []int{3}, ips)
-				},
-			},
-			{
-				name: "tick one preserves threaded nop boundaries",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.NOP),
-					instr.New(instr.NOP),
-					instr.New(instr.NOP),
-					instr.New(instr.I32_CONST, 7),
-				}),
-				opts: []func(*option){
-					WithTick(1),
-					WithThreshold(-1),
-					WithHook(func(i *Interpreter) error {
-						preciseIPs = append(preciseIPs, i.IP())
-						return nil
-					}),
-				},
-				after: func(t *testing.T, i *Interpreter) {
-					require.Equal(t, []int{0, 1, 2, 3}, preciseIPs)
-				},
-			},
-			{
-				name: "profile records opcode samples",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 7),
-					instr.New(instr.DROP),
-				}),
-				opts: []func(*option){WithProfile(profile), WithTick(1)},
-				after: func(t *testing.T, i *Interpreter) {
-					snap := profile.Snapshot()
-					require.Equal(t, uint64(2), snap.Samples)
-					require.Equal(t, uint64(2), snap.Funcs[0].Samples)
-					require.Equal(t, uint64(1), profile.IP(0, 0).Samples)
-					require.Equal(t, uint64(1), profile.IP(0, 5).Samples)
-
-					opcodes := map[byte]uint64{}
-					for _, op := range snap.Opcodes {
-						opcodes[op.Code] = op.Samples
-					}
-					require.Equal(t, uint64(1), opcodes[byte(instr.I32_CONST)])
-					require.Equal(t, uint64(1), opcodes[byte(instr.DROP)])
-				},
-			},
-			{
-				name: "hook returns error",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.NOP),
-				}),
-				opts: []func(*option){
-					WithTick(1),
-					WithHook(func(i *Interpreter) error {
-						return errHook
-					}),
-				},
-				err: errHook,
-			},
-			{
-				name:    "precise",
-				program: refProgram,
-				opts:    []func(*option){WithTick(1), WithThreshold(-1)},
-				values:  []types.Value{types.I32(20)},
-			},
-			{
-				name:    "fused outside precise mode",
-				program: refProgram,
-				opts:    []func(*option){WithThreshold(-1)},
-				values:  []types.Value{types.I32(20)},
-			},
-			{
-				name: "negative threshold disables jit",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.I32_ADD),
-				}),
-				opts: []func(*option){WithProfile(jitDisabledProfile), WithTick(1), WithThreshold(-1), WithCutoff(1)},
-				after: func(t *testing.T, i *Interpreter) {
-					require.Zero(t, jitDisabledProfile.Snapshot().JIT.Attempts)
-				},
-			},
-			{
-				name: "threshold zero attempts jit on first sample",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.I32_ADD),
-				}),
-				opts: []func(*option){WithProfile(thresholdProfile), WithTick(1), WithThreshold(0), WithCutoff(1)},
-				before: func(t *testing.T, i *Interpreter) {
-					if arch == nil {
-						t.Skip("jit is not available on this architecture")
-					}
-				},
-				after: func(t *testing.T, i *Interpreter) {
-					require.Equal(t, uint64(1), thresholdProfile.Snapshot().JIT.Attempts)
-				},
-			},
-			{
-				name: "profile records jit counters",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.I32_ADD),
-				}),
-				opts: []func(*option){WithProfile(counterProfile), WithTick(1), WithThreshold(1), WithCutoff(1)},
-				before: func(t *testing.T, i *Interpreter) {
-					if arch == nil {
-						t.Skip("jit is not available on this architecture")
-					}
-				},
-				after: func(t *testing.T, i *Interpreter) {
-					jit := counterProfile.Snapshot().JIT
-					require.Equal(t, uint64(1), jit.Attempts)
-					require.NotZero(t, jit.Emits)
-					require.NotZero(t, jit.Links)
-					require.NotZero(t, jit.Bytes)
-				},
-			},
-			func() test {
-				p := prof.New()
-				return test{
-					name: "jit compiles numeric globals",
-					program: program.New([]instr.Instruction{
-						instr.New(instr.I32_CONST, 9),
-						instr.New(instr.GLOBAL_SET, 0),
-						instr.New(instr.GLOBAL_GET, 0),
-					}),
-					opts:   []func(*option){WithProfile(p), WithCutoff(1)},
-					values: []types.Value{types.I32(9)},
-					before: func(t *testing.T, i *Interpreter) {
-						if arch == nil {
-							t.Skip("jit is not available on this architecture")
-						}
-						p.Add(0, 0, byte(instr.I32_CONST))
-						i.globals = append(i.globals, types.BoxI32(1))
-						require.NoError(t, i.jit(0))
-					},
-					after: func(t *testing.T, i *Interpreter) {
-						jit := p.Snapshot().JIT
-						require.Equal(t, uint64(1), jit.Attempts)
-						require.NotZero(t, jit.Emits)
-						require.NotZero(t, jit.Links)
-					},
-				}
-			}(),
-			func() test {
-				p := prof.New()
-				return test{
-					name: "jit skips ref globals",
-					program: program.New([]instr.Instruction{
-						instr.New(instr.GLOBAL_GET, 0),
-					}),
-					opts:   []func(*option){WithProfile(p), WithCutoff(1)},
-					values: []types.Value{types.Null},
-					before: func(t *testing.T, i *Interpreter) {
-						if arch == nil {
-							t.Skip("jit is not available on this architecture")
-						}
-						p.Add(0, 0, byte(instr.GLOBAL_GET))
-						i.globals = append(i.globals, types.BoxedNull)
-						require.NoError(t, i.jit(0))
-					},
-					after: func(t *testing.T, i *Interpreter) {
-						jit := p.Snapshot().JIT
-						require.Equal(t, uint64(1), jit.Attempts)
-						require.Zero(t, jit.Emits)
-						require.Zero(t, jit.Links)
-					},
-				}
-			}(),
-			{
-				name: "fuel zero is unlimited",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 7),
-					instr.New(instr.I32_CONST, 8),
-					instr.New(instr.I32_ADD),
-				}),
-				opts:   []func(*option){WithTick(1), WithFuel(0)},
-				values: []types.Value{types.I32(15)},
-			},
-			{
-				name: "fuel exhausts recursive execution",
-				program: program.New(
-					[]instr.Instruction{
-						instr.New(instr.CONST_GET, 0),
-						instr.New(instr.CALL),
-					},
-					program.WithConstants(recursiveFn),
-				),
-				opts: []func(*option){WithTick(1), WithFuel(2)},
-				err:  ErrFuelExhausted,
-			},
-			{
-				name: "fuel rounds up to tick interval",
-				program: program.New(
-					[]instr.Instruction{
-						instr.New(instr.CONST_GET, 0),
-						instr.New(instr.CALL),
-					},
-					program.WithConstants(recursiveFn),
-				),
-				opts: []func(*option){
-					WithTick(2),
-					WithFuel(3),
-					WithHook(func(i *Interpreter) error {
-						fuelCalls++
-						return nil
-					}),
-				},
-				err: ErrFuelExhausted,
-				after: func(t *testing.T, i *Interpreter) {
-					require.Equal(t, 2, fuelCalls)
-				},
-			},
-			{
-				name: "fuel exhausts jit execution",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.DROP),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.DROP),
-					instr.New(instr.I32_CONST, 3),
-					instr.New(instr.DROP),
-					instr.New(instr.I32_CONST, 4),
-					instr.New(instr.DROP),
-					instr.New(instr.I32_CONST, 5),
-					instr.New(instr.DROP),
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CALL),
-				}, program.WithConstants(NewHostFunction(&types.FunctionType{}, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
-					return nil, nil
-				}))),
-				opts: []func(*option){WithTick(1), WithThreshold(1), WithCutoff(1), WithFuel(1)},
-				err:  ErrFuelExhausted,
-			},
-		}
-		for _, tt := range cases {
-			tt := tt
-			t.Run(tt.name, func(t *testing.T) {
-				i := New(tt.program, tt.opts...)
-				defer i.Close()
-
-				if tt.before != nil {
-					tt.before(t, i)
-				}
-
-				err := i.Run(context.Background())
-				if tt.err != nil {
-					require.ErrorIs(t, err, tt.err)
-				} else {
-					require.NoError(t, err)
-					for _, val := range tt.values {
-						v, err := i.Pop()
-						require.NoError(t, err)
-						require.Equal(t, val, v)
-					}
-				}
-
-				if tt.after != nil {
-					tt.after(t, i)
-				}
-			})
-		}
+			program.WithConstants(recursiveFn),
+		), WithTick(1), WithFuel(2))
+		defer i.Close()
+		require.ErrorIs(t, i.Run(context.Background()), ErrFuelExhausted)
 	})
 
-	t.Run("hook cancel is observed on next tick", func(t *testing.T) {
-		cases := []struct {
-			name    string
-			program *program.Program
-			opts    []func(*option)
-		}{
-			{
-				name: "threaded",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.NOP),
-					instr.New(instr.I32_CONST, 0),
-				}),
-				opts: []func(*option){WithTick(1)},
+	t.Run("rounds up to tick interval", func(t *testing.T) {
+		recursiveFn := types.NewFunctionBuilder(nil).Emit(
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		).Build()
+		calls := 0
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
 			},
-			{
-				name: "jit",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.DROP),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.DROP),
-					instr.New(instr.I32_CONST, 3),
-					instr.New(instr.DROP),
-					instr.New(instr.I32_CONST, 4),
-					instr.New(instr.DROP),
-					instr.New(instr.I32_CONST, 5),
-					instr.New(instr.DROP),
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CALL),
-				}, program.WithConstants(NewHostFunction(&types.FunctionType{}, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
-					return nil, nil
-				}))),
-				opts: []func(*option){WithTick(1), WithThreshold(1), WithCutoff(1)},
-			},
-		}
-		for _, tt := range cases {
-			tt := tt
-			t.Run(tt.name, func(t *testing.T) {
-				ctx, cancel := context.WithCancel(context.Background())
-				defer cancel()
-
-				calls := 0
-				opts := append([]func(*option){}, tt.opts...)
-				opts = append(opts, WithHook(func(i *Interpreter) error {
-					calls++
-					cancel()
-					return nil
-				}))
-
-				i := New(tt.program, opts...)
-				defer i.Close()
-
-				err := i.Run(ctx)
-				require.ErrorIs(t, err, context.Canceled)
-				require.Equal(t, 1, calls)
-			})
-		}
+			program.WithConstants(recursiveFn),
+		), WithTick(2), WithFuel(3), WithHook(func(i *Interpreter) error {
+			calls++
+			return nil
+		}))
+		defer i.Close()
+		require.ErrorIs(t, i.Run(context.Background()), ErrFuelExhausted)
+		require.Equal(t, 2, calls)
 	})
 
-	t.Run("debugger breakpoint stops before instruction", func(t *testing.T) {
+	t.Run("exhausts jit execution", func(t *testing.T) {
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 3),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 4),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 5),
+			instr.New(instr.DROP),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(NewHostFunction(&types.FunctionType{}, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
+			return nil, nil
+		}))), WithTick(1), WithThreshold(1), WithCutoff(1), WithFuel(1))
+		defer i.Close()
+		require.ErrorIs(t, i.Run(context.Background()), ErrFuelExhausted)
+	})
+
+	t.Run("reset restores fuel", func(t *testing.T) {
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+			instr.New(instr.I32_CONST, 7),
+		}), WithTick(1), WithFuel(1))
+		defer i.Close()
+		require.ErrorIs(t, i.Run(context.Background()), ErrFuelExhausted)
+		i.Reset()
+		require.ErrorIs(t, i.Run(context.Background()), ErrFuelExhausted)
+	})
+}
+
+func TestInterpreter_WithDebugger(t *testing.T) {
+	t.Run("breakpoint stops before instruction", func(t *testing.T) {
 		dbg := NewDebugger()
 		id := dbg.Break(0, 0)
 		i := New(program.New([]instr.Instruction{
@@ -2831,7 +2722,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, uint64(1), dbg.Breakpoints()[0].Hits)
 	})
 
-	t.Run("debugger conditional breakpoint", func(t *testing.T) {
+	t.Run("conditional breakpoint", func(t *testing.T) {
 		dbg := NewDebugger()
 		id := dbg.BreakIf(0, 5, func(i *Interpreter) bool {
 			return i.Len() == 1
@@ -2848,7 +2739,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 1, i.Len())
 	})
 
-	t.Run("debugger helpers inspect current frame", func(t *testing.T) {
+	t.Run("helpers inspect current frame", func(t *testing.T) {
 		dbg := NewDebugger()
 		dbg.Break(0, 0)
 		i := New(program.New([]instr.Instruction{
@@ -2874,90 +2765,122 @@ func TestInterpreter_Run(t *testing.T) {
 		require.ErrorIs(t, err, ErrFrameUnderflow)
 	})
 
-	t.Run("debugger step next and finish around calls", func(t *testing.T) {
-		fn := types.NewFunctionBuilder(&types.FunctionType{
+	makeCallProg := func() *program.Program {
+		callee := types.NewFunctionBuilder(&types.FunctionType{
 			Returns: []types.Type{types.TypeI32},
 		}).Emit(
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.RETURN),
 		).Build()
-		prog := program.New([]instr.Instruction{
+		return program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
 			instr.New(instr.DROP),
-		}, program.WithConstants(fn))
+		}, program.WithConstants(callee))
+	}
 
-		t.Run("step enters call", func(t *testing.T) {
-			dbg := NewDebugger()
-			dbg.Break(0, 3)
-			i := New(prog, WithDebugger(dbg))
-			defer i.Close()
-
-			require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
-			dbg.Step()
-			require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
-			require.Equal(t, 1, i.Func())
-			require.Equal(t, 0, i.IP())
-			require.Equal(t, 2, i.FrameDepth())
-			fn, ip, _, err := i.Frame(0)
-			require.NoError(t, err)
-			require.Equal(t, 1, fn)
-			require.Equal(t, 0, ip)
-			fn, ip, _, err = i.Frame(1)
-			require.NoError(t, err)
-			require.Equal(t, 0, fn)
-			require.Equal(t, 4, ip)
-		})
-
-		t.Run("next steps over call", func(t *testing.T) {
-			dbg := NewDebugger()
-			dbg.Break(0, 3)
-			i := New(prog, WithDebugger(dbg))
-			defer i.Close()
-
-			require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
-			dbg.Next()
-			require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
-			require.Equal(t, 0, i.Func())
-			require.Equal(t, 4, i.IP())
-			require.Equal(t, 1, i.FrameDepth())
-			require.Equal(t, 1, i.Len())
-		})
-
-		t.Run("finish stops in caller", func(t *testing.T) {
-			dbg := NewDebugger()
-			dbg.Break(0, 3)
-			i := New(prog, WithDebugger(dbg))
-			defer i.Close()
-
-			require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
-			dbg.Step()
-			require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
-			dbg.Finish()
-			require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
-			require.Equal(t, 0, i.Func())
-			require.Equal(t, 4, i.IP())
-			require.Equal(t, 1, i.FrameDepth())
-		})
-	})
-
-	t.Run("reset restores fuel", func(t *testing.T) {
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.NOP),
-			instr.New(instr.I32_CONST, 7),
-		}), WithTick(1), WithFuel(1))
+	t.Run("step enters call", func(t *testing.T) {
+		dbg := NewDebugger()
+		dbg.Break(0, 3)
+		i := New(makeCallProg(), WithDebugger(dbg))
 		defer i.Close()
 
-		err := i.Run(context.Background())
-		require.ErrorIs(t, err, ErrFuelExhausted)
-
-		i.Reset()
-
-		err = i.Run(context.Background())
-		require.ErrorIs(t, err, ErrFuelExhausted)
+		require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
+		dbg.Step()
+		require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
+		require.Equal(t, 1, i.Func())
+		require.Equal(t, 0, i.IP())
+		require.Equal(t, 2, i.FrameDepth())
+		fn, ip, _, err := i.Frame(0)
+		require.NoError(t, err)
+		require.Equal(t, 1, fn)
+		require.Equal(t, 0, ip)
+		fn, ip, _, err = i.Frame(1)
+		require.NoError(t, err)
+		require.Equal(t, 0, fn)
+		require.Equal(t, 4, ip)
 	})
 
-	t.Run("jit links branches", func(t *testing.T) {
+	t.Run("next steps over call", func(t *testing.T) {
+		dbg := NewDebugger()
+		dbg.Break(0, 3)
+		i := New(makeCallProg(), WithDebugger(dbg))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
+		dbg.Next()
+		require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
+		require.Equal(t, 0, i.Func())
+		require.Equal(t, 4, i.IP())
+		require.Equal(t, 1, i.FrameDepth())
+		require.Equal(t, 1, i.Len())
+	})
+
+	t.Run("finish stops in caller", func(t *testing.T) {
+		dbg := NewDebugger()
+		dbg.Break(0, 3)
+		i := New(makeCallProg(), WithDebugger(dbg))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
+		dbg.Step()
+		require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
+		dbg.Finish()
+		require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
+		require.Equal(t, 0, i.Func())
+		require.Equal(t, 4, i.IP())
+		require.Equal(t, 1, i.FrameDepth())
+	})
+}
+
+func TestInterpreter_JIT(t *testing.T) {
+	t.Run("compiles numeric globals", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 9),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.GLOBAL_GET, 0),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.I32_CONST))
+		i.globals = append(i.globals, types.BoxI32(1))
+		require.NoError(t, i.jit(0))
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(9), v)
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Attempts)
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
+	t.Run("skips ref globals", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.GLOBAL_GET, 0),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.GLOBAL_GET))
+		i.globals = append(i.globals, types.BoxedNull)
+		require.NoError(t, i.jit(0))
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.Null, v)
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Attempts)
+		require.Zero(t, jit.Emits)
+		require.Zero(t, jit.Links)
+	})
+
+	t.Run("links branches", func(t *testing.T) {
 		if arch == nil {
 			t.Skip("jit is not available on this architecture")
 		}
@@ -2973,7 +2896,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.LOCAL_GET, 0),
 		).Build()
 
-		tests := []struct {
+		cases := []struct {
 			name     string
 			program  *program.Program
 			profile  func(*prof.Stats)
@@ -3089,7 +3012,8 @@ func TestInterpreter_Run(t *testing.T) {
 				value:   types.I32(3),
 			},
 		}
-		for _, tt := range tests {
+		for _, tt := range cases {
+			tt := tt
 			t.Run(tt.name, func(t *testing.T) {
 				p := prof.New()
 				tt.profile(p)
@@ -3109,7 +3033,7 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 	})
 
-	t.Run("jit skips cold segments", func(t *testing.T) {
+	t.Run("skips cold segments", func(t *testing.T) {
 		if arch == nil {
 			t.Skip("jit is not available on this architecture")
 		}
@@ -3129,10 +3053,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.NOP),
 		}), WithProfile(p), WithCutoff(1))
 		defer i.Close()
-
-		err := i.jit(0)
-		require.NoError(t, err)
-
+		require.NoError(t, i.jit(0))
 		jit := p.Snapshot().JIT
 		require.Equal(t, uint64(1), jit.Attempts)
 		require.Equal(t, uint64(1), jit.Emits)
@@ -3140,7 +3061,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, uint64(1), jit.Skips)
 	})
 
-	t.Run("canceled jit execution", func(t *testing.T) {
+	t.Run("canceled execution", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -3220,6 +3141,394 @@ func TestDebugger_Breakpoints(t *testing.T) {
 	require.Len(t, bps, 1)
 	require.Equal(t, first, bps[0].ID)
 	require.False(t, bps[0].Enabled)
+}
+
+func TestWithMarshaler(t *testing.T) {
+	i := New(program.New(nil), WithMarshaler(&recordingMarshaler{}))
+	defer i.Close()
+
+	m, ok := i.marshaler.(*recordingMarshaler)
+	require.True(t, ok)
+
+	v, err := i.Marshal("ignored")
+	require.NoError(t, err)
+	require.Equal(t, types.I32(9), v)
+	require.True(t, m.marshalCalled)
+
+	var out int32
+	require.NoError(t, i.Unmarshal(types.I32(1), &out))
+	require.Equal(t, int32(12), out)
+	require.True(t, m.unmarshalCalled)
+}
+
+func TestInterpreter_Marshal(t *testing.T) {
+	t.Run("primitives", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		tests := []struct {
+			in   any
+			want types.Value
+		}{
+			{true, types.True},
+			{int32(7), types.I32(7)},
+			{int64(8), types.I64(8)},
+			{float32(1.5), types.F32(1.5)},
+			{float64(2.5), types.F64(2.5)},
+			{"minivm", types.String("minivm")},
+		}
+		for _, tt := range tests {
+			t.Run(fmt.Sprint(tt.in), func(t *testing.T) {
+				got, err := i.Marshal(tt.in)
+				require.NoError(t, err)
+				require.Equal(t, tt.want, got)
+			})
+		}
+	})
+
+	t.Run("nil pointer", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		var p *int
+		got, err := i.Marshal(p)
+		require.NoError(t, err)
+		require.Equal(t, types.Null, got)
+	})
+
+	t.Run("primitive slices", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal([]int32{1, 2})
+		require.NoError(t, err)
+		require.Equal(t, types.I32Array{1, 2}, got)
+	})
+
+	t.Run("reference slice", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal([]string{"a", "b"})
+		require.NoError(t, err)
+
+		arr, ok := got.(*types.Array)
+		require.True(t, ok)
+		require.True(t, arr.Typ.Elem.Equals(types.TypeString))
+		require.Len(t, arr.Elems, 2)
+
+		first, err := i.Load(arr.Elems[0].Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.String("a"), first)
+	})
+
+	t.Run("reference slice survives small heap", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(1))
+		defer i.Close()
+
+		got, err := i.Marshal([]string{"a", "b"})
+		require.NoError(t, err)
+
+		arr, ok := got.(*types.Array)
+		require.True(t, ok)
+		require.Len(t, arr.Elems, 2)
+
+		first, err := i.Load(arr.Elems[0].Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.String("a"), first)
+
+		second, err := i.Load(arr.Elems[1].Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.String("b"), second)
+	})
+
+	t.Run("int slice uses i64 element boxes", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal([]int{1, 2})
+		require.NoError(t, err)
+
+		arr, ok := got.(*types.Array)
+		require.True(t, ok)
+		require.True(t, arr.Typ.Elem.Equals(types.TypeI64))
+		require.Equal(t, types.KindI64, arr.Elems[0].Kind())
+	})
+
+	t.Run("map", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(map[string]int32{"a": 1})
+		require.NoError(t, err)
+
+		m, ok := got.(*types.Map)
+		require.True(t, ok)
+		require.True(t, m.Typ.Key.Equals(types.TypeString))
+		require.True(t, m.Typ.Elem.Equals(types.TypeI32))
+		require.Equal(t, types.BoxI32(1), m.Entries[types.MapKey{Kind: types.KindRef, Text: "a"}].Value)
+	})
+
+	t.Run("int map uses i64 value boxes", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(map[string]int{"a": 1})
+		require.NoError(t, err)
+
+		m, ok := got.(*types.Map)
+		require.True(t, ok)
+		entry := m.Entries[types.MapKey{Kind: types.KindRef, Text: "a"}]
+		require.True(t, m.Typ.Elem.Equals(types.TypeI64))
+		require.Equal(t, types.KindI64, entry.Value.Kind())
+	})
+
+	t.Run("struct exported fields", func(t *testing.T) {
+		type sample struct {
+			Name   string
+			Count  int32
+			hidden int32
+		}
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(sample{Name: "go", Count: 3, hidden: 9})
+		require.NoError(t, err)
+
+		s, ok := got.(*types.Struct)
+		require.True(t, ok)
+		require.Len(t, s.Typ.Fields, 2)
+		require.Equal(t, "Name", s.Typ.Fields[0].Name)
+		require.Equal(t, "Count", s.Typ.Fields[1].Name)
+		require.True(t, s.Typ.Fields[0].Type.Equals(types.TypeString))
+		require.True(t, s.Typ.Fields[1].Type.Equals(types.TypeI32))
+		require.Equal(t, types.BoxI32(3), s.FieldByName("Count"))
+	})
+
+	t.Run("struct ref field", func(t *testing.T) {
+		type sample struct {
+			Ref types.Ref
+		}
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(sample{Ref: types.Null})
+		require.NoError(t, err)
+
+		s, ok := got.(*types.Struct)
+		require.True(t, ok)
+		require.True(t, s.Typ.Fields[0].Type.Equals(types.TypeRef))
+		require.Equal(t, types.BoxedNull, s.FieldByName("Ref"))
+	})
+
+	t.Run("struct value field allocates ref", func(t *testing.T) {
+		type sample struct {
+			Value types.Value
+		}
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(sample{Value: types.I32(7)})
+		require.NoError(t, err)
+
+		s, ok := got.(*types.Struct)
+		require.True(t, ok)
+		require.True(t, s.Typ.Fields[0].Type.Equals(types.TypeRef))
+
+		field := s.FieldByName("Value")
+		require.Equal(t, types.KindRef, field.Kind())
+		value, err := i.Load(field.Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.I32(7), value)
+	})
+
+	t.Run("function", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		for _, f := range []any{
+			func(v int32) (int32, error) { return v + 1, nil },
+			func(v types.I32) types.I32 { return v + 1 },
+		} {
+			got, err := i.Marshal(f)
+			require.NoError(t, err)
+			fn, ok := got.(*HostFunction)
+			require.True(t, ok)
+			require.True(t, fn.Typ.Params[0].Equals(types.TypeI32))
+			require.True(t, fn.Typ.Returns[0].Equals(types.TypeI32))
+			returns, err := fn.Fn(i, []types.Boxed{types.BoxI32(4)})
+			require.NoError(t, err)
+			require.Equal(t, []types.Boxed{types.BoxI32(5)}, returns)
+		}
+	})
+
+	t.Run("function error return", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(func() error {
+			return errors.New("boom")
+		})
+		require.NoError(t, err)
+
+		fn, ok := got.(*HostFunction)
+		require.True(t, ok)
+		require.Empty(t, fn.Typ.Params)
+		require.Empty(t, fn.Typ.Returns)
+
+		_, err = fn.Fn(i, nil)
+		require.EqualError(t, err, "boom")
+	})
+
+	t.Run("boxed ref input", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.String("ref"))
+		require.NoError(t, err)
+
+		got, err := i.Marshal(types.BoxRef(addr))
+		require.NoError(t, err)
+		require.Equal(t, types.String("ref"), got)
+	})
+
+	t.Run("unsupported kind", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		_, err := i.Marshal(make(chan int))
+		require.ErrorIs(t, err, ErrUnsupportedMarshalType)
+	})
+
+	t.Run("recursive struct pointer", func(t *testing.T) {
+		type node struct{ Next *node }
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(node{})
+		require.NoError(t, err)
+		s, ok := got.(*types.Struct)
+		require.True(t, ok)
+		require.True(t, s.Typ.Fields[0].Type.Equals(types.TypeRef))
+		require.Equal(t, types.BoxedNull, s.FieldByName("Next"))
+
+		n := &node{}
+		n.Next = n
+		_, err = i.Marshal(n)
+		require.ErrorIs(t, err, ErrMarshalCycle)
+	})
+
+	t.Run("shared pointer is not a cycle", func(t *testing.T) {
+		type sample struct {
+			First  *int32
+			Second *int32
+		}
+		i := New(program.New(nil))
+		defer i.Close()
+
+		n := int32(7)
+		got, err := i.Marshal(sample{First: &n, Second: &n})
+		require.NoError(t, err)
+
+		s, ok := got.(*types.Struct)
+		require.True(t, ok)
+		require.Equal(t, types.BoxI32(7), s.FieldByName("First"))
+		require.Equal(t, types.BoxI32(7), s.FieldByName("Second"))
+	})
+
+}
+
+func TestInterpreter_Unmarshal(t *testing.T) {
+	t.Run("primitives", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		var b bool
+		require.NoError(t, i.Unmarshal(types.True, &b))
+		require.True(t, b)
+
+		var n int32
+		require.NoError(t, i.Unmarshal(types.I32(7), &n))
+		require.Equal(t, int32(7), n)
+	})
+
+	t.Run("non nil pointer destination required", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Unmarshal(types.I32(1), nil), ErrInvalidUnmarshalTarget)
+		var p *int32
+		require.ErrorIs(t, i.Unmarshal(types.I32(1), p), ErrInvalidUnmarshalTarget)
+	})
+
+	t.Run("slice", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		var out []int32
+		require.NoError(t, i.Unmarshal(types.I32Array{1, 2}, &out))
+		require.Equal(t, []int32{1, 2}, out)
+	})
+
+	t.Run("map", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(map[string]int32{"a": 1})
+		require.NoError(t, err)
+
+		var out map[string]int32
+		require.NoError(t, i.Unmarshal(got, &out))
+		require.Equal(t, map[string]int32{"a": 1}, out)
+	})
+
+	t.Run("struct matches by name", func(t *testing.T) {
+		type sample struct {
+			Count int32
+			Name  string
+		}
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(struct {
+			Name  string
+			Count int32
+		}{Name: "go", Count: 3})
+		require.NoError(t, err)
+
+		var out sample
+		require.NoError(t, i.Unmarshal(got, &out))
+		require.Equal(t, sample{Name: "go", Count: 3}, out)
+	})
+
+	t.Run("pointer target", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		var out *int32
+		require.NoError(t, i.Unmarshal(types.I32(4), &out))
+		require.NotNil(t, out)
+		require.Equal(t, int32(4), *out)
+	})
+
+	t.Run("value target", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		var out types.Value
+		require.NoError(t, i.Unmarshal(types.I32(4), &out))
+		require.Equal(t, types.I32(4), out)
+	})
+
+	t.Run("error cases", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		var n int8
+		require.ErrorIs(t, i.Unmarshal(types.I32(128), &n), ErrValueOverflow)
+		var m int32
+		require.ErrorIs(t, i.Unmarshal(types.String("bad"), &m), ErrTypeMismatch)
+	})
 }
 
 func BenchmarkInterpreter_Run(b *testing.B) {

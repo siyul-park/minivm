@@ -7,33 +7,33 @@
 
 **Ship a scripting engine without writing a compiler.**
 
-minivm gives your Go service a lightweight programmable runtime: assemble bytecode, expose Go functions to it, and run. Hot paths automatically upgrade from a threaded interpreter to native ARM64 code — no flags, no warmup, no configuration.
+minivm gives your Go service a lightweight programmable runtime: assemble bytecode, expose Go functions, run. Hot paths auto-upgrade from threaded interpreter to native ARM64 — no flags, no warmup, no config.
 
 ```bash
 go get github.com/siyul-park/minivm
 ```
 
-> Requires Go 1.26.2+. The VM core uses only the Go standard library; the CLI and tests use small Go module dependencies.
+> Requires Go 1.26.2+. VM core uses only Go standard library; CLI and tests use small Go module dependencies.
 
 ---
 
 ## What you can build
 
 - **Scripting engines** — let users write logic your application executes under your host policy
-- **Rule engines** — evaluate complex conditions at runtime without redeployment  
+- **Rule engines** — evaluate complex conditions at runtime without redeployment
 - **DSL runtimes** — define your own instruction set on top of a proven VM foundation
 - **Plugin systems** — run application-defined bytecode in an isolated, GC-managed environment
 
 ## Designed for Go embedding
 
-minivm is intentionally shaped around Go services:
+minivm is shaped around Go services:
 
-- **Simple embedding** — build programs with Go APIs and run them in-process
-- **Typed host calls** — expose Go functions through the `[]Boxed` bridge without reflection
-- **Compact runtime model** — use a small custom bytecode format with a GC-managed heap
-- **Automatic tiering** — start in the threaded interpreter and promote hot ARM64 numeric paths
+- **Simple embedding** — build programs with Go APIs and run in-process
+- **Typed host calls** — expose Go functions through `[]Boxed` bridge without reflection
+- **Compact runtime model** — small custom bytecode format with GC-managed heap
+- **Automatic tiering** — start in threaded interpreter and promote hot ARM64 numeric paths
 
-The instruction set borrows familiar ideas from WebAssembly while staying focused on Go-native scripting, rules, and DSL execution. See [docs/roadmap.md](docs/roadmap.md) for the current direction.
+Instruction set borrows from WebAssembly while staying focused on Go-native scripting, rules, and DSL execution. See [docs/roadmap.md](docs/roadmap.md) for current direction.
 
 ---
 
@@ -41,7 +41,7 @@ The instruction set borrows familiar ideas from WebAssembly while staying focuse
 
 ### Execute bytecode
 
-Every value on the stack is a `uint64`. The VM manages memory; you manage the bytecode.
+Every stack value is `uint64`. VM manages memory; you manage bytecode.
 
 ```go
 prog := program.New([]instr.Instruction{
@@ -62,7 +62,7 @@ result, _ := vm.Pop() // types.I32(42)
 
 ### Call Go from bytecode
 
-The bridge between your application and guest code. Any Go function becomes callable from bytecode:
+Bridge between application and guest code. Any Go function becomes callable from bytecode:
 
 ```go
 lookup := interp.NewHostFunction(
@@ -87,11 +87,11 @@ prog := program.New(
 )
 ```
 
-Host functions receive typed parameters as `[]Boxed` and return `[]Boxed` — no reflection, no interface{} boxing overhead.
+Host functions receive typed params as `[]Boxed`, return `[]Boxed` — no reflection, no `interface{}` boxing.
 
 ### Define reusable functions
 
-Functions are first-class constants. Build them with the fluent `FunctionBuilder` API:
+Functions are first-class constants. Build with `FunctionBuilder` API:
 
 ```go
 factorial := types.NewFunctionBuilder(&types.FunctionType{
@@ -126,13 +126,13 @@ prog := program.New(
 
 ### Optimize before running
 
-Before handing bytecode to the VM, collapse compile-time-known expressions and strip unreachable branches:
+Before handing bytecode to VM, collapse compile-time-known expressions and strip unreachable branches:
 
 ```go
 prog, err := optimize.NewOptimizer(optimize.O1).Optimize(prog)
 ```
 
-`O1` applies across every function in the program:
+`O1` applies across every function:
 - **Constant folding** — `I32_CONST 3, I32_CONST 4, I32_ADD` collapses to `I32_CONST 7`
 - **Constant deduplication** — identical constant values share a single slot
 - **Dead code elimination** — unreachable basic blocks are removed
@@ -141,7 +141,7 @@ prog, err := optimize.NewOptimizer(optimize.O1).Optimize(prog)
 
 ## How the JIT works
 
-minivm runs a **two-tier pipeline** that requires no decisions from you:
+minivm runs a **two-tier pipeline** — no decisions required:
 
 ```
                 startup
@@ -158,15 +158,15 @@ bytecode ──────────────────► threaded clos
                           replaces closures in-place
 ```
 
-The JIT compiles numeric computation — arithmetic, bitwise ops, comparisons, and type conversions across i32/i64/f32/f64 — to native code. It also handles selected stack operations, locals, constants, `select`, and branch instructions when the current stack shape can be represented by the native segment signature. Function calls, globals, references, and heap-object operations continue through the threaded tier. The threaded interpreter itself uses closure dispatch rather than a switch table, so it's fast even before JIT kicks in.
+JIT compiles numeric computation — arithmetic, bitwise ops, comparisons, and type conversions across i32/i64/f32/f64 — to native code. Also handles selected stack operations, locals, constants, `select`, and branch instructions when current stack shape can be represented by native segment signature. Function calls, globals, references, and heap-object operations continue through threaded tier. Threaded interpreter uses closure dispatch rather than a switch table, so it's fast even before JIT.
 
-**What this means in practice:** a compute-heavy loop runs in the interpreter for roughly its first 4096 executed instructions, then hot native segments take over. There is nothing to tune unless you want to.
+**In practice:** compute-heavy loop runs in interpreter for ~4096 executed instructions, then hot native segments take over. Nothing to tune.
 
 ---
 
 ## Instruction set
 
-Inspired by WebAssembly, but intentionally custom. Every opcode is one byte; operands are fixed-width or length-prefixed.
+WebAssembly-inspired, intentionally custom. Every opcode is one byte; operands are fixed-width or length-prefixed.
 
 | Category | |
 |---|---|
@@ -199,15 +199,11 @@ vm := interp.New(prog,
 )
 ```
 
-`WithTick` controls profiling samples, context-cancellation polling, hook cadence, and fuel consumption. `WithFuel` accepts an expected instruction budget and rounds it up to the nearest tick interval internally; `WithFuel(0)` is unlimited. Hooks run synchronously on the `Run` goroutine and receive the live interpreter; avoid concurrent interpreter access and preserve VM invariants when mutating state.
+`WithTick` controls profiling samples, context-cancellation polling, hook cadence, and fuel consumption. `WithFuel` accepts instruction budget and rounds up to nearest tick interval; `WithFuel(0)` is unlimited. Hooks run synchronously on `Run` goroutine; avoid concurrent interpreter access and preserve VM invariants.
 
-For bytecode-level debugging, use `NewDebugger` with `WithDebugger`. The
-debugger provides breakpoints plus `Step`, `Next`, and `Finish`;
-`WithDebugger` configures instruction-accurate hooks and disables JIT. See
-[`docs/debugging.md`](docs/debugging.md).
+For bytecode-level debugging, use `NewDebugger` with `WithDebugger`. Provides breakpoints plus `Step`, `Next`, `Finish`; disables JIT. See [`docs/debugging.md`](docs/debugging.md).
 
-For profile snapshots, JIT counters, and REPL `.profile` output, see
-[`docs/profile.md`](docs/profile.md).
+For profile snapshots, JIT counters, and REPL `.profile` output, see [`docs/profile.md`](docs/profile.md).
 
 ---
 

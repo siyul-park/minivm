@@ -18,6 +18,7 @@ type Interpreter struct {
 	ctx       context.Context
 	prof      *prof.Stats
 	hook      func(*Interpreter) error
+	marshaler Marshaler
 	buffer    *asm.Buffer
 	instrs    [][]byte
 	code      [][]func(*Interpreter)
@@ -26,6 +27,7 @@ type Interpreter struct {
 	constants []types.Boxed
 	globals   []types.Boxed
 	stack     []types.Boxed
+	roots     []types.Boxed
 	heap      []types.Value
 	free      []int
 	rc        []int
@@ -50,6 +52,7 @@ type frame struct {
 type option struct {
 	profile   *prof.Stats
 	hook      func(*Interpreter) error
+	marshaler Marshaler
 	frame     int
 	globals   int
 	stack     int
@@ -80,6 +83,10 @@ func WithProfile(p *prof.Stats) func(*option) {
 
 func WithHook(fn func(*Interpreter) error) func(*option) {
 	return func(o *option) { o.hook = fn }
+}
+
+func WithMarshaler(m Marshaler) func(*option) {
+	return func(o *option) { o.marshaler = m }
 }
 
 func WithFrame(val int) func(*option) {
@@ -138,6 +145,10 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	if p == nil {
 		p = prof.New()
 	}
+	m := opt.marshaler
+	if m == nil {
+		m = DefaultMarshaler
+	}
 
 	var fuel int64 = -1
 	if opt.fuel > 0 {
@@ -159,6 +170,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	i := &Interpreter{
 		prof:      p,
 		hook:      opt.hook,
+		marshaler: m,
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
 		frames:    make([]frame, opt.frame),
@@ -192,6 +204,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 			val = types.BoxF32(float32(v))
 		case types.F64:
 			val = types.BoxF64(float64(v))
+		case types.Ref:
+			val = types.BoxRef(int(v))
 		default:
 			val = types.BoxRef(i.alloc(v))
 		}
@@ -474,6 +488,7 @@ func (i *Interpreter) Reset() {
 	i.globals = i.globals[:0]
 
 	i.sp = 0
+	i.roots = i.roots[:0]
 
 	constants := 1
 	for _, v := range i.constants {
@@ -601,6 +616,8 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 		return types.BoxF32(float32(v))
 	case types.F64:
 		return types.BoxF64(float64(v))
+	case types.Ref:
+		return types.BoxRef(int(v))
 	default:
 		addr := i.alloc(v)
 		return types.BoxRef(addr)
@@ -618,10 +635,14 @@ func (i *Interpreter) unbox(val types.Boxed) types.Value {
 }
 
 func (i *Interpreter) alloc(val types.Value) int {
+	roots := i.traceRoot(val)
+	defer i.unroot(roots)
+
 	if len(i.free) > 0 {
 		addr := i.free[len(i.free)-1]
 		i.free = i.free[:len(i.free)-1]
 		i.heap[addr] = val
+		i.rc[addr] = 1
 		return addr
 	}
 
@@ -631,6 +652,7 @@ func (i *Interpreter) alloc(val types.Value) int {
 			addr := i.free[len(i.free)-1]
 			i.free = i.free[:len(i.free)-1]
 			i.heap[addr] = val
+			i.rc[addr] = 1
 			return addr
 		}
 
@@ -683,6 +705,33 @@ func (i *Interpreter) release(addr int) {
 	}
 }
 
+func (i *Interpreter) traceRoot(val types.Value) int {
+	t, ok := val.(types.Traceable)
+	if !ok {
+		return 0
+	}
+	n := 0
+	for _, ref := range t.Refs() {
+		n += i.root(types.BoxRef(int(ref)))
+	}
+	return n
+}
+
+func (i *Interpreter) root(val types.Boxed) int {
+	if val.Kind() != types.KindRef {
+		return 0
+	}
+	i.roots = append(i.roots, val)
+	return 1
+}
+
+func (i *Interpreter) unroot(n int) {
+	if n == 0 {
+		return
+	}
+	i.roots = i.roots[:len(i.roots)-n]
+}
+
 func (i *Interpreter) gc() {
 	for j := 1; j < len(i.heap); j++ {
 		if i.rc[j] < 0 {
@@ -711,6 +760,11 @@ func (i *Interpreter) gc() {
 		}
 	}
 	for _, val := range i.globals {
+		if val.Kind() == types.KindRef {
+			push(val.Ref())
+		}
+	}
+	for _, val := range i.roots {
 		if val.Kind() == types.KindRef {
 			push(val.Ref())
 		}

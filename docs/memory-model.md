@@ -44,7 +44,7 @@ RC is manually handled in every threaded closure touching refs.
 1. gets nested refs from `Refs()` if object is `Traceable`
 2. calls `Close()` if object is `io.Closer`
 3. clears `heap[addr]` and appends `addr` to `free`
-4. repeats for nested refs using an explicit work stack
+4. repeats for nested refs using explicit work stack
 
 `release` must stay iterative, not recursive, to avoid stack overflow on deep object graphs.
 
@@ -60,7 +60,7 @@ RC is manually handled in every threaded closure touching refs.
 
 ## GC Algorithm: Mark-and-Sweep via Sign Flip
 
-`gc()` runs when the heap is full and `free` is empty. It uses the sign of `rc` as the mark bit, avoiding a separate mark array.
+`gc()` runs when heap is full and `free` is empty. Uses sign of `rc` as mark bit, avoiding separate mark array.
 
 ### 1. Mark all live slots unreachable
 
@@ -95,30 +95,30 @@ Properties:
 
 - O(1) extra space; no mark array
 - handles reference cycles
-- no compaction, so heap indices stay stable
-- pause cost is proportional to heap size, not live-set size
+- no compaction, heap indices stay stable
+- pause cost proportional to heap size, not live-set size
 
 ## Key Invariants
 
 ### `heap[0]` is always `Null`
 
-`interp.New()` allocates heap index `0` with RC `1` before user code. It is never freed and never enters `free`. `BoxedNull = BoxRef(0)`.
+`interp.New()` allocates heap index `0` with RC `1` before user code. Never freed, never enters `free`. `BoxedNull = BoxRef(0)`.
 
 ### RC must be symmetric
 
-Every `retain` needs a matching `release`. Asymmetry causes premature collection or leaks.
+Every `retain` needs matching `release`. Asymmetry causes premature collection or leaks.
 
 ### Primitive `Boxed` values do not use RC
 
-Only `KindRef` values need RC. `KindI32`, `KindI64`, `KindF32`, and `KindF64` are value types and ignored by RC logic.
+Only `KindRef` values need RC. `KindI32`, `KindI64`, `KindF32`, `KindF64` are value types, ignored by RC logic.
 
 ### Heap indices are stable
 
-Never cache a pointer into `heap` across potential `alloc`; the slice may reallocate. Keep integer indices.
+Never cache pointer into `heap` across potential `alloc`; slice may reallocate. Keep integer indices.
 
 ## Host Function Memory Access
 
-Host functions use the `Interpreter` API:
+Host functions use `Interpreter` API:
 
 ```go
 addr, err := vm.Alloc(val)  // allocate object; BoxedRef returns existing index
@@ -131,9 +131,11 @@ err = vm.Release(addr)      // matching release
 
 Always `Release` retained refs when done, or objects leak.
 
+`Interpreter.Marshal` may allocate nested ref values while converting Go arrays, maps, and structs into `types.Value`. Those refs belong to interpreter heap. Consume returned value through VM APIs such as `Push` or `Alloc`, or let `Close`/`Reset` discard temporary marshal allocations.
+
 ## I64 Heap Spilling
 
-Large `int64` values outside the 49-bit NaN-boxable range are heap-allocated as `types.I64`.
+Large `int64` values outside 49-bit NaN-boxable range are heap-allocated as `types.I64`.
 
 ```go
 func (i *Interpreter) boxI64(val int64) types.Boxed {
@@ -145,4 +147,4 @@ func (i *Interpreter) boxI64(val int64) types.Boxed {
 }
 ```
 
-Spilled I64 arithmetic costs one heap allocation plus RC work per operation. Bytecode behavior is unchanged, but tight-loop throughput can drop. Roughly, `[-2^48, 2^48-1]` stays stack-allocated; outside that range spills to heap.
+Spilled I64 arithmetic costs one heap allocation plus RC work per operation. Bytecode behavior unchanged, but tight-loop throughput can drop. Roughly, `[-2^48, 2^48-1]` stays stack-allocated; outside that range spills to heap.

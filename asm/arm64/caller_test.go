@@ -93,4 +93,33 @@ func TestCaller_Call(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []asm.Value{asm.I64(11), asm.I64(31)}, out)
 	})
+
+	t.Run("reuses executable buffer", func(t *testing.T) {
+		buf, err := asm.NewBuffer(8192)
+		require.NoError(t, err)
+		defer buf.Free()
+
+		a := asm.NewAssembler(Arch, buf)
+		for n := range 64 {
+			out := a.NewVReg(asm.RegTypeInt, asm.Width64)
+			require.NoError(t, a.Pin(out, X0))
+
+			a.Emits(LDI(out, uint64(n))...)
+			idx := a.Index()
+			a.Site(idx, []asm.VReg{out})
+			a.Emit(RET())
+
+			obj, err := a.Compile()
+			require.NoError(t, err)
+
+			callers, err := a.Link([]*asm.RelocObject{obj})
+			require.NoError(t, err)
+			require.Len(t, callers, 1)
+			require.NotNil(t, callers[0])
+
+			values, err := callers[0].Call(nil, nil)
+			require.NoError(t, err)
+			require.Equal(t, []asm.Value{asm.I64(uint64(n))}, values)
+		}
+	})
 }

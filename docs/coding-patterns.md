@@ -4,7 +4,7 @@
 
 ## Agent Fast Path
 
-Use this as style authority, but read only task-relevant sections.
+Style authority. Read only task-relevant sections.
 
 | Change | Read |
 |---|---|
@@ -16,7 +16,7 @@ Use this as style authority, but read only task-relevant sections.
 | Commits/PR text | 7. Git & PR Workflow |
 | Docs | 8. Documentation Maintenance |
 
-Default: match nearby code first; use this document when local style is unclear or a new pattern is needed.
+Default: match nearby code first; use this doc when local style unclear or new pattern needed.
 
 Priorities:
 
@@ -26,13 +26,13 @@ Priorities:
 - top-down flow over fragmented logic
 - intention-revealing APIs over implementation exposure
 
-Code should read like a behavior specification. Readers should quickly understand what the system does, where complexity lives, and why the structure exists without simulating low-level mechanics.
+Code reads like a behavior specification. Readers quickly understand what system does, where complexity lives, why structure exists — without simulating low-level mechanics.
 
 ## 0. Core Principles
 
 ### 0.1 Complexity placement
 
-Push complexity downward. Public APIs stay simple even when implementation is hard.
+Push complexity downward. Public APIs stay simple even when implementation hard.
 
 Prefer:
 
@@ -41,27 +41,27 @@ Prefer:
 - localized complexity over distributed state
 - predictable structure over clever abstraction
 
-Avoid spreading complexity across layers. A difficult operation should have one difficult implementation, not many partially difficult call sites.
+Avoid spreading complexity across layers. Difficult operation → one difficult implementation, not many partially difficult call sites.
 
 ### 0.2 Top-down readability
 
-Put important logic first. Reading downward should reveal detail progressively: policy above, mechanics below. Readers should rarely jump backward.
+Put important logic first. Reading downward reveals detail progressively: policy above, mechanics below. Readers rarely jump backward.
 
 ### 0.3 Avoid cleverness
 
-Do not optimize for brevity. Prefer mechanically obvious code, even if longer, when it reduces hidden state, avoids surprising flow, improves debuggability, or preserves interpreter/JIT symmetry.
+Don't optimize for brevity. Prefer mechanically obvious code, even if longer, when it reduces hidden state, avoids surprising flow, improves debuggability, or preserves interpreter/JIT symmetry.
 
 ### 0.4 Behavioral symmetry
 
-Interpreter and JIT paths should stay structurally similar when possible. Symmetry matters more than local optimization.
+Interpreter and JIT paths stay structurally similar when possible. Symmetry matters more than local optimization.
 
 ## 1. Function Design
 
 ### 1.1 Single abstraction level
 
-Every statement in a function should sit at the same conceptual height. Do not mix parsing with domain logic, policy with arithmetic, orchestration with buffer mutation, or business flow with index manipulation.
+Every statement sits at same conceptual height. Don't mix parsing with domain logic, policy with arithmetic, orchestration with buffer mutation, or business flow with index manipulation.
 
-Functions should read like a narrative. Callers should understand behavior without decoding parsing, temporary state, or low-level mechanics. Put mechanics in intent-named helpers.
+Functions read like a narrative. Callers understand behavior without decoding parsing, temporary state, or low-level mechanics. Put mechanics in intent-named helpers.
 
 ```go
 // ✗ mixed abstraction levels
@@ -111,11 +111,11 @@ func (r *REPL) Run(ctx context.Context) error {
 }
 ```
 
-If comments are needed to explain transitions between statements, abstraction levels are probably mixed.
+Comments explaining transitions between statements signal mixed abstraction levels.
 
 ### 1.2 Names express intent
 
-Names should describe caller-visible outcomes, not internal mechanisms.
+Names describe caller-visible outcomes, not internal mechanisms.
 
 | ✗ Mechanism | ✓ Intent |
 |---|---|
@@ -125,11 +125,11 @@ Names should describe caller-visible outcomes, not internal mechanisms.
 | `checkEmptyAndFormatProg` | `show` |
 | `appendInstrAndUpdateLen` | `commit` |
 
-Receiver context counts: `r.show()` and `r.commit()` are clear on `*REPL`.
+Receiver context counts: `r.show()`, `r.commit()` clear on `*REPL`.
 
 ### 1.3 Top-down structure
 
-Declare callers above callees. Reading downward should follow execution flow.
+Declare callers above callees. Reading downward follows execution flow.
 
 ```text
 Run
@@ -139,19 +139,19 @@ Run
   parse   → normalize → parseInt
 ```
 
-Readers should discover detail progressively, not reconstruct behavior from scattered helpers.
+Readers discover detail progressively, not reconstruct from scattered helpers.
 
 ### 1.4 Small responsibilities
 
-A function should do one conceptual thing: orchestrate, transform, validate, emit, or normalize.
+Function does one conceptual thing: orchestrate, transform, validate, emit, or normalize.
 
-Split when abstraction level changes, naming becomes hard, comments explain sections, or temporary state lives too long.
+Split when abstraction level changes, naming hard, comments explain sections, or temporary state lives too long.
 
 ### 1.5 Methods vs package-level functions
 
-Behavior belongs with the type that owns required context.
+Behavior belongs with type owning required context.
 
-**Rule**: Functions used by only one type should be methods on that type. Repeatedly passing the same receiver means the helper should be a method.
+**Rule**: Functions used by only one type → method on that type. Repeatedly passing same receiver means helper should be method.
 
 ```go
 // ✗ package-level helper (used only by jitCompiler)
@@ -165,7 +165,7 @@ func (c *jitCompiler) branchClosure(fn Caller, sig *Signature) func(*Interpreter
 }
 ```
 
-**Exception**: Constructors for types (not methods on other types) can remain standalone:
+**Exception**: Constructors for types can remain standalone:
 
 ```go
 // ✓ standalone constructor (not a method on Assembler)
@@ -179,13 +179,13 @@ func (a *Assembler) newCompiler(arch *Arch, p program) *compiler {
 }
 ```
 
-For JIT code, keep architecture-neutral `jitCompiler` state and helpers in `interp/jit.go`. Put only architecture selection, opcode handlers, and ISA-specific emission helpers in `interp/jit_<arch>.go`.
+For JIT: keep architecture-neutral `jitCompiler` state + helpers in `interp/jit.go`. Put only arch selection, opcode handlers, ISA-specific helpers in `interp/jit_<arch>.go`.
 
 ## 2. Type & Interface Design
 
 ### 2.1 Interface-first
 
-Define interfaces in the consuming package, not the implementing package.
+Define interfaces in consuming package, not implementing package.
 
 ```go
 // asm/caller.go
@@ -200,7 +200,7 @@ Interfaces represent required behavior, not implementation ownership.
 
 ### 2.2 Private type, public instance
 
-When only one meaningful implementation exists, use an unexported concrete type with one exported instance.
+One meaningful implementation → unexported concrete type with one exported instance.
 
 ```go
 type i32Type struct{}
@@ -215,7 +215,7 @@ func (i32Type) Equals(other Type) bool { return other == TypeI32 }
 
 ### 2.3 Interface compliance assertions
 
-Declare immediately after the type definition.
+Declare immediately after type definition.
 
 ```go
 var _ Traceable = (*Struct)(nil)
@@ -235,7 +235,7 @@ Order declarations from policy to mechanism:
 
 ### 2.5 Struct field ordering
 
-Struct layout should mirror human reasoning:
+Struct layout mirrors human reasoning:
 
 | Level | Examples |
 |---|---|
@@ -271,7 +271,7 @@ type Interpreter struct {
 }
 ```
 
-Struct literals must preserve declaration order. Zero-value fields may be omitted, but remaining fields must stay ordered.
+Struct literals preserve declaration order. Zero-value fields may omit, but remaining stay ordered.
 
 ## 3. API Design
 
@@ -287,7 +287,7 @@ func NewCaller(sig *Signature, chunk *Chunk) (Caller, error)
 
 ### 3.2 Parser naming
 
-`Parse` handles the primary package type.
+`Parse` handles primary package type.
 
 ```go
 func Parse(s string) (Type, error)
@@ -353,7 +353,7 @@ Discard builders after `Build()`.
 
 ### 4.1 Errors are API surface
 
-Errors are package behavior. Sentinel errors represent stable semantic categories, not implementation details.
+Errors are package behavior. Sentinel errors: stable semantic categories, not implementation details.
 
 ```go
 var (
@@ -374,7 +374,7 @@ return fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
 
 ### 4.3 Panic strategy
 
-Panic only for violated internal invariants in hot paths. Normal control flow must stay explicit. Recover once at the execution boundary.
+Panic only for violated internal invariants in hot paths. Normal control flow stays explicit. Recover once at execution boundary.
 
 ## 5. Build Tags
 
@@ -392,9 +392,38 @@ Architecture-specific files require matching stubs.
 
 ### 6.1 Tests are executable documentation
 
-Tests should show setup, execution, and expectation in one visible flow so behavior is clear without helper indirection.
+Tests show setup, execution, and expectation in one visible flow — no helper indirection.
 
-### 6.2 File naming — mandatory 1:1 mapping
+**No test helpers that wrap test logic.** Inline everything inside each `t.Run` body. When a test uses an abstraction, readers must chase the helper to understand what the API does and what the test asserts. Tests serve two purposes: verification and documentation of API usage. Both require full call sequence visible at the point of the test.
+
+```go
+// WRONG: hides what the API does
+runCancel := func(t *testing.T, prog *program.Program, opts ...func(*option)) {
+    t.Helper()
+    ctx, cancel := context.WithCancel(context.Background())
+    // ...
+}
+t.Run("threaded", func(t *testing.T) { runCancel(t, prog, WithTick(1)) })
+
+// CORRECT: full call visible, no indirection
+t.Run("threaded", func(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+    calls := 0
+    i := New(prog, WithTick(1), WithHook(func(i *Interpreter) error {
+        calls++
+        cancel()
+        return nil
+    }))
+    defer i.Close()
+    require.ErrorIs(t, i.Run(ctx), context.Canceled)
+    require.Equal(t, 1, calls)
+})
+```
+
+Exception only: package-level helpers iterating shared test data where test body is identical across all cases and variation is purely in inputs.
+
+### 6.2 File naming
 
 ```text
 buffer.go      → buffer_test.go
@@ -402,7 +431,9 @@ assembler.go   → assembler_test.go
 jit_arm64.go   → jit_arm64_test.go
 ```
 
-Every `.go` file must have a matching `_test.go`.
+Default to matching production files with corresponding `_test.go` files.
+
+When implementation file only supports another type's public API, put tests in owner type's test file. E.g., interpreter option functions and `Interpreter` methods belong in `interp_test.go`, even if implemented in smaller supporting file.
 
 ### 6.3 One test per public symbol
 
@@ -416,7 +447,11 @@ All cases for a symbol belong in one test function.
 
 ### 6.4 Test structure
 
-Prefer table-driven tests.
+**Minimize nesting depth.** Each `t.Run` level adds reading, filtering, debugging overhead. Aim for at most one subtest level. Wrapper subtests that only group cases add depth without value — hoist directly.
+
+At each nesting level, use **one** pattern — table-driven or explicit `t.Run`. Don't mix both.
+
+**Table-driven** — when all cases share identical setup and assertion shape:
 
 ```go
 func TestBoxed_Kind(t *testing.T) {
@@ -436,12 +471,49 @@ func TestBoxed_Kind(t *testing.T) {
 }
 ```
 
-Use explicit subtests when tables reduce readability.
+No `name string` field when subtest name derives from primary input. Use `fmt.Sprint(tt.input)` instead. `name` field allowed only when inputs don't produce readable name (e.g. program bytecode, complex configs).
+
+**Explicit subtests** — when cases differ in setup, have side effects, or benefit from a descriptive label:
 
 ```go
 func TestBuffer_Append(t *testing.T) {
     t.Run("normal", func(t *testing.T) { ... })
     t.Run("overflow", func(t *testing.T) { ... })
+}
+```
+
+**No grouping wrappers** unless wrapper does meaningful shared setup that can't be inlined. Wrapper that only groups adds depth without gain — hoist to parent level.
+
+Shared setup across few cases: inline or extract local helper:
+
+```go
+// WRONG: extra level just for grouping
+t.Run("with auth", func(t *testing.T) {
+    t.Run("valid token", func(t *testing.T) { ... })
+    t.Run("expired token", func(t *testing.T) { ... })
+})
+
+// CORRECT: hoisted, setup duplicated or extracted
+makeCtx := func() context.Context { ... }
+t.Run("valid token", func(t *testing.T) { ctx := makeCtx(); ... })
+t.Run("expired token", func(t *testing.T) { ctx := makeCtx(); ... })
+```
+
+Multiple execution modes: extract helper, call from explicit `t.Run` blocks:
+
+```go
+func TestFoo_Run(t *testing.T) {
+    run := func(t *testing.T, opts ...Option) {
+        t.Helper()
+        for _, tt := range cases {
+            t.Run(fmt.Sprint(tt.in), func(t *testing.T) { ... })
+        }
+    }
+
+    t.Run("default", func(t *testing.T) { run(t) })
+    t.Run("jit", func(t *testing.T) { run(t, WithJIT()) })
+
+    t.Run("canceled context", func(t *testing.T) { ... })
 }
 ```
 
@@ -477,7 +549,7 @@ package arm64
 
 ### 6.8 Test helper policy
 
-Test helpers are not allowed. Tests must stay self-contained and not hide setup, assertions, or execution flow.
+No test helpers. Tests stay self-contained; don't hide setup, assertions, or execution flow.
 
 Exception only if all are true:
 
@@ -485,7 +557,7 @@ Exception only if all are true:
 2. duplication harms readability
 3. abstraction models a general use case
 
-Even then, prefer improving the production API.
+Even then, prefer improving production API.
 
 ## 7. Git & PR Workflow
 
@@ -554,11 +626,11 @@ Before opening a PR:
 
 ### 7.5 Pull requests
 
-Follow the existing PR template, explain changes clearly, and include benchmark results when relevant.
+Follow existing PR template, explain changes clearly, include benchmark results when relevant.
 
 ## 8. Documentation Maintenance
 
-Documentation is part of the codebase. New code conventions require same-commit doc updates.
+Documentation is part of codebase. New code conventions require same-commit doc updates.
 
 | Change | Update |
 |---|---|
@@ -567,4 +639,4 @@ Documentation is part of the codebase. New code conventions require same-commit 
 | JIT contracts / assembler APIs | `docs/jit-internals.md` |
 | invariants / pitfalls | `AGENTS.md` or `architecture.md` |
 
-Code changes that establish a new convention are incomplete without the matching documentation update.
+Code changes establishing new convention are incomplete without matching doc update.

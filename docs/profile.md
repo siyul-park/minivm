@@ -1,6 +1,6 @@
 # Profiling
 
-minivm uses low-overhead sampling profiles for observability and JIT guidance. Profiles are collected on interpreter tick cadence, not every instruction by default.
+minivm uses low-overhead sampling profiles for observability and JIT guidance. Profiles collected on interpreter tick cadence, not every instruction by default.
 
 ## When to Read
 
@@ -18,7 +18,7 @@ Each sample records:
 | instruction pointer | byte offset in that function bytecode |
 | opcode | raw opcode byte at sampled IP |
 
-The same tick drives context polling, fuel accounting, and hooks. Lower ticks give denser data but more overhead. `WithDebugger` uses instruction-accurate hooks. REPL `.profile` also uses `WithTick(1)` so small examples show exact per-instruction samples.
+Same tick drives context polling, fuel accounting, and hooks. Lower ticks give denser data but more overhead. `WithDebugger` uses instruction-accurate hooks. REPL `.profile` also uses `WithTick(1)` so small examples show exact per-instruction samples.
 
 ## Library API
 
@@ -50,7 +50,7 @@ Reporting helpers outside hot paths:
 | `IP(fn,ip)` | copy one instruction profile |
 | `Snapshot()` | immutable deep copy of all profile data |
 
-`Snapshot` includes total samples, function/IP/opcode samples, and JIT counters. Function percent is relative to total samples, IP percent to its function, and opcode percent to total samples.
+`Snapshot` includes total samples, function/IP/opcode samples, and JIT counters. Function percent relative to total samples, IP percent to its function, opcode percent to total samples.
 
 ## JIT Counters
 
@@ -67,22 +67,22 @@ Reporting helpers outside hot paths:
 | `Bytes` | total emitted native code bytes |
 | `Time` | total JIT compile/link time |
 
-`Skips` are profile policy decisions; `Aborts` are compilation eligibility decisions. Tune them separately.
+`Skips` are profile policy decisions; `Aborts` are compilation eligibility decisions. Tune separately.
 
 ## Profile-Guided JIT
 
-JIT activates when `Samples(fn)` reaches the configured threshold rounded up to tick cadence. Default: `4096 / 128 = 32` samples. `WithThreshold(0)` activates on first sample; negative thresholds disable JIT.
+JIT activates when `Samples(fn)` reaches configured threshold rounded up to tick cadence. Default: `4096 / 128 = 32` samples. `WithThreshold(0)` activates on first sample; negative thresholds disable JIT.
 
-At compile time, profile data is used to:
+At compile time, profile data used to:
 
-1. rank basic blocks by `Range(fn, block.Start, block.End)`; hotter blocks compile first, and direct successors of hot blocks are included for branch linking
-2. emit candidate native segments only when their byte range has at least one sample; cold segments inside hot blocks are skipped
+1. rank basic blocks by `Range(fn, block.Start, block.End)`; hotter blocks compile first, direct successors of hot blocks included for branch linking
+2. emit candidate native segments only when byte range has at least one sample; cold segments inside hot blocks skipped
 
-JIT does not currently recompile or tier-up after the first function-level compilation attempt.
+JIT does not currently recompile or tier-up after first function-level compilation attempt.
 
 ## REPL Reporting
 
-`.profile` reruns accumulated code once in a fresh VM with exact sampling and prints:
+`.profile` reruns accumulated code once in fresh VM with exact sampling and prints:
 
 - total samples
 - function sample table
@@ -90,4 +90,4 @@ JIT does not currently recompile or tier-up after the first function-level compi
 - opcode sample table
 - JIT counters, when any JIT activity occurred
 
-`.profile` is side-effect free: it does not commit instructions, mutate REPL history, or change constants/types.
+`.profile` is side-effect free: does not commit instructions, mutate REPL history, or change constants/types.

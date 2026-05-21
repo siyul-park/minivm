@@ -1,10 +1,10 @@
 # Architecture
 
-Detailed component design and data flow for minivm.
+Detailed component design + data flow for minivm.
 
 ## Agent Quick Map
 
-Read when changes cross package boundaries or you need state ownership.
+Read when changes cross package boundaries or need state ownership.
 
 | Touch | Also read |
 |---|---|
@@ -15,7 +15,7 @@ Read when changes cross package boundaries or you need state ownership.
 | `analysis/`, `transform/`, `optimize/`, `pass/` | `pass-system.md` |
 | `cmd/repl/` or `cmd/minivm/` | `guides/repl.md` |
 
-Keep boundaries stable: `instr` stays leaf-like, `types` must not import `interp`, and optimizer code flows through `pass.Manager`.
+Keep boundaries stable: `instr` stays leaf-like, `types` must not import `interp`, optimizer code flows through `pass.Manager`.
 
 ## Package Dependency Graph
 
@@ -45,7 +45,7 @@ cmd/repl → instr, interp, program, types
 
 ### `program/`
 
-`program.Program` is the hand-off between bytecode producers and the VM:
+`program.Program` is hand-off between bytecode producers and VM:
 
 ```go
 type Program struct {
@@ -55,11 +55,11 @@ type Program struct {
 }
 ```
 
-`Code` is top-level bytecode. `Constants` holds functions, strings, arrays, etc. `Types` holds descriptors for `ARRAY_NEW` and `STRUCT_NEW`. `*types.Function` constants have their own `Code []byte`. `interp.New()` compiles all functions and stores them at parallel index `j+1`; index `0` is program code.
+`Code`: top-level bytecode. `Constants`: functions, strings, arrays, etc. `Types`: descriptors for `ARRAY_NEW` and `STRUCT_NEW`. `*types.Function` constants have own `Code []byte`. `interp.New()` compiles all functions to parallel index `j+1`; index `0` is program code.
 
 ### `instr/`
 
-Instruction set: byte-sized `Opcode`; each opcode has a `Type` in `instr/type.go` with mnemonic and `Widths []int` for variable-width encoding/decoding.
+Instruction set: byte-sized `Opcode`; each opcode has `Type` in `instr/type.go` with mnemonic and `Widths []int` for variable-width encoding/decoding.
 
 - `Marshal([]Instruction) []byte`: serialize.
 - `Unmarshal([]byte) []Instruction`: deserialize.
@@ -74,7 +74,7 @@ Two layers:
 1. `types.Value`: runtime value with `Kind()`, `Type()`, `String()`.
 2. `types.Type`: descriptor with `Kind()`, `Cast(Type)`, `Equals(Type)`.
 
-`types.Boxed` (`uint64`) is the VM stack/global currency. Heap objects are `types.Value` and referenced by `KindRef` in `Boxed`. See `value-representation.md`.
+`types.Boxed` (`uint64`) is VM stack/global currency. Heap objects are `types.Value` referenced by `KindRef` in `Boxed`. See `value-representation.md`.
 
 `types.Traceable` marks heap objects containing refs (`Array`, `Struct`); GC walks them via `Refs() []Ref`.
 
@@ -95,15 +95,15 @@ Two layers:
 | `globals []Boxed` | globals |
 | `buffer *asm.Buffer` | shared executable memory, allocated on first JIT |
 
-`threadedCompiler` (`threaded.go`) is a `[256]func` table populated in `init()`. Each compile-time entry reads operands from `c.code[c.ip+N:]`, advances `c.ip`, and returns a runtime closure. The closure captures constants and advances `f.ip` by instruction width.
+`threadedCompiler` (`threaded.go`): `[256]func` table populated in `init()`. Each compile-time entry reads operands, advances `c.ip`, returns runtime closure capturing constants + advancing `f.ip` by instruction width.
 
-`jitCompiler` (`jit.go`) is architecture-agnostic. It runs `BasicBlocksPass`, ranks sampled blocks by heat, and compiles hotter blocks first. `compile(b)` loops `segment(code,start,end)` to extract maximal consecutive runs of compilable sampled instructions. Completed segments emit at `WithCutoff` minimum count, default `8`; unsupported-truncated and branch-terminated segments emit only when they meet the same cutoff. Cold segments inside hot blocks are skipped. Two-pass compilation handles non-terminated blocks first, then branch-terminated blocks, so branch targets have known signatures. `assembler.Link()` patches cross-segment labels. Each linked segment installs a closure at `out[entryIP]`. The JIT does not recompile or tier-up compiled code.
+`jitCompiler` (`jit.go`): architecture-agnostic. Runs `BasicBlocksPass`, ranks blocks by heat, compiles hotter blocks first. `compile(b)` loops `segment(code,start,end)` to extract maximal compilable sampled runs. Completed segments emit at `WithCutoff` min count, default `8`; truncated and branch-terminated segments emit only when meeting same cutoff. Cold segments in hot blocks skipped. Two-pass: non-terminated blocks first, then branch-terminated, so branch targets have known signatures. `assembler.Link()` patches cross-segment labels. Each linked segment installs closure at `out[entryIP]`. JIT does not recompile or tier-up.
 
-`HostFunction` (`host.go`) wraps `func(i *Interpreter, params []Boxed) ([]Boxed, error)` as a `types.Value`. It lives in constants and is called by `CONST_GET` + `CALL`.
+`HostFunction` (`host.go`): wraps `func(i *Interpreter, params []Boxed) ([]Boxed, error)` as `types.Value`. Lives in constants, called by `CONST_GET` + `CALL`. Use `Interpreter.Marshal`/`Unmarshal` to convert Go values; Go `func` marshals to `HostFunction`, final `error` return propagated as host-call error. `WithMarshaler` replaces default reflection-based converter.
 
 ### `asm/`
 
-`Assembler` is low-level IR emission: allocate VRegs, emit instructions, declare ABI boundaries. No VM stack semantics.
+`Assembler`: low-level IR emission — allocate VRegs, emit instructions, declare ABI boundaries. No VM stack semantics.
 
 Core API:
 
@@ -116,7 +116,7 @@ Core API:
 
 `Compile()` + `Link()` pipeline:
 
-1. `snapshot()`: capture instruction list and VReg pins into immutable `program`.
+1. `snapshot()`: capture instructions + VReg pins into immutable `program`.
 2. `newCompiler()`: allocate physical regs via `RegAlloc`, encode IR to machine code.
 3. `resolve()`: two-pass encode. Pass 1 measures sizes via `Imm(0)` placeholders; Pass 2 patches labels and records `Relocation`s.
 4. `buffer.Unseal()` → `buffer.Append(code)` → `buffer.Seal()`: write to executable memory.
@@ -125,26 +125,26 @@ Core API:
 
 ### `asm/arm64/`
 
-Implements `asm.Arch` (`Arch` singleton), `asm.Encoder`, `asm.ABI`, and `asm.Caller`.
+Implements `asm.Arch` singleton, `asm.Encoder`, `asm.ABI`, `asm.Caller`.
 
-`Caller` invokes native chunks through `abi_arm64.s`. The trampoline marshals `argv` as `[header, reserved…, params…]`, copies `argv[0]` into the header register, loads scratch inputs `X10–X14`, calls with `BL`, copies the header register back to `argv[0]`, then writes scratch outputs and return values. `header uint64` encodes param/return counts, reserved count, and float/width masks. `X8` and `X9` are excluded from `arch.Scratch` for trampoline temporaries; `X15` is reserved for the header register.
+`Caller` invokes native chunks via `abi_arm64.s`. Trampoline marshals `argv` as `[header, reserved…, params…]`, copies `argv[0]` into header register, loads scratch `X10–X14`, calls with `BL`, copies header register back to `argv[0]`, writes scratch outputs + return values. `header uint64` encodes param/return counts, reserved count, float/width masks. `X8`/`X9` excluded from `arch.Scratch` for trampoline temporaries; `X15` reserved for header register.
 
 ARM64-specific files use `//go:build arm64`; `abi_stub.go` with `//go:build !arm64` keeps other platforms compilable.
 
 ### `pass/`
 
-`pass.Manager` is a reflection-based pipeline dispatcher:
+`pass.Manager`: reflection-based pipeline dispatcher.
 
 - `Register(pass)`: key pass by `Run` return type.
 - `Run(value)`: seed cache with input.
 - `Load(&result)`: run/cached-load passes producing `typeof(result)`.
 - `Convert(src,dst)`: child manager runs `src`, then loads `dst`.
 
-Passes communicate through manager outputs. Downstream passes `Load` upstream outputs. Each pass runs at most once per `Manager.Run`.
+Passes communicate through manager outputs. Downstream `Load` upstream outputs. Each pass runs at most once per `Manager.Run`.
 
 ### `analysis/`, `transform/`, `optimize/`
 
-`BasicBlocksPass` underpins both JIT and optimizer. Boundaries are placed at code start, after `BR`/`BR_IF`/`BR_TABLE`/`UNREACHABLE`/`RETURN`, and at every jump target.
+`BasicBlocksPass` underpins JIT + optimizer. Boundaries at code start, after `BR`/`BR_IF`/`BR_TABLE`/`UNREACHABLE`/`RETURN`, at every jump target.
 
 `optimize.NewOptimizer(O1)` order:
 
@@ -152,11 +152,11 @@ Passes communicate through manager outputs. Downstream passes `Load` upstream ou
 BasicBlocksPass → ConstantFoldingPass → ConstantDeduplicationPass → DeadCodeEliminationPass
 ```
 
-Transform passes mutate `*program.Program` in-place by editing `prog.Code` bytes and `prog.Constants`.
+Transform passes mutate `*program.Program` in-place: edit `prog.Code` bytes and `prog.Constants`.
 
 ### `cmd/repl/`
 
-`REPL` keeps state between steps:
+`REPL` state between steps:
 
 | Field | Purpose |
 |---|---|
@@ -165,13 +165,13 @@ Transform passes mutate `*program.Program` in-place by editing `prog.Code` bytes
 | `constants []types.Value` | `.const` function constants |
 | `types []types.Type` | `.type` descriptors |
 
-For each instruction, the REPL builds a fresh `program.Program` from history + new instruction, creates a new `interp.Interpreter`, runs the full program, and prints the stack. Accepted instructions/constants/types stay as source history. Heap objects are recreated each step, keeping refs valid. Cost is `O(N)` per step for `N` accumulated instructions.
+Each instruction: build fresh `program.Program` from history + new instruction, create new `interp.Interpreter`, run full program, print stack. Accepted instructions/constants/types stay as source history. Heap recreated each step, refs stay valid. Cost `O(N)` per step for `N` accumulated instructions.
 
-On error, the new instruction is not committed. `.reset` clears instruction history, code length, constants, and types.
+On error, new instruction not committed. `.reset` clears instruction history, code length, constants, types.
 
 ### `cmd/minivm/`
 
-Thin cobra entrypoint. Root command launches the REPL with `os.Stdin` / `os.Stdout`; cobra provides `--help`. Future subcommands like `run <file>` can be added here without changing `cmd/repl`.
+Thin cobra entrypoint. Root command launches REPL with `os.Stdin`/`os.Stdout`; cobra provides `--help`. Future subcommands like `run <file>` can be added without changing `cmd/repl`.
 
 ## Execution Flow
 
@@ -204,17 +204,17 @@ Thin cobra entrypoint. Root command launches the REPL with `os.Stdin` / `os.Stdo
    └─ buffer.Free() → munmap
 ```
 
-`WithThreshold(0)` enables JIT on the first sample. Negative thresholds disable JIT. Bytecode-level debugging uses `NewDebugger` via `WithDebugger`, enabling instruction-accurate hooks and disabling JIT for exact instruction-boundary stops.
+`WithThreshold(0)` enables JIT on first sample. Negative thresholds disable JIT. Bytecode debugging uses `NewDebugger` via `WithDebugger`, enabling instruction-accurate hooks and disabling JIT for exact instruction-boundary stops.
 
 ## Focus Areas
 
 | Area | Direction |
 |---|---|
-| JIT coverage | calls, globals, refs, heap objects stay threaded until benchmarks justify native handling |
-| Architecture support | ARM64 is optimized; x86-64 can follow once users and benchmarks are clear |
+| JIT coverage | calls, globals, refs, heap objects stay threaded until benchmarks justify |
+| Architecture support | ARM64 optimized; x86-64 can follow once users + benchmarks clear |
 | Benchmarks | broaden numeric loops, host calls, heap-object workloads |
 | Program format | keep `instr`/`program` as compact Go-native bytecode surface |
-| Host integration | keep `interp.NewHostFunction` as primary typed Go bridge |
-| Resource policy | document how `context.Context`, fuel, hooks, stack/heap/frame limits, and host policy work together |
+| Host integration | keep `interp.NewHostFunction` as primary call bridge; use `Marshal`/`Unmarshal` for Go value conversion |
+| Resource policy | document how `context.Context`, fuel, hooks, stack/heap/frame limits, host policy work together |
 
 See `docs/roadmap.md` for current priorities.

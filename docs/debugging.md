@@ -33,7 +33,7 @@ for {
 }
 ```
 
-`WithDebugger` installs the debugger hook, sets `WithTick(1)`, disables JIT with `WithThreshold(-1)`, and preserves exact threaded bytecode instruction boundaries.
+`WithDebugger` installs debugger hook, sets `WithTick(1)`, disables JIT with `WithThreshold(-1)`, preserves exact threaded bytecode instruction boundaries.
 
 ## Controls
 
@@ -44,7 +44,7 @@ for {
 | `Next()` | Execute one bytecode instruction, stepping over calls |
 | `Finish()` | Run until current frame returns |
 
-All stops occur before the current instruction executes. `Run` returns `ErrStopped`; `Stop()` returns function index, instruction pointer, and breakpoint ID, or `0` for stepping stops.
+All stops occur before current instruction executes. `Run` returns `ErrStopped`; `Stop()` returns function index, instruction pointer, and breakpoint ID, or `0` for stepping stops.
 
 ## Breakpoints
 
@@ -65,11 +65,11 @@ dbg.BreakIf(0, 10, func(vm *interp.Interpreter) bool {
 })
 ```
 
-`Breakpoints()` returns a sorted snapshot by breakpoint ID. Each breakpoint tracks `Hits`.
+`Breakpoints()` returns sorted snapshot by breakpoint ID. Each breakpoint tracks `Hits`.
 
 ## Inspection
 
-Inspect the stopped interpreter directly.
+Inspect stopped interpreter directly.
 
 | Method | Use |
 |---|---|

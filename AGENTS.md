@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guide for AI coding agents in this repository (`Claude Code`, `Codex`, `Cursor`, etc.).
+Agent guide for this repo (`Claude Code`, `Codex`, `Cursor`, etc.).
 
 ## Quick Commands
 
@@ -19,15 +19,16 @@ go test -race -run TestFoo ./interp/...
 
 ## Agent Workflow
 
-1. Check `git status --short`; do not overwrite unrelated user changes.
-2. **Read task-relevant docs from the Documentation Index before writing any code or tests.**
-3. Mirror nearby tests in the edited package; follow Test Conventions (one function per exported symbol, sub-cases as `t.Run`).
-4. Update docs when behavior, invariants, commands, or recurring pitfalls change.
-5. Run narrow tests first, then `go test ./...` or `make test` for broader risk.
+1. `git status --short`; don't overwrite unrelated changes.
+2. **Read task-relevant docs from Documentation Index before writing code or tests.**
+3. **Before modifying code, read `docs/coding-patterns.md` and follow relevant sections.**
+4. Mirror nearby tests; follow Test Conventions (one func per exported symbol, sub-cases as `t.Run`).
+5. Update docs when behavior, invariants, commands, or pitfalls change.
+6. Run narrow tests first, then `go test ./...` or `make test` for broad coverage.
 
 ## Local Hooks
 
-`.codex/hooks.json` runs `goimports` after `Edit`, `MultiEdit`, or `Write` touches `.go` files, using `goimports` on `PATH` or `$HOME/go/bin/goimports`. Hooks are best-effort; still run `make lint` before finishing code changes.
+`.codex/hooks.json` runs `goimports` after `Edit`/`MultiEdit`/`Write` on `.go` files. Hooks best-effort; run `make lint` before finishing.
 
 ## Task Router
 
@@ -47,10 +48,10 @@ Read only relevant docs.
 
 | Document | Read when… |
 |---|---|
-| `docs/architecture.md` | tracing execution flow or debugging across packages |
-| `docs/value-representation.md` | modifying boxed values or JIT value passing |
-| `docs/memory-model.md` | touching refs, closures, GC, or host functions |
-| `docs/profile.md` | modifying profiling, tick cadence, or JIT profile guidance |
+| `docs/architecture.md` | tracing execution or debugging across packages |
+| `docs/value-representation.md` | modifying boxed values or JIT passing |
+| `docs/memory-model.md` | touching refs, closures, GC, host functions |
+| `docs/profile.md` | modifying profiling or tick cadence |
 | `docs/instruction-set.md` | adding or debugging opcodes |
 | `docs/jit-internals.md` | modifying threaded/JIT compilation |
 | `docs/pass-system.md` | adding optimization or analysis passes |
@@ -58,10 +59,12 @@ Read only relevant docs.
 | `docs/guides/add-opcode.md` | implementing a new instruction |
 | `docs/guides/add-architecture.md` | adding a new JIT backend |
 | `docs/guides/repl.md` | extending or debugging the REPL |
+| `docs/compatibility.md` | Go version, platform support, CGO, build tags |
+| `docs/host-integration.md` | Marshal/Unmarshal, HostFunction, Go↔VM value conversion |
 
 ## Architecture Overview
 
-minivm is a bytecode VM with an adaptive JIT.
+minivm: bytecode VM + adaptive JIT.
 
 ```text
 program.Program → threadedCompiler → []func(*Interpreter) → Interpreter.Run()
@@ -71,7 +74,7 @@ program.Program → threadedCompiler → []func(*Interpreter) → Interpreter.Ru
 
 Hot-segment compilation:
 
-- profile samples record `(function, ip, opcode)` every 128 executed instructions
+- profile samples record `(function, ip, opcode)` every 128 instructions
 - JIT threshold defaults to 4096 ticks = 32 profile samples
 - compiled native handlers replace threaded closures in-place
 
@@ -94,7 +97,7 @@ Hot-segment compilation:
 
 ## Key Invariants
 
-Violations can cause silent corruption or invalid execution.
+Violations cause silent corruption or invalid execution.
 
 ### Runtime
 
@@ -106,7 +109,7 @@ Violations can cause silent corruption or invalid execution.
 
 - Advance `c.ip` during compile time.
 - Advance `f.ip` during runtime execution.
-- Missing either causes invalid execution or infinite loops.
+- Missing either → invalid execution or infinite loops.
 
 ### JIT
 
@@ -124,15 +127,19 @@ Unseal → Append → Seal → Call
 ```
 
 Incorrect ordering crashes on Apple Silicon.
+`Seal()` must sync instruction cache (Darwin/ARM64); missing flushes → intermittent `SIGILL`.
 
 ### Optimization
 
-- `ConstantFoldingPass` right-aligns folded instructions and pads the left side with NOPs.
-- Preserve folded byte ranges until `DeadCodeEliminationPass` compacts bytecode and rewrites branches.
+- `ConstantFoldingPass` right-aligns folded instructions, pads left with NOPs.
+- Preserve folded ranges until `DeadCodeEliminationPass` compacts bytecode and rewrites branches.
 - Threaded NOP handlers absorb consecutive gaps with one runtime dispatch.
 
 ## Coding Expectations
 
+- Apply `docs/coding-patterns.md` for every code change.
+- Error design: explicit errors with context, preserve sentinels for `errors.Is`, panic only in interpreter-threaded paths recovered by `Run`.
+- Test design: describe behavior, cover error paths + boundaries, organize under exported symbol.
 - Match existing package structure and naming.
 - Prefer small, cohesive packages.
 - Avoid unnecessary abstractions.
@@ -142,9 +149,10 @@ Incorrect ordering crashes on Apple Silicon.
 
 ## Test Conventions
 
-**Before writing or modifying tests, read the relevant docs from the Documentation Index and Task Router above.**
+**Before writing/modifying tests, read relevant docs from Documentation Index and Task Router.**
+**Read `docs/coding-patterns.md` §6, follow test-design rules.**
 
-**One test function per exported symbol.** Sub-cases go inside as `t.Run` subtests, not as separate top-level functions.
+**One test func per exported symbol.** Sub-cases as `t.Run`, not separate top-level funcs.
 
 ```go
 // CORRECT
@@ -165,6 +173,6 @@ func TestAssembler_Take_TypeMismatch(t *testing.T) { ... }
 
 ## Documentation Maintenance
 
-Update docs when an invariant caused a bug, a command became outdated, architecture changed, a recurring pitfall was found, or a new important doc should be indexed.
+Update docs when invariant caused bug, command outdated, architecture changed, pitfall found, or doc needs indexing.
 
-Guidelines: keep edits terse and factual; document only current behavior; avoid speculative notes; preserve formatting consistency; verify Markdown after edits.
+Keep edits terse + factual; document current behavior only; no speculative notes; preserve formatting; verify Markdown.

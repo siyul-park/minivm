@@ -14,18 +14,18 @@ Do not change ARM64 behavior unless a shared `asm/` contract requires it.
 
 ## Before You Start
 
-Read `docs/jit-internals.md`, especially Assembler API, Buffer lifecycle, and JIT handler contract. Use `asm/arm64/` as the reference implementation.
+Read `docs/jit-internals.md`, especially Assembler API, Buffer lifecycle, and JIT handler contract. Use `asm/arm64/` as reference implementation.
 
 ## Overview
 
 A new architecture needs:
 
 1. `asm/<arch>/` implementing `asm.Encoder`, `asm.ABI`, and `asm.Caller`
-2. an `asm/<arch>/Arch` singleton
+2. `asm/<arch>/Arch` singleton
 3. non-target platform stubs
 4. `interp/jit_<arch>.go` setting `arch` and registering opcode handlers
 
-Follow the JIT file boundary rules in `docs/coding-patterns.md`.
+Follow JIT file boundary rules in `docs/coding-patterns.md`.
 
 ## Step 1 — Create `asm/<arch>/`
 
@@ -109,7 +109,7 @@ func RET() asm.Instruction { ... }
 
 ### `abi.go` and `abi_<arch>.go` / `abi_<arch>.s`
 
-Implement `asm.ABI` and `asm.Caller`. The trampoline must:
+Implement `asm.ABI` and `asm.Caller`. Trampoline must:
 
 1. marshal `params []uint64` into native calling-convention registers
 2. call the chunk
@@ -163,7 +163,7 @@ func NewRegInfo() asm.RegInfo { return asm.RegInfo{} }
 
 ### Tests
 
-Create build-tagged tests, at minimum proving `Assembler.Compile()` + `Link()` returns a callable chunk for simple addition.
+Create build-tagged tests, at minimum proving `Assembler.Compile()` + `Link()` returns callable chunk for simple addition.
 
 ```go
 //go:build <arch>
@@ -281,6 +281,6 @@ make lint
 GOARCH=<arch> go test -race -v ./interp/... -run TestInterpreter_Run
 ```
 
-A non-nil buffer after a hot-function threshold confirms JIT activity.
+Non-nil buffer after hot-function threshold confirms JIT activity.
 
-Interpreter sampling happens every `WithTick` instructions, default `128`. The same cadence drives context cancellation, `WithFuel`, and `WithHook`. JIT activates when aggregate function samples reach `WithThreshold / WithTick`, default `4096 / 128 = 32`, and compiles only sampled basic blocks.
+Interpreter sampling happens every `WithTick` instructions, default `128`. Same cadence drives context cancellation, `WithFuel`, and `WithHook`. JIT activates when aggregate function samples reach `WithThreshold / WithTick`, default `4096 / 128 = 32`, and compiles only sampled basic blocks.

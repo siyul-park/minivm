@@ -100,11 +100,11 @@ ARM64 JIT reserves `arch.Scratch = X10-X15` as metadata channels outside normal 
 
 ## Branches And Globals
 
-Branches (`BR`, `BR_IF`, `BR_TABLE`) terminate segments. Branch offsets are signed i16 relative to instruction end. They emit direct label branches only when target segment compiled and current `assembler.Returns(idx)` exactly matches target `Signature.Params(entry)` by type and width. Otherwise arch-specific JIT return code records the current return point, writes target IP into JIT-owned `rNext`, writes the arch header register, and emits `RET`.
+Branches (`BR`, `BR_IF`, `BR_TABLE`) terminate segments. Branch offsets are signed i16 relative to instruction end. They emit direct label branches only when target segment compiled and current `assembler.Returns(idx)` exactly matches target `Signature.Params(entry)` by type and width. Otherwise arch-specific JIT return code records current return point, writes target IP into JIT-owned `rNext`, writes arch header register, and emits `RET`.
 
 Branch limits: `BR` rejects non-empty native returns; `BR_IF` and `BR_TABLE` reject when more than one return would need reconstruction. Branch handlers must not fall through `_EPILOGUE`, because that would overwrite branch-selected `rNext`.
 
-Mutable globals have no declared runtime kind. `GLOBAL_SET` / `GLOBAL_TEE` infer kind from source register and store it in same-segment `c.globalKinds`. `GLOBAL_GET` compiles only after same-segment store proves kind. Never specialize `GLOBAL_GET` from current global value; dynamic kind changes would need deopt stack reconstruction, which current JIT ABI lacks.
+Mutable globals have no declared runtime kind. `GLOBAL_SET` / `GLOBAL_TEE` infer kind from source register and store in same-segment `c.globalKinds`. `GLOBAL_GET` compiles only after same-segment store proves kind. Never specialize `GLOBAL_GET` from current global value; dynamic kind changes would need deopt stack reconstruction, which current JIT ABI lacks.
 
 ## Segment Selection
 
@@ -114,7 +114,7 @@ Emit rules:
 
 - completed segment emits when `count >= c.cutoff` (default `8`) and segment range has a profile sample
 - direct-successor entry segments may emit with one compilable instruction so linked branches can enter them
-- truncated or branch-terminated segments emit only when they meet the same cutoff and range from start to last compiled IP is sampled
+- truncated or branch-terminated segments emit only when they meet same cutoff and range from start to last compiled IP is sampled
 - otherwise `assembler.Abort()` discards segment state
 - JIT makes one function-level compilation attempt; no later tier-up/retry
 
@@ -128,8 +128,8 @@ block [A B X C D E F]  X unsupported
 
 Branch-terminated blocks need target signatures before choosing direct branch vs exit stub.
 
-1. Pass 1 compiles candidates into a throwaway buffer with direct branch linking disabled. Successful segments expose signatures only.
-2. Pass 2 recompiles candidates into the executable buffer after signatures are known, enabling direct branch labels where signatures match.
+1. Pass 1 compiles candidates into throwaway buffer with direct branch linking disabled. Successful segments expose signatures only.
+2. Pass 2 recompiles candidates into executable buffer after signatures known, enabling direct branch labels where signatures match.
 
 `linkable(targetIP)` compares current returns with target params by type and width.
 
@@ -182,11 +182,11 @@ Link():    Unseal() -> patch reloc bytes -> Seal()
 Free():    munmap
 ```
 
-Apple Silicon enforces W^X. Wrong `Unseal -> Append/Patch -> Seal -> Call` order can crash with `SIGBUS` or `SIGSEGV`.
+Apple Silicon enforces W^X. Wrong `Unseal -> Append/Patch -> Seal -> Call` order can crash with `SIGBUS` or `SIGSEGV`. `Seal()` also flushes instruction cache on Darwin/ARM64; without that, reused executable buffer can intermittently execute stale bytes and crash with `SIGILL`.
 
 ## ARM64 ABI
 
-`asm/arm64` follows AAPCS64: integer args/returns use `X0-X7`; float args/returns use `D0-D7` / `S0-S7`; metadata scratch uses `X10-X14`; trampoline bookkeeping reserves `X8`, `X9`, and the header register `X15`.
+`asm/arm64` follows AAPCS64: integer args/returns use `X0-X7`; float args/returns use `D0-D7` / `S0-S7`; metadata scratch uses `X10-X14`; trampoline bookkeeping reserves `X8`, `X9`, and header register `X15`.
 
 Trampoline `argv` layout:
 
@@ -196,4 +196,4 @@ argv[1..reserved]  scratch inputs/outputs
 argv[reserved+1..] params in / returns out
 ```
 
-`abi_arm64.s` marshals args from `argv`, copies `argv[0]` into `X15`, loads reserved `X10-X14`, calls native chunk via `BL`, copies `X15` back to `argv[0]`, then writes scratch outputs and return values back to `argv` using the updated header.
+`abi_arm64.s` marshals args from `argv`, copies `argv[0]` into `X15`, loads reserved `X10-X14`, calls native chunk via `BL`, copies `X15` back to `argv[0]`, then writes scratch outputs and return values back to `argv` using updated header.

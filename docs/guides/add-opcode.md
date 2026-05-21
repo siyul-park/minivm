@@ -22,7 +22,7 @@ Read `docs/jit-internals.md` for threaded/JIT contracts and `docs/instruction-se
 
 File: `instr/opcode.go`
 
-Append inside the existing `const` block, in the right category.
+Append inside existing `const` block, in the right category.
 
 ```go
 const (
@@ -32,13 +32,13 @@ const (
 )
 ```
 
-The `iota` value is the opcode byte. Order matters; never insert between existing opcodes.
+`iota` value is opcode byte. Order matters; never insert between existing opcodes.
 
 ## Step 2 — Declare Operand Width
 
 File: `instr/type.go`
 
-Add to the `types` map.
+Add to `types` map.
 
 ```go
 var types = map[Opcode]Type{
@@ -57,7 +57,7 @@ Fixed widths: `1`, `2`, `4`, `8`. Negative `-n` means length-prefixed array with
 
 File: `interp/threaded.go`
 
-Add an entry to the `threaded [256]func` table in `init()`. Mirror nearby opcode style.
+Add entry to `threaded [256]func` table in `init()`. Mirror nearby opcode style.
 
 ```go
 instr.I32_MY_OP: func(c *threadedCompiler) func(i *Interpreter) {
@@ -95,15 +95,15 @@ Checklist:
 - [ ] advance `c.ip` before returning
 - [ ] advance `f.ip` by exact instruction width
 - [ ] check stack bounds with `ErrStackUnderflow` / `ErrStackOverflow`
-- [ ] call `i.retain(addr)` when a `KindRef` enters stack
-- [ ] call `i.release(addr)` when a `KindRef` is consumed
+- [ ] call `i.retain(addr)` when `KindRef` enters stack
+- [ ] call `i.release(addr)` when `KindRef` is consumed
 - [ ] do not catch panics; let `interp.Run` recover
 
 ## Step 4 — Implement JIT Handler
 
 File: `interp/jit_arm64.go`
 
-Optional, ARM64 only. Skip if the opcode needs hard-to-compile interpreter access; threaded fallback remains correct.
+Optional, ARM64 only. Skip if opcode needs hard-to-compile interpreter access; threaded fallback remains correct.
 
 ```go
 jit[instr.I32_MY_OP] = func(s *jitSeg) (bool, bool) {

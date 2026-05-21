@@ -1,6 +1,6 @@
 # Guide: REPL
 
-Interactive assembly REPL for the MiniVM bytecode interpreter.
+Interactive assembly REPL for MiniVM bytecode interpreter.
 
 ## Running
 
@@ -10,7 +10,7 @@ Interactive assembly REPL for the MiniVM bytecode interpreter.
 
 ## Basic Usage
 
-Enter assembly instructions one per line. Each instruction executes immediately and the current stack is printed after each step.
+Enter assembly instructions one per line. Each instruction executes immediately and current stack is printed after each step.
 
 ```
 > i32.const 42
@@ -35,7 +35,7 @@ Enter assembly instructions one per line. Each instruction executes immediately 
 
 ## Debugging
 
-The REPL integrates `interp.Debugger` for GDB-style bytecode-level debugging. Breakpoints persist across `.debug` sessions; `.reset` clears them.
+REPL integrates `interp.Debugger` for GDB-style bytecode-level debugging. Breakpoints persist across `.debug` sessions; `.reset` clears them.
 
 ### Setting Breakpoints
 
@@ -48,11 +48,11 @@ The REPL integrates `interp.Debugger` for GDB-style bytecode-level debugging. Br
 > .disable 1        disable breakpoint 1
 ```
 
-Breakpoint offsets match the byte offsets shown by `.show`.
+Breakpoint offsets match byte offsets shown by `.show`.
 
 ### Starting a Debug Session
 
-`.debug` runs the accumulated program under the debugger. Execution always stops at the first instruction (step mode), regardless of breakpoints.
+`.debug` runs accumulated program under debugger. Execution always stops at first instruction (step mode), regardless of breakpoints.
 
 ```
 > i32.const 42
@@ -88,15 +88,15 @@ debug> continue
 | `clear <id>` | | Remove a breakpoint |
 | `quit` / `q` | | Exit the debug session |
 
-An empty line re-prints the current stopped location.
+Empty line re-prints current stopped location.
 
 ### Inspection
 
-All stops occur **before** the indicated instruction executes. The displayed ip is the bytecode offset of the next instruction to run.
+All stops occur **before** indicated instruction executes. Displayed ip is bytecode offset of next instruction to run.
 
-`locals` and `globals` iterate until an out-of-range index is reached (no explicit count needed).
+`locals` and `globals` iterate until out-of-range index reached (no explicit count needed).
 
-`frames` prints the full call stack with `>` marking the innermost frame:
+`frames` prints full call stack with `>` marking innermost frame:
 
 ```
 debug> frames
@@ -117,4 +117,4 @@ br 10           relative offset from instruction end
 br @0x0010      absolute byte offset in accumulated program
 ```
 
-`.show` output uses absolute offsets; the REPL normalizes them to relative on input.
+`.show` output uses absolute offsets; REPL normalizes them to relative on input.

@@ -18,6 +18,17 @@ type Traceable interface {
 	Refs() []Ref
 }
 
+func IsNull(v Value) bool {
+	switch v := v.(type) {
+	case Ref:
+		return v == Null
+	case Boxed:
+		return v == BoxedNull
+	default:
+		return false
+	}
+}
+
 type Kind byte
 
 const (

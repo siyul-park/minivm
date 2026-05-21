@@ -1,10 +1,10 @@
 # Roadmap
 
-minivm is a Go-native programmable runtime for scripting, rules, DSLs, and plugin-style execution inside Go services. Near-term work focuses on making the VM easier to embed, safer to operate, and clearer to evaluate before expanding compatibility or JIT scope.
+minivm: Go-native programmable runtime for scripting, rules, DSLs, and plugin-style execution in Go services. Near-term work focuses on easier embedding, safer operation, and clearer evaluation before expanding compatibility or JIT scope.
 
 ## Current Focus
 
-- Position clearly: custom bytecode VM for Go services with a WebAssembly-inspired instruction set.
+- Position clearly: custom bytecode VM for Go services with WebAssembly-inspired instruction set.
 - Strengthen host embedding APIs: function registration, error behavior, runtime options.
 - Improve guest execution controls: limits, cancellation, failure reporting.
 - Broaden benchmarks beyond numeric loops to justify default JIT thresholds with repeatable data.
@@ -22,7 +22,6 @@ minivm is a Go-native programmable runtime for scripting, rules, DSLs, and plugi
 
 ## Future Expansion
 
-- Add an adapter example pairing minivm with an external Wasm runtime for teams needing standard `.wasm`, WASI, or component-model workflows.
-- Expand ARM64 JIT coverage for calls, globals, refs, and selected heap operations only when benchmarks justify it.
+- Add adapter example pairing minivm with external Wasm runtime for teams needing standard `.wasm`, WASI, or component-model workflows.
+- Expand ARM64 JIT coverage for calls, globals, refs, and selected heap operations only when benchmarks justify.
 - Add architecture-specific backends only when target users and benchmark coverage are clear.
-- 
