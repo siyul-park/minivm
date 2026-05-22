@@ -8,7 +8,6 @@ package cli
 import (
 	"os"
 
-	"github.com/siyul-park/minivm/cli/fsx"
 	"github.com/siyul-park/minivm/cli/repl"
 	"github.com/spf13/cobra"
 )
@@ -17,12 +16,12 @@ import (
 type Option func(*options)
 
 type options struct {
-	fs fsx.WriteFS
+	fs WriteFS
 }
 
 // WithFS overrides the filesystem used by `run` and the REPL's
-// .load/.save commands. Defaults to fsx.OS().
-func WithFS(fs fsx.WriteFS) Option {
+// .load/.save commands. Defaults to OS().
+func WithFS(fs WriteFS) Option {
 	return func(o *options) { o.fs = fs }
 }
 
@@ -30,7 +29,7 @@ func WithFS(fs fsx.WriteFS) Option {
 // running it starts the interactive REPL; subcommands (e.g., `run`)
 // provide non-interactive entry points.
 func Root(opts ...Option) *cobra.Command {
-	o := options{fs: fsx.OS()}
+	o := options{fs: OS()}
 	for _, opt := range opts {
 		opt(&o)
 	}

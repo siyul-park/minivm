@@ -1,4 +1,4 @@
-package fsx
+package cli
 
 import (
 	"io"

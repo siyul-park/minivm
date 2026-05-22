@@ -92,10 +92,9 @@ Hot-segment compilation:
 | `analysis/` | shared analysis passes |
 | `transform/` | optimization transforms |
 | `optimize/` | optimization pipeline wiring |
-| `cli/` | CLI command tree (`Root`, `NewRunCommand`) |
+| `cli/` | CLI command tree (`Root`, `NewRunCommand`, `WriteFS`, `OS`) |
 | `cli/repl/` | interactive REPL |
 | `cli/display/` | shared CLI/REPL value formatting |
-| `cli/fsx/` | filesystem abstraction (read + write) for CLI commands |
 | `cmd/minivm/` | CLI entrypoint |
 
 ## Key Invariants

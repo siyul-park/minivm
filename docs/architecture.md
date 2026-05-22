@@ -28,10 +28,9 @@ asm     → asm/arm64
 analysis → pass, types, instr
 transform → analysis, pass, types, instr, program
 optimize → transform, analysis, pass, program
-cli → cli/repl, cli/display, cli/fsx, program, interp, cobra
-cli/repl → cli/display, cli/fsx, instr, interp, prof, program, types
+cli → cli/repl, cli/display, program, interp, cobra
+cli/repl → cli/display, instr, interp, prof, program, types
 cli/display → interp, types
-cli/fsx → io/fs (stdlib)
 cmd/minivm → cli
 ```
 
@@ -161,15 +160,11 @@ Transform passes mutate `*program.Program` in-place: edit `prog.Code` bytes and 
 
 ### `cli/`
 
-Top-level command tree. `cli.Root()` returns the `minivm` cobra command (REPL by default) plus subcommands. `cli.NewRunCommand(fs.FS)` is the `run <file>` factory and accepts any `io/fs.FS`, so embedders can drive it with `os.DirFS`, `embed.FS`, or `fstest.MapFS`. `cli.WithFS(fsx.WriteFS)` overrides the filesystem used by both `run` and the REPL's `.load` / `.save` commands.
+Top-level command tree. `cli.Root()` returns the `minivm` cobra command (REPL by default) plus subcommands. `cli.NewRunCommand(fs.FS)` is the `run <file>` factory and accepts any `io/fs.FS`, so embedders can drive it with `os.DirFS`, `embed.FS`, or `fstest.MapFS`. `cli.WriteFS` extends `fs.FS` with `Create` for commands that also write files; `cli.OS()` returns the host-filesystem implementation. `cli.WithFS(WriteFS)` overrides the filesystem used by both `run` and the REPL's `.load` / `.save` commands.
 
 ### `cli/display/`
 
 Shared value/stack formatting between the run subcommand and the REPL. Lives in its own subpackage so `cli` and `cli/repl` can both import it without a cycle.
-
-### `cli/fsx/`
-
-Minimal write extension to `io/fs.FS`. `fsx.WriteFS` embeds `fs.FS` and adds `Create(name) (io.WriteCloser, error)` — enough for `.save`, while leaving read-only callers on the standard interface. `fsx.OS()` backs it with the host filesystem.
 
 ### `cli/repl/`
 
@@ -181,7 +176,7 @@ Minimal write extension to `io/fs.FS`. `fsx.WriteFS` embeds `fs.FS` and adds `Cr
 | `codeLen int` | byte length of history for absolute branch normalization |
 | `constants []types.Value` | `.const` function constants |
 | `types []types.Type` | `.type` descriptors |
-| `fs fsx.WriteFS` | filesystem used by `.load` and `.save`; defaults to `fsx.OS()` |
+| `fs repl.WriteFS` | filesystem used by `.load` and `.save`; nil disables both commands (`cli.Root` injects `cli.OS()`) |
 
 Each instruction: build fresh `program.Program` from history + new instruction, create new `interp.Interpreter`, run full program, print stack. Accepted instructions/constants/types stay as source history. Heap recreated each step, refs stay valid. Cost `O(N)` per step for `N` accumulated instructions.
 

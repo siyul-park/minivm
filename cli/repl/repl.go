@@ -6,17 +6,26 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"strconv"
 	"strings"
 
 	"github.com/siyul-park/minivm/cli/display"
-	"github.com/siyul-park/minivm/cli/fsx"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
+
+// WriteFS is the filesystem surface needed by .load and .save: io/fs.FS
+// for reads plus Create for writes. Defined here (consumer side) so the
+// REPL package stands alone; callers pass an implementation via WithFS.
+// The top-level CLI provides cli.OS() as the host-filesystem default.
+type WriteFS interface {
+	fs.FS
+	Create(name string) (io.WriteCloser, error)
+}
 
 const prompt = "> "
 const blockPrompt = "... "
@@ -76,16 +85,17 @@ Debug commands:
 // Option configures a REPL constructed by New.
 type Option func(*REPL)
 
-// WithFS injects the filesystem used by .load and .save. Defaults to
-// fsx.OS() when not provided.
-func WithFS(fs fsx.WriteFS) Option {
+// WithFS injects the filesystem used by .load and .save. When omitted,
+// those commands report an error; callers that need them must supply a
+// WriteFS (e.g., cli.OS()).
+func WithFS(fs WriteFS) Option {
 	return func(r *REPL) { r.fs = fs }
 }
 
 type REPL struct {
 	in        io.Reader
 	out       io.Writer
-	fs        fsx.WriteFS
+	fs        WriteFS
 	instrs    []instr.Instruction
 	codeLen   int // byte length of instr.Marshal(instrs); updated incrementally
 	constants []types.Value
@@ -95,7 +105,7 @@ type REPL struct {
 
 // New returns a new REPL that reads from in and writes to out.
 func New(in io.Reader, out io.Writer, opts ...Option) *REPL {
-	r := &REPL{in: in, out: out, fs: fsx.OS()}
+	r := &REPL{in: in, out: out}
 	for _, o := range opts {
 		o(r)
 	}
@@ -296,6 +306,9 @@ func (r *REPL) load(path string) error {
 	if path == "" {
 		return fmt.Errorf("usage: .load <file>")
 	}
+	if r.fs == nil {
+		return fmt.Errorf(".load disabled: no filesystem configured")
+	}
 	file, err := r.fs.Open(path)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
@@ -323,6 +336,9 @@ func (r *REPL) load(path string) error {
 func (r *REPL) save(path string) error {
 	if path == "" {
 		return fmt.Errorf("usage: .save <file>")
+	}
+	if r.fs == nil {
+		return fmt.Errorf(".save disabled: no filesystem configured")
 	}
 	for i, c := range r.constants {
 		if _, ok := c.(*interp.HostFunction); ok {
