@@ -122,15 +122,17 @@ Heap objects implement `types.Value`.
 | `types.Ref` | `KindRef` | `TypeRef` | `Value` |
 | `types.String` | `KindRef` | `TypeString` | `Value` |
 | `*types.Array` | `KindRef` | `*ArrayType` | `Value`, `Traceable` |
-| `*types.Struct` | `KindRef` | `*StructType` | `Value`, `Traceable`, `Fielded` |
+| `*types.Struct` | `KindRef` | `*StructType` | `Value`, `Traceable` |
 | `*types.Map` | `KindRef` | `*MapType` | `Value`, `Traceable` |
 | `*types.Function` | `KindRef` | `*FunctionType` | `Value` |
 | `*interp.HostFunction` | `KindRef` | `*FunctionType` | `Value` |
-| `*interp.HostObject` | `KindRef` | `*StructType` | `Value`, `Traceable`, `Fielded` |
+| `*interp.HostObject` | `KindRef` | `*StructType` | `Value`, `Traceable` |
 
 `Traceable` exposes `Refs() []Ref` for GC graph traversal. Any heap object containing refs must implement `Traceable`.
 
-`Fielded` exposes indexed `Field` / `SetField` / `Raw` / `SetRaw` plus `StructType()`; `STRUCT_GET` and `STRUCT_SET` dispatch through it so both VM-native structs and host-supplied objects use the same opcodes. See [host-integration.md](host-integration.md) for HostObject semantics.
+`STRUCT_GET` and `STRUCT_SET` handle VM-native `*types.Struct` directly and fall back to `*interp.HostObject` for host-supplied values. See [host-integration.md](host-integration.md) for HostObject semantics.
+
+Use constructors for compound runtime types (`NewStructType`, `NewStruct`, `NewMapType`, `NewMap`, `NewMapWithCapacity`). These constructors initialize cached metadata and internal storage used by interpreter hot paths.
 
 ## Unbox to Value
 

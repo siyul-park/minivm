@@ -278,7 +278,7 @@ func (s *marshalState) mapValue(v reflect.Value) (types.Value, error) {
 		if err != nil {
 			return nil, fmt.Errorf("map value: %w", err)
 		}
-		out.Entries[mapKey] = types.MapEntry{Key: entryKey, Value: entryVal}
+		out.Set(mapKey, types.MapEntry{Key: entryKey, Value: entryVal})
 	}
 	return out, nil
 }
@@ -840,11 +840,16 @@ func (s *unmarshalState) mapValue(value types.Value, dst reflect.Value) error {
 	if !ok {
 		return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, value, dst.Type())
 	}
-	out := reflect.MakeMapWithSize(dst.Type(), len(m.Entries))
-	for key, entry := range m.Entries {
+	out := reflect.MakeMapWithSize(dst.Type(), m.Len())
+	var mapErr error
+	m.Range(func(key types.MapKey, entry types.MapEntry) {
+		if mapErr != nil {
+			return
+		}
 		k := reflect.New(dst.Type().Key()).Elem()
 		if err := s.mapKey(m.Typ.Key, key, entry.Key, k); err != nil {
-			return fmt.Errorf("map key: %w", err)
+			mapErr = fmt.Errorf("map key: %w", err)
+			return
 		}
 		v := reflect.New(dst.Type().Elem()).Elem()
 		entryValue, err := s.boxedValue(entry.Value)
@@ -852,20 +857,34 @@ func (s *unmarshalState) mapValue(value types.Value, dst reflect.Value) error {
 			err = s.value(entryValue, v)
 		}
 		if err != nil {
-			return fmt.Errorf("map value: %w", err)
+			mapErr = fmt.Errorf("map value: %w", err)
+			return
 		}
 		out.SetMapIndex(k, v)
+	})
+	if mapErr != nil {
+		return mapErr
 	}
 	dst.Set(out)
 	return nil
 }
 
 func (s *unmarshalState) structValue(value types.Value, dst reflect.Value) error {
-	strct, ok := value.(types.Fielded)
-	if !ok {
+	var typ *types.StructType
+	var fieldBox func(int) types.Boxed
+	var rawBits func(int) uint64
+	switch strct := value.(type) {
+	case *types.Struct:
+		typ = strct.Typ
+		fieldBox = strct.Field
+		rawBits = strct.Raw
+	case *HostObject:
+		typ = strct.Typ
+		fieldBox = strct.Field
+		rawBits = strct.Raw
+	default:
 		return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, value, dst.Type())
 	}
-	typ := strct.StructType()
 	used := make([]bool, len(typ.Fields))
 	for idx := 0; idx < dst.NumField(); idx++ {
 		field := dst.Type().Field(idx)
@@ -893,10 +912,10 @@ func (s *unmarshalState) structValue(value types.Value, dst reflect.Value) error
 		used[src] = true
 		var val types.Value
 		if typ.Fields[src].Kind == types.KindI64 {
-			val = types.I64(int64(strct.Raw(src)))
+			val = types.I64(int64(rawBits(src)))
 		} else {
 			var err error
-			val, err = s.boxedValue(strct.Field(src))
+			val, err = s.boxedValue(fieldBox(src))
 			if err != nil {
 				return fmt.Errorf("struct field %s: %w", field.Name, err)
 			}

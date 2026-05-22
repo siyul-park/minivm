@@ -76,7 +76,7 @@ Two layers:
 
 `types.Boxed` (`uint64`) is VM stack/global currency. Heap objects are `types.Value` referenced by `KindRef` in `Boxed`. See `value-representation.md`.
 
-`types.Traceable` marks heap objects containing refs (`Array`, `Struct`, `HostObject`); GC walks them via `Refs() []Ref`. `types.Fielded` is the indexed field-access contract used by `STRUCT_GET`/`STRUCT_SET`, implemented by `*Struct` and `*HostObject`.
+`types.Traceable` marks heap objects containing refs (`Array`, `Struct`, `HostObject`); GC walks them via `Refs() []Ref`. `STRUCT_GET`/`STRUCT_SET` handle native `*types.Struct` directly and use a concrete `HostObject` fallback for host values.
 
 ### `interp/`
 
@@ -101,7 +101,7 @@ Two layers:
 
 `HostFunction` (`host.go`): wraps `func(i *Interpreter, params []Boxed) ([]Boxed, error)` as `types.Value`. Lives in constants, called by `CONST_GET` + `CALL`. Use `Interpreter.Marshal`/`Unmarshal` to convert Go values; Go `func` marshals to `HostFunction`, final `error` return propagated as host-call error. `WithMarshaler` replaces default reflection-based converter.
 
-`HostObject` (`host.go`): wraps a Go value that carries methods or unexported fields. Implements `types.Fielded` so `STRUCT_GET`/`STRUCT_SET` dispatch through the same indexed-field protocol used by `*types.Struct`. Field reads/writes reflect against an internal addressable copy of the receiver through the interpreter's `Marshaler`; methods are pre-bound as `*HostFunction` values allocated on the VM heap.
+`HostObject` (`host.go`): wraps a Go value that carries methods or unexported fields. `STRUCT_GET`/`STRUCT_SET` use it as the concrete host-value fallback after the native `*types.Struct` fast path. Field reads/writes reflect against an internal addressable copy of the receiver through the interpreter's `Marshaler`; methods are pre-bound as `*HostFunction` values allocated on the VM heap.
 
 `Pool` (`pool.go`): multi-goroutine entry point. `Interpreter` is single-goroutine; `program.Program` is the only object safe to share across goroutines. `NewPool(prog, size, opts...)` lends up to `size` Interpreters lazily; `Get`/`Put` or `Run(ctx, fn)` borrow one per goroutine. `Put` calls `Reset` between borrows; `Close` releases every idle Interpreter's JIT buffer. Outstanding interpreters are closed on their next `Put` after `Close`. Heap refs from a borrowed Interpreter are invalid after `Put` (`Reset` wipes the heap).
 

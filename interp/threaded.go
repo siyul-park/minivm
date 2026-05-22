@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"math"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
@@ -1773,7 +1774,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			val, _ := i.unbox(i.stack[i.sp-1]).(types.I32Array)
+			val := unboxRef[types.I32Array](i, i.stack[i.sp-1])
 			i.stack[i.sp-1] = types.BoxRef(i.alloc(types.String(val)))
 			i.frames[i.fp-1].ip++
 		}
@@ -1784,7 +1785,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			v, _ := i.unbox(i.stack[i.sp-1]).(types.String)
+			v := unboxRef[types.String](i, i.stack[i.sp-1])
 			i.stack[i.sp-1] = types.BoxI32(int32(len(v)))
 			i.frames[i.fp-1].ip++
 		}
@@ -1795,8 +1796,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
-			v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
+			v1 := unboxRef[types.String](i, i.stack[i.sp-1])
+			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxRef(i.alloc(v2 + v1))
 			i.frames[i.fp-1].ip++
@@ -1808,8 +1809,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
-			v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
+			v1 := unboxRef[types.String](i, i.stack[i.sp-1])
+			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 == v1)
 			i.frames[i.fp-1].ip++
@@ -1821,8 +1822,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
-			v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
+			v1 := unboxRef[types.String](i, i.stack[i.sp-1])
+			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 != v1)
 			i.frames[i.fp-1].ip++
@@ -1834,8 +1835,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
-			v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
+			v1 := unboxRef[types.String](i, i.stack[i.sp-1])
+			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 < v1)
 			i.frames[i.fp-1].ip++
@@ -1847,8 +1848,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
-			v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
+			v1 := unboxRef[types.String](i, i.stack[i.sp-1])
+			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 > v1)
 			i.frames[i.fp-1].ip++
@@ -1860,8 +1861,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
-			v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
+			v1 := unboxRef[types.String](i, i.stack[i.sp-1])
+			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
 			i.frames[i.fp-1].ip++
@@ -1873,8 +1874,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1, _ := i.unbox(i.stack[i.sp-1]).(types.String)
-			v2, _ := i.unbox(i.stack[i.sp-2]).(types.String)
+			v1 := unboxRef[types.String](i, i.stack[i.sp-1])
+			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
 			i.frames[i.fp-1].ip++
@@ -1886,7 +1887,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			val, _ := i.unbox(i.stack[i.sp-1]).(types.String)
+			val := unboxRef[types.String](i, i.stack[i.sp-1])
 			i.stack[i.sp-1] = types.BoxRef(i.alloc(types.I32Array(val)))
 			i.frames[i.fp-1].ip++
 		}
@@ -2389,11 +2390,40 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrTypeMismatch)
 			}
 			addr := ref.Ref()
-			s, ok := i.heap[addr].(types.Fielded)
+			if s, ok := i.heap[addr].(*types.Struct); ok {
+				if idx < 0 || idx >= len(s.Typ.Fields) {
+					panic(ErrSegmentationFault)
+				}
+				field := s.Typ.Fields[idx]
+				var val types.Boxed
+				switch field.Kind {
+				case types.KindI32:
+					val = types.BoxI32(int32(uint32(s.Data[idx])))
+				case types.KindI64:
+					val = i.boxI64(int64(s.Data[idx]))
+				case types.KindF32:
+					val = types.BoxF32(math.Float32frombits(uint32(s.Data[idx])))
+				case types.KindF64:
+					val = types.BoxF64(math.Float64frombits(s.Data[idx]))
+				case types.KindRef:
+					val = types.Boxed(s.Data[idx])
+					if val.Kind() == types.KindRef {
+						i.retain(val.Ref())
+					}
+				default:
+					panic(ErrTypeMismatch)
+				}
+				i.release(addr)
+				i.sp--
+				i.stack[i.sp-1] = val
+				i.frames[i.fp-1].ip++
+				return
+			}
+			s, ok := i.heap[addr].(*HostObject)
 			if !ok {
 				panic(ErrTypeMismatch)
 			}
-			typ := s.StructType()
+			typ := s.Typ
 			if idx < 0 || idx >= len(typ.Fields) {
 				panic(ErrSegmentationFault)
 			}
@@ -2431,11 +2461,39 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrTypeMismatch)
 			}
 			addr := ref.Ref()
-			s, ok := i.heap[addr].(types.Fielded)
+			if s, ok := i.heap[addr].(*types.Struct); ok {
+				if idx < 0 || idx >= len(s.Typ.Fields) {
+					panic(ErrSegmentationFault)
+				}
+				field := s.Typ.Fields[idx]
+				switch field.Kind {
+				case types.KindI32:
+					s.Data[idx] = uint64(uint32(val.I32()))
+				case types.KindI64:
+					s.Data[idx] = uint64(i.unboxI64(val))
+				case types.KindF32:
+					s.Data[idx] = uint64(math.Float32bits(val.F32()))
+				case types.KindF64:
+					s.Data[idx] = math.Float64bits(val.F64())
+				case types.KindRef:
+					old := types.Boxed(s.Data[idx])
+					if old.Kind() == types.KindRef {
+						i.release(old.Ref())
+					}
+					s.Data[idx] = uint64(val)
+				default:
+					panic(ErrTypeMismatch)
+				}
+				i.release(addr)
+				i.sp -= 3
+				i.frames[i.fp-1].ip++
+				return
+			}
+			s, ok := i.heap[addr].(*HostObject)
 			if !ok {
 				panic(ErrTypeMismatch)
 			}
-			typ := s.StructType()
+			typ := s.Typ
 			if idx < 0 || idx >= len(typ.Fields) {
 				panic(ErrSegmentationFault)
 			}
@@ -2487,12 +2545,50 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			m := types.NewMapWithCapacity(typ, size)
 			base := i.sp - 1 - size*2
 			for j := 0; j < size; j++ {
-				key := i.stack[base+j*2]
+				keyVal := i.stack[base+j*2]
 				val := i.stack[base+j*2+1]
-				i.mapSet(m, key, val)
+				var key types.MapKey
+				var entryKey types.Boxed
+				var ok bool
+				if m.Typ.StringKeys {
+					if keyVal.Kind() != types.KindRef {
+						panic(ErrTypeMismatch)
+					}
+					str, ok := i.heap[keyVal.Ref()].(types.String)
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+					key, entryKey = m.Typ.StringKey(string(str))
+				} else if m.Typ.KeyKind == types.KindI64 {
+					key, entryKey = m.Typ.I64Key(i.unboxI64(keyVal))
+				} else {
+					key, entryKey, ok = m.Typ.BoxKey(keyVal)
+					if !ok {
+						panic(ErrTypeMismatch)
+					}
+				}
+				entryVal := val
+				if m.Typ.ElemKind == types.KindI64 {
+					entryVal = i.boxI64(i.unboxI64(val))
+				}
+				old, replaced := m.Set(key, types.MapEntry{Key: entryKey, Value: entryVal})
+				if ref, ok := m.Typ.KeyRef(keyVal); ok && (replaced || !m.Typ.TraceKeys) {
+					i.release(ref)
+				}
+				if replaced {
+					if old.Value.Kind() == types.KindRef {
+						i.release(old.Value.Ref())
+					}
+				}
+			}
+			var addr int
+			if m.Typ.HasRefs() {
+				addr = i.allocRoot(m)
+			} else {
+				addr = i.alloc(m)
 			}
 			i.sp = base + 1
-			i.stack[base] = types.BoxRef(i.alloc(m))
+			i.stack[base] = types.BoxRef(addr)
 			i.frames[i.fp-1].ip += 3
 		}
 	},
@@ -2538,7 +2634,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrTypeMismatch)
 			}
 			i.release(addr)
-			i.stack[i.sp-1] = types.BoxI32(int32(len(m.Entries)))
+			i.stack[i.sp-1] = types.BoxI32(int32(m.Len()))
 			i.frames[i.fp-1].ip++
 		}
 	},
@@ -2558,8 +2654,26 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if !ok {
 				panic(ErrTypeMismatch)
 			}
-			key, _ := i.mapKey(m.Typ.Key, keyVal)
-			val, ok := m.Entries[key]
+			var key types.MapKey
+			if m.Typ.StringKeys {
+				if keyVal.Kind() != types.KindRef {
+					panic(ErrTypeMismatch)
+				}
+				str, ok := i.heap[keyVal.Ref()].(types.String)
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+				key, _ = m.Typ.StringKey(string(str))
+			} else if m.Typ.KeyKind == types.KindI64 {
+				key, _ = m.Typ.I64Key(i.unboxI64(keyVal))
+			} else {
+				var ok bool
+				key, _, ok = m.Typ.BoxKey(keyVal)
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+			}
+			val, ok := m.Get(key)
 			var result types.Boxed
 			if ok {
 				result = val.Value
@@ -2567,9 +2681,14 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					i.retain(result.Ref())
 				}
 			} else {
-				result = i.zeroMapValue(m.Typ.Elem)
+				result = m.Typ.Zero()
+				if result.Kind() == types.KindRef {
+					i.retain(result.Ref())
+				}
 			}
-			i.releaseMapKeyArg(m.Typ.Key, keyVal)
+			if ref, ok := m.Typ.KeyRef(keyVal); ok {
+				i.release(ref)
+			}
 			i.release(addr)
 			i.sp--
 			i.stack[i.sp-1] = result
@@ -2592,8 +2711,26 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if !ok {
 				panic(ErrTypeMismatch)
 			}
-			key, _ := i.mapKey(m.Typ.Key, keyVal)
-			val, ok := m.Entries[key]
+			var key types.MapKey
+			if m.Typ.StringKeys {
+				if keyVal.Kind() != types.KindRef {
+					panic(ErrTypeMismatch)
+				}
+				str, ok := i.heap[keyVal.Ref()].(types.String)
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+				key, _ = m.Typ.StringKey(string(str))
+			} else if m.Typ.KeyKind == types.KindI64 {
+				key, _ = m.Typ.I64Key(i.unboxI64(keyVal))
+			} else {
+				var ok bool
+				key, _, ok = m.Typ.BoxKey(keyVal)
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+			}
+			val, ok := m.Get(key)
 			var result types.Boxed
 			if ok {
 				result = val.Value
@@ -2601,9 +2738,14 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					i.retain(result.Ref())
 				}
 			} else {
-				result = i.zeroMapValue(m.Typ.Elem)
+				result = m.Typ.Zero()
+				if result.Kind() == types.KindRef {
+					i.retain(result.Ref())
+				}
 			}
-			i.releaseMapKeyArg(m.Typ.Key, keyVal)
+			if ref, ok := m.Typ.KeyRef(keyVal); ok {
+				i.release(ref)
+			}
 			i.release(addr)
 			i.stack[i.sp-2] = result
 			i.stack[i.sp-1] = types.BoxBool(ok)
@@ -2627,7 +2769,39 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if !ok {
 				panic(ErrTypeMismatch)
 			}
-			i.mapSet(m, keyVal, val)
+			var key types.MapKey
+			var entryKey types.Boxed
+			if m.Typ.StringKeys {
+				if keyVal.Kind() != types.KindRef {
+					panic(ErrTypeMismatch)
+				}
+				str, ok := i.heap[keyVal.Ref()].(types.String)
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+				key, entryKey = m.Typ.StringKey(string(str))
+			} else if m.Typ.KeyKind == types.KindI64 {
+				key, entryKey = m.Typ.I64Key(i.unboxI64(keyVal))
+			} else {
+				var ok bool
+				key, entryKey, ok = m.Typ.BoxKey(keyVal)
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+			}
+			entryVal := val
+			if m.Typ.ElemKind == types.KindI64 {
+				entryVal = i.boxI64(i.unboxI64(val))
+			}
+			old, replaced := m.Set(key, types.MapEntry{Key: entryKey, Value: entryVal})
+			if ref, ok := m.Typ.KeyRef(keyVal); ok && (replaced || !m.Typ.TraceKeys) {
+				i.release(ref)
+			}
+			if replaced {
+				if old.Value.Kind() == types.KindRef {
+					i.release(old.Value.Ref())
+				}
+			}
 			i.release(addr)
 			i.sp -= 3
 			i.frames[i.fp-1].ip++
@@ -2649,7 +2823,36 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if !ok {
 				panic(ErrTypeMismatch)
 			}
-			i.mapDelete(m, keyVal)
+			var key types.MapKey
+			if m.Typ.StringKeys {
+				if keyVal.Kind() != types.KindRef {
+					panic(ErrTypeMismatch)
+				}
+				str, ok := i.heap[keyVal.Ref()].(types.String)
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+				key, _ = m.Typ.StringKey(string(str))
+			} else if m.Typ.KeyKind == types.KindI64 {
+				key, _ = m.Typ.I64Key(i.unboxI64(keyVal))
+			} else {
+				var ok bool
+				key, _, ok = m.Typ.BoxKey(keyVal)
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+			}
+			if old, ok := m.Delete(key); ok {
+				if m.Typ.TraceKeys && old.Key.Kind() == types.KindRef {
+					i.release(old.Key.Ref())
+				}
+				if old.Value.Kind() == types.KindRef {
+					i.release(old.Value.Ref())
+				}
+			}
+			if ref, ok := m.Typ.KeyRef(keyVal); ok {
+				i.release(ref)
+			}
 			i.release(addr)
 			i.sp -= 2
 			i.frames[i.fp-1].ip++
@@ -2670,7 +2873,14 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if !ok {
 				panic(ErrTypeMismatch)
 			}
-			i.mapClear(m)
+			m.Clear(func(entry types.MapEntry) {
+				if m.Typ.TraceKeys && entry.Key.Kind() == types.KindRef {
+					i.release(entry.Key.Ref())
+				}
+				if entry.Value.Kind() == types.KindRef {
+					i.release(entry.Value.Ref())
+				}
+			})
 			i.release(addr)
 			i.sp--
 			i.frames[i.fp-1].ip++

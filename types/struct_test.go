@@ -24,6 +24,33 @@ func TestStruct_SetField(t *testing.T) {
 	require.Equal(t, int32(1), s.Field(0).I32())
 }
 
+func TestStruct_Data(t *testing.T) {
+	t.Run("small struct uses data slice", func(t *testing.T) {
+		s := NewStruct(NewStructType(
+			NewStructField(TypeI32),
+			NewStructField(TypeI32),
+			NewStructField(TypeI32),
+			NewStructField(TypeI32),
+		))
+		s.SetField(3, BoxI32(4))
+		require.Len(t, s.Data, 4)
+		require.Equal(t, int32(4), s.Field(3).I32())
+	})
+
+	t.Run("large struct uses data slice", func(t *testing.T) {
+		s := NewStruct(NewStructType(
+			NewStructField(TypeI32),
+			NewStructField(TypeI32),
+			NewStructField(TypeI32),
+			NewStructField(TypeI32),
+			NewStructField(TypeI32),
+		))
+		s.SetField(4, BoxI32(5))
+		require.Len(t, s.Data, 5)
+		require.Equal(t, int32(5), s.Field(4).I32())
+	})
+}
+
 func TestStruct_Kind(t *testing.T) {
 	s := NewStruct(NewStructType())
 	require.Equal(t, KindRef, s.Kind())
