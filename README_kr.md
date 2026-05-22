@@ -5,7 +5,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/siyul-park/minivm.svg)](https://pkg.go.dev/github.com/siyul-park/minivm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**컴파일러 없이 스크립팅 엔진을 만드세요.**
+**어디에나 손쉽게 내장하는 빠른 바이트코드 VM.**
 
 minivm은 Go 서비스에 내장하는 경량 바이트코드 VM입니다. 바이트코드를 조립하고, Go 함수를 연결하고, 실행하면 됩니다. 핫 경로는 별도 설정 없이 스레디드 인터프리터에서 ARM64 네이티브 코드로 자동 승격됩니다.
 

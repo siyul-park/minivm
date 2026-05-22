@@ -5,9 +5,9 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/siyul-park/minivm.svg)](https://pkg.go.dev/github.com/siyul-park/minivm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Ship a scripting engine without writing a compiler.**
+**Fast bytecode VM that embeds anywhere.**
 
-minivm is a lightweight, embeddable bytecode VM for Go services. Assemble bytecode, expose Go functions, run. Hot paths automatically promote from threaded interpreter to native ARM64 — no flags, no warmup, no configuration.
+minivm is a lightweight bytecode VM designed for Go services. Assemble bytecode, expose Go functions, run. Hot paths automatically promote from threaded interpreter to native ARM64 — no flags, no warmup, no configuration.
 
 ```bash
 go get github.com/siyul-park/minivm
