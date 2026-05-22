@@ -1,4 +1,4 @@
-package repl
+package cli
 
 import (
 	"bufio"
@@ -328,7 +328,7 @@ func TestREPL_Run(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(fmt.Sprint(tt.input), func(t *testing.T) {
 			var out bytes.Buffer
-			r := New(strings.NewReader(tt.input), &out)
+			r := NewREPL(strings.NewReader(tt.input), &out, nil)
 			require.NoError(t, r.Run(context.Background()))
 			output := out.String()
 			for _, s := range tt.contains {
@@ -342,13 +342,13 @@ func TestREPL_Run(t *testing.T) {
 
 	t.Run("eof exits cleanly", func(t *testing.T) {
 		var out bytes.Buffer
-		r := New(strings.NewReader("i32.const 1\n"), &out)
+		r := NewREPL(strings.NewReader("i32.const 1\n"), &out, nil)
 		require.NoError(t, r.Run(context.Background()))
 	})
 
 	t.Run("stack accumulates bottom to top", func(t *testing.T) {
 		var out bytes.Buffer
-		r := New(strings.NewReader("i32.const 10\ni32.const 20\n.quit\n"), &out)
+		r := NewREPL(strings.NewReader("i32.const 10\ni32.const 20\n.quit\n"), &out, nil)
 		require.NoError(t, r.Run(context.Background()))
 		output := out.String()
 		var valLines []string
@@ -363,7 +363,7 @@ func TestREPL_Run(t *testing.T) {
 
 	t.Run("profile does not mutate history", func(t *testing.T) {
 		var out bytes.Buffer
-		r := New(strings.NewReader("i32.const 1\n.profile\n.quit\n"), &out)
+		r := NewREPL(strings.NewReader("i32.const 1\n.profile\n.quit\n"), &out, nil)
 		require.NoError(t, r.Run(context.Background()))
 		require.Len(t, r.instrs, 1)
 		require.Equal(t, 5, r.codeLen)
@@ -371,7 +371,7 @@ func TestREPL_Run(t *testing.T) {
 
 	t.Run("profile command renders runtime errors", func(t *testing.T) {
 		var out bytes.Buffer
-		r := New(strings.NewReader(""), &out)
+		r := NewREPL(strings.NewReader(""), &out, nil)
 		r.instrs = []instr.Instruction{instr.New(instr.DROP)}
 		done, err := r.command(context.Background(), bufio.NewScanner(strings.NewReader("")), ".profile")
 		require.NoError(t, err)
@@ -383,20 +383,20 @@ func TestREPL_Run(t *testing.T) {
 		memFS := newMemFS()
 
 		var out1 bytes.Buffer
-		r1 := New(
+		r1 := NewREPL(
 			strings.NewReader("i32.const 1\ni32.const 2\ni32.add\n.save prog.mvm\n.quit\n"),
 			&out1,
-			WithFS(memFS),
+			memFS,
 		)
 		require.NoError(t, r1.Run(context.Background()))
 		require.Contains(t, out1.String(), "saved prog.mvm")
 		require.Contains(t, memFS.files, "prog.mvm")
 
 		var out2 bytes.Buffer
-		r2 := New(
+		r2 := NewREPL(
 			strings.NewReader(".load prog.mvm\n.show\n.quit\n"),
 			&out2,
-			WithFS(memFS),
+			memFS,
 		)
 		require.NoError(t, r2.Run(context.Background()))
 		require.Contains(t, out2.String(), "loaded prog.mvm")
@@ -409,10 +409,10 @@ func TestREPL_Run(t *testing.T) {
 		memFS.files["replacement.mvm"] = []byte("0000:\ti32.const 0x00000063\n0005:\treturn\n")
 
 		var out bytes.Buffer
-		r := New(
+		r := NewREPL(
 			strings.NewReader("i32.const 1\ni32.const 2\n.load replacement.mvm\n.show\n.quit\n"),
 			&out,
-			WithFS(memFS),
+			memFS,
 		)
 		require.NoError(t, r.Run(context.Background()))
 		output := out.String()
@@ -427,21 +427,21 @@ func TestREPL_Run(t *testing.T) {
 		memFS.files["broken.mvm"] = []byte("not-an-instruction xyz\n")
 
 		var out bytes.Buffer
-		r := New(strings.NewReader(".load broken.mvm\n.quit\n"), &out, WithFS(memFS))
+		r := NewREPL(strings.NewReader(".load broken.mvm\n.quit\n"), &out, memFS)
 		require.NoError(t, r.Run(context.Background()))
 		require.Contains(t, out.String(), "error:")
 	})
 
 	t.Run("load reports missing file", func(t *testing.T) {
 		var out bytes.Buffer
-		r := New(strings.NewReader(".load missing.mvm\n.quit\n"), &out, WithFS(newMemFS()))
+		r := NewREPL(strings.NewReader(".load missing.mvm\n.quit\n"), &out, newMemFS())
 		require.NoError(t, r.Run(context.Background()))
 		require.Contains(t, out.String(), "error:")
 	})
 
 	t.Run("save and load require a path", func(t *testing.T) {
 		var out bytes.Buffer
-		r := New(strings.NewReader(".save\n.load\n.quit\n"), &out, WithFS(newMemFS()))
+		r := NewREPL(strings.NewReader(".save\n.load\n.quit\n"), &out, newMemFS())
 		require.NoError(t, r.Run(context.Background()))
 		require.Contains(t, out.String(), "usage: .save")
 		require.Contains(t, out.String(), "usage: .load")

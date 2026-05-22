@@ -28,8 +28,7 @@ asm     → asm/arm64
 analysis → pass, types, instr
 transform → analysis, pass, types, instr, program
 optimize → transform, analysis, pass, program
-cli → cli/repl, cli/display, program, interp, cobra
-cli/repl → cli/display, instr, interp, prof, program, types
+cli → cli/display, instr, interp, prof, program, types, cobra
 cli/display → interp, types
 cmd/minivm → cli
 ```
@@ -40,7 +39,7 @@ Important paths:
 program → instr → nothing
 interp → program, instr, types, asm, pass, analysis
 optimize → transform → analysis → pass
-cli → cli/repl → instr, interp, program, types
+cli → instr, interp, program, types, cobra
 ```
 
 ## Component Responsibilities
@@ -160,13 +159,7 @@ Transform passes mutate `*program.Program` in-place: edit `prog.Code` bytes and 
 
 ### `cli/`
 
-Top-level command tree. `cli.Root()` returns the `minivm` cobra command (REPL by default) plus subcommands. `cli.NewRunCommand(fs.FS)` is the `run <file>` factory and accepts any `io/fs.FS`, so embedders can drive it with `os.DirFS`, `embed.FS`, or `fstest.MapFS`. `cli.WriteFS` extends `fs.FS` with `Create` for commands that also write files; `cli.OS()` returns the host-filesystem implementation. `cli.WithFS(WriteFS)` overrides the filesystem used by both `run` and the REPL's `.load` / `.save` commands.
-
-### `cli/display/`
-
-Shared value/stack formatting between the run subcommand and the REPL. Lives in its own subpackage so `cli` and `cli/repl` can both import it without a cycle.
-
-### `cli/repl/`
+Top-level command tree and REPL. `cli.Root()` returns the `minivm` cobra command (REPL by default) plus subcommands. `cli.NewRunCommand(fs.FS)` is the `run <file>` factory and accepts any `io/fs.FS`, so embedders can drive it with `os.DirFS`, `embed.FS`, or `fstest.MapFS`. `cli.NewREPL(in, out, fs WriteFS)` constructs the interactive REPL directly; pass `nil` to disable `.load`/`.save`. `cli.WriteFS` extends `fs.FS` with `Create`; `cli.OS()` returns the host-filesystem implementation. `cli.WithFS(WriteFS)` overrides the filesystem used by both `run` and the REPL's `.load` / `.save` commands.
 
 `REPL` state between steps:
 
@@ -176,11 +169,15 @@ Shared value/stack formatting between the run subcommand and the REPL. Lives in 
 | `codeLen int` | byte length of history for absolute branch normalization |
 | `constants []types.Value` | `.const` function constants |
 | `types []types.Type` | `.type` descriptors |
-| `fs repl.WriteFS` | filesystem used by `.load` and `.save`; nil disables both commands (`cli.Root` injects `cli.OS()`) |
+| `fs WriteFS` | filesystem used by `.load` and `.save`; nil disables both commands (`cli.Root` injects `cli.OS()`) |
 
 Each instruction: build fresh `program.Program` from history + new instruction, create new `interp.Interpreter`, run full program, print stack. Accepted instructions/constants/types stay as source history. Heap recreated each step, refs stay valid. Cost `O(N)` per step for `N` accumulated instructions.
 
 On error, new instruction not committed. `.reset` clears instruction history, code length, constants, types. `.load <file>` parses a `Program.String()` dump and *replaces* state (merging would require renumbering instruction-embedded constant and type indices); `.save <file>` writes `r.build().String()` and refuses host-typed constants since they have no textual form.
+
+### `cli/display/`
+
+Shared value/stack formatting between the run subcommand and the REPL. Kept in a leaf subpackage so future split-outs of CLI helpers can consume it without forcing a `cli` import.
 
 ### `cmd/minivm/`
 

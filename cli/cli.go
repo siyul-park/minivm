@@ -8,7 +8,6 @@ package cli
 import (
 	"os"
 
-	"github.com/siyul-park/minivm/cli/repl"
 	"github.com/spf13/cobra"
 )
 
@@ -39,7 +38,7 @@ func Root(opts ...Option) *cobra.Command {
 		Short:        "MiniVM — interactive assembly REPL",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return repl.New(os.Stdin, os.Stdout, repl.WithFS(o.fs)).Run(cmd.Context())
+			return NewREPL(os.Stdin, os.Stdout, o.fs).Run(cmd.Context())
 		},
 	}
 	cmd.AddCommand(NewRunCommand(o.fs))

@@ -1,4 +1,4 @@
-package repl
+package cli
 
 import (
 	"bufio"
@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"strconv"
 	"strings"
 
@@ -17,15 +16,6 @@ import (
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
-
-// WriteFS is the filesystem surface needed by .load and .save: io/fs.FS
-// for reads plus Create for writes. Defined here (consumer side) so the
-// REPL package stands alone; callers pass an implementation via WithFS.
-// The top-level CLI provides cli.OS() as the host-filesystem default.
-type WriteFS interface {
-	fs.FS
-	Create(name string) (io.WriteCloser, error)
-}
 
 const prompt = "> "
 const blockPrompt = "... "
@@ -82,16 +72,9 @@ Debug commands:
   .quit  /  .exit     exit the REPL
 `
 
-// Option configures a REPL constructed by New.
-type Option func(*REPL)
-
-// WithFS injects the filesystem used by .load and .save. When omitted,
-// those commands report an error; callers that need them must supply a
-// WriteFS (e.g., cli.OS()).
-func WithFS(fs WriteFS) Option {
-	return func(r *REPL) { r.fs = fs }
-}
-
+// REPL evaluates one assembly instruction per iteration, rebuilding a
+// program from accumulated history and re-running it through a fresh
+// interpreter each step.
 type REPL struct {
 	in        io.Reader
 	out       io.Writer
@@ -103,13 +86,11 @@ type REPL struct {
 	debugger  *interp.Debugger // nil until first .break; breakpoint storage only
 }
 
-// New returns a new REPL that reads from in and writes to out.
-func New(in io.Reader, out io.Writer, opts ...Option) *REPL {
-	r := &REPL{in: in, out: out}
-	for _, o := range opts {
-		o(r)
-	}
-	return r
+// NewREPL returns a new REPL that reads from in and writes to out. fs
+// backs .load and .save; pass nil to disable those commands (callers
+// that need them typically pass OS()).
+func NewREPL(in io.Reader, out io.Writer, fs WriteFS) *REPL {
+	return &REPL{in: in, out: out, fs: fs}
 }
 
 // Run reads and executes assembly instructions until EOF or .quit.
