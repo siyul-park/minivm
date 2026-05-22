@@ -41,17 +41,6 @@ func NewPool(prog *program.Program, size int, opts ...func(*option)) *Pool {
 	}
 }
 
-// Run borrows an Interpreter, invokes fn, and returns it to the pool even if fn
-// panics. It is the recommended entry point for short-lived multi-goroutine use.
-func (p *Pool) Run(ctx context.Context, fn func(*Interpreter) error) error {
-	i, err := p.Get(ctx)
-	if err != nil {
-		return err
-	}
-	defer p.Put(i)
-	return fn(i)
-}
-
 // Get returns an Interpreter ready for use. It reuses an idle one if available,
 // otherwise creates a new one when below the size cap, otherwise blocks until
 // another goroutine calls Put or ctx is canceled. Returns ErrPoolClosed once

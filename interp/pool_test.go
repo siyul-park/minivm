@@ -2,15 +2,11 @@ package interp
 
 import (
 	"context"
-	"errors"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
-	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,107 +35,6 @@ func TestNewPool(t *testing.T) {
 		p := NewPool(program.New(nil), 4)
 		defer p.Close()
 		require.Equal(t, int64(0), p.live.Load())
-	})
-}
-
-func TestPool_Run(t *testing.T) {
-	prog := program.New([]instr.Instruction{
-		instr.New(instr.I32_CONST, 7),
-		instr.New(instr.I32_CONST, 8),
-		instr.New(instr.I32_ADD),
-	})
-
-	t.Run("propagates result", func(t *testing.T) {
-		p := NewPool(prog, 1)
-		defer p.Close()
-
-		var got types.Value
-		err := p.Run(context.Background(), func(i *Interpreter) error {
-			if err := i.Run(context.Background()); err != nil {
-				return err
-			}
-			v, err := i.Pop()
-			got = v
-			return err
-		})
-		require.NoError(t, err)
-		require.Equal(t, types.I32(15), got)
-	})
-
-	t.Run("propagates error", func(t *testing.T) {
-		p := NewPool(prog, 1)
-		defer p.Close()
-
-		want := errors.New("boom")
-		err := p.Run(context.Background(), func(i *Interpreter) error {
-			return want
-		})
-		require.ErrorIs(t, err, want)
-	})
-
-	t.Run("returns interpreter after panic", func(t *testing.T) {
-		p := NewPool(prog, 1)
-		defer p.Close()
-
-		require.Panics(t, func() {
-			_ = p.Run(context.Background(), func(i *Interpreter) error {
-				panic("boom")
-			})
-		})
-
-		i, err := p.Get(context.Background())
-		require.NoError(t, err)
-		defer p.Put(i)
-		require.Equal(t, 0, i.Len())
-	})
-
-	t.Run("after close returns ErrPoolClosed", func(t *testing.T) {
-		p := NewPool(prog, 1)
-		require.NoError(t, p.Close())
-
-		err := p.Run(context.Background(), func(i *Interpreter) error {
-			t.Fatal("fn should not run")
-			return nil
-		})
-		require.ErrorIs(t, err, ErrPoolClosed)
-	})
-
-	t.Run("concurrent goroutines see correct results", func(t *testing.T) {
-		p := NewPool(prog, 4)
-		defer p.Close()
-
-		const goroutines = 16
-		const iterations = 50
-
-		var wg sync.WaitGroup
-		var failures atomic.Int64
-		for g := 0; g < goroutines; g++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for k := 0; k < iterations; k++ {
-					err := p.Run(context.Background(), func(i *Interpreter) error {
-						if err := i.Run(context.Background()); err != nil {
-							return err
-						}
-						v, err := i.Pop()
-						if err != nil {
-							return err
-						}
-						if v != types.I32(15) {
-							return errors.New("wrong result")
-						}
-						return nil
-					})
-					if err != nil {
-						failures.Add(1)
-					}
-				}
-			}()
-		}
-		wg.Wait()
-		require.Equal(t, int64(0), failures.Load())
-		require.LessOrEqual(t, p.live.Load(), int64(4))
 	})
 }
 
