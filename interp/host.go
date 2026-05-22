@@ -54,12 +54,10 @@ func (s hostSlot) isMethod() bool { return s.field < 0 }
 var (
 	_ types.Value     = (*HostObject)(nil)
 	_ types.Traceable = (*HostObject)(nil)
-	_ types.Fielded   = (*HostObject)(nil)
 )
 
-func (h *HostObject) Kind() types.Kind              { return types.KindRef }
-func (h *HostObject) Type() types.Type              { return h.Typ }
-func (h *HostObject) StructType() *types.StructType { return h.Typ }
+func (h *HostObject) Kind() types.Kind { return types.KindRef }
+func (h *HostObject) Type() types.Type { return h.Typ }
 
 func (h *HostObject) String() string {
 	if !h.Receiver.IsValid() {
@@ -144,8 +142,7 @@ func (h *HostObject) lookup(i int) (hostSlot, types.StructField, bool) {
 
 // marshal delegates to the interpreter's injected Marshaler so HostObject
 // stays decoupled from the reflect-based default implementation. Errors
-// propagate via panic — there is no return path on the Fielded contract,
-// and the opcode handler converts panics to VM errors.
+// propagate via panic; opcode handlers convert panics to VM errors.
 func (h *HostObject) marshal(rv reflect.Value) types.Boxed {
 	v, err := h.interp.Marshal(rv.Interface())
 	if err != nil {

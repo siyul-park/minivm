@@ -207,7 +207,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		case types.Ref:
 			val = types.BoxRef(int(v))
 		default:
-			val = types.BoxRef(i.alloc(v))
+			val = types.BoxRef(i.allocRoot(v))
 		}
 		i.constants[j] = val
 	}
@@ -413,7 +413,7 @@ func (i *Interpreter) Alloc(val types.Value) (int, error) {
 		}
 		val = types.Unbox(v)
 	}
-	return i.alloc(val), nil
+	return i.allocRoot(val), nil
 }
 
 func (i *Interpreter) Retain(addr int) (types.Value, error) {
@@ -619,7 +619,7 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 	case types.Ref:
 		return types.BoxRef(int(v))
 	default:
-		addr := i.alloc(v)
+		addr := i.allocRoot(v)
 		return types.BoxRef(addr)
 	}
 }
@@ -635,9 +635,6 @@ func (i *Interpreter) unbox(val types.Boxed) types.Value {
 }
 
 func (i *Interpreter) alloc(val types.Value) int {
-	roots := i.traceRoot(val)
-	defer i.unroot(roots)
-
 	if len(i.free) > 0 {
 		addr := i.free[len(i.free)-1]
 		i.free = i.free[:len(i.free)-1]
@@ -672,6 +669,12 @@ func (i *Interpreter) alloc(val types.Value) int {
 	i.heap = append(i.heap, val)
 	i.rc = append(i.rc, 1)
 	return len(i.heap) - 1
+}
+
+func (i *Interpreter) allocRoot(val types.Value) int {
+	roots := i.traceRoot(val)
+	defer i.unroot(roots)
+	return i.alloc(val)
 }
 
 func (i *Interpreter) retain(addr int) {
@@ -787,4 +790,17 @@ func (i *Interpreter) gc() {
 			i.free = append(i.free, j)
 		}
 	}
+}
+
+func unboxRef[T types.Value](i *Interpreter, val types.Boxed) T {
+	if val.Kind() != types.KindRef {
+		panic(ErrTypeMismatch)
+	}
+	addr := val.Ref()
+	v, ok := i.heap[addr].(T)
+	if !ok {
+		panic(ErrTypeMismatch)
+	}
+	i.release(addr)
+	return v
 }

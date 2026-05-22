@@ -153,7 +153,7 @@ fn, err := vm.Marshal(add)
 
 ### Host Objects
 
-`*HostObject` surfaces a Go value to the VM with both **data fields** and **bound methods** behind the same indexed-field protocol used by `*Struct`. `STRUCT_GET` / `STRUCT_SET` dispatch through the `types.Fielded` interface so opcodes are unchanged.
+`*HostObject` surfaces a Go value to the VM with both **data fields** and **bound methods** behind the same indexed-field protocol used by `*Struct`. `STRUCT_GET` / `STRUCT_SET` handle native structs directly and use a concrete HostObject fallback for host values.
 
 ```go
 type Counter struct{ Count int32 }

@@ -16,7 +16,6 @@ import (
 )
 
 type test struct {
-	name    string
 	program *program.Program
 	opts    []func(*option)
 	values  []types.Value
@@ -2008,6 +2007,21 @@ var tests = []test{
 		),
 		values: []types.Value{types.I32(0)},
 	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I64_CONST, uint64(int64(1<<50))),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_GET),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI64)),
+		),
+		opts:   []func(*option){WithHeap(1)},
+		values: []types.Value{types.I64(1 << 50)},
+	},
 	// --- recursive: fibonacci (i32), factorial (i64) ---
 	{
 		program: program.New(
@@ -2337,11 +2351,7 @@ func runAll(t *testing.T, modeOpts ...func(*option)) {
 	t.Helper()
 	for _, tt := range tests {
 		tt := tt
-		name := tt.name
-		if name == "" {
-			name = tt.program.String()
-		}
-		t.Run(name, func(t *testing.T) {
+		t.Run(tt.program.String(), func(t *testing.T) {
 			opts := append([]func(*option){}, tt.opts...)
 			opts = append(opts, modeOpts...)
 			i := New(tt.program, opts...)
@@ -3308,7 +3318,9 @@ func TestInterpreter_Marshal(t *testing.T) {
 		require.True(t, ok)
 		require.True(t, m.Typ.Key.Equals(types.TypeString))
 		require.True(t, m.Typ.Elem.Equals(types.TypeI32))
-		require.Equal(t, types.BoxI32(1), m.Entries[types.MapKey{Kind: types.KindRef, Text: "a"}].Value)
+		entry, ok := m.Get(types.MapKey{Kind: types.KindRef, Text: "a"})
+		require.True(t, ok)
+		require.Equal(t, types.BoxI32(1), entry.Value)
 	})
 
 	t.Run("int map uses i64 value boxes", func(t *testing.T) {
@@ -3320,7 +3332,8 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 		m, ok := got.(*types.Map)
 		require.True(t, ok)
-		entry := m.Entries[types.MapKey{Kind: types.KindRef, Text: "a"}]
+		entry, ok := m.Get(types.MapKey{Kind: types.KindRef, Text: "a"})
+		require.True(t, ok)
 		require.True(t, m.Typ.Elem.Equals(types.TypeI64))
 		require.Equal(t, types.KindI64, entry.Value.Kind())
 	})

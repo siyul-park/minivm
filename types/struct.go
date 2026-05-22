@@ -6,8 +6,9 @@ import (
 )
 
 type Struct struct {
-	Typ  *StructType
-	Data []uint64
+	Typ    *StructType
+	Data   []uint64
+	inline [4]uint64
 }
 
 type StructType struct {
@@ -21,7 +22,6 @@ type StructField struct {
 }
 
 var _ Traceable = (*Struct)(nil)
-var _ Fielded = (*Struct)(nil)
 var _ Type = (*StructType)(nil)
 
 func FieldWithName(name string) func(*StructField) {
@@ -32,8 +32,12 @@ func FieldWithName(name string) func(*StructField) {
 
 func NewStruct(typ *StructType, fields ...Boxed) *Struct {
 	s := &Struct{
-		Typ:  typ,
-		Data: make([]uint64, len(typ.Fields)),
+		Typ: typ,
+	}
+	if len(typ.Fields) <= len(s.inline) {
+		s.Data = s.inline[:len(typ.Fields)]
+	} else {
+		s.Data = make([]uint64, len(typ.Fields))
 	}
 	for i, field := range fields {
 		s.SetField(i, field)
@@ -98,11 +102,6 @@ func (s *Struct) Kind() Kind {
 }
 
 func (s *Struct) Type() Type {
-	return s.Typ
-}
-
-// StructType returns the underlying *StructType. Satisfies Fielded.
-func (s *Struct) StructType() *StructType {
 	return s.Typ
 }
 
