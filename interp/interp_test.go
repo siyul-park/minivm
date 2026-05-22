@@ -3216,6 +3216,19 @@ func TestInterpreter_Marshal(t *testing.T) {
 		}
 	})
 
+	t.Run("unsigned primitives preserve raw bits", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(uint32(math.MaxUint32))
+		require.NoError(t, err)
+		require.Equal(t, types.I32(-1), got)
+
+		got, err = i.Marshal(uint64(math.MaxUint64))
+		require.NoError(t, err)
+		require.Equal(t, types.I64(-1), got)
+	})
+
 	t.Run("nil pointer", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
@@ -3233,6 +3246,18 @@ func TestInterpreter_Marshal(t *testing.T) {
 		got, err := i.Marshal([]int32{1, 2})
 		require.NoError(t, err)
 		require.Equal(t, types.I32Array{1, 2}, got)
+
+		got, err = i.Marshal([]uint32{math.MaxUint32})
+		require.NoError(t, err)
+		require.Equal(t, types.I32Array{-1}, got)
+
+		got, err = i.Marshal([]int{1, 2})
+		require.NoError(t, err)
+		require.Equal(t, types.I64Array{1, 2}, got)
+
+		got, err = i.Marshal([]uint64{math.MaxUint64})
+		require.NoError(t, err)
+		require.Equal(t, types.I64Array{-1}, got)
 	})
 
 	t.Run("reference slice", func(t *testing.T) {
@@ -3270,19 +3295,6 @@ func TestInterpreter_Marshal(t *testing.T) {
 		second, err := i.Load(arr.Elems[1].Ref())
 		require.NoError(t, err)
 		require.Equal(t, types.String("b"), second)
-	})
-
-	t.Run("int slice uses i64 element boxes", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-
-		got, err := i.Marshal([]int{1, 2})
-		require.NoError(t, err)
-
-		arr, ok := got.(*types.Array)
-		require.True(t, ok)
-		require.True(t, arr.Typ.Elem.Equals(types.TypeI64))
-		require.Equal(t, types.KindI64, arr.Elems[0].Kind())
 	})
 
 	t.Run("map", func(t *testing.T) {
@@ -3429,6 +3441,26 @@ func TestInterpreter_Marshal(t *testing.T) {
 		require.EqualError(t, err, "boom")
 	})
 
+	t.Run("unsigned function preserves raw bits", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(func(v uint64) uint64 {
+			require.Equal(t, uint64(math.MaxUint64), v)
+			return v
+		})
+		require.NoError(t, err)
+
+		fn, ok := got.(*HostFunction)
+		require.True(t, ok)
+		require.True(t, fn.Typ.Params[0].Equals(types.TypeI64))
+		require.True(t, fn.Typ.Returns[0].Equals(types.TypeI64))
+
+		returns, err := fn.Fn(i, []types.Boxed{types.BoxI64(-1)})
+		require.NoError(t, err)
+		require.Equal(t, []types.Boxed{types.BoxI64(-1)}, returns)
+	})
+
 	t.Run("boxed ref input", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
@@ -3501,6 +3533,23 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		require.Equal(t, int32(7), n)
 	})
 
+	t.Run("unsigned primitives preserve raw bits", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		var u32 uint32
+		require.NoError(t, i.Unmarshal(types.I32(-1), &u32))
+		require.Equal(t, uint32(math.MaxUint32), u32)
+
+		var u64 uint64
+		require.NoError(t, i.Unmarshal(types.I64(-1), &u64))
+		require.Equal(t, uint64(math.MaxUint64), u64)
+
+		var signed int64
+		require.NoError(t, i.Unmarshal(types.I64(-1), &signed))
+		require.Equal(t, int64(-1), signed)
+	})
+
 	t.Run("non nil pointer destination required", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
@@ -3517,6 +3566,14 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		var out []int32
 		require.NoError(t, i.Unmarshal(types.I32Array{1, 2}, &out))
 		require.Equal(t, []int32{1, 2}, out)
+
+		var u32 []uint32
+		require.NoError(t, i.Unmarshal(types.I32Array{-1}, &u32))
+		require.Equal(t, []uint32{math.MaxUint32}, u32)
+
+		var u64 []uint64
+		require.NoError(t, i.Unmarshal(types.I64Array{-1}, &u64))
+		require.Equal(t, []uint64{math.MaxUint64}, u64)
 	})
 
 	t.Run("map", func(t *testing.T) {
@@ -3577,6 +3634,8 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		require.ErrorIs(t, i.Unmarshal(types.I32(128), &n), ErrValueOverflow)
 		var m int32
 		require.ErrorIs(t, i.Unmarshal(types.String("bad"), &m), ErrTypeMismatch)
+		var u32 uint32
+		require.ErrorIs(t, i.Unmarshal(types.I64(-1), &u32), ErrValueOverflow)
 	})
 }
 

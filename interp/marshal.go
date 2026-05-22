@@ -172,14 +172,10 @@ func (s *marshalState) concrete(v reflect.Value) (types.Value, error) {
 		return types.I32(v.Int()), nil
 	case reflect.Int, reflect.Int64:
 		return types.I64(v.Int()), nil
-	case reflect.Uint8, reflect.Uint16:
+	case reflect.Uint8, reflect.Uint16, reflect.Uint32:
 		return types.I32(int32(v.Uint())), nil
-	case reflect.Uint, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		u := v.Uint()
-		if u > math.MaxInt64 {
-			return nil, fmt.Errorf("%w: %d overflows i64", ErrValueOverflow, u)
-		}
-		return types.I64(int64(u)), nil
+	case reflect.Uint, reflect.Uint64, reflect.Uintptr:
+		return types.I64(int64(v.Uint())), nil
 	case reflect.Float32:
 		return types.F32(float32(v.Float())), nil
 	case reflect.Float64:
@@ -205,16 +201,28 @@ func (s *marshalState) concrete(v reflect.Value) (types.Value, error) {
 
 func (s *marshalState) array(v reflect.Value) (types.Value, error) {
 	switch v.Type().Elem().Kind() {
-	case reflect.Int32:
+	case reflect.Int8, reflect.Int16, reflect.Int32:
 		out := make(types.I32Array, v.Len())
 		for idx := range out {
 			out[idx] = int32(v.Index(idx).Int())
 		}
 		return out, nil
-	case reflect.Int64:
+	case reflect.Uint8, reflect.Uint16, reflect.Uint32:
+		out := make(types.I32Array, v.Len())
+		for idx := range out {
+			out[idx] = int32(v.Index(idx).Uint())
+		}
+		return out, nil
+	case reflect.Int, reflect.Int64:
 		out := make(types.I64Array, v.Len())
 		for idx := range out {
 			out[idx] = int64(v.Index(idx).Int())
+		}
+		return out, nil
+	case reflect.Uint, reflect.Uint64, reflect.Uintptr:
+		out := make(types.I64Array, v.Len())
+		for idx := range out {
+			out[idx] = int64(v.Index(idx).Uint())
 		}
 		return out, nil
 	case reflect.Float32:
@@ -428,9 +436,9 @@ func (s *marshalState) hostObject(v reflect.Value) (types.Value, error) {
 // (_, false) for kinds the live reflect path does not support yet.
 func hostFieldType(t reflect.Type) (types.Type, bool) {
 	switch t.Kind() {
-	case reflect.Bool, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Uint8, reflect.Uint16:
+	case reflect.Bool, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Uint8, reflect.Uint16, reflect.Uint32:
 		return types.TypeI32, true
-	case reflect.Int, reflect.Int64, reflect.Uint, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+	case reflect.Int, reflect.Int64, reflect.Uint, reflect.Uint64, reflect.Uintptr:
 		return types.TypeI64, true
 	case reflect.Float32:
 		return types.TypeF32, true
@@ -575,9 +583,9 @@ func (s *marshalState) typeOfSeen(t reflect.Type, seen map[reflect.Type]bool) (t
 		return s.typeOfSeen(elem, seen)
 	}
 	switch t.Kind() {
-	case reflect.Bool, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Uint8, reflect.Uint16:
+	case reflect.Bool, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Uint8, reflect.Uint16, reflect.Uint32:
 		return types.TypeI32, nil
-	case reflect.Int, reflect.Int64, reflect.Uint, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+	case reflect.Int, reflect.Int64, reflect.Uint, reflect.Uint64, reflect.Uintptr:
 		return types.TypeI64, nil
 	case reflect.Float32:
 		return types.TypeF32, nil
@@ -755,11 +763,10 @@ func (s *unmarshalState) concrete(value types.Value, dst reflect.Value) error {
 		dst.SetInt(n)
 		return nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		signed, ok := signedValue(value)
-		if !ok || signed < 0 {
+		n, ok := unsignedValue(value)
+		if !ok {
 			return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, value, dst.Type())
 		}
-		n := uint64(signed)
 		if dst.OverflowUint(n) {
 			return fmt.Errorf("%w: %d overflows %s", ErrValueOverflow, n, dst.Type())
 		}
@@ -994,6 +1001,23 @@ func signedValue(val types.Value) (int64, bool) {
 			return int64(v.I32()), true
 		case types.KindI64:
 			return v.I64(), true
+		}
+	}
+	return 0, false
+}
+
+func unsignedValue(val types.Value) (uint64, bool) {
+	switch v := val.(type) {
+	case types.I32:
+		return uint64(uint32(v)), true
+	case types.I64:
+		return uint64(v), true
+	case types.Boxed:
+		switch v.Kind() {
+		case types.KindI32:
+			return uint64(uint32(v.I32())), true
+		case types.KindI64:
+			return uint64(v.I64()), true
 		}
 	}
 	return 0, false

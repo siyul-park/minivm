@@ -104,13 +104,15 @@ v, err := vm.Marshal(myGoValue)
 | `bool` | `I32` | `false=0`, `true=1` |
 | `int8`, `int16`, `int32` | `I32` | |
 | `int`, `int64` | `I64` | large values may heap-spill |
-| `uint8`, `uint16` | `I32` | |
-| `uint`, `uint32`, `uint64` | `I64` | error if > `MaxInt64` |
+| `uint8`, `uint16`, `uint32` | `I32` | preserves raw unsigned bits |
+| `uint`, `uint64`, `uintptr` | `I64` | preserves raw unsigned bits |
 | `float32` | `F32` | |
 | `float64` | `F64` | |
 | `string` | `String` (ref) | heap-allocated |
-| `[]int32` | `I32Array` | no heap allocation |
-| `[]int64` | `I64Array` | no heap allocation |
+| `[]int8`, `[]int16`, `[]int32` | `I32Array` | no heap allocation |
+| `[]uint8`, `[]uint16`, `[]uint32` | `I32Array` | preserves raw unsigned bits |
+| `[]int`, `[]int64` | `I64Array` | no heap allocation |
+| `[]uint`, `[]uint64`, `[]uintptr` | `I64Array` | preserves raw unsigned bits |
 | `[]float32` | `F32Array` | no heap allocation |
 | `[]float64` | `F64Array` | no heap allocation |
 | `[]T` (other) | `*Array` (ref) | elements heap-allocated if ref-typed |
@@ -201,6 +203,8 @@ err = vm.Unmarshal(vmStruct, &out) // struct fields matched by name
 **Struct field matching:** fields matched by name first; unmatched destination fields fall back to first unused VM field by position. VM function-typed fields are skipped.
 
 **Overflow and mismatch** return `ErrValueOverflow` or `ErrTypeMismatch`.
+
+Unsigned Go integers use the same `I32` / `I64` VM types as signed integers. Values above the signed maximum round-trip by preserving raw bits, so `uint32(math.MaxUint32)` appears as `I32(-1)` and `uint64(math.MaxUint64)` appears as `I64(-1)` inside the VM. Signedness is chosen by Go destination type during `Unmarshal`, or by `_S` / `_U` opcode suffixes in bytecode.
 
 ---
 
