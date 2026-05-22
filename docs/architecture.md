@@ -13,7 +13,7 @@ Read when changes cross package boundaries or need state ownership.
 | `prof/` or profile options | `profile.md` |
 | `interp/threaded.go` or `interp/jit*.go` | `jit-internals.md`, `instruction-set.md` |
 | `analysis/`, `transform/`, `optimize/`, `pass/` | `pass-system.md` |
-| `cmd/repl/` or `cmd/minivm/` | `guides/repl.md` |
+| `cli/` or `cmd/minivm/` | `guides/repl.md` |
 
 Keep boundaries stable: `instr` stays leaf-like, `types` must not import `interp`, optimizer code flows through `pass.Manager`.
 
@@ -28,8 +28,11 @@ asm     → asm/arm64
 analysis → pass, types, instr
 transform → analysis, pass, types, instr, program
 optimize → transform, analysis, pass, program
-cmd/repl → instr, interp, program, types
-cmd/minivm → cmd/repl, cobra
+cli → cli/repl, cli/display, cli/fsx, program, interp, cobra
+cli/repl → cli/display, cli/fsx, instr, interp, prof, program, types
+cli/display → interp, types
+cli/fsx → io/fs (stdlib)
+cmd/minivm → cli
 ```
 
 Important paths:
@@ -38,7 +41,7 @@ Important paths:
 program → instr → nothing
 interp → program, instr, types, asm, pass, analysis
 optimize → transform → analysis → pass
-cmd/repl → instr, interp, program, types
+cli → cli/repl → instr, interp, program, types
 ```
 
 ## Component Responsibilities
@@ -156,7 +159,19 @@ BasicBlocksPass → ConstantFoldingPass → ConstantDeduplicationPass → DeadCo
 
 Transform passes mutate `*program.Program` in-place: edit `prog.Code` bytes and `prog.Constants`.
 
-### `cmd/repl/`
+### `cli/`
+
+Top-level command tree. `cli.Root()` returns the `minivm` cobra command (REPL by default) plus subcommands. `cli.NewRunCommand(fs.FS)` is the `run <file>` factory and accepts any `io/fs.FS`, so embedders can drive it with `os.DirFS`, `embed.FS`, or `fstest.MapFS`. `cli.WithFS(fsx.WriteFS)` overrides the filesystem used by both `run` and the REPL's `.load` / `.save` commands.
+
+### `cli/display/`
+
+Shared value/stack formatting between the run subcommand and the REPL. Lives in its own subpackage so `cli` and `cli/repl` can both import it without a cycle.
+
+### `cli/fsx/`
+
+Minimal write extension to `io/fs.FS`. `fsx.WriteFS` embeds `fs.FS` and adds `Create(name) (io.WriteCloser, error)` — enough for `.save`, while leaving read-only callers on the standard interface. `fsx.OS()` backs it with the host filesystem.
+
+### `cli/repl/`
 
 `REPL` state between steps:
 
@@ -166,14 +181,15 @@ Transform passes mutate `*program.Program` in-place: edit `prog.Code` bytes and 
 | `codeLen int` | byte length of history for absolute branch normalization |
 | `constants []types.Value` | `.const` function constants |
 | `types []types.Type` | `.type` descriptors |
+| `fs fsx.WriteFS` | filesystem used by `.load` and `.save`; defaults to `fsx.OS()` |
 
 Each instruction: build fresh `program.Program` from history + new instruction, create new `interp.Interpreter`, run full program, print stack. Accepted instructions/constants/types stay as source history. Heap recreated each step, refs stay valid. Cost `O(N)` per step for `N` accumulated instructions.
 
-On error, new instruction not committed. `.reset` clears instruction history, code length, constants, types.
+On error, new instruction not committed. `.reset` clears instruction history, code length, constants, types. `.load <file>` parses a `Program.String()` dump and *replaces* state (merging would require renumbering instruction-embedded constant and type indices); `.save <file>` writes `r.build().String()` and refuses host-typed constants since they have no textual form.
 
 ### `cmd/minivm/`
 
-Thin cobra entrypoint. Root command launches REPL with `os.Stdin`/`os.Stdout`; cobra provides `--help`. Future subcommands like `run <file>` can be added without changing `cmd/repl`.
+Thin entrypoint. Delegates to `cli.Root().Execute()`.
 
 ## Execution Flow
 

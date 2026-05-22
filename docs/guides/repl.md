@@ -5,8 +5,11 @@ Interactive assembly REPL for MiniVM bytecode interpreter.
 ## Running
 
 ```bash
-./dist/minivm
+./dist/minivm                  # interactive REPL
+./dist/minivm run <file>       # execute an assembly file and print the final stack
 ```
+
+`run` accepts files written in the same format `.show` (and `.save`) emit — code lines optionally prefixed with `NNNN:\t`, followed by `.const`-style function blocks, followed by single-line type descriptors. The exit status is 0 on success and 1 on open/parse/runtime errors (diagnostics go to stderr).
 
 ## Basic Usage
 
@@ -29,9 +32,13 @@ Enter assembly instructions one per line. Each instruction executes immediately 
 | `.type` | Declare type descriptors (multi-line, end with blank line) |
 | `.show` | Disassemble the accumulated program |
 | `.profile` | Re-execute with profiling and print function/IP/opcode samples |
+| `.load <file>` | Replace REPL state with the program parsed from `<file>` |
+| `.save <file>` | Write the current program to `<file>` in `Program.String()` format |
 | `.reset` | Clear all instructions, constants, types, and breakpoints |
 | `.help` | Show help |
 | `.quit` / `.exit` | Exit the REPL |
+
+`.save` followed by `.load` round-trips the session through a file. `.load` replaces state rather than merging — merging would require renumbering instruction-embedded constant and type indices, which is out of scope. `.save` refuses programs that contain host-typed constants (`*interp.HostFunction`, `*interp.HostObject`) because those values have no textual representation.
 
 ## Debugging
 

@@ -39,7 +39,7 @@ go test -race -run TestFoo ./interp/...
 | Ref/GC/host function | `docs/memory-model.md`, `docs/value-representation.md` | `interp/host.go`, `interp/threaded.go`, `types/` | `go test ./interp ./types` |
 | JIT/ARM64 backend | `docs/jit-internals.md`, `docs/value-representation.md` | `interp/jit*.go`, `asm/`, `asm/arm64/` | `go test ./asm/... ./interp` |
 | Optimizer/pass | `docs/pass-system.md` | `analysis/`, `transform/`, `optimize/`, `pass/` | `go test ./analysis ./transform ./optimize ./pass` |
-| REPL/CLI | `docs/guides/repl.md` | `cmd/repl/`, `cmd/minivm/`, `instr/parse.go` | `go test ./cmd/repl ./cmd/minivm ./instr` |
+| REPL/CLI | `docs/guides/repl.md` | `cli/`, `cli/repl/`, `cmd/minivm/`, `instr/parse.go` | `go test ./cli/... ./cmd/minivm ./instr` |
 | Style-only change | `docs/coding-patterns.md` | touched package | package tests |
 
 ## Documentation Index
@@ -92,7 +92,10 @@ Hot-segment compilation:
 | `analysis/` | shared analysis passes |
 | `transform/` | optimization transforms |
 | `optimize/` | optimization pipeline wiring |
-| `cmd/repl/` | interactive REPL |
+| `cli/` | CLI command tree (`Root`, `NewRunCommand`) |
+| `cli/repl/` | interactive REPL |
+| `cli/display/` | shared CLI/REPL value formatting |
+| `cli/fsx/` | filesystem abstraction (read + write) for CLI commands |
 | `cmd/minivm/` | CLI entrypoint |
 
 ## Key Invariants
