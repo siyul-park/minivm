@@ -25,6 +25,7 @@ go test -race -run TestFoo ./interp/...
 4. Mirror nearby tests; follow Test Conventions (one func per exported symbol, sub-cases as `t.Run`).
 5. Update docs when behavior, invariants, commands, or pitfalls change.
 6. Run narrow tests first, then `go test ./...` or `make test` for broad coverage.
+7. Before reporting done, re-read every new/modified file against the pre-finish checklist in `.claude/CLAUDE.md` (or the equivalent in your agent's instruction file).
 
 ## Local Hooks
 
