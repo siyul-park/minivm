@@ -37,6 +37,33 @@ Instruction set borrows from WebAssembly while staying focused on Go-native scri
 
 ---
 
+## Performance
+
+Recursive `fib(20)` — end-to-end per call, linux/amd64:
+
+| Runtime | ns/op | allocs/op |
+|---|---|---|
+| native Go | 41,187 | 0 |
+| **minivm** | **968,392** | **0** |
+| tengo | 1,728,883 | 28,657 |
+| goja | 2,957,709 | 39 |
+
+minivm is **~1.8× faster than tengo** and **~3× faster than goja**, with **zero heap allocation** per call.
+
+Single-instruction throughput (threaded interpreter, same hardware):
+
+| Workload | ns/op |
+|---|---|
+| i32/i64/f32/f64 arithmetic | ~20–22 |
+| branch (`br`, `br_if`) | ~20–24 |
+| bytecode function call | ~26–29 |
+| host function call | ~36 |
+| array/struct operations | ~90–140 |
+
+Full results: [`docs/benchmarks.md`](docs/benchmarks.md)
+
+---
+
 ## Usage
 
 ### Execute bytecode
