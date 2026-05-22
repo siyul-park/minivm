@@ -2390,12 +2390,13 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrTypeMismatch)
 			}
 			addr := ref.Ref()
-			if s, ok := i.heap[addr].(*types.Struct); ok {
+			var val types.Boxed
+			switch s := i.heap[addr].(type) {
+			case *types.Struct:
 				if idx < 0 || idx >= len(s.Typ.Fields) {
 					panic(ErrSegmentationFault)
 				}
 				field := s.Typ.Fields[idx]
-				var val types.Boxed
 				switch field.Kind {
 				case types.KindI32:
 					val = types.BoxI32(int32(uint32(s.Data[idx])))
@@ -2413,31 +2414,24 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				default:
 					panic(ErrTypeMismatch)
 				}
-				i.release(addr)
-				i.sp--
-				i.stack[i.sp-1] = val
-				i.frames[i.fp-1].ip++
-				return
-			}
-			s, ok := i.heap[addr].(*HostObject)
-			if !ok {
-				panic(ErrTypeMismatch)
-			}
-			typ := s.Typ
-			if idx < 0 || idx >= len(typ.Fields) {
-				panic(ErrSegmentationFault)
-			}
-			field := typ.Fields[idx]
-			var val types.Boxed
-			switch field.Kind {
-			case types.KindI32, types.KindF32, types.KindF64:
-				val = s.Field(idx)
-			case types.KindI64:
-				val = i.boxI64(int64(s.Raw(idx)))
-			case types.KindRef:
-				val = types.Boxed(s.Raw(idx))
-				if val.Kind() == types.KindRef {
-					i.retain(val.Ref())
+			case *HostObject:
+				typ := s.Typ
+				if idx < 0 || idx >= len(typ.Fields) {
+					panic(ErrSegmentationFault)
+				}
+				field := typ.Fields[idx]
+				switch field.Kind {
+				case types.KindI32, types.KindF32, types.KindF64:
+					val = s.Field(idx)
+				case types.KindI64:
+					val = i.boxI64(int64(s.Raw(idx)))
+				case types.KindRef:
+					val = types.Boxed(s.Raw(idx))
+					if val.Kind() == types.KindRef {
+						i.retain(val.Ref())
+					}
+				default:
+					panic(ErrTypeMismatch)
 				}
 			default:
 				panic(ErrTypeMismatch)
@@ -2461,11 +2455,13 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrTypeMismatch)
 			}
 			addr := ref.Ref()
-			if s, ok := i.heap[addr].(*types.Struct); ok {
-				if idx < 0 || idx >= len(s.Typ.Fields) {
+			switch s := i.heap[addr].(type) {
+			case *types.Struct:
+				typ := s.Typ
+				if idx < 0 || idx >= len(typ.Fields) {
 					panic(ErrSegmentationFault)
 				}
-				field := s.Typ.Fields[idx]
+				field := typ.Fields[idx]
 				switch field.Kind {
 				case types.KindI32:
 					s.Data[idx] = uint64(uint32(val.I32()))
@@ -2484,31 +2480,26 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				default:
 					panic(ErrTypeMismatch)
 				}
-				i.release(addr)
-				i.sp -= 3
-				i.frames[i.fp-1].ip++
-				return
-			}
-			s, ok := i.heap[addr].(*HostObject)
-			if !ok {
-				panic(ErrTypeMismatch)
-			}
-			typ := s.Typ
-			if idx < 0 || idx >= len(typ.Fields) {
-				panic(ErrSegmentationFault)
-			}
-			field := typ.Fields[idx]
-			switch field.Kind {
-			case types.KindI32, types.KindF32, types.KindF64:
-				s.SetField(idx, val)
-			case types.KindI64:
-				s.SetRaw(idx, uint64(i.unboxI64(val)))
-			case types.KindRef:
-				old := types.Boxed(s.Raw(idx))
-				if old.Kind() == types.KindRef {
-					i.release(old.Ref())
+			case *HostObject:
+				typ := s.Typ
+				if idx < 0 || idx >= len(typ.Fields) {
+					panic(ErrSegmentationFault)
 				}
-				s.SetRaw(idx, uint64(val))
+				field := typ.Fields[idx]
+				switch field.Kind {
+				case types.KindI32, types.KindF32, types.KindF64:
+					s.SetField(idx, val)
+				case types.KindI64:
+					s.SetRaw(idx, uint64(i.unboxI64(val)))
+				case types.KindRef:
+					old := types.Boxed(s.Raw(idx))
+					if old.Kind() == types.KindRef {
+						i.release(old.Ref())
+					}
+					s.SetRaw(idx, uint64(val))
+				default:
+					panic(ErrTypeMismatch)
+				}
 			default:
 				panic(ErrTypeMismatch)
 			}
