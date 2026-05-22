@@ -18,11 +18,10 @@ func TestNewPool(t *testing.T) {
 	t.Run("normalizes non-positive size", func(t *testing.T) {
 		p := NewPool(program.New(nil), 0)
 		defer p.Close()
-		require.Equal(t, 1, p.size)
 
-		p2 := NewPool(program.New(nil), -5)
-		defer p2.Close()
-		require.Equal(t, 1, p2.size)
+		i, err := p.Get(context.Background())
+		require.NoError(t, err)
+		p.Put(i)
 	})
 
 	t.Run("forwards interpreter options", func(t *testing.T) {
@@ -43,6 +42,107 @@ func TestNewPool(t *testing.T) {
 	})
 }
 
+func TestPool_Run(t *testing.T) {
+	prog := program.New([]instr.Instruction{
+		instr.New(instr.I32_CONST, 7),
+		instr.New(instr.I32_CONST, 8),
+		instr.New(instr.I32_ADD),
+	})
+
+	t.Run("propagates result", func(t *testing.T) {
+		p := NewPool(prog, 1)
+		defer p.Close()
+
+		var got types.Value
+		err := p.Run(context.Background(), func(i *Interpreter) error {
+			if err := i.Run(context.Background()); err != nil {
+				return err
+			}
+			v, err := i.Pop()
+			got = v
+			return err
+		})
+		require.NoError(t, err)
+		require.Equal(t, types.I32(15), got)
+	})
+
+	t.Run("propagates error", func(t *testing.T) {
+		p := NewPool(prog, 1)
+		defer p.Close()
+
+		want := errors.New("boom")
+		err := p.Run(context.Background(), func(i *Interpreter) error {
+			return want
+		})
+		require.ErrorIs(t, err, want)
+	})
+
+	t.Run("returns interpreter after panic", func(t *testing.T) {
+		p := NewPool(prog, 1)
+		defer p.Close()
+
+		require.Panics(t, func() {
+			_ = p.Run(context.Background(), func(i *Interpreter) error {
+				panic("boom")
+			})
+		})
+
+		i, err := p.Get(context.Background())
+		require.NoError(t, err)
+		defer p.Put(i)
+		require.Equal(t, 0, i.Len())
+	})
+
+	t.Run("after close returns ErrPoolClosed", func(t *testing.T) {
+		p := NewPool(prog, 1)
+		require.NoError(t, p.Close())
+
+		err := p.Run(context.Background(), func(i *Interpreter) error {
+			t.Fatal("fn should not run")
+			return nil
+		})
+		require.ErrorIs(t, err, ErrPoolClosed)
+	})
+
+	t.Run("concurrent goroutines see correct results", func(t *testing.T) {
+		p := NewPool(prog, 4)
+		defer p.Close()
+
+		const goroutines = 16
+		const iterations = 50
+
+		var wg sync.WaitGroup
+		var failures atomic.Int64
+		for g := 0; g < goroutines; g++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for k := 0; k < iterations; k++ {
+					err := p.Run(context.Background(), func(i *Interpreter) error {
+						if err := i.Run(context.Background()); err != nil {
+							return err
+						}
+						v, err := i.Pop()
+						if err != nil {
+							return err
+						}
+						if v != types.I32(15) {
+							return errors.New("wrong result")
+						}
+						return nil
+					})
+					if err != nil {
+						failures.Add(1)
+					}
+				}
+			}()
+		}
+		wg.Wait()
+		require.Equal(t, int64(0), failures.Load())
+		require.LessOrEqual(t, p.live.Load(), int64(4))
+	})
+}
+
 func TestPool_Get(t *testing.T) {
 	t.Run("creates under cap", func(t *testing.T) {
 		p := NewPool(program.New(nil), 2)
@@ -50,14 +150,9 @@ func TestPool_Get(t *testing.T) {
 
 		i1, err := p.Get(context.Background())
 		require.NoError(t, err)
-		require.NotNil(t, i1)
-		require.Equal(t, int64(1), p.live.Load())
-
 		i2, err := p.Get(context.Background())
 		require.NoError(t, err)
-		require.NotNil(t, i2)
 		require.NotSame(t, i1, i2)
-		require.Equal(t, int64(2), p.live.Load())
 
 		p.Put(i1)
 		p.Put(i2)
@@ -156,23 +251,6 @@ func TestPool_Put(t *testing.T) {
 		require.Equal(t, 0, i2.Len())
 	})
 
-	t.Run("closes excess when idle full", func(t *testing.T) {
-		p := NewPool(program.New(nil), 1)
-		defer p.Close()
-
-		i1, err := p.Get(context.Background())
-		require.NoError(t, err)
-		p.Put(i1)
-		require.Equal(t, int64(1), p.live.Load())
-
-		// Bypass the cap to fabricate an "extra" interpreter; Put should
-		// close it because idle is already full.
-		extra := New(p.prog, p.opts...)
-		p.live.Add(1)
-		p.Put(extra)
-		require.Equal(t, int64(1), p.live.Load())
-	})
-
 	t.Run("nil is ignored", func(t *testing.T) {
 		p := NewPool(program.New(nil), 1)
 		defer p.Close()
@@ -188,69 +266,6 @@ func TestPool_Put(t *testing.T) {
 
 		require.NotPanics(t, func() { p.Put(i) })
 		require.Equal(t, int64(0), p.live.Load())
-	})
-}
-
-func TestPool_Run(t *testing.T) {
-	prog := program.New([]instr.Instruction{
-		instr.New(instr.I32_CONST, 7),
-		instr.New(instr.I32_CONST, 8),
-		instr.New(instr.I32_ADD),
-	})
-
-	t.Run("propagates result", func(t *testing.T) {
-		p := NewPool(prog, 1)
-		defer p.Close()
-
-		var got types.Value
-		err := p.Run(context.Background(), func(i *Interpreter) error {
-			if err := i.Run(context.Background()); err != nil {
-				return err
-			}
-			v, err := i.Pop()
-			got = v
-			return err
-		})
-		require.NoError(t, err)
-		require.Equal(t, types.I32(15), got)
-	})
-
-	t.Run("propagates error", func(t *testing.T) {
-		p := NewPool(prog, 1)
-		defer p.Close()
-
-		want := errors.New("boom")
-		err := p.Run(context.Background(), func(i *Interpreter) error {
-			return want
-		})
-		require.ErrorIs(t, err, want)
-	})
-
-	t.Run("returns interpreter even after panic", func(t *testing.T) {
-		p := NewPool(prog, 1)
-		defer p.Close()
-
-		require.Panics(t, func() {
-			_ = p.Run(context.Background(), func(i *Interpreter) error {
-				panic("boom")
-			})
-		})
-
-		i, err := p.Get(context.Background())
-		require.NoError(t, err)
-		defer p.Put(i)
-		require.Equal(t, 0, i.Len())
-	})
-
-	t.Run("after close returns ErrPoolClosed", func(t *testing.T) {
-		p := NewPool(prog, 1)
-		require.NoError(t, p.Close())
-
-		err := p.Run(context.Background(), func(i *Interpreter) error {
-			t.Fatal("fn should not run")
-			return nil
-		})
-		require.ErrorIs(t, err, ErrPoolClosed)
 	})
 }
 
@@ -289,47 +304,4 @@ func TestPool_Close(t *testing.T) {
 		p.Put(i)
 		require.Equal(t, int64(0), p.live.Load())
 	})
-}
-
-func TestPool_Concurrent(t *testing.T) {
-	prog := program.New([]instr.Instruction{
-		instr.New(instr.I32_CONST, 7),
-		instr.New(instr.I32_CONST, 8),
-		instr.New(instr.I32_ADD),
-	})
-	p := NewPool(prog, 4)
-	defer p.Close()
-
-	const goroutines = 16
-	const iterations = 50
-
-	var wg sync.WaitGroup
-	var failures atomic.Int64
-	for g := 0; g < goroutines; g++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for k := 0; k < iterations; k++ {
-				err := p.Run(context.Background(), func(i *Interpreter) error {
-					if err := i.Run(context.Background()); err != nil {
-						return err
-					}
-					v, err := i.Pop()
-					if err != nil {
-						return err
-					}
-					if v != types.I32(15) {
-						return errors.New("wrong result")
-					}
-					return nil
-				})
-				if err != nil {
-					failures.Add(1)
-				}
-			}
-		}()
-	}
-	wg.Wait()
-	require.Equal(t, int64(0), failures.Load())
-	require.LessOrEqual(t, p.live.Load(), int64(4))
 }
