@@ -1,10 +1,17 @@
 # Debugging
 
-Bytecode-level debugging for embedders.
+Bytecode-level debugging for embedders and test harnesses.
 
 ## When to Read
 
-Read when building a debugger, tracer, or test harness around `interp.Run`, or when you need breakpoints, step/next/finish control, current bytecode location, frames, or operand stack inspection.
+Read when building a debugger, tracer, or test harness around `interp.Run`.
+
+Use it for:
+
+- breakpoints
+- step / next / finish control
+- current bytecode location
+- frame and operand stack inspection
 
 ## Setup
 
@@ -33,7 +40,7 @@ for {
 }
 ```
 
-`WithDebugger` installs debugger hook, sets `WithTick(1)`, disables JIT with `WithThreshold(-1)`, preserves exact threaded bytecode instruction boundaries.
+`WithDebugger` installs the debugger hook, sets `WithTick(1)`, disables JIT with `WithThreshold(-1)`, and preserves exact threaded bytecode instruction boundaries.
 
 ## Controls
 
@@ -44,11 +51,11 @@ for {
 | `Next()` | Execute one bytecode instruction, stepping over calls |
 | `Finish()` | Run until current frame returns |
 
-All stops occur before current instruction executes. `Run` returns `ErrStopped`; `Stop()` returns function index, instruction pointer, and breakpoint ID, or `0` for stepping stops.
+Stops occur before the current instruction executes. `Run` returns `ErrStopped`. `Stop()` returns function index, instruction pointer, and breakpoint ID; stepping stops use breakpoint ID `0`.
 
 ## Breakpoints
 
-Breakpoints use function index + bytecode offset:
+Breakpoints use function index plus bytecode offset:
 
 ```go
 id := dbg.Break(0, 10)
@@ -69,7 +76,7 @@ dbg.BreakIf(0, 10, func(vm *interp.Interpreter) bool {
 
 ## Inspection
 
-Inspect stopped interpreter directly.
+Inspect a stopped interpreter directly.
 
 | Method | Use |
 |---|---|
@@ -86,6 +93,6 @@ Inspect stopped interpreter directly.
 
 ## JIT and Precision
 
-Debugging is bytecode-level. Exact stepping requires instruction-boundary execution, so `WithDebugger` disables JIT and uses `WithTick(1)`, making threaded compilation preserve observable bytecode offsets.
+Debugging is bytecode-level. Exact stepping needs instruction-boundary execution, so `WithDebugger` disables JIT and uses `WithTick(1)`. Threaded compilation then preserves observable bytecode offsets.
 
 Normal non-debug execution keeps threaded fusion optimizations such as NOP run collapsing and `const.get` + `call` fusion.

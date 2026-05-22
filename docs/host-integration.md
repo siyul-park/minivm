@@ -1,15 +1,17 @@
 # Host Integration
 
-How to pass values between Go host code and the VM.
+Pass values and calls between Go host code and the VM.
 
 ## Overview
 
-VM and Go host share same process but use different value representations. Two layers:
+The VM and Go host share a process but use different value representations.
 
-- **Direct** — use `types.Value` / `types.Boxed` / `HostFunction` directly, no reflection. Fast path for hot code.
-- **Reflect** — use `Marshal` / `Unmarshal` to convert ordinary Go types automatically. Convenient for setup code.
+| Layer | Use when | API |
+|---|---|---|
+| Direct | hot host calls, manual heap/ref control | `types.Value`, `types.Boxed`, `HostFunction` |
+| Reflect | setup code, ordinary Go structs/maps/functions | `Marshal`, `Unmarshal` |
 
-Both layers are available simultaneously. Use direct for host functions called in tight loops; use marshal for one-off conversions of complex Go data.
+Both layers can be mixed in one interpreter.
 
 ---
 
@@ -17,7 +19,7 @@ Both layers are available simultaneously. Use direct for host functions called i
 
 ### `HostFunction`
 
-`HostFunction` is the primary bridge. Any Go closure with signature `func(*Interpreter, []Boxed) ([]Boxed, error)` becomes callable from bytecode via `CONST_GET` + `CALL`.
+`HostFunction` is the direct call bridge. Any Go closure with signature `func(*Interpreter, []Boxed) ([]Boxed, error)` becomes callable from bytecode via `CONST_GET` + `CALL`.
 
 ```go
 fn := interp.NewHostFunction(
@@ -33,7 +35,7 @@ fn := interp.NewHostFunction(
 )
 ```
 
-`HostFunction` is a `types.Value` (`KindRef`). Register it as a constant:
+`HostFunction` is a `types.Value` (`KindRef`). Register it as a constant.
 
 ```go
 prog := program.New(instrs, program.WithConstants(fn))
@@ -83,7 +85,7 @@ obj, err = vm.Retain(addr)   // increments RC
 err = vm.Release(addr)        // decrements RC; free when 0
 ```
 
-Always `Release` what you `Retain`. Leaked refs prevent GC collection.
+Always `Release` what you `Retain`; leaked refs prevent GC collection.
 
 ---
 
@@ -91,7 +93,7 @@ Always `Release` what you `Retain`. Leaked refs prevent GC collection.
 
 ### `Marshal`
 
-`Marshal` converts an ordinary Go value to `types.Value` using reflection. Use for setup code — marshaling data structures, functions, configs — not in hot call paths.
+`Marshal` converts ordinary Go values to `types.Value` using reflection. Use it for setup data, functions, and config; keep hot paths on the direct layer.
 
 ```go
 v, err := vm.Marshal(myGoValue)
@@ -132,11 +134,11 @@ var p *MyStruct = nil
 v, _ := vm.Marshal(p) // → types.Null
 ```
 
-**Pointer cycles** return `ErrMarshalCycle`. Shared non-cycle pointers are allowed.
+Pointer cycles return `ErrMarshalCycle`. Shared non-cycle pointers are allowed.
 
 ### Marshaling Go functions
 
-A Go `func` value marshals to `*HostFunction`. Final return may be `error`; non-nil surfaces as host-call error, not passed to VM.
+A Go `func` marshals to `*HostFunction`. A final `error` return is host-only; non-nil values surface as call errors.
 
 ```go
 add := func(a, b int32) (int32, error) { return a + b, nil }
@@ -144,7 +146,7 @@ fn, err := vm.Marshal(add)
 // fn is *HostFunction with Params=[I32,I32], Returns=[I32]
 ```
 
-VM-native types (`types.I32`, `types.F32`, etc.) used directly in Go func signatures are recognized without boxing overhead:
+VM-native types (`types.I32`, `types.F32`, etc.) in Go signatures avoid boxing overhead:
 
 ```go
 add := func(a, b types.I32) types.I32 { return a + b }
@@ -153,7 +155,7 @@ fn, err := vm.Marshal(add)
 
 ### Host Objects
 
-`*HostObject` surfaces a Go value to the VM with both **data fields** and **bound methods** behind the same indexed-field protocol used by `*Struct`. `STRUCT_GET` / `STRUCT_SET` handle native structs directly and use a concrete HostObject fallback for host values.
+`*HostObject` exposes Go values with data fields and bound methods through the same indexed-field protocol as `*Struct`. `STRUCT_GET` / `STRUCT_SET` handle native structs first, then use `HostObject` for host values.
 
 ```go
 type Counter struct{ Count int32 }
@@ -168,7 +170,7 @@ ho := v.(*interp.HostObject)
 // ho.Typ.Fields = [Count: I32, Bump: func(I32) I32]
 ```
 
-**Routing rules:** `Marshal` routes a Go value to `*HostObject` when **either**:
+**Routing rules:** `Marshal` creates `*HostObject` when either condition holds:
 
 - The type has methods on `T` or `*T`.
 - The type is a struct with unexported fields (would lose info via `*Struct`).
@@ -183,11 +185,11 @@ ho := v.(*interp.HostObject)
 - `Receiver` is an **addressable copy** of the marshaled Go value, owned by the `HostObject`. Pointer-receiver method calls mutate this copy.
 - The caller's original Go value is not mutated by VM-side writes. Round-trip via `Unmarshal(ho, &dst)` to recover the current state into a new Go value.
 
-**Field access:** every `Field` / `SetField` reflects against `Receiver` through the interpreter's injected `Marshaler`. Methods are pre-bound as `*HostFunction` values allocated on the VM heap at marshal time; they are retained for the lifetime of the `HostObject` via `Refs`.
+**Field access:** `Field` / `SetField` reflect against `Receiver` through the interpreter's `Marshaler`. Methods are pre-bound as `*HostFunction` values on the VM heap and retained via `Refs`.
 
 ### `Unmarshal`
 
-`Unmarshal` converts a `types.Value` back to a Go value. Destination must be a non-nil pointer.
+`Unmarshal` converts `types.Value` back to Go. Destination must be a non-nil pointer.
 
 ```go
 var n int32
@@ -204,15 +206,15 @@ err = vm.Unmarshal(vmStruct, &out) // struct fields matched by name
 
 **Overflow and mismatch** return `ErrValueOverflow` or `ErrTypeMismatch`.
 
-Unsigned Go integers use the same `I32` / `I64` VM types as signed integers. Values above the signed maximum round-trip by preserving raw bits, so `uint32(math.MaxUint32)` appears as `I32(-1)` and `uint64(math.MaxUint64)` appears as `I64(-1)` inside the VM. Signedness is chosen by Go destination type during `Unmarshal`, or by `_S` / `_U` opcode suffixes in bytecode.
+Unsigned Go integers use the same `I32` / `I64` VM types as signed integers. Values above signed max preserve raw bits, so `uint32(math.MaxUint32)` appears as `I32(-1)` and `uint64(math.MaxUint64)` appears as `I64(-1)` inside the VM. Signedness comes from the Go destination type during `Unmarshal`, or from `_S` / `_U` opcode suffixes in bytecode.
 
 ---
 
 ## Marshaled Value Lifetime
 
-Values from `Marshal` that contain refs (strings, arrays, maps, structs, host functions) are heap-allocated on the VM heap. GC'd when unreachable from stack, constants, or globals.
+Marshaled refs (strings, arrays, maps, structs, host functions) live on the VM heap and are collected when unreachable from stack, constants, or globals.
 
-Consume marshaled values before next `Run` or register them as constants/globals:
+Consume marshaled refs before next `Run`, or register them as constants/globals:
 
 ```go
 // push to stack before running
@@ -231,7 +233,7 @@ Marshaled refs do not survive `vm.Close()` or `vm.Reset()`.
 
 ## Custom Marshaler
 
-Override conversion logic — for custom types, schema registry, or to replace reflection entirely:
+Override conversion for custom types, schema registries, or reflection-free integration:
 
 ```go
 type myMarshaler struct{}
@@ -247,7 +249,7 @@ func (m *myMarshaler) UnmarshalValue(vm *interp.Interpreter, v types.Value, dst 
 vm := interp.New(prog, interp.WithMarshaler(&myMarshaler{}))
 ```
 
-`WithMarshaler` replaces default reflection-based converter for all `Marshal` / `Unmarshal` calls on that interpreter.
+`WithMarshaler` replaces the default reflection converter for all `Marshal` / `Unmarshal` calls on that interpreter.
 
 ---
 

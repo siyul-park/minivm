@@ -1,10 +1,10 @@
 # Architecture
 
-Detailed component design + data flow for minivm.
+Component map, ownership rules, and execution flow for minivm.
 
 ## Agent Quick Map
 
-Read when changes cross package boundaries or need state ownership.
+Read when a change crosses package boundaries or depends on state ownership.
 
 | Touch | Also read |
 |---|---|
@@ -15,7 +15,7 @@ Read when changes cross package boundaries or need state ownership.
 | `analysis/`, `transform/`, `optimize/`, `pass/` | `pass-system.md` |
 | `cli/` or `cmd/minivm/` | `guides/repl.md` |
 
-Keep boundaries stable: `instr` stays leaf-like, `types` must not import `interp`, optimizer code flows through `pass.Manager`.
+Boundary rules: `instr` stays leaf-like, `types` must not import `interp`, and optimizer code flows through `pass.Manager`.
 
 ## Package Dependency Graph
 
@@ -32,7 +32,7 @@ cli → instr, interp, prof, program, types, cobra
 cmd/minivm → cli
 ```
 
-Important paths:
+Core paths:
 
 ```text
 program → instr → nothing
@@ -45,7 +45,7 @@ cli → instr, interp, program, types, cobra
 
 ### `program/`
 
-`program.Program` is hand-off between bytecode producers and VM:
+`program.Program` is the hand-off between bytecode producers and the VM:
 
 ```go
 type Program struct {
@@ -55,11 +55,11 @@ type Program struct {
 }
 ```
 
-`Code`: top-level bytecode. `Constants`: functions, strings, arrays, etc. `Types`: descriptors for `ARRAY_NEW` and `STRUCT_NEW`. `*types.Function` constants have own `Code []byte`. `interp.New()` compiles all functions to parallel index `j+1`; index `0` is program code.
+`Code` holds top-level bytecode. `Constants` hold functions, strings, arrays, and other values. `Types` holds descriptors for `ARRAY_NEW` and `STRUCT_NEW`. `*types.Function` constants have their own `Code []byte`. `interp.New()` compiles function constant `j` into slot `j+1`; slot `0` is program code.
 
 ### `instr/`
 
-Instruction set: byte-sized `Opcode`; each opcode has `Type` in `instr/type.go` with mnemonic and `Widths []int` for variable-width encoding/decoding.
+Instruction set: byte-sized `Opcode`. Each opcode has `Type` metadata in `instr/type.go`: mnemonic plus `Widths []int` for variable-width encoding/decoding.
 
 - `Marshal([]Instruction) []byte`: serialize.
 - `Unmarshal([]byte) []Instruction`: deserialize.
@@ -74,9 +74,9 @@ Two layers:
 1. `types.Value`: runtime value with `Kind()`, `Type()`, `String()`.
 2. `types.Type`: descriptor with `Kind()`, `Cast(Type)`, `Equals(Type)`.
 
-`types.Boxed` (`uint64`) is VM stack/global currency. Heap objects are `types.Value` referenced by `KindRef` in `Boxed`. See `value-representation.md`.
+`types.Boxed` (`uint64`) is the VM stack/global currency. Heap objects are `types.Value` references carried as `KindRef` boxed values. See `value-representation.md`.
 
-`types.Traceable` marks heap objects containing refs (`Array`, `Struct`, `HostObject`); GC walks them via `Refs() []Ref`. `STRUCT_GET`/`STRUCT_SET` handle native `*types.Struct` directly and use a concrete `HostObject` fallback for host values.
+`types.Traceable` marks heap objects containing refs (`Array`, `Struct`, `HostObject`). GC walks them via `Refs() []Ref`. `STRUCT_GET`/`STRUCT_SET` handle native `*types.Struct` first, then use `HostObject` for host values.
 
 ### `interp/`
 
@@ -95,19 +95,19 @@ Two layers:
 | `globals []Boxed` | globals |
 | `buffer *asm.Buffer` | shared executable memory, allocated on first JIT |
 
-`threadedCompiler` (`threaded.go`): `[256]func` table populated in `init()`. Each compile-time entry reads operands, advances `c.ip`, returns runtime closure capturing constants + advancing `f.ip` by instruction width.
+`threadedCompiler` (`threaded.go`): `[256]func` table populated in `init()`. Each compile-time entry reads operands, advances `c.ip`, and returns a runtime closure that captures constants and advances `f.ip` by instruction width.
 
-`jitCompiler` (`jit.go`): architecture-agnostic. Runs `BasicBlocksPass`, ranks blocks by heat, compiles hotter blocks first. `compile(b)` loops `segment(code,start,end)` to extract maximal compilable sampled runs. Completed segments emit at `WithCutoff` min count, default `8`; truncated and branch-terminated segments emit only when meeting same cutoff. Cold segments in hot blocks skipped. Two-pass: non-terminated blocks first, then branch-terminated, so branch targets have known signatures. `assembler.Link()` patches cross-segment labels. Each linked segment installs closure at `out[entryIP]`. JIT does not recompile or tier-up.
+`jitCompiler` (`jit.go`): architecture-agnostic. Runs `BasicBlocksPass`, ranks blocks by heat, and compiles hotter blocks first. `compile(b)` loops `segment(code,start,end)` to extract maximal compilable sampled runs. Completed, truncated, and branch-terminated segments all emit only when count meets `WithCutoff` (default `8`). Cold segments in hot blocks are skipped. Two-pass compile handles non-terminated blocks before branch-terminated blocks so branch targets have known signatures. `assembler.Link()` patches cross-segment labels. Each linked segment installs a closure at `out[entryIP]`. JIT does not recompile or tier-up.
 
 `HostFunction` (`host.go`): wraps `func(i *Interpreter, params []Boxed) ([]Boxed, error)` as `types.Value`. Lives in constants, called by `CONST_GET` + `CALL`. Use `Interpreter.Marshal`/`Unmarshal` to convert Go values; Go `func` marshals to `HostFunction`, final `error` return propagated as host-call error. `WithMarshaler` replaces default reflection-based converter.
 
 `HostObject` (`host.go`): wraps a Go value that carries methods or unexported fields. `STRUCT_GET`/`STRUCT_SET` use it as the concrete host-value fallback after the native `*types.Struct` fast path. Field reads/writes reflect against an internal addressable copy of the receiver through the interpreter's `Marshaler`; methods are pre-bound as `*HostFunction` values allocated on the VM heap.
 
-`Pool` (`pool.go`): multi-goroutine entry point. `Interpreter` is single-goroutine; `program.Program` is the only object safe to share across goroutines. `NewPool(prog, size, opts...)` lends up to `size` Interpreters lazily; `Get`/`Put` or `Run(ctx, fn)` borrow one per goroutine. `Put` calls `Reset` between borrows; `Close` releases every idle Interpreter's JIT buffer. Outstanding interpreters are closed on their next `Put` after `Close`. Heap refs from a borrowed Interpreter are invalid after `Put` (`Reset` wipes the heap).
+`Pool` (`pool.go`): multi-goroutine entry point. `Interpreter` is single-goroutine; only `program.Program` is safe to share across goroutines. `NewPool(prog, size, opts...)` lazily lends up to `size` interpreters. Use `Get`/`Put` or `Run(ctx, fn)` to borrow one per goroutine. `Put` calls `Reset`; `Close` releases every idle interpreter's JIT buffer. Outstanding interpreters close on their next `Put` after `Close`. Heap refs from a borrowed interpreter are invalid after `Put` because `Reset` wipes the heap.
 
 ### `asm/`
 
-`Assembler`: low-level IR emission — allocate VRegs, emit instructions, declare ABI boundaries. No VM stack semantics.
+`Assembler`: low-level IR emission. It allocates VRegs, emits instructions, and declares ABI boundaries. It has no VM stack semantics.
 
 Core API:
 
@@ -118,7 +118,7 @@ Core API:
 - `Compile()`: allocate physical regs, encode, append buffer, return `RelocObject`.
 - `Link([]*RelocObject)`: patch cross-segment labels, return native `Caller`s.
 
-`Compile()` + `Link()` pipeline:
+`Compile()` + `Link()`:
 
 1. `snapshot()`: capture instructions + VReg pins into immutable `program`.
 2. `newCompiler()`: allocate physical regs via `RegAlloc`, encode IR to machine code.
@@ -129,9 +129,9 @@ Core API:
 
 ### `asm/arm64/`
 
-Implements `asm.Arch` singleton, `asm.Encoder`, `asm.ABI`, `asm.Caller`.
+Implements the `asm.Arch` singleton, `asm.Encoder`, `asm.ABI`, and `asm.Caller`.
 
-`Caller` invokes native chunks via `abi_arm64.s`. Trampoline marshals `argv` as `[header, reserved…, params…]`, copies `argv[0]` into header register, loads scratch `X10–X14`, calls with `BL`, copies header register back to `argv[0]`, writes scratch outputs + return values. `header uint64` encodes param/return counts, reserved count, float/width masks. `X8`/`X9` excluded from `arch.Scratch` for trampoline temporaries; `X15` reserved for header register.
+`Caller` invokes native chunks through `abi_arm64.s`. The trampoline marshals `argv` as `[header, reserved…, params…]`, copies `argv[0]` into the header register, loads scratch `X10–X14`, calls with `BL`, copies the header register back to `argv[0]`, then writes scratch outputs and return values. `header uint64` encodes param/return counts, reserved count, and float/width masks. `X8`/`X9` are excluded from `arch.Scratch` for trampoline temporaries; `X15` is the header register.
 
 ARM64-specific files use `//go:build arm64`; `abi_stub.go` with `//go:build !arm64` keeps other platforms compilable.
 
@@ -144,7 +144,7 @@ ARM64-specific files use `//go:build arm64`; `abi_stub.go` with `//go:build !arm
 - `Load(&result)`: run/cached-load passes producing `typeof(result)`.
 - `Convert(src,dst)`: child manager runs `src`, then loads `dst`.
 
-Passes communicate through manager outputs. Downstream `Load` upstream outputs. Each pass runs at most once per `Manager.Run`.
+Passes communicate through manager outputs. Downstream passes `Load` from upstream outputs. Each pass runs at most once per `Manager.Run`.
 
 ### `analysis/`, `transform/`, `optimize/`
 
@@ -160,7 +160,7 @@ Transform passes mutate `*program.Program` in-place: edit `prog.Code` bytes and 
 
 ### `cli/`
 
-Top-level command tree, interactive REPL, and shared stack/value formatting — all flat in one package, no nested subpackages. `cli.Root()` returns the `minivm` cobra command (REPL by default) plus subcommands. `cli.NewRunCommand(fs.FS)` is the `run <file>` factory and accepts any `io/fs.FS`, so embedders can drive it with `os.DirFS`, `embed.FS`, or `fstest.MapFS`. `cli.NewREPL(in, out, fs WriteFS)` constructs the interactive REPL directly; pass `nil` to disable `.load`/`.save`. `cli.WriteFS` extends `fs.FS` with `Create`; `cli.OS()` returns the host-filesystem implementation. `cli.WithFS(WriteFS)` overrides the filesystem used by both `run` and the REPL's `.load` / `.save` commands.
+Top-level command tree, interactive REPL, and shared stack/value formatting live flat in one package. `cli.Root()` returns the `minivm` cobra command (REPL by default) plus subcommands. `cli.NewRunCommand(fs.FS)` builds `run <file>` and accepts any `io/fs.FS`, so embedders can use `os.DirFS`, `embed.FS`, or `fstest.MapFS`. `cli.NewREPL(in, out, fs WriteFS)` constructs the REPL directly; pass `nil` to disable `.load`/`.save`. `cli.WriteFS` extends `fs.FS` with `Create`; `cli.OS()` returns the host filesystem. `cli.WithFS(WriteFS)` overrides the filesystem used by `run` and the REPL's `.load` / `.save`.
 
 `REPL` state between steps:
 
@@ -172,15 +172,15 @@ Top-level command tree, interactive REPL, and shared stack/value formatting — 
 | `types []types.Type` | `.type` descriptors |
 | `fs WriteFS` | filesystem used by `.load` and `.save`; nil disables both commands (`cli.Root` injects `cli.OS()`) |
 
-Each instruction: build fresh `program.Program` from history + new instruction, create new `interp.Interpreter`, run full program, print stack. Accepted instructions/constants/types stay as source history. Heap recreated each step, refs stay valid. Cost `O(N)` per step for `N` accumulated instructions.
+Each instruction builds a fresh `program.Program` from history plus the new instruction, creates a new `interp.Interpreter`, runs the full program, and prints the stack. Accepted instructions/constants/types stay as source history. Heap is recreated each step, so refs stay valid. Cost is `O(N)` per step for `N` accumulated instructions.
 
-On error, new instruction not committed. `.reset` clears instruction history, code length, constants, types. `.load <file>` parses a `Program.String()` dump and *replaces* state (merging would require renumbering instruction-embedded constant and type indices); `.save <file>` writes `r.build().String()` and refuses host-typed constants since they have no textual form.
+On error, the new instruction is not committed. `.reset` clears instruction history, code length, constants, and types. `.load <file>` parses a `Program.String()` dump and *replaces* state; merging would require renumbering instruction-embedded constant/type indices. `.save <file>` writes `r.build().String()` and refuses host-typed constants because they have no textual form.
 
 Stack/value formatting (`printStack`, `formatValue` in `cli/display.go`) is unexported; both the `run` subcommand and the REPL call into it directly.
 
 ### `cmd/minivm/`
 
-Thin entrypoint. Delegates to `cli.Root().Execute()`.
+Thin entrypoint around `cli.Root().Execute()`.
 
 ## Execution Flow
 
@@ -213,7 +213,7 @@ Thin entrypoint. Delegates to `cli.Root().Execute()`.
    └─ buffer.Free() → munmap
 ```
 
-`WithThreshold(0)` enables JIT on first sample. Negative thresholds disable JIT. Bytecode debugging uses `NewDebugger` via `WithDebugger`, enabling instruction-accurate hooks and disabling JIT for exact instruction-boundary stops.
+`WithThreshold(0)` enables JIT on the first sample. Negative thresholds disable JIT. Bytecode debugging uses `NewDebugger` via `WithDebugger`, enabling instruction-accurate hooks and disabling JIT for exact instruction-boundary stops.
 
 ## Focus Areas
 

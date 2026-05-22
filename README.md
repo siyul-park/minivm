@@ -7,7 +7,7 @@
 
 **Fast bytecode VM that embeds anywhere.**
 
-minivm is a lightweight bytecode VM designed for Go services. Assemble bytecode, expose Go functions, run. Hot paths automatically promote from threaded interpreter to native ARM64 — no flags, no warmup, no configuration.
+minivm lets Go programs load tiny bytecode programs, call back into host functions, and run under explicit stack, heap, fuel, and hook limits. It starts as a fast threaded interpreter and promotes hot ARM64 segments to native code automatically.
 
 ```bash
 go get github.com/siyul-park/minivm
@@ -15,16 +15,22 @@ go get github.com/siyul-park/minivm
 
 > Requires Go 1.26.2+. The VM core depends only on the Go standard library.
 
----
+## Why minivm
 
-## What you can build
+| Need | What minivm gives you |
+|---|---|
+| Embed runtime behavior | bytecode programs with first-class functions, locals, globals, refs, arrays, structs, and strings |
+| Call host code | zero-reflection `HostFunction` path plus `Marshal` / `Unmarshal` for ordinary Go values |
+| Keep execution bounded | stack, heap, frame, fuel, context, and hook controls |
+| Stay fast before JIT | closure-threaded dispatch with near-zero allocations on recursive workloads |
+| Get native speed where it matters | adaptive ARM64 JIT for hot numeric segments |
+
+## Build With It
 
 - **Scripting engines** — execute user-defined logic under your host policy
 - **Rule engines** — evaluate complex conditions at runtime without redeployment
 - **DSL runtimes** — define a custom instruction set on a proven VM foundation
 - **Plugin systems** — run sandboxed bytecode in a GC-managed environment
-
----
 
 ## Performance
 
@@ -39,7 +45,7 @@ Recursive `fib(35)` — linux/amd64, Intel Xeon @ 2.80 GHz, Go 1.26.2:
 | gopher-lua | 4,081,167,978 | 971,008 | 3,793 | 79× | register VM |
 | goja | 5,427,175,850 | 383,488 | 46,384 | 105× | bytecode VM |
 
-Among interpreters without JIT, minivm is the fastest: **1.6× tengo, 2.4× gopher-lua, 3.2× goja**. Allocation count stays near zero regardless of recursion depth — tengo accumulates 39M allocs at fib(35).
+Among interpreters without JIT, minivm is fastest in this benchmark: **1.6× tengo, 2.4× gopher-lua, 3.2× goja**. Allocation count stays near zero regardless of recursion depth; tengo accumulates 39M allocations at fib(35).
 
 wazero's lead is structural: it compiles WASM to native x86-64 at module load. minivm closes this gap on ARM64, where JIT promotes hot segments to native code.
 
@@ -53,9 +59,7 @@ Single-instruction throughput (threaded interpreter):
 | host function call | ~36 |
 | array / struct operations | ~90–140 |
 
-→ Full results: [`docs/benchmarks.md`](docs/benchmarks.md)
-
----
+Full results: [`docs/benchmarks.md`](docs/benchmarks.md)
 
 ## Usage
 
@@ -80,7 +84,7 @@ result, _ := vm.Pop() // types.I32(42)
 
 ### Call Go from bytecode
 
-Any Go function becomes callable from bytecode:
+Expose Go code as a bytecode-callable function:
 
 ```go
 lookup := interp.NewHostFunction(
@@ -105,11 +109,11 @@ prog := program.New(
 )
 ```
 
-Parameters arrive as typed `[]Boxed` — no reflection, no `interface{}` boxing.
+Parameters arrive as typed `[]Boxed`: no reflection, no `interface{}` boxing.
 
 ### Define reusable functions
 
-Functions are first-class constants, built with `FunctionBuilder`:
+Functions are first-class constants built with `FunctionBuilder`:
 
 ```go
 factorial := types.NewFunctionBuilder(&types.FunctionType{
@@ -135,7 +139,7 @@ factorial := types.NewFunctionBuilder(&types.FunctionType{
 
 ### Optimize before running
 
-Fold constants and strip dead branches before handing bytecode to the VM:
+Fold constants and strip dead branches before the VM sees them:
 
 ```go
 prog, err := optimize.NewOptimizer(optimize.O1).Optimize(prog)
@@ -147,11 +151,9 @@ prog, err := optimize.NewOptimizer(optimize.O1).Optimize(prog)
 - **Constant deduplication** — identical values share a single constant slot
 - **Dead code elimination** — unreachable basic blocks are removed
 
----
-
 ## How the JIT works
 
-minivm runs a two-tier pipeline — no decisions required:
+minivm runs a two-tier pipeline by default; thresholds and sampling cadence remain configurable:
 
 ```
            startup
@@ -169,13 +171,11 @@ bytecode ──────────► threaded interpreter
                      replaces closures in-place
 ```
 
-JIT covers numeric computation: arithmetic, bitwise, comparisons, and type conversions across i32/i64/f32/f64. Stack ops, locals, constants, `select`, and branches compile when the current stack shape fits a native segment signature. Calls, globals, refs, and heap-object ops stay threaded. The threaded interpreter uses closure dispatch rather than a switch table, so it performs well even before JIT kicks in.
-
----
+JIT covers numeric computation: arithmetic, bitwise operations, comparisons, and type conversions across i32/i64/f32/f64. Stack ops, locals, constants, `select`, and branches compile when the stack shape fits a native segment signature. Calls, globals, refs, and heap-object ops stay threaded. The threaded interpreter uses closure dispatch rather than a switch table, so it stays useful before JIT kicks in.
 
 ## Instruction set
 
-WebAssembly-inspired, intentionally custom. One-byte opcodes; operands are fixed-width or length-prefixed.
+WebAssembly-inspired, intentionally custom. Opcodes are one byte; operands are fixed-width or length-prefixed.
 
 | Category | Instructions |
 |---|---|
@@ -188,8 +188,6 @@ WebAssembly-inspired, intentionally custom. One-byte opcodes; operands are fixed
 | Strings | `STRING_NEW_UTF32` `STRING_LEN` `STRING_CONCAT` and comparisons |
 | Arrays | `ARRAY_NEW` `ARRAY_NEW_DEFAULT` `ARRAY_LEN` `ARRAY_GET/SET` `ARRAY_FILL/COPY` |
 | Structs | `STRUCT_NEW` `STRUCT_NEW_DEFAULT` `STRUCT_GET/SET` |
-
----
 
 ## Options
 
@@ -214,8 +212,6 @@ For instruction-accurate debugging (breakpoints, `Step`, `Next`, `Finish`), use 
 
 For profile snapshots and JIT counters, see [`docs/profile.md`](docs/profile.md).
 
----
-
 ## Status
 
 | Feature | |
@@ -227,8 +223,6 @@ For profile snapshots and JIT counters, see [`docs/profile.md`](docs/profile.md)
 | x86-64 JIT | 🔲 planned |
 
 See [docs/roadmap.md](docs/roadmap.md) for priorities and future direction.
-
----
 
 ## License
 
