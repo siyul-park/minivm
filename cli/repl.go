@@ -1,4 +1,4 @@
-package repl
+package cli
 
 import (
 	"bufio"
@@ -41,6 +41,8 @@ Commands:
                               []i32
   .show               show disassembly of accumulated program
   .profile            profile accumulated program
+  .load <file>        replace REPL state with the program parsed from <file>
+  .save <file>        write the current program (code, constants, types) to <file>
   .reset              clear all accumulated instructions, stack, constants, types, and breakpoints
 
 Debug commands:
@@ -69,9 +71,13 @@ Debug commands:
   .quit  /  .exit     exit the REPL
 `
 
+// REPL evaluates one assembly instruction per iteration, rebuilding a
+// program from accumulated history and re-running it through a fresh
+// interpreter each step.
 type REPL struct {
 	in        io.Reader
 	out       io.Writer
+	fs        WriteFS
 	instrs    []instr.Instruction
 	codeLen   int // byte length of instr.Marshal(instrs); updated incrementally
 	constants []types.Value
@@ -79,9 +85,11 @@ type REPL struct {
 	debugger  *interp.Debugger // nil until first .break; breakpoint storage only
 }
 
-// New returns a new REPL that reads from in and writes to out.
-func New(in io.Reader, out io.Writer) *REPL {
-	return &REPL{in: in, out: out}
+// NewREPL returns a new REPL that reads from in and writes to out. fs
+// backs .load and .save; pass nil to disable those commands (callers
+// that need them typically pass OS()).
+func NewREPL(in io.Reader, out io.Writer, fs WriteFS) *REPL {
+	return &REPL{in: in, out: out, fs: fs}
 }
 
 // Run reads and executes assembly instructions until EOF or .quit.
@@ -138,11 +146,20 @@ func (r *REPL) command(ctx context.Context, scanner *bufio.Scanner, line string)
 		fmt.Fprintln(r.out, "bye")
 		return true, nil
 	case ".reset":
-		r.reset()
+		r.clear()
+		fmt.Fprintln(r.out, "reset.")
 	case ".show":
 		r.show()
 	case ".profile":
 		if err := r.profile(ctx); err != nil {
+			r.printErr(err)
+		}
+	case ".load":
+		if err := r.load(arg); err != nil {
+			r.printErr(err)
+		}
+	case ".save":
+		if err := r.save(arg); err != nil {
 			r.printErr(err)
 		}
 	case ".help":
@@ -253,13 +270,76 @@ func (r *REPL) addType(s string) error {
 	return nil
 }
 
-func (r *REPL) reset() {
+func (r *REPL) clear() {
 	r.instrs = nil
 	r.codeLen = 0
 	r.constants = nil
 	r.types = nil
 	r.debugger = nil
-	fmt.Fprintln(r.out, "reset.")
+}
+
+// load replaces REPL state with the program parsed from path. Merging
+// into existing state would require renumbering instruction-embedded
+// constant and type indices; replace keeps the semantics simple and
+// matches what users expect from a "load this file" command.
+func (r *REPL) load(path string) error {
+	if path == "" {
+		return fmt.Errorf("usage: .load <file>")
+	}
+	if r.fs == nil {
+		return fmt.Errorf(".load disabled: no filesystem configured")
+	}
+	file, err := r.fs.Open(path)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+	defer file.Close()
+
+	prog, err := program.Parse(file)
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+
+	r.clear()
+	r.instrs = instr.Unmarshal(prog.Code)
+	r.codeLen = len(prog.Code)
+	r.constants = append([]types.Value(nil), prog.Constants...)
+	r.types = append([]types.Type(nil), prog.Types...)
+	fmt.Fprintf(r.out, "loaded %s\n", path)
+	return nil
+}
+
+// save writes the current program to path in Program.String() format,
+// which program.Parse can read back. Host values (HostFunction,
+// HostObject) have no textual form, so a program containing them cannot
+// round-trip; reject the save before producing an unreadable file.
+func (r *REPL) save(path string) error {
+	if path == "" {
+		return fmt.Errorf("usage: .save <file>")
+	}
+	if r.fs == nil {
+		return fmt.Errorf(".save disabled: no filesystem configured")
+	}
+	for i, c := range r.constants {
+		if _, ok := c.(*interp.HostFunction); ok {
+			return fmt.Errorf("cannot save: constant %d is a host function (no textual form)", i)
+		}
+		if _, ok := c.(*interp.HostObject); ok {
+			return fmt.Errorf("cannot save: constant %d is a host object (no textual form)", i)
+		}
+	}
+
+	file, err := r.fs.Create(path)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", path, err)
+	}
+	defer file.Close()
+
+	if _, err := io.WriteString(file, r.build().String()); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	fmt.Fprintf(r.out, "saved %s\n", path)
+	return nil
 }
 
 func (r *REPL) show() {
@@ -522,19 +602,6 @@ func (r *REPL) printErr(err error) {
 	fmt.Fprintf(r.out, "error: %v\n", err)
 }
 
-func printStack(out io.Writer, vm *interp.Interpreter) {
-	n := vm.Len()
-	if n == 0 {
-		return
-	}
-	parts := make([]string, n)
-	for i := 0; i < n; i++ {
-		v, _ := vm.Peek(i)
-		parts[n-1-i] = format(v, vm)
-	}
-	fmt.Fprintln(out, strings.Join(parts, " "))
-}
-
 func printLocals(out io.Writer, vm *interp.Interpreter) {
 	var parts []string
 	for i := 0; ; i++ {
@@ -542,7 +609,7 @@ func printLocals(out io.Writer, vm *interp.Interpreter) {
 		if err != nil {
 			break
 		}
-		parts = append(parts, fmt.Sprintf("local[%d]=%s", i, format(v, vm)))
+		parts = append(parts, fmt.Sprintf("local[%d]=%s", i, formatValue(v, vm)))
 	}
 	if len(parts) == 0 {
 		fmt.Fprintln(out, "(no locals)")
@@ -558,7 +625,7 @@ func printGlobals(out io.Writer, vm *interp.Interpreter) {
 		if err != nil {
 			break
 		}
-		parts = append(parts, fmt.Sprintf("global[%d]=%s", i, format(v, vm)))
+		parts = append(parts, fmt.Sprintf("global[%d]=%s", i, formatValue(v, vm)))
 	}
 	if len(parts) == 0 {
 		fmt.Fprintln(out, "(no globals)")
@@ -645,33 +712,6 @@ func hasJIT(jit prof.JIT) bool {
 		jit.Errors != 0 ||
 		jit.Bytes != 0 ||
 		jit.Time != 0
-}
-
-// format resolves KindRef through the heap (shows actual object, not raw index),
-// truncates multi-line values to the first line, and adds type suffixes to i64/f32/f64.
-func format(v types.Boxed, vm *interp.Interpreter) string {
-	switch v.Kind() {
-	case types.KindI32:
-		return fmt.Sprintf("%d", v.I32())
-	case types.KindI64:
-		return fmt.Sprintf("%d (i64)", v.I64())
-	case types.KindF32:
-		return fmt.Sprintf("%g (f32)", v.F32())
-	case types.KindF64:
-		return fmt.Sprintf("%g (f64)", v.F64())
-	case types.KindRef:
-		val, err := vm.Load(v.Ref())
-		if err != nil || val == nil {
-			return "null"
-		}
-		s := val.String()
-		if i := strings.IndexByte(s, '\n'); i >= 0 {
-			s = s[:i]
-		}
-		return s
-	default:
-		return "<invalid>"
-	}
 }
 
 // normalize converts "@N" absolute byte targets in branch instructions to relative
