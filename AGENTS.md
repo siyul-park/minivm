@@ -61,6 +61,7 @@ Read only relevant docs.
 | `docs/guides/repl.md` | extending or debugging the REPL |
 | `docs/compatibility.md` | Go version, platform support, CGO, build tags |
 | `docs/host-integration.md` | Marshal/Unmarshal, HostFunction, Go↔VM value conversion |
+| `docs/benchmarks.md` | measured performance, cross-runtime comparison, JIT notes |
 
 ## Architecture Overview
 
