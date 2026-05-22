@@ -41,6 +41,7 @@ go test -race -run TestFoo ./interp/...
 | Optimizer/pass | `docs/pass-system.md` | `analysis/`, `transform/`, `optimize/`, `pass/` | `go test ./analysis ./transform ./optimize ./pass` |
 | REPL/CLI | `docs/guides/repl.md` | `cmd/repl/`, `cmd/minivm/`, `instr/parse.go` | `go test ./cmd/repl ./cmd/minivm ./instr` |
 | Style-only change | `docs/coding-patterns.md` | touched package | package tests |
+| Concurrent VM use | `docs/architecture.md` (`interp/`) | `interp/pool.go` | `go test -race ./interp` |
 
 ## Documentation Index
 

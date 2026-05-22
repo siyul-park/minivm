@@ -25,3 +25,4 @@ minivm: Go-native programmable runtime for scripting, rules, DSLs, and plugin-st
 - Add adapter example pairing minivm with external Wasm runtime for teams needing standard `.wasm`, WASI, or component-model workflows.
 - Expand ARM64 JIT coverage for calls, globals, refs, and selected heap operations only when benchmarks justify.
 - Add architecture-specific backends only when target users and benchmark coverage are clear.
+- Share JIT code cache and aggregate profiling across `interp.Pool` interpreters when concurrent embedding becomes a measured bottleneck.

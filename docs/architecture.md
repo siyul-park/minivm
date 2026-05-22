@@ -103,6 +103,8 @@ Two layers:
 
 `HostObject` (`host.go`): wraps a Go value that carries methods or unexported fields. Implements `types.Fielded` so `STRUCT_GET`/`STRUCT_SET` dispatch through the same indexed-field protocol used by `*types.Struct`. Field reads/writes reflect against an internal addressable copy of the receiver through the interpreter's `Marshaler`; methods are pre-bound as `*HostFunction` values allocated on the VM heap.
 
+`Pool` (`pool.go`): multi-goroutine entry point. `Interpreter` is single-goroutine; `program.Program` is the only object safe to share across goroutines. `NewPool(prog, size, opts...)` lends up to `size` Interpreters lazily; `Get`/`Put` or `Run(ctx, fn)` borrow one per goroutine. `Put` calls `Reset` between borrows; `Close` releases every idle Interpreter's JIT buffer. Outstanding interpreters are closed on their next `Put` after `Close`. Heap refs from a borrowed Interpreter are invalid after `Put` (`Reset` wipes the heap).
+
 ### `asm/`
 
 `Assembler`: low-level IR emission — allocate VRegs, emit instructions, declare ABI boundaries. No VM stack semantics.
