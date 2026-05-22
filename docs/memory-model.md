@@ -11,6 +11,7 @@ Read before editing `interp/threaded.go`, `interp/host.go`, `types/array.go`, `t
 - keep `release()` iterative
 - heap index `0` is always `Null`
 - never keep pointers into `heap`; keep integer refs because allocation may grow slices
+- heap and RC live on `Interpreter`; refs from a pool-borrowed Interpreter are invalid after `Pool.Put` because `Reset` wipes the heap
 
 ## Heap Structure
 

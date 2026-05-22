@@ -215,7 +215,7 @@ func (i32Type) Equals(other Type) bool { return other == TypeI32 }
 
 ### 2.3 Interface compliance assertions
 
-Declare immediately after type definition.
+`var _ Foo = (*Bar)(nil)`. Declare in slot 6 per §2.4 (private values), after the types they assert. Group several with one `var (...)` block when convenient.
 
 ```go
 var _ Traceable = (*Struct)(nil)
@@ -224,14 +224,20 @@ var _ Type      = (*StructType)(nil)
 
 ### 2.4 File layout
 
-Order declarations from policy to mechanism:
+Every `.go` file declares symbols in this fixed order:
 
-1. exported interfaces/types
-2. exported errors
-3. interface assertions
-4. exported constructors
-5. exported methods
-6. unexported helpers
+1. public type (interface, struct, alias)
+2. private type
+3. public const
+4. private const
+5. public value (`var`)
+6. private value (`var`) — includes interface compliance assertions
+7. public function
+8. public method
+9. private method
+10. private function
+
+Constructors (`NewFoo`) are public functions (slot 7). Within each slot, follow §1.3 (callers above callees) and §4.1 (group sentinel errors in a single `var (...)` block).
 
 ### 2.5 Struct field ordering
 
