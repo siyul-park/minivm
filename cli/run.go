@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/fs"
 
-	"github.com/siyul-park/minivm/cli/display"
 	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/program"
 	"github.com/spf13/cobra"
@@ -44,7 +43,7 @@ func NewRunCommand(fsys fs.FS) *cobra.Command {
 			return fmt.Errorf("run %s: %w", path, err)
 		}
 
-		display.Stack(cmd.OutOrStdout(), vm)
+		printStack(cmd.OutOrStdout(), vm)
 		return nil
 	}
 	return cmd

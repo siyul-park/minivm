@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/siyul-park/minivm/cli/display"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/prof"
@@ -207,7 +206,7 @@ func (r *REPL) exec(ctx context.Context, inst instr.Instruction) error {
 	if err := vm.Run(ctx); err != nil {
 		return err
 	}
-	display.Stack(r.out, vm)
+	printStack(r.out, vm)
 	return nil
 }
 
@@ -479,7 +478,7 @@ func (r *REPL) doDebug(ctx context.Context, scanner *bufio.Scanner) error {
 		}
 		break
 	}
-	display.Stack(r.out, vm)
+	printStack(r.out, vm)
 	return nil
 }
 
@@ -508,7 +507,7 @@ func (r *REPL) debugLoop(ctx context.Context, scanner *bufio.Scanner, vm *interp
 			dbg.Continue()
 			return false, nil
 		case "stack":
-			display.Stack(r.out, vm)
+			printStack(r.out, vm)
 		case "locals":
 			printLocals(r.out, vm)
 		case "globals":
@@ -610,7 +609,7 @@ func printLocals(out io.Writer, vm *interp.Interpreter) {
 		if err != nil {
 			break
 		}
-		parts = append(parts, fmt.Sprintf("local[%d]=%s", i, display.Value(v, vm)))
+		parts = append(parts, fmt.Sprintf("local[%d]=%s", i, formatValue(v, vm)))
 	}
 	if len(parts) == 0 {
 		fmt.Fprintln(out, "(no locals)")
@@ -626,7 +625,7 @@ func printGlobals(out io.Writer, vm *interp.Interpreter) {
 		if err != nil {
 			break
 		}
-		parts = append(parts, fmt.Sprintf("global[%d]=%s", i, display.Value(v, vm)))
+		parts = append(parts, fmt.Sprintf("global[%d]=%s", i, formatValue(v, vm)))
 	}
 	if len(parts) == 0 {
 		fmt.Fprintln(out, "(no globals)")

@@ -1,4 +1,4 @@
-package display
+package cli
 
 import (
 	"bytes"
@@ -10,12 +10,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestStack(t *testing.T) {
+func TestPrintStack(t *testing.T) {
 	t.Run("empty stack produces no output", func(t *testing.T) {
 		vm := interp.New(program.New(nil))
 		defer vm.Close()
 		var out bytes.Buffer
-		Stack(&out, vm)
+		printStack(&out, vm)
 		require.Empty(t, out.String())
 	})
 
@@ -28,22 +28,19 @@ func TestStack(t *testing.T) {
 		require.NoError(t, vm.Run(t.Context()))
 
 		var out bytes.Buffer
-		Stack(&out, vm)
+		printStack(&out, vm)
 		require.Equal(t, "10 20\n", out.String())
 	})
 }
 
-func TestValue(t *testing.T) {
-	vm := interp.New(program.New(nil))
-	defer vm.Close()
-
+func TestFormatValue(t *testing.T) {
 	t.Run("i32 has no type suffix", func(t *testing.T) {
 		vm := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)}))
 		defer vm.Close()
 		require.NoError(t, vm.Run(t.Context()))
 		v, err := vm.Peek(0)
 		require.NoError(t, err)
-		require.Equal(t, "42", Value(v, vm))
+		require.Equal(t, "42", formatValue(v, vm))
 	})
 
 	t.Run("i64 carries (i64) suffix", func(t *testing.T) {
@@ -52,6 +49,6 @@ func TestValue(t *testing.T) {
 		require.NoError(t, vm.Run(t.Context()))
 		v, err := vm.Peek(0)
 		require.NoError(t, err)
-		require.Equal(t, "42 (i64)", Value(v, vm))
+		require.Equal(t, "42 (i64)", formatValue(v, vm))
 	})
 }

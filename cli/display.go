@@ -1,9 +1,4 @@
-// Package display formats interpreter values for the CLI and REPL.
-//
-// Splitting these helpers into their own package lets both cli (for the
-// run subcommand) and cli/repl (for interactive output) consume them
-// without an import cycle.
-package display
+package cli
 
 import (
 	"fmt"
@@ -14,9 +9,9 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// Stack writes the operand stack to out in top-down order. An empty stack
-// produces no output, matching the REPL's behavior.
-func Stack(out io.Writer, vm *interp.Interpreter) {
+// printStack writes the operand stack to out in top-down order. An empty
+// stack produces no output, matching the REPL's behavior.
+func printStack(out io.Writer, vm *interp.Interpreter) {
 	n := vm.Len()
 	if n == 0 {
 		return
@@ -24,16 +19,16 @@ func Stack(out io.Writer, vm *interp.Interpreter) {
 	parts := make([]string, n)
 	for i := 0; i < n; i++ {
 		v, _ := vm.Peek(i)
-		parts[n-1-i] = Value(v, vm)
+		parts[n-1-i] = formatValue(v, vm)
 	}
 	fmt.Fprintln(out, strings.Join(parts, " "))
 }
 
-// Value renders a boxed value. KindRef values are resolved through the
-// interpreter heap; multi-line String() output is truncated to its first
-// line; integer/float types carry a type suffix to disambiguate kinds
-// that share a textual form.
-func Value(v types.Boxed, vm *interp.Interpreter) string {
+// formatValue renders a boxed value. KindRef values are resolved through
+// the interpreter heap; multi-line String() output is truncated to its
+// first line; integer/float types carry a type suffix to disambiguate
+// kinds that share a textual form.
+func formatValue(v types.Boxed, vm *interp.Interpreter) string {
 	switch v.Kind() {
 	case types.KindI32:
 		return fmt.Sprintf("%d", v.I32())

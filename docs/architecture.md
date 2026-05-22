@@ -28,8 +28,7 @@ asm     → asm/arm64
 analysis → pass, types, instr
 transform → analysis, pass, types, instr, program
 optimize → transform, analysis, pass, program
-cli → cli/display, instr, interp, prof, program, types, cobra
-cli/display → interp, types
+cli → instr, interp, prof, program, types, cobra
 cmd/minivm → cli
 ```
 
@@ -159,7 +158,7 @@ Transform passes mutate `*program.Program` in-place: edit `prog.Code` bytes and 
 
 ### `cli/`
 
-Top-level command tree and REPL. `cli.Root()` returns the `minivm` cobra command (REPL by default) plus subcommands. `cli.NewRunCommand(fs.FS)` is the `run <file>` factory and accepts any `io/fs.FS`, so embedders can drive it with `os.DirFS`, `embed.FS`, or `fstest.MapFS`. `cli.NewREPL(in, out, fs WriteFS)` constructs the interactive REPL directly; pass `nil` to disable `.load`/`.save`. `cli.WriteFS` extends `fs.FS` with `Create`; `cli.OS()` returns the host-filesystem implementation. `cli.WithFS(WriteFS)` overrides the filesystem used by both `run` and the REPL's `.load` / `.save` commands.
+Top-level command tree, interactive REPL, and shared stack/value formatting — all flat in one package, no nested subpackages. `cli.Root()` returns the `minivm` cobra command (REPL by default) plus subcommands. `cli.NewRunCommand(fs.FS)` is the `run <file>` factory and accepts any `io/fs.FS`, so embedders can drive it with `os.DirFS`, `embed.FS`, or `fstest.MapFS`. `cli.NewREPL(in, out, fs WriteFS)` constructs the interactive REPL directly; pass `nil` to disable `.load`/`.save`. `cli.WriteFS` extends `fs.FS` with `Create`; `cli.OS()` returns the host-filesystem implementation. `cli.WithFS(WriteFS)` overrides the filesystem used by both `run` and the REPL's `.load` / `.save` commands.
 
 `REPL` state between steps:
 
@@ -175,9 +174,7 @@ Each instruction: build fresh `program.Program` from history + new instruction, 
 
 On error, new instruction not committed. `.reset` clears instruction history, code length, constants, types. `.load <file>` parses a `Program.String()` dump and *replaces* state (merging would require renumbering instruction-embedded constant and type indices); `.save <file>` writes `r.build().String()` and refuses host-typed constants since they have no textual form.
 
-### `cli/display/`
-
-Shared value/stack formatting between the run subcommand and the REPL. Kept in a leaf subpackage so future split-outs of CLI helpers can consume it without forcing a `cli` import.
+Stack/value formatting (`printStack`, `formatValue` in `cli/display.go`) is unexported; both the `run` subcommand and the REPL call into it directly.
 
 ### `cmd/minivm/`
 
