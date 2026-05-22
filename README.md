@@ -41,14 +41,14 @@ Instruction set borrows from WebAssembly while staying focused on Go-native scri
 
 Recursive `fib(20)` — end-to-end per call, linux/amd64:
 
-| Runtime | ns/op | allocs/op | execution model |
-|---|---|---|---|
-| native Go | 37,968 | 0 | compiled |
-| wazero | 62,219 | 2 | WASM JIT |
-| **minivm** | **1,157,136** | **0** | **threaded interpreter** |
-| tengo | 2,000,364 | 28,657 | bytecode VM |
-| gopher-lua | 2,942,015 | 2 | register VM |
-| goja | 3,964,702 | 39 | bytecode VM |
+| Runtime | ns/op | B/op | allocs/op | vs native Go | execution model |
+|---|---|---|---|---|---|
+| native Go | 37,968 | 0 | 0 | 1× | compiled |
+| wazero | 62,219 | 16 | 2 | 1.6× | WASM JIT |
+| **minivm** | **1,157,136** | **0** | **0** | **30×** | **threaded interpreter** |
+| tengo | 2,000,364 | 319,474 | 28,657 | 53× | bytecode VM |
+| gopher-lua | 2,942,015 | 703 | 2 | 77× | register VM |
+| goja | 3,964,702 | 3,643 | 39 | 104× | bytecode VM |
 
 Among **interpreters without ahead-of-time JIT**, minivm runs with **zero heap allocation** and outperforms tengo (~1.7×), gopher-lua (~2.5×), and goja (~3.4×). wazero's lead comes from JIT-compiling WebAssembly to native x86-64 at load time — minivm closes this gap on ARM64 once hot segments promote to native code.
 
