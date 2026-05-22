@@ -9,8 +9,6 @@ import (
 	"github.com/siyul-park/minivm/program"
 )
 
-var ErrPoolClosed = errors.New("pool closed")
-
 // Pool hands out Interpreter instances bound to a shared Program for use across
 // goroutines. Each Interpreter owns its runtime state and JIT buffer; callers
 // must borrow one per goroutine via Get/Put or Run.
@@ -25,6 +23,8 @@ type Pool struct {
 	mu     sync.RWMutex
 	closed bool
 }
+
+var ErrPoolClosed = errors.New("pool closed")
 
 // NewPool builds a pool that lends up to size Interpreters constructed from
 // prog with opts. size <= 0 is normalized to 1. Interpreters are created lazily
@@ -57,19 +57,19 @@ func (p *Pool) Run(ctx context.Context, fn func(*Interpreter) error) error {
 // another goroutine calls Put or ctx is canceled. Returns ErrPoolClosed once
 // the pool is closed.
 func (p *Pool) Get(ctx context.Context) (*Interpreter, error) {
-	if p.isClosed() {
+	if p.dead() {
 		return nil, ErrPoolClosed
 	}
 
-	if i, err := p.tryRecv(); i != nil || err != nil {
+	if i, err := p.take(); i != nil || err != nil {
 		return i, err
 	}
 
-	if i, ok := p.tryCreate(); ok {
+	if i, ok := p.grow(); ok {
 		return i, nil
 	}
 
-	return p.waitRecv(ctx)
+	return p.wait(ctx)
 }
 
 // Put returns i to the pool after resetting its runtime state. If the pool is
@@ -85,14 +85,14 @@ func (p *Pool) Put(i *Interpreter) {
 	defer p.mu.RUnlock()
 
 	if p.closed {
-		p.discard(i)
+		p.drop(i)
 		return
 	}
 
 	select {
 	case p.idle <- i:
 	default:
-		p.discard(i)
+		p.drop(i)
 	}
 }
 
@@ -119,15 +119,15 @@ func (p *Pool) Close() error {
 	return errors.Join(errs...)
 }
 
-func (p *Pool) isClosed() bool {
+func (p *Pool) dead() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.closed
 }
 
-// tryRecv returns an idle Interpreter without blocking, (nil, nil) if none is
-// ready, or (nil, ErrPoolClosed) if Close raced ahead of the isClosed check.
-func (p *Pool) tryRecv() (*Interpreter, error) {
+// take returns an idle Interpreter without blocking, (nil, nil) if none is
+// ready, or (nil, ErrPoolClosed) if Close raced ahead of the dead check.
+func (p *Pool) take() (*Interpreter, error) {
 	select {
 	case i, ok := <-p.idle:
 		if !ok {
@@ -139,9 +139,9 @@ func (p *Pool) tryRecv() (*Interpreter, error) {
 	}
 }
 
-// tryCreate reserves a slot below the size cap and returns a fresh Interpreter,
-// or (nil, false) if the cap is reached.
-func (p *Pool) tryCreate() (*Interpreter, bool) {
+// grow reserves a slot below the size cap and returns a fresh Interpreter, or
+// (nil, false) if the cap is reached.
+func (p *Pool) grow() (*Interpreter, bool) {
 	for {
 		live := p.live.Load()
 		if live >= int64(p.size) {
@@ -153,7 +153,7 @@ func (p *Pool) tryCreate() (*Interpreter, bool) {
 	}
 }
 
-func (p *Pool) waitRecv(ctx context.Context) (*Interpreter, error) {
+func (p *Pool) wait(ctx context.Context) (*Interpreter, error) {
 	select {
 	case i, ok := <-p.idle:
 		if !ok {
@@ -165,7 +165,7 @@ func (p *Pool) waitRecv(ctx context.Context) (*Interpreter, error) {
 	}
 }
 
-func (p *Pool) discard(i *Interpreter) {
+func (p *Pool) drop(i *Interpreter) {
 	_ = i.Close()
 	p.live.Add(-1)
 }
