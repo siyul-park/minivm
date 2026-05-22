@@ -1,8 +1,8 @@
 # Benchmarks
 
-Measured performance of minivm on `linux/amd64` (Intel Xeon @ 2.10 GHz, Go 1.26.2).
+Measured performance of minivm on `linux/amd64` (Intel Xeon @ 2.80 GHz, Go 1.26.2).
 
-JIT is ARM64-only; all results below use the threaded interpreter.
+minivm JIT targets ARM64 only; all results below use the threaded interpreter unless noted.
 
 Run benchmarks yourself:
 
@@ -16,14 +16,18 @@ go test -bench="BenchmarkInterpreter_Run" -benchmem ./interp/...
 
 Recursive `fib(20)` returning `6765`. Measures end-to-end execution per call.
 
-| Runtime | ns/op | B/op | allocs/op | vs native Go |
-|---|---|---|---|---|
-| native Go | 41,187 | 0 | 0 | 1× |
-| minivm threaded | 968,392 | 0 | 0 | 23× |
-| tengo | 1,728,883 | 319,475 | 28,657 | 42× |
-| goja | 2,957,709 | 3,640 | 39 | 72× |
+| Runtime | ns/op | B/op | allocs/op | vs native Go | execution model |
+|---|---|---|---|---|---|
+| native Go | 37,968 | 0 | 0 | 1× | compiled |
+| wazero | 62,219 | 16 | 2 | 1.6× | WASM JIT (compiler runtime) |
+| **minivm threaded** | **1,157,136** | **0** | **0** | **30×** | **threaded interpreter** |
+| tengo | 2,000,364 | 319,474 | 28,657 | 53× | tree-walking + bytecode |
+| gopher-lua | 2,942,015 | 703 | 2 | 77× | register-based VM |
+| goja | 3,964,702 | 3,643 | 39 | 104× | AST + bytecode |
 
-minivm threaded is ~1.8× faster than tengo and ~3× faster than goja on this workload, with zero heap allocation per call.
+Among **threaded/bytecode interpreters without JIT**, minivm allocates zero heap per call and outperforms tengo (~1.7×), gopher-lua (~2.5×), and goja (~3.4×).
+
+wazero is faster because it JIT-compiles WebAssembly to native x86-64 at module instantiation time, paying a one-time compile cost. minivm's threaded interpreter closes this gap on ARM64 once JIT promotes hot segments.
 
 Source: `interp/compare_bench_test.go · BenchmarkFibo20`
 
@@ -188,7 +192,7 @@ Ref-type arrays allocate an extra heap object per element.
 
 | Program | ns/op | B/op | allocs/op |
 |---|---|---|---|
-| `fib(20)` — i32 recursive | 968,392 | 0 | 0 |
+| `fib(20)` — i32 recursive | 1,157,136 | 0 | 0 |
 | `factorial(10)` — i64 recursive | 556 | 0 | 0 |
 
 `fib(20)` triggers 21,891 recursive calls; `factorial(10)` is tail-call reducible and terminates early via `br_if`.
@@ -197,7 +201,7 @@ Ref-type arrays allocate an extra heap object per element.
 
 JIT compilation targets ARM64 only. On x86_64, `WithTick(1)` + `WithThreshold(1)` mode falls back to threaded execution with per-instruction context polling, adding overhead to each dispatch compared to the default tick=128 cadence.
 
-`fib(20)` in JIT-mode settings on x86_64: **4,093 µs/op** vs **968 µs/op** default — the tick=1 overhead dominates for deep-recursive workloads.
+`fib(20)` in JIT-mode settings on x86_64: **4,093 µs/op** vs **1,157 µs/op** default — the tick=1 overhead dominates for deep-recursive workloads.
 
 On ARM64, JIT-compiled segments eliminate threaded dispatch overhead for hot numeric loops; native segments run at hardware speed.
 
@@ -207,5 +211,7 @@ On ARM64, JIT-compiled segments eliminate threaded dispatch overhead for hot num
 - `Interpreter.Reset()` called between iterations to reuse allocated state.
 - Each sub-benchmark measures one program execution: compile-time is amortized across `New()` outside the timed loop.
 - Host function benchmark includes `[]Boxed` allocation inherent to the host call ABI.
-- Cross-runtime runtimes: goja v0.0.0-20260311135729, tengo v2.17.0.
+- Cross-runtime versions: goja v0.0.0-20260311135729, tengo v2.17.0, gopher-lua v1.1.2, wazero v1.11.0.
+- wazero uses its default compiler runtime (JIT to native x86-64); module instantiation cost is excluded from the timed loop.
+- Native Go baseline uses the same recursive algorithm without memoization.
 - Native Go baseline uses the same recursive algorithm without memoization.

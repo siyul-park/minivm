@@ -41,14 +41,16 @@ Instruction set borrows from WebAssembly while staying focused on Go-native scri
 
 Recursive `fib(20)` — end-to-end per call, linux/amd64:
 
-| Runtime | ns/op | allocs/op |
-|---|---|---|
-| native Go | 41,187 | 0 |
-| **minivm** | **968,392** | **0** |
-| tengo | 1,728,883 | 28,657 |
-| goja | 2,957,709 | 39 |
+| Runtime | ns/op | allocs/op | execution model |
+|---|---|---|---|
+| native Go | 37,968 | 0 | compiled |
+| wazero | 62,219 | 2 | WASM JIT |
+| **minivm** | **1,157,136** | **0** | **threaded interpreter** |
+| tengo | 2,000,364 | 28,657 | bytecode VM |
+| gopher-lua | 2,942,015 | 2 | register VM |
+| goja | 3,964,702 | 39 | bytecode VM |
 
-minivm is **~1.8× faster than tengo** and **~3× faster than goja**, with **zero heap allocation** per call.
+Among **interpreters without ahead-of-time JIT**, minivm runs with **zero heap allocation** and outperforms tengo (~1.7×), gopher-lua (~2.5×), and goja (~3.4×). wazero's lead comes from JIT-compiling WebAssembly to native x86-64 at load time — minivm closes this gap on ARM64 once hot segments promote to native code.
 
 Single-instruction throughput (threaded interpreter, same hardware):
 
