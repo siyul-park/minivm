@@ -218,10 +218,7 @@ func (m *marshaler) compilePlan(t reflect.Type, seen map[reflect.Type]bool) (*ma
 		if err != nil {
 			return nil, fmt.Errorf("map value type: %w", err)
 		}
-		mt, err := mapType(keyPlan.VMType, valPlan.VMType)
-		if err != nil {
-			return nil, err
-		}
+		mt := types.NewMapType(keyPlan.VMType, valPlan.VMType)
 		return &marshalPlan{
 			VMType:    mt,
 			Type:      t,
@@ -369,59 +366,6 @@ func (s *marshalState) value(v reflect.Value) (types.Value, error) {
 		return nil, err
 	}
 	return p.marshal(s, v)
-}
-
-func (s *marshalState) mapKey(typ types.Type, v reflect.Value) (types.MapKey, types.Boxed, error) {
-	val, err := s.value(v)
-	if err != nil {
-		return types.MapKey{}, 0, err
-	}
-	switch {
-	case typ.Equals(types.TypeI32):
-		boxed, err := s.boxed(val, typ)
-		if err != nil {
-			return types.MapKey{}, 0, err
-		}
-		bits := uint64(uint32(boxed.I32()))
-		return types.MapKey{Kind: types.KindI32, Bits: bits}, types.BoxI32(int32(bits)), nil
-	case typ.Equals(types.TypeI64):
-		n, ok := signedValue(val)
-		if !ok {
-			return types.MapKey{}, 0, fmt.Errorf("%w: map key type=%s", ErrTypeMismatch, typ)
-		}
-		return types.MapKey{Kind: types.KindI64, Bits: uint64(n)}, 0, nil
-	case typ.Equals(types.TypeF32):
-		f, ok := floatValue(val)
-		if !ok {
-			return types.MapKey{}, 0, fmt.Errorf("%w: map key type=%s", ErrTypeMismatch, typ)
-		}
-		bits := math.Float32bits(float32(f))
-		if bits == 1<<31 {
-			bits = 0
-		}
-		return types.MapKey{Kind: types.KindF32, Bits: uint64(bits)}, types.BoxF32(math.Float32frombits(bits)), nil
-	case typ.Equals(types.TypeF64):
-		f, ok := floatValue(val)
-		if !ok {
-			return types.MapKey{}, 0, fmt.Errorf("%w: map key type=%s", ErrTypeMismatch, typ)
-		}
-		bits := math.Float64bits(f)
-		if bits == 1<<63 {
-			bits = 0
-		}
-		return types.MapKey{Kind: types.KindF64, Bits: bits}, types.BoxF64(math.Float64frombits(bits)), nil
-	case typ.Equals(types.TypeString):
-		str, ok := val.(types.String)
-		if !ok {
-			return types.MapKey{}, 0, fmt.Errorf("%w: map key type=%s", ErrTypeMismatch, typ)
-		}
-		return types.MapKey{Kind: types.KindRef, Text: string(str)}, types.BoxedNull, nil
-	case typ.Equals(types.TypeRef):
-		boxed := s.boxRef(val)
-		return types.MapKey{Kind: types.KindRef, Bits: uint64(boxed.Ref())}, boxed, nil
-	default:
-		return types.MapKey{}, 0, fmt.Errorf("%w: map key type=%s", ErrUnsupportedMarshalType, typ)
-	}
 }
 
 func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *HostFunction {
@@ -586,6 +530,10 @@ func (s *marshalState) boxRef(val types.Value) types.Boxed {
 		return types.BoxRef(s.alloc(types.Unbox(v)))
 	case types.Ref:
 		return types.BoxRef(int(v))
+	case types.String:
+		ref := s.i.intern(string(v))
+		s.root += s.i.root(types.BoxRef(int(ref)))
+		return types.BoxRef(int(ref))
 	default:
 		return types.BoxRef(s.alloc(val))
 	}
@@ -611,23 +559,6 @@ func (s *unmarshalState) value(val types.Value, dst reflect.Value) error {
 		return err
 	}
 	return p.unmarshal(s, val, dst)
-}
-
-func (s *unmarshalState) mapKey(typ types.Type, key types.MapKey, entry types.Boxed) (types.Value, error) {
-	switch {
-	case typ.Equals(types.TypeString):
-		return types.String(key.Text), nil
-	case typ.Equals(types.TypeI32):
-		return types.I32(int32(key.Bits)), nil
-	case typ.Equals(types.TypeI64):
-		return types.I64(int64(key.Bits)), nil
-	case typ.Equals(types.TypeF32):
-		return types.F32(math.Float32frombits(uint32(key.Bits))), nil
-	case typ.Equals(types.TypeF64):
-		return types.F64(math.Float64frombits(key.Bits)), nil
-	default:
-		return loadValue(s.i, entry)
-	}
 }
 
 func (s *unmarshalState) arrayElems(value types.Value) ([]types.Value, error) {
@@ -833,18 +764,93 @@ func arrayMarshaler(elem *marshalPlan) marshalFn {
 
 func mapMarshaler(mt *types.MapType) marshalFn {
 	return func(s *marshalState, v reflect.Value) (types.Value, error) {
-		out := types.NewMapWithCapacity(mt, v.Len())
-		iter := v.MapRange()
-		for iter.Next() {
-			mapKey, entryKey, err := s.mapKey(mt.Key, iter.Key())
-			if err != nil {
-				return nil, fmt.Errorf("map key: %w", err)
+		out := types.NewMapForType(mt, v.Len())
+		switch m := out.(type) {
+		case *types.MapI32:
+			iter := v.MapRange()
+			for iter.Next() {
+				key, err := s.boxAs(iter.Key(), mt.Key)
+				if err != nil {
+					return nil, fmt.Errorf("map key: %w", err)
+				}
+				value, err := s.boxAs(iter.Value(), mt.Elem)
+				if err != nil {
+					return nil, fmt.Errorf("map value: %w", err)
+				}
+				m.Set(key.I32(), value)
 			}
-			entryVal, err := s.boxAs(iter.Value(), mt.Elem)
-			if err != nil {
-				return nil, fmt.Errorf("map value: %w", err)
+		case *types.MapI64:
+			iter := v.MapRange()
+			for iter.Next() {
+				key, err := s.value(iter.Key())
+				if err != nil {
+					return nil, fmt.Errorf("map key: %w", err)
+				}
+				keyInt, ok := signedValue(key)
+				if !ok {
+					return nil, fmt.Errorf("map key: %w: map key type=%s", ErrTypeMismatch, mt.Key)
+				}
+				value, err := s.boxAs(iter.Value(), mt.Elem)
+				if err != nil {
+					return nil, fmt.Errorf("map value: %w", err)
+				}
+				m.Set(keyInt, value)
 			}
-			out.Set(mapKey, types.MapEntry{Key: entryKey, Value: entryVal})
+		case *types.MapF32:
+			iter := v.MapRange()
+			for iter.Next() {
+				key, err := s.value(iter.Key())
+				if err != nil {
+					return nil, fmt.Errorf("map key: %w", err)
+				}
+				keyFloat, ok := floatValue(key)
+				if !ok {
+					return nil, fmt.Errorf("map key: %w: map key type=%s", ErrTypeMismatch, mt.Key)
+				}
+				value, err := s.boxAs(iter.Value(), mt.Elem)
+				if err != nil {
+					return nil, fmt.Errorf("map value: %w", err)
+				}
+				m.Set(float32(keyFloat), value)
+			}
+		case *types.MapF64:
+			iter := v.MapRange()
+			for iter.Next() {
+				key, err := s.value(iter.Key())
+				if err != nil {
+					return nil, fmt.Errorf("map key: %w", err)
+				}
+				keyFloat, ok := floatValue(key)
+				if !ok {
+					return nil, fmt.Errorf("map key: %w: map key type=%s", ErrTypeMismatch, mt.Key)
+				}
+				value, err := s.boxAs(iter.Value(), mt.Elem)
+				if err != nil {
+					return nil, fmt.Errorf("map value: %w", err)
+				}
+				m.Set(keyFloat, value)
+			}
+		case *types.Map:
+			iter := v.MapRange()
+			for iter.Next() {
+				keyValue, err := s.value(iter.Key())
+				if err != nil {
+					return nil, fmt.Errorf("map key: %w", err)
+				}
+				var mapKey types.MapKey
+				var entryKey types.Boxed
+				if mt.Key.Kind() == types.KindRef {
+					entryKey = s.boxRef(keyValue)
+					mapKey = types.MapKey{Kind: types.KindRef, Bits: uint64(entryKey.Ref())}
+				} else {
+					return nil, fmt.Errorf("map key: %w: map key type=%s", ErrUnsupportedMarshalType, mt.Key)
+				}
+				entryValue, err := s.boxAs(iter.Value(), mt.Elem)
+				if err != nil {
+					return nil, fmt.Errorf("map value: %w", err)
+				}
+				m.Set(mapKey, types.MapEntry{Key: entryKey, Value: entryValue})
+			}
 		}
 		return out, nil
 	}
@@ -1084,39 +1090,105 @@ func arrayUnmarshaler(elem *marshalPlan) unmarshalFn {
 }
 
 func mapUnmarshaler(keyPlan, valPlan *marshalPlan) unmarshalFn {
-	return func(s *unmarshalState, val types.Value, dst reflect.Value) error {
-		m, ok := val.(*types.Map)
-		if !ok {
-			return mismatchErr(val, dst)
+	return func(s *unmarshalState, src types.Value, dst reflect.Value) error {
+		size := 0
+		switch m := src.(type) {
+		case *types.MapI32:
+			size = m.Len()
+		case *types.MapI64:
+			size = m.Len()
+		case *types.MapF32:
+			size = m.Len()
+		case *types.MapF64:
+			size = m.Len()
+		case *types.Map:
+			size = m.Len()
+		default:
+			return mismatchErr(src, dst)
 		}
-		out := reflect.MakeMapWithSize(dst.Type(), m.Len())
+		out := reflect.MakeMapWithSize(dst.Type(), size)
 		var mapErr error
-		m.Range(func(mk types.MapKey, entry types.MapEntry) {
+		set := func(keyValue types.Value, elemValue types.Value) {
 			if mapErr != nil {
 				return
 			}
-			kv, err := s.mapKey(m.Typ.Key, mk, entry.Key)
-			if err != nil {
-				mapErr = fmt.Errorf("map key: %w", err)
-				return
-			}
 			k := reflect.New(dst.Type().Key()).Elem()
-			if err := keyPlan.unmarshal(s, kv, k); err != nil {
+			if err := keyPlan.unmarshal(s, keyValue, k); err != nil {
 				mapErr = fmt.Errorf("map key: %w", err)
-				return
-			}
-			ev, err := loadValue(s.i, entry.Value)
-			if err != nil {
-				mapErr = fmt.Errorf("map value: %w", err)
 				return
 			}
 			v := reflect.New(dst.Type().Elem()).Elem()
-			if err := valPlan.unmarshal(s, ev, v); err != nil {
+			if err := valPlan.unmarshal(s, elemValue, v); err != nil {
 				mapErr = fmt.Errorf("map value: %w", err)
 				return
 			}
 			out.SetMapIndex(k, v)
-		})
+		}
+		switch m := src.(type) {
+		case *types.MapI32:
+			m.Range(func(key int32, value types.Boxed) {
+				elemValue, err := loadValue(s.i, value)
+				if err != nil {
+					mapErr = fmt.Errorf("map value: %w", err)
+					return
+				}
+				set(types.I32(key), elemValue)
+			})
+		case *types.MapI64:
+			m.Range(func(key int64, value types.Boxed) {
+				elemValue, err := loadValue(s.i, value)
+				if err != nil {
+					mapErr = fmt.Errorf("map value: %w", err)
+					return
+				}
+				set(types.I64(key), elemValue)
+			})
+		case *types.MapF32:
+			m.Range(func(key float32, value types.Boxed) {
+				elemValue, err := loadValue(s.i, value)
+				if err != nil {
+					mapErr = fmt.Errorf("map value: %w", err)
+					return
+				}
+				set(types.F32(key), elemValue)
+			})
+		case *types.MapF64:
+			m.Range(func(key float64, value types.Boxed) {
+				elemValue, err := loadValue(s.i, value)
+				if err != nil {
+					mapErr = fmt.Errorf("map value: %w", err)
+					return
+				}
+				set(types.F64(key), elemValue)
+			})
+		case *types.Map:
+			m.Range(func(mapKey types.MapKey, entry types.MapEntry) {
+				var keyValue types.Value
+				var err error
+				switch mapKey.Kind {
+				case types.KindI32:
+					keyValue = types.I32(int32(mapKey.Bits))
+				case types.KindI64:
+					keyValue = types.I64(int64(mapKey.Bits))
+				case types.KindF32:
+					keyValue = types.F32(math.Float32frombits(uint32(mapKey.Bits)))
+				case types.KindF64:
+					keyValue = types.F64(math.Float64frombits(mapKey.Bits))
+				default:
+					keyValue, err = loadValue(s.i, entry.Key)
+				}
+				if err != nil {
+					mapErr = fmt.Errorf("map key: %w", err)
+					return
+				}
+				elemValue, err := loadValue(s.i, entry.Value)
+				if err != nil {
+					mapErr = fmt.Errorf("map value: %w", err)
+					return
+				}
+				set(keyValue, elemValue)
+			})
+		}
 		if mapErr != nil {
 			return mapErr
 		}
@@ -1132,13 +1204,6 @@ func addrPointer(v reflect.Value) unsafe.Pointer {
 	holder := reflect.New(v.Type())
 	holder.Elem().Set(v)
 	return holder.UnsafePointer()
-}
-
-func mapType(key, elem types.Type) (*types.MapType, error) {
-	if !types.IsComparableMapKeyType(key) {
-		return nil, fmt.Errorf("%w: map key type=%s", ErrUnsupportedMarshalType, key)
-	}
-	return types.NewMapType(key, elem), nil
 }
 
 func mismatchErr(src any, dst reflect.Value) error {

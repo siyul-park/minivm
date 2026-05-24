@@ -2131,6 +2131,39 @@ func TestInterpreter_Push(t *testing.T) {
 		require.NoError(t, i.Push(types.I32(42)))
 		require.Equal(t, 1, i.Len())
 	})
+	t.Run("interns strings", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		require.NoError(t, i.Push(types.String("same")))
+		first, err := i.Peek(0)
+		require.NoError(t, err)
+		require.Equal(t, types.KindRef, first.Kind())
+
+		require.NoError(t, i.Push(types.String("same")))
+		second, err := i.Peek(0)
+		require.NoError(t, err)
+		require.Equal(t, first.Ref(), second.Ref())
+		require.Equal(t, 2, i.rc[first.Ref()])
+
+		_, err = i.Pop()
+		require.NoError(t, err)
+		require.Contains(t, i.interned, "same")
+
+		_, err = i.Pop()
+		require.NoError(t, err)
+		require.NotContains(t, i.interned, "same")
+
+		filler, err := i.Alloc(types.I32(1))
+		require.NoError(t, err)
+		require.Equal(t, first.Ref(), filler)
+
+		require.NoError(t, i.Push(types.String("same")))
+		third, err := i.Peek(0)
+		require.NoError(t, err)
+		require.NotEqual(t, first.Ref(), third.Ref())
+		require.Equal(t, 1, i.rc[third.Ref()])
+	})
 	t.Run("overflow", func(t *testing.T) {
 		i := New(program.New(nil), WithStack(1))
 		defer i.Close()
@@ -3343,9 +3376,74 @@ func TestInterpreter_Marshal(t *testing.T) {
 		require.True(t, ok)
 		require.True(t, m.Typ.Key.Equals(types.TypeString))
 		require.True(t, m.Typ.Elem.Equals(types.TypeI32))
-		entry, ok := m.Get(types.MapKey{Kind: types.KindRef, Text: "a"})
+		keyRef := types.Boxed(0)
+		m.Range(func(_ types.MapKey, entry types.MapEntry) {
+			keyRef = entry.Key
+		})
+		require.Equal(t, types.KindRef, keyRef.Kind())
+		key, err := i.Load(keyRef.Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.String("a"), key)
+		entry, ok := m.Get(types.MapKey{Kind: types.KindRef, Bits: uint64(keyRef.Ref())})
 		require.True(t, ok)
 		require.Equal(t, types.BoxI32(1), entry.Value)
+	})
+
+	t.Run("primitive keyed maps", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		i32, err := i.Marshal(map[int32]int32{1: 2})
+		require.NoError(t, err)
+		mI32, ok := i32.(*types.MapI32)
+		require.True(t, ok)
+		gotI32, ok := mI32.Get(1)
+		require.True(t, ok)
+		require.Equal(t, types.BoxI32(2), gotI32)
+
+		i64, err := i.Marshal(map[int64]string{1: "a"})
+		require.NoError(t, err)
+		mI64, ok := i64.(*types.MapI64)
+		require.True(t, ok)
+		gotI64, ok := mI64.Get(1)
+		require.True(t, ok)
+		str, err := i.Load(gotI64.Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.String("a"), str)
+
+		f64, err := i.Marshal(map[float64]int32{math.Copysign(0, -1): 1})
+		require.NoError(t, err)
+		mF64, ok := f64.(*types.MapF64)
+		require.True(t, ok)
+		gotF64, ok := mF64.Get(0)
+		require.True(t, ok)
+		require.Equal(t, types.BoxI32(1), gotF64)
+	})
+
+	t.Run("ref identity map keys", func(t *testing.T) {
+		type key struct {
+			ID int32
+		}
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(map[key]int32{{ID: 1}: 2})
+		require.NoError(t, err)
+
+		m, ok := got.(*types.Map)
+		require.True(t, ok)
+		require.Equal(t, types.KindRef, m.Typ.KeyKind)
+
+		var entry types.MapEntry
+		m.Range(func(_ types.MapKey, e types.MapEntry) {
+			entry = e
+		})
+		require.Equal(t, types.KindRef, entry.Key.Kind())
+		require.Equal(t, types.BoxI32(2), entry.Value)
+		loaded, err := i.Load(entry.Key.Ref())
+		require.NoError(t, err)
+		_, ok = loaded.(*types.Struct)
+		require.True(t, ok)
 	})
 
 	t.Run("int map uses i64 value boxes", func(t *testing.T) {
@@ -3357,7 +3455,11 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 		m, ok := got.(*types.Map)
 		require.True(t, ok)
-		entry, ok := m.Get(types.MapKey{Kind: types.KindRef, Text: "a"})
+		var keyRef types.Boxed
+		m.Range(func(_ types.MapKey, entry types.MapEntry) {
+			keyRef = entry.Key
+		})
+		entry, ok := m.Get(types.MapKey{Kind: types.KindRef, Bits: uint64(keyRef.Ref())})
 		require.True(t, ok)
 		require.True(t, m.Typ.Elem.Equals(types.TypeI64))
 		require.Equal(t, types.KindI64, entry.Value.Kind())
@@ -3624,6 +3726,47 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		var out map[string]int32
 		require.NoError(t, i.Unmarshal(got, &out))
 		require.Equal(t, map[string]int32{"a": 1}, out)
+	})
+
+	t.Run("primitive keyed maps", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		in := map[int32]int32{1: 2}
+		got, err := i.Marshal(in)
+		require.NoError(t, err)
+		var out map[int32]int32
+		require.NoError(t, i.Unmarshal(got, &out))
+		require.Equal(t, in, out)
+
+		stringsByI64 := map[int64]string{1: "a"}
+		got, err = i.Marshal(stringsByI64)
+		require.NoError(t, err)
+		var outStrings map[int64]string
+		require.NoError(t, i.Unmarshal(got, &outStrings))
+		require.Equal(t, stringsByI64, outStrings)
+
+		floats := map[float64]int32{0: 1}
+		got, err = i.Marshal(floats)
+		require.NoError(t, err)
+		var outFloats map[float64]int32
+		require.NoError(t, i.Unmarshal(got, &outFloats))
+		require.Equal(t, floats, outFloats)
+	})
+
+	t.Run("ref identity map keys", func(t *testing.T) {
+		type key struct {
+			ID int32
+		}
+		i := New(program.New(nil))
+		defer i.Close()
+
+		in := map[key]int32{{ID: 1}: 2}
+		got, err := i.Marshal(in)
+		require.NoError(t, err)
+		var out map[key]int32
+		require.NoError(t, i.Unmarshal(got, &out))
+		require.Equal(t, in, out)
 	})
 
 	t.Run("struct matches by name", func(t *testing.T) {

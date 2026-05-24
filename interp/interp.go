@@ -26,6 +26,7 @@ type Interpreter struct {
 	types     []types.Type
 	constants []types.Boxed
 	globals   []types.Boxed
+	interned  map[string]types.Ref
 	stack     []types.Boxed
 	roots     []types.Boxed
 	heap      []types.Value
@@ -177,6 +178,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
 		globals:   make([]types.Boxed, 0, opt.globals),
+		interned:  make(map[string]types.Ref),
 		stack:     make([]types.Boxed, opt.stack),
 		heap:      make([]types.Value, 0, opt.heap),
 		free:      make([]int, 0, opt.heap),
@@ -413,6 +415,9 @@ func (i *Interpreter) Alloc(val types.Value) (int, error) {
 		}
 		val = types.Unbox(v)
 	}
+	if s, ok := val.(types.String); ok {
+		return int(i.intern(string(s))), nil
+	}
 	return i.allocRoot(val), nil
 }
 
@@ -489,6 +494,7 @@ func (i *Interpreter) Reset() {
 
 	i.sp = 0
 	i.roots = i.roots[:0]
+	clear(i.interned)
 
 	constants := 1
 	for _, v := range i.constants {
@@ -594,6 +600,18 @@ func (i *Interpreter) boxI64(val int64) types.Boxed {
 	return types.BoxRef(addr)
 }
 
+// intern returns a heap ref for s. Interpreters are single-threaded; callers
+// must not use one Interpreter concurrently from multiple goroutines.
+func (i *Interpreter) intern(s string) types.Ref {
+	if ref, ok := i.interned[s]; ok {
+		i.retain(int(ref))
+		return ref
+	}
+	ref := types.Ref(i.alloc(types.String(s)))
+	i.interned[s] = ref
+	return ref
+}
+
 func (i *Interpreter) unboxI64(val types.Boxed) int64 {
 	if val.Kind() != types.KindRef {
 		return val.I64()
@@ -618,6 +636,8 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 		return types.BoxF64(float64(v))
 	case types.Ref:
 		return types.BoxRef(int(v))
+	case types.String:
+		return types.BoxRef(int(i.intern(string(v))))
 	default:
 		addr := i.allocRoot(v)
 		return types.BoxRef(addr)
@@ -694,6 +714,9 @@ func (i *Interpreter) release(addr int) {
 		i.rc[addr]--
 		if i.rc[addr] == 0 {
 			v := i.heap[addr]
+			if s, ok := v.(types.String); ok {
+				delete(i.interned, string(s))
+			}
 			if t, ok := v.(types.Traceable); ok {
 				for _, r := range t.Refs() {
 					stack = append(stack, int(r))

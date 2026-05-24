@@ -124,6 +124,7 @@ Heap objects implement `types.Value`.
 | `*types.Array` | `KindRef` | `*ArrayType` | `Value`, `Traceable` |
 | `*types.Struct` | `KindRef` | `*StructType` | `Value`, `Traceable` |
 | `*types.Map` | `KindRef` | `*MapType` | `Value`, `Traceable` |
+| `*types.MapI32`, `*types.MapI64`, `*types.MapF32`, `*types.MapF64` | `KindRef` | `*MapType` | `Value`, `Traceable` |
 | `*types.Function` | `KindRef` | `*FunctionType` | `Value` |
 | `*interp.HostFunction` | `KindRef` | `*FunctionType` | `Value` |
 | `*interp.HostObject` | `KindRef` | `*StructType` | `Value`, `Traceable` |
@@ -132,7 +133,9 @@ Heap objects implement `types.Value`.
 
 `STRUCT_GET` and `STRUCT_SET` handle VM-native `*types.Struct` directly and fall back to `*interp.HostObject` for host-supplied values. See [host-integration.md](host-integration.md) for HostObject semantics.
 
-Use constructors for compound runtime types (`NewStructType`, `NewStruct`, `NewMapType`, `NewMap`, `NewMapWithCapacity`). These constructors initialize cached metadata and internal storage used by interpreter hot paths.
+Strings created by interpreter opcodes and the marshaler are interned per `Interpreter`. Equal string contents share one heap ref while live; the intern table drops an entry when the last ref is released.
+
+Use constructors for compound runtime types (`NewStructType`, `NewStruct`, `NewMapType`, `NewMap`, `NewMapWithCapacity`, `NewMapForType`). These constructors initialize cached metadata and internal storage used by interpreter hot paths. `NewMapForType` returns primitive-key specializations for `i32`, `i64`, `f32`, and `f64`; strings and all other ref-typed keys use generic `*types.Map` with heap ref identity keys.
 
 ## Unbox to Value
 

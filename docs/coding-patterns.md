@@ -443,6 +443,8 @@ When implementation file only supports another type's public API, put tests in o
 
 ### 6.3 One test per public symbol
 
+Test targets are public API only. Do not create top-level tests named after private helpers or implementation details. Exercise private behavior through the public function or method that owns the observable behavior.
+
 | Symbol | Test |
 |---|---|
 | `Foo` | `TestFoo` |

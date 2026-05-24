@@ -7,6 +7,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestZero(t *testing.T) {
+	tests := []struct {
+		name string
+		kind Kind
+		want Boxed
+	}{
+		{name: "i32", kind: KindI32, want: BoxI32(0)},
+		{name: "i64", kind: KindI64, want: BoxI64(0)},
+		{name: "f32", kind: KindF32, want: BoxF32(0)},
+		{name: "f64", kind: KindF64, want: BoxF64(0)},
+		{name: "ref", kind: KindRef, want: BoxedNull},
+		{name: "unknown", kind: Kind(255), want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, Zero(tt.kind))
+		})
+	}
+}
+
 func TestIsNull(t *testing.T) {
 	tests := []struct {
 		val  Value

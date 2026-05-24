@@ -465,6 +465,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 		case types.KindRef:
 			addr := val.Ref()
+			if str, ok := c.heap[addr].(types.String); ok {
+				text := string(str)
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					i.stack[i.sp] = types.BoxRef(int(i.intern(text)))
+					i.sp++
+					i.frames[i.fp-1].ip += 3
+				}
+			}
 			if fused := c.fuseRefImm(addr, 3); fused != nil {
 				return fused
 			}
@@ -1775,7 +1786,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			val := unboxRef[types.I32Array](i, i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxRef(i.alloc(types.String(val)))
+			i.stack[i.sp-1] = types.BoxRef(int(i.intern(string(types.String(val)))))
 			i.frames[i.fp-1].ip++
 		}
 	},
@@ -1799,7 +1810,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v1 := unboxRef[types.String](i, i.stack[i.sp-1])
 			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxRef(i.alloc(v2 + v1))
+			i.stack[i.sp-1] = types.BoxRef(int(i.intern(string(v2 + v1))))
 			i.frames[i.fp-1].ip++
 		}
 	},
@@ -2517,7 +2528,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 		}
 		typ, ok := c.types[idx].(*types.MapType)
-		if !ok || !types.IsComparableMapKeyType(typ.Key) {
+		if !ok {
 			return func(i *Interpreter) {
 				panic(ErrTypeMismatch)
 			}
@@ -2533,47 +2544,85 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < size*2+1 {
 				panic(ErrStackUnderflow)
 			}
-			m := types.NewMapWithCapacity(typ, size)
+			m := types.NewMapForType(typ, size)
 			base := i.sp - 1 - size*2
 			for j := 0; j < size; j++ {
-				keyVal := i.stack[base+j*2]
-				val := i.stack[base+j*2+1]
-				var key types.MapKey
-				var entryKey types.Boxed
-				var ok bool
-				if m.Typ.StringKeys {
-					if keyVal.Kind() != types.KindRef {
+				key := i.stack[base+j*2]
+				value := i.stack[base+j*2+1]
+				switch m := m.(type) {
+				case *types.MapI32:
+					old, ok := m.Set(key.I32(), value)
+					if ok && old.Kind() == types.KindRef {
+						i.release(old.Ref())
+					}
+				case *types.MapI64:
+					old, ok := m.Set(i.unboxI64(key), value)
+					if ok && old.Kind() == types.KindRef {
+						i.release(old.Ref())
+					}
+				case *types.MapF32:
+					old, ok := m.Set(key.F32(), value)
+					if ok && old.Kind() == types.KindRef {
+						i.release(old.Ref())
+					}
+				case *types.MapF64:
+					old, ok := m.Set(key.F64(), value)
+					if ok && old.Kind() == types.KindRef {
+						i.release(old.Ref())
+					}
+				case *types.Map:
+					var k types.MapKey
+					entry := types.MapEntry{Value: value}
+					keyRef := 0
+					drop := false
+					switch key.Kind() {
+					case types.KindI32:
+						bits := uint64(uint32(key.I32()))
+						k = types.MapKey{Kind: types.KindI32, Bits: bits}
+						entry.Key = types.BoxI32(int32(bits))
+					case types.KindI64:
+						k = types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}
+					case types.KindF32:
+						bits := math.Float32bits(key.F32())
+						if bits == 1<<31 {
+							bits = 0
+						}
+						k = types.MapKey{Kind: types.KindF32, Bits: uint64(bits)}
+						entry.Key = types.BoxF32(math.Float32frombits(bits))
+					case types.KindF64:
+						bits := math.Float64bits(key.F64())
+						if bits == 1<<63 {
+							bits = 0
+						}
+						k = types.MapKey{Kind: types.KindF64, Bits: bits}
+						entry.Key = types.BoxF64(math.Float64frombits(bits))
+					case types.KindRef:
+						keyRef = key.Ref()
+						if _, ok := i.heap[keyRef].(types.I64); ok {
+							k = types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}
+						} else {
+							k = types.MapKey{Kind: types.KindRef, Bits: uint64(keyRef)}
+							entry.Key = key
+							drop = true
+						}
+					default:
 						panic(ErrTypeMismatch)
 					}
-					str, ok := i.heap[keyVal.Ref()].(types.String)
-					if !ok {
-						panic(ErrTypeMismatch)
+					old, ok := m.Set(k, entry)
+					if ok {
+						if drop {
+							i.release(keyRef)
+						}
+						if old.Value.Kind() == types.KindRef {
+							i.release(old.Value.Ref())
+						}
 					}
-					key, entryKey = m.Typ.StringKey(string(str))
-				} else if m.Typ.KeyKind == types.KindI64 {
-					key, entryKey = m.Typ.I64Key(i.unboxI64(keyVal))
-				} else {
-					key, entryKey, ok = m.Typ.BoxKey(keyVal)
-					if !ok {
-						panic(ErrTypeMismatch)
-					}
-				}
-				entryVal := val
-				if m.Typ.ElemKind == types.KindI64 {
-					entryVal = i.boxI64(i.unboxI64(val))
-				}
-				old, replaced := m.Set(key, types.MapEntry{Key: entryKey, Value: entryVal})
-				if ref, ok := m.Typ.KeyRef(keyVal); ok && (replaced || !m.Typ.TraceKeys) {
-					i.release(ref)
-				}
-				if replaced {
-					if old.Value.Kind() == types.KindRef {
-						i.release(old.Value.Ref())
-					}
+				default:
+					panic(ErrTypeMismatch)
 				}
 			}
 			var addr int
-			if m.Typ.HasRefs() {
+			if typ.TraceKeys || typ.TraceValues {
 				addr = i.allocRoot(m)
 			} else {
 				addr = i.alloc(m)
@@ -2592,7 +2641,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 		}
 		typ, ok := c.types[idx].(*types.MapType)
-		if !ok || !types.IsComparableMapKeyType(typ.Key) {
+		if !ok {
 			return func(i *Interpreter) {
 				panic(ErrTypeMismatch)
 			}
@@ -2605,7 +2654,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if capacity < 0 {
 				panic(ErrIndexOutOfRange)
 			}
-			i.stack[i.sp-1] = types.BoxRef(i.alloc(types.NewMapWithCapacity(typ, capacity)))
+			i.stack[i.sp-1] = types.BoxRef(i.alloc(types.NewMapForType(typ, capacity)))
 			i.frames[i.fp-1].ip += 3
 		}
 	},
@@ -2620,12 +2669,23 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrTypeMismatch)
 			}
 			addr := ref.Ref()
-			m, ok := i.heap[addr].(*types.Map)
-			if !ok {
+			n := 0
+			switch m := i.heap[addr].(type) {
+			case *types.MapI32:
+				n = m.Len()
+			case *types.MapI64:
+				n = m.Len()
+			case *types.MapF32:
+				n = m.Len()
+			case *types.MapF64:
+				n = m.Len()
+			case *types.Map:
+				n = m.Len()
+			default:
 				panic(ErrTypeMismatch)
 			}
 			i.release(addr)
-			i.stack[i.sp-1] = types.BoxI32(int32(m.Len()))
+			i.stack[i.sp-1] = types.BoxI32(int32(n))
 			i.frames[i.fp-1].ip++
 		}
 	},
@@ -2635,50 +2695,88 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			keyVal := i.stack[i.sp-1]
+			key := i.stack[i.sp-1]
 			ref := i.stack[i.sp-2]
 			if ref.Kind() != types.KindRef {
 				panic(ErrTypeMismatch)
 			}
 			addr := ref.Ref()
-			m, ok := i.heap[addr].(*types.Map)
-			if !ok {
+			var result types.Boxed
+			switch m := i.heap[addr].(type) {
+			case *types.MapI32:
+				value, ok := m.Get(key.I32())
+				if ok {
+					result = value
+				} else {
+					result = m.Zero
+				}
+			case *types.MapI64:
+				value, ok := m.Get(i.unboxI64(key))
+				if ok {
+					result = value
+				} else {
+					result = m.Zero
+				}
+			case *types.MapF32:
+				value, ok := m.Get(key.F32())
+				if ok {
+					result = value
+				} else {
+					result = m.Zero
+				}
+			case *types.MapF64:
+				value, ok := m.Get(key.F64())
+				if ok {
+					result = value
+				} else {
+					result = m.Zero
+				}
+			case *types.Map:
+				var k types.MapKey
+				keyRef := 0
+				drop := false
+				switch key.Kind() {
+				case types.KindI32:
+					k = types.MapKey{Kind: types.KindI32, Bits: uint64(uint32(key.I32()))}
+				case types.KindI64:
+					k = types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}
+				case types.KindF32:
+					bits := math.Float32bits(key.F32())
+					if bits == 1<<31 {
+						bits = 0
+					}
+					k = types.MapKey{Kind: types.KindF32, Bits: uint64(bits)}
+				case types.KindF64:
+					bits := math.Float64bits(key.F64())
+					if bits == 1<<63 {
+						bits = 0
+					}
+					k = types.MapKey{Kind: types.KindF64, Bits: bits}
+				case types.KindRef:
+					keyRef = key.Ref()
+					if _, ok := i.heap[keyRef].(types.I64); ok {
+						k = types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}
+					} else {
+						k = types.MapKey{Kind: types.KindRef, Bits: uint64(keyRef)}
+						drop = true
+					}
+				default:
+					panic(ErrTypeMismatch)
+				}
+				entry, ok := m.Get(k)
+				if drop {
+					i.release(keyRef)
+				}
+				if ok {
+					result = entry.Value
+				} else {
+					result = m.Zero
+				}
+			default:
 				panic(ErrTypeMismatch)
 			}
-			var key types.MapKey
-			if m.Typ.StringKeys {
-				if keyVal.Kind() != types.KindRef {
-					panic(ErrTypeMismatch)
-				}
-				str, ok := i.heap[keyVal.Ref()].(types.String)
-				if !ok {
-					panic(ErrTypeMismatch)
-				}
-				key, _ = m.Typ.StringKey(string(str))
-			} else if m.Typ.KeyKind == types.KindI64 {
-				key, _ = m.Typ.I64Key(i.unboxI64(keyVal))
-			} else {
-				var ok bool
-				key, _, ok = m.Typ.BoxKey(keyVal)
-				if !ok {
-					panic(ErrTypeMismatch)
-				}
-			}
-			val, ok := m.Get(key)
-			var result types.Boxed
-			if ok {
-				result = val.Value
-				if result.Kind() == types.KindRef {
-					i.retain(result.Ref())
-				}
-			} else {
-				result = m.Typ.Zero()
-				if result.Kind() == types.KindRef {
-					i.retain(result.Ref())
-				}
-			}
-			if ref, ok := m.Typ.KeyRef(keyVal); ok {
-				i.release(ref)
+			if result.Kind() == types.KindRef {
+				i.retain(result.Ref())
 			}
 			i.release(addr)
 			i.sp--
@@ -2692,54 +2790,86 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			keyVal := i.stack[i.sp-1]
+			key := i.stack[i.sp-1]
 			ref := i.stack[i.sp-2]
 			if ref.Kind() != types.KindRef {
 				panic(ErrTypeMismatch)
 			}
 			addr := ref.Ref()
-			m, ok := i.heap[addr].(*types.Map)
-			if !ok {
+			var result types.Boxed
+			var found bool
+			switch m := i.heap[addr].(type) {
+			case *types.MapI32:
+				result, found = m.Get(key.I32())
+				if !found {
+					result = m.Zero
+				}
+			case *types.MapI64:
+				result, found = m.Get(i.unboxI64(key))
+				if !found {
+					result = m.Zero
+				}
+			case *types.MapF32:
+				result, found = m.Get(key.F32())
+				if !found {
+					result = m.Zero
+				}
+			case *types.MapF64:
+				result, found = m.Get(key.F64())
+				if !found {
+					result = m.Zero
+				}
+			case *types.Map:
+				var k types.MapKey
+				keyRef := 0
+				drop := false
+				switch key.Kind() {
+				case types.KindI32:
+					k = types.MapKey{Kind: types.KindI32, Bits: uint64(uint32(key.I32()))}
+				case types.KindI64:
+					k = types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}
+				case types.KindF32:
+					bits := math.Float32bits(key.F32())
+					if bits == 1<<31 {
+						bits = 0
+					}
+					k = types.MapKey{Kind: types.KindF32, Bits: uint64(bits)}
+				case types.KindF64:
+					bits := math.Float64bits(key.F64())
+					if bits == 1<<63 {
+						bits = 0
+					}
+					k = types.MapKey{Kind: types.KindF64, Bits: bits}
+				case types.KindRef:
+					keyRef = key.Ref()
+					if _, ok := i.heap[keyRef].(types.I64); ok {
+						k = types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}
+					} else {
+						k = types.MapKey{Kind: types.KindRef, Bits: uint64(keyRef)}
+						drop = true
+					}
+				default:
+					panic(ErrTypeMismatch)
+				}
+				entry, ok := m.Get(k)
+				if drop {
+					i.release(keyRef)
+				}
+				found = ok
+				if ok {
+					result = entry.Value
+				} else {
+					result = m.Zero
+				}
+			default:
 				panic(ErrTypeMismatch)
 			}
-			var key types.MapKey
-			if m.Typ.StringKeys {
-				if keyVal.Kind() != types.KindRef {
-					panic(ErrTypeMismatch)
-				}
-				str, ok := i.heap[keyVal.Ref()].(types.String)
-				if !ok {
-					panic(ErrTypeMismatch)
-				}
-				key, _ = m.Typ.StringKey(string(str))
-			} else if m.Typ.KeyKind == types.KindI64 {
-				key, _ = m.Typ.I64Key(i.unboxI64(keyVal))
-			} else {
-				var ok bool
-				key, _, ok = m.Typ.BoxKey(keyVal)
-				if !ok {
-					panic(ErrTypeMismatch)
-				}
-			}
-			val, ok := m.Get(key)
-			var result types.Boxed
-			if ok {
-				result = val.Value
-				if result.Kind() == types.KindRef {
-					i.retain(result.Ref())
-				}
-			} else {
-				result = m.Typ.Zero()
-				if result.Kind() == types.KindRef {
-					i.retain(result.Ref())
-				}
-			}
-			if ref, ok := m.Typ.KeyRef(keyVal); ok {
-				i.release(ref)
+			if result.Kind() == types.KindRef {
+				i.retain(result.Ref())
 			}
 			i.release(addr)
 			i.stack[i.sp-2] = result
-			i.stack[i.sp-1] = types.BoxBool(ok)
+			i.stack[i.sp-1] = types.BoxBool(found)
 			i.frames[i.fp-1].ip++
 		}
 	},
@@ -2749,49 +2879,83 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 3 {
 				panic(ErrStackUnderflow)
 			}
-			val := i.stack[i.sp-1]
-			keyVal := i.stack[i.sp-2]
+			value := i.stack[i.sp-1]
+			key := i.stack[i.sp-2]
 			ref := i.stack[i.sp-3]
 			if ref.Kind() != types.KindRef {
 				panic(ErrTypeMismatch)
 			}
 			addr := ref.Ref()
-			m, ok := i.heap[addr].(*types.Map)
-			if !ok {
+			switch m := i.heap[addr].(type) {
+			case *types.MapI32:
+				old, ok := m.Set(key.I32(), value)
+				if ok && old.Kind() == types.KindRef {
+					i.release(old.Ref())
+				}
+			case *types.MapI64:
+				old, ok := m.Set(i.unboxI64(key), value)
+				if ok && old.Kind() == types.KindRef {
+					i.release(old.Ref())
+				}
+			case *types.MapF32:
+				old, ok := m.Set(key.F32(), value)
+				if ok && old.Kind() == types.KindRef {
+					i.release(old.Ref())
+				}
+			case *types.MapF64:
+				old, ok := m.Set(key.F64(), value)
+				if ok && old.Kind() == types.KindRef {
+					i.release(old.Ref())
+				}
+			case *types.Map:
+				var k types.MapKey
+				entry := types.MapEntry{Value: value}
+				keyRef := 0
+				drop := false
+				switch key.Kind() {
+				case types.KindI32:
+					bits := uint64(uint32(key.I32()))
+					k = types.MapKey{Kind: types.KindI32, Bits: bits}
+					entry.Key = types.BoxI32(int32(bits))
+				case types.KindI64:
+					k = types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}
+				case types.KindF32:
+					bits := math.Float32bits(key.F32())
+					if bits == 1<<31 {
+						bits = 0
+					}
+					k = types.MapKey{Kind: types.KindF32, Bits: uint64(bits)}
+					entry.Key = types.BoxF32(math.Float32frombits(bits))
+				case types.KindF64:
+					bits := math.Float64bits(key.F64())
+					if bits == 1<<63 {
+						bits = 0
+					}
+					k = types.MapKey{Kind: types.KindF64, Bits: bits}
+					entry.Key = types.BoxF64(math.Float64frombits(bits))
+				case types.KindRef:
+					keyRef = key.Ref()
+					if _, ok := i.heap[keyRef].(types.I64); ok {
+						k = types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}
+					} else {
+						k = types.MapKey{Kind: types.KindRef, Bits: uint64(keyRef)}
+						entry.Key = key
+						drop = true
+					}
+				default:
+					panic(ErrTypeMismatch)
+				}
+				old, ok := m.Set(k, entry)
+				if ok {
+					if drop {
+						i.release(keyRef)
+					}
+					if old.Value.Kind() == types.KindRef {
+						i.release(old.Value.Ref())
+					}
+				}
+			default:
 				panic(ErrTypeMismatch)
-			}
-			var key types.MapKey
-			var entryKey types.Boxed
-			if m.Typ.StringKeys {
-				if keyVal.Kind() != types.KindRef {
-					panic(ErrTypeMismatch)
-				}
-				str, ok := i.heap[keyVal.Ref()].(types.String)
-				if !ok {
-					panic(ErrTypeMismatch)
-				}
-				key, entryKey = m.Typ.StringKey(string(str))
-			} else if m.Typ.KeyKind == types.KindI64 {
-				key, entryKey = m.Typ.I64Key(i.unboxI64(keyVal))
-			} else {
-				var ok bool
-				key, entryKey, ok = m.Typ.BoxKey(keyVal)
-				if !ok {
-					panic(ErrTypeMismatch)
-				}
-			}
-			entryVal := val
-			if m.Typ.ElemKind == types.KindI64 {
-				entryVal = i.boxI64(i.unboxI64(val))
-			}
-			old, replaced := m.Set(key, types.MapEntry{Key: entryKey, Value: entryVal})
-			if ref, ok := m.Typ.KeyRef(keyVal); ok && (replaced || !m.Typ.TraceKeys) {
-				i.release(ref)
-			}
-			if replaced {
-				if old.Value.Kind() == types.KindRef {
-					i.release(old.Value.Ref())
-				}
 			}
 			i.release(addr)
 			i.sp -= 3
@@ -2804,45 +2968,79 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			keyVal := i.stack[i.sp-1]
+			key := i.stack[i.sp-1]
 			ref := i.stack[i.sp-2]
 			if ref.Kind() != types.KindRef {
 				panic(ErrTypeMismatch)
 			}
 			addr := ref.Ref()
-			m, ok := i.heap[addr].(*types.Map)
-			if !ok {
+			switch m := i.heap[addr].(type) {
+			case *types.MapI32:
+				old, ok := m.Delete(key.I32())
+				if ok && old.Kind() == types.KindRef {
+					i.release(old.Ref())
+				}
+			case *types.MapI64:
+				old, ok := m.Delete(i.unboxI64(key))
+				if ok && old.Kind() == types.KindRef {
+					i.release(old.Ref())
+				}
+			case *types.MapF32:
+				old, ok := m.Delete(key.F32())
+				if ok && old.Kind() == types.KindRef {
+					i.release(old.Ref())
+				}
+			case *types.MapF64:
+				old, ok := m.Delete(key.F64())
+				if ok && old.Kind() == types.KindRef {
+					i.release(old.Ref())
+				}
+			case *types.Map:
+				var k types.MapKey
+				keyRef := 0
+				drop := false
+				switch key.Kind() {
+				case types.KindI32:
+					k = types.MapKey{Kind: types.KindI32, Bits: uint64(uint32(key.I32()))}
+				case types.KindI64:
+					k = types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}
+				case types.KindF32:
+					bits := math.Float32bits(key.F32())
+					if bits == 1<<31 {
+						bits = 0
+					}
+					k = types.MapKey{Kind: types.KindF32, Bits: uint64(bits)}
+				case types.KindF64:
+					bits := math.Float64bits(key.F64())
+					if bits == 1<<63 {
+						bits = 0
+					}
+					k = types.MapKey{Kind: types.KindF64, Bits: bits}
+				case types.KindRef:
+					keyRef = key.Ref()
+					if _, ok := i.heap[keyRef].(types.I64); ok {
+						k = types.MapKey{Kind: types.KindI64, Bits: uint64(i.unboxI64(key))}
+					} else {
+						k = types.MapKey{Kind: types.KindRef, Bits: uint64(keyRef)}
+						drop = true
+					}
+				default:
+					panic(ErrTypeMismatch)
+				}
+				old, ok := m.Delete(k)
+				if ok {
+					if old.Key.Kind() == types.KindRef {
+						i.release(old.Key.Ref())
+					}
+					if old.Value.Kind() == types.KindRef {
+						i.release(old.Value.Ref())
+					}
+				}
+				if drop {
+					i.release(keyRef)
+				}
+			default:
 				panic(ErrTypeMismatch)
-			}
-			var key types.MapKey
-			if m.Typ.StringKeys {
-				if keyVal.Kind() != types.KindRef {
-					panic(ErrTypeMismatch)
-				}
-				str, ok := i.heap[keyVal.Ref()].(types.String)
-				if !ok {
-					panic(ErrTypeMismatch)
-				}
-				key, _ = m.Typ.StringKey(string(str))
-			} else if m.Typ.KeyKind == types.KindI64 {
-				key, _ = m.Typ.I64Key(i.unboxI64(keyVal))
-			} else {
-				var ok bool
-				key, _, ok = m.Typ.BoxKey(keyVal)
-				if !ok {
-					panic(ErrTypeMismatch)
-				}
-			}
-			if old, ok := m.Delete(key); ok {
-				if m.Typ.TraceKeys && old.Key.Kind() == types.KindRef {
-					i.release(old.Key.Ref())
-				}
-				if old.Value.Kind() == types.KindRef {
-					i.release(old.Value.Ref())
-				}
-			}
-			if ref, ok := m.Typ.KeyRef(keyVal); ok {
-				i.release(ref)
 			}
 			i.release(addr)
 			i.sp -= 2
@@ -2860,18 +3058,43 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrTypeMismatch)
 			}
 			addr := ref.Ref()
-			m, ok := i.heap[addr].(*types.Map)
-			if !ok {
+			switch m := i.heap[addr].(type) {
+			case *types.MapI32:
+				m.Clear(func(value types.Boxed) {
+					if value.Kind() == types.KindRef {
+						i.release(value.Ref())
+					}
+				})
+			case *types.MapI64:
+				m.Clear(func(value types.Boxed) {
+					if value.Kind() == types.KindRef {
+						i.release(value.Ref())
+					}
+				})
+			case *types.MapF32:
+				m.Clear(func(value types.Boxed) {
+					if value.Kind() == types.KindRef {
+						i.release(value.Ref())
+					}
+				})
+			case *types.MapF64:
+				m.Clear(func(value types.Boxed) {
+					if value.Kind() == types.KindRef {
+						i.release(value.Ref())
+					}
+				})
+			case *types.Map:
+				m.Clear(func(entry types.MapEntry) {
+					if entry.Key.Kind() == types.KindRef {
+						i.release(entry.Key.Ref())
+					}
+					if entry.Value.Kind() == types.KindRef {
+						i.release(entry.Value.Ref())
+					}
+				})
+			default:
 				panic(ErrTypeMismatch)
 			}
-			m.Clear(func(entry types.MapEntry) {
-				if m.Typ.TraceKeys && entry.Key.Kind() == types.KindRef {
-					i.release(entry.Key.Ref())
-				}
-				if entry.Value.Kind() == types.KindRef {
-					i.release(entry.Value.Ref())
-				}
-			})
 			i.release(addr)
 			i.sp--
 			i.frames[i.fp-1].ip++
