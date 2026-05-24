@@ -121,8 +121,8 @@ v, err := vm.Marshal(myGoValue)
 | `map[K]V` | `*Map` (ref) | heap-allocated |
 | `struct` (exported fields only, no methods) | `*Struct` (ref) | data-only snapshot |
 | `struct` with methods or unexported fields | `*HostObject` (ref) | see Host Objects below |
-| named scalar with methods (e.g. `type Celsius float64`) | `*HostObject` (ref) | data fields empty, methods bound |
-| `*T` | same as `T`, or `Null` if nil | pointer dereferenced |
+| defined scalar with methods (e.g. `type Celsius float64`) | underlying scalar | keeps primitive opcode/JIT path |
+| `*T` | same as `T`, `*HostObject`, or `Null` if nil | pointer dereferenced; defined scalar pointers with methods become host objects |
 | `func(...)` | `*HostFunction` (ref) | see below |
 | `types.Value` | passthrough | returned as-is |
 | `types.Boxed` | unboxed | `KindRef` resolved via `Load` |
@@ -170,14 +170,18 @@ ho := v.(*interp.HostObject)
 // ho.Typ.Fields = [Count: I32, Bump: func(I32) I32]
 ```
 
-**Routing rules:** `Marshal` creates `*HostObject` when either condition holds:
+**Routing rules:** `Marshal` creates `*HostObject` when any condition holds:
 
-- The type has methods on `T` or `*T`.
-- The type is a struct with unexported fields (would lose info via `*Struct`).
+- A struct type has methods on `T` or `*T`.
+- A struct type has unexported fields (would lose info via `*Struct`).
+- A pointer to a defined scalar type has methods on `T` or `*T`.
+
+Non-pointer defined scalars with methods marshal as their underlying scalar so numeric and string opcodes keep their normal fast path. Marshal a pointer when VM code needs method access or pointer-receiver mutation.
 
 **Field layout:**
 
 - Exported data fields first, in declaration order. Only fields whose Go kind maps to a VM primitive (`bool`, `int*`, `uint*`, `float*`, `string`) or implements `types.Value` are exposed; others are skipped.
+- Defined scalar host objects reserve field `0` as `Value`, the current underlying scalar. Use `STRUCT_GET 0` before primitive opcodes and `STRUCT_SET 0` to update it directly.
 - Methods second. Methods whose name collides with an exported data field are skipped.
 
 **Receiver semantics:**

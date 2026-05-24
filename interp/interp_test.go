@@ -3260,6 +3260,34 @@ func TestInterpreter_Marshal(t *testing.T) {
 		}
 	})
 
+	t.Run("defined primitive with methods marshals as primitive", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(hostUserID(41))
+		require.NoError(t, err)
+		require.Equal(t, types.I64(41), got)
+	})
+
+	t.Run("defined primitive with methods uses primitive opcodes", func(t *testing.T) {
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I64_ADD),
+			},
+		))
+		defer i.Close()
+
+		got, err := i.Marshal(hostUserID(41))
+		require.NoError(t, err)
+		require.NoError(t, i.Push(got))
+
+		require.NoError(t, i.Run(context.Background()))
+		out, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64(42), out)
+	})
+
 	t.Run("compiled plans are cached", func(t *testing.T) {
 		type sample struct {
 			Name  string
@@ -3303,6 +3331,11 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 		var p *int
 		got, err := i.Marshal(p)
+		require.NoError(t, err)
+		require.Equal(t, types.Null, got)
+
+		var id *hostUserID
+		got, err = i.Marshal(id)
 		require.NoError(t, err)
 		require.Equal(t, types.Null, got)
 	})

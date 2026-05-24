@@ -25,6 +25,21 @@ func (c hostCelsius) Fahrenheit() hostCelsius {
 	return c*9/5 + 32
 }
 
+type hostUserID int64
+
+func (id hostUserID) Next() hostUserID {
+	return id + 1
+}
+
+func (id *hostUserID) Bump(n int64) hostUserID {
+	*id += hostUserID(n)
+	return *id
+}
+
+func (id *hostUserID) Value() hostUserID {
+	return *id
+}
+
 func TestNewHostFunction(t *testing.T) {
 	t.Run("kind and type", func(t *testing.T) {
 		typ := &types.FunctionType{
@@ -110,16 +125,86 @@ func TestHostObject(t *testing.T) {
 		require.Equal(t, types.BoxI32(5), ho.Field(0))
 	})
 
-	t.Run("non-struct named scalar with method", func(t *testing.T) {
+	t.Run("pointer to named scalar with method routes to HostObject", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
 
-		got, err := i.Marshal(hostCelsius(100))
+		id := hostUserID(41)
+		got, err := i.Marshal(&id)
 		require.NoError(t, err)
 		ho, ok := got.(*HostObject)
 		require.True(t, ok)
-		require.Len(t, ho.Typ.Fields, 1)
-		require.Equal(t, "Fahrenheit", ho.Typ.Fields[0].Name)
+		require.Equal(t, "Value", ho.Typ.Fields[0].Name)
+		require.True(t, ho.Typ.Fields[0].Type.Equals(types.TypeI64))
+		require.Equal(t, types.BoxI64(41), ho.Field(0))
+		require.NotEqual(t, -1, hostFieldIndex(t, ho, "Bump"))
+		require.NotEqual(t, -1, hostFieldIndex(t, ho, "Next"))
+
+		valueFields := 0
+		for _, field := range ho.Typ.Fields {
+			if field.Name == "Value" {
+				valueFields++
+			}
+		}
+		require.Equal(t, 1, valueFields)
+	})
+
+	t.Run("pointer method mutates named scalar receiver", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		id := hostUserID(41)
+		got, err := i.Marshal(&id)
+		require.NoError(t, err)
+		ho := got.(*HostObject)
+
+		boxed := ho.Field(hostFieldIndex(t, ho, "Bump"))
+		require.Equal(t, types.KindRef, boxed.Kind())
+		v, err := i.Load(boxed.Ref())
+		require.NoError(t, err)
+		fn, ok := v.(*HostFunction)
+		require.True(t, ok)
+
+		returns, err := fn.Fn(i, []types.Boxed{types.BoxI64(1)})
+		require.NoError(t, err)
+		require.Equal(t, []types.Boxed{types.BoxI64(42)}, returns)
+		require.Equal(t, types.BoxI64(42), ho.Field(0))
+		require.Equal(t, hostUserID(41), id)
+	})
+
+	t.Run("SetField updates named scalar receiver", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		id := hostUserID(41)
+		got, err := i.Marshal(&id)
+		require.NoError(t, err)
+		ho := got.(*HostObject)
+
+		ho.SetField(0, types.BoxI64(99))
+		require.Equal(t, types.BoxI64(99), ho.Field(0))
+	})
+
+	t.Run("named scalar value field feeds primitive opcodes", func(t *testing.T) {
+		id := hostUserID(41)
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.STRUCT_GET),
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I64_ADD),
+			},
+		))
+		defer i.Close()
+
+		got, err := i.Marshal(&id)
+		require.NoError(t, err)
+		require.NoError(t, i.Push(got))
+
+		require.NoError(t, i.Run(context.Background()))
+		out, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64(42), out)
 	})
 
 	t.Run("unmarshal recovers receiver", func(t *testing.T) {

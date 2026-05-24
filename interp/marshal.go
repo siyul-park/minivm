@@ -125,21 +125,24 @@ func (m *marshaler) compilePlan(t reflect.Type, seen map[reflect.Type]bool) (*ma
 	seen[t] = true
 	defer delete(seen, t)
 
-	if m.isHostable(t) {
-		fields, slots, data, err := m.compileHostObject(t, seen)
-		if err != nil {
-			return nil, err
-		}
-		vmStruct := types.NewStructType(fields...)
-		return &marshalPlan{
-			VMType:    vmStruct,
-			Type:      t,
-			marshal:   hostMarshaler(slots, vmStruct),
-			unmarshal: structUnmarshaler(data),
-		}, nil
-	}
 	if t.Kind() == reflect.Pointer {
 		elem := t.Elem()
+		if m.isPointerHostable(t) {
+			elemPlan, err := m.compilePlan(elem, seen)
+			if err != nil {
+				return nil, err
+			}
+			vmStruct, slots, _, err := m.compileHostObject(elem, seen)
+			if err != nil {
+				return nil, err
+			}
+			return &marshalPlan{
+				VMType:    vmStruct,
+				Type:      t,
+				marshal:   hostPointerMarshaler(slots, vmStruct),
+				unmarshal: pointerUnmarshaler(elemPlan),
+			}, nil
+		}
 		if seen[elem] {
 			return &marshalPlan{VMType: types.TypeRef, Type: t, marshal: marshalRuntime, unmarshal: unmarshalInterface}, nil
 		}
@@ -152,6 +155,18 @@ func (m *marshaler) compilePlan(t reflect.Type, seen map[reflect.Type]bool) (*ma
 			Type:      t,
 			marshal:   pointerMarshaler(elemPlan),
 			unmarshal: pointerUnmarshaler(elemPlan),
+		}, nil
+	}
+	if m.isHostable(t) {
+		vmStruct, slots, data, err := m.compileHostObject(t, seen)
+		if err != nil {
+			return nil, err
+		}
+		return &marshalPlan{
+			VMType:    vmStruct,
+			Type:      t,
+			marshal:   hostMarshaler(slots, vmStruct),
+			unmarshal: structUnmarshaler(data),
 		}, nil
 	}
 	if t.Implements(typeValue) {
@@ -241,27 +256,35 @@ func (m *marshaler) compilePlan(t reflect.Type, seen map[reflect.Type]bool) (*ma
 }
 
 func (m *marshaler) isHostable(t reflect.Type) bool {
+	if t.Kind() != reflect.Struct {
+		return false
+	}
 	if _, ok := runtimeTypes[t]; ok {
 		return false
 	}
 	if t.Implements(typeValue) || reflect.PointerTo(t).Implements(typeValue) {
 		return false
 	}
-	switch t.Kind() {
-	case reflect.Func, reflect.Chan, reflect.Map, reflect.Slice, reflect.Interface, reflect.Pointer:
-		return false
-	}
-	if reflect.PointerTo(t).NumMethod() > 0 {
-		return true
-	}
-	if t.Kind() == reflect.Struct {
-		for idx := 0; idx < t.NumField(); idx++ {
-			if t.Field(idx).PkgPath != "" {
-				return true
-			}
+	for idx := 0; idx < t.NumField(); idx++ {
+		if t.Field(idx).PkgPath != "" {
+			return true
 		}
 	}
-	return false
+	return reflect.PointerTo(t).NumMethod() > 0
+}
+
+func (m *marshaler) isPointerHostable(t reflect.Type) bool {
+	if t.Kind() != reflect.Pointer {
+		return false
+	}
+	elem := t.Elem()
+	if _, ok := runtimeTypes[elem]; ok {
+		return false
+	}
+	if elem.Implements(typeValue) || reflect.PointerTo(elem).Implements(typeValue) {
+		return false
+	}
+	return elem.Kind() != reflect.Interface && hostFieldVMType(elem.Kind()) != nil && t.NumMethod() > 0
 }
 
 func (m *marshaler) compileStructType(t reflect.Type, seen map[reflect.Type]bool) (*types.StructType, []planField, error) {
@@ -287,7 +310,7 @@ func (m *marshaler) compileStructType(t reflect.Type, seen map[reflect.Type]bool
 	return types.NewStructType(fields...), plans, nil
 }
 
-func (m *marshaler) compileHostObject(t reflect.Type, seen map[reflect.Type]bool) ([]types.StructField, []hostSlot, []planField, error) {
+func (m *marshaler) compileHostObject(t reflect.Type, seen map[reflect.Type]bool) (*types.StructType, []hostSlot, []planField, error) {
 	var fields []types.StructField
 	var slots []hostSlot
 	var data []planField
@@ -315,6 +338,14 @@ func (m *marshaler) compileHostObject(t reflect.Type, seen map[reflect.Type]bool
 			data = append(data, planField{Index: idx, Offset: f.Offset, Kind: kind, Plan: p})
 			names[f.Name] = true
 		}
+	} else if t.Kind() != reflect.Interface {
+		vmType := hostFieldVMType(t.Kind())
+		if vmType == nil {
+			return nil, nil, nil, fmt.Errorf("%w: host value type=%s", ErrUnsupportedMarshalType, t)
+		}
+		fields = append(fields, types.NewStructField(vmType, types.FieldWithName("Value")))
+		slots = append(slots, hostSlot{field: 0, kind: t.Kind()})
+		names["Value"] = true
 	}
 	methodType := reflect.PointerTo(t)
 	for idx := 0; idx < methodType.NumMethod(); idx++ {
@@ -330,7 +361,7 @@ func (m *marshaler) compileHostObject(t reflect.Type, seen map[reflect.Type]bool
 		slots = append(slots, hostSlot{field: -1, method: idx, fnType: fnType})
 		names[method.Name] = true
 	}
-	return fields, slots, data, nil
+	return types.NewStructType(fields...), slots, data, nil
 }
 
 func (m *marshaler) compileFunctionType(t reflect.Type, skip int, seen map[reflect.Type]bool) (*types.FunctionType, error) {
@@ -411,6 +442,25 @@ func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *Host
 		}
 		return returns, nil
 	})
+}
+
+func (s *marshalState) hostObject(ptr reflect.Value, slots []hostSlot, vm *types.StructType) *HostObject {
+	bound := make([]hostSlot, len(slots))
+	copy(bound, slots)
+	for idx := range bound {
+		if !bound[idx].isMethod() {
+			continue
+		}
+		fn := s.wrapFunc(ptr.Method(bound[idx].method), bound[idx].fnType)
+		bound[idx].addr = s.alloc(fn)
+	}
+	return &HostObject{
+		Typ:      vm,
+		Receiver: ptr,
+		data:     unsafe.Pointer(ptr.Pointer()),
+		slots:    bound,
+		interp:   s.i,
+	}
 }
 
 func (s *marshalState) boxFieldAt(base unsafe.Pointer, pf planField, typ types.Type) (types.Boxed, error) {
@@ -866,22 +916,18 @@ func hostMarshaler(slots []hostSlot, vm *types.StructType) marshalFn {
 	return func(s *marshalState, v reflect.Value) (types.Value, error) {
 		ptr := reflect.New(v.Type())
 		ptr.Elem().Set(v)
-		bound := make([]hostSlot, len(slots))
-		copy(bound, slots)
-		for idx := range bound {
-			if !bound[idx].isMethod() {
-				continue
-			}
-			fn := s.wrapFunc(ptr.Method(bound[idx].method), bound[idx].fnType)
-			bound[idx].addr = s.alloc(fn)
+		return s.hostObject(ptr, slots, vm), nil
+	}
+}
+
+func hostPointerMarshaler(slots []hostSlot, vm *types.StructType) marshalFn {
+	return func(s *marshalState, v reflect.Value) (types.Value, error) {
+		if v.IsNil() {
+			return types.Null, nil
 		}
-		return &HostObject{
-			Typ:      vm,
-			Receiver: ptr,
-			data:     unsafe.Pointer(ptr.Pointer()),
-			slots:    bound,
-			interp:   s.i,
-		}, nil
+		ptr := reflect.New(v.Type().Elem())
+		ptr.Elem().Set(v.Elem())
+		return s.hostObject(ptr, slots, vm), nil
 	}
 }
 
@@ -1274,4 +1320,28 @@ func floatValue(val types.Value) (float64, bool) {
 		}
 	}
 	return 0, false
+}
+
+// hostFieldVMType maps a Go reflect.Kind to its VM-side types.Type.
+// Returns nil for kinds that HostObject cannot represent directly.
+// reflect.Interface is only valid for types implementing types.Value;
+// callers must filter non-Value interfaces before reaching this point.
+func hostFieldVMType(k reflect.Kind) types.Type {
+	switch k {
+	case reflect.Bool, reflect.Int8, reflect.Int16, reflect.Int32,
+		reflect.Uint8, reflect.Uint16, reflect.Uint32:
+		return types.TypeI32
+	case reflect.Int, reflect.Int64, reflect.Uint, reflect.Uint64, reflect.Uintptr:
+		return types.TypeI64
+	case reflect.Float32:
+		return types.TypeF32
+	case reflect.Float64:
+		return types.TypeF64
+	case reflect.String:
+		return types.TypeString
+	case reflect.Interface:
+		return types.TypeRef
+	default:
+		return nil
+	}
 }

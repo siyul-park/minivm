@@ -252,27 +252,3 @@ func (h *HostObject) setField(s hostSlot, val types.Boxed) {
 func (h *HostObject) fieldPtr(s hostSlot) unsafe.Pointer {
 	return unsafe.Add(h.data, s.offset)
 }
-
-// hostFieldVMType maps a Go reflect.Kind to its VM-side types.Type.
-// Returns nil for kinds that HostObject cannot represent directly.
-// reflect.Interface is only valid for types implementing types.Value;
-// callers must filter non-Value interfaces before reaching this point.
-func hostFieldVMType(k reflect.Kind) types.Type {
-	switch k {
-	case reflect.Bool, reflect.Int8, reflect.Int16, reflect.Int32,
-		reflect.Uint8, reflect.Uint16, reflect.Uint32:
-		return types.TypeI32
-	case reflect.Int, reflect.Int64, reflect.Uint, reflect.Uint64, reflect.Uintptr:
-		return types.TypeI64
-	case reflect.Float32:
-		return types.TypeF32
-	case reflect.Float64:
-		return types.TypeF64
-	case reflect.String:
-		return types.TypeString
-	case reflect.Interface:
-		return types.TypeRef
-	default:
-		return nil
-	}
-}
