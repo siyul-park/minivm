@@ -93,7 +93,7 @@ Always `Release` what you `Retain`; leaked refs prevent GC collection.
 
 ### `Marshal`
 
-`Marshal` converts ordinary Go values to `types.Value` using reflection. Use it for setup data, functions, and config; keep hot paths on the direct layer.
+`Marshal` converts ordinary Go values to `types.Value` using reflection-backed type plans. The default marshaler compiles metadata once per Go type, then reuses that plan for later conversions. Use it for setup data, functions, and config; keep hot calls on the direct layer.
 
 ```go
 v, err := vm.Marshal(myGoValue)
@@ -185,11 +185,11 @@ ho := v.(*interp.HostObject)
 - `Receiver` is an **addressable copy** of the marshaled Go value, owned by the `HostObject`. Pointer-receiver method calls mutate this copy.
 - The caller's original Go value is not mutated by VM-side writes. Round-trip via `Unmarshal(ho, &dst)` to recover the current state into a new Go value.
 
-**Field access:** `Field` / `SetField` reflect against `Receiver` through the interpreter's `Marshaler`. Methods are pre-bound as `*HostFunction` values on the VM heap and retained via `Refs`.
+**Field access:** `Field` / `SetField` use compiled field metadata and unsafe offsets against `Receiver`. Methods are pre-bound as `*HostFunction` values on the VM heap and retained via `Refs`. Arbitrary Go function and method calls still use `reflect.Call` because their signatures are not known statically.
 
 ### `Unmarshal`
 
-`Unmarshal` converts `types.Value` back to Go. Destination must be a non-nil pointer.
+`Unmarshal` converts `types.Value` back to Go. Destination must be a non-nil pointer. The default marshaler reuses the same per-type plans used by `Marshal`.
 
 ```go
 var n int32

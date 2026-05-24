@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"testing"
 	"time"
 
@@ -2096,12 +2097,12 @@ type recordingMarshaler struct {
 	unmarshalCalled bool
 }
 
-func (m *recordingMarshaler) MarshalValue(_ *Interpreter, _ any) (types.Value, error) {
+func (m *recordingMarshaler) Marshal(_ *Interpreter, _ any) (types.Value, error) {
 	m.marshalCalled = true
 	return types.I32(9), nil
 }
 
-func (m *recordingMarshaler) UnmarshalValue(_ *Interpreter, _ types.Value, dst any) error {
+func (m *recordingMarshaler) Unmarshal(_ *Interpreter, _ types.Value, dst any) error {
 	m.unmarshalCalled = true
 	out, ok := dst.(*int32)
 	if !ok {
@@ -3226,6 +3227,30 @@ func TestInterpreter_Marshal(t *testing.T) {
 		}
 	})
 
+	t.Run("compiled plans are cached", func(t *testing.T) {
+		type sample struct {
+			Name  string
+			Count int32
+		}
+		m := newMarshaler()
+		t1 := reflect.TypeOf(sample{})
+		p1, err := m.plan(t1)
+		require.NoError(t, err)
+		p2, err := m.plan(t1)
+		require.NoError(t, err)
+		require.Same(t, p1, p2)
+	})
+
+	t.Run("custom marshaler routes marshal calls", func(t *testing.T) {
+		custom := &recordingMarshaler{}
+		i := New(program.New(nil), WithMarshaler(custom))
+		defer i.Close()
+
+		_, err := i.Marshal(struct{ Count int32 }{Count: 1})
+		require.NoError(t, err)
+		require.True(t, custom.marshalCalled)
+	})
+
 	t.Run("unsigned primitives preserve raw bits", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
@@ -3690,4 +3715,75 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			})
 		}
 	})
+}
+
+func BenchmarkInterpreter_Marshal(b *testing.B) {
+	type plainStruct struct {
+		Name  string
+		Count int32
+		Ratio float64
+	}
+	cases := []struct {
+		name  string
+		value any
+	}{
+		{"i32", int32(42)},
+		{"string", "hello"},
+		{"slice_i32", []int32{1, 2, 3, 4, 5, 6, 7, 8}},
+		{"map_string_i32", map[string]int32{"a": 1, "b": 2, "c": 3, "d": 4}},
+		{"struct_plain", plainStruct{Name: "n", Count: 7, Ratio: 1.5}},
+		{"host_object", hostCounter{Count: 1}},
+		{"function", func(a, b int32) int32 { return a + b }},
+		{"nested_slice_struct", []plainStruct{{Name: "a"}, {Name: "b"}, {Name: "c"}}},
+	}
+	for _, c := range cases {
+		b.Run(c.name, func(b *testing.B) {
+			i := New(program.New(nil))
+			defer i.Close()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for n := 0; n < b.N; n++ {
+				if _, err := i.Marshal(c.value); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkInterpreter_Unmarshal(b *testing.B) {
+	type plainStruct struct {
+		Name  string
+		Count int32
+		Ratio float64
+	}
+	cases := []struct {
+		name string
+		src  any
+		dst  func() any
+	}{
+		{"i32", int32(42), func() any { return new(int32) }},
+		{"string", "hello", func() any { return new(string) }},
+		{"slice_i32", []int32{1, 2, 3, 4, 5, 6, 7, 8}, func() any { return new([]int32) }},
+		{"map_string_i32", map[string]int32{"a": 1, "b": 2, "c": 3, "d": 4}, func() any { return new(map[string]int32) }},
+		{"struct_plain", plainStruct{Name: "n", Count: 7, Ratio: 1.5}, func() any { return new(plainStruct) }},
+		{"host_object", hostCounter{Count: 1}, func() any { return new(hostCounter) }},
+	}
+	for _, c := range cases {
+		b.Run(c.name, func(b *testing.B) {
+			i := New(program.New(nil))
+			defer i.Close()
+			val, err := i.Marshal(c.src)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for n := 0; n < b.N; n++ {
+				if err := i.Unmarshal(val, c.dst()); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }
