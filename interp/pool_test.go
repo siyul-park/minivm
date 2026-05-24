@@ -36,6 +36,48 @@ func TestNewPool(t *testing.T) {
 		defer p.Close()
 		require.Equal(t, int64(0), p.live.Load())
 	})
+
+	t.Run("shares default marshaler within pool", func(t *testing.T) {
+		p1 := NewPool(program.New(nil), 2)
+		defer p1.Close()
+
+		i1, err := p1.Get(context.Background())
+		require.NoError(t, err)
+		defer p1.Put(i1)
+
+		i2, err := p1.Get(context.Background())
+		require.NoError(t, err)
+		defer p1.Put(i2)
+
+		m1, ok := i1.marshaler.(*marshaler)
+		require.True(t, ok)
+		m2, ok := i2.marshaler.(*marshaler)
+		require.True(t, ok)
+		require.Same(t, m1, m2)
+
+		p2 := NewPool(program.New(nil), 1)
+		defer p2.Close()
+
+		i3, err := p2.Get(context.Background())
+		require.NoError(t, err)
+		defer p2.Put(i3)
+
+		m3, ok := i3.marshaler.(*marshaler)
+		require.True(t, ok)
+		require.NotSame(t, m1, m3)
+	})
+
+	t.Run("custom marshaler overrides pool default", func(t *testing.T) {
+		custom := &recordingMarshaler{}
+		p := NewPool(program.New(nil), 1, WithMarshaler(custom))
+		defer p.Close()
+
+		i, err := p.Get(context.Background())
+		require.NoError(t, err)
+		defer p.Put(i)
+
+		require.Same(t, custom, i.marshaler)
+	})
 }
 
 func TestPool_Get(t *testing.T) {
