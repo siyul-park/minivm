@@ -2204,14 +2204,34 @@ func TestInterpreter_Len(t *testing.T) {
 }
 
 func TestInterpreter_Alloc(t *testing.T) {
-	i := New(program.New(nil))
-	defer i.Close()
+	t.Run("basic", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
 
-	for _, v := range []types.Value{types.I32(7), types.BoxI32(3)} {
-		addr, err := i.Alloc(v)
+		for _, v := range []types.Value{types.I32(7), types.BoxI32(3)} {
+			addr, err := i.Alloc(v)
+			require.NoError(t, err)
+			require.Greater(t, addr, 0)
+		}
+	})
+
+	t.Run("interns strings", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		first, err := i.Alloc(types.String("same"))
 		require.NoError(t, err)
-		require.Greater(t, addr, 0)
-	}
+		second, err := i.Alloc(types.String("same"))
+		require.NoError(t, err)
+		require.Equal(t, first, second)
+		require.Equal(t, 2, i.rc[first])
+
+		require.NoError(t, i.Release(first))
+		require.Contains(t, i.interned, "same")
+
+		require.NoError(t, i.Release(second))
+		require.NotContains(t, i.interned, "same")
+	})
 }
 
 func TestInterpreter_Load(t *testing.T) {
@@ -3829,6 +3849,24 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		require.NoError(t, i.Unmarshal(types.I32(4), &out))
 		require.NotNil(t, out)
 		require.Equal(t, int32(4), *out)
+	})
+
+	t.Run("host object pointer target", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		id := hostUserID(41)
+		got, err := i.Marshal(&id)
+		require.NoError(t, err)
+
+		ho, ok := got.(*HostObject)
+		require.True(t, ok)
+		ho.SetField(0, types.BoxI64(99))
+
+		var out *hostUserID
+		require.NoError(t, i.Unmarshal(got, &out))
+		require.NotNil(t, out)
+		require.Equal(t, hostUserID(99), *out)
 	})
 
 	t.Run("value target", func(t *testing.T) {
