@@ -24,6 +24,25 @@ type jitCompiler struct {
 	constants []types.Boxed
 	globals   []types.Boxed
 	heap      []types.Value
+	entries   map[int]*jitEntry
+	ip        *Interpreter
+	// entryReturned mirrors jitRun.entryReturned for the emit pass.
+	// link consults this to gate jitEntry registration: only function
+	// entries whose entry segment natively pops its frame are
+	// call-target safe.
+	entryReturned bool
+}
+
+// jitEntry records a JIT-compiled function entry that is callable
+// natively from another JIT segment. Populated by Interpreter.jit
+// after a successful function-entry segment compile (segment start
+// IP == 0). chunk.Ptr() is the absolute branch target; params/locals/
+// rets mirror *types.Function metadata for use by CALL/RETURN handlers.
+type jitEntry struct {
+	chunk  *asm.Chunk
+	params []types.Kind
+	locals []types.Kind
+	rets   []types.Kind
 }
 
 type jitPlan struct {
@@ -60,6 +79,13 @@ type jitSeg struct {
 	params  []asm.VReg
 	facts   map[int]types.Kind
 	scratch []asm.PReg
+	// pendingFuncRef carries the heap addr of a *types.Function set by
+	// CONST_GET when its successor opcode is CALL. The value is fused
+	// CONST_GET+CALL metadata: no VReg is pushed and no native code is
+	// emitted for the CONST_GET itself, so a segment exit between the
+	// two opcodes cannot leave a half-formed ref on the eval stack.
+	// CALL consumes the field and resets it to 0.
+	pendingFuncRef int
 }
 
 const (
@@ -67,6 +93,8 @@ const (
 	rHeap
 	rGlobals
 	rNext
+	rInterp
+	rScratchCount
 )
 
 type jitOp func(*jitSeg) (ok bool, stop bool)
@@ -146,6 +174,14 @@ func (c *jitCompiler) scan(plan jitPlan) (map[int]*asm.Signature, bool) {
 	}
 	defer buf.Free()
 
+	// Scan pass uses a throwaway buffer to expose segment signatures
+	// before the emit pass. jitSeg writes c.entryReturned directly when
+	// the function-entry segment runs to RETURN — required for self-
+	// recursion CALL emission since emit-time entries[c.addr] is always
+	// nil for the function currently being compiled. Reset the flag so
+	// the scan run rediscovers it.
+	c.entryReturned = false
+
 	r := newJITRun(c, asm.NewAssembler(arch, buf), plan.code, nil, true)
 	r.bind(plan.blocks)
 
@@ -186,6 +222,12 @@ func (c *jitCompiler) link(code []byte, objs []*asm.RelocObject, entries []int) 
 
 		c.profile.JITLink()
 		out[entries[i]] = fn
+
+		if entries[i] == 0 && c.entryReturned && c.entries != nil {
+			if e := newJitEntry(c.heap, c.addr, objs[i].Chunk); e != nil {
+				c.entries[c.addr] = e
+			}
+		}
 	}
 	return out
 }
@@ -370,7 +412,7 @@ func (s *jitSeg) Pop() (asm.VReg, bool) {
 
 func (s *jitSeg) init() {
 	s.scratch = s.scratch[:0]
-	for range 4 {
+	for range rScratchCount {
 		s.scratch = append(s.scratch, s.assembler.Scratch())
 	}
 
@@ -566,8 +608,35 @@ func sameStack(src []asm.VReg, dst []asm.PReg) bool {
 	return true
 }
 
+// newJitEntry builds a jitEntry from heap-resident *types.Function
+// metadata. chunk is the native target for cross-function callers
+// (BLR) and nil for self-recursion (caller uses BL to a chunk-local
+// label instead). Returns nil if addr does not point at a Function.
+func newJitEntry(heap []types.Value, addr int, chunk *asm.Chunk) *jitEntry {
+	if addr <= 0 || addr >= len(heap) {
+		return nil
+	}
+	fn, ok := heap[addr].(*types.Function)
+	if !ok || fn.Typ == nil {
+		return nil
+	}
+	kinds := func(ts []types.Type) []types.Kind {
+		out := make([]types.Kind, len(ts))
+		for i, t := range ts {
+			out[i] = t.Kind()
+		}
+		return out
+	}
+	return &jitEntry{
+		chunk:  chunk,
+		params: kinds(fn.Typ.Params),
+		locals: kinds(fn.Locals),
+		rets:   kinds(fn.Typ.Returns),
+	}
+}
+
 func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpreter) {
-	if len(sig.Scratch) <= rNext {
+	if len(sig.Scratch) <= rInterp {
 		return nil
 	}
 
@@ -617,9 +686,16 @@ func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpret
 		}
 		c.scratch(i, scratch)
 
+		savedFp := i.fp
 		rets, err := fn.Call(params, &scratch)
 		if err != nil {
 			panic(err)
+		}
+
+		// Native RETURN inside the chunk already restored i.fr/i.fp/i.sp
+		// and copied returns into i.stack. Skip the Go-side post-amble.
+		if i.fp != savedFp {
+			return
 		}
 
 		for j, val := range rets {
@@ -653,6 +729,7 @@ func (c *jitCompiler) scratch(i *Interpreter, scratch []uint64) {
 	scratch[rStack] = uint64(uintptr(unsafe.Pointer(&i.stack[f.bp])))
 	scratch[rHeap] = uint64(uintptr(unsafe.Pointer(unsafe.SliceData(i.heap))))
 	scratch[rGlobals] = uint64(uintptr(unsafe.Pointer(unsafe.SliceData(i.globals))))
+	scratch[rInterp] = uint64(uintptr(unsafe.Pointer(i)))
 }
 
 func (c *jitCompiler) regKind(r asm.Reg) (types.Kind, bool) {

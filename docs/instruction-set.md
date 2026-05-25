@@ -72,8 +72,8 @@ Offsets are signed 16-bit values encoded little-endian. `BR 5` skips 5 bytes pas
 | `BR` | `{2}` | `→` | ◐ | Unconditional relative jump. JIT only when current segment has no pending return values. |
 | `BR_IF` | `{2}` | `cond →` | ◐ | Jump if `cond ≠ 0`, else fall through. JIT only for simple stack shapes. |
 | `BR_TABLE` | `{-2, 2}` | `index →` | ◐ | Jump table; negative or out-of-range index uses default target. JIT only for simple stack shapes. |
-| `CALL` | `{}` | `fn →` | ⬜ | Call `*Function` or `*HostFunction`; pushes a frame. |
-| `RETURN` | `{}` | `→` | ⬜ | Return from current frame. |
+| `CALL` | `{}` | `fn →` | ◐ | Call `*Function` or `*HostFunction`; pushes a frame. JIT only for fused `CONST_GET`+`CALL` of a `*types.Function` whose entry segment is already JIT-compiled (cross-function) or is the current self-recursion target with `entryReturned`. Signature must be numeric-only (`i32`/`f32`/`f64`); `i64`, refs, and `HostFunction` calls stay threaded. |
+| `RETURN` | `{}` | `→` | ◐ | Return from current frame. JIT only at function-entry segments (segment start IP == 0) whose returns are numeric-only (`i32`/`f32`/`f64`); RETURN inside non-entry segments stays threaded. Registers the function in `Interpreter.jitEntries` so subsequent native callers can BLR it. |
 
 ## Variables
 

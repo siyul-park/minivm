@@ -573,6 +573,14 @@ func BLabel(id int) asm.Instruction {
 	return asm.Instruction{Op: uint16(OpB), Src2: asm.LabelOperand{ID: id}}
 }
 
+// BLLabel emits a branch-with-link (BL) targeting a label. Used by JIT
+// CALL handler for self-recursion: the chunk-local entry label binds
+// to IP 0 of the function being compiled, and resolution happens at
+// Link time exactly like BLabel.
+func BLLabel(id int) asm.Instruction {
+	return asm.Instruction{Op: uint16(OpBL), Src2: asm.LabelOperand{ID: id}}
+}
+
 // condOp must be one of OpBEQ, OpBNE, OpBLT, OpBGT, OpBLE, OpBGE, …
 func BCondLabel(condOp Op, id int) asm.Instruction {
 	return asm.Instruction{Op: uint16(condOp), Src2: asm.LabelOperand{ID: id}}

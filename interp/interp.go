@@ -15,30 +15,31 @@ import (
 )
 
 type Interpreter struct {
-	ctx       context.Context
-	prof      *prof.Stats
-	hook      func(*Interpreter) error
-	marshaler Marshaler
-	buffer    *asm.Buffer
-	instrs    [][]byte
-	code      [][]func(*Interpreter)
-	frames    []frame
-	types     []types.Type
-	constants []types.Boxed
-	globals   []types.Boxed
-	interned  map[string]types.Ref
-	stack     []types.Boxed
-	roots     []types.Boxed
-	heap      []types.Value
-	free      []int
-	rc        []int
-	fr        *frame
-	fp        int
-	sp        int
-	tick      int
-	threshold int64
-	fuel      int64
-	cutoff    int
+	ctx        context.Context
+	prof       *prof.Stats
+	hook       func(*Interpreter) error
+	marshaler  Marshaler
+	buffer     *asm.Buffer
+	instrs     [][]byte
+	code       [][]func(*Interpreter)
+	jitEntries map[int]*jitEntry
+	frames     []frame
+	types      []types.Type
+	constants  []types.Boxed
+	globals    []types.Boxed
+	interned   map[string]types.Ref
+	stack      []types.Boxed
+	roots      []types.Boxed
+	heap       []types.Value
+	free       []int
+	rc         []int
+	fr         *frame
+	fp         int
+	sp         int
+	tick       int
+	threshold  int64
+	fuel       int64
+	cutoff     int
 }
 
 type frame struct {
@@ -169,26 +170,27 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	}
 
 	i := &Interpreter{
-		prof:      p,
-		hook:      opt.hook,
-		marshaler: m,
-		instrs:    make([][]byte, len(prog.Constants)+1),
-		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
-		frames:    make([]frame, opt.frame),
-		types:     prog.Types,
-		constants: make([]types.Boxed, len(prog.Constants)),
-		globals:   make([]types.Boxed, 0, opt.globals),
-		interned:  make(map[string]types.Ref),
-		stack:     make([]types.Boxed, opt.stack),
-		heap:      make([]types.Value, 0, opt.heap),
-		free:      make([]int, 0, opt.heap),
-		rc:        make([]int, 0, opt.heap),
-		fp:        0,
-		sp:        0,
-		tick:      opt.tick,
-		threshold: threshold,
-		fuel:      fuel,
-		cutoff:    opt.cutoff,
+		prof:       p,
+		hook:       opt.hook,
+		marshaler:  m,
+		instrs:     make([][]byte, len(prog.Constants)+1),
+		code:       make([][]func(*Interpreter), len(prog.Constants)+1),
+		jitEntries: make(map[int]*jitEntry),
+		frames:     make([]frame, opt.frame),
+		types:      prog.Types,
+		constants:  make([]types.Boxed, len(prog.Constants)),
+		globals:    make([]types.Boxed, 0, opt.globals),
+		interned:   make(map[string]types.Ref),
+		stack:      make([]types.Boxed, opt.stack),
+		heap:       make([]types.Value, 0, opt.heap),
+		free:       make([]int, 0, opt.heap),
+		rc:         make([]int, 0, opt.heap),
+		fp:         0,
+		sp:         0,
+		tick:       opt.tick,
+		threshold:  threshold,
+		fuel:       fuel,
+		cutoff:     opt.cutoff,
 	}
 
 	i.alloc(types.Null)
@@ -532,6 +534,8 @@ func (i *Interpreter) jit(addr int) error {
 		globals:   i.globals,
 		heap:      i.heap,
 		cutoff:    i.cutoff,
+		entries:   i.jitEntries,
+		ip:        i,
 	}
 	for j, fn := range c.Compile(i.instrs[addr]) {
 		if fn != nil {

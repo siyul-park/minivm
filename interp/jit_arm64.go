@@ -11,8 +11,30 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// Layout offsets for native CALL/RETURN. Resolved once at init from the
+// live struct definitions so a future field reorder cannot silently
+// corrupt frame state.
+var (
+	offInterpFP      uintptr
+	offInterpSP      uintptr
+	offInterpFR      uintptr
+	offInterpFrames  uintptr
+	offInterpStack   uintptr
+	offInterpHeap    uintptr
+	offInterpGlobals uintptr
+	offInterpCode    uintptr
+	sizeofFrame      uintptr
+	offFrameCode     uintptr
+	offFrameAddr     uintptr
+	offFrameIP       uintptr
+	offFrameBP       uintptr
+	offFrameReturns  uintptr
+	offFrameRelease  uintptr
+)
+
 func init() {
 	arch = arm64.Arch
+	initLayout()
 
 	jitPrologue = func(s *jitSeg) {
 		s.assembler.Emits(arm64.LDI(s.scratch[rNext], uint64(s.end))...)
@@ -83,6 +105,16 @@ func init() {
 	jit[instr.UNREACHABLE] = func(s *jitSeg) (bool, bool) {
 		s.ip++
 		return false, false
+	}
+
+	jit[instr.CALL] = func(s *jitSeg) (bool, bool) {
+		s.ip++
+		return s.emitCall()
+	}
+
+	jit[instr.RETURN] = func(s *jitSeg) (bool, bool) {
+		s.ip++
+		return s.emitReturn()
 	}
 
 	jit[instr.DROP] = func(s *jitSeg) (bool, bool) {
@@ -431,6 +463,18 @@ func init() {
 			s.assembler.Emit(arm64.MOVK(ri, uint16((v>>48)&0xFFFF), 48))
 			s.assembler.Emit(arm64.FMOV(rf, ri))
 			s.Push(rf)
+		case types.KindRef:
+			// Fused CONST_GET+CALL: emit nothing for the CONST_GET
+			// itself when the very next opcode is CALL and the fused
+			// pair is guaranteed to compile cleanly. Materializing a
+			// Ref on the eval stack would corrupt mid-segment exits
+			// (closure() reboxes Width64 ints as I64, not Ref), so we
+			// must reject (returning false,false BEFORE the s.ip
+			// advance counts) when CALL would itself reject.
+			if !s.callFusable(val) {
+				return false, false
+			}
+			s.pendingFuncRef = val.Ref()
 		default:
 			return false, false
 		}
@@ -1907,4 +1951,467 @@ func (s *jitSeg) ret(nextIP int) {
 	s.assembler.Emits(arm64.LDI(s.scratch[rNext], uint64(nextIP))...)
 	s.assembler.Emits(arm64.LDI(arm64.X15, arm64.Header(nil, regs, len(s.scratch)))...)
 	s.assembler.Emit(arm64.RET())
+}
+
+// kindRegV1 returns the (type, width, ok) triple for a v1 native
+// CALL/RETURN kind. i64 is excluded because boxI64 has a slow-path
+// deopt that would emit s.ret() mid-sequence.
+func kindRegV1(k types.Kind) (asm.RegType, asm.RegWidth, bool) {
+	switch k {
+	case types.KindI32:
+		return asm.RegTypeInt, asm.Width32, true
+	case types.KindF32:
+		return asm.RegTypeFloat, asm.Width32, true
+	case types.KindF64:
+		return asm.RegTypeFloat, asm.Width64, true
+	}
+	return 0, 0, false
+}
+
+// boxByKind boxes a numeric VReg using the existing box helpers.
+// Accepts only the v1 numeric kinds.
+func (s *jitSeg) boxByKind(r asm.VReg, kind types.Kind) (asm.VReg, bool) {
+	typ, width, ok := kindRegV1(kind)
+	if !ok || r.Type() != typ || r.Width() != width {
+		return asm.VReg{}, false
+	}
+	switch kind {
+	case types.KindI32:
+		return s.boxI32(r), true
+	case types.KindF32:
+		return s.boxF32(r), true
+	case types.KindF64:
+		return s.boxF64(r), true
+	}
+	return asm.VReg{}, false
+}
+
+// numericEntryV1 reports whether every kind in a jitEntry signature is
+// supported by kindRegV1.
+func numericEntryV1(e *jitEntry) bool {
+	for _, k := range e.params {
+		if _, _, ok := kindRegV1(k); !ok {
+			return false
+		}
+	}
+	for _, k := range e.locals {
+		if _, _, ok := kindRegV1(k); !ok {
+			return false
+		}
+	}
+	for _, k := range e.rets {
+		if _, _, ok := kindRegV1(k); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// emitInterpReload re-materializes rInterp via LDI of the captured
+// immortal pointer. Interpreter is allocated once at New() and never
+// relocated, so embedding the pointer as immediate is safe.
+func (s *jitSeg) emitInterpReload() {
+	s.assembler.Emits(arm64.LDI(s.scratch[rInterp], uint64(uintptr(unsafe.Pointer(s.r.c.ip))))...)
+}
+
+// emitScratchReload reloads rStack/rHeap/rGlobals from the Interpreter
+// struct after a BLR clobbered the caller-save scratch registers.
+// rInterp must already be valid.
+func (s *jitSeg) emitScratchReload() {
+	a := s.assembler
+	a.Emit(arm64.LDR(s.scratch[rHeap], s.scratch[rInterp], int16(offInterpHeap)))
+	a.Emit(arm64.LDR(s.scratch[rGlobals], s.scratch[rInterp], int16(offInterpGlobals)))
+	stackData := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(stackData, s.scratch[rInterp], int16(offInterpStack)))
+	frPtr := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(frPtr, s.scratch[rInterp], int16(offInterpFR)))
+	bpVal := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(bpVal, frPtr, int16(offFrameBP)))
+	bpBytes := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LSLI(bpBytes, bpVal, 3))
+	a.Emit(arm64.ADD(s.scratch[rStack], stackData, bpBytes))
+}
+
+// callFusable reports whether a CONST_GET of the given Boxed value is
+// safe to fuse with an immediately following CALL — i.e., the fused
+// pair would compile cleanly through emitCall. The CONST_GET handler
+// uses this BEFORE setting pendingFuncRef so a rejection happens
+// before s.ip would advance past the CONST_GET, letting partial()
+// rewind and threaded resume from CONST_GET.
+func (s *jitSeg) callFusable(val types.Boxed) bool {
+	// Next opcode must be CALL.
+	if s.ip >= s.end || s.code[s.ip] != byte(instr.CALL) {
+		return false
+	}
+	addr := val.Ref()
+	if addr <= 0 || addr >= len(s.r.c.heap) {
+		return false
+	}
+	if _, ok := s.r.c.heap[addr].(*types.Function); !ok {
+		return false
+	}
+	// Resolve entry: self uses entryFromHeap (chunk filled at Link),
+	// cross-fn requires entries[addr] to be already registered.
+	var entry *jitEntry
+	if addr == s.r.c.addr {
+		if !s.r.c.entryReturned {
+			return false
+		}
+		if _, ok := s.labels[0]; !ok {
+			return false
+		}
+		entry = newJitEntry(s.r.c.heap, addr, nil)
+	} else {
+		entry = s.r.c.entries[addr]
+	}
+	if entry == nil || !numericEntryV1(entry) {
+		return false
+	}
+	nParams := len(entry.params)
+	if len(s.stack) < nParams {
+		return false
+	}
+	top := len(s.stack) - 1
+	for i := 0; i < nParams; i++ {
+		v := s.stack[top-i]
+		typ, width, ok := kindRegV1(entry.params[nParams-1-i])
+		if !ok || v.Type() != typ || v.Width() != width {
+			return false
+		}
+	}
+	return true
+}
+
+// emitCall is the body of jit[instr.CALL]. Returns (ok, stop). When
+// emit succeeds, the segment continues. Failure returns (false, false)
+// without mutating the assembler beyond what prior handlers committed.
+//
+// CALL is the consumer side of a CONST_GET+CALL fused pair: the
+// preceding CONST_GET set s.pendingFuncRef when it recognized a
+// JIT-eligible *types.Function constant, and emitted nothing. emitCall
+// uses that addr and clears the field. Without a pending ref, the
+// handler rejects (the fused pair is the only direct-call shape v1
+// supports).
+func (s *jitSeg) emitCall() (bool, bool) {
+	addr := s.pendingFuncRef
+	if addr == 0 {
+		return false, false
+	}
+	s.pendingFuncRef = 0
+
+	// Resolve entry. callFusable already validated all conditions, so
+	// non-nil and numeric-only are guaranteed for the path that set
+	// pendingFuncRef; the self/cross split picks the BL target shape.
+	isSelf := addr == s.r.c.addr
+	var entry *jitEntry
+	var selfLabel int
+	if isSelf {
+		selfLabel = s.labels[0]
+		entry = newJitEntry(s.r.c.heap, addr, nil)
+	} else {
+		entry = s.r.c.entries[addr]
+	}
+
+	nParams := len(entry.params)
+	nLocalsOnly := len(entry.locals)
+	nReturns := len(entry.rets)
+
+	// Caller frame layout. The CONST_GET that produced pendingFuncRef
+	// did not push a VReg, so the bytecode-logical eval-stack depth is
+	// len(s.stack) + 1. Threaded CALL computes callee_bp = sp -
+	// nParams - 1, which simplifies to:
+	//   callee_bp_from_caller_bp = callerSlots + len(s.stack) - nParams
+	fn := s.r.c.heap[s.r.c.addr].(*types.Function)
+	callerSlots := len(fn.Typ.Params) + len(fn.Locals)
+	calleeBPSlotOffset := callerSlots + len(s.stack) - nParams
+	calleeBPByteOffset := calleeBPSlotOffset * 8
+
+	// Pop nParams in declared order (last param popped first).
+	pregs := make([]asm.VReg, nParams)
+	for i := nParams - 1; i >= 0; i-- {
+		r, ok := s.Pop()
+		if !ok {
+			return false, false
+		}
+		pregs[i] = r
+	}
+
+	a := s.assembler
+
+	// Spill params into i.stack[callee_bp + i] via box helpers. rStack
+	// currently points at &i.stack[caller_bp]; offsets are relative to
+	// caller_bp.
+	for i, p := range pregs {
+		boxed, ok := s.boxByKind(p, entry.params[i])
+		if !ok {
+			return false, false
+		}
+		a.Emit(arm64.STR(boxed, s.scratch[rStack], int16(calleeBPByteOffset+i*8)))
+	}
+
+	// Zero the fn-ref slot (now first local) and remaining callee
+	// locals so threaded LOCAL_GET sees cleared slots.
+	zeroBase := calleeBPByteOffset + nParams*8
+	for i := 0; i < nLocalsOnly; i++ {
+		a.Emit(arm64.STR(arm64.XZR, s.scratch[rStack], int16(zeroBase+i*8)))
+	}
+
+	// Frame push.
+	s.emitInterpReload()
+
+	fpReg := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(fpReg, s.scratch[rInterp], int16(offInterpFP)))
+
+	framesPtr := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(framesPtr, s.scratch[rInterp], int16(offInterpFrames)))
+
+	// frameAddr = framesPtr + fpReg * sizeofFrame
+	frameAddr := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	if sz := uint8(log2(sizeofFrame)); sz != 0 {
+		shifted := a.NewVReg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LSLI(shifted, fpReg, sz))
+		a.Emit(arm64.ADD(frameAddr, framesPtr, shifted))
+	} else {
+		sizeReg := a.NewVReg(asm.RegTypeInt, asm.Width64)
+		a.Emits(arm64.LDI(sizeReg, uint64(sizeofFrame))...)
+		a.Emit(arm64.MADD(frameAddr, fpReg, sizeReg, framesPtr))
+	}
+
+	// f.code = i.code[addr] (24-byte slice header copy).
+	codeBase := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(codeBase, s.scratch[rInterp], int16(offInterpCode)))
+	codeEntry := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	offsetReg := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emits(arm64.LDI(offsetReg, uint64(addr*24))...)
+	a.Emit(arm64.ADD(codeEntry, codeBase, offsetReg))
+	for w := 0; w < 3; w++ {
+		tmp := a.NewVReg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LDR(tmp, codeEntry, int16(w*8)))
+		a.Emit(arm64.STR(tmp, frameAddr, int16(int(offFrameCode)+w*8)))
+	}
+
+	// f.addr = addr (constant).
+	addrReg := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emits(arm64.LDI(addrReg, uint64(addr))...)
+	a.Emit(arm64.STR(addrReg, frameAddr, int16(offFrameAddr)))
+
+	// f.ip = 0.
+	a.Emit(arm64.STR(arm64.XZR, frameAddr, int16(offFrameIP)))
+
+	// f.bp = caller_bp + calleeBPSlotOffset.
+	callerFr := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(callerFr, s.scratch[rInterp], int16(offInterpFR)))
+	callerBP := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(callerBP, callerFr, int16(offFrameBP)))
+	calleeBP := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	if calleeBPSlotOffset <= 0xFFFF {
+		a.Emit(arm64.ADDI(calleeBP, callerBP, uint16(calleeBPSlotOffset)))
+	} else {
+		offReg := a.NewVReg(asm.RegTypeInt, asm.Width64)
+		a.Emits(arm64.LDI(offReg, uint64(calleeBPSlotOffset))...)
+		a.Emit(arm64.ADD(calleeBP, callerBP, offReg))
+	}
+	a.Emit(arm64.STR(calleeBP, frameAddr, int16(offFrameBP)))
+
+	// f.returns = nReturns.
+	retReg := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emits(arm64.LDI(retReg, uint64(nReturns))...)
+	a.Emit(arm64.STR(retReg, frameAddr, int16(offFrameReturns)))
+
+	// f.release = 1 (byte).
+	oneReg := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emits(arm64.LDI(oneReg, 1)...)
+	a.Emit(arm64.STRB(oneReg, frameAddr, int16(offFrameRelease)))
+
+	// caller_frame.ip = postCallIP — for threaded fallback resume.
+	postIPReg := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emits(arm64.LDI(postIPReg, uint64(s.ip))...)
+	a.Emit(arm64.STR(postIPReg, callerFr, int16(offFrameIP)))
+
+	// i.fp++.
+	newFp := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ADDI(newFp, fpReg, 1))
+	a.Emit(arm64.STR(newFp, s.scratch[rInterp], int16(offInterpFP)))
+
+	// i.fr = frameAddr.
+	a.Emit(arm64.STR(frameAddr, s.scratch[rInterp], int16(offInterpFR)))
+
+	// i.sp = callee_bp + nParams + nLocalsOnly.
+	spDelta := nParams + nLocalsOnly
+	newSp := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	if spDelta <= 0xFFFF {
+		a.Emit(arm64.ADDI(newSp, calleeBP, uint16(spDelta)))
+	} else {
+		offReg := a.NewVReg(asm.RegTypeInt, asm.Width64)
+		a.Emits(arm64.LDI(offReg, uint64(spDelta))...)
+		a.Emit(arm64.ADD(newSp, calleeBP, offReg))
+	}
+	a.Emit(arm64.STR(newSp, s.scratch[rInterp], int16(offInterpSP)))
+
+	// Rebase rStack for callee: rStack = i.stack.data + calleeBP * 8.
+	stackData := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(stackData, s.scratch[rInterp], int16(offInterpStack)))
+	bpBytes := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LSLI(bpBytes, calleeBP, 3))
+	a.Emit(arm64.ADD(s.scratch[rStack], stackData, bpBytes))
+
+	// Call.
+	if isSelf {
+		a.Emit(arm64.BLLabel(selfLabel))
+	} else {
+		target := a.NewVReg(asm.RegTypeInt, asm.Width64)
+		a.Emits(arm64.LDI(target, uint64(uintptr(entry.chunk.Ptr())))...)
+		a.Emit(arm64.BLR(target))
+	}
+
+	// Post-BLR: scratch regs clobbered. Reload rInterp from immortal
+	// pointer, then derive the rest from i.
+	s.emitInterpReload()
+	s.emitScratchReload()
+
+	// Load nReturns boxed values from i.stack[callee_bp + i] and push
+	// the unboxed VRegs onto s.stack. rStack now = &i.stack[caller_bp];
+	// callee_bp_byte_offset relative to caller_bp is unchanged.
+	for i := 0; i < nReturns; i++ {
+		boxed := a.NewVReg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LDR(boxed, s.scratch[rStack], int16(calleeBPByteOffset+i*8)))
+		unboxed, ok := s.unbox64(boxed, entry.rets[i])
+		if !ok {
+			return false, false
+		}
+		s.Push(unboxed)
+	}
+	return true, false
+}
+
+// emitReturn is the body of jit[instr.RETURN]. Only valid when the
+// segment is the function-entry segment (s.start == 0) so the chunk
+// was entered via BLR (or trampoline that expects RET back). The
+// emitted code spills return values to i.stack[f.bp..], pops the
+// frame, and RETs.
+func (s *jitSeg) emitReturn() (bool, bool) {
+	if s.start != 0 {
+		return false, false
+	}
+	entry := newJitEntry(s.r.c.heap, s.r.c.addr, nil)
+	if entry == nil || !numericEntryV1(entry) {
+		return false, false
+	}
+	rets := entry.rets
+	if len(s.stack) < len(rets) {
+		return false, false
+	}
+	// Validate return kinds against current s.stack top.
+	for i, k := range rets {
+		v := s.stack[len(s.stack)-len(rets)+i]
+		typ, width, ok := kindRegV1(k)
+		if !ok || v.Type() != typ || v.Width() != width {
+			return false, false
+		}
+	}
+
+	a := s.assembler
+
+	// Spill returns to i.stack[f.bp + i] via boxByKind. rStack
+	// currently = &i.stack[f.bp] for this (callee) frame.
+	for i, k := range rets {
+		v := s.stack[len(s.stack)-len(rets)+i]
+		boxed, ok := s.boxByKind(v, k)
+		if !ok {
+			return false, false
+		}
+		a.Emit(arm64.STR(boxed, s.scratch[rStack], int16(i*8)))
+	}
+
+	// Pop frame: rInterp may already be valid (it was loaded at chunk
+	// entry by the trampoline and not yet clobbered), but reload for
+	// safety to keep this helper independent of upstream state.
+	s.emitInterpReload()
+
+	// i.sp = f.bp + len(rets). Use rStack-derived f.bp? Easier: load
+	// from i.fr.bp + len(rets).
+	frPtr := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(frPtr, s.scratch[rInterp], int16(offInterpFR)))
+	bpVal := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(bpVal, frPtr, int16(offFrameBP)))
+	newSp := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	if len(rets) <= 0xFFFF {
+		a.Emit(arm64.ADDI(newSp, bpVal, uint16(len(rets))))
+	} else {
+		offReg := a.NewVReg(asm.RegTypeInt, asm.Width64)
+		a.Emits(arm64.LDI(offReg, uint64(len(rets)))...)
+		a.Emit(arm64.ADD(newSp, bpVal, offReg))
+	}
+	a.Emit(arm64.STR(newSp, s.scratch[rInterp], int16(offInterpSP)))
+
+	// f.code = nil (zero 3 words of slice header).
+	for w := 0; w < 3; w++ {
+		a.Emit(arm64.STR(arm64.XZR, frPtr, int16(int(offFrameCode)+w*8)))
+	}
+
+	// i.fp--.
+	fpReg := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(fpReg, s.scratch[rInterp], int16(offInterpFP)))
+	newFp := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.SUBI(newFp, fpReg, 1))
+	a.Emit(arm64.STR(newFp, s.scratch[rInterp], int16(offInterpFP)))
+
+	// i.fr = &i.frames[newFp - 1] = framesPtr + (newFp - 1) * sizeofFrame.
+	framesPtr := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(framesPtr, s.scratch[rInterp], int16(offInterpFrames)))
+	idxReg := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.SUBI(idxReg, newFp, 1))
+	newFrAddr := a.NewVReg(asm.RegTypeInt, asm.Width64)
+	if sz := uint8(log2(sizeofFrame)); sz != 0 {
+		shifted := a.NewVReg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LSLI(shifted, idxReg, sz))
+		a.Emit(arm64.ADD(newFrAddr, framesPtr, shifted))
+	} else {
+		sizeReg := a.NewVReg(asm.RegTypeInt, asm.Width64)
+		a.Emits(arm64.LDI(sizeReg, uint64(sizeofFrame))...)
+		a.Emit(arm64.MADD(newFrAddr, idxReg, sizeReg, framesPtr))
+	}
+	a.Emit(arm64.STR(newFrAddr, s.scratch[rInterp], int16(offInterpFR)))
+
+	// Mark entry-segment native return so link() registers this
+	// function in jitEntries for subsequent cross-function callers.
+	s.r.c.entryReturned = true
+
+	a.Emit(arm64.RET())
+	return true, true
+}
+
+// log2 returns the integer base-2 log of n if n is a power of two,
+// else 0. Used to pick LSL shift count over MUL when sizeofFrame is
+// a power of two.
+func log2(n uintptr) int {
+	if n == 0 || n&(n-1) != 0 {
+		return 0
+	}
+	r := 0
+	for n > 1 {
+		n >>= 1
+		r++
+	}
+	return r
+}
+
+func initLayout() {
+	var i Interpreter
+	var f frame
+	offInterpFP = unsafe.Offsetof(i.fp)
+	offInterpSP = unsafe.Offsetof(i.sp)
+	offInterpFR = unsafe.Offsetof(i.fr)
+	offInterpFrames = unsafe.Offsetof(i.frames)
+	offInterpStack = unsafe.Offsetof(i.stack)
+	offInterpHeap = unsafe.Offsetof(i.heap)
+	offInterpGlobals = unsafe.Offsetof(i.globals)
+	offInterpCode = unsafe.Offsetof(i.code)
+	sizeofFrame = unsafe.Sizeof(f)
+	offFrameCode = unsafe.Offsetof(f.code)
+	offFrameAddr = unsafe.Offsetof(f.addr)
+	offFrameIP = unsafe.Offsetof(f.ip)
+	offFrameBP = unsafe.Offsetof(f.bp)
+	offFrameReturns = unsafe.Offsetof(f.returns)
+	offFrameRelease = unsafe.Offsetof(f.release)
 }

@@ -2689,6 +2689,42 @@ func TestInterpreter_WithProfile(t *testing.T) {
 		require.NotZero(t, jit.Links)
 		require.NotZero(t, jit.Bytes)
 	})
+
+	t.Run("jit call into jit'd numeric callee", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		// Helper(x) = x + 1. Its entry segment runs straight to
+		// RETURN, so it registers in jitEntries and becomes a native
+		// CALL target.
+		helper := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+		).Build()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 41),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(helper),
+		), WithTick(1), WithThreshold(1), WithCutoff(1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(42), v)
+
+		// Helper must register as a native CALL target after its JIT
+		// compile (entry segment terminates via RETURN). Heap slot 1
+		// holds the helper *types.Function constant.
+		require.NotNil(t, i.jitEntries[1])
+	})
 }
 
 func TestInterpreter_WithFuel(t *testing.T) {

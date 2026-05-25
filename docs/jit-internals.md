@@ -87,7 +87,7 @@ Rules:
 
 ## Scratch And Next IP
 
-ARM64 JIT reserves `arch.Scratch = X10-X15` as metadata channels outside normal params/returns.
+ARM64 JIT reserves `arch.Scratch = X10-X14` as metadata channels outside normal params/returns. Five slots, matching the `maxScratch = 5` ceiling in `asm/arm64/caller.go` and the `R10-R14` load/store band in `asm/arm64/abi_arm64.s`.
 
 | Scratch | Purpose |
 |---|---|
@@ -95,8 +95,9 @@ ARM64 JIT reserves `arch.Scratch = X10-X15` as metadata channels outside normal 
 | `rHeap` | heap pointer input |
 | `rGlobals` | globals pointer input |
 | `rNext` | next interpreter IP output |
+| `rInterp` | `&Interpreter` input; consumed by native `CALL`/`RETURN` to read/write `i.fp`, `i.fr`, `i.sp`, and `i.frames[fp]` via constant struct field offsets |
 
-`jitCompiler.closure()` writes scratch inputs, calls native code, receives typed `asm.Value` results, reads JIT-owned `rNext`, restores stack values, then sets `i.frames[fp-1].ip`.
+`jitCompiler.closure()` writes scratch inputs, calls native code, receives typed `asm.Value` results, reads JIT-owned `rNext`, restores stack values, then sets `i.frames[fp-1].ip`. After `fn.Call`, closure checks `i.fp != savedFp`; if a native `RETURN` has already restored frame state, closure skips its post-amble.
 
 ## Branches And Globals
 
@@ -105,6 +106,31 @@ Branches (`BR`, `BR_IF`, `BR_TABLE`) terminate segments. Branch offsets are sign
 Branch limits: `BR` rejects non-empty native returns; `BR_IF` and `BR_TABLE` reject when more than one return would need reconstruction. Branch handlers must not fall through `_EPILOGUE`, because that would overwrite branch-selected `rNext`.
 
 Mutable globals have no declared runtime kind. `GLOBAL_SET` / `GLOBAL_TEE` infer kind from source register and store in same-segment `c.globalKinds`. `GLOBAL_GET` compiles only after same-segment store proves kind. Never specialize `GLOBAL_GET` from current global value; dynamic kind changes would need deopt stack reconstruction, which current JIT ABI lacks.
+
+## Native CALL / RETURN
+
+`CALL` and `RETURN` are JIT-compiled under tight preconditions; otherwise they fall back to threaded handlers in `interp/threaded.go`.
+
+`CALL` rules (`s.emitCall`):
+
+- Must be the second half of a fused `CONST_GET`+`CALL` pair. `CONST_GET` of a `*types.Function` constant emits no native code and sets `s.pendingFuncRef = addr` only when `s.callFusable(val)` confirms the very next opcode is `CALL` and every emit-time precondition is met. A rejection at `CONST_GET` exits the segment before `s.ip` advances past it, so threaded resumes from `CONST_GET` cleanly.
+- Cross-function targets require `Interpreter.jitEntries[addr]` to be populated. The entry registry is filled by `jitCompiler.register` after a successful function-entry segment compile whose `didReturn` flag is set.
+- Self-recursion (`addr == c.addr`) emits `BL` to the chunk-local entry label (`s.labels[0]`) via `arm64.BLLabel`. The cross-segment label resolves through the existing assembler relocation path. Self-call additionally requires `c.entryReturned` (populated by the scan pass) so the BL target is guaranteed to terminate via a native `RETURN`.
+- Signatures must be numeric-only — `i32`, `f32`, `f64`. `i64` is excluded because `boxI64` has a slow-path deopt that would emit `s.ret()` in the middle of frame-push/pop sequences.
+- Native CALL:
+  1. Spills the `nParams` popped VReg params to `i.stack[callee_bp + i]` via the existing box helpers, using `rStack` (caller-relative).
+  2. Zeroes the fn-ref + remaining callee local slots.
+  3. Pushes a new frame at `i.frames[i.fp]` via LDR/STR through `rInterp` and constant `unsafe.Offsetof` offsets, writes `i.fp++`, `i.fr = frameAddr`, `i.sp = callee_bp + nParams + nLocals`, and stamps `caller_frame.ip = post_CALL_IP` for threaded fallback resume.
+  4. Rebases `rStack` for the callee and issues `BL`/`BLR` to the chunk entry.
+  5. After return, reloads `rInterp` from the immortal `&Interpreter` pointer (LDI), then re-derives `rStack`, `rHeap`, `rGlobals` from the struct.
+  6. Loads `nReturns` boxed values from `i.stack[callee_bp + i]` via `unbox64` and pushes the resulting VRegs.
+
+`RETURN` rules (`s.emitReturn`):
+
+- Only valid at function-entry segments (`s.start == 0`); otherwise the handler rejects so the segment falls back to threaded. The entry-only rule guarantees the chunk was entered via `BL`/`BLR` (or trampoline) expecting `RET` back.
+- Returns must be numeric-only — same restriction as `CALL`.
+- Emits the inverse of `CALL`: spills returns to `i.stack[f.bp + i]`, zeros `f.code`, decrements `i.fp`, sets `i.fr = &i.frames[fp-1]`, writes `i.sp = f.bp + nReturns`, then `RET`.
+- Sets `s.didReturn = true`. The compiler propagates this through `jitRun.entryReturned` → `jitCompiler.entryReturned` so `link()` knows whether to register the function in `i.jitEntries`.
 
 ## Segment Selection
 
