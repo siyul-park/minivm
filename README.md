@@ -34,30 +34,30 @@ go get github.com/siyul-park/minivm
 
 ## Performance
 
-Recursive `fib(35)` — linux/amd64, Intel Xeon @ 2.80 GHz, Go 1.26.2:
+Recursive `fib(35)` — linux/amd64, Intel Xeon @ 2.10 GHz, Go 1.26.2:
 
 | Runtime | ns/op | B/op | allocs/op | vs native Go | execution model |
 |---|---|---|---|---|---|
-| native Go | 51,947,220 | 0 | 0 | 1× | compiled |
-| wazero | 84,807,148 | 16 | 2 | 1.6× | WASM JIT |
-| **minivm** | **1,672,707,295** | **288** | **1** | **32×** | **threaded interpreter** |
-| tengo | 2,665,298,176 | 312,800,180 | 39,088,180 | 51× | bytecode VM |
-| gopher-lua | 4,081,167,978 | 971,008 | 3,793 | 79× | register VM |
-| goja | 5,427,175,850 | 383,488 | 46,384 | 105× | bytecode VM |
+| native Go | 56,441,552 | 0 | 0 | 1× | compiled |
+| wazero | 84,601,941 | 16 | 2 | 1.5× | WASM → native JIT |
+| **minivm** | **1,320,092,108** | **244** | **1** | **23×** | **threaded interpreter** |
+| tengo | 2,276,648,719 | 312,797,200 | 39,088,175 | 40× | bytecode VM |
+| gopher-lua | 3,002,897,021 | 971,008 | 3,793 | 53× | register VM |
+| goja | 3,962,089,181 | 380,400 | 46,377 | 70× | bytecode VM |
 
-Among interpreters without JIT, minivm is fastest in this benchmark: **1.6× tengo, 2.4× gopher-lua, 3.2× goja**. Allocation count stays near zero regardless of recursion depth; tengo accumulates 39M allocations at fib(35).
+Among interpreters without JIT, minivm is fastest in this benchmark: **1.7× tengo, 2.3× gopher-lua, 3.0× goja**. Allocation count stays near zero regardless of recursion depth; tengo accumulates 39M allocations at fib(35).
 
-wazero's lead is structural: it compiles WASM to native x86-64 at module load. minivm closes this gap on ARM64, where JIT promotes hot segments to native code.
+wazero's advantage is structural: it compiles the WebAssembly module to native x86-64 at load time. minivm closes this gap on ARM64, where JIT promotes hot numeric segments to native code.
 
 Single-instruction throughput (threaded interpreter):
 
 | Workload | ns/op |
 |---|---|
-| i32/i64/f32/f64 arithmetic | ~20–22 |
+| i32/i64/f32/f64 arithmetic | ~17–25 |
 | branches (`br`, `br_if`) | ~20–24 |
 | bytecode function call | ~26–29 |
 | host function call | ~36 |
-| array / struct operations | ~90–140 |
+| array / struct operations | ~82–117 |
 
 Full results: [`docs/benchmarks.md`](docs/benchmarks.md)
 
