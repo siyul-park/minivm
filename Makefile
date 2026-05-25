@@ -53,6 +53,7 @@ coverage:
 
 benchmark:
 	@go test -run="-" -bench=".*" -benchmem $(test-options) ./...
+	@(cd benchmarks && go test -run="-" -bench=".*" -benchmem $(test-options) ./...)
 
 lint: fmt vet
 
