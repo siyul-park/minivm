@@ -2,22 +2,18 @@ package arm64
 
 import "github.com/siyul-park/minivm/asm"
 
-type ABI struct{}
+type abi struct{}
 
-var _ asm.ABI = (*ABI)(nil)
+var _ asm.ABI = abi{}
 
-func NewABI() *ABI {
-	return &ABI{}
-}
-
-func (a *ABI) NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
+func (abi) NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
 	return NewCaller(sig, chunk)
 }
 
-func (a *ABI) MaxParams() int {
+func (abi) MaxParams() int {
 	return abiRegs
 }
 
-func (a *ABI) MaxReturns() int {
+func (abi) MaxReturns() int {
 	return abiRegs
 }

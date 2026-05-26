@@ -43,7 +43,7 @@ import "github.com/siyul-park/minivm/asm"
 var Arch = &asm.Arch{
     Registers: NewRegInfo(),
     Encoder:   NewEncoder(),
-    ABI:       NewABI(),
+    ABI:       abi{},
 
     // Caller-saved metadata registers, e.g. next interpreter IP.
     // Must not overlap ABI params/returns.
@@ -109,56 +109,45 @@ func RET() asm.Instruction { ... }
 
 ### `abi.go` and `abi_<arch>.go` / `abi_<arch>.s`
 
-Implement `asm.ABI` and `asm.Caller`. Trampoline must:
+Implement `asm.ABI` with an unexported stateless adapter and expose the backend's `NewCaller`. Trampoline must:
 
-1. marshal `params []uint64` into native calling-convention registers
+1. marshal `params []asm.Value` into native calling-convention registers
 2. call the chunk
-3. collect register returns into `[]uint64`
+3. collect register returns into `[]asm.Value`
 
 ```go
-var _ asm.ABI = (*ABI)(nil)
+type abi struct{}
 
 const (
     maxParams  = 8
     maxReturns = 8
 )
 
-type ABI struct{}
+var _ asm.ABI = abi{}
 
-func (a *ABI) NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
+func (abi) NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
     return NewCaller(sig, chunk)
 }
 
-func (a *ABI) MaxParams() int  { return maxParams }
-func (a *ABI) MaxReturns() int { return maxReturns }
+func (abi) MaxParams() int  { return maxParams }
+func (abi) MaxReturns() int { return maxReturns }
+
+func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
+    // Validate sig.Params, sig.Returns, and sig.Scratch, then build caller.
+}
 ```
 
 ### `abi_stub.go`
 
-Non-target stubs must declare every exported symbol from build-tagged files.
+Non-target stubs must declare native invocation symbols referenced by the portable caller implementation.
 
 ```go
 //go:build !<arch>
 
 package <arch>
 
-import "github.com/siyul-park/minivm/asm"
-
-type ABI struct{}
-
-var Arch *asm.Arch
-
-func NewABI() *ABI { return nil }
-
-func (a *ABI) NewCaller(_ *asm.Signature, _ *asm.Chunk) (asm.Caller, error) {
-    return nil, nil
+func invoke(addr uintptr, argv uintptr) {
 }
-
-func (a *ABI) MaxParams() int  { return 0 }
-func (a *ABI) MaxReturns() int { return 0 }
-
-func NewEncoder() *Encoder  { return nil }
-func NewRegInfo() asm.RegInfo { return asm.RegInfo{} }
 ```
 
 ### Tests
@@ -177,12 +166,17 @@ func TestAssembler_Compile(t *testing.T) {
 
     a := asm.NewAssembler(Arch, buffer)
 
-    left, _ := a.Take(asm.RegTypeInt, asm.Width64)
-    right, _ := a.Take(asm.RegTypeInt, asm.Width64)
-
+    left := a.NewVReg(asm.RegTypeInt, asm.Width64)
+    right := a.NewVReg(asm.RegTypeInt, asm.Width64)
     result := a.NewVReg(asm.RegTypeInt, asm.Width64)
-    a.Push(result)
+    require.NoError(t, a.Pin(left, asm.NewPReg(0, asm.RegTypeInt, asm.Width64)))
+    require.NoError(t, a.Pin(right, asm.NewPReg(1, asm.RegTypeInt, asm.Width64)))
+    require.NoError(t, a.Pin(result, asm.NewPReg(0, asm.RegTypeInt, asm.Width64)))
+    a.Site(0, []asm.VReg{right, left})
+
     a.Emit(ADD(result, left, right))
+    idx := a.Index()
+    a.Site(idx, []asm.VReg{result})
     a.Emit(RET())
 
     obj, err := a.Compile()
@@ -192,9 +186,9 @@ func TestAssembler_Compile(t *testing.T) {
     require.NoError(t, err)
     require.NotNil(t, callers[0])
 
-    out, err := callers[0].Call([]uint64{3, 5}, nil)
+    out, err := callers[0].Call([]asm.Value{asm.I64(3), asm.I64(5)}, nil)
     require.NoError(t, err)
-    require.Equal(t, []uint64{8}, out)
+    require.Equal(t, []asm.Value{asm.I64(8)}, out)
 }
 ```
 

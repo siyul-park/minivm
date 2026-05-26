@@ -24,7 +24,8 @@ Import direction: `A → B` means `A` imports `B`.
 ```text
 program → instr
 interp  → program, instr, types, asm, prof, pass, analysis
-asm     → asm/arm64
+interp/jit_arm64 → asm/arm64
+asm/arm64 → asm
 analysis → pass, types, instr
 transform → analysis, pass, types, instr, program
 optimize → transform, analysis, pass, program
@@ -37,6 +38,8 @@ Core paths:
 ```text
 program → instr → nothing
 interp → program, instr, types, asm, pass, analysis
+interp/jit_arm64 → asm/arm64
+asm/arm64 → asm
 optimize → transform → analysis → pass
 cli → instr, interp, program, types, cobra
 ```
@@ -114,7 +117,8 @@ Core API:
 - `NewVReg(type,width)`: allocate virtual register.
 - `Emit(inst)`: append instruction.
 - `Pin(vreg, preg)`: bind VReg to physical register (JIT uses for ABI slots).
-- `Site(idx, live)`: declare ABI boundary at instruction idx with live values.
+- `Site(0, live)`: declare the single entry parameter signature.
+- `Site(idx, live)` for `idx > 0`: declare a return site signature.
 - `Compile()`: allocate physical regs, encode, append buffer, return `RelocObject`.
 - `Link([]*RelocObject)`: patch cross-segment labels, return native `Caller`s.
 
@@ -124,12 +128,12 @@ Core API:
 2. `newCompiler()`: allocate physical regs via `RegAlloc`, encode IR to machine code.
 3. `resolve()`: two-pass encode. Pass 1 measures sizes via `Imm(0)` placeholders; Pass 2 patches labels and records `Relocation`s.
 4. `buffer.Unseal()` → `buffer.Append(code)` → `buffer.Seal()`: write to executable memory.
-5. Return `*RelocObject` with chunk, `Signature` (from `Site` declarations), relocations.
+5. Return `*RelocObject` with chunk, `Signature{Params, Returns, Scratch}` from `Site` declarations, and relocations.
 6. `Link([]*RelocObject)`: unseal, patch relocations, seal, create one `Caller` per object.
 
 ### `asm/arm64/`
 
-Implements the `asm.Arch` singleton, `asm.Encoder`, `asm.ABI`, and `asm.Caller`.
+Exposes the `asm.Arch` singleton and encoder/caller, with an unexported adapter implementing `asm.ABI`.
 
 `Caller` invokes native chunks through `abi_arm64.s`. The trampoline marshals `argv` as `[header, reserved…, params…]`, copies `argv[0]` into the header register, loads scratch `X10–X14`, calls with `BL`, copies the header register back to `argv[0]`, then writes scratch outputs and return values. `header uint64` encodes param/return counts, reserved count, and float/width masks. `X8`/`X9` are excluded from `arch.Scratch` for trampoline temporaries; `X15` is the header register.
 

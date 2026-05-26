@@ -79,25 +79,33 @@ func TestAssembler_Emit(t *testing.T) {
 	require.Equal(t, 1, idx1)
 }
 
-func TestAssembler_SiteSignature(t *testing.T) {
+func TestAssembler_Site(t *testing.T) {
 	buf, err := NewBuffer(256)
 	require.NoError(t, err)
 	defer buf.Free()
 	a := NewAssembler(&Arch{Registers: NewRegInfo(8, 4, nil, nil), ABI: testABI{}, Encoder: testEncoder{}}, buf)
 
-	v := a.NewVReg(RegTypeInt, Width64)
-	require.NoError(t, a.Pin(v, NewPReg(0, RegTypeInt, Width64)))
-	a.Site(0, []VReg{v})
+	left := a.NewVReg(RegTypeInt, Width64)
+	right := a.NewVReg(RegTypeInt, Width64)
+	require.NoError(t, a.Pin(left, NewPReg(0, RegTypeInt, Width64)))
+	require.NoError(t, a.Pin(right, NewPReg(1, RegTypeInt, Width64)))
+	a.Site(0, []VReg{left})
 
 	a.Emit(Instruction{Op: 1})
-	idx := a.Index()
-	a.Site(idx, []VReg{v})
+	first := a.Index()
+	a.Site(first, []VReg{left})
+	a.Emit(Instruction{Op: 2})
+	second := a.Index()
+	a.Site(second, []VReg{left, right})
 
 	obj, err := a.Compile()
 	require.NoError(t, err)
-	require.Equal(t, []PReg{NewPReg(0, RegTypeInt, Width64)}, obj.Sig.Params(obj.Sig.Entry))
-	require.Equal(t, []PReg{NewPReg(0, RegTypeInt, Width64)}, obj.Sig.Returns(idx))
-	require.Equal(t, Width64, obj.Sig.Returns(idx)[0].Width())
+	require.Equal(t, []PReg{NewPReg(0, RegTypeInt, Width64)}, obj.Sig.Params)
+	require.Equal(t, []PReg{NewPReg(0, RegTypeInt, Width64)}, obj.Sig.Returns[first])
+	require.Equal(t, []PReg{
+		NewPReg(0, RegTypeInt, Width64),
+		NewPReg(1, RegTypeInt, Width64),
+	}, obj.Sig.Returns[second])
 }
 
 func TestAssembler_Reset(t *testing.T) {

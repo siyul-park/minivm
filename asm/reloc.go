@@ -21,7 +21,6 @@ type RelocObject struct {
 	// Unresolved cross-block branches retain their LabelOperand in Src2
 	// so that Link can re-encode them once the target address is known.
 	Instrs []Instruction
-	Labels map[int]int // labelID → byte offset from Chunk start
 	Relocs []Relocation
 }
 

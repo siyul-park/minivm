@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCaller_Call(t *testing.T) {
+func TestNewCaller(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
 		buf, err := asm.NewBuffer(64)
 		require.NoError(t, err)
@@ -23,10 +23,8 @@ func TestCaller_Call(t *testing.T) {
 		require.NoError(t, buf.Seal())
 
 		sig := &asm.Signature{
-			Inputs: map[int][]asm.PReg{
-				0: {asm.NewPReg(0, asm.RegTypeInt, asm.Width64)},
-			},
-			Outputs: map[int][]asm.PReg{
+			Params: []asm.PReg{asm.NewPReg(0, asm.RegTypeInt, asm.Width64)},
+			Returns: map[int][]asm.PReg{
 				0: {asm.NewPReg(0, asm.RegTypeInt, asm.Width64)},
 			},
 		}
@@ -78,10 +76,7 @@ func TestCaller_Call(t *testing.T) {
 		require.NoError(t, err)
 
 		sig := &asm.Signature{
-			Inputs: map[int][]asm.PReg{
-				0: nil,
-			},
-			Outputs: map[int][]asm.PReg{
+			Returns: map[int][]asm.PReg{
 				0: {X0},
 				1: {X0, X1},
 			},
@@ -92,6 +87,31 @@ func TestCaller_Call(t *testing.T) {
 		out, err := c.Call(nil, nil)
 		require.NoError(t, err)
 		require.Equal(t, []asm.Value{asm.I64(11), asm.I64(31)}, out)
+	})
+
+	t.Run("defaults to site zero output layout", func(t *testing.T) {
+		buf, err := asm.NewBuffer(256)
+		require.NoError(t, err)
+		defer buf.Free()
+
+		a := asm.NewAssembler(Arch, buf)
+		a.Emits(LDI(X0, 11)...)
+		a.Emit(RET())
+		obj, err := a.Compile()
+		require.NoError(t, err)
+
+		sig := &asm.Signature{
+			Returns: map[int][]asm.PReg{
+				0: {X0},
+				1: {D0},
+			},
+		}
+		c, err := NewCaller(sig, obj.Chunk)
+		require.NoError(t, err)
+
+		out, err := c.Call(nil, nil)
+		require.NoError(t, err)
+		require.Equal(t, []asm.Value{asm.I64(11)}, out)
 	})
 
 	t.Run("reuses executable buffer", func(t *testing.T) {

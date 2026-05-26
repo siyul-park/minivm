@@ -27,7 +27,7 @@ func init() {
 		targetIP := s.ip + 3 + offset
 		s.ip += 3
 
-		if s.linkable(targetIP, false) {
+		if s.linkable(targetIP) {
 			s.assembler.Emit(arm64.BLabel(s.labels[targetIP]))
 		} else {
 			s.ret(targetIP)
@@ -46,8 +46,8 @@ func init() {
 			return false, false
 		}
 
-		targetLink := s.linkable(targetIP, false)
-		fallLink := s.linkable(fallIP, false)
+		targetLink := s.linkable(targetIP)
+		fallLink := s.linkable(fallIP)
 
 		switch {
 		case targetLink && fallLink:
@@ -184,7 +184,7 @@ func init() {
 
 		for j := 0; j <= count; j++ {
 			s.assembler.Bind(stubLabels[j])
-			if s.linkable(targetIPs[j], false) {
+			if s.linkable(targetIPs[j]) {
 				s.assembler.Emit(arm64.BLabel(s.labels[targetIPs[j]]))
 			} else {
 				s.ret(targetIPs[j])
@@ -225,7 +225,7 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		kind, ok := s.kind(r0)
+		kind, ok := s.regKind(r0)
 		if !ok {
 			return false, false
 		}
@@ -250,7 +250,7 @@ func init() {
 		if !ok {
 			return false, false
 		}
-		kind, ok := s.kind(r0)
+		kind, ok := s.regKind(r0)
 		if !ok {
 			return false, false
 		}
@@ -448,208 +448,55 @@ func init() {
 	}
 
 	jit[instr.I32_ADD] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.ADD(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width32, arm64.ADD)
 	}
 
 	jit[instr.I32_SUB] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.SUB(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width32, arm64.SUB)
 	}
 
 	jit[instr.I32_MUL] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.MUL(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width32, arm64.MUL)
 	}
 
 	jit[instr.I32_DIV_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.SDIV(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width32, arm64.SDIV)
 	}
 
 	jit[instr.I32_DIV_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.UDIV(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width32, arm64.UDIV)
 	}
 
 	jit[instr.I32_REM_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		r3 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		r4 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.SDIV(r3, r1, r0))
-		s.assembler.Emit(arm64.MUL(r4, r3, r0))
-		s.assembler.Emit(arm64.SUB(r2, r1, r4))
-		s.Push(r2)
-		return true, false
+		return s.remainder(asm.Width32, arm64.SDIV)
 	}
 
 	jit[instr.I32_REM_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		r3 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		r4 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.UDIV(r3, r1, r0))
-		s.assembler.Emit(arm64.MUL(r4, r3, r0))
-		s.assembler.Emit(arm64.SUB(r2, r1, r4))
-		s.Push(r2)
-		return true, false
+		return s.remainder(asm.Width32, arm64.UDIV)
 	}
 
 	jit[instr.I32_AND] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.AND(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width32, arm64.AND)
 	}
 
 	jit[instr.I32_OR] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.ORR(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width32, arm64.ORR)
 	}
 
 	jit[instr.I32_XOR] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.EOR(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width32, arm64.EOR)
 	}
 
 	jit[instr.I32_SHL] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.LSL(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width32, arm64.LSL)
 	}
 
 	jit[instr.I32_SHR_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.ASR(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width32, arm64.ASR)
 	}
 
 	jit[instr.I32_SHR_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.LSR(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width32, arm64.LSR)
 	}
 
 	jit[instr.I32_EQZ] = func(s *jitSeg) (bool, bool) {
@@ -665,235 +512,67 @@ func init() {
 	}
 
 	jit[instr.I32_EQ] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r1, arm64.CondEQ))
-		s.Push(r1)
-		return true, false
+		return s.compareI32(arm64.CondEQ)
 	}
 
 	jit[instr.I32_NE] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r1, arm64.CondNE))
-		s.Push(r1)
-		return true, false
+		return s.compareI32(arm64.CondNE)
 	}
 
 	jit[instr.I32_LT_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r1, arm64.CondLT))
-		s.Push(r1)
-		return true, false
+		return s.compareI32(arm64.CondLT)
 	}
 
 	jit[instr.I32_LT_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r1, arm64.CondCC))
-		s.Push(r1)
-		return true, false
+		return s.compareI32(arm64.CondCC)
 	}
 
 	jit[instr.I32_GT_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r1, arm64.CondGT))
-		s.Push(r1)
-		return true, false
+		return s.compareI32(arm64.CondGT)
 	}
 
 	jit[instr.I32_GT_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r1, arm64.CondHI))
-		s.Push(r1)
-		return true, false
+		return s.compareI32(arm64.CondHI)
 	}
 
 	jit[instr.I32_LE_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r1, arm64.CondLE))
-		s.Push(r1)
-		return true, false
+		return s.compareI32(arm64.CondLE)
 	}
 
 	jit[instr.I32_LE_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r1, arm64.CondLS))
-		s.Push(r1)
-		return true, false
+		return s.compareI32(arm64.CondLS)
 	}
 
 	jit[instr.I32_GE_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r1, arm64.CondGE))
-		s.Push(r1)
-		return true, false
+		return s.compareI32(arm64.CondGE)
 	}
 
 	jit[instr.I32_GE_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r1, arm64.CondCS))
-		s.Push(r1)
-		return true, false
+		return s.compareI32(arm64.CondCS)
 	}
 
 	jit[instr.I32_TO_I64_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		s.assembler.Emit(arm64.SXTW(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeInt, asm.Width32, asm.RegTypeInt, asm.Width64, arm64.SXTW)
 	}
 
 	jit[instr.I32_TO_I64_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		s.assembler.Emit(arm64.UXTW(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeInt, asm.Width32, asm.RegTypeInt, asm.Width64, arm64.UXTW)
 	}
 
 	jit[instr.I32_TO_F32_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeFloat, asm.Width32)
-		s.assembler.Emit(arm64.SCVTF(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeInt, asm.Width32, asm.RegTypeFloat, asm.Width32, arm64.SCVTF)
 	}
 
 	jit[instr.I32_TO_F32_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeFloat, asm.Width32)
-		s.assembler.Emit(arm64.UCVTF(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeInt, asm.Width32, asm.RegTypeFloat, asm.Width32, arm64.UCVTF)
 	}
 
 	jit[instr.I32_TO_F64_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeFloat, asm.Width64)
-		s.assembler.Emit(arm64.SCVTF(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeInt, asm.Width32, asm.RegTypeFloat, asm.Width64, arm64.SCVTF)
 	}
 
 	jit[instr.I32_TO_F64_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeFloat, asm.Width64)
-		s.assembler.Emit(arm64.UCVTF(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeInt, asm.Width32, asm.RegTypeFloat, asm.Width64, arm64.UCVTF)
 	}
 
 	jit[instr.I64_CONST] = func(s *jitSeg) (bool, bool) {
@@ -909,163 +588,43 @@ func init() {
 	}
 
 	jit[instr.I64_ADD] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.ADD(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width64, arm64.ADD)
 	}
 
 	jit[instr.I64_SUB] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.SUB(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width64, arm64.SUB)
 	}
 
 	jit[instr.I64_MUL] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.MUL(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width64, arm64.MUL)
 	}
 
 	jit[instr.I64_DIV_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.SDIV(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width64, arm64.SDIV)
 	}
 
 	jit[instr.I64_DIV_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.UDIV(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width64, arm64.UDIV)
 	}
 
 	jit[instr.I64_REM_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		r3 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		r4 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		s.assembler.Emit(arm64.SDIV(r3, r1, r0))
-		s.assembler.Emit(arm64.MUL(r4, r3, r0))
-		s.assembler.Emit(arm64.SUB(r2, r1, r4))
-		s.Push(r2)
-		return true, false
+		return s.remainder(asm.Width64, arm64.SDIV)
 	}
 
 	jit[instr.I64_REM_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		r3 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		r4 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		s.assembler.Emit(arm64.UDIV(r3, r1, r0))
-		s.assembler.Emit(arm64.MUL(r4, r3, r0))
-		s.assembler.Emit(arm64.SUB(r2, r1, r4))
-		s.Push(r2)
-		return true, false
+		return s.remainder(asm.Width64, arm64.UDIV)
 	}
 
 	jit[instr.I64_SHL] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.LSL(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width64, arm64.LSL)
 	}
 
 	jit[instr.I64_SHR_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.ASR(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width64, arm64.ASR)
 	}
 
 	jit[instr.I64_SHR_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.LSR(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeInt, asm.Width64, arm64.LSR)
 	}
 
 	jit[instr.I64_EQZ] = func(s *jitSeg) (bool, bool) {
@@ -1082,233 +641,63 @@ func init() {
 	}
 
 	jit[instr.I64_EQ] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondEQ))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeInt, asm.Width64, arm64.CMP, arm64.CondEQ)
 	}
 
 	jit[instr.I64_NE] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondNE))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeInt, asm.Width64, arm64.CMP, arm64.CondNE)
 	}
 
 	jit[instr.I64_LT_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondLT))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeInt, asm.Width64, arm64.CMP, arm64.CondLT)
 	}
 
 	jit[instr.I64_LT_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondCC))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeInt, asm.Width64, arm64.CMP, arm64.CondCC)
 	}
 
 	jit[instr.I64_GT_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondGT))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeInt, asm.Width64, arm64.CMP, arm64.CondGT)
 	}
 
 	jit[instr.I64_GT_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondHI))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeInt, asm.Width64, arm64.CMP, arm64.CondHI)
 	}
 
 	jit[instr.I64_LE_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondLE))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeInt, asm.Width64, arm64.CMP, arm64.CondLE)
 	}
 
 	jit[instr.I64_LE_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondLS))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeInt, asm.Width64, arm64.CMP, arm64.CondLS)
 	}
 
 	jit[instr.I64_GE_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondGE))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeInt, asm.Width64, arm64.CMP, arm64.CondGE)
 	}
 
 	jit[instr.I64_GE_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.CMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondCS))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeInt, asm.Width64, arm64.CMP, arm64.CondCS)
 	}
 
 	jit[instr.I64_TO_I32] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.UXTW(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeInt, asm.Width64, asm.RegTypeInt, asm.Width32, arm64.UXTW)
 	}
 
 	jit[instr.I64_TO_F32_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeFloat, asm.Width32)
-		s.assembler.Emit(arm64.SCVTF(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeInt, asm.Width64, asm.RegTypeFloat, asm.Width32, arm64.SCVTF)
 	}
 
 	jit[instr.I64_TO_F32_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeFloat, asm.Width32)
-		s.assembler.Emit(arm64.UCVTF(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeInt, asm.Width64, asm.RegTypeFloat, asm.Width32, arm64.UCVTF)
 	}
 
 	jit[instr.I64_TO_F64_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeFloat, asm.Width64)
-		s.assembler.Emit(arm64.SCVTF(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeInt, asm.Width64, asm.RegTypeFloat, asm.Width64, arm64.SCVTF)
 	}
 
 	jit[instr.I64_TO_F64_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeInt, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeFloat, asm.Width64)
-		s.assembler.Emit(arm64.UCVTF(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeInt, asm.Width64, asm.RegTypeFloat, asm.Width64, arm64.UCVTF)
 	}
 
 	jit[instr.F32_CONST] = func(s *jitSeg) (bool, bool) {
@@ -1324,225 +713,63 @@ func init() {
 	}
 
 	jit[instr.F32_ADD] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.FADD(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeFloat, asm.Width32, arm64.FADD)
 	}
 
 	jit[instr.F32_SUB] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.FSUB(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeFloat, asm.Width32, arm64.FSUB)
 	}
 
 	jit[instr.F32_MUL] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.FMUL(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeFloat, asm.Width32, arm64.FMUL)
 	}
 
 	jit[instr.F32_DIV] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.FDIV(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeFloat, asm.Width32, arm64.FDIV)
 	}
 
 	jit[instr.F32_EQ] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.FCMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondEQ))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeFloat, asm.Width32, arm64.FCMP, arm64.CondEQ)
 	}
 
 	jit[instr.F32_NE] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.FCMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondNE))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeFloat, asm.Width32, arm64.FCMP, arm64.CondNE)
 	}
 
 	jit[instr.F32_LT] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.FCMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondCC))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeFloat, asm.Width32, arm64.FCMP, arm64.CondCC)
 	}
 
 	jit[instr.F32_GT] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.FCMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondGT))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeFloat, asm.Width32, arm64.FCMP, arm64.CondGT)
 	}
 
 	jit[instr.F32_LE] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.FCMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondLS))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeFloat, asm.Width32, arm64.FCMP, arm64.CondLS)
 	}
 
 	jit[instr.F32_GE] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.FCMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondGE))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeFloat, asm.Width32, arm64.FCMP, arm64.CondGE)
 	}
 
 	jit[instr.F32_TO_I32_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.FCVTZS(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeFloat, asm.Width32, asm.RegTypeInt, asm.Width32, arm64.FCVTZS)
 	}
 
 	jit[instr.F32_TO_I32_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.FCVTZU(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeFloat, asm.Width32, asm.RegTypeInt, asm.Width32, arm64.FCVTZU)
 	}
 
 	jit[instr.F32_TO_I64_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		s.assembler.Emit(arm64.FCVTZS(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeFloat, asm.Width32, asm.RegTypeInt, asm.Width64, arm64.FCVTZS)
 	}
 
 	jit[instr.F32_TO_I64_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		s.assembler.Emit(arm64.FCVTZU(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeFloat, asm.Width32, asm.RegTypeInt, asm.Width64, arm64.FCVTZU)
 	}
 
 	jit[instr.F32_TO_F64] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width32)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeFloat, asm.Width64)
-		s.assembler.Emit(arm64.FCVT(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeFloat, asm.Width32, asm.RegTypeFloat, asm.Width64, arm64.FCVT)
 	}
 
 	jit[instr.F64_CONST] = func(s *jitSeg) (bool, bool) {
@@ -1560,226 +787,144 @@ func init() {
 	}
 
 	jit[instr.F64_ADD] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.FADD(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeFloat, asm.Width64, arm64.FADD)
 	}
 
 	jit[instr.F64_SUB] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.FSUB(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeFloat, asm.Width64, arm64.FSUB)
 	}
 
 	jit[instr.F64_MUL] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.FMUL(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeFloat, asm.Width64, arm64.FMUL)
 	}
 
 	jit[instr.F64_DIV] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		s.assembler.Emit(arm64.FDIV(r1, r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.binary(asm.RegTypeFloat, asm.Width64, arm64.FDIV)
 	}
 
 	jit[instr.F64_EQ] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.FCMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondEQ))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeFloat, asm.Width64, arm64.FCMP, arm64.CondEQ)
 	}
 
 	jit[instr.F64_NE] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.FCMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondNE))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeFloat, asm.Width64, arm64.FCMP, arm64.CondNE)
 	}
 
 	jit[instr.F64_LT] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.FCMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondCC))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeFloat, asm.Width64, arm64.FCMP, arm64.CondCC)
 	}
 
 	jit[instr.F64_GT] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.FCMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondGT))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeFloat, asm.Width64, arm64.FCMP, arm64.CondGT)
 	}
 
 	jit[instr.F64_LE] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.FCMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondLS))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeFloat, asm.Width64, arm64.FCMP, arm64.CondLS)
 	}
 
 	jit[instr.F64_GE] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r2 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.FCMP(r1, r0))
-		s.assembler.Emit(arm64.CSET(r2, arm64.CondGE))
-		s.Push(r2)
-		return true, false
+		return s.compare(asm.RegTypeFloat, asm.Width64, arm64.FCMP, arm64.CondGE)
 	}
 
 	jit[instr.F64_TO_I32_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.FCVTZS(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeFloat, asm.Width64, asm.RegTypeInt, asm.Width32, arm64.FCVTZS)
 	}
 
 	jit[instr.F64_TO_I32_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
-		s.assembler.Emit(arm64.FCVTZU(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeFloat, asm.Width64, asm.RegTypeInt, asm.Width32, arm64.FCVTZU)
 	}
 
 	jit[instr.F64_TO_I64_S] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		s.assembler.Emit(arm64.FCVTZS(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeFloat, asm.Width64, asm.RegTypeInt, asm.Width64, arm64.FCVTZS)
 	}
 
 	jit[instr.F64_TO_I64_U] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		s.assembler.Emit(arm64.FCVTZU(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeFloat, asm.Width64, asm.RegTypeInt, asm.Width64, arm64.FCVTZU)
 	}
 
 	jit[instr.F64_TO_F32] = func(s *jitSeg) (bool, bool) {
-		s.ip++
-		r0, ok := s.Take(asm.RegTypeFloat, asm.Width64)
-		if !ok {
-			return false, false
-		}
-		r1 := s.assembler.NewVReg(asm.RegTypeFloat, asm.Width32)
-		s.assembler.Emit(arm64.FCVT(r1, r0))
-		s.Push(r1)
-		return true, false
+		return s.convert(asm.RegTypeFloat, asm.Width64, asm.RegTypeFloat, asm.Width32, arm64.FCVT)
 	}
+}
+
+func (s *jitSeg) binary(typ asm.RegType, width asm.RegWidth, emit func(dst, left, right asm.Reg) asm.Instruction) (bool, bool) {
+	s.ip++
+	right, ok := s.Take(typ, width)
+	if !ok {
+		return false, false
+	}
+	left, ok := s.Take(typ, width)
+	if !ok {
+		return false, false
+	}
+	s.assembler.Emit(emit(left, left, right))
+	s.Push(left)
+	return true, false
+}
+
+func (s *jitSeg) remainder(width asm.RegWidth, divide func(dst, left, right asm.Reg) asm.Instruction) (bool, bool) {
+	s.ip++
+	right, ok := s.Take(asm.RegTypeInt, width)
+	if !ok {
+		return false, false
+	}
+	left, ok := s.Take(asm.RegTypeInt, width)
+	if !ok {
+		return false, false
+	}
+	result := s.assembler.NewVReg(asm.RegTypeInt, width)
+	quotient := s.assembler.NewVReg(asm.RegTypeInt, width)
+	product := s.assembler.NewVReg(asm.RegTypeInt, width)
+	s.assembler.Emit(divide(quotient, left, right))
+	s.assembler.Emit(arm64.MUL(product, quotient, right))
+	s.assembler.Emit(arm64.SUB(result, left, product))
+	s.Push(result)
+	return true, false
+}
+
+func (s *jitSeg) compareI32(cond uint8) (bool, bool) {
+	s.ip++
+	right, ok := s.Take(asm.RegTypeInt, asm.Width32)
+	if !ok {
+		return false, false
+	}
+	left, ok := s.Take(asm.RegTypeInt, asm.Width32)
+	if !ok {
+		return false, false
+	}
+	s.assembler.Emit(arm64.CMP(left, right))
+	s.assembler.Emit(arm64.CSET(left, cond))
+	s.Push(left)
+	return true, false
+}
+
+func (s *jitSeg) compare(typ asm.RegType, width asm.RegWidth, compare func(left, right asm.Reg) asm.Instruction, cond uint8) (bool, bool) {
+	s.ip++
+	right, ok := s.Take(typ, width)
+	if !ok {
+		return false, false
+	}
+	left, ok := s.Take(typ, width)
+	if !ok {
+		return false, false
+	}
+	result := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
+	s.assembler.Emit(compare(left, right))
+	s.assembler.Emit(arm64.CSET(result, cond))
+	s.Push(result)
+	return true, false
+}
+
+func (s *jitSeg) convert(srcType asm.RegType, srcWidth asm.RegWidth, dstType asm.RegType, dstWidth asm.RegWidth, emit func(dst, src asm.Reg) asm.Instruction) (bool, bool) {
+	s.ip++
+	src, ok := s.Take(srcType, srcWidth)
+	if !ok {
+		return false, false
+	}
+	dst := s.assembler.NewVReg(dstType, dstWidth)
+	s.assembler.Emit(emit(dst, src))
+	s.Push(dst)
+	return true, false
 }
 
 func (s *jitSeg) unbox64(boxed asm.VReg, kind types.Kind) (asm.VReg, bool) {
@@ -1897,7 +1042,7 @@ func (s *jitSeg) boxF64(r0 asm.VReg) asm.VReg {
 }
 
 func (s *jitSeg) ret(nextIP int) {
-	_ = s.PinReturn()
+	_ = s.pinReturn()
 
 	regs := make([]asm.PReg, len(s.stack))
 	for i, v := range s.stack {

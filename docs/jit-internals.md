@@ -100,7 +100,7 @@ ARM64 JIT reserves `arch.Scratch = X10-X15` as metadata channels outside normal 
 
 ## Branches And Globals
 
-Branches (`BR`, `BR_IF`, `BR_TABLE`) terminate segments. Branch offsets are signed i16 relative to instruction end. They emit direct label branches only when target segment compiled and current `assembler.Returns(idx)` exactly matches target `Signature.Params(entry)` by type and width. Otherwise arch-specific JIT return code records current return point, writes target IP into JIT-owned `rNext`, writes arch header register, and emits `RET`.
+Branches (`BR`, `BR_IF`, `BR_TABLE`) terminate segments. Branch offsets are signed i16 relative to instruction end. They emit direct label branches only when target segment compiled and the current stack signature exactly matches target `Signature.Params` by type and width. Otherwise arch-specific JIT return code records current return point, writes target IP into JIT-owned `rNext`, writes arch header register, and emits `RET`.
 
 Branch limits: `BR` rejects non-empty native returns; `BR_IF` and `BR_TABLE` reject when more than one return would need reconstruction. Branch handlers must not fall through `_EPILOGUE`, because that would overwrite branch-selected `rNext`.
 
@@ -160,6 +160,8 @@ Two-layer IR emission:
 | `Push(reg)` / `Pop()` | push or unchecked pop |
 
 `jitSeg.assembler` delegates IR emission to `Assembler`; `jitSeg.stack` and `jitSeg.params` track VM stack shape. `Site()` called at function entry and return points to expose ABI signatures.
+
+`asm.Signature.Params` stores the single entry signature. `asm.Signature.Returns` stores return signatures keyed by return-site instruction index. `asm.Caller` only executes a compiled chunk; signature inspection belongs to the `Signature` returned by `Compile()`.
 
 Pipeline:
 

@@ -7,7 +7,7 @@ var Arch = &asm.Arch{
 	// FP (X29) and LR (X30) are reserved by the Go ABI.
 	Registers: asm.NewRegInfo(31, 32, []uint8{FP.ID(), LR.ID(), X15.ID()}, nil),
 	Encoder:   NewEncoder(),
-	ABI:       NewABI(),
+	ABI:       abi{},
 
 	// X10–X14: caller-saved scratch registers preserved across the invoke
 	// trampoline call. X0–X7 are ABI param/return registers. X8/X9 are

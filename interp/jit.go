@@ -2,7 +2,6 @@ package interp
 
 import (
 	"math"
-	"slices"
 	"sort"
 	"time"
 	"unsafe"
@@ -146,7 +145,12 @@ func (c *jitCompiler) scan(plan jitPlan) (map[int]*asm.Signature, bool) {
 	}
 	defer buf.Free()
 
-	r := newJITRun(c, asm.NewAssembler(arch, buf), plan.code, nil, true)
+	r := &jitRun{
+		c:    c,
+		a:    asm.NewAssembler(arch, buf),
+		code: plan.code,
+		scan: true,
+	}
 	r.bind(plan.blocks)
 
 	objs, entries := r.compile(plan)
@@ -160,7 +164,12 @@ func (c *jitCompiler) scan(plan jitPlan) (map[int]*asm.Signature, bool) {
 func (c *jitCompiler) emit(plan jitPlan, sigs map[int]*asm.Signature) ([]*asm.RelocObject, []int) {
 	c.assembler.Reset()
 
-	r := newJITRun(c, c.assembler, plan.code, sigs, false)
+	r := &jitRun{
+		c:    c,
+		a:    c.assembler,
+		code: plan.code,
+		sigs: sigs,
+	}
 	r.bind(plan.blocks)
 
 	return r.compile(plan)
@@ -244,16 +253,6 @@ func (c *jitCompiler) hot(blocks []*analysis.BasicBlock) ([]*analysis.BasicBlock
 	})
 
 	return out, forced
-}
-
-func newJITRun(c *jitCompiler, a *asm.Assembler, code []byte, sigs map[int]*asm.Signature, scan bool) *jitRun {
-	return &jitRun{
-		c:    c,
-		a:    a,
-		code: code,
-		sigs: sigs,
-		scan: scan,
-	}
 }
 
 func (r *jitRun) bind(blocks []*analysis.BasicBlock) {
@@ -486,19 +485,19 @@ func (s *jitSeg) finalize() {
 	}
 }
 
-// PinReturn pins the current eval-stack regs to ABI return slots and marks
+// pinReturn pins the current eval-stack regs to ABI return slots and marks
 // the current instruction index as a return Site. Called from architecture-
 // specific ret() helpers.
-func (s *jitSeg) PinReturn() int {
+func (s *jitSeg) pinReturn() int {
 	idx := s.assembler.Index()
 	for i, v := range s.stack {
 		_ = s.assembler.Pin(v, asm.NewPReg(uint8(i), v.Type(), v.Width()))
 	}
-	s.assembler.Site(idx, slices.Clone(s.stack))
+	s.assembler.Site(idx, s.stack)
 	return idx
 }
 
-func (s *jitSeg) linkable(target int, _ bool) bool {
+func (s *jitSeg) linkable(target int) bool {
 	if s.r.scan || target < 0 || target >= len(s.code) {
 		return false
 	}
@@ -508,13 +507,16 @@ func (s *jitSeg) linkable(target int, _ bool) bool {
 		return false
 	}
 
-	src := s.stack
-	dst := sig.Params(sig.Entry)
-	if !sameStack(src, dst) {
+	if len(s.stack) != len(sig.Params) {
 		return false
 	}
+	for i, v := range s.stack {
+		if v.Type() != sig.Params[i].Type() || v.Width() != sig.Params[i].Width() {
+			return false
+		}
+	}
 
-	_ = s.PinReturn()
+	_ = s.pinReturn()
 	return true
 }
 
@@ -550,20 +552,8 @@ func (s *jitSeg) local(idx int) (types.Type, bool) {
 	return fn.Locals[idx], true
 }
 
-func (s *jitSeg) kind(r asm.Reg) (types.Kind, bool) {
+func (s *jitSeg) regKind(r asm.Reg) (types.Kind, bool) {
 	return s.r.c.regKind(r)
-}
-
-func sameStack(src []asm.VReg, dst []asm.PReg) bool {
-	if len(src) != len(dst) {
-		return false
-	}
-	for i, v := range src {
-		if v.Type() != dst[i].Type() || v.Width() != dst[i].Width() {
-			return false
-		}
-	}
-	return true
 }
 
 func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpreter) {
@@ -571,7 +561,7 @@ func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpret
 		return nil
 	}
 
-	pregs := fn.Params(sig.Entry)
+	pregs := sig.Params
 	pkinds := make([]types.Kind, len(pregs))
 	for i, r := range pregs {
 		kind, ok := c.regKind(r)
@@ -581,7 +571,7 @@ func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpret
 		pkinds[i] = kind
 	}
 
-	rregs := fn.Returns(sig.Entry)
+	rregs := sig.Returns[0]
 	rkinds := make([]types.Kind, len(rregs))
 	for i, r := range rregs {
 		kind, ok := c.regKind(r)

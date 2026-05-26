@@ -187,7 +187,6 @@ func (a *Assembler) Compile() (*RelocObject, error) {
 		Chunk:  chunk,
 		Sig:    sig,
 		Instrs: instrs,
-		Labels: labels,
 		Relocs: relocs,
 	}, nil
 }
@@ -247,7 +246,7 @@ func (a *Assembler) Link(objects []*RelocObject) ([]Caller, error) {
 			continue
 		}
 
-		caller, err := a.arch.NewCaller(obj.Sig, obj.Chunk)
+		caller, err := a.arch.ABI.NewCaller(obj.Sig, obj.Chunk)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = err
@@ -501,26 +500,18 @@ func (c *compiler) free(v VReg) {
 }
 
 func (c *compiler) signature() *Signature {
-	inputs := make(map[int][]PReg)
-	outputs := make(map[int][]PReg)
+	returns := make(map[int][]PReg)
 
 	for idx, regs := range c.prog.sites {
-		pregs := c.pregs(regs)
-		if idx == 0 {
-			inputs[idx] = pregs
-		} else {
-			outputs[idx] = pregs
+		if idx != 0 {
+			returns[idx] = c.pregs(regs)
 		}
 	}
 
-	if _, ok := inputs[0]; !ok {
-		inputs[0] = nil
-	}
-
 	return &Signature{
+		Params:  c.pregs(c.prog.sites[0]),
 		Scratch: slices.Clone(c.prog.scratch),
-		Inputs:  inputs,
-		Outputs: outputs,
+		Returns: returns,
 	}
 }
 

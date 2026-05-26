@@ -18,31 +18,28 @@ import (
 //	bits[55:48] = returnWidths (width bitmask, 1=64-bit)
 
 type caller struct {
-	chunk   *asm.Chunk
-	sig     *asm.Signature
-	scratch []asm.PReg
+	chunk *asm.Chunk
 
 	header   uint64
 	argv     []uint64
 	rets     []asm.Value
-	nParams  int
 	nScratch int
 }
-
-var _ asm.Caller = (*caller)(nil)
 
 const (
 	abiRegs    = 8 // X0–X7 / F0–F7: ABI parameter/return registers
 	maxScratch = 5 // X10–X14: slots available in invoke trampoline
 )
 
+var _ asm.Caller = (*caller)(nil)
+
 func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
-	params := sig.Params(sig.Entry)
+	params := sig.Params
 	if len(params) > abiRegs {
 		return nil, fmt.Errorf("%w: %d params exceed ABI limit of %d",
 			asm.ErrTooManyParams, len(params), abiRegs)
 	}
-	for idx, regs := range sig.Outputs {
+	for idx, regs := range sig.Returns {
 		if len(regs) > abiRegs {
 			return nil, fmt.Errorf("%w: %d returns at idx %d exceed ABI limit of %d",
 				asm.ErrTooManyReturns, len(regs), idx, abiRegs)
@@ -58,7 +55,7 @@ func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
 				asm.ErrTooManyParams, i, p, p.ID(), abiRegs)
 		}
 	}
-	for idx, regs := range sig.Outputs {
+	for idx, regs := range sig.Returns {
 		for i, p := range regs {
 			if p.ID() >= abiRegs {
 				return nil, fmt.Errorf("%w: return[%d] at idx %d register %v (id=%d) outside ABI range [0,%d)",
@@ -76,11 +73,11 @@ func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
 	}
 	nReturns := sig.MaxReturns()
 	nScratch := len(sig.Scratch)
-	// Default initial header is derived from the longest output site so
+	// Default initial header is derived from the longest return site so
 	// callees that omit an X15 write still produce a usable header layout
 	// for trivial single-exit functions.
-	rregs := sig.Returns(sig.Entry)
-	for _, regs := range sig.Outputs {
+	rregs := sig.Returns[0]
+	for _, regs := range sig.Returns {
 		if len(regs) > len(rregs) {
 			rregs = regs
 		}
@@ -91,12 +88,9 @@ func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
 
 	return &caller{
 		chunk:    chunk,
-		sig:      sig,
-		scratch:  append([]asm.PReg(nil), sig.Scratch...),
 		header:   Header(params, rregs, nScratch),
 		argv:     make([]uint64, 1+nScratch+abiRegs),
 		rets:     make([]asm.Value, abiRegs),
-		nParams:  len(params),
 		nScratch: nScratch,
 	}, nil
 }
@@ -131,10 +125,7 @@ func Header(params, returns []asm.PReg, nScratch int) uint64 {
 		uint64(rWid)<<48
 }
 
-func (c *caller) Params(idx int) []asm.PReg  { return c.sig.Params(idx) }
-func (c *caller) Returns(idx int) []asm.PReg { return c.sig.Returns(idx) }
-
-func (c *caller) Call(params []asm.Value, rsv *[]uint64) ([]asm.Value, error) {
+func (c *caller) Call(params []asm.Value, scratch *[]uint64) ([]asm.Value, error) {
 	if len(params) > abiRegs {
 		return nil, fmt.Errorf("%w: too many params", asm.ErrTooManyParams)
 	}
@@ -144,8 +135,8 @@ func (c *caller) Call(params []asm.Value, rsv *[]uint64) ([]asm.Value, error) {
 	// argv layout: [ header | scratch×nScratch | values×abiRegs ]
 	argv[0] = c.header
 
-	if rsv != nil && nScratch > 0 {
-		copy(argv[1:1+nScratch], (*rsv)[:min(nScratch, len(*rsv))])
+	if scratch != nil && nScratch > 0 {
+		copy(argv[1:1+nScratch], (*scratch)[:min(nScratch, len(*scratch))])
 	}
 	for i, v := range params {
 		argv[1+nScratch+i] = v.Bits()
@@ -158,11 +149,11 @@ func (c *caller) Call(params []asm.Value, rsv *[]uint64) ([]asm.Value, error) {
 	if nReturns > abiRegs {
 		return nil, fmt.Errorf("callee returned %d values but argv only has %d slots", nReturns, abiRegs)
 	}
-	if rsv != nil && nScratch > 0 {
-		if len(*rsv) < nScratch {
-			*rsv = append(*rsv, make([]uint64, nScratch-len(*rsv))...)
+	if scratch != nil && nScratch > 0 {
+		if len(*scratch) < nScratch {
+			*scratch = append(*scratch, make([]uint64, nScratch-len(*scratch))...)
 		}
-		copy(*rsv, argv[1:1+nScratch])
+		copy(*scratch, argv[1:1+nScratch])
 	}
 
 	retTypes := uint8((h >> 32) & 0xFF)

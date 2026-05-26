@@ -190,9 +190,7 @@ Define interfaces in consuming package, not implementing package.
 ```go
 // asm/caller.go
 type Caller interface {
-    Params(idx int) []PReg
-    Returns(idx int) []PReg
-    Call(args []Value, reserved *[]uint64) ([]Value, error)
+    Call(params []Value, scratch *[]uint64) ([]Value, error)
 }
 ```
 
