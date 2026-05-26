@@ -1,6 +1,6 @@
 # Benchmarks
 
-Environment: `linux/amd64`, Intel Xeon @ 2.10 GHz, Go 1.26.2.
+Unless a section names another environment: `linux/amd64`, Intel Xeon @ 2.10 GHz, Go 1.26.2.
 minivm JIT targets ARM64 only; all numbers below reflect the threaded interpreter unless noted.
 
 ```bash
@@ -145,6 +145,46 @@ Allocations happen on every `Run` since the interpreter re-executes from scratch
 
 `map.new` with an initial entry is ~1.8× more expensive than `map.new_default` due to upfront insertion.
 
+### Heap traversal optimization (`darwin/arm64`)
+
+Environment: Apple M4 Pro, Go 1.26.2. Comparison uses `benchstat`,
+`-benchtime=300ms -count=10`; before is the same tree before lazy `Refs()`
+allocation, after allocates a result slice only after the first child ref.
+`Traceable` remains `Refs() []Ref`.
+
+```bash
+go test -run '^$' -bench='^BenchmarkInterpreter_Run/default/.*struct\.(get|set)' -benchmem -benchtime=300ms -count=10 ./interp
+go test -run '^$' -bench='^BenchmarkInterpreter_Marshal/(string|struct_plain|map_string_i32|nested_slice_struct)$' -benchmem -benchtime=300ms -count=10 ./interp
+```
+
+| Workload | Before ns/op | After ns/op | Change | Before/after B/op | Before/after allocs/op |
+|---|---:|---:|---:|---:|---:|
+| `struct.get` / `struct.set` geomean (all field kinds) | 43.82 | 37.26 | -14.96% | 68 / 64 | 2 / 1 |
+| `Marshal` geomean guard set | 195.8 | 193.9 | -1.00% | 276.2 / 276.2 | 8.056 / 8.056 |
+
+Callback-based `Trace(func(Ref))` was measured and rejected: representative
+`struct.get(i32)` regressed from `40.45 ns/op, 68 B/op, 2 allocs/op` to
+`68.47 ns/op, 112 B/op, 4 allocs/op` due to escaped traversal state.
+
+New lifecycle benchmarks use public heap APIs and include forced cyclic GC:
+
+| Benchmark | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| `Alloc/free_slot_reuse` | ~10.4 | 0 | 0 |
+| `Alloc/small_heap_cyclic_gc` | ~46.6 | 40 | 2 |
+| `Release/primitive_struct` | ~26.9 | 64 | 1 |
+| `Release/ref_array` | ~50.6 | 48 | 4 |
+| `Release/ref_struct` | ~52.9 | 72 | 3 |
+| `Release/ref_valued_map` | ~142.8 | 224 | 5 |
+
+Direct `Refs()` benchmarks confirm no-child traversal is allocation-free:
+
+| Object | No-child allocs/op | Child-ref allocs/op |
+|---|---:|---:|
+| `Array` | 0 | 1 |
+| `Struct` | 0 | 1 |
+| `Map` | 0 | 1 |
+
 ### Recursive workloads
 
 | Program | ns/op | B/op | allocs/op |
@@ -167,6 +207,7 @@ On x86-64, JIT is not yet implemented. Running with `WithTick(1)` + `WithThresho
 ## Methodology
 
 - `-benchtime=1s` for the threaded-interpreter suite; `-benchtime=5s` for cross-runtime comparison.
+- The Apple M4 Pro heap traversal comparison uses `-benchtime=300ms -count=10`; lifecycle and direct `Refs()` baselines use `-benchtime=500ms -count=3`.
 - `Interpreter.Reset()` called between iterations; `New()` called once outside the timed loop.
 - Cross-runtime benchmark code lives in `benchmarks/` (a separate Go module with its own `go.mod`). Run `make benchmark` to execute both suites, or `cd benchmarks && go test ...` for the cross-runtime suite alone.
 - wazero uses its default compiler runtime (JIT); module instantiation excluded from timing.

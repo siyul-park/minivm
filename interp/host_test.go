@@ -83,7 +83,7 @@ func TestHostObject(t *testing.T) {
 	t.Run("private fields trace without allocation", func(t *testing.T) {
 		type private struct {
 			Visible int32
-			hidden int32
+			hidden  int32
 		}
 		i := New(program.New(nil))
 		defer i.Close()

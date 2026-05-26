@@ -2232,6 +2232,28 @@ func TestInterpreter_Alloc(t *testing.T) {
 		require.NoError(t, i.Release(second))
 		require.NotContains(t, i.interned, "same")
 	})
+
+	t.Run("collects unreachable cycle when heap fills", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(2))
+		defer i.Close()
+
+		array := types.NewArray(types.NewArrayType(types.TypeRef))
+		addr, err := i.Alloc(array)
+		require.NoError(t, err)
+		array.Elems = append(array.Elems, types.BoxRef(addr))
+
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		reused, err := i.Alloc(types.I32(1))
+		require.NoError(t, err)
+		require.Equal(t, addr, reused)
+		require.NoError(t, i.Release(reused))
+
+		_, err = i.Load(addr)
+		require.ErrorIs(t, err, ErrSegmentationFault)
+	})
 }
 
 func TestInterpreter_Load(t *testing.T) {
@@ -3927,6 +3949,150 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 					i.Reset()
 				}
 			})
+		}
+	})
+}
+
+func BenchmarkInterpreter_Alloc(b *testing.B) {
+	b.Run("free slot reuse", func(b *testing.B) {
+		i := New(program.New(nil), WithHeap(2))
+		defer i.Close()
+
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for n := 0; n < b.N; n++ {
+			addr, err := i.Alloc(types.I32(1))
+			if err != nil {
+				b.Fatal(err)
+			}
+			if err := i.Release(addr); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("small heap cyclic gc", func(b *testing.B) {
+		i := New(program.New(nil), WithHeap(2))
+		defer i.Close()
+		typ := types.NewArrayType(types.TypeRef)
+
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for n := 0; n < b.N; n++ {
+			array := types.NewArray(typ)
+			addr, err := i.Alloc(array)
+			if err != nil {
+				b.Fatal(err)
+			}
+			array.Elems = append(array.Elems, types.BoxRef(addr))
+			if _, err := i.Retain(addr); err != nil {
+				b.Fatal(err)
+			}
+			if err := i.Release(addr); err != nil {
+				b.Fatal(err)
+			}
+
+			leaf, err := i.Alloc(types.I32(1))
+			if err != nil {
+				b.Fatal(err)
+			}
+			if err := i.Release(leaf); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkInterpreter_Release(b *testing.B) {
+	b.Run("primitive struct", func(b *testing.B) {
+		i := New(program.New(nil), WithHeap(2))
+		defer i.Close()
+		typ := types.NewStructType(types.NewStructField(types.TypeI32))
+
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for n := 0; n < b.N; n++ {
+			addr, err := i.Alloc(types.NewStruct(typ))
+			if err != nil {
+				b.Fatal(err)
+			}
+			if err := i.Release(addr); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("ref array", func(b *testing.B) {
+		i := New(program.New(nil), WithHeap(3))
+		defer i.Close()
+		typ := types.NewArrayType(types.TypeRef)
+
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for n := 0; n < b.N; n++ {
+			child, err := i.Alloc(types.I32(1))
+			if err != nil {
+				b.Fatal(err)
+			}
+			addr, err := i.Alloc(types.NewArray(typ, types.BoxRef(child)))
+			if err != nil {
+				b.Fatal(err)
+			}
+			if err := i.Release(addr); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("ref struct", func(b *testing.B) {
+		i := New(program.New(nil), WithHeap(3))
+		defer i.Close()
+		typ := types.NewStructType(types.NewStructField(types.TypeRef))
+
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for n := 0; n < b.N; n++ {
+			child, err := i.Alloc(types.I32(1))
+			if err != nil {
+				b.Fatal(err)
+			}
+			addr, err := i.Alloc(types.NewStruct(typ, types.BoxRef(child)))
+			if err != nil {
+				b.Fatal(err)
+			}
+			if err := i.Release(addr); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("ref valued map", func(b *testing.B) {
+		i := New(program.New(nil), WithHeap(3))
+		defer i.Close()
+		typ := types.NewMapType(types.TypeI32, types.TypeRef)
+
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for n := 0; n < b.N; n++ {
+			child, err := i.Alloc(types.I32(1))
+			if err != nil {
+				b.Fatal(err)
+			}
+			m := types.NewMapI32(typ, 1)
+			m.Set(1, types.BoxRef(child))
+			addr, err := i.Alloc(m)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if err := i.Release(addr); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 }

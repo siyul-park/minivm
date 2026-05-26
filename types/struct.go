@@ -127,6 +127,9 @@ func (s *Struct) Refs() []Ref {
 		}
 		val := Boxed(s.Data[i])
 		if val.Kind() == KindRef {
+			if refs == nil {
+				refs = make([]Ref, 0, len(s.Typ.Fields))
+			}
 			refs = append(refs, Ref(val.Ref()))
 		}
 	}

@@ -563,3 +563,35 @@ func BenchmarkMapStringGet_Interned(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkMap_Refs(b *testing.B) {
+	b.Run("no refs", func(b *testing.B) {
+		m := NewMap(NewMapType(TypeI32, TypeI32))
+		m.Set(MapKey{Kind: KindI32, Bits: 1}, MapEntry{Key: BoxI32(1), Value: BoxI32(2)})
+
+		var refs []Ref
+		b.ReportAllocs()
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			refs = m.Refs()
+		}
+		if len(refs) != 0 {
+			b.Fatal("unexpected refs")
+		}
+	})
+
+	b.Run("child refs", func(b *testing.B) {
+		m := NewMap(NewMapType(TypeRef, TypeRef))
+		m.Set(MapKey{Kind: KindRef, Bits: 1}, MapEntry{Key: BoxRef(1), Value: BoxRef(2)})
+
+		var refs []Ref
+		b.ReportAllocs()
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			refs = m.Refs()
+		}
+		if len(refs) != 2 {
+			b.Fatal("missing refs")
+		}
+	})
+}

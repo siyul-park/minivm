@@ -48,6 +48,9 @@ RC is manually handled in every threaded closure touching refs.
 4. repeats for nested refs using explicit work stack
 
 `release` must stay iterative, not recursive, to avoid stack overflow on deep object graphs.
+`Refs()` returns `nil` without allocation when an object has no nested refs; if
+it finds a child ref, it allocates once with capacity for that object's slots.
+Keep this property when adding new `Traceable` implementations.
 
 ## Allocation
 

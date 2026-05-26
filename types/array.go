@@ -73,6 +73,9 @@ func (a *Array) Refs() []Ref {
 	var refs []Ref
 	for _, e := range a.Elems {
 		if e.Kind() == KindRef {
+			if refs == nil {
+				refs = make([]Ref, 0, len(a.Elems))
+			}
 			refs = append(refs, Ref(e.Ref()))
 		}
 	}

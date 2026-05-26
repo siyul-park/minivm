@@ -125,3 +125,33 @@ func TestArray_Refs(t *testing.T) {
 		require.Equal(t, []Ref{1, 3}, a.Refs())
 	})
 }
+
+func BenchmarkArray_Refs(b *testing.B) {
+	b.Run("no refs", func(b *testing.B) {
+		a := NewArray(NewArrayType(TypeI32), BoxI32(1), BoxI32(2))
+
+		var refs []Ref
+		b.ReportAllocs()
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			refs = a.Refs()
+		}
+		if len(refs) != 0 {
+			b.Fatal("unexpected refs")
+		}
+	})
+
+	b.Run("child refs", func(b *testing.B) {
+		a := NewArray(NewArrayType(TypeRef), BoxRef(1), BoxRef(2))
+
+		var refs []Ref
+		b.ReportAllocs()
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			refs = a.Refs()
+		}
+		if len(refs) != 2 {
+			b.Fatal("missing refs")
+		}
+	})
+}

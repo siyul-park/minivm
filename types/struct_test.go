@@ -88,3 +88,33 @@ func TestStruct_Refs(t *testing.T) {
 		require.Equal(t, []Ref{1, 3}, s.Refs())
 	})
 }
+
+func BenchmarkStruct_Refs(b *testing.B) {
+	b.Run("no refs", func(b *testing.B) {
+		s := NewStruct(NewStructType(NewStructField(TypeI32)), BoxI32(1))
+
+		var refs []Ref
+		b.ReportAllocs()
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			refs = s.Refs()
+		}
+		if len(refs) != 0 {
+			b.Fatal("unexpected refs")
+		}
+	})
+
+	b.Run("child refs", func(b *testing.B) {
+		s := NewStruct(NewStructType(NewStructField(TypeRef)), BoxRef(1))
+
+		var refs []Ref
+		b.ReportAllocs()
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			refs = s.Refs()
+		}
+		if len(refs) != 1 {
+			b.Fatal("missing refs")
+		}
+	})
+}

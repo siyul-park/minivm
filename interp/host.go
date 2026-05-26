@@ -75,6 +75,9 @@ func (h *HostObject) Refs() []types.Ref {
 	var refs []types.Ref
 	for _, s := range h.slots {
 		if s.isMethod() {
+			if refs == nil {
+				refs = make([]types.Ref, 0, len(h.slots))
+			}
 			refs = append(refs, types.Ref(s.addr))
 		}
 	}

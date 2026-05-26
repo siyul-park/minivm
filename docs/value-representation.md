@@ -130,6 +130,9 @@ Heap objects implement `types.Value`.
 | `*interp.HostObject` | `KindRef` | `*StructType` | `Value`, `Traceable` |
 
 `Traceable` exposes `Refs() []Ref` for GC graph traversal. Any heap object containing refs must implement `Traceable`.
+`Array`, `Struct`, and `HostObject` defer their `Refs()` result allocation until
+the first nested ref is found, so release of values with no children stays
+allocation-free while ref-containing values keep one pre-sized result slice.
 
 `STRUCT_GET` and `STRUCT_SET` handle VM-native `*types.Struct` directly and fall back to `*interp.HostObject` for host-supplied values. See [host-integration.md](host-integration.md) for HostObject semantics.
 
