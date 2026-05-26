@@ -635,7 +635,7 @@ func printGlobals(out io.Writer, vm *interp.Interpreter) {
 }
 
 func printFrames(out io.Writer, vm *interp.Interpreter) {
-	depth := vm.FrameDepth()
+	depth := vm.FP()
 	if depth == 0 {
 		fmt.Fprintln(out, "(no frames)")
 		return

@@ -83,7 +83,7 @@ Inspect a stopped interpreter directly.
 | `Func()` | current function slot; `0` is top-level |
 | `IP()` | current bytecode offset |
 | `Opcode()` | opcode at current bytecode offset |
-| `FrameDepth()` | active frame count |
+| `FP()` | active frame count |
 | `Frame(n)` | frame snapshot; `0` current, `1` caller |
 | `Len()` / `Peek(n)` | operand stack inspection |
 | `Local(n)` / `Global(n)` / `Const(n)` | value inspection |
