@@ -316,7 +316,7 @@ func (i *Interpreter) IP() int {
 	return i.frame().ip
 }
 
-func (i *Interpreter) FrameDepth() int {
+func (i *Interpreter) FP() int {
 	return i.fp
 }
 

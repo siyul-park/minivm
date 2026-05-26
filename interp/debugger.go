@@ -64,8 +64,8 @@ func NewDebugger() *Debugger {
 }
 
 func (d *Debugger) Hook(i *Interpreter) error {
-	fn, ip, depth := i.Func(), i.IP(), i.FrameDepth()
-	if d.skip && d.skipFunc == fn && d.skipIP == ip && d.skipDepth == depth {
+	fn, ip, fp := i.Func(), i.IP(), i.FP()
+	if d.skip && d.skipFunc == fn && d.skipIP == ip && d.skipDepth == fp {
 		d.skip = false
 		return nil
 	}
@@ -73,19 +73,19 @@ func (d *Debugger) Hook(i *Interpreter) error {
 
 	if bp := d.breakpoint(i, fn, ip); bp != nil {
 		bp.Hits++
-		return d.stopped(fn, ip, depth, bp.ID)
+		return d.stopped(fn, ip, fp, bp.ID)
 	}
 
 	switch d.mode {
 	case debugStep:
-		return d.stopped(fn, ip, depth, 0)
+		return d.stopped(fn, ip, fp, 0)
 	case debugNext:
-		if depth <= d.depth {
-			return d.stopped(fn, ip, depth, 0)
+		if fp <= d.depth {
+			return d.stopped(fn, ip, fp, 0)
 		}
 	case debugFinish:
-		if depth < d.depth {
-			return d.stopped(fn, ip, depth, 0)
+		if fp < d.depth {
+			return d.stopped(fn, ip, fp, 0)
 		}
 	}
 	return nil

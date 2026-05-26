@@ -2826,7 +2826,7 @@ func TestInterpreter_WithDebugger(t *testing.T) {
 
 		require.Equal(t, 0, i.Func())
 		require.Equal(t, 0, i.IP())
-		require.Equal(t, 1, i.FrameDepth())
+		require.Equal(t, 1, i.FP())
 		op, err := i.Opcode()
 		require.NoError(t, err)
 		require.Equal(t, instr.I32_CONST, op)
@@ -2864,7 +2864,7 @@ func TestInterpreter_WithDebugger(t *testing.T) {
 		require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
 		require.Equal(t, 1, i.Func())
 		require.Equal(t, 0, i.IP())
-		require.Equal(t, 2, i.FrameDepth())
+		require.Equal(t, 2, i.FP())
 		fn, ip, _, err := i.Frame(0)
 		require.NoError(t, err)
 		require.Equal(t, 1, fn)
@@ -2886,7 +2886,7 @@ func TestInterpreter_WithDebugger(t *testing.T) {
 		require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
 		require.Equal(t, 0, i.Func())
 		require.Equal(t, 4, i.IP())
-		require.Equal(t, 1, i.FrameDepth())
+		require.Equal(t, 1, i.FP())
 		require.Equal(t, 1, i.Len())
 	})
 
@@ -2903,7 +2903,7 @@ func TestInterpreter_WithDebugger(t *testing.T) {
 		require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
 		require.Equal(t, 0, i.Func())
 		require.Equal(t, 4, i.IP())
-		require.Equal(t, 1, i.FrameDepth())
+		require.Equal(t, 1, i.FP())
 	})
 }
 
