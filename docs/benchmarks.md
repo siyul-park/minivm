@@ -155,12 +155,14 @@ allocation, after allocates a result slice only after the first child ref.
 ```bash
 go test -run '^$' -bench='^BenchmarkInterpreter_Run/default/.*struct\.(get|set)' -benchmem -benchtime=300ms -count=10 ./interp
 go test -run '^$' -bench='^BenchmarkInterpreter_Marshal/(string|struct_plain|map_string_i32|nested_slice_struct)$' -benchmem -benchtime=300ms -count=10 ./interp
+go test -run '^$' -bench='^BenchmarkMap_Refs/(inline_i64|child_refs)$' -benchmem -benchtime=300ms -count=10 ./types
 ```
 
 | Workload | Before ns/op | After ns/op | Change | Before/after B/op | Before/after allocs/op |
 |---|---:|---:|---:|---:|---:|
 | `struct.get` / `struct.set` geomean (all field kinds) | 43.82 | 37.26 | -14.96% | 68 / 64 | 2 / 1 |
 | `Marshal` geomean guard set | 195.8 | 193.9 | -1.00% | 276.2 / 276.2 | 8.056 / 8.056 |
+| `Map_Refs/inline_i64` | 29.55 | 23.69 | -19.85% | 4 / 0 | 1 / 0 |
 
 Callback-based `Trace(func(Ref))` was measured and rejected: representative
 `struct.get(i32)` regressed from `40.45 ns/op, 68 B/op, 2 allocs/op` to

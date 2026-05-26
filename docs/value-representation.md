@@ -130,7 +130,7 @@ Heap objects implement `types.Value`.
 | `*interp.HostObject` | `KindRef` | `*StructType` | `Value`, `Traceable` |
 
 `Traceable` exposes `Refs() []Ref` for GC graph traversal. Any heap object containing refs must implement `Traceable`.
-`Array`, `Struct`, and `HostObject` defer their `Refs()` result allocation until
+`Array`, `Struct`, `Map` variants, and `HostObject` defer their `Refs()` result allocation until
 the first nested ref is found, so release of values with no children stays
 allocation-free while ref-containing values keep one pre-sized result slice.
 

@@ -172,15 +172,21 @@ func (m *Map) Refs() []Ref {
 	if !traceKeys && !traceValues {
 		return nil
 	}
-	refs := make([]Ref, 0, m.Len()*2)
-	m.Range(func(_ MapKey, entry MapEntry) {
+	var refs []Ref
+	for _, entry := range m.entries {
 		if traceKeys && entry.Key.Kind() == KindRef {
+			if refs == nil {
+				refs = make([]Ref, 0, m.Len()*2)
+			}
 			refs = append(refs, Ref(entry.Key.Ref()))
 		}
 		if traceValues && entry.Value.Kind() == KindRef {
+			if refs == nil {
+				refs = make([]Ref, 0, m.Len()*2)
+			}
 			refs = append(refs, Ref(entry.Value.Ref()))
 		}
-	})
+	}
 	return refs
 }
 
@@ -235,12 +241,15 @@ func (m *MapI32) Refs() []Ref {
 	if !m.Typ.TraceValues {
 		return nil
 	}
-	refs := make([]Ref, 0, m.Len())
-	m.Range(func(_ int32, value Boxed) {
+	var refs []Ref
+	for _, value := range m.entries {
 		if value.Kind() == KindRef {
+			if refs == nil {
+				refs = make([]Ref, 0, m.Len())
+			}
 			refs = append(refs, Ref(value.Ref()))
 		}
-	})
+	}
 	return refs
 }
 
@@ -295,12 +304,15 @@ func (m *MapI64) Refs() []Ref {
 	if !m.Typ.TraceValues {
 		return nil
 	}
-	refs := make([]Ref, 0, m.Len())
-	m.Range(func(_ int64, value Boxed) {
+	var refs []Ref
+	for _, value := range m.entries {
 		if value.Kind() == KindRef {
+			if refs == nil {
+				refs = make([]Ref, 0, m.Len())
+			}
 			refs = append(refs, Ref(value.Ref()))
 		}
-	})
+	}
 	return refs
 }
 
@@ -367,12 +379,15 @@ func (m *MapF32) Refs() []Ref {
 	if !m.Typ.TraceValues {
 		return nil
 	}
-	refs := make([]Ref, 0, m.Len())
-	m.Range(func(_ float32, value Boxed) {
+	var refs []Ref
+	for _, value := range m.entries {
 		if value.Kind() == KindRef {
+			if refs == nil {
+				refs = make([]Ref, 0, m.Len())
+			}
 			refs = append(refs, Ref(value.Ref()))
 		}
-	})
+	}
 	return refs
 }
 
@@ -439,12 +454,15 @@ func (m *MapF64) Refs() []Ref {
 	if !m.Typ.TraceValues {
 		return nil
 	}
-	refs := make([]Ref, 0, m.Len())
-	m.Range(func(_ float64, value Boxed) {
+	var refs []Ref
+	for _, value := range m.entries {
 		if value.Kind() == KindRef {
+			if refs == nil {
+				refs = make([]Ref, 0, m.Len())
+			}
 			refs = append(refs, Ref(value.Ref()))
 		}
-	})
+	}
 	return refs
 }
 

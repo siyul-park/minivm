@@ -76,7 +76,7 @@ Two layers:
 
 `types.Boxed` (`uint64`) is the VM stack/global currency. Heap objects are `types.Value` references carried as `KindRef` boxed values. See `value-representation.md`.
 
-`types.Traceable` marks heap objects containing refs (`Array`, `Struct`, `HostObject`). GC walks them via `Refs() []Ref`; implementations do not allocate a result slice until they find a nested ref. `STRUCT_GET`/`STRUCT_SET` handle native `*types.Struct` first, then use `HostObject` for host values.
+`types.Traceable` marks heap objects containing refs (`Array`, `Struct`, `Map`, `HostObject`). GC walks them via `Refs() []Ref`; implementations do not allocate a result slice until they find a nested ref. `STRUCT_GET`/`STRUCT_SET` handle native `*types.Struct` first, then use `HostObject` for host values.
 
 ### `interp/`
 
