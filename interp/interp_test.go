@@ -3929,6 +3929,8 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 					_ = i.Run(ctx)
 					i.Reset()
 				}
+				b.StopTimer()
+				require.NoError(b, i.Run(ctx))
 			})
 		}
 	})
@@ -3948,6 +3950,8 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 					_ = i.Run(ctx)
 					i.Reset()
 				}
+				b.StopTimer()
+				require.NoError(b, i.Run(ctx))
 			})
 		}
 	})
@@ -3961,15 +3965,20 @@ func BenchmarkInterpreter_Alloc(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 
+		var err error
 		for n := 0; n < b.N; n++ {
-			addr, err := i.Alloc(types.I32(1))
+			var addr int
+			addr, err = i.Alloc(types.I32(1))
 			if err != nil {
-				b.Fatal(err)
+				break
 			}
-			if err := i.Release(addr); err != nil {
-				b.Fatal(err)
+			err = i.Release(addr)
+			if err != nil {
+				break
 			}
 		}
+		b.StopTimer()
+		require.NoError(b, err)
 	})
 
 	b.Run("small heap cyclic gc", func(b *testing.B) {
@@ -3980,28 +3989,36 @@ func BenchmarkInterpreter_Alloc(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 
+		var err error
 		for n := 0; n < b.N; n++ {
 			array := types.NewArray(typ)
-			addr, err := i.Alloc(array)
+			var addr int
+			addr, err = i.Alloc(array)
 			if err != nil {
-				b.Fatal(err)
+				break
 			}
 			array.Elems = append(array.Elems, types.BoxRef(addr))
-			if _, err := i.Retain(addr); err != nil {
-				b.Fatal(err)
+			_, err = i.Retain(addr)
+			if err != nil {
+				break
 			}
-			if err := i.Release(addr); err != nil {
-				b.Fatal(err)
+			err = i.Release(addr)
+			if err != nil {
+				break
 			}
 
-			leaf, err := i.Alloc(types.I32(1))
+			var leaf int
+			leaf, err = i.Alloc(types.I32(1))
 			if err != nil {
-				b.Fatal(err)
+				break
 			}
-			if err := i.Release(leaf); err != nil {
-				b.Fatal(err)
+			err = i.Release(leaf)
+			if err != nil {
+				break
 			}
 		}
+		b.StopTimer()
+		require.NoError(b, err)
 	})
 }
 
@@ -4014,15 +4031,20 @@ func BenchmarkInterpreter_Release(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 
+		var err error
 		for n := 0; n < b.N; n++ {
-			addr, err := i.Alloc(types.NewStruct(typ))
+			var addr int
+			addr, err = i.Alloc(types.NewStruct(typ))
 			if err != nil {
-				b.Fatal(err)
+				break
 			}
-			if err := i.Release(addr); err != nil {
-				b.Fatal(err)
+			err = i.Release(addr)
+			if err != nil {
+				break
 			}
 		}
+		b.StopTimer()
+		require.NoError(b, err)
 	})
 
 	b.Run("ref array", func(b *testing.B) {
@@ -4033,19 +4055,25 @@ func BenchmarkInterpreter_Release(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 
+		var err error
 		for n := 0; n < b.N; n++ {
-			child, err := i.Alloc(types.I32(1))
+			var child int
+			child, err = i.Alloc(types.I32(1))
 			if err != nil {
-				b.Fatal(err)
+				break
 			}
-			addr, err := i.Alloc(types.NewArray(typ, types.BoxRef(child)))
+			var addr int
+			addr, err = i.Alloc(types.NewArray(typ, types.BoxRef(child)))
 			if err != nil {
-				b.Fatal(err)
+				break
 			}
-			if err := i.Release(addr); err != nil {
-				b.Fatal(err)
+			err = i.Release(addr)
+			if err != nil {
+				break
 			}
 		}
+		b.StopTimer()
+		require.NoError(b, err)
 	})
 
 	b.Run("ref struct", func(b *testing.B) {
@@ -4056,19 +4084,25 @@ func BenchmarkInterpreter_Release(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 
+		var err error
 		for n := 0; n < b.N; n++ {
-			child, err := i.Alloc(types.I32(1))
+			var child int
+			child, err = i.Alloc(types.I32(1))
 			if err != nil {
-				b.Fatal(err)
+				break
 			}
-			addr, err := i.Alloc(types.NewStruct(typ, types.BoxRef(child)))
+			var addr int
+			addr, err = i.Alloc(types.NewStruct(typ, types.BoxRef(child)))
 			if err != nil {
-				b.Fatal(err)
+				break
 			}
-			if err := i.Release(addr); err != nil {
-				b.Fatal(err)
+			err = i.Release(addr)
+			if err != nil {
+				break
 			}
 		}
+		b.StopTimer()
+		require.NoError(b, err)
 	})
 
 	b.Run("ref valued map", func(b *testing.B) {
@@ -4079,21 +4113,27 @@ func BenchmarkInterpreter_Release(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 
+		var err error
 		for n := 0; n < b.N; n++ {
-			child, err := i.Alloc(types.I32(1))
+			var child int
+			child, err = i.Alloc(types.I32(1))
 			if err != nil {
-				b.Fatal(err)
+				break
 			}
 			m := types.NewMapI32(typ, 1)
 			m.Set(1, types.BoxRef(child))
-			addr, err := i.Alloc(m)
+			var addr int
+			addr, err = i.Alloc(m)
 			if err != nil {
-				b.Fatal(err)
+				break
 			}
-			if err := i.Release(addr); err != nil {
-				b.Fatal(err)
+			err = i.Release(addr)
+			if err != nil {
+				break
 			}
 		}
+		b.StopTimer()
+		require.NoError(b, err)
 	})
 }
 
@@ -4122,11 +4162,15 @@ func BenchmarkInterpreter_Marshal(b *testing.B) {
 			defer i.Close()
 			b.ReportAllocs()
 			b.ResetTimer()
+			var err error
 			for n := 0; n < b.N; n++ {
-				if _, err := i.Marshal(c.value); err != nil {
-					b.Fatal(err)
+				_, err = i.Marshal(c.value)
+				if err != nil {
+					break
 				}
 			}
+			b.StopTimer()
+			require.NoError(b, err)
 		})
 	}
 }
@@ -4154,16 +4198,17 @@ func BenchmarkInterpreter_Unmarshal(b *testing.B) {
 			i := New(program.New(nil))
 			defer i.Close()
 			val, err := i.Marshal(c.src)
-			if err != nil {
-				b.Fatal(err)
-			}
+			require.NoError(b, err)
 			b.ReportAllocs()
 			b.ResetTimer()
 			for n := 0; n < b.N; n++ {
-				if err := i.Unmarshal(val, c.dst()); err != nil {
-					b.Fatal(err)
+				err = i.Unmarshal(val, c.dst())
+				if err != nil {
+					break
 				}
 			}
+			b.StopTimer()
+			require.NoError(b, err)
 		})
 	}
 }

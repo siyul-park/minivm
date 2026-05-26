@@ -13,6 +13,7 @@ import (
 	"github.com/tetratelabs/wazero/api"
 
 	"github.com/siyul-park/minivm/interp"
+	"github.com/stretchr/testify/require"
 )
 
 // fibN is the input for the cross-runtime comparison.
@@ -89,10 +90,13 @@ func BenchmarkFib35(b *testing.B) {
 
 		b.ReportAllocs()
 		b.ResetTimer()
+		var err error
 		for n := 0; n < b.N; n++ {
-			_ = i.Run(ctx)
+			err = i.Run(ctx)
 			i.Reset()
 		}
+		b.StopTimer()
+		require.NoError(b, err)
 	})
 
 	b.Run("wazero", func(b *testing.B) {
@@ -102,18 +106,19 @@ func BenchmarkFib35(b *testing.B) {
 		defer r.Close(ctx)
 
 		mod, err := r.Instantiate(ctx, fibWasm)
-		if err != nil {
-			b.Fatal(err)
-		}
+		require.NoError(b, err)
 		fib := mod.ExportedFunction("fib")
 
 		b.ReportAllocs()
 		b.ResetTimer()
 		for n := 0; n < b.N; n++ {
-			if _, err := fib.Call(ctx, api.EncodeI32(fibN)); err != nil {
-				b.Fatal(err)
+			_, err = fib.Call(ctx, api.EncodeI32(fibN))
+			if err != nil {
+				break
 			}
 		}
+		b.StopTimer()
+		require.NoError(b, err)
 	})
 
 	b.Run("tengo", func(b *testing.B) {
@@ -126,18 +131,19 @@ result := fib(35)
 `
 		s := tengo.NewScript([]byte(src))
 		compiled, err := s.Compile()
-		if err != nil {
-			b.Fatal(err)
-		}
+		require.NoError(b, err)
 
 		b.ReportAllocs()
 		b.ResetTimer()
 		for n := 0; n < b.N; n++ {
 			cloned := compiled.Clone()
-			if err := cloned.Run(); err != nil {
-				b.Fatal(err)
+			err = cloned.Run()
+			if err != nil {
+				break
 			}
 		}
+		b.StopTimer()
+		require.NoError(b, err)
 	})
 
 	b.Run("gopher_lua", func(b *testing.B) {
@@ -145,28 +151,30 @@ result := fib(35)
 		defer L.Close()
 
 		// Define fib as a global so it can call itself by name.
-		if err := L.DoString(`
+		err := L.DoString(`
 fib = function(n)
     if n < 2 then return n end
     return fib(n-1) + fib(n-2)
 end
-`); err != nil {
-			b.Fatal(err)
-		}
+`)
+		require.NoError(b, err)
 		fibFn := L.GetGlobal("fib")
 
 		b.ReportAllocs()
 		b.ResetTimer()
 		for n := 0; n < b.N; n++ {
-			if err := L.CallByParam(lua.P{
+			err = L.CallByParam(lua.P{
 				Fn:      fibFn,
 				NRet:    1,
 				Protect: true,
-			}, lua.LNumber(fibN)); err != nil {
-				b.Fatal(err)
+			}, lua.LNumber(fibN))
+			if err != nil {
+				break
 			}
 			L.Pop(1)
 		}
+		b.StopTimer()
+		require.NoError(b, err)
 	})
 
 	b.Run("goja", func(b *testing.B) {
@@ -177,20 +185,20 @@ function fib(n) {
     return fib(n-1) + fib(n-2);
 }
 `), true)
-		if err != nil {
-			b.Fatal(err)
-		}
-		if _, err := vm.RunProgram(p); err != nil {
-			b.Fatal(err)
-		}
+		require.NoError(b, err)
+		_, err = vm.RunProgram(p)
+		require.NoError(b, err)
 		fibFn, _ := goja.AssertFunction(vm.Get("fib"))
 
 		b.ReportAllocs()
 		b.ResetTimer()
 		for n := 0; n < b.N; n++ {
-			if _, err := fibFn(goja.Undefined(), vm.ToValue(fibN)); err != nil {
-				b.Fatal(err)
+			_, err = fibFn(goja.Undefined(), vm.ToValue(fibN))
+			if err != nil {
+				break
 			}
 		}
+		b.StopTimer()
+		require.NoError(b, err)
 	})
 }

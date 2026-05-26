@@ -99,9 +99,8 @@ func BenchmarkStruct_Refs(b *testing.B) {
 		for n := 0; n < b.N; n++ {
 			refs = s.Refs()
 		}
-		if len(refs) != 0 {
-			b.Fatal("unexpected refs")
-		}
+		b.StopTimer()
+		require.Empty(b, refs)
 	})
 
 	b.Run("child refs", func(b *testing.B) {
@@ -113,8 +112,7 @@ func BenchmarkStruct_Refs(b *testing.B) {
 		for n := 0; n < b.N; n++ {
 			refs = s.Refs()
 		}
-		if len(refs) != 1 {
-			b.Fatal("missing refs")
-		}
+		b.StopTimer()
+		require.Len(b, refs, 1)
 	})
 }

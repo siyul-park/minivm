@@ -612,11 +612,12 @@ func BenchmarkMapI64_Get(b *testing.B) {
 	m.Set(42, BoxI32(7))
 
 	b.ReportAllocs()
+	var ok bool
 	for n := 0; n < b.N; n++ {
-		if _, ok := m.Get(42); !ok {
-			b.Fatal("missing key")
-		}
+		_, ok = m.Get(42)
 	}
+	b.StopTimer()
+	require.True(b, ok)
 }
 
 func BenchmarkMapStringGet_Interned(b *testing.B) {
@@ -625,11 +626,12 @@ func BenchmarkMapStringGet_Interned(b *testing.B) {
 	key := MapKey{Kind: KindRef, Bits: 1}
 
 	b.ReportAllocs()
+	var ok bool
 	for n := 0; n < b.N; n++ {
-		if _, ok := m.Get(key); !ok {
-			b.Fatal("missing key")
-		}
+		_, ok = m.Get(key)
 	}
+	b.StopTimer()
+	require.True(b, ok)
 }
 
 func BenchmarkMap_Refs(b *testing.B) {
@@ -643,9 +645,8 @@ func BenchmarkMap_Refs(b *testing.B) {
 		for n := 0; n < b.N; n++ {
 			refs = m.Refs()
 		}
-		if len(refs) != 0 {
-			b.Fatal("unexpected refs")
-		}
+		b.StopTimer()
+		require.Empty(b, refs)
 	})
 
 	b.Run("inline i64", func(b *testing.B) {
@@ -658,9 +659,8 @@ func BenchmarkMap_Refs(b *testing.B) {
 		for n := 0; n < b.N; n++ {
 			refs = m.Refs()
 		}
-		if len(refs) != 0 {
-			b.Fatal("unexpected refs")
-		}
+		b.StopTimer()
+		require.Empty(b, refs)
 	})
 
 	b.Run("child refs", func(b *testing.B) {
@@ -673,8 +673,7 @@ func BenchmarkMap_Refs(b *testing.B) {
 		for n := 0; n < b.N; n++ {
 			refs = m.Refs()
 		}
-		if len(refs) != 2 {
-			b.Fatal("missing refs")
-		}
+		b.StopTimer()
+		require.Len(b, refs, 2)
 	})
 }

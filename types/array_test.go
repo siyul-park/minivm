@@ -136,9 +136,8 @@ func BenchmarkArray_Refs(b *testing.B) {
 		for n := 0; n < b.N; n++ {
 			refs = a.Refs()
 		}
-		if len(refs) != 0 {
-			b.Fatal("unexpected refs")
-		}
+		b.StopTimer()
+		require.Empty(b, refs)
 	})
 
 	b.Run("child refs", func(b *testing.B) {
@@ -150,8 +149,7 @@ func BenchmarkArray_Refs(b *testing.B) {
 		for n := 0; n < b.N; n++ {
 			refs = a.Refs()
 		}
-		if len(refs) != 2 {
-			b.Fatal("missing refs")
-		}
+		b.StopTimer()
+		require.Len(b, refs, 2)
 	})
 }
