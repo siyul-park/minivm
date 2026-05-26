@@ -7,8 +7,8 @@ minivm JIT targets ARM64 only; all numbers below reflect the threaded interprete
 # Full suite (interpreter + cross-runtime)
 make benchmark
 
-# Interpreter only
-go test -run="-" -bench="BenchmarkInterpreter_Run" -benchmem ./interp/...
+# Pure threaded interpreter only (JIT disabled)
+go test -run="-" -bench="BenchmarkInterpreter_Run/threaded" -benchmem ./interp/...
 
 # Cross-runtime comparison (benchmarks/ module)
 cd benchmarks && go test -run="-" -bench="BenchmarkFib35" -benchmem -benchtime=5s ./...
@@ -37,7 +37,7 @@ wazero's advantage is structural: it compiles the WebAssembly module to native x
 
 ## Threaded Interpreter — Instruction Throughput
 
-Each row is one complete `Interpreter.Run` + `Reset` cycle. Setup instructions are included, so numbers reflect real dispatch overhead, not isolated opcode cost. Benchmarked via `BenchmarkInterpreter_Run/default` (`-benchtime=1s`).
+Each row is one complete `Interpreter.Run` + `Reset` cycle. Setup instructions are included, so numbers reflect real dispatch overhead, not isolated opcode cost. Benchmarked via `BenchmarkInterpreter_Run/threaded` (`-benchtime=1s`). The `/threaded` benchmark reuses the existing test-program corpus with `WithThreshold(-1)`, so no hot segment is promoted to JIT code during measurement.
 
 ### Scalar operations
 
@@ -153,7 +153,7 @@ allocation, after allocates a result slice only after the first child ref.
 `Traceable` remains `Refs() []Ref`.
 
 ```bash
-go test -run '^$' -bench='^BenchmarkInterpreter_Run/default/.*struct\.(get|set)' -benchmem -benchtime=300ms -count=10 ./interp
+go test -run '^$' -bench='^BenchmarkInterpreter_Run/threaded/.*struct\.(get|set)' -benchmem -benchtime=300ms -count=10 ./interp
 go test -run '^$' -bench='^BenchmarkInterpreter_Marshal/(string|struct_plain|map_string_i32|nested_slice_struct)$' -benchmem -benchtime=300ms -count=10 ./interp
 go test -run '^$' -bench='^BenchmarkMap_Refs/(inline_i64|child_refs)$' -benchmem -benchtime=300ms -count=10 ./types
 ```
@@ -210,6 +210,7 @@ On x86-64, JIT is not yet implemented. Running with `WithTick(1)` + `WithThresho
 
 - `-benchtime=1s` for the threaded-interpreter suite; `-benchtime=5s` for cross-runtime comparison.
 - The Apple M4 Pro heap traversal comparison uses `-benchtime=300ms -count=10`; lifecycle and direct `Refs()` baselines use `-benchtime=500ms -count=3`.
+- `BenchmarkInterpreter_Run/threaded` runs with `WithThreshold(-1)` on every architecture. On ARM64, a default `New` interpreter may promote hot segments to JIT code and is not a pure threaded baseline.
 - `Interpreter.Reset()` called between iterations; `New()` called once outside the timed loop.
 - Cross-runtime benchmark code lives in `benchmarks/` (a separate Go module with its own `go.mod`). Run `make benchmark` to execute both suites, or `cd benchmarks && go test ...` for the cross-runtime suite alone.
 - wazero uses its default compiler runtime (JIT); module instantiation excluded from timing.

@@ -2662,6 +2662,55 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 		require.Equal(t, types.I32(20), v)
 	})
 
+	t.Run("i64 const fusion returns inline result", func(t *testing.T) {
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I64_CONST, 40),
+			instr.New(instr.I64_CONST, 2),
+			instr.New(instr.I64_ADD),
+		}), WithThreshold(-1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64(42), v)
+	})
+
+	t.Run("i64 const fusion preserves spilled result", func(t *testing.T) {
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I64_CONST, 1<<50),
+			instr.New(instr.I64_CONST, 1),
+			instr.New(instr.I64_ADD),
+		}), WithThreshold(-1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64((1<<50)+1), v)
+	})
+
+	t.Run("i64 const fusion preserves divide by zero", func(t *testing.T) {
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I64_CONST, 1),
+			instr.New(instr.I64_CONST, 0),
+			instr.New(instr.I64_DIV_S),
+		}), WithThreshold(-1))
+		defer i.Close()
+		require.ErrorIs(t, i.Run(context.Background()), ErrDivideByZero)
+	})
+
+	t.Run("precise i64 bypass returns same result", func(t *testing.T) {
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I64_CONST, 40),
+			instr.New(instr.I64_CONST, 2),
+			instr.New(instr.I64_ADD),
+		}), WithTick(1), WithThreshold(-1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64(42), v)
+	})
+
 	t.Run("negative disables jit", func(t *testing.T) {
 		p := prof.New()
 		i := New(program.New([]instr.Instruction{
@@ -3914,15 +3963,16 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 }
 
 func BenchmarkInterpreter_Run(b *testing.B) {
-	b.Run("default", func(b *testing.B) {
+	b.Run("threaded", func(b *testing.B) {
 		for _, tt := range tests {
 			b.Run(tt.program.String(), func(b *testing.B) {
 				ctx, cancel := context.WithCancel(context.TODO())
 				defer cancel()
 
-				i := New(tt.program)
+				i := New(tt.program, WithThreshold(-1))
 				defer i.Close()
 
+				b.ReportAllocs()
 				b.ResetTimer()
 
 				for n := 0; n < b.N; n++ {

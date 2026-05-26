@@ -223,7 +223,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.fp == 1 {
 				panic(ErrFrameUnderflow)
 			}
-			f := &i.frames[i.fp-1]
+			f := i.fr
 			if i.sp < f.returns {
 				panic(ErrStackUnderflow)
 			}
@@ -473,7 +473,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					}
 					i.stack[i.sp] = types.BoxRef(int(i.intern(text)))
 					i.sp++
-					i.frames[i.fp-1].ip += 3
+					i.fr.ip += 3
 				}
 			}
 			if fused := c.fuseRefImm(addr, 3); fused != nil {
@@ -486,7 +486,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				i.retain(addr)
 				i.stack[i.sp] = val
 				i.sp++
-				i.frames[i.fp-1].ip += 3
+				i.fr.ip += 3
 			}
 		}
 		return func(i *Interpreter) {
@@ -495,7 +495,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.stack[i.sp] = val
 			i.sp++
-			i.frames[i.fp-1].ip += 3
+			i.fr.ip += 3
 		}
 	},
 	instr.REF_NULL: func(c *threadedCompiler) func(i *Interpreter) {
@@ -507,7 +507,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.retain(0)
 			i.stack[i.sp] = types.BoxedNull
 			i.sp++
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.REF_TEST: func(c *threadedCompiler) func(i *Interpreter) {
@@ -533,7 +533,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				cond = types.BoxBool(typ.Kind() == kind)
 			}
 			i.stack[i.sp-1] = cond
-			i.frames[i.fp-1].ip += 3
+			i.fr.ip += 3
 		}
 	},
 	instr.REF_CAST: func(c *threadedCompiler) func(i *Interpreter) {
@@ -561,7 +561,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					panic(ErrTypeMismatch)
 				}
 			}
-			i.frames[i.fp-1].ip += 3
+			i.fr.ip += 3
 		}
 	},
 	instr.REF_IS_NULL: func(c *threadedCompiler) func(i *Interpreter) {
@@ -572,7 +572,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			val := i.stack[i.sp-1]
 			i.stack[i.sp-1] = types.BoxBool(val.Ref() == 0)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.REF_EQ: func(c *threadedCompiler) func(i *Interpreter) {
@@ -585,7 +585,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2]
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 == v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.REF_NE: func(c *threadedCompiler) func(i *Interpreter) {
@@ -598,7 +598,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2]
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 != v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_CONST: func(c *threadedCompiler) func(i *Interpreter) {
@@ -653,7 +653,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].I32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxI32(v2 * v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_DIV_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -669,7 +669,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp--
 			i.stack[i.sp-1] = types.BoxI32(v2 / v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_DIV_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -685,7 +685,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp--
 			i.stack[i.sp-1] = types.BoxI32(int32(uint32(v2) / uint32(v1)))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_REM_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -701,7 +701,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp--
 			i.stack[i.sp-1] = types.BoxI32(v2 % v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_REM_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -717,7 +717,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp--
 			i.stack[i.sp-1] = types.BoxI32(int32(uint32(v2) % uint32(v1)))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_SHL: func(c *threadedCompiler) func(i *Interpreter) {
@@ -730,7 +730,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].I32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxI32(v2 << v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_SHR_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -743,7 +743,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].I32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxI32(v2 >> v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_SHR_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -756,7 +756,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := uint32(i.stack[i.sp-2].I32())
 			i.sp--
 			i.stack[i.sp-1] = types.BoxI32(int32(v2 >> v1))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_XOR: func(c *threadedCompiler) func(i *Interpreter) {
@@ -769,7 +769,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].I32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxI32(v1 ^ v2)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_AND: func(c *threadedCompiler) func(i *Interpreter) {
@@ -782,7 +782,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].I32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxI32(v1 & v2)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_OR: func(c *threadedCompiler) func(i *Interpreter) {
@@ -795,7 +795,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].I32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxI32(v1 | v2)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_EQZ: func(c *threadedCompiler) func(i *Interpreter) {
@@ -806,7 +806,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			val := i.stack[i.sp-1].I32()
 			i.stack[i.sp-1] = types.BoxBool(val == 0)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_EQ: func(c *threadedCompiler) func(i *Interpreter) {
@@ -819,7 +819,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].I32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 == v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_NE: func(c *threadedCompiler) func(i *Interpreter) {
@@ -832,7 +832,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].I32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 != v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_LT_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -858,7 +858,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].I32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(uint32(v2) < uint32(v1))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_GT_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -871,7 +871,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].I32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 > v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_GT_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -884,7 +884,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].I32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(uint32(v2) > uint32(v1))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_LE_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -897,7 +897,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].I32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_LE_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -910,7 +910,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].I32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(uint32(v2) <= uint32(v1))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_GE_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -923,7 +923,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].I32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_GE_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -936,7 +936,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].I32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(uint32(v2) >= uint32(v1))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_TO_I64_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -947,7 +947,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.stack[i.sp-1].I32()
 			i.stack[i.sp-1] = i.boxI64(int64(v))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_TO_I64_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -958,7 +958,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := uint32(i.stack[i.sp-1].I32())
 			i.stack[i.sp-1] = i.boxI64(int64(v))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_TO_F32_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -969,7 +969,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.stack[i.sp-1].I32()
 			i.stack[i.sp-1] = types.BoxF32(float32(v))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_TO_F32_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -980,7 +980,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := uint32(i.stack[i.sp-1].I32())
 			i.stack[i.sp-1] = types.BoxF32(float32(v))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_TO_F64_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -991,7 +991,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.stack[i.sp-1].I32()
 			i.stack[i.sp-1] = types.BoxF64(float64(v))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I32_TO_F64_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1002,7 +1002,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := uint32(i.stack[i.sp-1].I32())
 			i.stack[i.sp-1] = types.BoxF64(float64(v))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_CONST: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1019,7 +1019,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				i.stack[i.sp] = v
 				i.sp++
-				i.frames[i.fp-1].ip += 9
+				i.fr.ip += 9
 			}
 		}
 		v := types.I64(val)
@@ -1029,7 +1029,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.stack[i.sp] = types.BoxRef(i.alloc(v))
 			i.sp++
-			i.frames[i.fp-1].ip += 9
+			i.fr.ip += 9
 		}
 	},
 	instr.I64_ADD: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1042,7 +1042,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = i.boxI64(v2 + v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_SUB: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1055,7 +1055,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = i.boxI64(v2 - v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_MUL: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1068,7 +1068,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = i.boxI64(v2 * v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_DIV_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1084,7 +1084,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp--
 			i.stack[i.sp-1] = i.boxI64(v2 / v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_DIV_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1100,7 +1100,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp--
 			i.stack[i.sp-1] = i.boxI64(int64(uint64(v2) / uint64(v1)))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_REM_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1116,7 +1116,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp--
 			i.stack[i.sp-1] = i.boxI64(v2 % v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_REM_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1132,7 +1132,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp--
 			i.stack[i.sp-1] = i.boxI64(int64(uint64(v2) % uint64(v1)))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_SHL: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1145,7 +1145,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = i.boxI64(int64(v2 << (v1 & 0x3F)))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_SHR_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1158,7 +1158,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = i.boxI64(v2 >> (v1 & 0x3F))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_SHR_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1171,7 +1171,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = i.boxI64(int64(uint64(v2) >> (v1 & 0x3F)))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_EQZ: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1182,7 +1182,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			val := i.unboxI64(i.stack[i.sp-1])
 			i.stack[i.sp-1] = types.BoxBool(val == 0)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_EQ: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1195,7 +1195,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 == v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_NE: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1208,7 +1208,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 != v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_LT_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1221,7 +1221,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 < v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_LT_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1234,7 +1234,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(uint64(v2) < uint64(v1))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_GT_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1247,7 +1247,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 > v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_GT_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1260,7 +1260,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(uint64(v2) > uint64(v1))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_LE_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1273,7 +1273,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_LE_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1286,7 +1286,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(uint64(v2) <= uint64(v1))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_GE_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1299,7 +1299,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_GE_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1312,7 +1312,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(uint64(v2) >= uint64(v1))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_TO_I32: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1323,7 +1323,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.unboxI64(i.stack[i.sp-1])
 			i.stack[i.sp-1] = types.BoxI32(int32(v))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_TO_F32_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1334,7 +1334,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.unboxI64(i.stack[i.sp-1])
 			i.stack[i.sp-1] = types.BoxF32(float32(v))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_TO_F32_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1345,7 +1345,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.unboxI64(i.stack[i.sp-1])
 			i.stack[i.sp-1] = types.BoxF32(float32(uint64(v)))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_TO_F64_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1356,7 +1356,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.unboxI64(i.stack[i.sp-1])
 			i.stack[i.sp-1] = types.BoxF64(float64(v))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.I64_TO_F64_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1367,7 +1367,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.unboxI64(i.stack[i.sp-1])
 			i.stack[i.sp-1] = types.BoxF64(float64(uint64(v)))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F32_CONST: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1383,7 +1383,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.stack[i.sp] = val
 			i.sp++
-			i.frames[i.fp-1].ip += 5
+			i.fr.ip += 5
 		}
 	},
 	instr.F32_ADD: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1396,7 +1396,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxF32(v2 + v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F32_SUB: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1409,7 +1409,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxF32(v2 - v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F32_MUL: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1422,7 +1422,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxF32(v1 * v2)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F32_DIV: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1438,7 +1438,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp--
 			i.stack[i.sp-1] = types.BoxF32(v2 / v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F32_EQ: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1451,7 +1451,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 == v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F32_NE: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1464,7 +1464,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 != v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F32_LT: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1477,7 +1477,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 < v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F32_GT: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1490,7 +1490,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 > v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F32_LE: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1503,7 +1503,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F32_GE: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1516,7 +1516,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F32()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F32_TO_I32_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1527,7 +1527,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.stack[i.sp-1].F32()
 			i.stack[i.sp-1] = types.BoxI32(int32(v))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F32_TO_I32_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1538,7 +1538,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.stack[i.sp-1].F32()
 			i.stack[i.sp-1] = types.BoxI32(int32(uint32(v)))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F32_TO_I64_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1549,7 +1549,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.stack[i.sp-1].F32()
 			i.stack[i.sp-1] = i.boxI64(int64(v))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F32_TO_I64_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1560,7 +1560,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.stack[i.sp-1].F32()
 			i.stack[i.sp-1] = i.boxI64(int64(uint32(v)))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F32_TO_F64: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1571,7 +1571,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.stack[i.sp-1].F32()
 			i.stack[i.sp-1] = types.BoxF64(float64(v))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F64_CONST: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1587,7 +1587,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.stack[i.sp] = val
 			i.sp++
-			i.frames[i.fp-1].ip += 9
+			i.fr.ip += 9
 		}
 	},
 	instr.F64_ADD: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1600,7 +1600,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F64()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxF64(v2 + v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F64_SUB: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1613,7 +1613,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F64()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxF64(v2 - v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F64_MUL: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1626,7 +1626,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F64()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxF64(v1 * v2)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F64_DIV: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1642,7 +1642,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp--
 			i.stack[i.sp-1] = types.BoxF64(v2 / v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F64_EQ: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1655,7 +1655,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F64()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 == v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F64_NE: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1668,7 +1668,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F64()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 != v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F64_LT: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1681,7 +1681,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F64()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 < v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F64_GT: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1694,7 +1694,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F64()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 > v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F64_LE: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1707,7 +1707,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F64()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F64_GE: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1720,7 +1720,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2].F64()
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F64_TO_I32_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1731,7 +1731,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.stack[i.sp-1].F64()
 			i.stack[i.sp-1] = types.BoxI32(int32(v))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 
@@ -1743,7 +1743,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.stack[i.sp-1].F64()
 			i.stack[i.sp-1] = types.BoxI32(int32(uint32(v)))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F64_TO_I64_S: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1754,7 +1754,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.stack[i.sp-1].F64()
 			i.stack[i.sp-1] = i.boxI64(int64(v))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F64_TO_I64_U: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1765,7 +1765,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.stack[i.sp-1].F64()
 			i.stack[i.sp-1] = i.boxI64(int64(uint64(v)))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.F64_TO_F32: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1776,7 +1776,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.stack[i.sp-1].F64()
 			i.stack[i.sp-1] = types.BoxF32(float32(v))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.STRING_NEW_UTF32: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1787,7 +1787,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			val := unboxRef[types.I32Array](i, i.stack[i.sp-1])
 			i.stack[i.sp-1] = types.BoxRef(int(i.intern(string(types.String(val)))))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.STRING_LEN: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1798,7 +1798,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := unboxRef[types.String](i, i.stack[i.sp-1])
 			i.stack[i.sp-1] = types.BoxI32(int32(len(v)))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.STRING_CONCAT: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1811,7 +1811,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxRef(int(i.intern(string(v2 + v1))))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.STRING_EQ: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1824,7 +1824,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 == v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.STRING_NE: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1837,7 +1837,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 != v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.STRING_LT: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1850,7 +1850,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 < v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.STRING_GT: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1863,7 +1863,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 > v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.STRING_LE: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1876,7 +1876,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.STRING_GE: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1889,7 +1889,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.STRING_ENCODE_UTF32: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1900,7 +1900,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			val := unboxRef[types.String](i, i.stack[i.sp-1])
 			i.stack[i.sp-1] = types.BoxRef(i.alloc(types.I32Array(val)))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.ARRAY_NEW: func(c *threadedCompiler) func(i *Interpreter) {
@@ -1933,7 +1933,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				i.sp -= size
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-				i.frames[i.fp-1].ip += 3
+				i.fr.ip += 3
 			}
 		case types.KindI64:
 			return func(i *Interpreter) {
@@ -1950,7 +1950,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				i.sp -= size
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-				i.frames[i.fp-1].ip += 3
+				i.fr.ip += 3
 			}
 		case types.KindF32:
 			return func(i *Interpreter) {
@@ -1967,7 +1967,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				i.sp -= size
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-				i.frames[i.fp-1].ip += 3
+				i.fr.ip += 3
 			}
 		case types.KindF64:
 			return func(i *Interpreter) {
@@ -1984,7 +1984,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				i.sp -= size
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-				i.frames[i.fp-1].ip += 3
+				i.fr.ip += 3
 			}
 		default:
 			return func(i *Interpreter) {
@@ -2002,7 +2002,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				copy(val.Elems, i.stack[i.sp-size-1:i.sp-1])
 				i.sp -= size
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-				i.frames[i.fp-1].ip += 3
+				i.fr.ip += 3
 			}
 		}
 	},
@@ -2029,7 +2029,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				size := i.stack[i.sp-1].I32()
 				val := make(types.I32Array, size)
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-				i.frames[i.fp-1].ip += 3
+				i.fr.ip += 3
 			}
 		case types.KindI64:
 			return func(i *Interpreter) {
@@ -2039,7 +2039,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				size := i.stack[i.sp-1].I32()
 				val := make(types.I64Array, size)
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-				i.frames[i.fp-1].ip += 3
+				i.fr.ip += 3
 			}
 		case types.KindF32:
 			return func(i *Interpreter) {
@@ -2049,7 +2049,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				size := i.stack[i.sp-1].I32()
 				val := make(types.F32Array, size)
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-				i.frames[i.fp-1].ip += 3
+				i.fr.ip += 3
 			}
 		case types.KindF64:
 			return func(i *Interpreter) {
@@ -2059,7 +2059,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				size := i.stack[i.sp-1].I32()
 				val := make(types.F64Array, size)
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-				i.frames[i.fp-1].ip += 3
+				i.fr.ip += 3
 			}
 		default:
 			return func(i *Interpreter) {
@@ -2072,7 +2072,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					Elems: make([]types.Boxed, size),
 				}
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
-				i.frames[i.fp-1].ip += 3
+				i.fr.ip += 3
 			}
 		}
 	},
@@ -2098,7 +2098,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrTypeMismatch)
 			}
 			i.stack[i.sp-1] = types.BoxI32(n)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.ARRAY_GET: func(c *threadedCompiler) func(i *Interpreter) {
@@ -2150,7 +2150,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.release(addr)
 			i.sp--
 			i.stack[i.sp-1] = val
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.ARRAY_SET: func(c *threadedCompiler) func(i *Interpreter) {
@@ -2201,7 +2201,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.release(addr)
 			i.sp -= 3
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.ARRAY_FILL: func(c *threadedCompiler) func(i *Interpreter) {
@@ -2270,7 +2270,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.release(addr)
 			i.sp -= 4
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.ARRAY_COPY: func(c *threadedCompiler) func(i *Interpreter) {
@@ -2329,7 +2329,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.release(addr)
 			i.sp -= 4
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.STRUCT_NEW: func(c *threadedCompiler) func(i *Interpreter) {
@@ -2365,7 +2365,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp -= size - 1
 			i.stack[i.sp-1] = types.BoxRef(i.alloc(s))
-			i.frames[i.fp-1].ip += 3
+			i.fr.ip += 3
 		}
 	},
 	instr.STRUCT_NEW_DEFAULT: func(c *threadedCompiler) func(i *Interpreter) {
@@ -2386,7 +2386,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			s := types.NewStruct(typ)
 			i.sp++
 			i.stack[i.sp-1] = types.BoxRef(i.alloc(s))
-			i.frames[i.fp-1].ip += 3
+			i.fr.ip += 3
 		}
 	},
 	instr.STRUCT_GET: func(c *threadedCompiler) func(i *Interpreter) {
@@ -2450,7 +2450,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.release(addr)
 			i.sp--
 			i.stack[i.sp-1] = val
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.STRUCT_SET: func(c *threadedCompiler) func(i *Interpreter) {
@@ -2516,7 +2516,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.release(addr)
 			i.sp -= 3
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.MAP_NEW: func(c *threadedCompiler) func(i *Interpreter) {
@@ -2629,7 +2629,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp = base + 1
 			i.stack[base] = types.BoxRef(addr)
-			i.frames[i.fp-1].ip += 3
+			i.fr.ip += 3
 		}
 	},
 	instr.MAP_NEW_DEFAULT: func(c *threadedCompiler) func(i *Interpreter) {
@@ -2655,7 +2655,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrIndexOutOfRange)
 			}
 			i.stack[i.sp-1] = types.BoxRef(i.alloc(types.NewMapForType(typ, capacity)))
-			i.frames[i.fp-1].ip += 3
+			i.fr.ip += 3
 		}
 	},
 	instr.MAP_LEN: func(c *threadedCompiler) func(i *Interpreter) {
@@ -2686,7 +2686,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.release(addr)
 			i.stack[i.sp-1] = types.BoxI32(int32(n))
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.MAP_GET: func(c *threadedCompiler) func(i *Interpreter) {
@@ -2781,7 +2781,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.release(addr)
 			i.sp--
 			i.stack[i.sp-1] = result
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.MAP_LOOKUP: func(c *threadedCompiler) func(i *Interpreter) {
@@ -2870,7 +2870,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.release(addr)
 			i.stack[i.sp-2] = result
 			i.stack[i.sp-1] = types.BoxBool(found)
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.MAP_SET: func(c *threadedCompiler) func(i *Interpreter) {
@@ -2959,7 +2959,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.release(addr)
 			i.sp -= 3
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.MAP_DELETE: func(c *threadedCompiler) func(i *Interpreter) {
@@ -3044,7 +3044,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.release(addr)
 			i.sp -= 2
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 	instr.MAP_CLEAR: func(c *threadedCompiler) func(i *Interpreter) {
@@ -3097,7 +3097,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.release(addr)
 			i.sp--
-			i.frames[i.fp-1].ip++
+			i.fr.ip++
 		}
 	},
 }
