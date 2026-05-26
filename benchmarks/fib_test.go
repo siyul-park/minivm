@@ -54,9 +54,9 @@ var fibWasm = []byte{
 	0x41, 0x02, // i32.const 2
 	0x6b,       // i32.sub
 	0x10, 0x00, // call 0
-	0x6a,       // i32.add               — else branch end
-	0x0b,       // end (if/else)
-	0x0b,       // end (function)
+	0x6a, // i32.add               — else branch end
+	0x0b, // end (if/else)
+	0x0b, // end (function)
 }
 
 // fibGo is a pure-Go recursive fib used as the native baseline.
