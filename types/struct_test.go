@@ -65,3 +65,28 @@ func TestStruct_String(t *testing.T) {
 	s := NewStruct(NewStructType())
 	require.Equal(t, "struct {}{}", s.String())
 }
+
+func TestStruct_Trace(t *testing.T) {
+	t.Run("primitive fields", func(t *testing.T) {
+		s := NewStruct(NewStructType(NewStructField(TypeI32)), BoxI32(1))
+
+		var refs []Ref
+		s.Trace(func(ref Ref) {
+			refs = append(refs, ref)
+		})
+		require.Empty(t, refs)
+	})
+
+	t.Run("reference fields", func(t *testing.T) {
+		s := NewStruct(
+			NewStructType(NewStructField(TypeRef), NewStructField(TypeI32), NewStructField(TypeRef)),
+			BoxRef(1), BoxI32(2), BoxRef(3),
+		)
+
+		var refs []Ref
+		s.Trace(func(ref Ref) {
+			refs = append(refs, ref)
+		})
+		require.Equal(t, []Ref{1, 3}, refs)
+	})
+}

@@ -105,3 +105,25 @@ func TestArray_String(t *testing.T) {
 		})
 	}
 }
+
+func TestArray_Trace(t *testing.T) {
+	t.Run("primitive elements", func(t *testing.T) {
+		a := NewArray(NewArrayType(TypeI32), BoxI32(1), BoxI32(2))
+
+		var refs []Ref
+		a.Trace(func(ref Ref) {
+			refs = append(refs, ref)
+		})
+		require.Empty(t, refs)
+	})
+
+	t.Run("reference elements", func(t *testing.T) {
+		a := NewArray(NewArrayType(TypeRef), BoxRef(1), BoxI32(2), BoxRef(3))
+
+		var refs []Ref
+		a.Trace(func(ref Ref) {
+			refs = append(refs, ref)
+		})
+		require.Equal(t, []Ref{1, 3}, refs)
+	})
+}
