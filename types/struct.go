@@ -120,7 +120,7 @@ func (s *Struct) String() string {
 }
 
 func (s *Struct) Refs() []Ref {
-	refs := make([]Ref, 0, len(s.Typ.Fields))
+	var refs []Ref
 	for i, f := range s.Typ.Fields {
 		if f.Kind != KindRef {
 			continue
