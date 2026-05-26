@@ -118,7 +118,7 @@ func TestMap_Clear(t *testing.T) {
 	require.Equal(t, 0, m.Len())
 }
 
-func TestMap_Trace(t *testing.T) {
+func TestMap_Refs(t *testing.T) {
 	t.Run("ref key and value", func(t *testing.T) {
 		typ := NewMapType(TypeRef, TypeRef)
 		m := NewMap(typ)
@@ -126,11 +126,7 @@ func TestMap_Trace(t *testing.T) {
 			Key:   BoxRef(1),
 			Value: BoxRef(2),
 		})
-		var refs []Ref
-		m.Trace(func(ref Ref) {
-			refs = append(refs, ref)
-		})
-		require.Equal(t, []Ref{1, 2}, refs)
+		require.Equal(t, []Ref{1, 2}, m.Refs())
 	})
 
 	t.Run("spilled i64 value", func(t *testing.T) {
@@ -140,11 +136,7 @@ func TestMap_Trace(t *testing.T) {
 			Key:   BoxI32(1),
 			Value: BoxRef(2),
 		})
-		var refs []Ref
-		m.Trace(func(ref Ref) {
-			refs = append(refs, ref)
-		})
-		require.Equal(t, []Ref{2}, refs)
+		require.Equal(t, []Ref{2}, m.Refs())
 	})
 }
 
@@ -249,14 +241,10 @@ func TestMapI32_String(t *testing.T) {
 	require.Equal(t, "map[i32]i32{1: 2}", m.String())
 }
 
-func TestMapI32_Trace(t *testing.T) {
+func TestMapI32_Refs(t *testing.T) {
 	m := NewMapI32(NewMapType(TypeI32, TypeString), 0)
 	m.Set(1, BoxRef(2))
-	var refs []Ref
-	m.Trace(func(ref Ref) {
-		refs = append(refs, ref)
-	})
-	require.Equal(t, []Ref{2}, refs)
+	require.Equal(t, []Ref{2}, m.Refs())
 }
 
 func TestMapI64_Kind(t *testing.T) {
@@ -338,14 +326,10 @@ func TestMapI64_String(t *testing.T) {
 	require.Equal(t, "map[i64]i32{1: 2}", m.String())
 }
 
-func TestMapI64_Trace(t *testing.T) {
+func TestMapI64_Refs(t *testing.T) {
 	m := NewMapI64(NewMapType(TypeI64, TypeString), 0)
 	m.Set(1, BoxRef(2))
-	var refs []Ref
-	m.Trace(func(ref Ref) {
-		refs = append(refs, ref)
-	})
-	require.Equal(t, []Ref{2}, refs)
+	require.Equal(t, []Ref{2}, m.Refs())
 }
 
 func TestMapF32_Kind(t *testing.T) {
@@ -427,14 +411,10 @@ func TestMapF32_String(t *testing.T) {
 	require.Equal(t, "map[f32]i32{1: 2}", m.String())
 }
 
-func TestMapF32_Trace(t *testing.T) {
+func TestMapF32_Refs(t *testing.T) {
 	m := NewMapF32(NewMapType(TypeF32, TypeString), 0)
 	m.Set(1, BoxRef(2))
-	var refs []Ref
-	m.Trace(func(ref Ref) {
-		refs = append(refs, ref)
-	})
-	require.Equal(t, []Ref{2}, refs)
+	require.Equal(t, []Ref{2}, m.Refs())
 }
 
 func TestMapF64_Kind(t *testing.T) {
@@ -516,14 +496,10 @@ func TestMapF64_String(t *testing.T) {
 	require.Equal(t, "map[f64]i32{1: 2}", m.String())
 }
 
-func TestMapF64_Trace(t *testing.T) {
+func TestMapF64_Refs(t *testing.T) {
 	m := NewMapF64(NewMapType(TypeF64, TypeString), 0)
 	m.Set(1, BoxRef(2))
-	var refs []Ref
-	m.Trace(func(ref Ref) {
-		refs = append(refs, ref)
-	})
-	require.Equal(t, []Ref{2}, refs)
+	require.Equal(t, []Ref{2}, m.Refs())
 }
 
 func TestMapType_Kind(t *testing.T) {

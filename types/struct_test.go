@@ -66,15 +66,17 @@ func TestStruct_String(t *testing.T) {
 	require.Equal(t, "struct {}{}", s.String())
 }
 
-func TestStruct_Trace(t *testing.T) {
+func TestStruct_Refs(t *testing.T) {
 	t.Run("primitive fields", func(t *testing.T) {
 		s := NewStruct(NewStructType(NewStructField(TypeI32)), BoxI32(1))
 
+		require.Empty(t, s.Refs())
 		var refs []Ref
-		s.Trace(func(ref Ref) {
-			refs = append(refs, ref)
+		allocs := testing.AllocsPerRun(100, func() {
+			refs = s.Refs()
 		})
 		require.Empty(t, refs)
+		require.Zero(t, allocs)
 	})
 
 	t.Run("reference fields", func(t *testing.T) {
@@ -83,10 +85,6 @@ func TestStruct_Trace(t *testing.T) {
 			BoxRef(1), BoxI32(2), BoxRef(3),
 		)
 
-		var refs []Ref
-		s.Trace(func(ref Ref) {
-			refs = append(refs, ref)
-		})
-		require.Equal(t, []Ref{1, 3}, refs)
+		require.Equal(t, []Ref{1, 3}, s.Refs())
 	})
 }
