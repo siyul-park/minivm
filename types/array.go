@@ -70,7 +70,7 @@ func (a *Array) Type() Type     { return a.Typ }
 func (a *Array) String() string { return joinElems(a.Type(), a.Elems) }
 
 func (a *Array) Refs() []Ref {
-	refs := make([]Ref, 0, len(a.Elems))
+	var refs []Ref
 	for _, e := range a.Elems {
 		if e.Kind() == KindRef {
 			refs = append(refs, Ref(e.Ref()))

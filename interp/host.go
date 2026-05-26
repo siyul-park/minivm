@@ -72,7 +72,7 @@ func (h *HostObject) String() string {
 }
 
 func (h *HostObject) Refs() []types.Ref {
-	refs := make([]types.Ref, 0, len(h.slots))
+	var refs []types.Ref
 	for _, s := range h.slots {
 		if s.isMethod() {
 			refs = append(refs, types.Ref(s.addr))
