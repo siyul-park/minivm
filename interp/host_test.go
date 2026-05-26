@@ -80,6 +80,27 @@ func TestNewHostFunction(t *testing.T) {
 }
 
 func TestHostObject(t *testing.T) {
+	t.Run("private fields trace without allocation", func(t *testing.T) {
+		type private struct {
+			Visible int32
+			hidden int32
+		}
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(private{Visible: 1, hidden: 2})
+		require.NoError(t, err)
+		ho, ok := got.(*HostObject)
+		require.True(t, ok)
+
+		var refs []types.Ref
+		allocs := testing.AllocsPerRun(100, func() {
+			refs = ho.Refs()
+		})
+		require.Empty(t, refs)
+		require.Zero(t, allocs)
+	})
+
 	t.Run("struct with method routes to HostObject", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()

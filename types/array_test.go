@@ -111,6 +111,12 @@ func TestArray_Refs(t *testing.T) {
 		a := NewArray(NewArrayType(TypeI32), BoxI32(1), BoxI32(2))
 
 		require.Empty(t, a.Refs())
+		var refs []Ref
+		allocs := testing.AllocsPerRun(100, func() {
+			refs = a.Refs()
+		})
+		require.Empty(t, refs)
+		require.Zero(t, allocs)
 	})
 
 	t.Run("reference elements", func(t *testing.T) {
