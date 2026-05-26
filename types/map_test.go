@@ -119,6 +119,18 @@ func TestMap_Clear(t *testing.T) {
 }
 
 func TestMap_Refs(t *testing.T) {
+	t.Run("inline i64 value", func(t *testing.T) {
+		m := NewMap(NewMapType(TypeI32, TypeI64))
+		m.Set(MapKey{Kind: KindI32, Bits: 1}, MapEntry{Key: BoxI32(1), Value: BoxI64(2)})
+
+		var refs []Ref
+		allocs := testing.AllocsPerRun(100, func() {
+			refs = m.Refs()
+		})
+		require.Empty(t, refs)
+		require.Zero(t, allocs)
+	})
+
 	t.Run("ref key and value", func(t *testing.T) {
 		typ := NewMapType(TypeRef, TypeRef)
 		m := NewMap(typ)
@@ -242,9 +254,23 @@ func TestMapI32_String(t *testing.T) {
 }
 
 func TestMapI32_Refs(t *testing.T) {
-	m := NewMapI32(NewMapType(TypeI32, TypeString), 0)
-	m.Set(1, BoxRef(2))
-	require.Equal(t, []Ref{2}, m.Refs())
+	t.Run("inline i64 value", func(t *testing.T) {
+		m := NewMapI32(NewMapType(TypeI32, TypeI64), 0)
+		m.Set(1, BoxI64(2))
+
+		var refs []Ref
+		allocs := testing.AllocsPerRun(100, func() {
+			refs = m.Refs()
+		})
+		require.Empty(t, refs)
+		require.Zero(t, allocs)
+	})
+
+	t.Run("ref value", func(t *testing.T) {
+		m := NewMapI32(NewMapType(TypeI32, TypeString), 0)
+		m.Set(1, BoxRef(2))
+		require.Equal(t, []Ref{2}, m.Refs())
+	})
 }
 
 func TestMapI64_Kind(t *testing.T) {
@@ -327,9 +353,23 @@ func TestMapI64_String(t *testing.T) {
 }
 
 func TestMapI64_Refs(t *testing.T) {
-	m := NewMapI64(NewMapType(TypeI64, TypeString), 0)
-	m.Set(1, BoxRef(2))
-	require.Equal(t, []Ref{2}, m.Refs())
+	t.Run("inline i64 value", func(t *testing.T) {
+		m := NewMapI64(NewMapType(TypeI64, TypeI64), 0)
+		m.Set(1, BoxI64(2))
+
+		var refs []Ref
+		allocs := testing.AllocsPerRun(100, func() {
+			refs = m.Refs()
+		})
+		require.Empty(t, refs)
+		require.Zero(t, allocs)
+	})
+
+	t.Run("ref value", func(t *testing.T) {
+		m := NewMapI64(NewMapType(TypeI64, TypeString), 0)
+		m.Set(1, BoxRef(2))
+		require.Equal(t, []Ref{2}, m.Refs())
+	})
 }
 
 func TestMapF32_Kind(t *testing.T) {
@@ -412,9 +452,23 @@ func TestMapF32_String(t *testing.T) {
 }
 
 func TestMapF32_Refs(t *testing.T) {
-	m := NewMapF32(NewMapType(TypeF32, TypeString), 0)
-	m.Set(1, BoxRef(2))
-	require.Equal(t, []Ref{2}, m.Refs())
+	t.Run("inline i64 value", func(t *testing.T) {
+		m := NewMapF32(NewMapType(TypeF32, TypeI64), 0)
+		m.Set(1, BoxI64(2))
+
+		var refs []Ref
+		allocs := testing.AllocsPerRun(100, func() {
+			refs = m.Refs()
+		})
+		require.Empty(t, refs)
+		require.Zero(t, allocs)
+	})
+
+	t.Run("ref value", func(t *testing.T) {
+		m := NewMapF32(NewMapType(TypeF32, TypeString), 0)
+		m.Set(1, BoxRef(2))
+		require.Equal(t, []Ref{2}, m.Refs())
+	})
 }
 
 func TestMapF64_Kind(t *testing.T) {
@@ -497,9 +551,23 @@ func TestMapF64_String(t *testing.T) {
 }
 
 func TestMapF64_Refs(t *testing.T) {
-	m := NewMapF64(NewMapType(TypeF64, TypeString), 0)
-	m.Set(1, BoxRef(2))
-	require.Equal(t, []Ref{2}, m.Refs())
+	t.Run("inline i64 value", func(t *testing.T) {
+		m := NewMapF64(NewMapType(TypeF64, TypeI64), 0)
+		m.Set(1, BoxI64(2))
+
+		var refs []Ref
+		allocs := testing.AllocsPerRun(100, func() {
+			refs = m.Refs()
+		})
+		require.Empty(t, refs)
+		require.Zero(t, allocs)
+	})
+
+	t.Run("ref value", func(t *testing.T) {
+		m := NewMapF64(NewMapType(TypeF64, TypeString), 0)
+		m.Set(1, BoxRef(2))
+		require.Equal(t, []Ref{2}, m.Refs())
+	})
 }
 
 func TestMapType_Kind(t *testing.T) {
@@ -568,6 +636,21 @@ func BenchmarkMap_Refs(b *testing.B) {
 	b.Run("no refs", func(b *testing.B) {
 		m := NewMap(NewMapType(TypeI32, TypeI32))
 		m.Set(MapKey{Kind: KindI32, Bits: 1}, MapEntry{Key: BoxI32(1), Value: BoxI32(2)})
+
+		var refs []Ref
+		b.ReportAllocs()
+		b.ResetTimer()
+		for n := 0; n < b.N; n++ {
+			refs = m.Refs()
+		}
+		if len(refs) != 0 {
+			b.Fatal("unexpected refs")
+		}
+	})
+
+	b.Run("inline i64", func(b *testing.B) {
+		m := NewMapI32(NewMapType(TypeI32, TypeI64), 0)
+		m.Set(1, BoxI64(2))
 
 		var refs []Ref
 		b.ReportAllocs()
