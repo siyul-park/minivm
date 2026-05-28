@@ -1,6 +1,6 @@
 module github.com/siyul-park/minivm/benchmarks
 
-go 1.26.2
+go 1.26.3
 
 require (
 	github.com/d5/tengo/v2 v2.17.0
