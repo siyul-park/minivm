@@ -20,12 +20,32 @@ go test -race -run TestFoo ./interp/...
 ## Agent Workflow
 
 1. `git status --short`; don't overwrite unrelated changes.
-2. **Read task-relevant docs from Documentation Index before writing code or tests.**
-3. **Before modifying code, read `docs/coding-patterns.md` and follow relevant sections.**
-4. Mirror nearby tests; follow Test Conventions (one func per exported symbol, sub-cases as `t.Run`).
-5. Update docs when behavior, invariants, commands, or pitfalls change.
-6. Run narrow tests first, then `go test ./...` or `make test` for broad coverage.
-7. Before reporting done, re-read every new/modified file against the pre-finish checklist in `.claude/CLAUDE.md` (or the equivalent in your agent's instruction file).
+2. **For code exploration, prefer `codegraph` MCP tools over grep/read** (see Code Exploration below).
+3. **Read task-relevant docs from Documentation Index before writing code or tests.**
+4. **Before modifying code, read `docs/coding-patterns.md` and follow relevant sections.**
+5. Mirror nearby tests; follow Test Conventions (one func per exported symbol, sub-cases as `t.Run`).
+6. Update docs when behavior, invariants, commands, or pitfalls change.
+7. Run narrow tests first, then `go test ./...` or `make test` for broad coverage.
+8. Before reporting done, re-read every new/modified file against the pre-finish checklist in `.claude/CLAUDE.md` (or the equivalent in your agent's instruction file).
+
+## Code Exploration
+
+Prefer `codegraph` MCP tools over grep/read for structural questions. It is a tree-sitter knowledge graph of every symbol, edge, and file (sub-millisecond reads). Fall back to grep/read only for literal text (string contents, comments, log messages) or to confirm a specific detail codegraph didn't cover.
+
+| Question | Tool |
+|---|---|
+| Where is symbol X defined? | `codegraph_search` |
+| Focused context for a task/area | `codegraph_context` |
+| How does X reach Y? / trace the flow | `codegraph_trace` |
+| What calls Y? | `codegraph_callers` |
+| What does Y call? | `codegraph_callees` |
+| What breaks if I change Z? | `codegraph_impact` |
+| Show Y's signature/source | `codegraph_node` |
+| Survey several related symbols' source | `codegraph_explore` |
+| What files exist under path/ | `codegraph_files` |
+| Is the index healthy? | `codegraph_status` |
+
+If `codegraph` reports the index is stale or not initialized, fall back to grep/read for affected files.
 
 ## Local Hooks
 
