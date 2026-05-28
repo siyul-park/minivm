@@ -46,9 +46,9 @@ type frame struct {
 	upvals  []types.Boxed
 	addr    int
 	ref     int
-	release bool
 	ip      int
 	bp      int
+	release bool
 	returns int
 }
 
@@ -796,6 +796,9 @@ func (i *Interpreter) gc() {
 		if val.Kind() == types.KindRef {
 			push(val.Ref())
 		}
+	}
+	if j := i.fp - 1; j >= 0 {
+		push(i.frames[j].ref)
 	}
 
 	for len(stack) > 0 {

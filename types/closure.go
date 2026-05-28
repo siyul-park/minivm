@@ -2,13 +2,13 @@ package types
 
 type Closure struct {
 	Typ    *FunctionType
-	Fn     int
+	Fn     Ref
 	Upvals []Boxed
 }
 
 var _ Traceable = (*Closure)(nil)
 
-func NewClosure(typ *FunctionType, fn int, upvals []Boxed) *Closure {
+func NewClosure(typ *FunctionType, fn Ref, upvals []Boxed) *Closure {
 	if typ == nil {
 		typ = &FunctionType{}
 	}
@@ -29,7 +29,7 @@ func (c *Closure) String() string {
 
 func (c *Closure) Refs() []Ref {
 	refs := make([]Ref, 0, 1+len(c.Upvals))
-	refs = append(refs, Ref(c.Fn))
+	refs = append(refs, c.Fn)
 	for _, u := range c.Upvals {
 		if u.Kind() == KindRef {
 			refs = append(refs, Ref(u.Ref()))

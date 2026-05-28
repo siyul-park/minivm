@@ -13,6 +13,10 @@ func (c *threadedCompiler) fuseRefImm(addr int, size int) func(*Interpreter) {
 		if fused := c.fuseI64Imm(int64(v), size); fused != nil {
 			return fused
 		}
+	case *types.Closure:
+		if fused := c.fuseClosure(v, addr); fused != nil {
+			return fused
+		}
 	case *types.Function:
 		if fused := c.fuseFunction(v, addr); fused != nil {
 			return fused
@@ -58,7 +62,68 @@ func (c *threadedCompiler) fuseFunction(fn *types.Function, addr int) func(*Inte
 			f.ip = 0
 			f.bp = i.sp - params
 			f.returns = returns
-			f.release = false
+			i.sp += locals
+			i.fp++
+			i.fr = f
+		}
+	case instr.CLOSURE_NEW:
+		captures := len(fn.Captures)
+		return func(i *Interpreter) {
+			if i.sp < captures {
+				panic(ErrStackUnderflow)
+			}
+			upvals := make([]types.Boxed, captures)
+			copy(upvals, i.stack[i.sp-captures:i.sp])
+			cl := types.NewClosure(fn.Typ, types.Ref(addr), upvals)
+			i.retain(addr)
+			caddr := i.allocRoot(cl)
+			i.sp -= captures
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			i.stack[i.sp] = types.BoxRef(caddr)
+			i.sp++
+			i.fr.ip += 4
+		}
+	}
+	return nil
+}
+
+func (c *threadedCompiler) fuseClosure(fn *types.Closure, addr int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.CALL:
+		tmpl, ok := c.heap[fn.Fn].(*types.Function)
+		if !ok {
+			return nil
+		}
+		params := len(fn.Typ.Params)
+		returns := len(fn.Typ.Returns)
+		locals := len(tmpl.Locals)
+		return func(i *Interpreter) {
+			if i.fp == len(i.frames) {
+				panic(ErrFrameOverflow)
+			}
+			if i.sp < params {
+				panic(ErrStackUnderflow)
+			}
+			if i.sp+locals >= len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			if locals > 0 {
+				clear(i.stack[i.sp : i.sp+locals])
+			}
+			i.fr.ip += 4
+			f := &i.frames[i.fp]
+			f.code = i.code[fn.Fn]
+			f.upvals = fn.Upvals
+			f.addr = int(fn.Fn)
+			f.ref = addr
+			f.ip = 0
+			f.bp = i.sp - params
+			f.returns = returns
 			i.sp += locals
 			i.fp++
 			i.fr = f

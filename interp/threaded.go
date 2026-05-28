@@ -204,7 +204,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				f := &i.frames[i.fp]
 				f.code = i.code[fn.Fn]
 				f.upvals = fn.Upvals
-				f.addr = fn.Fn
+				f.addr = int(fn.Fn)
 				f.ref = addr
 				f.ip = 0
 				f.bp = i.sp - params - 1
@@ -528,6 +528,101 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.stack[i.sp] = val
 			i.sp++
 			i.fr.ip += 3
+		}
+	},
+	instr.UPVAL_GET: func(c *threadedCompiler) func(i *Interpreter) {
+		idx := int(c.code[c.ip+1])
+		c.ip += 2
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			if idx >= len(i.fr.upvals) {
+				panic(ErrSegmentationFault)
+			}
+			val := i.fr.upvals[idx]
+			if val.Kind() == types.KindRef {
+				i.retain(val.Ref())
+			}
+			i.stack[i.sp] = val
+			i.sp++
+			i.fr.ip += 2
+		}
+	},
+	instr.UPVAL_SET: func(c *threadedCompiler) func(i *Interpreter) {
+		idx := int(c.code[c.ip+1])
+		c.ip += 2
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			if idx >= len(i.fr.upvals) {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[i.sp-1]
+			old := i.fr.upvals[idx]
+			if old != val && old.Kind() == types.KindRef {
+				i.release(old.Ref())
+			}
+			i.fr.upvals[idx] = val
+			i.sp--
+			i.fr.ip += 2
+		}
+	},
+	instr.REF_NEW: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1]
+			if v.Kind() == types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			i.stack[i.sp-1] = types.BoxRef(i.alloc(types.Unbox(v)))
+			i.fr.ip++
+		}
+	},
+	instr.REF_GET: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			ref := i.stack[i.sp-1]
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			switch i.heap[addr].(type) {
+			case types.I32, types.I64, types.F32, types.F64:
+			default:
+				panic(ErrTypeMismatch)
+			}
+			i.stack[i.sp-1] = i.box(i.heap[addr])
+			i.release(addr)
+			i.fr.ip++
+		}
+	},
+	instr.REF_SET: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			value := i.stack[i.sp-1]
+			ref := i.stack[i.sp-2]
+			if value.Kind() == types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			i.heap[addr] = types.Unbox(value)
+			i.sp -= 2
+			i.release(addr)
+			i.fr.ip++
 		}
 	},
 	instr.REF_NULL: func(c *threadedCompiler) func(i *Interpreter) {
@@ -993,17 +1088,6 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_TO_F32_S: func(c *threadedCompiler) func(i *Interpreter) {
-		c.ip++
-		return func(i *Interpreter) {
-			if i.sp == 0 {
-				panic(ErrStackUnderflow)
-			}
-			v := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxF32(float32(v))
-			i.fr.ip++
-		}
-	},
 	instr.I32_TO_F32_U: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
@@ -1015,14 +1099,14 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_TO_F64_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_TO_F32_S: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxF64(float64(v))
+			i.stack[i.sp-1] = types.BoxF32(float32(v))
 			i.fr.ip++
 		}
 	},
@@ -1033,6 +1117,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := uint32(i.stack[i.sp-1].I32())
+			i.stack[i.sp-1] = types.BoxF64(float64(v))
+			i.fr.ip++
+		}
+	},
+	instr.I32_TO_F64_S: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].I32()
 			i.stack[i.sp-1] = types.BoxF64(float64(v))
 			i.fr.ip++
 		}
@@ -1766,7 +1861,6 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-
 	instr.F64_TO_I32_U: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
@@ -3132,62 +3226,6 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.REF_NEW: func(c *threadedCompiler) func(i *Interpreter) {
-		c.ip++
-		return func(i *Interpreter) {
-			if i.sp == 0 {
-				panic(ErrStackUnderflow)
-			}
-			v := i.stack[i.sp-1]
-			if v.Kind() == types.KindRef {
-				panic(ErrTypeMismatch)
-			}
-			i.stack[i.sp-1] = types.BoxRef(i.alloc(types.Unbox(v)))
-			i.fr.ip++
-		}
-	},
-	instr.REF_GET: func(c *threadedCompiler) func(i *Interpreter) {
-		c.ip++
-		return func(i *Interpreter) {
-			if i.sp == 0 {
-				panic(ErrStackUnderflow)
-			}
-			ref := i.stack[i.sp-1]
-			if ref.Kind() != types.KindRef {
-				panic(ErrTypeMismatch)
-			}
-			addr := ref.Ref()
-			switch i.heap[addr].(type) {
-			case types.I32, types.I64, types.F32, types.F64:
-			default:
-				panic(ErrTypeMismatch)
-			}
-			i.stack[i.sp-1] = i.box(i.heap[addr])
-			i.release(addr)
-			i.fr.ip++
-		}
-	},
-	instr.REF_SET: func(c *threadedCompiler) func(i *Interpreter) {
-		c.ip++
-		return func(i *Interpreter) {
-			if i.sp < 2 {
-				panic(ErrStackUnderflow)
-			}
-			value := i.stack[i.sp-1]
-			ref := i.stack[i.sp-2]
-			if value.Kind() == types.KindRef {
-				panic(ErrTypeMismatch)
-			}
-			if ref.Kind() != types.KindRef {
-				panic(ErrTypeMismatch)
-			}
-			addr := ref.Ref()
-			i.heap[addr] = types.Unbox(value)
-			i.sp -= 2
-			i.release(addr)
-			i.fr.ip++
-		}
-	},
 	instr.CLOSURE_NEW: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
@@ -3209,50 +3247,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			upvals := make([]types.Boxed, n)
 			copy(upvals, i.stack[i.sp-1-n:i.sp-1])
-			cl := types.NewClosure(fn.Typ, addr, upvals)
+			cl := types.NewClosure(fn.Typ, types.Ref(addr), upvals)
 			caddr := i.allocRoot(cl)
 			i.sp -= n
 			i.stack[i.sp-1] = types.BoxRef(caddr)
 			i.fr.ip++
-		}
-	},
-	instr.UPVAL_GET: func(c *threadedCompiler) func(i *Interpreter) {
-		idx := int(c.code[c.ip+1])
-		c.ip += 2
-		return func(i *Interpreter) {
-			if i.sp == len(i.stack) {
-				panic(ErrStackOverflow)
-			}
-			if idx >= len(i.fr.upvals) {
-				panic(ErrSegmentationFault)
-			}
-			val := i.fr.upvals[idx]
-			if val.Kind() == types.KindRef {
-				i.retain(val.Ref())
-			}
-			i.stack[i.sp] = val
-			i.sp++
-			i.fr.ip += 2
-		}
-	},
-	instr.UPVAL_SET: func(c *threadedCompiler) func(i *Interpreter) {
-		idx := int(c.code[c.ip+1])
-		c.ip += 2
-		return func(i *Interpreter) {
-			if i.sp == 0 {
-				panic(ErrStackUnderflow)
-			}
-			if idx >= len(i.fr.upvals) {
-				panic(ErrSegmentationFault)
-			}
-			val := i.stack[i.sp-1]
-			old := i.fr.upvals[idx]
-			if old != val && old.Kind() == types.KindRef {
-				i.release(old.Ref())
-			}
-			i.fr.upvals[idx] = val
-			i.sp--
-			i.fr.ip += 2
 		}
 	},
 }

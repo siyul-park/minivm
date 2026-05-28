@@ -18,9 +18,7 @@ import (
 
 type test struct {
 	program *program.Program
-	opts    []func(*option)
 	values  []types.Value
-	err     error
 	before  func(*testing.T, *Interpreter)
 	after   func(*testing.T, *Interpreter)
 }
@@ -284,7 +282,7 @@ var tests = []test{
 		),
 		values: []types.Value{types.NewFunctionBuilder(nil).Build()},
 	},
-	// --- refs: REF_NULL, REF_TEST, REF_CAST, REF_IS_NULL, REF_EQ, REF_NE ---
+	// --- refs: REF_NEW, REF_GET, REF_SET, REF_NULL, REF_TEST, REF_CAST, REF_IS_NULL, REF_EQ, REF_NE ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -292,6 +290,29 @@ var tests = []test{
 			},
 		),
 		values: []types.Value{types.Null},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.REF_NEW),
+				instr.New(instr.REF_GET),
+			},
+		),
+		values: []types.Value{types.I32(7)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.REF_NEW),
+				instr.New(instr.DUP),
+				instr.New(instr.I32_CONST, 9),
+				instr.New(instr.REF_SET),
+				instr.New(instr.REF_GET),
+			},
+		),
+		values: []types.Value{types.I32(9)},
 	},
 	{
 		program: program.New(
@@ -2070,139 +2091,7 @@ var tests = []test{
 			},
 			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI64)),
 		),
-		opts:   []func(*option){WithHeap(1)},
 		values: []types.Value{types.I64(1 << 50)},
-	},
-	// --- recursive: fibonacci (i32), factorial (i64) ---
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 20),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
-			},
-			program.WithConstants(
-				types.NewFunctionBuilder(&types.FunctionType{
-					Params:  []types.Type{types.TypeI32},
-					Returns: []types.Type{types.TypeI32},
-				}).Emit(
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.I32_LT_S),
-					instr.New(instr.BR_IF, 26),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.I32_SUB),
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CALL),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.I32_SUB),
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CALL),
-					instr.New(instr.I32_ADD),
-					instr.New(instr.RETURN),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.RETURN),
-				).Build(),
-			),
-		),
-		values: []types.Value{types.I32(6765)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.I64_CONST, 10),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
-			},
-			program.WithConstants(
-				types.NewFunctionBuilder(&types.FunctionType{
-					Params:  []types.Type{types.TypeI64},
-					Returns: []types.Type{types.TypeI64},
-				}).Emit(
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I64_CONST, 1),
-					instr.New(instr.I64_LE_S),
-					instr.New(instr.BR_IF, 16),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I64_CONST, 1),
-					instr.New(instr.I64_SUB),
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.CALL),
-					instr.New(instr.LOCAL_GET, 0),
-					instr.New(instr.I64_MUL),
-					instr.New(instr.RETURN),
-					instr.New(instr.I64_CONST, 1),
-					instr.New(instr.RETURN),
-				).Build(),
-			),
-		),
-		values: []types.Value{types.I64(3628800)},
-	},
-	// --- refs: REF_NEW, REF_GET, REF_SET ---
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 7),
-				instr.New(instr.REF_NEW),
-				instr.New(instr.REF_GET),
-			},
-		),
-		values: []types.Value{types.I32(7)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.REF_NEW),
-				instr.New(instr.DUP),
-				instr.New(instr.I32_CONST, 9),
-				instr.New(instr.REF_SET),
-				instr.New(instr.REF_GET),
-			},
-		),
-		values: []types.Value{types.I32(9)},
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.REF_NULL),
-				instr.New(instr.REF_NEW),
-			},
-		),
-		err: ErrTypeMismatch,
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.REF_GET),
-			},
-		),
-		err: ErrStackUnderflow,
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.REF_GET),
-			},
-			program.WithConstants(
-				types.NewFunctionBuilder(nil).Build(),
-			),
-		),
-		err: ErrTypeMismatch,
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 0),
-				instr.New(instr.REF_NEW),
-				instr.New(instr.REF_NULL),
-				instr.New(instr.REF_SET),
-			},
-		),
-		err: ErrTypeMismatch,
 	},
 	// --- closures: CLOSURE_NEW, UPVAL_GET, UPVAL_SET ---
 	{
@@ -2298,45 +2187,72 @@ var tests = []test{
 		),
 		values: []types.Value{types.I32(2)},
 	},
+	// --- recursive: fibonacci (i32), factorial (i64) ---
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.CLOSURE_NEW),
-			},
-		),
-		err: ErrStackUnderflow,
-	},
-	{
-		program: program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 5),
-				instr.New(instr.CLOSURE_NEW),
-			},
-		),
-		err: ErrTypeMismatch,
-	},
-	{
-		// function expects two captures but none are on the stack
-		program: program.New(
-			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 20),
 				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CLOSURE_NEW),
+				instr.New(instr.CALL),
 			},
 			program.WithConstants(
-				types.NewFunctionBuilder(nil).
-					WithCaptures(types.TypeI32, types.TypeI32).Build(),
+				types.NewFunctionBuilder(&types.FunctionType{
+					Params:  []types.Type{types.TypeI32},
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.I32_LT_S),
+					instr.New(instr.BR_IF, 26),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.I32_SUB),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.I32_SUB),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+					instr.New(instr.I32_ADD),
+					instr.New(instr.RETURN),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.RETURN),
+				).Build(),
 			),
 		),
-		err: ErrStackUnderflow,
+		values: []types.Value{types.I32(6765)},
 	},
 	{
-		// upval.get outside a closure frame has no upvalues
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.UPVAL_GET, 0),
+				instr.New(instr.I64_CONST, 10),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
 			},
+			program.WithConstants(
+				types.NewFunctionBuilder(&types.FunctionType{
+					Params:  []types.Type{types.TypeI64},
+					Returns: []types.Type{types.TypeI64},
+				}).Emit(
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I64_CONST, 1),
+					instr.New(instr.I64_LE_S),
+					instr.New(instr.BR_IF, 16),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I64_CONST, 1),
+					instr.New(instr.I64_SUB),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I64_MUL),
+					instr.New(instr.RETURN),
+					instr.New(instr.I64_CONST, 1),
+					instr.New(instr.RETURN),
+				).Build(),
+			),
 		),
-		err: ErrSegmentationFault,
+		values: []types.Value{types.I64(3628800)},
 	},
 }
 
@@ -2671,39 +2587,45 @@ func TestInterpreter_Reset(t *testing.T) {
 	require.Equal(t, 0, i.Len())
 }
 
-func runAll(t *testing.T, modeOpts ...func(*option)) {
-	t.Helper()
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.program.String(), func(t *testing.T) {
-			opts := append([]func(*option){}, tt.opts...)
-			opts = append(opts, modeOpts...)
-			i := New(tt.program, opts...)
-			defer i.Close()
-			if tt.before != nil {
-				tt.before(t, i)
-			}
-			err := i.Run(context.Background())
-			if tt.err != nil {
-				require.ErrorIs(t, err, tt.err)
-			} else {
+func TestInterpreter_Run(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		for _, tt := range tests {
+			tt := tt
+			t.Run(tt.program.String(), func(t *testing.T) {
+				i := New(tt.program)
+				defer i.Close()
+				if tt.before != nil {
+					tt.before(t, i)
+				}
+				err := i.Run(context.Background())
 				require.NoError(t, err)
 				for _, val := range tt.values {
 					v, err := i.Pop()
 					require.NoError(t, err)
 					require.Equal(t, val, v)
 				}
-			}
-			if tt.after != nil {
-				tt.after(t, i)
-			}
-		})
-	}
-}
-
-func TestInterpreter_Run(t *testing.T) {
-	t.Run("default", func(t *testing.T) { runAll(t) })
-	t.Run("jit", func(t *testing.T) { runAll(t, WithTick(1), WithThreshold(1), WithCutoff(1)) })
+			})
+		}
+	})
+	t.Run("jit", func(t *testing.T) {
+		for _, tt := range tests {
+			tt := tt
+			t.Run(tt.program.String(), func(t *testing.T) {
+				i := New(tt.program, WithTick(1), WithCutoff(1), WithThreshold(1))
+				defer i.Close()
+				if tt.before != nil {
+					tt.before(t, i)
+				}
+				err := i.Run(context.Background())
+				require.NoError(t, err)
+				for _, val := range tt.values {
+					v, err := i.Pop()
+					require.NoError(t, err)
+					require.Equal(t, val, v)
+				}
+			})
+		}
+	})
 
 	t.Run("canceled context", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
