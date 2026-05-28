@@ -76,7 +76,7 @@ func (c *threadedCompiler) fuseFunction(fn *types.Function, addr int) func(*Inte
 			copy(upvals, i.stack[i.sp-captures:i.sp])
 			cl := types.NewClosure(fn.Typ, types.Ref(addr), upvals)
 			i.retain(addr)
-			caddr := i.allocRoot(cl)
+			caddr := i.keep(cl)
 			i.sp -= captures
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)

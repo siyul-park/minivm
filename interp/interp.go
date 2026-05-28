@@ -211,7 +211,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		case types.Ref:
 			val = types.BoxRef(int(v))
 		default:
-			val = types.BoxRef(i.allocRoot(v))
+			val = types.BoxRef(i.keep(v))
 		}
 		i.constants[j] = val
 	}
@@ -304,6 +304,14 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 		code = f.code
 	}
 	return nil
+}
+
+func (i *Interpreter) Marshal(v any) (types.Value, error) {
+	return i.marshaler.Marshal(i, v)
+}
+
+func (i *Interpreter) Unmarshal(v types.Value, dst any) error {
+	return i.marshaler.Unmarshal(i, v, dst)
 }
 
 func (i *Interpreter) Context() context.Context {
@@ -420,7 +428,7 @@ func (i *Interpreter) Alloc(val types.Value) (int, error) {
 	if s, ok := val.(types.String); ok {
 		return int(i.intern(string(s))), nil
 	}
-	return i.allocRoot(val), nil
+	return i.keep(val), nil
 }
 
 func (i *Interpreter) Retain(addr int) (types.Value, error) {
@@ -641,7 +649,7 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 	case types.String:
 		return types.BoxRef(int(i.intern(string(v))))
 	default:
-		addr := i.allocRoot(v)
+		addr := i.keep(v)
 		return types.BoxRef(addr)
 	}
 }
@@ -693,8 +701,8 @@ func (i *Interpreter) alloc(val types.Value) int {
 	return len(i.heap) - 1
 }
 
-func (i *Interpreter) allocRoot(val types.Value) int {
-	roots := i.traceRoot(val)
+func (i *Interpreter) keep(val types.Value) int {
+	roots := i.trace(val)
 	defer i.unroot(roots)
 	return i.alloc(val)
 }
@@ -733,7 +741,7 @@ func (i *Interpreter) release(addr int) {
 	}
 }
 
-func (i *Interpreter) traceRoot(val types.Value) int {
+func (i *Interpreter) trace(val types.Value) int {
 	t, ok := val.(types.Traceable)
 	if !ok {
 		return 0

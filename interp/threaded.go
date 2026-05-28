@@ -2749,7 +2749,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			var addr int
 			if typ.TraceKeys || typ.TraceValues {
-				addr = i.allocRoot(m)
+				addr = i.keep(m)
 			} else {
 				addr = i.alloc(m)
 			}
@@ -3248,7 +3248,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			upvals := make([]types.Boxed, n)
 			copy(upvals, i.stack[i.sp-1-n:i.sp-1])
 			cl := types.NewClosure(fn.Typ, types.Ref(addr), upvals)
-			caddr := i.allocRoot(cl)
+			caddr := i.keep(cl)
 			i.sp -= n
 			i.stack[i.sp-1] = types.BoxRef(caddr)
 			i.fr.ip++

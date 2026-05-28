@@ -49,9 +49,9 @@ func TestNewPool(t *testing.T) {
 		require.NoError(t, err)
 		defer p1.Put(i2)
 
-		m1, ok := i1.marshaler.(*marshaler)
+		m1, ok := i1.marshaler.(*codec)
 		require.True(t, ok)
-		m2, ok := i2.marshaler.(*marshaler)
+		m2, ok := i2.marshaler.(*codec)
 		require.True(t, ok)
 		require.Same(t, m1, m2)
 
@@ -62,7 +62,7 @@ func TestNewPool(t *testing.T) {
 		require.NoError(t, err)
 		defer p2.Put(i3)
 
-		m3, ok := i3.marshaler.(*marshaler)
+		m3, ok := i3.marshaler.(*codec)
 		require.True(t, ok)
 		require.NotSame(t, m1, m3)
 	})

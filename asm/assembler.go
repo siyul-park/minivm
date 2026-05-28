@@ -183,7 +183,7 @@ func (a *Assembler) Compile() (*RelocObject, error) {
 
 	p := a.snapshot()
 
-	sig, entryParams, instrs, err := newCompiler(a.arch, p).compile()
+	sig, params, instrs, err := newCompiler(a.arch, p).compile()
 	if err != nil {
 		return nil, err
 	}
@@ -213,10 +213,18 @@ func (a *Assembler) Compile() (*RelocObject, error) {
 
 	a.reset()
 
+	var entries map[int]Entry
+	if len(params) > 0 {
+		entries = make(map[int]Entry, len(params))
+		for label, regs := range params {
+			entries[label] = Entry{Offset: labels[label], Params: regs}
+		}
+	}
+
 	return &RelocObject{
 		Chunk:   chunk,
 		Sig:     sig,
-		Entries: buildEntries(entryParams, labels),
+		Entries: entries,
 		Instrs:  instrs,
 		Relocs:  relocs,
 	}, nil
@@ -343,13 +351,21 @@ func (a *Assembler) snapshot() program {
 		sites = out
 	}
 
+	var entries map[int][]VReg
+	if len(a.entries) > 0 {
+		entries = make(map[int][]VReg, len(a.entries))
+		for label, regs := range a.entries {
+			entries[label] = slices.Clone(regs)
+		}
+	}
+
 	return program{
 		insts:   slices.Clone(a.insts),
 		scratch: slices.Clone(a.scratch),
 		pins:    maps.Clone(a.pins),
 		sites:   sites,
 		labels:  maps.Clone(a.local),
-		entries: cloneEntries(a.entries),
+		entries: entries,
 	}
 }
 
@@ -641,7 +657,13 @@ func (c *compiler) rewriteOp(op Operand, widths map[int32]RegWidth) Operand {
 		if !ok {
 			return op
 		}
-		return P(c.withWidth(p, v.Reg, widths))
+
+		width := v.Reg.Width()
+		if width == WidthUndefined {
+			width = widths[v.Reg.ID()]
+		}
+
+		return P(NewPReg(p.ID(), p.Type(), width))
 
 	case MemOperand:
 		base, ok := v.Base.(VRegOperand)
@@ -654,19 +676,16 @@ func (c *compiler) rewriteOp(op Operand, widths map[int32]RegWidth) Operand {
 			return op
 		}
 
-		return Mem(P(c.withWidth(p, base.Reg, widths)), v.Offset)
+		width := base.Reg.Width()
+		if width == WidthUndefined {
+			width = widths[base.Reg.ID()]
+		}
+
+		return Mem(P(NewPReg(p.ID(), p.Type(), width)), v.Offset)
 
 	default:
 		return op
 	}
-}
-
-func (c *compiler) withWidth(p PReg, v VReg, widths map[int32]RegWidth) PReg {
-	width := v.Width()
-	if width == WidthUndefined {
-		width = widths[v.ID()]
-	}
-	return NewPReg(p.ID(), p.Type(), width)
 }
 
 func (c *compiler) widths() map[int32]RegWidth {
@@ -808,26 +827,4 @@ func (c *compiler) pregs(vregs []VReg) []PReg {
 		regs[i] = NewPReg(uint8(i), v.Type(), v.Width())
 	}
 	return regs
-}
-
-func cloneEntries(entries map[int][]VReg) map[int][]VReg {
-	if len(entries) == 0 {
-		return nil
-	}
-	out := make(map[int][]VReg, len(entries))
-	for label, regs := range entries {
-		out[label] = slices.Clone(regs)
-	}
-	return out
-}
-
-func buildEntries(params map[int][]PReg, labels map[int]int) map[int]Entry {
-	if len(params) == 0 {
-		return nil
-	}
-	out := make(map[int]Entry, len(params))
-	for label, regs := range params {
-		out[label] = Entry{Offset: labels[label], Params: regs}
-	}
-	return out
 }

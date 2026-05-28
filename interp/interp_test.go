@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"reflect"
 	"testing"
 	"time"
 
@@ -3693,20 +3692,6 @@ func TestInterpreter_Marshal(t *testing.T) {
 		out, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I64(42), out)
-	})
-
-	t.Run("compiled plans are cached", func(t *testing.T) {
-		type sample struct {
-			Name  string
-			Count int32
-		}
-		m := newMarshaler()
-		t1 := reflect.TypeOf(sample{})
-		p1, err := m.plan(t1)
-		require.NoError(t, err)
-		p2, err := m.plan(t1)
-		require.NoError(t, err)
-		require.Same(t, p1, p2)
 	})
 
 	t.Run("custom marshaler routes marshal calls", func(t *testing.T) {

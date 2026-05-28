@@ -34,7 +34,7 @@ func NewPool(prog *program.Program, size int, opts ...func(*option)) *Pool {
 		size = 1
 	}
 	shared := make([]func(*option), 0, len(opts)+1)
-	shared = append(shared, WithMarshaler(newMarshaler()))
+	shared = append(shared, WithMarshaler(&codec{}))
 	shared = append(shared, opts...)
 	return &Pool{
 		prog: prog,
