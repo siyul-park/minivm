@@ -185,6 +185,15 @@ func TestTypeOf(t *testing.T) {
 		{opcode: MAP_SET},
 		{opcode: MAP_DELETE},
 		{opcode: MAP_CLEAR},
+
+		{opcode: REF_NEW},
+		{opcode: REF_GET},
+		{opcode: REF_SET},
+
+		{opcode: CLOSURE_NEW},
+
+		{opcode: UPVAL_GET},
+		{opcode: UPVAL_SET},
 	}
 
 	for _, tt := range tests {

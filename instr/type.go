@@ -186,6 +186,15 @@ var types = map[Opcode]Type{
 	MAP_SET:    {"map.set", []int{}},
 	MAP_DELETE: {"map.delete", []int{}},
 	MAP_CLEAR:  {"map.clear", []int{}},
+
+	REF_NEW: {"ref.new", []int{}},
+	REF_GET: {"ref.get", []int{}},
+	REF_SET: {"ref.set", []int{}},
+
+	CLOSURE_NEW: {"closure.new", []int{}},
+
+	UPVAL_GET: {"upval.get", []int{1}},
+	UPVAL_SET: {"upval.set", []int{1}},
 }
 
 func TypeOf(op Opcode) Type {

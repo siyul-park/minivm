@@ -71,6 +71,17 @@ func TestParseFunction(t *testing.T) {
 				"\n",
 			),
 		},
+		{
+			// with captures and locals
+			lines: strings.Split(
+				NewFunctionBuilder(&FunctionType{Returns: []Type{TypeI32}}).
+					WithCaptures(TypeI32, TypeRef).
+					WithLocals(TypeI64).
+					Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
+					Build().String(),
+				"\n",
+			),
+		},
 	}
 
 	for _, tt := range tests {
@@ -118,6 +129,23 @@ func TestParseFunction(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, fn)
 		require.Equal(t, 2, len(fn.Locals))
+		require.Equal(t, 2, len(instr.Unmarshal(fn.Code)))
+	})
+
+	t.Run("captures before locals", func(t *testing.T) {
+		lines := []string{
+			"func() i32",
+			"capture i32",
+			"capture ref",
+			"i64",
+			"i32.const 42",
+			"return",
+		}
+		fn, err := ParseFunction(lines)
+		require.NoError(t, err)
+		require.NotNil(t, fn)
+		require.Equal(t, []Type{TypeI32, TypeRef}, fn.Captures)
+		require.Equal(t, []Type{TypeI64}, fn.Locals)
 		require.Equal(t, 2, len(instr.Unmarshal(fn.Code)))
 	})
 }

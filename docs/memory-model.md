@@ -35,8 +35,9 @@ RC is manually handled in every threaded closure touching refs.
 | pop/use ref from stack | `release(addr)` |
 | `DUP` ref | `retain(addr)` |
 | `DROP` ref | `release(addr)` |
-| store ref to local/global | `retain(new)`, `release(old)` |
+| store ref to local/global/upvalue | `retain(new)`, `release(old)` |
 | map insert/replace/delete/clear | transfer or release map-owned ref keys/values |
+| `CLOSURE_NEW` | transfer popped `fn` + upvalue refs into the closure (no retain/release); `allocRoot` before adjusting `sp` |
 
 `retain(addr)` increments `rc[addr]`.
 
@@ -119,6 +120,15 @@ Only `KindRef` values need RC. `KindI32`, `KindI64`, `KindF32`, `KindF64` are va
 ### Heap indices are stable
 
 Never cache pointer into `heap` across potential `alloc`; slice may reallocate. Keep integer indices.
+
+### Closure frames separate code identity from the released callable
+
+A frame stores both `addr` (the function/template heap index used to index `i.code`,
+`i.instrs`, and the profiler/JIT) and `callee` (the heap index released on `RETURN`). For a
+plain function these are equal; for a closure they diverge — `addr` is the template
+(`Closure.Fn`) while `callee` is the closure instance. Profiling/JIT must use `addr`;
+release must use `callee`. A closure keeps its template alive through its `Fn` ref and its
+captured cells alive through its upvalue refs until the closure's RC reaches `0`.
 
 ## Host Function Memory Access
 

@@ -107,6 +107,8 @@ Violations cause silent corruption or invalid execution.
 - Heap index `0` is permanently `Null`.
 - `release()` must stay iterative, never recursive.
 - Threaded closure errors should `panic`; `interp.Run()` recovers and annotates `at=<ip>`.
+- A `frame` separates `addr` (template/code index for `i.code`/`i.instrs`/profiler/JIT) from `callee` (heap index released on `RETURN`). They differ for closures; every frame-creating `CALL`/fused path must set both, and non-closure paths must reset `upvalues = nil`.
+- `closure.new` takes the function ref from the stack top (like `call`) and transfers ownership of the function ref plus its upvalues into the closure.
 
 ### Threaded Compiler
 

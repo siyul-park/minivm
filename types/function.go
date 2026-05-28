@@ -8,15 +8,17 @@ import (
 )
 
 type FunctionBuilder struct {
-	typ    *FunctionType
-	locals []Type
-	instrs []instr.Instruction
+	typ      *FunctionType
+	locals   []Type
+	captures []Type
+	instrs   []instr.Instruction
 }
 
 type Function struct {
-	Typ    *FunctionType
-	Locals []Type
-	Code   []byte
+	Typ      *FunctionType
+	Locals   []Type
+	Captures []Type
+	Code     []byte
 }
 
 type FunctionType struct {
@@ -49,6 +51,11 @@ func (b *FunctionBuilder) WithLocals(ls ...Type) *FunctionBuilder {
 	return b
 }
 
+func (b *FunctionBuilder) WithCaptures(cs ...Type) *FunctionBuilder {
+	b.captures = append(b.captures, cs...)
+	return b
+}
+
 func (b *FunctionBuilder) Emit(instrs ...instr.Instruction) *FunctionBuilder {
 	b.instrs = append(b.instrs, instrs...)
 	return b
@@ -56,9 +63,10 @@ func (b *FunctionBuilder) Emit(instrs ...instr.Instruction) *FunctionBuilder {
 
 func (b *FunctionBuilder) Build() *Function {
 	return &Function{
-		Typ:    b.typ,
-		Locals: b.locals,
-		Code:   instr.Marshal(b.instrs),
+		Typ:      b.typ,
+		Locals:   b.locals,
+		Captures: b.captures,
+		Code:     instr.Marshal(b.instrs),
 	}
 }
 
@@ -84,6 +92,11 @@ func (f *Function) Type() Type {
 func (f *Function) String() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("%s\n", f.Type().String()))
+	for _, t := range f.Captures {
+		sb.WriteString("capture ")
+		sb.WriteString(t.String())
+		sb.WriteString("\n")
+	}
 	for i, t := range f.Locals {
 		if i > 0 {
 			sb.WriteString("\n")

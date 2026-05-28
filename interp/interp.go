@@ -42,12 +42,14 @@ type Interpreter struct {
 }
 
 type frame struct {
-	code    []func(*Interpreter)
-	addr    int
-	ip      int
-	bp      int
-	returns int
-	release bool
+	code     []func(*Interpreter)
+	upvalues []types.Boxed
+	addr     int
+	callee   int
+	ip       int
+	bp       int
+	returns  int
+	release  bool
 }
 
 type option struct {
