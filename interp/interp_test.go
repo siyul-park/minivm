@@ -2457,6 +2457,38 @@ func TestInterpreter_Run(t *testing.T) {
 	t.Run("default", func(t *testing.T) { runAll(t) })
 	t.Run("jit", func(t *testing.T) { runAll(t, WithTick(1), WithThreshold(1), WithCutoff(1)) })
 
+	t.Run("nested return restores caller frame for locals", func(t *testing.T) {
+		callee := types.NewFunctionBuilder(&types.FunctionType{
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.RETURN),
+		).Build()
+		caller := types.NewFunctionBuilder(&types.FunctionType{
+			Returns: []types.Type{types.TypeI32},
+		}).WithLocals(types.TypeI32).Emit(
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.RETURN),
+		).Build()
+
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(callee, caller),
+		), WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(7), v)
+	})
+
 	t.Run("canceled context", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
