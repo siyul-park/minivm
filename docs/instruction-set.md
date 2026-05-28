@@ -72,7 +72,7 @@ Offsets are signed 16-bit values encoded little-endian. `BR 5` skips 5 bytes pas
 | `BR` | `{2}` | `→` | ◐ | Unconditional relative jump. JIT only when current segment has no pending return values. |
 | `BR_IF` | `{2}` | `cond →` | ◐ | Jump if `cond ≠ 0`, else fall through. JIT only for simple stack shapes. |
 | `BR_TABLE` | `{-2, 2}` | `index →` | ◐ | Jump table; negative or out-of-range index uses default target. JIT only for simple stack shapes. |
-| `CALL` | `{}` | `fn →` | ⬜ | Call `*Function` or `*HostFunction`; pushes a frame. |
+| `CALL` | `{}` | `fn →` | ⬜ | Call `*Function`, `*HostFunction`, or `*Closure`; pushes a frame. |
 | `RETURN` | `{}` | `→` | ⬜ | Return from current frame. |
 
 ## Variables
@@ -97,6 +97,17 @@ Offsets are signed 16-bit values encoded little-endian. `BR 5` skips 5 bytes pas
 | `REF_NE` | `{}` | `a b → i32` | ⬜ | Push `I32(1)` if refs differ. |
 | `REF_TEST` | `{2}` | `ref → i32` | ⬜ | Push `I32(1)` if ref matches type at u16 index. |
 | `REF_CAST` | `{2}` | `ref → ref` | ⬜ | Trap with `ErrTypeMismatch` if ref type mismatches. |
+| `REF_NEW` | `{}` | `x → ref` | ⬜ | Box a non-ref scalar (`I32/I64/F32/F64`) onto the heap as a mutable cell; trap `ErrTypeMismatch` on a ref operand. Reuses the scalar heap rows. |
+| `REF_GET` | `{}` | `ref → x` | ⬜ | Load the scalar held by a cell; trap `ErrTypeMismatch` if the target is not a scalar. Consumes (releases) the ref. |
+| `REF_SET` | `{}` | `ref x →` | ⬜ | Overwrite a cell's scalar; trap `ErrTypeMismatch` if `x` is a ref. Consumes (releases) the ref. |
+
+## Closures
+
+| Opcode | Widths | Stack | JIT | Description |
+|---|---|---|---|---|
+| `CLOSURE_NEW` | `{}` | `upval1 … upvalN fn → closure` | ⬜ | Pop the `*Function` template (top of stack, like `call`), read `N = len(fn.Captures)`, pop N upvalues below it, and push a `*Closure` capturing them. Ownership of `fn` and the upvalues transfers into the closure. |
+| `UPVAL_GET` | `{1}` | `→ x` | ⬜ | Push the closure upvalue at u8 index; traps `ErrSegmentationFault` outside a closure frame or out of range. |
+| `UPVAL_SET` | `{1}` | `x →` | ⬜ | Store into the closure upvalue at u8 index (persists across calls to the same closure); same trap conditions as `UPVAL_GET`. |
 
 ## i32 Operations
 

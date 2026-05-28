@@ -2140,6 +2140,204 @@ var tests = []test{
 		),
 		values: []types.Value{types.I64(3628800)},
 	},
+	// --- refs: REF_NEW, REF_GET, REF_SET ---
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.REF_NEW),
+				instr.New(instr.REF_GET),
+			},
+		),
+		values: []types.Value{types.I32(7)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.REF_NEW),
+				instr.New(instr.DUP),
+				instr.New(instr.I32_CONST, 9),
+				instr.New(instr.REF_SET),
+				instr.New(instr.REF_GET),
+			},
+		),
+		values: []types.Value{types.I32(9)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.REF_NULL),
+				instr.New(instr.REF_NEW),
+			},
+		),
+		err: ErrTypeMismatch,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.REF_GET),
+			},
+		),
+		err: ErrStackUnderflow,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.REF_GET),
+			},
+			program.WithConstants(
+				types.NewFunctionBuilder(nil).Build(),
+			),
+		),
+		err: ErrTypeMismatch,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.REF_NEW),
+				instr.New(instr.REF_NULL),
+				instr.New(instr.REF_SET),
+			},
+		),
+		err: ErrTypeMismatch,
+	},
+	// --- closures: CLOSURE_NEW, UPVAL_GET, UPVAL_SET ---
+	{
+		// no-capture closure: behaves like calling the function directly
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CLOSURE_NEW),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(
+				types.NewFunctionBuilder(&types.FunctionType{
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
+					instr.New(instr.I32_CONST, 42),
+					instr.New(instr.RETURN),
+				).Build(),
+			),
+		),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		// single mutable closure: a counter, called three times yields 3
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CLOSURE_NEW),
+				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.CALL),
+				instr.New(instr.DROP),
+				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.CALL),
+				instr.New(instr.DROP),
+				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(
+				types.NewFunctionBuilder(&types.FunctionType{
+					Returns: []types.Type{types.TypeI32},
+				}).WithCaptures(types.TypeI32).Emit(
+					instr.New(instr.UPVAL_GET, 0),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.I32_ADD),
+					instr.New(instr.UPVAL_SET, 0),
+					instr.New(instr.UPVAL_GET, 0),
+					instr.New(instr.RETURN),
+				).Build(),
+			),
+		),
+		values: []types.Value{types.I32(3)},
+	},
+	{
+		// two closures sharing one heap-boxed variable via ref.new
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.REF_NEW),
+				instr.New(instr.DUP),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CLOSURE_NEW),
+				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.CLOSURE_NEW),
+				instr.New(instr.GLOBAL_SET, 1),
+				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.CALL),
+				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.CALL),
+				instr.New(instr.GLOBAL_GET, 1),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(
+				types.NewFunctionBuilder(&types.FunctionType{}).
+					WithCaptures(types.TypeRef).Emit(
+					instr.New(instr.UPVAL_GET, 0),
+					instr.New(instr.UPVAL_GET, 0),
+					instr.New(instr.REF_GET),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.I32_ADD),
+					instr.New(instr.REF_SET),
+					instr.New(instr.RETURN),
+				).Build(),
+				types.NewFunctionBuilder(&types.FunctionType{
+					Returns: []types.Type{types.TypeI32},
+				}).WithCaptures(types.TypeRef).Emit(
+					instr.New(instr.UPVAL_GET, 0),
+					instr.New(instr.REF_GET),
+					instr.New(instr.RETURN),
+				).Build(),
+			),
+		),
+		values: []types.Value{types.I32(2)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CLOSURE_NEW),
+			},
+		),
+		err: ErrStackUnderflow,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 5),
+				instr.New(instr.CLOSURE_NEW),
+			},
+		),
+		err: ErrTypeMismatch,
+	},
+	{
+		// function expects two captures but none are on the stack
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CLOSURE_NEW),
+			},
+			program.WithConstants(
+				types.NewFunctionBuilder(nil).
+					WithCaptures(types.TypeI32, types.TypeI32).Build(),
+			),
+		),
+		err: ErrStackUnderflow,
+	},
+	{
+		// upval.get outside a closure frame has no upvalues
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.UPVAL_GET, 0),
+			},
+		),
+		err: ErrSegmentationFault,
+	},
 }
 
 type recordingMarshaler struct {

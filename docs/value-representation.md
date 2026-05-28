@@ -126,13 +126,22 @@ Heap objects implement `types.Value`.
 | `*types.Map` | `KindRef` | `*MapType` | `Value`, `Traceable` |
 | `*types.MapI32`, `*types.MapI64`, `*types.MapF32`, `*types.MapF64` | `KindRef` | `*MapType` | `Value`, `Traceable` |
 | `*types.Function` | `KindRef` | `*FunctionType` | `Value` |
+| `*types.Closure` | `KindRef` | `*FunctionType` | `Value`, `Traceable` |
 | `*interp.HostFunction` | `KindRef` | `*FunctionType` | `Value` |
 | `*interp.HostObject` | `KindRef` | `*StructType` | `Value`, `Traceable` |
+
+`*types.Closure` **shares** `*FunctionType` with its underlying function: a closure and a
+function with the same signature are type-equal. Captures live on `*types.Function`
+(`Captures []Type`, parallel to `Locals`), never on `*FunctionType`, so they never affect
+type equality. `REF_NEW`/`REF_GET`/`REF_SET` reuse the `types.I32/I64/F32/F64` heap rows as
+mutable scalar cells.
 
 `Traceable` exposes `Refs() []Ref` for GC graph traversal. Any heap object containing refs must implement `Traceable`.
 `Array`, `Struct`, `Map` variants, and `HostObject` defer their `Refs()` result allocation until
 the first nested ref is found, so release of values with no children stays
 allocation-free while ref-containing values keep one pre-sized result slice.
+`*types.Closure` always reports at least its template (`Fn`), so it pre-sizes its `Refs()`
+slice to `1 + len(Upvals)` and never takes the lazy-nil path.
 
 `STRUCT_GET` and `STRUCT_SET` handle VM-native `*types.Struct` directly and fall back to `*interp.HostObject` for host-supplied values. See [host-integration.md](host-integration.md) for HostObject semantics.
 

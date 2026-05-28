@@ -76,6 +76,21 @@ func TestParse(t *testing.T) {
 			want: New(LOCAL_GET, 2),
 		},
 		{
+			name: "closure.new",
+			line: "closure.new",
+			want: New(CLOSURE_NEW),
+		},
+		{
+			name: "upval.get",
+			line: "upval.get 0x01",
+			want: New(UPVAL_GET, 1),
+		},
+		{
+			name: "ref.new",
+			line: "ref.new",
+			want: New(REF_NEW),
+		},
+		{
 			name: "br_table",
 			line: "br_table 0x02 0x0000 0x0001 0x0000",
 			want: New(BR_TABLE, 2, 0, 1, 0),

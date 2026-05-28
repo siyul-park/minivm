@@ -173,7 +173,39 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				f := &i.frames[i.fp]
 				f.code = i.code[addr]
+				f.upvals = nil
 				f.addr = addr
+				f.ref = addr
+				f.ip = 0
+				f.bp = i.sp - params - 1
+				f.returns = returns
+				f.release = true
+				i.sp = f.bp + params + locals
+				i.fr.ip++
+				i.fp++
+				i.fr = f
+			case *types.Closure:
+				tmpl, ok := i.heap[fn.Fn].(*types.Function)
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+				params := len(fn.Typ.Params)
+				returns := len(fn.Typ.Returns)
+				locals := len(tmpl.Locals)
+				if i.sp <= params {
+					panic(ErrStackUnderflow)
+				}
+				if i.sp+locals-1 >= len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				if locals > 0 {
+					clear(i.stack[i.sp-1 : i.sp+locals-1])
+				}
+				f := &i.frames[i.fp]
+				f.code = i.code[fn.Fn]
+				f.upvals = fn.Upvals
+				f.addr = fn.Fn
+				f.ref = addr
 				f.ip = 0
 				f.bp = i.sp - params - 1
 				f.returns = returns
@@ -236,7 +268,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp = f.bp + f.returns
 			if f.release {
-				i.release(f.addr)
+				i.release(f.ref)
 			}
 			f.code = nil
 			i.fp--
@@ -3098,6 +3130,129 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.release(addr)
 			i.sp--
 			i.fr.ip++
+		}
+	},
+	instr.REF_NEW: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1]
+			if v.Kind() == types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			i.stack[i.sp-1] = types.BoxRef(i.alloc(types.Unbox(v)))
+			i.fr.ip++
+		}
+	},
+	instr.REF_GET: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			ref := i.stack[i.sp-1]
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			switch i.heap[addr].(type) {
+			case types.I32, types.I64, types.F32, types.F64:
+			default:
+				panic(ErrTypeMismatch)
+			}
+			i.stack[i.sp-1] = i.box(i.heap[addr])
+			i.release(addr)
+			i.fr.ip++
+		}
+	},
+	instr.REF_SET: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			value := i.stack[i.sp-1]
+			ref := i.stack[i.sp-2]
+			if value.Kind() == types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			i.heap[addr] = types.Unbox(value)
+			i.sp -= 2
+			i.release(addr)
+			i.fr.ip++
+		}
+	},
+	instr.CLOSURE_NEW: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			ref := i.stack[i.sp-1]
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			fn, ok := i.heap[addr].(*types.Function)
+			if !ok {
+				panic(ErrTypeMismatch)
+			}
+			n := len(fn.Captures)
+			if i.sp < n+1 {
+				panic(ErrStackUnderflow)
+			}
+			upvals := make([]types.Boxed, n)
+			copy(upvals, i.stack[i.sp-1-n:i.sp-1])
+			cl := types.NewClosure(fn.Typ, addr, upvals)
+			caddr := i.allocRoot(cl)
+			i.sp -= n
+			i.stack[i.sp-1] = types.BoxRef(caddr)
+			i.fr.ip++
+		}
+	},
+	instr.UPVAL_GET: func(c *threadedCompiler) func(i *Interpreter) {
+		idx := int(c.code[c.ip+1])
+		c.ip += 2
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			if idx >= len(i.fr.upvals) {
+				panic(ErrSegmentationFault)
+			}
+			val := i.fr.upvals[idx]
+			if val.Kind() == types.KindRef {
+				i.retain(val.Ref())
+			}
+			i.stack[i.sp] = val
+			i.sp++
+			i.fr.ip += 2
+		}
+	},
+	instr.UPVAL_SET: func(c *threadedCompiler) func(i *Interpreter) {
+		idx := int(c.code[c.ip+1])
+		c.ip += 2
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			if idx >= len(i.fr.upvals) {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[i.sp-1]
+			old := i.fr.upvals[idx]
+			if old != val && old.Kind() == types.KindRef {
+				i.release(old.Ref())
+			}
+			i.fr.upvals[idx] = val
+			i.sp--
+			i.fr.ip += 2
 		}
 	},
 }
