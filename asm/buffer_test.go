@@ -78,3 +78,24 @@ func TestChunk_Ptr(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, chunk.Ptr())
 }
+
+func TestChunk_At(t *testing.T) {
+	b, err := NewBuffer(64)
+	require.NoError(t, err)
+	defer b.Free()
+
+	chunk, err := b.Append([]byte{0x90, 0x91, 0x92})
+	require.NoError(t, err)
+
+	t.Run("subchunk", func(t *testing.T) {
+		sub, err := chunk.Slice(1)
+		require.NoError(t, err)
+		require.Equal(t, 2, sub.Size())
+		require.NotEqual(t, chunk.Ptr(), sub.Ptr())
+	})
+
+	t.Run("invalid offset", func(t *testing.T) {
+		_, err := chunk.Slice(4)
+		require.ErrorIs(t, err, ErrInvalidArgs)
+	})
+}

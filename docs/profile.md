@@ -59,8 +59,8 @@ Reporting helpers outside hot paths:
 | Counter | Meaning |
 |---|---|
 | `Attempts` | function-level JIT compilation attempts |
-| `Emits` | native segments emitted |
-| `Links` | emitted segments linked and installed |
+| `Emits` | native objects emitted; a merged fallthrough trace counts once |
+| `Links` | callable entry IPs installed; one object may install multiple entries |
 | `Skips` | cold segments skipped by profile policy |
 | `Aborts` | candidates discarded as too short or ineligible |
 | `Errors` | buffer, compile, or link errors |

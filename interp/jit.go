@@ -14,6 +14,12 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// JIT handler contract: handlers in jit_<arch>.go must validate the stack and
+// any other preconditions BEFORE mutating jitSeg state (ip, stack, params,
+// facts) or emitting instructions. A handler that returns false must leave
+// jitSeg unchanged so the surrounding segment can abort cleanly without a
+// snapshot/restore loop.
+
 type jitCompiler struct {
 	assembler *asm.Assembler
 	profile   *prof.Stats
@@ -30,6 +36,11 @@ type jitPlan struct {
 	blocks []*analysis.BasicBlock
 	hot    []*analysis.BasicBlock
 	forced map[*analysis.BasicBlock]bool
+	traces []jitTrace
+}
+
+type jitTrace struct {
+	blocks []*analysis.BasicBlock
 }
 
 type jitRun struct {
@@ -37,9 +48,22 @@ type jitRun struct {
 	a    *asm.Assembler
 	code []byte
 
-	labels map[int]int
-	sigs   map[int]*asm.Signature
-	scan   bool
+	labels  map[int]int
+	entries map[int]jitEntry
+	edges   []jitEdge
+}
+
+type jitEntry struct {
+	obj    *asm.RelocObject
+	label  int // negative = primary entry
+	params []asm.PReg
+}
+
+type jitEdge struct {
+	label    int
+	fallback int
+	target   int
+	stack    []asm.VReg
 }
 
 type jitSeg struct {
@@ -59,7 +83,12 @@ type jitSeg struct {
 	params  []asm.VReg
 	facts   map[int]types.Kind
 	scratch []asm.PReg
+	entries map[int]int
 }
+
+type jitOp func(*jitSeg) bool
+
+const primaryEntry = -1
 
 const (
 	rStack = iota
@@ -67,8 +96,6 @@ const (
 	rGlobals
 	rNext
 )
-
-type jitOp func(*jitSeg) (ok bool, stop bool)
 
 var (
 	arch        *asm.Arch
@@ -83,10 +110,8 @@ func init() {
 			continue
 		}
 
-		jit[i] = func(s *jitSeg) (bool, bool) {
-			inst := instr.Instruction(s.code[s.ip:])
-			s.ip += inst.Width()
-			return false, false
+		jit[i] = func(*jitSeg) bool {
+			return false
 		}
 	}
 }
@@ -109,17 +134,21 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 		return make([]func(*Interpreter), len(code))
 	}
 
-	sigs, ok := c.scan(plan)
-	if !ok {
-		return nil
+	c.assembler.Reset()
+	r := &jitRun{
+		c:       c,
+		a:       c.assembler,
+		code:    plan.code,
+		entries: make(map[int]jitEntry),
 	}
-
-	objs, entries := c.emit(plan, sigs)
+	r.assign(plan.blocks)
+	objs := r.compile(plan)
 	if len(objs) == 0 {
 		return nil
 	}
+	r.resolve()
 
-	return c.link(code, objs, entries)
+	return c.link(code, objs, r.entries)
 }
 
 func (c *jitCompiler) plan(code []byte) (jitPlan, bool) {
@@ -129,72 +158,52 @@ func (c *jitCompiler) plan(code []byte) (jitPlan, bool) {
 	}
 
 	hot, forced := c.hot(blocks)
-	return jitPlan{
+	plan := jitPlan{
 		code:   code,
 		blocks: blocks,
 		hot:    hot,
 		forced: forced,
-	}, true
+	}
+	plan.traces = c.traces(plan)
+	return plan, true
 }
 
-func (c *jitCompiler) scan(plan jitPlan) (map[int]*asm.Signature, bool) {
-	buf, err := asm.NewBuffer(256)
-	if err != nil {
-		c.profile.JITError()
-		return nil, false
-	}
-	defer buf.Free()
-
-	r := &jitRun{
-		c:    c,
-		a:    asm.NewAssembler(arch, buf),
-		code: plan.code,
-		scan: true,
-	}
-	r.bind(plan.blocks)
-
-	objs, entries := r.compile(plan)
-	sigs := make(map[int]*asm.Signature, len(objs))
-	for i, obj := range objs {
-		sigs[entries[i]] = obj.Sig
-	}
-	return sigs, true
-}
-
-func (c *jitCompiler) emit(plan jitPlan, sigs map[int]*asm.Signature) ([]*asm.RelocObject, []int) {
-	c.assembler.Reset()
-
-	r := &jitRun{
-		c:    c,
-		a:    c.assembler,
-		code: plan.code,
-		sigs: sigs,
-	}
-	r.bind(plan.blocks)
-
-	return r.compile(plan)
-}
-
-func (c *jitCompiler) link(code []byte, objs []*asm.RelocObject, entries []int) []func(*Interpreter) {
+func (c *jitCompiler) link(code []byte, objs []*asm.RelocObject, entries map[int]jitEntry) []func(*Interpreter) {
 	callers, err := c.assembler.Link(objs)
 	if err != nil {
 		c.profile.JITError()
 		return nil
 	}
 
-	out := make([]func(*Interpreter), len(code))
+	primaries := make(map[*asm.RelocObject]asm.Caller, len(callers))
 	for i, caller := range callers {
 		if caller == nil {
 			continue
 		}
+		primaries[objs[i]] = caller
+	}
 
-		fn := c.closure(caller, objs[i].Sig)
+	out := make([]func(*Interpreter), len(code))
+	for ip, entry := range entries {
+		caller := primaries[entry.obj]
+		if entry.label >= 0 {
+			caller, err = c.assembler.CallerAt(entry.obj, entry.label)
+			if err != nil {
+				c.profile.JITError()
+				continue
+			}
+		}
+		if caller == nil {
+			continue
+		}
+
+		fn := c.closure(caller, entry.params, entry.obj.Sig)
 		if fn == nil {
 			continue
 		}
 
 		c.profile.JITLink()
-		out[entries[i]] = fn
+		out[ip] = fn
 	}
 	return out
 }
@@ -255,52 +264,156 @@ func (c *jitCompiler) hot(blocks []*analysis.BasicBlock) ([]*analysis.BasicBlock
 	return out, forced
 }
 
-func (r *jitRun) bind(blocks []*analysis.BasicBlock) {
+func (c *jitCompiler) traces(plan jitPlan) []jitTrace {
+	eligible := make(map[*analysis.BasicBlock]bool, len(plan.hot))
+	for _, b := range plan.hot {
+		eligible[b] = true
+	}
+
+	// adjacent reports whether b flows straight into its single successor: one
+	// successor block that begins exactly where b ends.
+	adjacent := func(b *analysis.BasicBlock) (*analysis.BasicBlock, bool) {
+		if len(b.Succs) != 1 {
+			return nil, false
+		}
+		next := plan.blocks[b.Succs[0]]
+		return next, b.End == next.Start
+	}
+
+	used := make(map[*analysis.BasicBlock]bool, len(plan.hot))
+	traces := make([]jitTrace, 0, len(plan.hot))
+	appendTrace := func(first *analysis.BasicBlock) {
+		trace := jitTrace{blocks: []*analysis.BasicBlock{first}}
+		used[first] = true
+		for current := first; ; {
+			next, ok := adjacent(current)
+			if !ok || used[next] || !eligible[next] {
+				break
+			}
+			trace.blocks = append(trace.blocks, next)
+			used[next] = true
+			current = next
+		}
+		traces = append(traces, trace)
+	}
+
+	// absorbed reports whether an eligible block flows straight into b, in which
+	// case b becomes a trace body rather than a head.
+	absorbed := func(b *analysis.BasicBlock) bool {
+		for _, p := range b.Preds {
+			if p < 0 || p >= len(plan.blocks) {
+				continue
+			}
+			prev := plan.blocks[p]
+			if next, ok := adjacent(prev); ok && eligible[prev] && next == b {
+				return true
+			}
+		}
+		return false
+	}
+
+	for _, first := range plan.hot {
+		if !used[first] && !absorbed(first) {
+			appendTrace(first)
+		}
+	}
+	for _, first := range plan.hot {
+		if !used[first] {
+			appendTrace(first)
+		}
+	}
+	return traces
+}
+
+func (r *jitRun) assign(blocks []*analysis.BasicBlock) {
 	r.labels = make(map[int]int, len(blocks))
 	for _, b := range blocks {
 		r.labels[b.Start] = r.a.NewLabel()
 	}
 }
 
-func (r *jitRun) compile(plan jitPlan) ([]*asm.RelocObject, []int) {
+func (r *jitRun) compile(plan jitPlan) []*asm.RelocObject {
 	var objs []*asm.RelocObject
-	var entries []int
 
-	for _, b := range plan.hot {
-		blockObjs, blockEntries, _ := r.block(b, plan.forced[b])
-		objs = append(objs, blockObjs...)
-		entries = append(entries, blockEntries...)
+	for _, trace := range plan.traces {
+		traceObjs := r.compileGroup(trace.blocks, plan.forced)
+		if len(traceObjs) == 0 && len(trace.blocks) > 1 {
+			for _, b := range trace.blocks {
+				objs = append(objs, r.compileGroup([]*analysis.BasicBlock{b}, plan.forced)...)
+			}
+			continue
+		}
+		objs = append(objs, traceObjs...)
 	}
 
-	return objs, entries
+	return objs
 }
 
-func (r *jitRun) block(b *analysis.BasicBlock, force bool) ([]*asm.RelocObject, []int, bool) {
-	var objs []*asm.RelocObject
-	var entries []int
+func (r *jitRun) compileGroup(blocks []*analysis.BasicBlock, forced map[*analysis.BasicBlock]bool) []*asm.RelocObject {
+	start := blocks[0].Start
+	end := blocks[len(blocks)-1].End
 
-	for start := b.Start; start < b.End; {
-		obj, next, stop := r.segment(start, b.End, force && start == b.Start)
-		if obj != nil {
-			objs = append(objs, obj)
-			entries = append(entries, start)
+	var boundaries []int
+	if len(blocks) > 1 {
+		boundaries = make([]int, 0, len(blocks)-1)
+		for _, block := range blocks[1:] {
+			boundaries = append(boundaries, block.Start)
 		}
-		if stop {
-			return objs, entries, true
-		}
-		if next <= start {
-			next = r.next(start)
-			if next <= start {
-				return objs, entries, false
+	}
+
+	forceAt := func(ip int) bool {
+		for _, b := range blocks {
+			if b.Start == ip {
+				return forced[b]
 			}
 		}
-		start = next
+		return false
 	}
 
-	return objs, entries, false
+	var objs []*asm.RelocObject
+	for next := start; next < end; {
+		if _, exists := r.entries[next]; exists {
+			next = r.next(next)
+			continue
+		}
+		obj, after, stop := r.segment(next, end, forceAt(next), boundaries)
+		if obj != nil {
+			objs = append(objs, obj)
+			r.record(obj, next, boundaries)
+		}
+		if stop {
+			break
+		}
+		if after <= next {
+			after = r.next(next)
+			if after <= next {
+				break
+			}
+		}
+		next = after
+	}
+	return objs
 }
 
-func (r *jitRun) segment(start, end int, force bool) (*asm.RelocObject, int, bool) {
+func (r *jitRun) record(obj *asm.RelocObject, start int, boundaries []int) {
+	r.entries[start] = jitEntry{obj: obj, label: primaryEntry, params: obj.Sig.Params}
+	for _, ip := range boundaries {
+		label := r.labels[ip]
+		entry, ok := obj.Entries[label]
+		if !ok {
+			continue
+		}
+		r.entries[ip] = jitEntry{obj: obj, label: label, params: entry.Params}
+	}
+}
+
+func (r *jitRun) segment(start, end int, force bool, boundaries []int) (*asm.RelocObject, int, bool) {
+	entries := make(map[int]int, len(boundaries))
+	for _, ip := range boundaries {
+		if ip > start {
+			entries[ip] = r.labels[ip]
+		}
+	}
 	s := &jitSeg{
 		r:         r,
 		assembler: r.a,
@@ -312,9 +425,21 @@ func (r *jitRun) segment(start, end int, force bool) (*asm.RelocObject, int, boo
 		ip:        start,
 		force:     force,
 		facts:     make(map[int]types.Kind),
+		entries:   entries,
 	}
 
-	s.init()
+	s.scratch = s.scratch[:0]
+	for range 4 {
+		s.scratch = append(s.scratch, s.assembler.Scratch())
+	}
+
+	if jitPrologue != nil {
+		jitPrologue(s)
+	}
+	if id, ok := s.labels[s.start]; ok {
+		s.assembler.Bind(id)
+	}
+
 	return s.run()
 }
 
@@ -323,6 +448,43 @@ func (r *jitRun) next(ip int) int {
 		return ip + 1
 	}
 	return ip + instr.Instruction(r.code[ip:]).Width()
+}
+
+func (r *jitRun) resolve() {
+	invalid := make(map[int]bool)
+	for _, edge := range r.edges {
+		entry, ok := r.entries[edge.target]
+		if ok && entry.label >= 0 && !asm.Compatibles(edge.stack, entry.params) {
+			invalid[edge.target] = true
+		}
+	}
+	for ip := range invalid {
+		delete(r.entries, ip)
+	}
+
+	for _, edge := range r.edges {
+		target := edge.fallback
+		if entry, ok := r.entries[edge.target]; ok && asm.Compatibles(edge.stack, entry.params) {
+			target = r.labels[edge.target]
+		}
+		r.a.Alias(edge.label, target)
+	}
+}
+
+// accepts checks the top-N stack slots against expected (type, width) specs.
+// specs[0] matches the topmost slot, specs[1] the next, etc. Slots below the
+// current stack height are treated as future entry params and always accepted.
+func (s *jitSeg) accepts(specs ...asm.PReg) bool {
+	for i, expected := range specs {
+		at := len(s.stack) - i - 1
+		if at < 0 {
+			continue
+		}
+		if !asm.Compatible(s.stack[at], expected) {
+			return false
+		}
+	}
+	return true
 }
 
 // Take pops the top of the eval stack if its type/width matches; if the
@@ -367,37 +529,31 @@ func (s *jitSeg) Pop() (asm.VReg, bool) {
 	return r, true
 }
 
-func (s *jitSeg) init() {
-	s.scratch = s.scratch[:0]
-	for range 4 {
-		s.scratch = append(s.scratch, s.assembler.Scratch())
-	}
-
-	if jitPrologue != nil {
-		jitPrologue(s)
-	}
-	if id, ok := s.labels[s.start]; ok {
-		s.assembler.Bind(id)
-	}
-}
-
 func (s *jitSeg) run() (*asm.RelocObject, int, bool) {
 	count := 0
 
 	for s.ip < s.end {
+		label, internal := s.entries[s.ip]
+		if internal {
+			s.assembler.Entry(label, s.stack)
+			s.facts = make(map[int]types.Kind)
+		}
 		prev := s.ip
-		ok, stop := jit[s.code[s.ip]](s)
-		if !ok {
+		if !jit[s.code[s.ip]](s) {
+			if internal {
+				s.abort(false)
+				return nil, s.r.next(prev), true
+			}
 			return s.partial(prev, count)
 		}
 
 		count++
-		if stop {
+		if instr.Opcode(s.code[prev]).IsBranch() {
 			if ok, skip := s.can(s.ip, count); !ok {
 				s.abort(skip)
 				return nil, s.ip, true
 			}
-			return s.compileAt(s.ip, true)
+			return s.compile(s.ip, true)
 		}
 	}
 
@@ -409,11 +565,11 @@ func (s *jitSeg) run() (*asm.RelocObject, int, bool) {
 	if jitEpilogue != nil {
 		jitEpilogue(s)
 	}
-	return s.compileAt(s.ip, false)
+	return s.compile(s.ip, false)
 }
 
 func (s *jitSeg) partial(fail, count int) (*asm.RelocObject, int, bool) {
-	next := s.ip
+	next := s.r.next(fail)
 	if ok, skip := s.can(fail, count); !ok {
 		s.abort(skip)
 		return nil, next, false
@@ -423,7 +579,7 @@ func (s *jitSeg) partial(fail, count int) (*asm.RelocObject, int, bool) {
 	if jitEpilogue != nil {
 		jitEpilogue(s)
 	}
-	return s.compileAt(next, false)
+	return s.compile(next, false)
 }
 
 func (s *jitSeg) can(end, count int) (bool, bool) {
@@ -445,9 +601,6 @@ func (s *jitSeg) hot(start, end int) uint64 {
 
 func (s *jitSeg) abort(skip bool) {
 	s.assembler.Abort()
-	if s.r.scan {
-		return
-	}
 	if skip {
 		s.r.c.profile.JITSkip()
 	} else {
@@ -455,21 +608,17 @@ func (s *jitSeg) abort(skip bool) {
 	}
 }
 
-func (s *jitSeg) compileAt(next int, stop bool) (*asm.RelocObject, int, bool) {
+func (s *jitSeg) compile(next int, stop bool) (*asm.RelocObject, int, bool) {
 	s.finalize()
 
 	obj, err := s.assembler.Compile()
 	if err != nil {
 		s.assembler.Abort()
-		if !s.r.scan {
-			s.r.c.profile.JITError()
-		}
+		s.r.c.profile.JITError()
 		return nil, next, false
 	}
 
-	if !s.r.scan {
-		s.r.c.profile.JITEmit(obj.Chunk.Size())
-	}
+	s.r.c.profile.JITEmit(obj.Chunk.Size())
 	return obj, next, stop
 }
 
@@ -497,27 +646,16 @@ func (s *jitSeg) pinReturn() int {
 	return idx
 }
 
-func (s *jitSeg) linkable(target int) bool {
-	if s.r.scan || target < 0 || target >= len(s.code) {
-		return false
-	}
-
-	sig := s.r.sigs[target]
-	if sig == nil {
-		return false
-	}
-
-	if len(s.stack) != len(sig.Params) {
-		return false
-	}
-	for i, v := range s.stack {
-		if v.Type() != sig.Params[i].Type() || v.Width() != sig.Params[i].Width() {
-			return false
-		}
-	}
-
-	_ = s.pinReturn()
-	return true
+func (s *jitSeg) edge(target int) (int, int) {
+	label := s.assembler.NewLabel()
+	fallback := s.assembler.NewLabel()
+	s.r.edges = append(s.r.edges, jitEdge{
+		label:    label,
+		fallback: fallback,
+		target:   target,
+		stack:    append([]asm.VReg(nil), s.stack...),
+	})
+	return label, fallback
 }
 
 func (s *jitSeg) global(idx int) (int16, bool) {
@@ -556,12 +694,11 @@ func (s *jitSeg) regKind(r asm.Reg) (types.Kind, bool) {
 	return s.r.c.regKind(r)
 }
 
-func (c *jitCompiler) closure(fn asm.Caller, sig *asm.Signature) func(*Interpreter) {
+func (c *jitCompiler) closure(fn asm.Caller, pregs []asm.PReg, sig *asm.Signature) func(*Interpreter) {
 	if len(sig.Scratch) <= rNext {
 		return nil
 	}
 
-	pregs := sig.Params
 	pkinds := make([]types.Kind, len(pregs))
 	for i, r := range pregs {
 		kind, ok := c.regKind(r)

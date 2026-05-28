@@ -46,44 +46,41 @@ Rules:
 - refs entering stack need `i.retain(addr)`; consumed refs need `i.release(addr)`
 - closure errors panic; `Interpreter.Run` recovers and annotates `at=<ip>`
 
-`NOP`: normal threaded compile emits one closure per NOP byte, but first closure skips whole consecutive NOP run. Dead-code padding costs one dispatch. `WithTick(1)` disables run skipping and preserves exact byte boundaries. JIT `NOP` advances `c.ip`, returns `true,false`, emits nothing, and counts toward segment length.
+`NOP`: normal threaded compile emits one closure per NOP byte, but first closure skips whole consecutive NOP run. Dead-code padding costs one dispatch. `WithTick(1)` disables run skipping and preserves exact byte boundaries. JIT `NOP` advances `s.ip`, returns `true`, emits nothing, and counts toward segment length.
 
 ## JIT Handlers
 
-`jit` is `[256]func(*jitSeg) (ok bool, stop bool)`, populated in `jit_arm64.go`.
+`jit` is `[256]func(*jitSeg) bool`, populated in `jit_arm64.go`.
 
 | Return | Meaning |
 |---|---|
-| `true,false` | compiled; continue segment |
-| `false,false` | unsupported or type mismatch; end segment |
-| `true,true` | compiled terminator; end segment |
+| `true` | current opcode lowered and `s.ip` advanced by its exact width |
+| `false` | current opcode rejected; segment ends before it |
 
 Handler shape:
 
 ```go
-jit[instr.OPCODE] = func(s *jitSeg) (bool, bool) {
-    s.ip++ // before every return path
-
+jit[instr.OPCODE] = func(s *jitSeg) bool {
     r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
     if !ok {
-        return false, false
+        return false
     }
     r1 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
     s.assembler.Emit(arm64.ADD(r1, r0, r0))
     s.Push(r1)
-    return true, false
+    s.ip++
+    return true
 }
 ```
 
 Rules:
 
-- advance `c.ip` before every return, including failure paths
-- operand handlers read operands, then advance by exact width
-- type/width mismatch returns `false,false`; never coerce
-- `false,false` stops current segment
-- branch terminators return `true,true`, emit their own exit, and skip `_EPILOGUE`
-- non-branch segments use `_EPILOGUE`
-- `_PROLOGUE` seeds next-IP scratch with `c.end`; `_EPILOGUE` reloads final `c.end` and emits `RET`
+- type/width mismatch returns `false`; never coerce
+- **validate-first contract**: a handler that returns `false` must leave `jitSeg` (ip, stack, params, facts) and the assembler unchanged. The segment loop does not snapshot/restore — rejection on a partly-mutated state will corrupt the surrounding compile.
+- already lowered prefix code remains eligible when a following opcode rejects
+- branch terminators return `true`; the basic-block/trace boundary ends compilation and skips `jitEpilogue`
+- non-branch segments use `jitEpilogue`
+- `jitPrologue` seeds next-IP scratch with `s.end`; `jitEpilogue` reloads final `s.end` and emits `RET`
 
 ## Scratch And Next IP
 
@@ -100,15 +97,15 @@ ARM64 JIT reserves `arch.Scratch = X10-X15` as metadata channels outside normal 
 
 ## Branches And Globals
 
-Branches (`BR`, `BR_IF`, `BR_TABLE`) terminate segments. Branch offsets are signed i16 relative to instruction end. They emit direct label branches only when target segment compiled and the current stack signature exactly matches target `Signature.Params` by type and width. Otherwise arch-specific JIT return code records current return point, writes target IP into JIT-owned `rNext`, writes arch header register, and emits `RET`.
+Branches (`BR`, `BR_IF`, `BR_TABLE`) terminate traces. Branch offsets are signed i16 relative to instruction end. Each lowered branch emits a deferred edge label and a local fallback `RET` stub. After all objects are compiled once, compatible targets alias the edge to the target entry; missing or incompatible targets alias it to the fallback stub.
 
-Branch limits: `BR` rejects non-empty native returns; `BR_IF` and `BR_TABLE` reject when more than one return would need reconstruction. Branch handlers must not fall through `_EPILOGUE`, because that would overwrite branch-selected `rNext`.
+Branch handlers must not fall through `jitEpilogue`, because that would overwrite branch-selected `rNext`.
 
-Mutable globals have no declared runtime kind. `GLOBAL_SET` / `GLOBAL_TEE` infer kind from source register and store in same-segment `c.globalKinds`. `GLOBAL_GET` compiles only after same-segment store proves kind. Never specialize `GLOBAL_GET` from current global value; dynamic kind changes would need deopt stack reconstruction, which current JIT ABI lacks.
+Mutable globals have no declared runtime kind. `GLOBAL_SET` / `GLOBAL_TEE` infer kind from source register and store it in same-segment `s.facts`. `GLOBAL_GET` compiles only after same-segment store proves kind. Never specialize `GLOBAL_GET` from current global value; dynamic kind changes would need deopt stack reconstruction, which current JIT ABI lacks.
 
 ## Segment Selection
 
-`jitCompiler.Compile(code)` builds basic blocks, scores each with `profile.Range(addr,start,end)`, compiles hot blocks plus their direct CFG successors, and extracts independent compilable segments inside each block.
+`jitCompiler.Compile(code)` builds basic blocks, scores each with `profile.Range(addr,start,end)`, selects hot blocks plus direct CFG successors, and builds JIT-only fallthrough traces. `analysis.BasicBlock` remains the CFG source of truth.
 
 Emit rules:
 
@@ -116,6 +113,9 @@ Emit rules:
 - direct-successor entry segments may emit with one compilable instruction so linked branches can enter them
 - truncated or branch-terminated segments emit only when they meet same cutoff and range from start to last compiled IP is sampled
 - otherwise `assembler.Abort()` discards segment state
+- adjacent eligible blocks joined only by natural fallthrough may emit as one object
+- if the first opcode at an internal entry rejects, discard that merged attempt and compile the blocks separately
+- each bytecode entry IP is installed at most once per JIT attempt
 - JIT makes one function-level compilation attempt; no later tier-up/retry
 
 ```text
@@ -124,14 +124,15 @@ block [A B X C D E F]  X unsupported
 -> [C D E F]    count=4  abort unless forced by a linked branch or lowered cutoff
 ```
 
-## Two-Pass Linking
+## Single-Compile Linking
 
-Branch-terminated blocks need target signatures before choosing direct branch vs exit stub.
+Each trace is compiled once into the real executable buffer.
 
-1. Pass 1 compiles candidates into throwaway buffer with direct branch linking disabled. Successful segments expose signatures only.
-2. Pass 2 recompiles candidates into executable buffer after signatures known, enabling direct branch labels where signatures match.
+1. Compile traces and collect primary/internal entry signatures and deferred branch edges.
+2. Alias compatible edges to compiled entry labels; alias all other edges to their local fallback stubs.
+3. Link relocations and install one interpreter-callable closure per accepted entry IP.
 
-`linkable(targetIP)` compares current returns with target params by type and width.
+Natural fallthrough trace `A+B` records an internal callable entry at `B`. A cold or uncompiled additional predecessor does not prevent installing that entry, so threaded dispatch at `B` can still enter native code. If a compiled incoming edge has a mismatched type/width signature, the internal entry is not installed and that edge uses its fallback stub; merged fallthrough code remains valid for `A`.
 
 ## Assembler And JIT Segment
 
@@ -144,11 +145,14 @@ Two-layer IR emission:
 | `NewVReg(type,width)` | allocate virtual register |
 | `Emit(inst)` | append instruction |
 | `NewLabel()` / `Bind(id)` | create/place branch targets |
+| `Entry(label, live)` | mark internal callable entry and its ABI inputs |
+| `Alias(label, target)` | resolve deferred edges at link time |
 | `Scratch()` | allocate reserved metadata PReg |
 | `Pin(vreg, preg)` | bind VReg to physical register (ABI slots) |
 | `Site(idx, live)` | declare ABI boundary at instruction idx with live values |
 | `Compile()` | allocate physical regs, encode, append buffer, return `RelocObject` |
 | `Link(objects)` | patch cross-segment relocs, return native callers |
+| `CallerAt(object, label)` | build caller for an internal entry |
 | `Abort()` / `Reset()` | discard segment / reset function assembler state |
 
 **`jitSeg`** (high-level): track VM stack shape, manage operands and results.
@@ -161,14 +165,15 @@ Two-layer IR emission:
 
 `jitSeg.assembler` delegates IR emission to `Assembler`; `jitSeg.stack` and `jitSeg.params` track VM stack shape. `Site()` called at function entry and return points to expose ABI signatures.
 
-`asm.Signature.Params` stores the single entry signature. `asm.Signature.Returns` stores return signatures keyed by return-site instruction index. `asm.Caller` only executes a compiled chunk; signature inspection belongs to the `Signature` returned by `Compile()`.
+`asm.Signature.Params` is the primary entry's input register layout, used to construct a `Caller`. `asm.RelocObject.Entries map[int]Entry{Offset, Params}` records internal callable entries keyed by assembler label. `asm.Signature.Returns` stores return signatures keyed by return-site instruction index. `asm.Caller` only executes a compiled chunk; signature inspection belongs to the `Signature` returned by `Compile()`. Negative labels are reserved and invalid for `Entry`.
 
 Pipeline:
 
 ```text
 per segment: jitSeg.Take/Push/Pop -> assembler.Emit() -> IR list
 Compile(): IR list -> Assembler.Compile() -> RelocObject
-Link(): []*RelocObject -> Assembler.Link() -> []Caller
+Resolve: deferred edges -> Assembler.Alias()
+Link(): []*RelocObject -> Assembler.Link()/CallerAt() -> callers
 ```
 
 Intra-segment labels resolve in `Compile()`. Cross-segment labels become relocations patched by `Link()`.

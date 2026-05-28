@@ -85,6 +85,12 @@ func NewRegInfo() asm.RegInfo {
 
 Implement `asm.Encoder`.
 
+Keep `asm.RegType` and `asm.RegWidth` as the backend contract. Integer
+instructions must encode distinct `W`/`X` forms, float instructions distinct
+`S`/`D` forms, and conversions must encode each valid source/destination width
+combination. Reject invalid mixed type or width operands with
+`asm.ErrInvalidOperand`.
+
 ```go
 var _ asm.Encoder = (*Encoder)(nil)
 
@@ -137,6 +143,14 @@ func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
 }
 ```
 
+`Signature.Params` records inputs for the entry selected for a caller.
+`RelocObject.Entries map[int]Entry{Offset, Params}` records internal callable
+entry signatures keyed by assembler label; negative labels are reserved and
+must not be passed to `Assembler.Entry`. The generic assembler calls
+`NewCaller` with an internal chunk view from `CallerAt` (a synthesized
+`Signature` whose `Params` come from the target `Entry`) when a linked object
+exposes multiple entries.
+
 ### `abi_stub.go`
 
 Non-target stubs must declare native invocation symbols referenced by the portable caller implementation.
@@ -152,7 +166,9 @@ func invoke(addr uintptr, argv uintptr) {
 
 ### Tests
 
-Create build-tagged tests, at minimum proving `Assembler.Compile()` + `Link()` returns callable chunk for simple addition.
+Create build-tagged tests proving `Assembler.Compile()` + `Link()` returns a
+callable chunk for simple addition. Also cover `Entry` + `CallerAt`, alias
+resolution, width-specific encodings, and invalid operands.
 
 ```go
 //go:build <arch>
@@ -208,40 +224,37 @@ import (
 func init() {
     arch = <arch>.Arch
 
-    jit[_PROLOGUE] = func(s *jitSeg) (bool, bool) {
+    jitPrologue = func(s *jitSeg) {
         s.assembler.Emits(<arch>.LDI(s.scratch[rNext], uint64(s.end))...)
-        return true, false
     }
 
-    jit[_EPILOGUE] = func(s *jitSeg) (bool, bool) {
+    jitEpilogue = func(s *jitSeg) {
         s.assembler.Emits(<arch>.LDI(s.scratch[rNext], uint64(s.end))...)
         s.assembler.Emit(<arch>.RET())
-        return true, false
     }
 
-    jit[instr.NOP] = func(s *jitSeg) (bool, bool) {
+    jit[instr.NOP] = func(s *jitSeg) bool {
         s.ip++
-        return true, false
+        return true
     }
 
-    jit[instr.I32_ADD] = func(s *jitSeg) (bool, bool) {
-        s.ip++
-
+    jit[instr.I32_ADD] = func(s *jitSeg) bool {
         r1, ok := s.Take(asm.RegTypeInt, asm.Width32)
         if !ok {
-            return false, false
+            return false
         }
 
         r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
         if !ok {
-            return false, false
+            return false
         }
 
         dst := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
         s.assembler.Emit(<arch>.ADD(dst, r0, r1))
         s.Push(dst)
+        s.ip++
 
-        return true, false
+        return true
     }
 
     // register remaining opcodes
@@ -252,9 +265,17 @@ Handler rules:
 
 - prologue loads segment exit IP into scratch next register
 - epilogue reloads possibly truncated exit IP, then returns
-- normal success returns `(true, false)`
-- failure returns `(false, false)`
-- branch terminators return `(true, true)` and emit their own `RET`
+- `true` means the current opcode was fully lowered and advanced `s.ip`
+- `false` means the current opcode was rejected without observable IR, stack,
+  parameter, fact, or label mutation
+- branch terminators return `true`; the trace boundary stops compilation
+- direct branch handlers emit deferred alias edges plus local fallback returns
+
+The JIT may merge an adjacent natural-fallthrough successor into one native
+object. Place `Assembler.Entry` at an internal callable boundary and use
+`Assembler.Alias` to resolve compatible direct edges after all entry
+signatures are known. Keep VM tracing, heat, and fallback policy out of
+`asm/<arch>/`.
 
 Opcode priority:
 

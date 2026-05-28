@@ -2,6 +2,18 @@ package instr
 
 type Opcode byte
 
+// IsBranch reports whether op encodes an intra-function control-flow branch
+// (BR / BR_IF / BR_TABLE). Unconditional terminators like RETURN and
+// UNREACHABLE are not branches.
+func (op Opcode) IsBranch() bool {
+	switch op {
+	case BR, BR_IF, BR_TABLE:
+		return true
+	default:
+		return false
+	}
+}
+
 const (
 	NOP Opcode = iota
 	UNREACHABLE

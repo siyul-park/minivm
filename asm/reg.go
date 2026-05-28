@@ -90,6 +90,25 @@ func NewVReg(id int32, typ RegType, w RegWidth) VReg {
 	return VReg{id: id, typ: typ, width: w}
 }
 
+// Compatible reports whether a and b share the same register type and width.
+func Compatible(a, b Reg) bool {
+	return a.Type() == b.Type() && a.Width() == b.Width()
+}
+
+// Compatibles reports whether a and b are element-wise shape-compatible: equal
+// length with matching type and width at every position.
+func Compatibles[A, B Reg](a []A, b []B) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !Compatible(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 func (r PReg) ID() uint8       { return r.id }
 func (r PReg) Type() RegType   { return r.typ }
 func (r PReg) Width() RegWidth { return r.width }

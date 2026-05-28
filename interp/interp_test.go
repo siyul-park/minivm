@@ -88,6 +88,16 @@ var tests = []test{
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0x7FFFFFFF),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_ADD),
+			},
+		),
+		values: []types.Value{types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.BR_TABLE, 2, 0, 5, 0),
 				instr.New(instr.I32_CONST, 2),
@@ -387,6 +397,16 @@ var tests = []test{
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0xFFFFFFF9),
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.I32_DIV_S),
+			},
+		),
+		values: []types.Value{types.I32(-2)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 10),
 				instr.New(instr.I32_CONST, 3),
 				instr.New(instr.I32_DIV_U),
@@ -407,6 +427,16 @@ var tests = []test{
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0xFFFFFFF9),
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.I32_REM_S),
+			},
+		),
+		values: []types.Value{types.I32(-1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 10),
 				instr.New(instr.I32_CONST, 3),
 				instr.New(instr.I32_REM_U),
@@ -423,6 +453,16 @@ var tests = []test{
 			},
 		),
 		values: []types.Value{types.I32(2)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 32),
+				instr.New(instr.I32_SHL),
+			},
+		),
+		values: []types.Value{types.I32(1)},
 	},
 	{
 		program: program.New(
@@ -508,6 +548,16 @@ var tests = []test{
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_LT_S),
+			},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0xFFFFFFFF),
+				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_LT_S),
 			},
 		),
@@ -3045,6 +3095,32 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.Zero(t, jit.Links)
 	})
 
+	t.Run("executes compiled prefix before unsupported opcode", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 41),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.REF_NULL),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.I32_CONST))
+
+		require.NoError(t, i.jit(0))
+		require.Equal(t, uint64(1), p.Snapshot().JIT.Emits)
+		require.NoError(t, i.Run(context.Background()))
+
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.Null, value)
+		value, err = i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(42), value)
+	})
+
 	t.Run("links branches", func(t *testing.T) {
 		if arch == nil {
 			t.Skip("jit is not available on this architecture")
@@ -3196,6 +3272,126 @@ func TestInterpreter_JIT(t *testing.T) {
 				require.GreaterOrEqual(t, p.Snapshot().JIT.Links, tt.minLinks)
 			})
 		}
+	})
+
+	t.Run("merges fallthrough block with internal entry", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+
+		code := []instr.Instruction{
+			instr.New(instr.I32_CONST, 40),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.BR, 8),
+			instr.New(instr.I32_CONST, 40),
+			instr.New(instr.BR, uint64(uint16(1<<16-17))),
+			instr.New(instr.NOP),
+		}
+		p := prof.New()
+		p.Add(0, 0, byte(instr.I32_CONST))
+		p.Add(0, 5, byte(instr.I32_CONST))
+		p.Add(0, 5, byte(instr.I32_CONST))
+		p.Add(0, 14, byte(instr.I32_CONST))
+		i := New(program.New(code), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+
+		require.NoError(t, i.jit(0))
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(3), jit.Emits)
+		require.Equal(t, uint64(4), jit.Links)
+
+		i.fr.ip = 5
+		require.NoError(t, i.Push(types.I32(40)))
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(42), value)
+
+		i.fr.ip = 14
+		require.NoError(t, i.Run(context.Background()))
+		value, err = i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(42), value)
+	})
+
+	t.Run("keeps internal entry with cold predecessor", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+
+		code := []instr.Instruction{
+			instr.New(instr.I32_CONST, 40),
+			instr.New(instr.BR, 5),
+			instr.New(instr.I32_CONST, 40),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+		}
+		p := prof.New()
+		p.Add(0, 8, byte(instr.I32_CONST))
+		i := New(program.New(code), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+
+		require.NoError(t, i.jit(0))
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Emits)
+		require.Equal(t, uint64(2), jit.Links)
+
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(42), value)
+	})
+
+	t.Run("splits trace when internal entry rejects", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 42),
+			instr.New(instr.REF_NULL),
+			instr.New(instr.BR, 8),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.BR, uint64(uint16(1<<16-12))),
+			instr.New(instr.NOP),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.I32_CONST))
+		p.Add(0, 5, byte(instr.REF_NULL))
+		p.Add(0, 9, byte(instr.I32_CONST))
+
+		require.NoError(t, i.jit(0))
+		require.NoError(t, i.Run(context.Background()))
+
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.Null, value)
+		value, err = i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(42), value)
+	})
+
+	t.Run("compiles forced successor after merged prefix rejects", func(t *testing.T) {
+		if arch == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+			instr.New(instr.REF_NULL),
+			instr.New(instr.NOP),
+			instr.New(instr.BR, 3),
+			instr.New(instr.BR, uint64(uint16(1<<16-7))),
+			instr.New(instr.NOP),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.NOP))
+
+		require.NoError(t, i.jit(0))
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(2), jit.Emits)
+		require.Equal(t, uint64(2), jit.Links)
 	})
 
 	t.Run("skips cold segments", func(t *testing.T) {

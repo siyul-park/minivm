@@ -31,7 +31,7 @@ func IsBoxable(v int64) bool {
 }
 
 func BoxI32(v int32) Boxed {
-	return Box(uint64(v), KindI32)
+	return Box(uint64(uint32(v)), KindI32)
 }
 
 func BoxI64(v int64) Boxed {

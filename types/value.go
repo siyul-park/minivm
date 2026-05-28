@@ -73,6 +73,16 @@ func (k Kind) String() string {
 	}
 }
 
+// IsNumeric reports whether k is one of the numeric kinds (i32, i64, f32, f64).
+func (k Kind) IsNumeric() bool {
+	switch k {
+	case KindI32, KindI64, KindF32, KindF64:
+		return true
+	default:
+		return false
+	}
+}
+
 func (k Kind) Size() int {
 	switch k {
 	case KindI32:

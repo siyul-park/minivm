@@ -106,39 +106,38 @@ File: `interp/jit_arm64.go`
 Optional, ARM64 only. Skip if opcode needs hard-to-compile interpreter access; threaded fallback remains correct.
 
 ```go
-jit[instr.I32_MY_OP] = func(s *jitSeg) (bool, bool) {
-    s.ip++ // before every return path
-
+jit[instr.I32_MY_OP] = func(s *jitSeg) bool {
     r0, ok := s.Take(asm.RegTypeInt, asm.Width32)
     if !ok {
-        return false, false
+        return false
     }
 
     r1 := s.assembler.NewVReg(asm.RegTypeInt, asm.Width32)
     s.assembler.Emit(arm64.ADD(r1, r0, r0))
     s.Push(r1)
+    s.ip++
 
-    return true, false
+    return true
 }
 ```
 
-Return values are `(ok, stop)`:
+Return value:
 
 | Return | Meaning |
 |---|---|
-| `true, false` | compiled; continue |
-| `false, false` | not compilable; end segment |
-| `true, true` | compiled branch terminator; emits own `RET` |
+| `true` | current opcode fully lowered and `s.ip` advanced |
+| `false` | current opcode rejected without observable state mutation |
 
 Checklist:
 
-- [ ] advance `c.ip` before every return
+- [ ] advance `s.ip` only on success, by exact bytecode width
 - [ ] call `Take` with correct `RegType` and `RegWidth`
-- [ ] return `false, false` on type/width mismatch
+- [ ] return `false` on type/width mismatch
+- [ ] validate operands before emitting IR or mutating facts/labels
 - [ ] use only VRegs from `Take` or `NewVReg`
 - [ ] push result VReg with `Push`
-- [ ] use `return false, false`, not `panic`, when emission is impossible
-- [ ] non-branch instructions return `(ok, false)`; only branch terminators return `(true, true)`
+- [ ] use `return false`, not `panic`, when emission is impossible
+- [ ] branch terminators return `true`; trace boundaries stop compilation
 
 ## Step 5 — Write Tests
 

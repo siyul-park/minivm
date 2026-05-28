@@ -100,7 +100,7 @@ Two layers:
 
 `threadedCompiler` (`threaded.go`): `[256]func` table populated in `init()`. Each compile-time entry reads operands, advances `c.ip`, and returns a runtime closure that captures constants and advances `f.ip` by instruction width.
 
-`jitCompiler` (`jit.go`): architecture-agnostic. Runs `BasicBlocksPass`, ranks blocks by heat, and compiles hotter blocks first. `compile(b)` loops `segment(code,start,end)` to extract maximal compilable sampled runs. Completed, truncated, and branch-terminated segments all emit only when count meets `WithCutoff` (default `8`). Cold segments in hot blocks are skipped. Two-pass compile handles non-terminated blocks before branch-terminated blocks so branch targets have known signatures. `assembler.Link()` patches cross-segment labels. Each linked segment installs a closure at `out[entryIP]`. JIT does not recompile or tier-up.
+`jitCompiler` (`jit.go`): architecture-agnostic. Runs `BasicBlocksPass`, ranks blocks by heat, then groups eligible adjacent natural-fallthrough blocks into JIT traces. A trace compiles once into a native object; internal trace block starts may be callable entries when incoming stack signatures are proven compatible. Branches emit deferred aliases, resolved after entry signatures are known, then `assembler.Link()` patches relocations. Each accepted entry IP installs one closure. JIT does not recompile or tier-up.
 
 `HostFunction` (`host.go`): wraps `func(i *Interpreter, params []Boxed) ([]Boxed, error)` as `types.Value`. Lives in constants, called by `CONST_GET` + `CALL`. Use `Interpreter.Marshal`/`Unmarshal` to convert Go values; the default converter caches per-type reflection plans, while arbitrary Go function calls still use `reflect.Call`. Go `func` marshals to `HostFunction`, final `error` return propagated as host-call error. `WithMarshaler` replaces the default converter.
 
@@ -119,8 +119,11 @@ Core API:
 - `Pin(vreg, preg)`: bind VReg to physical register (JIT uses for ABI slots).
 - `Site(0, live)`: declare the single entry parameter signature.
 - `Site(idx, live)` for `idx > 0`: declare a return site signature.
+- `Entry(label, live)`: declare a callable internal object entry.
+- `Alias(label, target)`: defer branch target choice until link.
 - `Compile()`: allocate physical regs, encode, append buffer, return `RelocObject`.
 - `Link([]*RelocObject)`: patch cross-segment labels, return native `Caller`s.
+- `CallerAt(obj, label)`: create a caller at an internal entry offset.
 
 `Compile()` + `Link()`:
 
@@ -128,8 +131,8 @@ Core API:
 2. `newCompiler()`: allocate physical regs via `RegAlloc`, encode IR to machine code.
 3. `resolve()`: two-pass encode. Pass 1 measures sizes via `Imm(0)` placeholders; Pass 2 patches labels and records `Relocation`s.
 4. `buffer.Unseal()` → `buffer.Append(code)` → `buffer.Seal()`: write to executable memory.
-5. Return `*RelocObject` with chunk, `Signature{Params, Returns, Scratch}` from `Site` declarations, and relocations.
-6. `Link([]*RelocObject)`: unseal, patch relocations, seal, create one `Caller` per object.
+5. Return `*RelocObject` with chunk, `Signature{Params, Returns, Scratch}` for the primary entry, plus `Entries map[int]Entry{Offset, Params}` for internal callable entries, and relocations.
+6. `Link([]*RelocObject)`: unseal, resolve aliases/relocations, seal, create primary callers; `CallerAt` creates internal callers.
 
 ### `asm/arm64/`
 
@@ -206,12 +209,12 @@ Thin entrypoint around `cli.Root().Execute()`.
    │  check ctx, consume fuel, call hook, prof.Add(addr, ip, opcode)
    └─ if JIT enabled and prof.Samples(addr) reaches threshold rounded to tick cadence:
       jitCompiler.Compile(instrs[addr])
-      └─ heat-sorted two-pass sampled basic-block compile:
-         ├─ pass 1: hot blocks → segment() loop → sampled eligible segments
-         │  non-terminated segments → objs; terminated blocks deferred
-         ├─ pass 2: recompile terminated blocks with full signature knowledge
-         ├─ assembler.Link(objs) → patch cross-segment relocations → []Caller
-         └─ out[entryIP] = closure(caller, sig) per segment
+      └─ heat-sorted single-compile JIT trace pipeline:
+         ├─ hot/forced basic blocks → natural-fallthrough traces
+         ├─ each trace compiles once, collecting entries and deferred edges
+         ├─ compatible edges alias to native entries; others alias to fallback exits
+         ├─ assembler.Link/CallerAt → primary and internal callers
+         └─ out[entryIP] = closure(caller, sig) per accepted entry
 
 5. interp.Close()
    └─ buffer.Free() → munmap

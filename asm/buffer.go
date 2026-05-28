@@ -91,6 +91,18 @@ func (c *Chunk) Size() int {
 	return c.size
 }
 
+// Slice returns a sub-Chunk starting at the given byte offset.
+func (c *Chunk) Slice(offset int) (*Chunk, error) {
+	if offset < 0 || offset > c.size {
+		return nil, ErrInvalidArgs
+	}
+	return &Chunk{
+		buf:    c.buf,
+		offset: c.offset + offset,
+		size:   c.size - offset,
+	}, nil
+}
+
 func (b *Buffer) grow(s int) error {
 	size := len(b.mem) * 2
 	if size < s {

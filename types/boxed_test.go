@@ -98,7 +98,9 @@ func TestBoxI32(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
 			val := BoxI32(tt.val)
+			require.Equal(t, KindI32, val.Kind())
 			require.Equal(t, tt.val, val.I32())
+			require.Equal(t, I32(tt.val), Unbox(val))
 		})
 	}
 }

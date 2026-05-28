@@ -398,10 +398,12 @@ func CMNI(src asm.Reg, i uint16) asm.Instruction { return newCmpImm(OpCMNI, src,
 // CCMP Xn, Xm, #nzcv, cond — conditional compare (register)
 // nzcv and cond packed into Src2 as (nzcv | cond<<4)
 func CCMP(src1, src2 asm.Reg, nzcv uint8, cond uint8) asm.Instruction {
-	return newInst(OpCCMP, nil, regOperand(src1), regOperand(src2))
+	flags := int64(nzcv&0xF) | int64(cond&0xF)<<4
+	return newInst(OpCCMP, nil, regOperand(src1), regOperand(src2), imm(flags))
 }
 func CCMPI(src asm.Reg, val uint8, nzcv uint8, cond uint8) asm.Instruction {
-	return newInst(OpCCMPI, nil, regOperand(src), imm(int64(val)))
+	flags := int64(nzcv&0xF) | int64(cond&0xF)<<4
+	return newInst(OpCCMPI, nil, regOperand(src), imm(int64(val)), imm(flags))
 }
 
 // ---------------------------------------------------------------------------
@@ -538,13 +540,13 @@ func CSEL(dst, trueReg, falseReg asm.Reg, cond uint8) asm.Instruction {
 	return newInst(OpCSEL, regOperand(dst), regOperand(trueReg), asm.ImmOperand{Value: int64(cond)}, regOperand(falseReg))
 }
 func CSINC(dst, trueReg, falseReg asm.Reg, cond uint8) asm.Instruction {
-	return newInst(OpCSINC, regOperand(dst), regOperand(trueReg), regOperand(falseReg))
+	return newInst(OpCSINC, regOperand(dst), regOperand(trueReg), imm(int64(cond)), regOperand(falseReg))
 }
 func CSINV(dst, trueReg, falseReg asm.Reg, cond uint8) asm.Instruction {
-	return newInst(OpCSINV, regOperand(dst), regOperand(trueReg), regOperand(falseReg))
+	return newInst(OpCSINV, regOperand(dst), regOperand(trueReg), imm(int64(cond)), regOperand(falseReg))
 }
 func CSNEG(dst, trueReg, falseReg asm.Reg, cond uint8) asm.Instruction {
-	return newInst(OpCSNEG, regOperand(dst), regOperand(trueReg), regOperand(falseReg))
+	return newInst(OpCSNEG, regOperand(dst), regOperand(trueReg), imm(int64(cond)), regOperand(falseReg))
 }
 
 // CSET Xd, cond  — Xd = cond ? 1 : 0

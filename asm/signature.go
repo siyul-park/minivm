@@ -5,7 +5,7 @@ package asm
 // Each PReg carries its physical register ID, type (int/float), and width,
 // so no separate type or width slices are needed.
 //
-// ABI layout (parameters = Params, returns = Returns):
+// ABI layout:
 //
 //	params:  Params[0], Params[1], …   — physical registers X0/D0, X1/D1, …
 //	returns: Returns[0], Returns[1], … — same registers (different direction)

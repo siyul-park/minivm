@@ -116,9 +116,10 @@ Violations cause silent corruption or invalid execution.
 
 ### JIT
 
-- JIT handlers must advance `c.ip` before every return path.
-- On type mismatch, return `false, false`; never coerce mismatched types.
-- Branch terminators return `true, true`.
+- JIT handlers return `true` only after lowering the opcode and advancing `s.ip` by its exact width.
+- On type mismatch or unsupported lowering, return `false` without mutating IR, stack, params, facts, or labels.
+- Branch termination is determined by the trace boundary; branch handlers return `true` after successful terminal emission.
+- Compile each entry IP at most once per JIT attempt; natural-fallthrough traces may expose compatible internal entries.
 - Completed JIT segments emit when `count >= emit` default `8`; truncated and branch-terminated segments use the same cutoff.
 
 ### Executable Buffers
