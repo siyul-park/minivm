@@ -52,9 +52,9 @@ func (c *threadedCompiler) fuseFunction(fn *types.Function, addr int) func(*Inte
 			i.fr.ip += 4
 			f := &i.frames[i.fp]
 			f.code = i.code[addr]
-			f.upvalues = nil
+			f.upvals = nil
 			f.addr = addr
-			f.callee = addr
+			f.ref = addr
 			f.ip = 0
 			f.bp = i.sp - params
 			f.returns = returns

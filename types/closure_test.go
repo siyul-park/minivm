@@ -52,7 +52,7 @@ func TestNewClosure(t *testing.T) {
 	cl := NewClosure(typ, 5, ups)
 	require.Equal(t, typ, cl.Typ)
 	require.Equal(t, 5, cl.Fn)
-	require.Equal(t, ups, cl.Upvalues)
+	require.Equal(t, ups, cl.Upvals)
 
 	t.Run("nil type defaults to empty", func(t *testing.T) {
 		cl := NewClosure(nil, 1, nil)

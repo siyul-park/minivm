@@ -124,11 +124,11 @@ Never cache pointer into `heap` across potential `alloc`; slice may reallocate. 
 ### Closure frames separate code identity from the released callable
 
 A frame stores both `addr` (the function/template heap index used to index `i.code`,
-`i.instrs`, and the profiler/JIT) and `callee` (the heap index released on `RETURN`). For a
+`i.instrs`, and the profiler/JIT) and `ref` (the heap index released on `RETURN`). For a
 plain function these are equal; for a closure they diverge — `addr` is the template
-(`Closure.Fn`) while `callee` is the closure instance. Profiling/JIT must use `addr`;
-release must use `callee`. A closure keeps its template alive through its `Fn` ref and its
-captured cells alive through its upvalue refs until the closure's RC reaches `0`.
+(`Closure.Fn`) while `ref` is the closure instance. Profiling/JIT must use `addr`;
+release must use `ref`. A closure keeps its template alive through its `Fn` ref and its
+captured cells alive through its upval refs until the closure's RC reaches `0`.
 
 ## Host Function Memory Access
 

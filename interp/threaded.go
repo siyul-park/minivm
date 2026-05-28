@@ -173,9 +173,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				f := &i.frames[i.fp]
 				f.code = i.code[addr]
-				f.upvalues = nil
+				f.upvals = nil
 				f.addr = addr
-				f.callee = addr
+				f.ref = addr
 				f.ip = 0
 				f.bp = i.sp - params - 1
 				f.returns = returns
@@ -203,9 +203,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				f := &i.frames[i.fp]
 				f.code = i.code[fn.Fn]
-				f.upvalues = fn.Upvalues
+				f.upvals = fn.Upvals
 				f.addr = fn.Fn
-				f.callee = addr
+				f.ref = addr
 				f.ip = 0
 				f.bp = i.sp - params - 1
 				f.returns = returns
@@ -268,7 +268,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp = f.bp + f.returns
 			if f.release {
-				i.release(f.callee)
+				i.release(f.ref)
 			}
 			f.code = nil
 			i.fp--
@@ -3207,9 +3207,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < n+1 {
 				panic(ErrStackUnderflow)
 			}
-			upvalues := make([]types.Boxed, n)
-			copy(upvalues, i.stack[i.sp-1-n:i.sp-1])
-			cl := types.NewClosure(fn.Typ, addr, upvalues)
+			upvals := make([]types.Boxed, n)
+			copy(upvals, i.stack[i.sp-1-n:i.sp-1])
+			cl := types.NewClosure(fn.Typ, addr, upvals)
 			caddr := i.allocRoot(cl)
 			i.sp -= n
 			i.stack[i.sp-1] = types.BoxRef(caddr)
@@ -3223,10 +3223,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			if idx >= len(i.fr.upvalues) {
+			if idx >= len(i.fr.upvals) {
 				panic(ErrSegmentationFault)
 			}
-			val := i.fr.upvalues[idx]
+			val := i.fr.upvals[idx]
 			if val.Kind() == types.KindRef {
 				i.retain(val.Ref())
 			}
@@ -3242,15 +3242,15 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			if idx >= len(i.fr.upvalues) {
+			if idx >= len(i.fr.upvals) {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[i.sp-1]
-			old := i.fr.upvalues[idx]
+			old := i.fr.upvals[idx]
 			if old != val && old.Kind() == types.KindRef {
 				i.release(old.Ref())
 			}
-			i.fr.upvalues[idx] = val
+			i.fr.upvals[idx] = val
 			i.sp--
 			i.fr.ip += 2
 		}

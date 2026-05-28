@@ -141,7 +141,7 @@ mutable scalar cells.
 the first nested ref is found, so release of values with no children stays
 allocation-free while ref-containing values keep one pre-sized result slice.
 `*types.Closure` always reports at least its template (`Fn`), so it pre-sizes its `Refs()`
-slice to `1 + len(Upvalues)` and never takes the lazy-nil path.
+slice to `1 + len(Upvals)` and never takes the lazy-nil path.
 
 `STRUCT_GET` and `STRUCT_SET` handle VM-native `*types.Struct` directly and fall back to `*interp.HostObject` for host-supplied values. See [host-integration.md](host-integration.md) for HostObject semantics.
 
