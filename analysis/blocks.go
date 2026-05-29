@@ -23,7 +23,7 @@ var ErrInvalidJump = errors.New("invalid jump")
 
 var _ pass.Pass[[]*BasicBlock] = (*BasicBlocksPass)(nil)
 
-func NewBasicBlocksPass() pass.Pass[[]*BasicBlock] {
+func NewBasicBlocksPass() *BasicBlocksPass {
 	return &BasicBlocksPass{}
 }
 
@@ -139,10 +139,6 @@ func (p *BasicBlocksPass) Run(m *pass.Manager) ([]*BasicBlock, error) {
 	return blocks, nil
 }
 
-func invalidJumpError(ip, target int) error {
-	return fmt.Errorf("%w: at=%d target=%d", ErrInvalidJump, ip, target)
-}
-
 func (p *BasicBlocksPass) link(blocks []*BasicBlock, src, dst int) bool {
 	for i, b := range blocks {
 		if b.Start <= dst && dst < b.End {
@@ -152,4 +148,8 @@ func (p *BasicBlocksPass) link(blocks []*BasicBlock, src, dst int) bool {
 		}
 	}
 	return false
+}
+
+func invalidJumpError(ip, target int) error {
+	return fmt.Errorf("%w: at=%d target=%d", ErrInvalidJump, ip, target)
 }
