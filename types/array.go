@@ -5,13 +5,7 @@ import (
 	"strings"
 )
 
-type I32Array []int32
-
-type I64Array []int64
-
-type F32Array []float32
-
-type F64Array []float64
+type TypedArray[T int32 | int64 | float32 | float64] []T
 
 type Array struct {
 	Typ   *ArrayType
@@ -30,10 +24,10 @@ var (
 	TypeF64Array = NewArrayType(TypeF64)
 )
 
-var _ Value = I32Array(nil)
-var _ Value = I64Array(nil)
-var _ Value = F32Array(nil)
-var _ Value = F64Array(nil)
+var _ Value = TypedArray[int32](nil)
+var _ Value = TypedArray[int64](nil)
+var _ Value = TypedArray[float32](nil)
+var _ Value = TypedArray[float64](nil)
 var _ Traceable = (*Array)(nil)
 var _ Type = (*ArrayType)(nil)
 
@@ -45,28 +39,24 @@ func NewArrayType(elem Type) *ArrayType {
 	return &ArrayType{Elem: elem, ElemKind: elem.Kind()}
 }
 
-func (a I32Array) Kind() Kind { return KindRef }
-func (a I32Array) Type() Type { return TypeI32Array }
-func (a I32Array) String() string {
-	return formatSlice(TypeI32Array, len(a), func(i int) string { return fmt.Sprintf("%d", a[i]) })
+func (a TypedArray[T]) Kind() Kind { return KindRef }
+
+func (a TypedArray[T]) Type() Type {
+	var zero T
+	switch any(zero).(type) {
+	case int32:
+		return TypeI32Array
+	case int64:
+		return TypeI64Array
+	case float32:
+		return TypeF32Array
+	default:
+		return TypeF64Array
+	}
 }
 
-func (a I64Array) Kind() Kind { return KindRef }
-func (a I64Array) Type() Type { return TypeI64Array }
-func (a I64Array) String() string {
-	return formatSlice(TypeI64Array, len(a), func(i int) string { return fmt.Sprintf("%d", a[i]) })
-}
-
-func (a F32Array) Kind() Kind { return KindRef }
-func (a F32Array) Type() Type { return TypeF32Array }
-func (a F32Array) String() string {
-	return formatSlice(TypeF32Array, len(a), func(i int) string { return fmt.Sprintf("%g", a[i]) })
-}
-
-func (a F64Array) Kind() Kind { return KindRef }
-func (a F64Array) Type() Type { return TypeF64Array }
-func (a F64Array) String() string {
-	return formatSlice(TypeF64Array, len(a), func(i int) string { return fmt.Sprintf("%g", a[i]) })
+func (a TypedArray[T]) String() string {
+	return formatSlice(a.Type(), len(a), func(i int) string { return formatElem(a[i]) })
 }
 
 func (a *Array) Kind() Kind { return KindRef }
@@ -106,6 +96,17 @@ func (t *ArrayType) Equals(other Type) bool {
 		return t.Elem.Equals(o.Elem)
 	}
 	return false
+}
+
+func formatElem[T int32 | int64 | float32 | float64](v T) string {
+	switch x := any(v).(type) {
+	case int32:
+		return fmt.Sprintf("%d", x)
+	case int64:
+		return fmt.Sprintf("%d", x)
+	default:
+		return fmt.Sprintf("%g", x)
+	}
 }
 
 func formatSlice(typ Type, n int, elem func(int) string) string {

@@ -433,12 +433,12 @@ func (p *ConstantFoldingPass) Run(m *pass.Manager) (*program.Program, error) {
 							default:
 							}
 						case instr.STRING_ENCODE_UTF32:
-							prog.Constants = append(prog.Constants, types.I32Array(v0))
+							prog.Constants = append(prog.Constants, types.TypedArray[int32](v0))
 							ip = p.replace(fn.Code, ip, i0.Width()+i1.Width(), instr.New(instr.CONST_GET, uint64(len(prog.Constants)-1)))
 							continue
 						default:
 						}
-					case types.I32Array:
+					case types.TypedArray[int32]:
 						switch i1.Opcode() {
 						case instr.STRING_NEW_UTF32:
 							prog.Constants = append(prog.Constants, types.String(v0))

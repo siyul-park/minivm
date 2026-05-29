@@ -1899,7 +1899,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			val := unboxRef[types.I32Array](i, i.stack[i.sp-1])
+			val := unboxRef[types.TypedArray[int32]](i, i.stack[i.sp-1])
 			i.stack[i.sp-1] = types.BoxRef(int(i.intern(string(types.String(val)))))
 			i.fr.ip++
 		}
@@ -2013,7 +2013,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			val := unboxRef[types.String](i, i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxRef(i.alloc(types.I32Array(val)))
+			i.stack[i.sp-1] = types.BoxRef(i.alloc(types.TypedArray[int32](val)))
 			i.fr.ip++
 		}
 	},
@@ -2041,7 +2041,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				if i.sp < size+1 {
 					panic(ErrStackUnderflow)
 				}
-				val := make(types.I32Array, size)
+				val := make(types.TypedArray[int32], size)
 				for j := 0; j < size; j++ {
 					val[j] = i.stack[i.sp-size-j-1].I32()
 				}
@@ -2058,7 +2058,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				if i.sp < size+1 {
 					panic(ErrStackUnderflow)
 				}
-				val := make(types.I64Array, size)
+				val := make(types.TypedArray[int64], size)
 				for j := 0; j < size; j++ {
 					val[j] = i.unboxI64(i.stack[i.sp-size-j-1])
 				}
@@ -2075,7 +2075,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				if i.sp < size+1 {
 					panic(ErrStackUnderflow)
 				}
-				val := make(types.F32Array, size)
+				val := make(types.TypedArray[float32], size)
 				for j := 0; j < size; j++ {
 					val[j] = i.stack[i.sp-size-j-1].F32()
 				}
@@ -2092,7 +2092,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				if i.sp < size+1 {
 					panic(ErrStackUnderflow)
 				}
-				val := make(types.F64Array, size)
+				val := make(types.TypedArray[float64], size)
 				for j := 0; j < size; j++ {
 					val[j] = i.stack[i.sp-size-j-1].F64()
 				}
@@ -2141,7 +2141,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					panic(ErrStackUnderflow)
 				}
 				size := i.stack[i.sp-1].I32()
-				val := make(types.I32Array, size)
+				val := make(types.TypedArray[int32], size)
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
 				i.fr.ip += 3
 			}
@@ -2151,7 +2151,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					panic(ErrStackUnderflow)
 				}
 				size := i.stack[i.sp-1].I32()
-				val := make(types.I64Array, size)
+				val := make(types.TypedArray[int64], size)
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
 				i.fr.ip += 3
 			}
@@ -2161,7 +2161,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					panic(ErrStackUnderflow)
 				}
 				size := i.stack[i.sp-1].I32()
-				val := make(types.F32Array, size)
+				val := make(types.TypedArray[float32], size)
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
 				i.fr.ip += 3
 			}
@@ -2171,7 +2171,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					panic(ErrStackUnderflow)
 				}
 				size := i.stack[i.sp-1].I32()
-				val := make(types.F64Array, size)
+				val := make(types.TypedArray[float64], size)
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
 				i.fr.ip += 3
 			}
@@ -2198,13 +2198,13 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			var n int32
 			switch arr := i.unbox(i.stack[i.sp-1]).(type) {
-			case types.I32Array:
+			case types.TypedArray[int32]:
 				n = int32(len(arr))
-			case types.I64Array:
+			case types.TypedArray[int64]:
 				n = int32(len(arr))
-			case types.F32Array:
+			case types.TypedArray[float32]:
 				n = int32(len(arr))
-			case types.F64Array:
+			case types.TypedArray[float64]:
 				n = int32(len(arr))
 			case *types.Array:
 				n = int32(len(arr.Elems))
@@ -2229,22 +2229,22 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			addr := ref.Ref()
 			var val types.Boxed
 			switch arr := i.heap[addr].(type) {
-			case types.I32Array:
+			case types.TypedArray[int32]:
 				if idx < 0 || idx >= len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
 				val = types.BoxI32(int32(arr[idx]))
-			case types.I64Array:
+			case types.TypedArray[int64]:
 				if idx < 0 || idx >= len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
 				val = i.boxI64(int64(arr[idx]))
-			case types.F32Array:
+			case types.TypedArray[float32]:
 				if idx < 0 || idx >= len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
 				val = types.BoxF32(float32(arr[idx]))
-			case types.F64Array:
+			case types.TypedArray[float64]:
 				if idx < 0 || idx >= len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
@@ -2279,22 +2279,22 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			addr := ref.Ref()
 			switch arr := i.heap[addr].(type) {
-			case types.I32Array:
+			case types.TypedArray[int32]:
 				if idx < 0 || idx >= len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
 				arr[idx] = val.I32()
-			case types.I64Array:
+			case types.TypedArray[int64]:
 				if idx < 0 || idx >= len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
 				arr[idx] = i.unboxI64(val)
-			case types.F32Array:
+			case types.TypedArray[float32]:
 				if idx < 0 || idx >= len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
 				arr[idx] = val.F32()
-			case types.F64Array:
+			case types.TypedArray[float64]:
 				if idx < 0 || idx >= len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
@@ -2329,7 +2329,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			addr := ref.Ref()
 			switch arr := i.heap[addr].(type) {
-			case types.I32Array:
+			case types.TypedArray[int32]:
 				if idx < 0 || idx+size > len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
@@ -2337,7 +2337,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				for k := idx; k < idx+size; k++ {
 					arr[k] = v
 				}
-			case types.I64Array:
+			case types.TypedArray[int64]:
 				if idx < 0 || idx+size > len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
@@ -2345,7 +2345,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				for k := idx; k < idx+size; k++ {
 					arr[k] = v
 				}
-			case types.F32Array:
+			case types.TypedArray[float32]:
 				if idx < 0 || idx+size > len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
@@ -2353,7 +2353,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				for k := idx; k < idx+size; k++ {
 					arr[k] = v
 				}
-			case types.F64Array:
+			case types.TypedArray[float64]:
 				if idx < 0 || idx+size > len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
@@ -2396,22 +2396,22 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			addr := ref.Ref()
 			switch arr := i.heap[addr].(type) {
-			case types.I32Array:
+			case types.TypedArray[int32]:
 				if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
 				copy(arr[dst:dst+size], arr[src:src+size])
-			case types.I64Array:
+			case types.TypedArray[int64]:
 				if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
 				copy(arr[dst:dst+size], arr[src:src+size])
-			case types.F32Array:
+			case types.TypedArray[float32]:
 				if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
 				copy(arr[dst:dst+size], arr[src:src+size])
-			case types.F64Array:
+			case types.TypedArray[float64]:
 				if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
 					panic(ErrIndexOutOfRange)
 				}

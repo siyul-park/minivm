@@ -594,25 +594,25 @@ func (s *unmarshalState) value(val types.Value, dst reflect.Value) error {
 
 func (s *unmarshalState) elems(value types.Value) ([]types.Value, error) {
 	switch v := value.(type) {
-	case types.I32Array:
+	case types.TypedArray[int32]:
 		out := make([]types.Value, len(v))
 		for idx, elem := range v {
 			out[idx] = types.I32(elem)
 		}
 		return out, nil
-	case types.I64Array:
+	case types.TypedArray[int64]:
 		out := make([]types.Value, len(v))
 		for idx, elem := range v {
 			out[idx] = types.I64(elem)
 		}
 		return out, nil
-	case types.F32Array:
+	case types.TypedArray[float32]:
 		out := make([]types.Value, len(v))
 		for idx, elem := range v {
 			out[idx] = types.F32(elem)
 		}
 		return out, nil
-	case types.F64Array:
+	case types.TypedArray[float64]:
 		out := make([]types.Value, len(v))
 		for idx, elem := range v {
 			out[idx] = types.F64(elem)
@@ -736,37 +736,37 @@ func (m *codec) marshalArray(elem *marshalPlan) marshaler {
 	return func(s *marshalState, v reflect.Value) (types.Value, error) {
 		switch elemKind {
 		case reflect.Int8, reflect.Int16, reflect.Int32:
-			out := make(types.I32Array, v.Len())
+			out := make(types.TypedArray[int32], v.Len())
 			for idx := range out {
 				out[idx] = int32(v.Index(idx).Int())
 			}
 			return out, nil
 		case reflect.Uint8, reflect.Uint16, reflect.Uint32:
-			out := make(types.I32Array, v.Len())
+			out := make(types.TypedArray[int32], v.Len())
 			for idx := range out {
 				out[idx] = int32(v.Index(idx).Uint())
 			}
 			return out, nil
 		case reflect.Int, reflect.Int64:
-			out := make(types.I64Array, v.Len())
+			out := make(types.TypedArray[int64], v.Len())
 			for idx := range out {
 				out[idx] = v.Index(idx).Int()
 			}
 			return out, nil
 		case reflect.Uint, reflect.Uint64, reflect.Uintptr:
-			out := make(types.I64Array, v.Len())
+			out := make(types.TypedArray[int64], v.Len())
 			for idx := range out {
 				out[idx] = int64(v.Index(idx).Uint())
 			}
 			return out, nil
 		case reflect.Float32:
-			out := make(types.F32Array, v.Len())
+			out := make(types.TypedArray[float32], v.Len())
 			for idx := range out {
 				out[idx] = float32(v.Index(idx).Float())
 			}
 			return out, nil
 		case reflect.Float64:
-			out := make(types.F64Array, v.Len())
+			out := make(types.TypedArray[float64], v.Len())
 			for idx := range out {
 				out[idx] = v.Index(idx).Float()
 			}
