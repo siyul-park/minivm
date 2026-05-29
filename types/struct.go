@@ -106,17 +106,9 @@ func (s *Struct) Type() Type {
 }
 
 func (s *Struct) String() string {
-	var sb strings.Builder
-	sb.WriteString(s.Typ.String())
-	sb.WriteString("{")
-	for i, f := range s.Typ.Fields {
-		if i > 0 {
-			sb.WriteString(", ")
-		}
-		sb.WriteString(s.field(i, f).String())
-	}
-	sb.WriteString("}")
-	return sb.String()
+	return formatSlice(s.Typ, len(s.Typ.Fields), func(i int) string {
+		return s.field(i, s.Typ.Fields[i]).String()
+	})
 }
 
 func (s *Struct) Refs() []Ref {
