@@ -788,7 +788,7 @@ func (m *codec) marshalMap(mt *types.MapType) marshaler {
 	return func(s *marshalState, v reflect.Value) (types.Value, error) {
 		out := types.NewMapForType(mt, v.Len())
 		switch m := out.(type) {
-		case *types.MapI32:
+		case *types.TypedMap[int32]:
 			iter := v.MapRange()
 			for iter.Next() {
 				key, err := s.boxAs(iter.Key(), mt.Key)
@@ -801,7 +801,7 @@ func (m *codec) marshalMap(mt *types.MapType) marshaler {
 				}
 				m.Set(key.I32(), value)
 			}
-		case *types.MapI64:
+		case *types.TypedMap[int64]:
 			iter := v.MapRange()
 			for iter.Next() {
 				key, err := s.value(iter.Key())
@@ -818,7 +818,7 @@ func (m *codec) marshalMap(mt *types.MapType) marshaler {
 				}
 				m.Set(keyInt, value)
 			}
-		case *types.MapF32:
+		case *types.TypedMap[float32]:
 			iter := v.MapRange()
 			for iter.Next() {
 				key, err := s.value(iter.Key())
@@ -835,7 +835,7 @@ func (m *codec) marshalMap(mt *types.MapType) marshaler {
 				}
 				m.Set(float32(keyFloat), value)
 			}
-		case *types.MapF64:
+		case *types.TypedMap[float64]:
 			iter := v.MapRange()
 			for iter.Next() {
 				key, err := s.value(iter.Key())
@@ -1111,13 +1111,13 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 	return func(s *unmarshalState, src types.Value, dst reflect.Value) error {
 		size := 0
 		switch m := src.(type) {
-		case *types.MapI32:
+		case *types.TypedMap[int32]:
 			size = m.Len()
-		case *types.MapI64:
+		case *types.TypedMap[int64]:
 			size = m.Len()
-		case *types.MapF32:
+		case *types.TypedMap[float32]:
 			size = m.Len()
-		case *types.MapF64:
+		case *types.TypedMap[float64]:
 			size = m.Len()
 		case *types.Map:
 			size = m.Len()
@@ -1143,7 +1143,7 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 			out.SetMapIndex(k, v)
 		}
 		switch m := src.(type) {
-		case *types.MapI32:
+		case *types.TypedMap[int32]:
 			m.Range(func(key int32, value types.Boxed) {
 				elemValue, err := s.m.resolve(s.i, value)
 				if err != nil {
@@ -1152,7 +1152,7 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 				}
 				set(types.I32(key), elemValue)
 			})
-		case *types.MapI64:
+		case *types.TypedMap[int64]:
 			m.Range(func(key int64, value types.Boxed) {
 				elemValue, err := s.m.resolve(s.i, value)
 				if err != nil {
@@ -1161,7 +1161,7 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 				}
 				set(types.I64(key), elemValue)
 			})
-		case *types.MapF32:
+		case *types.TypedMap[float32]:
 			m.Range(func(key float32, value types.Boxed) {
 				elemValue, err := s.m.resolve(s.i, value)
 				if err != nil {
@@ -1170,7 +1170,7 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 				}
 				set(types.F32(key), elemValue)
 			})
-		case *types.MapF64:
+		case *types.TypedMap[float64]:
 			m.Range(func(key float64, value types.Boxed) {
 				elemValue, err := s.m.resolve(s.i, value)
 				if err != nil {

@@ -3899,7 +3899,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 		i32, err := i.Marshal(map[int32]int32{1: 2})
 		require.NoError(t, err)
-		mI32, ok := i32.(*types.MapI32)
+		mI32, ok := i32.(*types.TypedMap[int32])
 		require.True(t, ok)
 		gotI32, ok := mI32.Get(1)
 		require.True(t, ok)
@@ -3907,7 +3907,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 		i64, err := i.Marshal(map[int64]string{1: "a"})
 		require.NoError(t, err)
-		mI64, ok := i64.(*types.MapI64)
+		mI64, ok := i64.(*types.TypedMap[int64])
 		require.True(t, ok)
 		gotI64, ok := mI64.Get(1)
 		require.True(t, ok)
@@ -3917,7 +3917,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 		f64, err := i.Marshal(map[float64]int32{math.Copysign(0, -1): 1})
 		require.NoError(t, err)
-		mF64, ok := f64.(*types.MapF64)
+		mF64, ok := f64.(*types.TypedMap[float64])
 		require.True(t, ok)
 		gotF64, ok := mF64.Get(0)
 		require.True(t, ok)
@@ -4656,7 +4656,7 @@ func BenchmarkInterpreter_Release(b *testing.B) {
 			if err != nil {
 				break
 			}
-			m := types.NewMapI32(typ, 1)
+			m := types.NewTypedMap[int32](typ, 1)
 			m.Set(1, types.BoxRef(child))
 			var addr int
 			addr, err = i.Alloc(m)

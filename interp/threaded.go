@@ -2646,22 +2646,22 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				key := i.stack[base+j*2]
 				value := i.stack[base+j*2+1]
 				switch m := m.(type) {
-				case *types.MapI32:
+				case *types.TypedMap[int32]:
 					old, ok := m.Set(key.I32(), value)
 					if ok {
 						i.releaseVal(old)
 					}
-				case *types.MapI64:
+				case *types.TypedMap[int64]:
 					old, ok := m.Set(i.unboxI64(key), value)
 					if ok {
 						i.releaseVal(old)
 					}
-				case *types.MapF32:
+				case *types.TypedMap[float32]:
 					old, ok := m.Set(key.F32(), value)
 					if ok {
 						i.releaseVal(old)
 					}
-				case *types.MapF64:
+				case *types.TypedMap[float64]:
 					old, ok := m.Set(key.F64(), value)
 					if ok {
 						i.releaseVal(old)
@@ -2765,13 +2765,13 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			addr := ref.Ref()
 			n := 0
 			switch m := i.heap[addr].(type) {
-			case *types.MapI32:
+			case *types.TypedMap[int32]:
 				n = m.Len()
-			case *types.MapI64:
+			case *types.TypedMap[int64]:
 				n = m.Len()
-			case *types.MapF32:
+			case *types.TypedMap[float32]:
 				n = m.Len()
-			case *types.MapF64:
+			case *types.TypedMap[float64]:
 				n = m.Len()
 			case *types.Map:
 				n = m.Len()
@@ -2797,28 +2797,28 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			addr := ref.Ref()
 			var result types.Boxed
 			switch m := i.heap[addr].(type) {
-			case *types.MapI32:
+			case *types.TypedMap[int32]:
 				value, ok := m.Get(key.I32())
 				if ok {
 					result = value
 				} else {
 					result = m.Zero
 				}
-			case *types.MapI64:
+			case *types.TypedMap[int64]:
 				value, ok := m.Get(i.unboxI64(key))
 				if ok {
 					result = value
 				} else {
 					result = m.Zero
 				}
-			case *types.MapF32:
+			case *types.TypedMap[float32]:
 				value, ok := m.Get(key.F32())
 				if ok {
 					result = value
 				} else {
 					result = m.Zero
 				}
-			case *types.MapF64:
+			case *types.TypedMap[float64]:
 				value, ok := m.Get(key.F64())
 				if ok {
 					result = value
@@ -2891,22 +2891,22 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			var result types.Boxed
 			var found bool
 			switch m := i.heap[addr].(type) {
-			case *types.MapI32:
+			case *types.TypedMap[int32]:
 				result, found = m.Get(key.I32())
 				if !found {
 					result = m.Zero
 				}
-			case *types.MapI64:
+			case *types.TypedMap[int64]:
 				result, found = m.Get(i.unboxI64(key))
 				if !found {
 					result = m.Zero
 				}
-			case *types.MapF32:
+			case *types.TypedMap[float32]:
 				result, found = m.Get(key.F32())
 				if !found {
 					result = m.Zero
 				}
-			case *types.MapF64:
+			case *types.TypedMap[float64]:
 				result, found = m.Get(key.F64())
 				if !found {
 					result = m.Zero
@@ -2977,22 +2977,22 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			addr := ref.Ref()
 			switch m := i.heap[addr].(type) {
-			case *types.MapI32:
+			case *types.TypedMap[int32]:
 				old, ok := m.Set(key.I32(), value)
 				if ok {
 					i.releaseVal(old)
 				}
-			case *types.MapI64:
+			case *types.TypedMap[int64]:
 				old, ok := m.Set(i.unboxI64(key), value)
 				if ok {
 					i.releaseVal(old)
 				}
-			case *types.MapF32:
+			case *types.TypedMap[float32]:
 				old, ok := m.Set(key.F32(), value)
 				if ok {
 					i.releaseVal(old)
 				}
-			case *types.MapF64:
+			case *types.TypedMap[float64]:
 				old, ok := m.Set(key.F64(), value)
 				if ok {
 					i.releaseVal(old)
@@ -3063,22 +3063,22 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			addr := ref.Ref()
 			switch m := i.heap[addr].(type) {
-			case *types.MapI32:
+			case *types.TypedMap[int32]:
 				old, ok := m.Delete(key.I32())
 				if ok {
 					i.releaseVal(old)
 				}
-			case *types.MapI64:
+			case *types.TypedMap[int64]:
 				old, ok := m.Delete(i.unboxI64(key))
 				if ok {
 					i.releaseVal(old)
 				}
-			case *types.MapF32:
+			case *types.TypedMap[float32]:
 				old, ok := m.Delete(key.F32())
 				if ok {
 					i.releaseVal(old)
 				}
-			case *types.MapF64:
+			case *types.TypedMap[float64]:
 				old, ok := m.Delete(key.F64())
 				if ok {
 					i.releaseVal(old)
@@ -3143,19 +3143,19 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			addr := ref.Ref()
 			switch m := i.heap[addr].(type) {
-			case *types.MapI32:
+			case *types.TypedMap[int32]:
 				m.Clear(func(value types.Boxed) {
 					i.releaseVal(value)
 				})
-			case *types.MapI64:
+			case *types.TypedMap[int64]:
 				m.Clear(func(value types.Boxed) {
 					i.releaseVal(value)
 				})
-			case *types.MapF32:
+			case *types.TypedMap[float32]:
 				m.Clear(func(value types.Boxed) {
 					i.releaseVal(value)
 				})
-			case *types.MapF64:
+			case *types.TypedMap[float64]:
 				m.Clear(func(value types.Boxed) {
 					i.releaseVal(value)
 				})
