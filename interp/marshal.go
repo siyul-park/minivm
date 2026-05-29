@@ -594,31 +594,31 @@ func (s *unmarshalState) value(val types.Value, dst reflect.Value) error {
 
 func (s *unmarshalState) elems(value types.Value) ([]types.Value, error) {
 	switch v := value.(type) {
-	case types.TypedArray[int32]:
+	case types.Array[int32]:
 		out := make([]types.Value, len(v))
 		for idx, elem := range v {
 			out[idx] = types.I32(elem)
 		}
 		return out, nil
-	case types.TypedArray[int64]:
+	case types.Array[int64]:
 		out := make([]types.Value, len(v))
 		for idx, elem := range v {
 			out[idx] = types.I64(elem)
 		}
 		return out, nil
-	case types.TypedArray[float32]:
+	case types.Array[float32]:
 		out := make([]types.Value, len(v))
 		for idx, elem := range v {
 			out[idx] = types.F32(elem)
 		}
 		return out, nil
-	case types.TypedArray[float64]:
+	case types.Array[float64]:
 		out := make([]types.Value, len(v))
 		for idx, elem := range v {
 			out[idx] = types.F64(elem)
 		}
 		return out, nil
-	case *types.Array:
+	case *types.BoxedArray:
 		out := make([]types.Value, len(v.Elems))
 		for idx, elem := range v.Elems {
 			val, err := s.m.resolve(s.i, elem)
@@ -736,37 +736,37 @@ func (m *codec) marshalArray(elem *marshalPlan) marshaler {
 	return func(s *marshalState, v reflect.Value) (types.Value, error) {
 		switch elemKind {
 		case reflect.Int8, reflect.Int16, reflect.Int32:
-			out := make(types.TypedArray[int32], v.Len())
+			out := make(types.Array[int32], v.Len())
 			for idx := range out {
 				out[idx] = int32(v.Index(idx).Int())
 			}
 			return out, nil
 		case reflect.Uint8, reflect.Uint16, reflect.Uint32:
-			out := make(types.TypedArray[int32], v.Len())
+			out := make(types.Array[int32], v.Len())
 			for idx := range out {
 				out[idx] = int32(v.Index(idx).Uint())
 			}
 			return out, nil
 		case reflect.Int, reflect.Int64:
-			out := make(types.TypedArray[int64], v.Len())
+			out := make(types.Array[int64], v.Len())
 			for idx := range out {
 				out[idx] = v.Index(idx).Int()
 			}
 			return out, nil
 		case reflect.Uint, reflect.Uint64, reflect.Uintptr:
-			out := make(types.TypedArray[int64], v.Len())
+			out := make(types.Array[int64], v.Len())
 			for idx := range out {
 				out[idx] = int64(v.Index(idx).Uint())
 			}
 			return out, nil
 		case reflect.Float32:
-			out := make(types.TypedArray[float32], v.Len())
+			out := make(types.Array[float32], v.Len())
 			for idx := range out {
 				out[idx] = float32(v.Index(idx).Float())
 			}
 			return out, nil
 		case reflect.Float64:
-			out := make(types.TypedArray[float64], v.Len())
+			out := make(types.Array[float64], v.Len())
 			for idx := range out {
 				out[idx] = v.Index(idx).Float()
 			}
@@ -780,7 +780,7 @@ func (m *codec) marshalArray(elem *marshalPlan) marshaler {
 			}
 			elems[idx] = boxed
 		}
-		return types.NewArray(arrayType, elems...), nil
+		return types.NewBoxedArray(arrayType, elems...), nil
 	}
 }
 
@@ -788,7 +788,7 @@ func (m *codec) marshalMap(mt *types.MapType) marshaler {
 	return func(s *marshalState, v reflect.Value) (types.Value, error) {
 		out := types.NewMapForType(mt, v.Len())
 		switch m := out.(type) {
-		case *types.TypedMap[int32]:
+		case *types.Map[int32]:
 			iter := v.MapRange()
 			for iter.Next() {
 				key, err := s.boxAs(iter.Key(), mt.Key)
@@ -801,7 +801,7 @@ func (m *codec) marshalMap(mt *types.MapType) marshaler {
 				}
 				m.Set(key.I32(), value)
 			}
-		case *types.TypedMap[int64]:
+		case *types.Map[int64]:
 			iter := v.MapRange()
 			for iter.Next() {
 				key, err := s.value(iter.Key())
@@ -818,7 +818,7 @@ func (m *codec) marshalMap(mt *types.MapType) marshaler {
 				}
 				m.Set(keyInt, value)
 			}
-		case *types.TypedMap[float32]:
+		case *types.Map[float32]:
 			iter := v.MapRange()
 			for iter.Next() {
 				key, err := s.value(iter.Key())
@@ -835,7 +835,7 @@ func (m *codec) marshalMap(mt *types.MapType) marshaler {
 				}
 				m.Set(float32(keyFloat), value)
 			}
-		case *types.TypedMap[float64]:
+		case *types.Map[float64]:
 			iter := v.MapRange()
 			for iter.Next() {
 				key, err := s.value(iter.Key())
@@ -852,18 +852,18 @@ func (m *codec) marshalMap(mt *types.MapType) marshaler {
 				}
 				m.Set(keyFloat, value)
 			}
-		case *types.Map:
+		case *types.BoxedMap:
 			iter := v.MapRange()
 			for iter.Next() {
 				keyValue, err := s.value(iter.Key())
 				if err != nil {
 					return nil, fmt.Errorf("map key: %w", err)
 				}
-				var mapKey types.MapKey
+				var mapKey types.BoxedMapKey
 				var entryKey types.Boxed
 				if mt.Key.Kind() == types.KindRef {
 					entryKey = s.boxRef(keyValue)
-					mapKey = types.MapKey{Kind: types.KindRef, Bits: uint64(entryKey.Ref())}
+					mapKey = types.BoxedMapKey{Kind: types.KindRef, Bits: uint64(entryKey.Ref())}
 				} else {
 					return nil, fmt.Errorf("map key: %w: map key type=%s", ErrUnsupportedMarshalType, mt.Key)
 				}
@@ -871,7 +871,7 @@ func (m *codec) marshalMap(mt *types.MapType) marshaler {
 				if err != nil {
 					return nil, fmt.Errorf("map value: %w", err)
 				}
-				m.Set(mapKey, types.MapEntry{Key: entryKey, Value: entryValue})
+				m.Set(mapKey, types.BoxedMapEntry{Key: entryKey, Value: entryValue})
 			}
 		}
 		return out, nil
@@ -1111,15 +1111,15 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 	return func(s *unmarshalState, src types.Value, dst reflect.Value) error {
 		size := 0
 		switch m := src.(type) {
-		case *types.TypedMap[int32]:
+		case *types.Map[int32]:
 			size = m.Len()
-		case *types.TypedMap[int64]:
+		case *types.Map[int64]:
 			size = m.Len()
-		case *types.TypedMap[float32]:
+		case *types.Map[float32]:
 			size = m.Len()
-		case *types.TypedMap[float64]:
+		case *types.Map[float64]:
 			size = m.Len()
-		case *types.Map:
+		case *types.BoxedMap:
 			size = m.Len()
 		default:
 			return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, src, dst.Type())
@@ -1143,7 +1143,7 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 			out.SetMapIndex(k, v)
 		}
 		switch m := src.(type) {
-		case *types.TypedMap[int32]:
+		case *types.Map[int32]:
 			m.Range(func(key int32, value types.Boxed) {
 				elemValue, err := s.m.resolve(s.i, value)
 				if err != nil {
@@ -1152,7 +1152,7 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 				}
 				set(types.I32(key), elemValue)
 			})
-		case *types.TypedMap[int64]:
+		case *types.Map[int64]:
 			m.Range(func(key int64, value types.Boxed) {
 				elemValue, err := s.m.resolve(s.i, value)
 				if err != nil {
@@ -1161,7 +1161,7 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 				}
 				set(types.I64(key), elemValue)
 			})
-		case *types.TypedMap[float32]:
+		case *types.Map[float32]:
 			m.Range(func(key float32, value types.Boxed) {
 				elemValue, err := s.m.resolve(s.i, value)
 				if err != nil {
@@ -1170,7 +1170,7 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 				}
 				set(types.F32(key), elemValue)
 			})
-		case *types.TypedMap[float64]:
+		case *types.Map[float64]:
 			m.Range(func(key float64, value types.Boxed) {
 				elemValue, err := s.m.resolve(s.i, value)
 				if err != nil {
@@ -1179,8 +1179,8 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 				}
 				set(types.F64(key), elemValue)
 			})
-		case *types.Map:
-			m.Range(func(mapKey types.MapKey, entry types.MapEntry) {
+		case *types.BoxedMap:
+			m.Range(func(mapKey types.BoxedMapKey, entry types.BoxedMapEntry) {
 				var keyValue types.Value
 				var err error
 				switch mapKey.Kind {

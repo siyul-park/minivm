@@ -1705,7 +1705,7 @@ func TestConstantFoldingPass_Run(t *testing.T) {
 					instr.New(instr.NOP),
 					instr.New(instr.CONST_GET, 2),
 				},
-				program.WithConstants(types.String("foo"), types.TypedArray[int32]("foo"), types.String("foo")),
+				program.WithConstants(types.String("foo"), types.Array[int32]("foo"), types.String("foo")),
 			),
 		},
 		{
@@ -1849,7 +1849,7 @@ func TestConstantFoldingPass_Run(t *testing.T) {
 					instr.New(instr.NOP),
 					instr.New(instr.CONST_GET, 1),
 				},
-				program.WithConstants(types.String("foo"), types.TypedArray[int32]("foo")),
+				program.WithConstants(types.String("foo"), types.Array[int32]("foo")),
 			),
 		},
 	}

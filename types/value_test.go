@@ -37,7 +37,7 @@ func TestIsNull(t *testing.T) {
 		{Ref(1), false},
 		{BoxRef(1), false},
 		{I32(0), false},
-		{TypedArray[int32]{0}, false},
+		{Array[int32]{0}, false},
 		{nil, false},
 	}
 	for _, tt := range tests {

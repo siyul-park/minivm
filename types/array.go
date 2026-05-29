@@ -5,9 +5,9 @@ import (
 	"strings"
 )
 
-type TypedArray[T int32 | int64 | float32 | float64] []T
+type Array[T int32 | int64 | float32 | float64] []T
 
-type Array struct {
+type BoxedArray struct {
 	Typ   *ArrayType
 	Elems []Boxed
 }
@@ -24,24 +24,24 @@ var (
 	TypeF64Array = NewArrayType(TypeF64)
 )
 
-var _ Value = TypedArray[int32](nil)
-var _ Value = TypedArray[int64](nil)
-var _ Value = TypedArray[float32](nil)
-var _ Value = TypedArray[float64](nil)
-var _ Traceable = (*Array)(nil)
+var _ Value = Array[int32](nil)
+var _ Value = Array[int64](nil)
+var _ Value = Array[float32](nil)
+var _ Value = Array[float64](nil)
+var _ Traceable = (*BoxedArray)(nil)
 var _ Type = (*ArrayType)(nil)
 
-func NewArray(typ *ArrayType, elems ...Boxed) *Array {
-	return &Array{Typ: typ, Elems: elems}
+func NewBoxedArray(typ *ArrayType, elems ...Boxed) *BoxedArray {
+	return &BoxedArray{Typ: typ, Elems: elems}
 }
 
 func NewArrayType(elem Type) *ArrayType {
 	return &ArrayType{Elem: elem, ElemKind: elem.Kind()}
 }
 
-func (a TypedArray[T]) Kind() Kind { return KindRef }
+func (a Array[T]) Kind() Kind { return KindRef }
 
-func (a TypedArray[T]) Type() Type {
+func (a Array[T]) Type() Type {
 	var zero T
 	switch any(zero).(type) {
 	case int32:
@@ -55,17 +55,17 @@ func (a TypedArray[T]) Type() Type {
 	}
 }
 
-func (a TypedArray[T]) String() string {
+func (a Array[T]) String() string {
 	return formatSlice(a.Type(), len(a), func(i int) string { return formatElem(a[i]) })
 }
 
-func (a *Array) Kind() Kind { return KindRef }
-func (a *Array) Type() Type { return a.Typ }
-func (a *Array) String() string {
+func (a *BoxedArray) Kind() Kind { return KindRef }
+func (a *BoxedArray) Type() Type { return a.Typ }
+func (a *BoxedArray) String() string {
 	return formatSlice(a.Type(), len(a.Elems), func(i int) string { return a.Elems[i].String() })
 }
 
-func (a *Array) Refs() []Ref {
+func (a *BoxedArray) Refs() []Ref {
 	var refs []Ref
 	for _, e := range a.Elems {
 		if e.Kind() == KindRef {
