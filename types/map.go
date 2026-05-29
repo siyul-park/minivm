@@ -160,7 +160,7 @@ func (m *Map) Clear(fn func(MapEntry)) {
 func (m *Map) String() string {
 	parts := make([]string, 0, m.Len())
 	m.Range(func(key MapKey, entry MapEntry) {
-		parts = append(parts, fmt.Sprintf("%s: %s", key.String(m.Typ.Key), entry.Value.String()))
+		parts = append(parts, fmt.Sprintf("%s: %s", key.String(), entry.Value.String()))
 	})
 	sort.Strings(parts)
 	return fmt.Sprintf("%s{%s}", m.Typ, strings.Join(parts, ", "))
@@ -466,10 +466,7 @@ func (m *MapF64) Refs() []Ref {
 	return refs
 }
 
-func (k MapKey) String(typ Type) string {
-	if typ.Equals(TypeString) && k.Kind == KindRef {
-		return BoxRef(int(k.Bits)).String()
-	}
+func (k MapKey) String() string {
 	switch k.Kind {
 	case KindI32:
 		return BoxI32(int32(k.Bits)).String()

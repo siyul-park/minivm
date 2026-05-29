@@ -776,7 +776,7 @@ func (c *jitCompiler) closure(fn asm.Caller, pregs []asm.PReg, sig *asm.Signatur
 }
 
 func (c *jitCompiler) scratch(i *Interpreter, scratch []uint64) {
-	f := i.frame()
+	f := i.fr
 	scratch[rStack] = uint64(uintptr(unsafe.Pointer(&i.stack[f.bp])))
 	scratch[rHeap] = uint64(uintptr(unsafe.Pointer(unsafe.SliceData(i.heap))))
 	scratch[rGlobals] = uint64(uintptr(unsafe.Pointer(unsafe.SliceData(i.globals))))
