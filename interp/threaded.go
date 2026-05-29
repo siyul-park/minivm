@@ -46,9 +46,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			val := i.stack[i.sp-1]
-			if val.Kind() == types.KindRef {
-				i.release(val.Ref())
-			}
+			i.releaseVal(val)
 			i.sp--
 			i.fr.ip++
 		}
@@ -63,9 +61,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackOverflow)
 			}
 			val := i.stack[i.sp-1]
-			if val.Kind() == types.KindRef {
-				i.retain(val.Ref())
-			}
+			i.retainVal(val)
 			i.stack[i.sp] = val
 			i.sp++
 			i.fr.ip++
@@ -139,9 +135,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			} else {
 				result = v1
 			}
-			if result.Kind() == types.KindRef {
-				i.release(result.Ref())
-			}
+			i.releaseVal(result)
 			i.stack[i.sp-3] = result
 			i.sp -= 2
 			i.fr.ip++
@@ -286,9 +280,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrSegmentationFault)
 			}
 			val := i.globals[idx]
-			if val.Kind() == types.KindRef {
-				i.retain(val.Ref())
-			}
+			i.retainVal(val)
 			i.stack[i.sp] = val
 			i.sp++
 			i.fr.ip += 3
@@ -315,8 +307,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 			}
 			old := i.globals[idx]
-			if old != val && old.Kind() == types.KindRef {
-				i.release(old.Ref())
+			if old != val {
+				i.releaseVal(old)
 			}
 			i.globals[idx] = val
 			i.sp--
@@ -344,8 +336,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 			}
 			old := i.globals[idx]
-			if old != val && old.Kind() == types.KindRef {
-				i.release(old.Ref())
+			if old != val {
+				i.releaseVal(old)
 			}
 			i.globals[idx] = val
 			i.fr.ip += 3
@@ -410,9 +402,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
-			if val.Kind() == types.KindRef {
-				i.retain(val.Ref())
-			}
+			i.retainVal(val)
 			i.stack[i.sp] = val
 			i.sp++
 			i.fr.ip += 2
@@ -436,8 +426,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			val := i.stack[i.sp-1]
 			old := i.stack[addr]
-			if old != val && old.Kind() == types.KindRef {
-				i.release(old.Ref())
+			if old != val {
+				i.releaseVal(old)
 			}
 			i.stack[addr] = val
 			i.sp--
@@ -462,8 +452,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			val := i.stack[i.sp-1]
 			old := i.stack[addr]
-			if old != val && old.Kind() == types.KindRef {
-				i.release(old.Ref())
+			if old != val {
+				i.releaseVal(old)
 			}
 			i.stack[addr] = val
 			i.fr.ip += 2
@@ -541,9 +531,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrSegmentationFault)
 			}
 			val := i.fr.upvals[idx]
-			if val.Kind() == types.KindRef {
-				i.retain(val.Ref())
-			}
+			i.retainVal(val)
 			i.stack[i.sp] = val
 			i.sp++
 			i.fr.ip += 2
@@ -561,8 +549,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			val := i.stack[i.sp-1]
 			old := i.fr.upvals[idx]
-			if old != val && old.Kind() == types.KindRef {
-				i.release(old.Ref())
+			if old != val {
+				i.releaseVal(old)
 			}
 			i.fr.upvals[idx] = val
 			i.sp--
@@ -2266,9 +2254,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					panic(ErrIndexOutOfRange)
 				}
 				elem := arr.Elems[idx]
-				if elem.Kind() == types.KindRef {
-					i.retain(elem.Ref())
-				}
+				i.retainVal(elem)
 				val = elem
 			default:
 				panic(ErrTypeMismatch)
@@ -2319,9 +2305,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				elem := arr.Elems[idx]
 				arr.Elems[idx] = val
-				if elem.Kind() == types.KindRef {
-					i.release(elem.Ref())
-				}
+				i.releaseVal(elem)
 			default:
 				panic(ErrTypeMismatch)
 			}
@@ -2388,9 +2372,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				if val.Kind() == types.KindRef {
 					i.retains(val.Ref(), size-1)
 				}
-				if elem.Kind() == types.KindRef {
-					i.release(elem.Ref())
-				}
+				i.releaseVal(elem)
 			default:
 				panic(ErrTypeMismatch)
 			}
@@ -2440,14 +2422,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				elems := arr.Elems
 				for _, v := range elems[src : src+size] {
-					if v.Kind() == types.KindRef {
-						i.retain(v.Ref())
-					}
+					i.retainVal(v)
 				}
 				for _, v := range elems[dst : dst+size] {
-					if v.Kind() == types.KindRef {
-						i.release(v.Ref())
-					}
+					i.releaseVal(v)
 				}
 				copy(elems[dst:dst+size], elems[src:src+size])
 			default:
@@ -2545,9 +2523,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					val = types.BoxF64(math.Float64frombits(s.Data[idx]))
 				case types.KindRef:
 					val = types.Boxed(s.Data[idx])
-					if val.Kind() == types.KindRef {
-						i.retain(val.Ref())
-					}
+					i.retainVal(val)
 				default:
 					panic(ErrTypeMismatch)
 				}
@@ -2564,9 +2540,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					val = i.boxI64(int64(s.Raw(idx)))
 				case types.KindRef:
 					val = types.Boxed(s.Raw(idx))
-					if val.Kind() == types.KindRef {
-						i.retain(val.Ref())
-					}
+					i.retainVal(val)
 				default:
 					panic(ErrTypeMismatch)
 				}
@@ -2610,9 +2584,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					s.Data[idx] = math.Float64bits(val.F64())
 				case types.KindRef:
 					old := types.Boxed(s.Data[idx])
-					if old.Kind() == types.KindRef {
-						i.release(old.Ref())
-					}
+					i.releaseVal(old)
 					s.Data[idx] = uint64(val)
 				default:
 					panic(ErrTypeMismatch)
@@ -2630,9 +2602,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					s.SetRaw(idx, uint64(i.unboxI64(val)))
 				case types.KindRef:
 					old := types.Boxed(s.Raw(idx))
-					if old.Kind() == types.KindRef {
-						i.release(old.Ref())
-					}
+					i.releaseVal(old)
 					s.SetRaw(idx, uint64(val))
 				default:
 					panic(ErrTypeMismatch)
@@ -2678,23 +2648,23 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				switch m := m.(type) {
 				case *types.MapI32:
 					old, ok := m.Set(key.I32(), value)
-					if ok && old.Kind() == types.KindRef {
-						i.release(old.Ref())
+					if ok {
+						i.releaseVal(old)
 					}
 				case *types.MapI64:
 					old, ok := m.Set(i.unboxI64(key), value)
-					if ok && old.Kind() == types.KindRef {
-						i.release(old.Ref())
+					if ok {
+						i.releaseVal(old)
 					}
 				case *types.MapF32:
 					old, ok := m.Set(key.F32(), value)
-					if ok && old.Kind() == types.KindRef {
-						i.release(old.Ref())
+					if ok {
+						i.releaseVal(old)
 					}
 				case *types.MapF64:
 					old, ok := m.Set(key.F64(), value)
-					if ok && old.Kind() == types.KindRef {
-						i.release(old.Ref())
+					if ok {
+						i.releaseVal(old)
 					}
 				case *types.Map:
 					var k types.MapKey
@@ -2739,9 +2709,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 						if drop {
 							i.release(keyRef)
 						}
-						if old.Value.Kind() == types.KindRef {
-							i.release(old.Value.Ref())
-						}
+						i.releaseVal(old.Value)
 					}
 				default:
 					panic(ErrTypeMismatch)
@@ -2901,9 +2869,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			default:
 				panic(ErrTypeMismatch)
 			}
-			if result.Kind() == types.KindRef {
-				i.retain(result.Ref())
-			}
+			i.retainVal(result)
 			i.release(addr)
 			i.sp--
 			i.stack[i.sp-1] = result
@@ -2990,9 +2956,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			default:
 				panic(ErrTypeMismatch)
 			}
-			if result.Kind() == types.KindRef {
-				i.retain(result.Ref())
-			}
+			i.retainVal(result)
 			i.release(addr)
 			i.stack[i.sp-2] = result
 			i.stack[i.sp-1] = types.BoxBool(found)
@@ -3015,23 +2979,23 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			switch m := i.heap[addr].(type) {
 			case *types.MapI32:
 				old, ok := m.Set(key.I32(), value)
-				if ok && old.Kind() == types.KindRef {
-					i.release(old.Ref())
+				if ok {
+					i.releaseVal(old)
 				}
 			case *types.MapI64:
 				old, ok := m.Set(i.unboxI64(key), value)
-				if ok && old.Kind() == types.KindRef {
-					i.release(old.Ref())
+				if ok {
+					i.releaseVal(old)
 				}
 			case *types.MapF32:
 				old, ok := m.Set(key.F32(), value)
-				if ok && old.Kind() == types.KindRef {
-					i.release(old.Ref())
+				if ok {
+					i.releaseVal(old)
 				}
 			case *types.MapF64:
 				old, ok := m.Set(key.F64(), value)
-				if ok && old.Kind() == types.KindRef {
-					i.release(old.Ref())
+				if ok {
+					i.releaseVal(old)
 				}
 			case *types.Map:
 				var k types.MapKey
@@ -3076,9 +3040,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					if drop {
 						i.release(keyRef)
 					}
-					if old.Value.Kind() == types.KindRef {
-						i.release(old.Value.Ref())
-					}
+					i.releaseVal(old.Value)
 				}
 			default:
 				panic(ErrTypeMismatch)
@@ -3103,23 +3065,23 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			switch m := i.heap[addr].(type) {
 			case *types.MapI32:
 				old, ok := m.Delete(key.I32())
-				if ok && old.Kind() == types.KindRef {
-					i.release(old.Ref())
+				if ok {
+					i.releaseVal(old)
 				}
 			case *types.MapI64:
 				old, ok := m.Delete(i.unboxI64(key))
-				if ok && old.Kind() == types.KindRef {
-					i.release(old.Ref())
+				if ok {
+					i.releaseVal(old)
 				}
 			case *types.MapF32:
 				old, ok := m.Delete(key.F32())
-				if ok && old.Kind() == types.KindRef {
-					i.release(old.Ref())
+				if ok {
+					i.releaseVal(old)
 				}
 			case *types.MapF64:
 				old, ok := m.Delete(key.F64())
-				if ok && old.Kind() == types.KindRef {
-					i.release(old.Ref())
+				if ok {
+					i.releaseVal(old)
 				}
 			case *types.Map:
 				var k types.MapKey
@@ -3155,12 +3117,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				old, ok := m.Delete(k)
 				if ok {
-					if old.Key.Kind() == types.KindRef {
-						i.release(old.Key.Ref())
-					}
-					if old.Value.Kind() == types.KindRef {
-						i.release(old.Value.Ref())
-					}
+					i.releaseVal(old.Key)
+					i.releaseVal(old.Value)
 				}
 				if drop {
 					i.release(keyRef)
@@ -3187,36 +3145,24 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			switch m := i.heap[addr].(type) {
 			case *types.MapI32:
 				m.Clear(func(value types.Boxed) {
-					if value.Kind() == types.KindRef {
-						i.release(value.Ref())
-					}
+					i.releaseVal(value)
 				})
 			case *types.MapI64:
 				m.Clear(func(value types.Boxed) {
-					if value.Kind() == types.KindRef {
-						i.release(value.Ref())
-					}
+					i.releaseVal(value)
 				})
 			case *types.MapF32:
 				m.Clear(func(value types.Boxed) {
-					if value.Kind() == types.KindRef {
-						i.release(value.Ref())
-					}
+					i.releaseVal(value)
 				})
 			case *types.MapF64:
 				m.Clear(func(value types.Boxed) {
-					if value.Kind() == types.KindRef {
-						i.release(value.Ref())
-					}
+					i.releaseVal(value)
 				})
 			case *types.Map:
 				m.Clear(func(entry types.MapEntry) {
-					if entry.Key.Kind() == types.KindRef {
-						i.release(entry.Key.Ref())
-					}
-					if entry.Value.Kind() == types.KindRef {
-						i.release(entry.Value.Ref())
-					}
+					i.releaseVal(entry.Key)
+					i.releaseVal(entry.Value)
 				})
 			default:
 				panic(ErrTypeMismatch)
