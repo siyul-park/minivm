@@ -23,6 +23,7 @@ func TestArray_String(t *testing.T) {
 
 func TestTypedArray_Kind(t *testing.T) {
 	tests := []Value{
+		TypedArray[int8]{},
 		TypedArray[int32]{},
 		TypedArray[int64]{},
 		TypedArray[float32]{},
@@ -40,6 +41,7 @@ func TestTypedArray_Type(t *testing.T) {
 		val Value
 		typ Type
 	}{
+		{val: TypedArray[int8]{}, typ: TypeI8Array},
 		{val: TypedArray[int32]{}, typ: TypeI32Array},
 		{val: TypedArray[int64]{}, typ: TypeI64Array},
 		{val: TypedArray[float32]{}, typ: TypeF32Array},
@@ -57,6 +59,7 @@ func TestTypedArray_String(t *testing.T) {
 		val Value
 		str string
 	}{
+		{val: TypedArray[int8]{1, 2, 3}, str: "[]i8{1, 2, 3}"},
 		{val: TypedArray[int32]{1, 2, 3}, str: "[]i32{1, 2, 3}"},
 		{val: TypedArray[int64]{1, 2, 3}, str: "[]i64{1, 2, 3}"},
 		{val: TypedArray[float32]{1, 2, 3}, str: "[]f32{1, 2, 3}"},

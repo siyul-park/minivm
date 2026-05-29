@@ -14,12 +14,14 @@ func TestParse(t *testing.T) {
 		want    Type
 		wantErr bool
 	}{
+		{"i8", TypeI8, false},
 		{"i32", TypeI32, false},
 		{"i64", TypeI64, false},
 		{"f32", TypeF32, false},
 		{"f64", TypeF64, false},
 		{"ref", TypeRef, false},
 		{"string", TypeString, false},
+		{"[]i8", NewArrayType(TypeI8), false},
 		{"[]i32", NewArrayType(TypeI32), false},
 		{"[]f64", NewArrayType(TypeF64), false},
 		{"map[i32]string", NewMapType(TypeI32, TypeString), false},

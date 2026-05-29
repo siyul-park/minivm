@@ -10,8 +10,9 @@ type F64 float64
 
 type Ref int32
 
-type i32Type struct{}
+type i8Type struct{}
 
+type i32Type struct{}
 type i64Type struct{}
 type f32Type struct{}
 type f64Type struct{}
@@ -24,6 +25,7 @@ var (
 )
 
 var (
+	TypeI8  = i8Type{}
 	TypeI32 = i32Type{}
 	TypeI64 = i64Type{}
 	TypeF32 = f32Type{}
@@ -37,6 +39,7 @@ var _ Value = F32(0)
 var _ Value = F64(0)
 var _ Value = Ref(0)
 
+var _ Type = i8Type{}
 var _ Type = i32Type{}
 var _ Type = i64Type{}
 var _ Type = f32Type{}
@@ -108,6 +111,22 @@ func (r Ref) Type() Type {
 
 func (r Ref) String() string {
 	return fmt.Sprintf("%d", r)
+}
+
+func (i8Type) Kind() Kind {
+	return KindI32
+}
+
+func (i8Type) String() string {
+	return "i8"
+}
+
+func (i8Type) Cast(other Type) bool {
+	return other == TypeI8
+}
+
+func (i8Type) Equals(other Type) bool {
+	return other == TypeI8
 }
 
 func (i32Type) Kind() Kind {

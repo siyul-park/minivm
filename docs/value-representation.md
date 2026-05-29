@@ -121,6 +121,7 @@ Heap objects implement `types.Value`.
 | `types.F64` | `KindF64` | `TypeF64` | `Value` |
 | `types.Ref` | `KindRef` | `TypeRef` | `Value` |
 | `types.String` | `KindRef` | `TypeString` | `Value` |
+| `types.TypedArray[int8]` | `KindRef` | `TypeI8Array` | `Value` |
 | `*types.Array` | `KindRef` | `*ArrayType` | `Value`, `Traceable` |
 | `*types.Struct` | `KindRef` | `*StructType` | `Value`, `Traceable` |
 | `*types.Map` | `KindRef` | `*MapType` | `Value`, `Traceable` |
@@ -148,6 +149,8 @@ slice to `1 + len(Upvals)` and never takes the lazy-nil path.
 Defined scalar values with methods marshal as their underlying primitive unless passed by pointer. Pointer form becomes a `HostObject`; field `0` is reserved as `Value` and exposes the current primitive for ordinary opcodes.
 
 Strings created by interpreter opcodes and the marshaler are interned per `Interpreter`. Equal string contents share one heap ref while live; the intern table drops an entry when the last ref is released.
+
+`TypeI8` is an element-only type: it appears as `ArrayType.Elem` (and as a `Parse("i8")` result) but never as a stack `Boxed` kind. Cells in `[]i8` arrays store raw bytes (`int8`); `ARRAY_GET` zero-extends to `BoxI32(0..255)`, `ARRAY_SET` / `ARRAY_FILL` narrow via low-byte truncation (`int8(val.I32())`). Use `[]i8` for binary blobs; signed interpretation is up to the caller (mask `& 0xFF` is unnecessary because the load already zero-extends).
 
 Use constructors for compound runtime types (`NewStructType`, `NewStruct`, `NewMapType`, `NewMap`, `NewMapWithCapacity`, `NewMapForType`). These constructors initialize cached metadata and internal storage used by interpreter hot paths. `NewMapForType` returns primitive-key specializations for `i32`, `i64`, `f32`, and `f64`; strings and all other ref-typed keys use generic `*types.Map` with heap ref identity keys.
 

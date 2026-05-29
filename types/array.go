@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-type TypedArray[T int32 | int64 | float32 | float64] []T
+type TypedArray[T int8 | int32 | int64 | float32 | float64] []T
 
 type Array struct {
 	Typ   *ArrayType
@@ -18,12 +18,14 @@ type ArrayType struct {
 }
 
 var (
+	TypeI8Array  = NewArrayType(TypeI8)
 	TypeI32Array = NewArrayType(TypeI32)
 	TypeI64Array = NewArrayType(TypeI64)
 	TypeF32Array = NewArrayType(TypeF32)
 	TypeF64Array = NewArrayType(TypeF64)
 )
 
+var _ Value = TypedArray[int8](nil)
 var _ Value = TypedArray[int32](nil)
 var _ Value = TypedArray[int64](nil)
 var _ Value = TypedArray[float32](nil)
@@ -44,6 +46,8 @@ func (a TypedArray[T]) Kind() Kind { return KindRef }
 func (a TypedArray[T]) Type() Type {
 	var zero T
 	switch any(zero).(type) {
+	case int8:
+		return TypeI8Array
 	case int32:
 		return TypeI32Array
 	case int64:
@@ -98,8 +102,10 @@ func (t *ArrayType) Equals(other Type) bool {
 	return false
 }
 
-func formatElem[T int32 | int64 | float32 | float64](v T) string {
+func formatElem[T int8 | int32 | int64 | float32 | float64](v T) string {
 	switch x := any(v).(type) {
+	case int8:
+		return fmt.Sprintf("%d", x)
 	case int32:
 		return fmt.Sprintf("%d", x)
 	case int64:

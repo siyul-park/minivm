@@ -224,6 +224,8 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `ARRAY_FILL` | `{}` | `array offset count value →` | ⬜ | Fill range with repeated value. |
 | `ARRAY_COPY` | `{}` | `dst dstOffset src srcOffset count →` | ⬜ | Copy elements between arrays. |
 
+`[]i8` arrays (binary blobs) share these opcodes. Stack values are `i32`; `ARRAY_GET` zero-extends a byte to `BoxI32(0..255)`, and `ARRAY_SET`/`ARRAY_FILL` narrow via low-byte truncation (`int8(val.I32())`). No overflow trap on narrowing — the storage cell holds raw bits.
+
 ## Struct Operations
 
 | Opcode | Widths | Stack | JIT | Description |

@@ -594,6 +594,12 @@ func (s *unmarshalState) value(val types.Value, dst reflect.Value) error {
 
 func (s *unmarshalState) elems(value types.Value) ([]types.Value, error) {
 	switch v := value.(type) {
+	case types.TypedArray[int8]:
+		out := make([]types.Value, len(v))
+		for idx, elem := range v {
+			out[idx] = types.I32(elem)
+		}
+		return out, nil
 	case types.TypedArray[int32]:
 		out := make([]types.Value, len(v))
 		for idx, elem := range v {
@@ -735,13 +741,25 @@ func (m *codec) marshalArray(elem *marshalPlan) marshaler {
 	arrayType := types.NewArrayType(elemVM)
 	return func(s *marshalState, v reflect.Value) (types.Value, error) {
 		switch elemKind {
-		case reflect.Int8, reflect.Int16, reflect.Int32:
+		case reflect.Int8:
+			out := make(types.TypedArray[int8], v.Len())
+			for idx := range out {
+				out[idx] = int8(v.Index(idx).Int())
+			}
+			return out, nil
+		case reflect.Uint8:
+			out := make(types.TypedArray[int8], v.Len())
+			for idx := range out {
+				out[idx] = int8(v.Index(idx).Uint())
+			}
+			return out, nil
+		case reflect.Int16, reflect.Int32:
 			out := make(types.TypedArray[int32], v.Len())
 			for idx := range out {
 				out[idx] = int32(v.Index(idx).Int())
 			}
 			return out, nil
-		case reflect.Uint8, reflect.Uint16, reflect.Uint32:
+		case reflect.Uint16, reflect.Uint32:
 			out := make(types.TypedArray[int32], v.Len())
 			for idx := range out {
 				out[idx] = int32(v.Index(idx).Uint())
@@ -1074,6 +1092,20 @@ func (m *codec) unmarshalStruct(fields []fieldPlan) unmarshaler {
 
 func (m *codec) unmarshalSlice(elem *marshalPlan) unmarshaler {
 	return func(s *unmarshalState, val types.Value, dst reflect.Value) error {
+		if src, ok := val.(types.TypedArray[int8]); ok {
+			if k := dst.Type().Elem().Kind(); k == reflect.Int8 || k == reflect.Uint8 {
+				out := reflect.MakeSlice(dst.Type(), len(src), len(src))
+				for idx, b := range src {
+					if k == reflect.Int8 {
+						out.Index(idx).SetInt(int64(b))
+					} else {
+						out.Index(idx).SetUint(uint64(uint8(b)))
+					}
+				}
+				dst.Set(out)
+				return nil
+			}
+		}
 		elems, err := s.elems(val)
 		if err != nil {
 			return err
@@ -1091,6 +1123,21 @@ func (m *codec) unmarshalSlice(elem *marshalPlan) unmarshaler {
 
 func (m *codec) unmarshalArray(elem *marshalPlan) unmarshaler {
 	return func(s *unmarshalState, val types.Value, dst reflect.Value) error {
+		if src, ok := val.(types.TypedArray[int8]); ok {
+			if k := dst.Type().Elem().Kind(); k == reflect.Int8 || k == reflect.Uint8 {
+				if len(src) != dst.Len() {
+					return fmt.Errorf("%w: array length %d does not match %d", ErrValueOverflow, len(src), dst.Len())
+				}
+				for idx, b := range src {
+					if k == reflect.Int8 {
+						dst.Index(idx).SetInt(int64(b))
+					} else {
+						dst.Index(idx).SetUint(uint64(uint8(b)))
+					}
+				}
+				return nil
+			}
+		}
 		elems, err := s.elems(val)
 		if err != nil {
 			return err

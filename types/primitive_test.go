@@ -116,6 +116,7 @@ func TestPrimitiveType_Kind(t *testing.T) {
 		typ  Type
 		kind Kind
 	}{
+		{typ: TypeI8, kind: KindI32},
 		{typ: TypeI32, kind: KindI32},
 		{typ: TypeI64, kind: KindI64},
 		{typ: TypeF32, kind: KindF32},
@@ -134,6 +135,7 @@ func TestPrimitiveType_String(t *testing.T) {
 		typ Type
 		str string
 	}{
+		{typ: TypeI8, str: "i8"},
 		{typ: TypeI32, str: "i32"},
 		{typ: TypeI64, str: "i64"},
 		{typ: TypeF32, str: "f32"},
@@ -153,8 +155,11 @@ func TestPrimitiveType_Cast(t *testing.T) {
 		other  Type
 		result bool
 	}{
+		{TypeI8, TypeI8, true},
+		{TypeI8, TypeI32, false},
 		{TypeI32, TypeI32, true},
 		{TypeI32, TypeI64, false},
+		{TypeI32, TypeI8, false},
 		{TypeI64, TypeI64, true},
 		{TypeI64, TypeI32, false},
 		{TypeF32, TypeF32, true},
@@ -177,8 +182,11 @@ func TestPrimitiveType_Equals(t *testing.T) {
 		other  Type
 		result bool
 	}{
+		{TypeI8, TypeI8, true},
+		{TypeI8, TypeI32, false},
 		{TypeI32, TypeI32, true},
 		{TypeI32, TypeI64, false},
+		{TypeI32, TypeI8, false},
 		{TypeI64, TypeI64, true},
 		{TypeI64, TypeI32, false},
 		{TypeF32, TypeF32, true},

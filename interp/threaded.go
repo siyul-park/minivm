@@ -2031,6 +2031,24 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrTypeMismatch)
 			}
 		}
+		if typ.Elem == types.TypeI8 {
+			return func(i *Interpreter) {
+				if i.sp < 1 {
+					panic(ErrStackUnderflow)
+				}
+				size := int(i.stack[i.sp-1].I32())
+				if i.sp < size+1 {
+					panic(ErrStackUnderflow)
+				}
+				val := make(types.TypedArray[int8], size)
+				for j := 0; j < size; j++ {
+					val[j] = int8(i.stack[i.sp-size-j-1].I32())
+				}
+				i.sp -= size
+				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
+				i.fr.ip += 3
+			}
+		}
 		switch typ.ElemKind {
 		case types.KindI32:
 			return func(i *Interpreter) {
@@ -2134,6 +2152,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrTypeMismatch)
 			}
 		}
+		if typ.Elem == types.TypeI8 {
+			return func(i *Interpreter) {
+				if i.sp < 1 {
+					panic(ErrStackUnderflow)
+				}
+				size := i.stack[i.sp-1].I32()
+				val := make(types.TypedArray[int8], size)
+				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
+				i.fr.ip += 3
+			}
+		}
 		switch typ.ElemKind {
 		case types.KindI32:
 			return func(i *Interpreter) {
@@ -2198,6 +2227,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			var n int32
 			switch arr := i.unbox(i.stack[i.sp-1]).(type) {
+			case types.TypedArray[int8]:
+				n = int32(len(arr))
 			case types.TypedArray[int32]:
 				n = int32(len(arr))
 			case types.TypedArray[int64]:
@@ -2229,6 +2260,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			addr := ref.Ref()
 			var val types.Boxed
 			switch arr := i.heap[addr].(type) {
+			case types.TypedArray[int8]:
+				if idx < 0 || idx >= len(arr) {
+					panic(ErrIndexOutOfRange)
+				}
+				val = types.BoxI32(int32(uint8(arr[idx])))
 			case types.TypedArray[int32]:
 				if idx < 0 || idx >= len(arr) {
 					panic(ErrIndexOutOfRange)
@@ -2279,6 +2315,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			addr := ref.Ref()
 			switch arr := i.heap[addr].(type) {
+			case types.TypedArray[int8]:
+				if idx < 0 || idx >= len(arr) {
+					panic(ErrIndexOutOfRange)
+				}
+				arr[idx] = int8(val.I32())
 			case types.TypedArray[int32]:
 				if idx < 0 || idx >= len(arr) {
 					panic(ErrIndexOutOfRange)
@@ -2329,6 +2370,14 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			addr := ref.Ref()
 			switch arr := i.heap[addr].(type) {
+			case types.TypedArray[int8]:
+				if idx < 0 || idx+size > len(arr) {
+					panic(ErrIndexOutOfRange)
+				}
+				v := int8(val.I32())
+				for k := idx; k < idx+size; k++ {
+					arr[k] = v
+				}
 			case types.TypedArray[int32]:
 				if idx < 0 || idx+size > len(arr) {
 					panic(ErrIndexOutOfRange)
@@ -2396,6 +2445,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			addr := ref.Ref()
 			switch arr := i.heap[addr].(type) {
+			case types.TypedArray[int8]:
+				if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
+					panic(ErrIndexOutOfRange)
+				}
+				copy(arr[dst:dst+size], arr[src:src+size])
 			case types.TypedArray[int32]:
 				if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
 					panic(ErrIndexOutOfRange)

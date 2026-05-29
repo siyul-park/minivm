@@ -1767,6 +1767,93 @@ var tests = []test{
 		),
 		values: nil,
 	},
+	// --- array: []i8 (Binary) ---
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0x1FF),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_NEW, 0),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI8)),
+		),
+		values: []types.Value{types.TypedArray[int8]{-1}},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI8)),
+		),
+		values: []types.Value{make(types.TypedArray[int8], 1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 0x1FF),
+				instr.New(instr.ARRAY_SET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI8)),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0xFF),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_NEW, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI8)),
+		),
+		values: []types.Value{types.I32(0xFF)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 0xAB),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.ARRAY_FILL),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI8)),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 4),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.ARRAY_COPY),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI8)),
+		),
+		values: nil,
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.ARRAY_LEN),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI8)),
+		),
+		values: []types.Value{types.I32(3)},
+	},
 	// --- struct: STRUCT_NEW, STRUCT_NEW_DEFAULT, STRUCT_GET, STRUCT_SET ---
 	{
 		program: program.New(
@@ -3830,6 +3917,18 @@ func TestInterpreter_Marshal(t *testing.T) {
 		got, err = i.Marshal([]uint64{math.MaxUint64})
 		require.NoError(t, err)
 		require.Equal(t, types.TypedArray[int64]{-1}, got)
+
+		got, err = i.Marshal([]int8{1, -1})
+		require.NoError(t, err)
+		require.Equal(t, types.TypedArray[int8]{1, -1}, got)
+
+		got, err = i.Marshal([]uint8{0x00, 0x7F, 0xFF})
+		require.NoError(t, err)
+		require.Equal(t, types.TypedArray[int8]{0, 0x7F, -1}, got)
+
+		got, err = i.Marshal([]byte{0xAB, 0xCD})
+		require.NoError(t, err)
+		require.Equal(t, types.TypedArray[int8]{-0x55, -0x33}, got)
 	})
 
 	t.Run("reference slice", func(t *testing.T) {
@@ -4299,6 +4398,14 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		var u64 []uint64
 		require.NoError(t, i.Unmarshal(types.TypedArray[int64]{-1}, &u64))
 		require.Equal(t, []uint64{math.MaxUint64}, u64)
+
+		var bs []byte
+		require.NoError(t, i.Unmarshal(types.TypedArray[int8]{0x00, 0x7F, -1}, &bs))
+		require.Equal(t, []byte{0x00, 0x7F, 0xFF}, bs)
+
+		var i8s []int8
+		require.NoError(t, i.Unmarshal(types.TypedArray[int8]{-1, 0x7F}, &i8s))
+		require.Equal(t, []int8{-1, 0x7F}, i8s)
 	})
 
 	t.Run("map", func(t *testing.T) {
