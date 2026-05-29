@@ -151,6 +151,39 @@ Strings created by interpreter opcodes and the marshaler are interned per `Inter
 
 Use constructors for compound runtime types (`NewStructType`, `NewStruct`, `NewMapType`, `NewMap`, `NewMapWithCapacity`, `NewMapForType`). These constructors initialize cached metadata and internal storage used by interpreter hot paths. `NewMapForType` returns primitive-key specializations for `i32`, `i64`, `f32`, and `f64`; strings and all other ref-typed keys use generic `*types.Map` with heap ref identity keys.
 
+## Dynamic (any) values
+
+`ref` (`types.TypeRef`) is the VM's dynamic "any" type — the equivalent of Go's
+`interface{}`. No separate boxed representation exists: a `Boxed` is already a
+self-describing tagged union, so a `ref`-typed slot can hold any value.
+
+- A `ref` slot stores the full `Boxed` verbatim. An inline primitive (`KindI32`,
+  `KindF32`, …) stays inline; a `KindRef` indexes a heap object whose `Type()`
+  gives the concrete type.
+- `refType.Cast` accepts every type, so any value is assignable to a `ref` slot.
+- Recover the runtime type with `REF_TEST` / `REF_CAST` (they accept both
+  primitive and ref operands). For a primitive operand they compare against
+  `Boxed.Type()`; for a `KindRef` they compare against the heap object's `Type()`.
+- Reference counting is always guarded on the value's **actual** runtime `Kind`,
+  never the declared slot kind: storing a primitive into a `ref` slot does not
+  retain, and overwriting releases only when the displaced value is a real ref.
+  This holds uniformly for locals, globals, struct fields, array elements, and
+  map keys/values.
+
+Constraints:
+
+- Only the **generic** containers carry `any` elements: `[]ref` uses `*Array`
+  (not `I32Array` etc.); a `ref`-keyed or `ref`-valued map uses `*Map` (not the
+  `MapI32`/… specializations). Specialized containers pack raw bits with no kind
+  tag and cannot hold `any`.
+- A generic `*Map` keys primitives by value (`MapKey{Kind, Bits}`) and heap refs
+  by identity, so primitive `any` keys compare correctly.
+- The JIT has no static type fact for a `ref` slot, so hot segments touching one
+  fall back to threaded execution.
+
+Go `interface{}` bridges to `ref` through the marshaler — see
+[host-integration.md](host-integration.md#dynamic-interface-values).
+
 ## Unbox to Value
 
 `types.Unbox(v Boxed) Value` converts boxed values to concrete `types.Value`:

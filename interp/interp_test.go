@@ -334,6 +334,85 @@ var tests = []test{
 		values: nil,
 	},
 	{
+		// ref.test discriminates a heap value (any holding a ref) against its type.
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.REF_TEST, 0),
+			},
+			program.WithConstants(types.String("foo")),
+			program.WithTypes(types.TypeString),
+		),
+		values: []types.Value{types.True},
+	},
+	{
+		// ref.test rejects a heap value against a mismatching type.
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.REF_TEST, 0),
+			},
+			program.WithConstants(types.String("foo")),
+			program.WithTypes(types.TypeI32),
+		),
+		values: []types.Value{types.False},
+	},
+	{
+		// ref.test rejects a primitive (any holding a scalar) against a mismatching type.
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.REF_TEST, 0),
+			},
+			program.WithTypes(types.TypeF64),
+		),
+		values: []types.Value{types.False},
+	},
+	{
+		// A ref-typed (any) global round-trips a primitive and discriminates it.
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 5),
+				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.REF_TEST, 0),
+			},
+			program.WithTypes(types.TypeI32),
+		),
+		values: []types.Value{types.True},
+	},
+	{
+		// A ref-typed (any) global round-trips a heap reference and discriminates it.
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.REF_TEST, 0),
+			},
+			program.WithConstants(types.String("foo")),
+			program.WithTypes(types.TypeString),
+		),
+		values: []types.Value{types.True},
+	},
+	{
+		// Overwriting a heap ref in an any-slot with a primitive releases the ref
+		// and leaves a clean scalar (no spurious release of the primitive bits).
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.GLOBAL_GET, 0),
+				instr.New(instr.REF_TEST, 0),
+			},
+			program.WithConstants(types.String("foo")),
+			program.WithTypes(types.TypeI32),
+		),
+		values: []types.Value{types.True},
+	},
+	{
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
@@ -4082,6 +4161,87 @@ func TestInterpreter_Marshal(t *testing.T) {
 		require.Equal(t, types.BoxI32(7), s.FieldByName("Second"))
 	})
 
+	t.Run("interface slice holds mixed dynamic kinds", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal([]any{int32(1), "x", float64(2.5)})
+		require.NoError(t, err)
+
+		arr, ok := got.(*types.Array)
+		require.True(t, ok)
+		require.True(t, arr.Typ.Elem.Equals(types.TypeRef))
+		require.Len(t, arr.Elems, 3)
+		for _, elem := range arr.Elems {
+			require.Equal(t, types.KindRef, elem.Kind())
+		}
+
+		first, err := i.Load(arr.Elems[0].Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1), first)
+		second, err := i.Load(arr.Elems[1].Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.String("x"), second)
+		third, err := i.Load(arr.Elems[2].Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.F64(2.5), third)
+	})
+
+	t.Run("interface struct field marshals as ref", func(t *testing.T) {
+		type box struct {
+			Value any
+			Tag   int32
+		}
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(box{Value: "hi", Tag: 7})
+		require.NoError(t, err)
+
+		s, ok := got.(*types.Struct)
+		require.True(t, ok)
+		require.True(t, s.Typ.Fields[0].Type.Equals(types.TypeRef))
+		require.Equal(t, types.BoxI32(7), s.FieldByName("Tag"))
+
+		value := s.FieldByName("Value")
+		require.Equal(t, types.KindRef, value.Kind())
+		loaded, err := i.Load(value.Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.String("hi"), loaded)
+	})
+
+	t.Run("interface valued map marshals values as ref", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(map[string]any{"a": int32(1)})
+		require.NoError(t, err)
+
+		m, ok := got.(*types.Map)
+		require.True(t, ok)
+		require.True(t, m.Typ.Elem.Equals(types.TypeRef))
+
+		var value types.Boxed
+		m.Range(func(_ types.MapKey, entry types.MapEntry) {
+			value = entry.Value
+		})
+		require.Equal(t, types.KindRef, value.Kind())
+		loaded, err := i.Load(value.Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1), loaded)
+	})
+
+	t.Run("nil interface marshals to null", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		var v any
+		got, err := i.Marshal([]any{v})
+		require.NoError(t, err)
+		arr, ok := got.(*types.Array)
+		require.True(t, ok)
+		require.Equal(t, types.BoxedNull, arr.Elems[0])
+	})
 }
 
 func TestInterpreter_Unmarshal(t *testing.T) {
@@ -4248,6 +4408,31 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		var out types.Value
 		require.NoError(t, i.Unmarshal(types.I32(4), &out))
 		require.Equal(t, types.I32(4), out)
+	})
+
+	t.Run("interface target yields vm-native value", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		var n any
+		require.NoError(t, i.Unmarshal(types.I32(42), &n))
+		require.Equal(t, types.I32(42), n)
+
+		var s any
+		require.NoError(t, i.Unmarshal(types.String("hi"), &s))
+		require.Equal(t, types.String("hi"), s)
+	})
+
+	t.Run("interface slice round-trip", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal([]any{int32(1), "x", float64(2.5)})
+		require.NoError(t, err)
+
+		var out []any
+		require.NoError(t, i.Unmarshal(got, &out))
+		require.Equal(t, []any{types.I32(1), types.String("x"), types.F64(2.5)}, out)
 	})
 
 	t.Run("error cases", func(t *testing.T) {

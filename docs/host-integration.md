@@ -124,6 +124,7 @@ v, err := vm.Marshal(myGoValue)
 | defined scalar with methods (e.g. `type Celsius float64`) | underlying scalar | keeps primitive opcode/JIT path |
 | `*T` | same as `T`, `*HostObject`, or `Null` if nil | pointer dereferenced; defined scalar pointers with methods become host objects |
 | `func(...)` | `*HostFunction` (ref) | see below |
+| `interface{}` / `any` | `ref` | dynamic value; the concrete dynamic type is marshaled, `nil` → `Null`. See [Dynamic interface values](#dynamic-interface-values) |
 | `types.Value` | passthrough | returned as-is |
 | `types.Boxed` | unboxed | `KindRef` resolved via `Load` |
 
@@ -152,6 +153,31 @@ VM-native types (`types.I32`, `types.F32`, etc.) in Go signatures avoid boxing o
 add := func(a, b types.I32) types.I32 { return a + b }
 fn, err := vm.Marshal(add)
 ```
+
+### Dynamic interface values
+
+Go `interface{}` (and any named interface) maps to the VM `ref` type — the
+dynamic "any" type (see [value-representation.md](value-representation.md#dynamic-any-values)).
+
+```go
+got, _ := vm.Marshal([]any{int32(1), "x", 2.5})
+// *types.Array typed []ref; each element is a KindRef to a heap I32 / String / F64
+```
+
+- **Marshal** resolves the dynamic value and marshals its concrete type; the
+  resulting `Boxed` self-describes. A `nil` interface marshals to `Null`.
+  Interface-typed struct fields, slice elements, and map values all become
+  `ref`. Marshal heap-allocates primitives carried in an interface (like Go
+  boxing into an interface), so they arrive as `KindRef` to a scalar heap row.
+- **Unmarshal** into an `interface{}` destination yields the **VM-native**
+  `types.Value` concrete (`types.I32`, `types.String`, `types.F64`, …), not the
+  original Go scalar type. Unmarshal into a concrete Go type to recover Go-native
+  values.
+- Recover the dynamic type inside bytecode with `REF_TEST` / `REF_CAST`.
+
+Limitation: an `interface{}`-keyed map heap-boxes primitive keys during marshal,
+so equal primitive keys are not deduplicated. Use a concrete key type, or build
+the map inside the VM (where `MAP_SET` keys primitives by value).
 
 ### Host Objects
 

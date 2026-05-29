@@ -95,11 +95,13 @@ Offsets are signed 16-bit values encoded little-endian. `BR 5` skips 5 bytes pas
 | `REF_IS_NULL` | `{}` | `ref → i32` | ⬜ | Push `I32(1)` if null, else `I32(0)`. |
 | `REF_EQ` | `{}` | `a b → i32` | ⬜ | Push `I32(1)` if refs point to same heap index. |
 | `REF_NE` | `{}` | `a b → i32` | ⬜ | Push `I32(1)` if refs differ. |
-| `REF_TEST` | `{2}` | `ref → i32` | ⬜ | Push `I32(1)` if ref matches type at u16 index. |
-| `REF_CAST` | `{2}` | `ref → ref` | ⬜ | Trap with `ErrTypeMismatch` if ref type mismatches. |
+| `REF_TEST` | `{2}` | `any → i32` | ⬜ | Push `I32(1)` if the value matches the type at u16 index. Accepts any operand: a `KindRef` is matched against the heap object's `Type()`; a primitive is matched against its own kind. |
+| `REF_CAST` | `{2}` | `any → any` | ⬜ | Trap with `ErrTypeMismatch` if the value does not cast to the type at u16 index. Accepts both `KindRef` and primitive operands (primitives use `Boxed.Type()`). |
 | `REF_NEW` | `{}` | `x → ref` | ⬜ | Box a non-ref scalar (`I32/I64/F32/F64`) onto the heap as a mutable cell; trap `ErrTypeMismatch` on a ref operand. Reuses the scalar heap rows. |
 | `REF_GET` | `{}` | `ref → x` | ⬜ | Load the scalar held by a cell; trap `ErrTypeMismatch` if the target is not a scalar. Consumes (releases) the ref. |
 | `REF_SET` | `{}` | `ref x →` | ⬜ | Overwrite a cell's scalar; trap `ErrTypeMismatch` if `x` is a ref. Consumes (releases) the ref. |
+
+A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an inline primitive or a `KindRef` — and `REF_TEST`/`REF_CAST` recover the runtime type. See [value-representation.md](value-representation.md#dynamic-any-values).
 
 ## Closures
 
