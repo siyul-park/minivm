@@ -24,18 +24,7 @@ func (p *ConstantFoldingPass) Run(m *pass.Manager) (*program.Program, error) {
 		return nil, err
 	}
 
-	var fns []*types.Function
-	fns = append(fns, &types.Function{
-		Typ:  &types.FunctionType{},
-		Code: prog.Code,
-	})
-	for _, v := range prog.Constants {
-		if fn, ok := v.(*types.Function); ok {
-			fns = append(fns, fn)
-		}
-	}
-
-	for _, fn := range fns {
+	for _, fn := range functions(prog) {
 		var blocks []*analysis.BasicBlock
 		if err := m.Convert(fn, &blocks); err != nil {
 			return nil, err

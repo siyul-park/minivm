@@ -21,86 +21,31 @@ func (p *ConstantDeduplicationPass) Run(m *pass.Manager) (*program.Program, erro
 		return nil, err
 	}
 
-	var codes [][]byte
-	codes = append(codes, prog.Code)
-	for _, v := range prog.Constants {
-		if fn, ok := v.(*types.Function); ok {
-			codes = append(codes, fn.Code)
-		}
-	}
+	fns := functions(prog)
 
 	constants := prog.Constants
 	typs := prog.Types
 
-	constIndex := make([]int, len(constants))
-	typeIndex := make([]int, len(typs))
-	for i := 0; i < len(constIndex); i++ {
-		constIndex[i] = -1
-	}
-	for i := 0; i < len(typeIndex); i++ {
-		typeIndex[i] = -1
-	}
-
-	for _, code := range codes {
+	constUsed := make([]bool, len(constants))
+	typeUsed := make([]bool, len(typs))
+	for _, fn := range fns {
+		code := fn.Code
 		ip := 0
 		for ip < len(code) {
 			inst := instr.Instruction(code[ip:])
 			switch inst.Opcode() {
 			case instr.CONST_GET:
-				idx := inst.Operand(0)
-				constIndex[idx] = int(idx)
+				constUsed[inst.Operand(0)] = true
 			case instr.ARRAY_NEW, instr.ARRAY_NEW_DEFAULT, instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT:
-				idx := inst.Operand(0)
-				typeIndex[idx] = int(idx)
+				typeUsed[inst.Operand(0)] = true
 			default:
 			}
 			ip += inst.Width()
 		}
 	}
 
-	for i := 0; i < len(constants); i++ {
-		if constIndex[i] == -1 {
-			continue
-		}
-		for j := i + 1; j < len(constants); j++ {
-			if constants[j] == constants[i] {
-				constIndex[j] = constIndex[i]
-			}
-		}
-	}
-	for i := 0; i < len(typs); i++ {
-		if typeIndex[i] == -1 {
-			continue
-		}
-		for j := i + 1; j < len(typs); j++ {
-			if typs[j].Equals(typs[i]) {
-				typeIndex[j] = typeIndex[i]
-			}
-		}
-	}
-
-	constSize := 0
-	typesSize := 0
-	for i := 0; i < len(constIndex); i++ {
-		if constIndex[i] != -1 {
-			if constIndex[i] != i {
-				constIndex[i] = constIndex[constIndex[i]]
-			} else {
-				constIndex[i] = constSize
-				constSize++
-			}
-		}
-	}
-	for i := 0; i < len(typeIndex); i++ {
-		if typeIndex[i] != -1 {
-			if typeIndex[i] != i {
-				typeIndex[i] = typeIndex[typeIndex[i]]
-			} else {
-				typeIndex[i] = typesSize
-				typesSize++
-			}
-		}
-	}
+	constIndex, constSize := dedup(constants, constUsed, func(a, b types.Value) bool { return a == b })
+	typeIndex, typesSize := dedup(typs, typeUsed, func(a, b types.Type) bool { return a.Equals(b) })
 
 	for i, v := range constIndex {
 		if v >= 0 {
@@ -122,7 +67,8 @@ func (p *ConstantDeduplicationPass) Run(m *pass.Manager) (*program.Program, erro
 		typs = nil
 	}
 
-	for _, code := range codes {
+	for _, fn := range fns {
+		code := fn.Code
 		ip := 0
 		for ip < len(code) {
 			inst := instr.Instruction(code[ip:])
