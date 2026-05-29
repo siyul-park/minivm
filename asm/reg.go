@@ -20,8 +20,6 @@ type VReg struct {
 	width RegWidth
 }
 
-const InvalidRegID = 255
-
 type RegType uint8
 
 const (

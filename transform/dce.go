@@ -3,8 +3,6 @@ package transform
 import (
 	"fmt"
 
-	"github.com/siyul-park/minivm/types"
-
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/pass"
@@ -25,18 +23,7 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error)
 		return nil, err
 	}
 
-	var fns []*types.Function
-	fns = append(fns, &types.Function{
-		Typ:  &types.FunctionType{},
-		Code: prog.Code,
-	})
-	for _, v := range prog.Constants {
-		if fn, ok := v.(*types.Function); ok {
-			fns = append(fns, fn)
-		}
-	}
-
-	for i, fn := range fns {
+	for i, fn := range functions(prog) {
 		code := fn.Code
 
 		var blocks []*analysis.BasicBlock
@@ -88,7 +75,7 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error)
 					target++
 				}
 				if target < 0 || target >= len(offsets) {
-					return nil, invalidJumpError(read)
+					return nil, fmt.Errorf("%w: at=%d", analysis.ErrInvalidJump, read)
 				}
 				inst.SetOperand(0, uint64(offsets[target]-write-inst.Width()))
 			case instr.BR_TABLE:
@@ -101,7 +88,7 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error)
 						target++
 					}
 					if target < 0 || target >= len(offsets) {
-						return nil, invalidJumpError(read)
+						return nil, fmt.Errorf("%w: at=%d", analysis.ErrInvalidJump, read)
 					}
 					inst.SetOperand(j+1, uint64(offsets[target]-write-width))
 				}
@@ -120,8 +107,4 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error)
 	}
 
 	return prog, nil
-}
-
-func invalidJumpError(at int) error {
-	return fmt.Errorf("%w: at=%d", analysis.ErrInvalidJump, at)
 }

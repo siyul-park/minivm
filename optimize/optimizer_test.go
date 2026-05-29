@@ -3,8 +3,8 @@ package optimize
 import (
 	"testing"
 
+	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -17,9 +17,7 @@ func TestOptimizer_Level(t *testing.T) {
 
 func TestOptimizer_Register(t *testing.T) {
 	o := NewOptimizer(O0)
-	err := o.Register(pass.New(func(_ *pass.Manager) (*program.Program, error) {
-		return nil, nil
-	}))
+	err := o.Register(analysis.NewBasicBlocksPass())
 	require.NoError(t, err)
 }
 

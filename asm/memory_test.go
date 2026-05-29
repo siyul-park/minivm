@@ -23,28 +23,6 @@ func TestAlloc(t *testing.T) {
 	})
 }
 
-func TestWrite(t *testing.T) {
-	t.Run("valid", func(t *testing.T) {
-		m, err := Alloc(64)
-		require.NoError(t, err)
-		defer m.Free()
-
-		code := []byte{0x90, 0x90, 0x90}
-		err = m.Write(code)
-		require.NoError(t, err)
-		require.Equal(t, Memory(code), m[:len(code)])
-	})
-
-	t.Run("too large", func(t *testing.T) {
-		m, err := Alloc(4)
-		require.NoError(t, err)
-		defer m.Free()
-
-		err = m.Write(make([]byte, len(m)+1))
-		require.ErrorIs(t, err, ErrCodeTooLarge)
-	})
-}
-
 func TestExecutable(t *testing.T) {
 	m, err := Alloc(64)
 	require.NoError(t, err)
@@ -69,9 +47,6 @@ func TestMemory_Writable(t *testing.T) {
 
 	require.NoError(t, m.Executable())
 	require.NoError(t, m.Writable())
-
-	code := []byte{0x90}
-	require.NoError(t, m.Write(code))
 }
 
 func TestMemory_Ptr(t *testing.T) {

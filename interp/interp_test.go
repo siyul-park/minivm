@@ -1464,7 +1464,7 @@ var tests = []test{
 			},
 			program.WithConstants(types.String("foo")),
 		),
-		values: []types.Value{types.I32Array("foo")},
+		values: []types.Value{types.TypedArray[int32]("foo")},
 	},
 	// --- array: ARRAY_NEW, ARRAY_NEW_DEFAULT, ARRAY_GET, ARRAY_SET, ARRAY_FILL ---
 	{
@@ -1476,7 +1476,7 @@ var tests = []test{
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI32)),
 		),
-		values: []types.Value{types.I32Array{1}},
+		values: []types.Value{types.TypedArray[int32]{1}},
 	},
 	{
 		program: program.New(
@@ -1487,7 +1487,7 @@ var tests = []test{
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI64)),
 		),
-		values: []types.Value{types.I64Array{1}},
+		values: []types.Value{types.TypedArray[int64]{1}},
 	},
 	{
 		program: program.New(
@@ -1498,7 +1498,7 @@ var tests = []test{
 			},
 			program.WithTypes(types.NewArrayType(types.TypeF32)),
 		),
-		values: []types.Value{types.F32Array{42}},
+		values: []types.Value{types.TypedArray[float32]{42}},
 	},
 	{
 		program: program.New(
@@ -1509,7 +1509,7 @@ var tests = []test{
 			},
 			program.WithTypes(types.NewArrayType(types.TypeF64)),
 		),
-		values: []types.Value{types.F64Array{42}},
+		values: []types.Value{types.TypedArray[float64]{42}},
 	},
 	{
 		program: program.New(
@@ -1530,7 +1530,7 @@ var tests = []test{
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI32)),
 		),
-		values: []types.Value{make(types.I32Array, 1)},
+		values: []types.Value{make(types.TypedArray[int32], 1)},
 	},
 	{
 		program: program.New(
@@ -1540,7 +1540,7 @@ var tests = []test{
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI64)),
 		),
-		values: []types.Value{make(types.I64Array, 1)},
+		values: []types.Value{make(types.TypedArray[int64], 1)},
 	},
 	{
 		program: program.New(
@@ -1550,7 +1550,7 @@ var tests = []test{
 			},
 			program.WithTypes(types.NewArrayType(types.TypeF32)),
 		),
-		values: []types.Value{make(types.F32Array, 1)},
+		values: []types.Value{make(types.TypedArray[float32], 1)},
 	},
 	{
 		program: program.New(
@@ -1560,7 +1560,7 @@ var tests = []test{
 			},
 			program.WithTypes(types.NewArrayType(types.TypeF64)),
 		),
-		values: []types.Value{make(types.F64Array, 1)},
+		values: []types.Value{make(types.TypedArray[float64], 1)},
 	},
 	{
 		program: program.New(
@@ -2885,7 +2885,7 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.ARRAY_GET),
 			},
-			program.WithConstants(types.I32Array{10, 20, 30}),
+			program.WithConstants(types.TypedArray[int32]{10, 20, 30}),
 		), WithTick(1), WithThreshold(-1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
@@ -2901,7 +2901,7 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.ARRAY_GET),
 			},
-			program.WithConstants(types.I32Array{10, 20, 30}),
+			program.WithConstants(types.TypedArray[int32]{10, 20, 30}),
 		), WithThreshold(-1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
@@ -3817,19 +3817,19 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 		got, err := i.Marshal([]int32{1, 2})
 		require.NoError(t, err)
-		require.Equal(t, types.I32Array{1, 2}, got)
+		require.Equal(t, types.TypedArray[int32]{1, 2}, got)
 
 		got, err = i.Marshal([]uint32{math.MaxUint32})
 		require.NoError(t, err)
-		require.Equal(t, types.I32Array{-1}, got)
+		require.Equal(t, types.TypedArray[int32]{-1}, got)
 
 		got, err = i.Marshal([]int{1, 2})
 		require.NoError(t, err)
-		require.Equal(t, types.I64Array{1, 2}, got)
+		require.Equal(t, types.TypedArray[int64]{1, 2}, got)
 
 		got, err = i.Marshal([]uint64{math.MaxUint64})
 		require.NoError(t, err)
-		require.Equal(t, types.I64Array{-1}, got)
+		require.Equal(t, types.TypedArray[int64]{-1}, got)
 	})
 
 	t.Run("reference slice", func(t *testing.T) {
@@ -3899,7 +3899,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 		i32, err := i.Marshal(map[int32]int32{1: 2})
 		require.NoError(t, err)
-		mI32, ok := i32.(*types.MapI32)
+		mI32, ok := i32.(*types.TypedMap[int32])
 		require.True(t, ok)
 		gotI32, ok := mI32.Get(1)
 		require.True(t, ok)
@@ -3907,7 +3907,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 		i64, err := i.Marshal(map[int64]string{1: "a"})
 		require.NoError(t, err)
-		mI64, ok := i64.(*types.MapI64)
+		mI64, ok := i64.(*types.TypedMap[int64])
 		require.True(t, ok)
 		gotI64, ok := mI64.Get(1)
 		require.True(t, ok)
@@ -3917,7 +3917,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 		f64, err := i.Marshal(map[float64]int32{math.Copysign(0, -1): 1})
 		require.NoError(t, err)
-		mF64, ok := f64.(*types.MapF64)
+		mF64, ok := f64.(*types.TypedMap[float64])
 		require.True(t, ok)
 		gotF64, ok := mF64.Get(0)
 		require.True(t, ok)
@@ -4289,15 +4289,15 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		defer i.Close()
 
 		var out []int32
-		require.NoError(t, i.Unmarshal(types.I32Array{1, 2}, &out))
+		require.NoError(t, i.Unmarshal(types.TypedArray[int32]{1, 2}, &out))
 		require.Equal(t, []int32{1, 2}, out)
 
 		var u32 []uint32
-		require.NoError(t, i.Unmarshal(types.I32Array{-1}, &u32))
+		require.NoError(t, i.Unmarshal(types.TypedArray[int32]{-1}, &u32))
 		require.Equal(t, []uint32{math.MaxUint32}, u32)
 
 		var u64 []uint64
-		require.NoError(t, i.Unmarshal(types.I64Array{-1}, &u64))
+		require.NoError(t, i.Unmarshal(types.TypedArray[int64]{-1}, &u64))
 		require.Equal(t, []uint64{math.MaxUint64}, u64)
 	})
 
@@ -4656,7 +4656,7 @@ func BenchmarkInterpreter_Release(b *testing.B) {
 			if err != nil {
 				break
 			}
-			m := types.NewMapI32(typ, 1)
+			m := types.NewTypedMap[int32](typ, 1)
 			m.Set(1, types.BoxRef(child))
 			var addr int
 			addr, err = i.Alloc(m)

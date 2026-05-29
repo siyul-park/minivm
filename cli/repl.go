@@ -509,9 +509,9 @@ func (r *REPL) debugLoop(ctx context.Context, scanner *bufio.Scanner, vm *interp
 		case "stack":
 			printStack(r.out, vm)
 		case "locals":
-			printLocals(r.out, vm)
+			printIndexed(r.out, vm, "local", vm.Local)
 		case "globals":
-			printGlobals(r.out, vm)
+			printIndexed(r.out, vm, "global", vm.Global)
 		case "frames":
 			printFrames(r.out, vm)
 		case "breaks":
@@ -602,33 +602,17 @@ func (r *REPL) printErr(err error) {
 	fmt.Fprintf(r.out, "error: %v\n", err)
 }
 
-func printLocals(out io.Writer, vm *interp.Interpreter) {
+func printIndexed(out io.Writer, vm *interp.Interpreter, label string, get func(int) (types.Boxed, error)) {
 	var parts []string
 	for i := 0; ; i++ {
-		v, err := vm.Local(i)
+		v, err := get(i)
 		if err != nil {
 			break
 		}
-		parts = append(parts, fmt.Sprintf("local[%d]=%s", i, formatValue(v, vm)))
+		parts = append(parts, fmt.Sprintf("%s[%d]=%s", label, i, formatValue(v, vm)))
 	}
 	if len(parts) == 0 {
-		fmt.Fprintln(out, "(no locals)")
-		return
-	}
-	fmt.Fprintln(out, strings.Join(parts, "\n"))
-}
-
-func printGlobals(out io.Writer, vm *interp.Interpreter) {
-	var parts []string
-	for i := 0; ; i++ {
-		v, err := vm.Global(i)
-		if err != nil {
-			break
-		}
-		parts = append(parts, fmt.Sprintf("global[%d]=%s", i, formatValue(v, vm)))
-	}
-	if len(parts) == 0 {
-		fmt.Fprintln(out, "(no globals)")
+		fmt.Fprintf(out, "(no %ss)\n", label)
 		return
 	}
 	fmt.Fprintln(out, strings.Join(parts, "\n"))
@@ -682,7 +666,7 @@ func printProfile(out io.Writer, snap prof.Snapshot) {
 			fmt.Fprintf(out, "%s\t%d\t%s\n", opcodeLabel(op.Code), op.Samples, formatPercent(op.Percent))
 		}
 	}
-	if hasJIT(snap.JIT) {
+	if snap.JIT != (prof.JIT{}) {
 		jit := snap.JIT
 		fmt.Fprintln(out, "jit:")
 		fmt.Fprintln(out, "attempts\temits\tlinks\tskips\taborts\terrors\tbytes\ttime")
@@ -701,17 +685,6 @@ func opcodeLabel(code byte) string {
 		return typ.Mnemonic
 	}
 	return fmt.Sprintf("0x%02X", code)
-}
-
-func hasJIT(jit prof.JIT) bool {
-	return jit.Attempts != 0 ||
-		jit.Emits != 0 ||
-		jit.Links != 0 ||
-		jit.Skips != 0 ||
-		jit.Aborts != 0 ||
-		jit.Errors != 0 ||
-		jit.Bytes != 0 ||
-		jit.Time != 0
 }
 
 // normalize converts "@N" absolute byte targets in branch instructions to relative

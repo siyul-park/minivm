@@ -23,20 +23,27 @@ type Breakpoint struct {
 }
 
 type Debugger struct {
+	mode debugMode
+
 	breakpoints map[int]*Breakpoint
-	next        int
-	mode        debugMode
-	stop        Stop
-	stoppedFlag bool
-	skip        bool
-	skipFunc    int
-	skipIP      int
-	skipDepth   int
+
+	stop        *Stop
+	skip        *skipPoint
 	pausedDepth int
 	depth       int
+
+	next int
 }
 
 type debugMode int
+
+// skipPoint marks the instruction a resumed debugger steps over once so it
+// does not immediately re-trigger at the position it stopped on.
+type skipPoint struct {
+	fn    int
+	ip    int
+	depth int
+}
 
 const (
 	debugContinue debugMode = iota
@@ -65,11 +72,12 @@ func NewDebugger() *Debugger {
 
 func (d *Debugger) Hook(i *Interpreter) error {
 	fn, ip, fp := i.Func(), i.IP(), i.FP()
-	if d.skip && d.skipFunc == fn && d.skipIP == ip && d.skipDepth == fp {
-		d.skip = false
-		return nil
+	if s := d.skip; s != nil {
+		d.skip = nil
+		if s.fn == fn && s.ip == ip && s.depth == fp {
+			return nil
+		}
 	}
-	d.skip = false
 
 	if bp := d.breakpoint(i, fn, ip); bp != nil {
 		bp.Hits++
@@ -92,7 +100,10 @@ func (d *Debugger) Hook(i *Interpreter) error {
 }
 
 func (d *Debugger) Stop() Stop {
-	return d.stop
+	if d.stop == nil {
+		return Stop{}
+	}
+	return *d.stop
 }
 
 func (d *Debugger) Continue() {
@@ -184,27 +195,26 @@ func (d *Debugger) breakpoint(i *Interpreter, fn, ip int) *Breakpoint {
 }
 
 func (d *Debugger) stopped(fn, ip, depth, bp int) error {
-	d.stop = Stop{
+	d.stop = &Stop{
 		Func:       fn,
 		IP:         ip,
 		Breakpoint: bp,
 	}
-	d.stoppedFlag = true
 	d.pausedDepth = depth
 	d.mode = debugContinue
 	return ErrStopped
 }
 
 func (d *Debugger) resume() {
-	if !d.stoppedFlag {
+	if d.stop == nil {
 		return
 	}
-	d.skip = true
-	d.skipFunc = d.stop.Func
-	d.skipIP = d.stop.IP
-	d.skipDepth = d.stopDepth()
-	d.stop = Stop{}
-	d.stoppedFlag = false
+	d.skip = &skipPoint{
+		fn:    d.stop.Func,
+		ip:    d.stop.IP,
+		depth: d.stopDepth(),
+	}
+	d.stop = nil
 }
 
 func (d *Debugger) stopDepth() int {

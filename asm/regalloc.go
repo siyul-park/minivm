@@ -101,11 +101,6 @@ func (ra *RegAlloc) Free(vreg VReg) {
 	}
 }
 
-func (ra *RegAlloc) Get(vreg VReg) (PReg, bool) {
-	p, ok := ra.phys[vreg.ID()]
-	return p, ok
-}
-
 func (ra *RegAlloc) Block(preg PReg) {
 	switch preg.Type() {
 	case RegTypeFloat:
@@ -125,21 +120,4 @@ func (ra *RegAlloc) Reset() {
 
 	ra.blockedInt = 0
 	ra.blockedFloat = 0
-}
-
-func (ra *RegAlloc) Clone() *RegAlloc {
-	clone := &RegAlloc{
-		info:         ra.info,
-		phys:         make(map[int32]PReg),
-		intAvail:     ra.intAvail,
-		floatAvail:   ra.floatAvail,
-		blockedInt:   ra.blockedInt,
-		blockedFloat: ra.blockedFloat,
-	}
-
-	for k, v := range ra.phys {
-		clone.phys[k] = v
-	}
-
-	return clone
 }

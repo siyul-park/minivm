@@ -175,10 +175,7 @@ func init() {
 			return false
 		}
 		s.ip += 3
-		boxed := s.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		s.assembler.Emit(arm64.LDR(boxed, s.scratch[rGlobals], offset))
-		r0 := s.unbox64(boxed, kind)
-		s.Push(r0)
+		s.loadSlot(s.scratch[rGlobals], offset, kind)
 		return true
 	}
 	jit[instr.GLOBAL_SET] = func(s *jitSeg) bool {
@@ -197,9 +194,7 @@ func init() {
 		}
 		s.ip += 3
 		s.Pop()
-		boxed := s.box64(r0, kind, s.ip-3)
-
-		s.assembler.Emit(arm64.STR(boxed, s.scratch[rGlobals], offset))
+		s.storeSlot(r0, kind, s.scratch[rGlobals], offset, s.ip-3)
 		s.facts[idx] = kind
 		return true
 	}
@@ -218,8 +213,7 @@ func init() {
 			return false
 		}
 		s.ip += 3
-		boxed := s.box64(r0, kind, s.ip-3)
-		s.assembler.Emit(arm64.STR(boxed, s.scratch[rGlobals], offset))
+		s.storeSlot(r0, kind, s.scratch[rGlobals], offset, s.ip-3)
 		s.facts[idx] = kind
 		return true
 	}
@@ -235,10 +229,7 @@ func init() {
 		}
 
 		s.ip += 2
-		offset := int16(idx * 8)
-		boxed := s.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
-		s.assembler.Emit(arm64.LDR(boxed, s.scratch[rStack], offset))
-		s.Push(s.unbox64(boxed, typ.Kind()))
+		s.loadSlot(s.scratch[rStack], int16(idx*8), typ.Kind())
 		return true
 	}
 	jit[instr.LOCAL_SET] = func(s *jitSeg) bool {
@@ -248,15 +239,13 @@ func init() {
 		if !ok {
 			return false
 		}
-		reg, ok := regOf(typ.Kind())
+		reg, ok := s.regOf(typ.Kind())
 		if !ok || !s.accepts(reg) {
 			return false
 		}
 		s.ip += 2
-		offset := int16(idx * 8)
 		r0, _ := s.Take(reg.Type(), reg.Width())
-		boxed := s.box64(r0, typ.Kind(), s.ip-2)
-		s.assembler.Emit(arm64.STR(boxed, s.scratch[rStack], offset))
+		s.storeSlot(r0, typ.Kind(), s.scratch[rStack], int16(idx*8), s.ip-2)
 		return true
 	}
 	jit[instr.LOCAL_TEE] = func(s *jitSeg) bool {
@@ -266,16 +255,14 @@ func init() {
 		if !ok {
 			return false
 		}
-		reg, ok := regOf(typ.Kind())
+		reg, ok := s.regOf(typ.Kind())
 		if !ok || !s.accepts(reg) {
 			return false
 		}
 		s.ip += 2
-		offset := int16(idx * 8)
 		r0, _ := s.Take(reg.Type(), reg.Width())
-		boxed := s.box64(r0, typ.Kind(), s.ip-2)
 		s.Push(r0)
-		s.assembler.Emit(arm64.STR(boxed, s.scratch[rStack], offset))
+		s.storeSlot(r0, typ.Kind(), s.scratch[rStack], int16(idx*8), s.ip-2)
 		return true
 	}
 	jit[instr.CONST_GET] = func(s *jitSeg) bool {
@@ -384,34 +371,34 @@ func init() {
 		return true
 	}
 	jit[instr.I32_EQ] = func(s *jitSeg) bool {
-		return s.compareI32(arm64.CondEQ)
+		return s.compare(asm.RegTypeInt, asm.Width32, arm64.CMP, arm64.CondEQ)
 	}
 	jit[instr.I32_NE] = func(s *jitSeg) bool {
-		return s.compareI32(arm64.CondNE)
+		return s.compare(asm.RegTypeInt, asm.Width32, arm64.CMP, arm64.CondNE)
 	}
 	jit[instr.I32_LT_S] = func(s *jitSeg) bool {
-		return s.compareI32(arm64.CondLT)
+		return s.compare(asm.RegTypeInt, asm.Width32, arm64.CMP, arm64.CondLT)
 	}
 	jit[instr.I32_LT_U] = func(s *jitSeg) bool {
-		return s.compareI32(arm64.CondCC)
+		return s.compare(asm.RegTypeInt, asm.Width32, arm64.CMP, arm64.CondCC)
 	}
 	jit[instr.I32_GT_S] = func(s *jitSeg) bool {
-		return s.compareI32(arm64.CondGT)
+		return s.compare(asm.RegTypeInt, asm.Width32, arm64.CMP, arm64.CondGT)
 	}
 	jit[instr.I32_GT_U] = func(s *jitSeg) bool {
-		return s.compareI32(arm64.CondHI)
+		return s.compare(asm.RegTypeInt, asm.Width32, arm64.CMP, arm64.CondHI)
 	}
 	jit[instr.I32_LE_S] = func(s *jitSeg) bool {
-		return s.compareI32(arm64.CondLE)
+		return s.compare(asm.RegTypeInt, asm.Width32, arm64.CMP, arm64.CondLE)
 	}
 	jit[instr.I32_LE_U] = func(s *jitSeg) bool {
-		return s.compareI32(arm64.CondLS)
+		return s.compare(asm.RegTypeInt, asm.Width32, arm64.CMP, arm64.CondLS)
 	}
 	jit[instr.I32_GE_S] = func(s *jitSeg) bool {
-		return s.compareI32(arm64.CondGE)
+		return s.compare(asm.RegTypeInt, asm.Width32, arm64.CMP, arm64.CondGE)
 	}
 	jit[instr.I32_GE_U] = func(s *jitSeg) bool {
-		return s.compareI32(arm64.CondCS)
+		return s.compare(asm.RegTypeInt, asm.Width32, arm64.CMP, arm64.CondCS)
 	}
 	jit[instr.I32_TO_I64_S] = func(s *jitSeg) bool {
 		return s.convert(asm.RegTypeInt, asm.Width32, asm.RegTypeInt, asm.Width64, arm64.SXTW)
@@ -676,20 +663,6 @@ func (s *jitSeg) remainder(width asm.RegWidth, divide func(dst, left, right asm.
 	return true
 }
 
-func (s *jitSeg) compareI32(cond uint8) bool {
-	reg := asm.NewPReg(0, asm.RegTypeInt, asm.Width32)
-	if !s.accepts(reg, reg) {
-		return false
-	}
-	s.ip++
-	right, _ := s.Take(asm.RegTypeInt, asm.Width32)
-	left, _ := s.Take(asm.RegTypeInt, asm.Width32)
-	s.assembler.Emit(arm64.CMP(left, right))
-	s.assembler.Emit(arm64.CSET(left, cond))
-	s.Push(left)
-	return true
-}
-
 func (s *jitSeg) compare(typ asm.RegType, width asm.RegWidth, compare func(left, right asm.Reg) asm.Instruction, cond uint8) bool {
 	reg := asm.NewPReg(0, typ, width)
 	if !s.accepts(reg, reg) {
@@ -832,7 +805,22 @@ func (s *jitSeg) ret(nextIP int) {
 	s.assembler.Emit(arm64.RET())
 }
 
-func regOf(kind types.Kind) (asm.PReg, bool) {
+// loadSlot emits a boxed 64-bit load from base+offset, unboxes it as kind, and
+// pushes the result. Shared by LOCAL_GET and GLOBAL_GET.
+func (s *jitSeg) loadSlot(base asm.PReg, offset int16, kind types.Kind) {
+	boxed := s.assembler.NewVReg(asm.RegTypeInt, asm.Width64)
+	s.assembler.Emit(arm64.LDR(boxed, base, offset))
+	s.Push(s.unbox64(boxed, kind))
+}
+
+// storeSlot boxes r0 as kind and emits a 64-bit store to base+offset. Shared by
+// LOCAL_SET/TEE and GLOBAL_SET/TEE.
+func (s *jitSeg) storeSlot(r0 asm.VReg, kind types.Kind, base asm.PReg, offset int16, fallbackIP int) {
+	boxed := s.box64(r0, kind, fallbackIP)
+	s.assembler.Emit(arm64.STR(boxed, base, offset))
+}
+
+func (s *jitSeg) regOf(kind types.Kind) (asm.PReg, bool) {
 	switch kind {
 	case types.KindI32:
 		return asm.NewPReg(0, asm.RegTypeInt, asm.Width32), true
