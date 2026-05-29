@@ -10,7 +10,6 @@ import (
 
 var (
 	ErrInvalidSize    = errors.New("invalid size")
-	ErrCodeTooLarge   = errors.New("code too large for memory")
 	ErrMmapFailed     = errors.New("mmap failed")
 	ErrMprotectFailed = errors.New("mprotect failed")
 	ErrMunmapFailed   = errors.New("munmap failed")
@@ -35,14 +34,6 @@ func Alloc(size int) (Memory, error) {
 		return nil, fmt.Errorf("%w: %w", ErrMmapFailed, err)
 	}
 	return data, nil
-}
-
-func (m Memory) Write(code []byte) error {
-	if len(code) > len(m) {
-		return fmt.Errorf("%w: code size %d exceeds memory size %d", ErrCodeTooLarge, len(code), len(m))
-	}
-	copy(m, code)
-	return nil
 }
 
 func (m Memory) Executable() error {

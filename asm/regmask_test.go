@@ -43,16 +43,6 @@ func TestRegMask_Contains(t *testing.T) {
 	})
 }
 
-func TestRegMask_Empty(t *testing.T) {
-	t.Run("empty", func(t *testing.T) {
-		require.True(t, RegMask(0).Empty())
-	})
-	t.Run("not empty", func(t *testing.T) {
-		m := RegMask(0).Set(0)
-		require.False(t, m.Empty())
-	})
-}
-
 func TestRegMask_First(t *testing.T) {
 	t.Run("non-empty", func(t *testing.T) {
 		m := NewRegMask([]uint8{3, 7, 1})
@@ -84,41 +74,4 @@ func TestRegMask_Count(t *testing.T) {
 	t.Run("three", func(t *testing.T) {
 		require.Equal(t, 3, NewRegMask([]uint8{0, 1, 2}).Count())
 	})
-}
-
-func TestRegMask_List(t *testing.T) {
-	m := NewRegMask([]uint8{1, 3, 5})
-	require.Equal(t, []uint8{1, 3, 5}, m.List())
-}
-
-func TestRegMask_And(t *testing.T) {
-	a := NewRegMask([]uint8{0, 1, 2})
-	b := NewRegMask([]uint8{1, 2, 3})
-	c := a.And(b)
-	require.True(t, c.Contains(1))
-	require.True(t, c.Contains(2))
-	require.False(t, c.Contains(0))
-	require.False(t, c.Contains(3))
-}
-
-func TestRegMask_Or(t *testing.T) {
-	a := NewRegMask([]uint8{0, 1})
-	b := NewRegMask([]uint8{2, 3})
-	require.Equal(t, 4, a.Or(b).Count())
-}
-
-func TestRegMask_Not(t *testing.T) {
-	m := NewRegMask([]uint8{0})
-	n := m.Not()
-	require.False(t, n.Contains(0))
-	require.True(t, n.Contains(1))
-}
-
-func TestRegMask_Sub(t *testing.T) {
-	a := NewRegMask([]uint8{0, 1, 2})
-	b := NewRegMask([]uint8{1})
-	c := a.Sub(b)
-	require.True(t, c.Contains(0))
-	require.False(t, c.Contains(1))
-	require.True(t, c.Contains(2))
 }

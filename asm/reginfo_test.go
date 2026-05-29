@@ -12,17 +12,6 @@ func TestNewRegInfo(t *testing.T) {
 	require.Equal(t, uint8(4), ri.NumFloat)
 }
 
-func TestRegInfo_IsReserved(t *testing.T) {
-	ri := NewRegInfo(8, 4, []uint8{6, 7}, []uint8{3})
-
-	require.True(t, ri.IsReserved(NewPReg(6, RegTypeInt, Width64)))
-	require.True(t, ri.IsReserved(NewPReg(7, RegTypeInt, Width64)))
-	require.False(t, ri.IsReserved(NewPReg(0, RegTypeInt, Width64)))
-
-	require.True(t, ri.IsReserved(NewPReg(3, RegTypeFloat, Width64)))
-	require.False(t, ri.IsReserved(NewPReg(0, RegTypeFloat, Width64)))
-}
-
 func TestRegInfo_Allocatable(t *testing.T) {
 	ri := NewRegInfo(4, 2, []uint8{3}, []uint8{1})
 

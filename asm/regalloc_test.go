@@ -49,8 +49,8 @@ func TestRegAlloc_Reserve(t *testing.T) {
 		v := NewVReg(0, RegTypeInt, Width64)
 		p := NewPReg(2, RegTypeInt, Width64)
 		require.NoError(t, ra.Reserve(v, p))
-		got, ok := ra.Get(v)
-		require.True(t, ok)
+		got, err := ra.Alloc(v)
+		require.NoError(t, err)
 		require.Equal(t, uint8(2), got.ID())
 	})
 	t.Run("conflict", func(t *testing.T) {
@@ -83,30 +83,13 @@ func TestRegAlloc_Free(t *testing.T) {
 	})
 }
 
-func TestRegAlloc_Get(t *testing.T) {
-	t.Run("not found", func(t *testing.T) {
-		ra := NewRegAlloc(NewRegInfo(4, 2, nil, nil))
-		_, ok := ra.Get(NewVReg(0, RegTypeInt, Width64))
-		require.False(t, ok)
-	})
-	t.Run("found after alloc", func(t *testing.T) {
-		ra := NewRegAlloc(NewRegInfo(4, 2, nil, nil))
-		v := NewVReg(0, RegTypeInt, Width64)
-		ra.Alloc(v)
-		_, ok := ra.Get(v)
-		require.True(t, ok)
-	})
-}
-
 func TestRegAlloc_Reset(t *testing.T) {
 	ra := NewRegAlloc(NewRegInfo(1, 0, nil, nil))
 	v := NewVReg(0, RegTypeInt, Width64)
 	ra.Alloc(v)
 	ra.Reset()
 
-	_, ok := ra.Get(v)
-	require.False(t, ok)
-
+	// The single register is available again after reset.
 	_, err := ra.Alloc(NewVReg(1, RegTypeInt, Width64))
 	require.NoError(t, err)
 }

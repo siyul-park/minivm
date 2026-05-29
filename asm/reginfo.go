@@ -16,13 +16,6 @@ func NewRegInfo(numInt, numFloat uint8, intRes, fltRes []uint8) RegInfo {
 	}
 }
 
-func (ri RegInfo) IsReserved(reg PReg) bool {
-	if reg.Type() == RegTypeInt {
-		return ri.IntReserved.Contains(reg.ID())
-	}
-	return ri.FltReserved.Contains(reg.ID())
-}
-
 func (ri RegInfo) Allocatable(typ RegType) RegMask {
 	var count uint8
 	var reserved RegMask
