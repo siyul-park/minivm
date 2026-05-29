@@ -130,7 +130,7 @@ func (m *Map[K]) Clear(fn func(Boxed)) {
 func (m *Map[K]) String() string {
 	parts := make([]string, 0, m.Len())
 	m.Range(func(key K, value Boxed) {
-		parts = append(parts, fmt.Sprintf("%s: %s", boxKey(any(key)), value.String()))
+		parts = append(parts, fmt.Sprintf("%s: %s", formatKey(any(key)), value.String()))
 	})
 	sort.Strings(parts)
 	return fmt.Sprintf("%s{%s}", m.Typ, strings.Join(parts, ", "))
@@ -261,8 +261,8 @@ func (t *MapType) Equals(other Type) bool {
 	return t.Key.Equals(o.Key) && t.Elem.Equals(o.Elem)
 }
 
-// boxKey renders a native map key through its boxed value's String form.
-func boxKey(k any) string {
+// formatKey renders a native map key through its boxed value's String form.
+func formatKey(k any) string {
 	switch v := k.(type) {
 	case int32:
 		return I32(v).String()

@@ -1175,51 +1175,51 @@ func (e *Encoder) encodeMovImmediate(op32, op64 uint32, inst asm.Instruction) ([
 
 // encodeCompareReg emits a register-form compare/test (CMP/CMN/TST → SUBS/ADDS/
 // ANDS with XZR destination).
-func (e *Encoder) encodeCompareReg(base uint32, inst asm.Instruction) ([]byte, error) {
+func (e *Encoder) encodeCompareReg(op uint32, inst asm.Instruction) ([]byte, error) {
 	n, m, err := e.decodeCmp(inst)
 	if err != nil {
 		return nil, err
 	}
-	b, err := intBase(base, n, m)
+	base, err := intBase(op, n, m)
 	if err != nil {
 		return nil, err
 	}
-	return enc(b | reg(m)<<16 | reg(n)<<5), nil
+	return enc(base | reg(m)<<16 | reg(n)<<5), nil
 }
 
 // encodeCompareImm emits an immediate-form compare (CMPI/CMNI).
-func (e *Encoder) encodeCompareImm(base uint32, inst asm.Instruction) ([]byte, error) {
+func (e *Encoder) encodeCompareImm(op uint32, inst asm.Instruction) ([]byte, error) {
 	n, imm, err := e.decodeCmpImm(inst)
 	if err != nil {
 		return nil, err
 	}
-	b, err := intBase(base, n)
+	base, err := intBase(op, n)
 	if err != nil {
 		return nil, err
 	}
-	return enc(b | (uint32(imm)&0xFFF)<<10 | reg(n)<<5), nil
+	return enc(base | (uint32(imm)&0xFFF)<<10 | reg(n)<<5), nil
 }
 
 // encodeLoad emits an unsigned-offset load, scaling the byte offset by the
 // access size.
-func (e *Encoder) encodeLoad(base uint32, scale int64, inst asm.Instruction) ([]byte, error) {
-	d, b, offset, err := e.decodeMemOp(inst)
+func (e *Encoder) encodeLoad(op uint32, scale int64, inst asm.Instruction) ([]byte, error) {
+	dst, base, offset, err := e.decodeMemOp(inst)
 	if err != nil {
 		return nil, err
 	}
 	pimm := uint32(offset/scale) & 0xFFF
-	return enc(base | pimm<<10 | reg(b)<<5 | reg(d)), nil
+	return enc(op | pimm<<10 | reg(base)<<5 | reg(dst)), nil
 }
 
 // encodeStore emits an unsigned-offset store, scaling the byte offset by the
 // access size.
-func (e *Encoder) encodeStore(base uint32, scale int64, inst asm.Instruction) ([]byte, error) {
-	src, b, offset, err := e.decodeStrOp(inst)
+func (e *Encoder) encodeStore(op uint32, scale int64, inst asm.Instruction) ([]byte, error) {
+	src, base, offset, err := e.decodeStrOp(inst)
 	if err != nil {
 		return nil, err
 	}
 	pimm := uint32(offset/scale) & 0xFFF
-	return enc(base | pimm<<10 | reg(b)<<5 | reg(src)), nil
+	return enc(op | pimm<<10 | reg(base)<<5 | reg(src)), nil
 }
 
 // encodeFloatBinary emits a 3-register scalar float op (FADD/FSUB/FMUL/FDIV),
