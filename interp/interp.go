@@ -702,15 +702,13 @@ func (i *Interpreter) keep(val types.Value) int {
 	return i.alloc(val)
 }
 
-// retainVal increments v's refcount when it holds a heap reference.
-func (i *Interpreter) retainVal(v types.Boxed) {
+func (i *Interpreter) retainBox(v types.Boxed) {
 	if v.Kind() == types.KindRef {
 		i.retain(v.Ref())
 	}
 }
 
-// releaseVal decrements v's refcount when it holds a heap reference.
-func (i *Interpreter) releaseVal(v types.Boxed) {
+func (i *Interpreter) releaseBox(v types.Boxed) {
 	if v.Kind() == types.KindRef {
 		i.release(v.Ref())
 	}

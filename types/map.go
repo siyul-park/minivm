@@ -7,24 +7,24 @@ import (
 	"strings"
 )
 
-type Map[K comparable] struct {
+type TypedMap[K comparable] struct {
 	Typ     *MapType
 	Zero    Boxed
 	entries map[K]Boxed
 }
 
-type BoxedMap struct {
+type Map struct {
 	Typ     *MapType
 	Zero    Boxed
-	entries map[BoxedMapKey]BoxedMapEntry
+	entries map[MapKey]MapEntry
 }
 
-type BoxedMapKey struct {
+type MapKey struct {
 	Kind Kind
 	Bits uint64
 }
 
-type BoxedMapEntry struct {
+type MapEntry struct {
 	Key   Boxed
 	Value Boxed
 }
@@ -39,42 +39,42 @@ type MapType struct {
 }
 
 var (
-	_ Traceable = (*BoxedMap)(nil)
-	_ Traceable = (*Map[int32])(nil)
-	_ Traceable = (*Map[int64])(nil)
-	_ Traceable = (*Map[float32])(nil)
-	_ Traceable = (*Map[float64])(nil)
+	_ Traceable = (*Map)(nil)
+	_ Traceable = (*TypedMap[int32])(nil)
+	_ Traceable = (*TypedMap[int64])(nil)
+	_ Traceable = (*TypedMap[float32])(nil)
+	_ Traceable = (*TypedMap[float64])(nil)
 	_ Type      = (*MapType)(nil)
 )
 
-func NewMap[K comparable](typ *MapType, capacity int) *Map[K] {
-	return &Map[K]{Typ: typ, Zero: Zero(typ.ElemKind), entries: make(map[K]Boxed, capacity)}
+func NewTypedMap[K comparable](typ *MapType, capacity int) *TypedMap[K] {
+	return &TypedMap[K]{Typ: typ, Zero: Zero(typ.ElemKind), entries: make(map[K]Boxed, capacity)}
 }
 
-func NewBoxedMap(typ *MapType) *BoxedMap {
-	return NewBoxedMapWithCapacity(typ, 0)
+func NewMap(typ *MapType) *Map {
+	return NewMapWithCapacity(typ, 0)
 }
 
-func NewBoxedMapWithCapacity(typ *MapType, capacity int) *BoxedMap {
-	return &BoxedMap{
+func NewMapWithCapacity(typ *MapType, capacity int) *Map {
+	return &Map{
 		Typ:     typ,
 		Zero:    Zero(typ.ElemKind),
-		entries: make(map[BoxedMapKey]BoxedMapEntry, capacity),
+		entries: make(map[MapKey]MapEntry, capacity),
 	}
 }
 
 func NewMapForType(typ *MapType, capacity int) Value {
 	switch typ.KeyKind {
 	case KindI32:
-		return NewMap[int32](typ, capacity)
+		return NewTypedMap[int32](typ, capacity)
 	case KindI64:
-		return NewMap[int64](typ, capacity)
+		return NewTypedMap[int64](typ, capacity)
 	case KindF32:
-		return NewMap[float32](typ, capacity)
+		return NewTypedMap[float32](typ, capacity)
 	case KindF64:
-		return NewMap[float64](typ, capacity)
+		return NewTypedMap[float64](typ, capacity)
 	default:
-		return NewBoxedMapWithCapacity(typ, capacity)
+		return NewMapWithCapacity(typ, capacity)
 	}
 }
 
@@ -89,24 +89,24 @@ func NewMapType(key Type, elem Type) *MapType {
 	}
 }
 
-func (m *Map[K]) Kind() Kind { return KindRef }
+func (m *TypedMap[K]) Kind() Kind { return KindRef }
 
-func (m *Map[K]) Type() Type { return m.Typ }
+func (m *TypedMap[K]) Type() Type { return m.Typ }
 
-func (m *Map[K]) Len() int { return len(m.entries) }
+func (m *TypedMap[K]) Len() int { return len(m.entries) }
 
-func (m *Map[K]) Get(key K) (Boxed, bool) {
+func (m *TypedMap[K]) Get(key K) (Boxed, bool) {
 	value, ok := m.entries[key]
 	return value, ok
 }
 
-func (m *Map[K]) Set(key K, value Boxed) (Boxed, bool) {
+func (m *TypedMap[K]) Set(key K, value Boxed) (Boxed, bool) {
 	old, ok := m.entries[key]
 	m.entries[key] = value
 	return old, ok
 }
 
-func (m *Map[K]) Delete(key K) (Boxed, bool) {
+func (m *TypedMap[K]) Delete(key K) (Boxed, bool) {
 	old, ok := m.entries[key]
 	if ok {
 		delete(m.entries, key)
@@ -114,20 +114,20 @@ func (m *Map[K]) Delete(key K) (Boxed, bool) {
 	return old, ok
 }
 
-func (m *Map[K]) Range(fn func(K, Boxed)) {
+func (m *TypedMap[K]) Range(fn func(K, Boxed)) {
 	for key, value := range m.entries {
 		fn(key, value)
 	}
 }
 
-func (m *Map[K]) Clear(fn func(Boxed)) {
+func (m *TypedMap[K]) Clear(fn func(Boxed)) {
 	for key, value := range m.entries {
 		fn(value)
 		delete(m.entries, key)
 	}
 }
 
-func (m *Map[K]) String() string {
+func (m *TypedMap[K]) String() string {
 	parts := make([]string, 0, m.Len())
 	m.Range(func(key K, value Boxed) {
 		parts = append(parts, fmt.Sprintf("%s: %s", formatKey(any(key)), value.String()))
@@ -136,7 +136,7 @@ func (m *Map[K]) String() string {
 	return fmt.Sprintf("%s{%s}", m.Typ, strings.Join(parts, ", "))
 }
 
-func (m *Map[K]) Refs() []Ref {
+func (m *TypedMap[K]) Refs() []Ref {
 	if !m.Typ.TraceValues {
 		return nil
 	}
@@ -152,24 +152,24 @@ func (m *Map[K]) Refs() []Ref {
 	return refs
 }
 
-func (m *BoxedMap) Kind() Kind { return KindRef }
+func (m *Map) Kind() Kind { return KindRef }
 
-func (m *BoxedMap) Type() Type { return m.Typ }
+func (m *Map) Type() Type { return m.Typ }
 
-func (m *BoxedMap) Len() int { return len(m.entries) }
+func (m *Map) Len() int { return len(m.entries) }
 
-func (m *BoxedMap) Get(key BoxedMapKey) (BoxedMapEntry, bool) {
+func (m *Map) Get(key MapKey) (MapEntry, bool) {
 	entry, ok := m.entries[key]
 	return entry, ok
 }
 
-func (m *BoxedMap) Set(key BoxedMapKey, entry BoxedMapEntry) (BoxedMapEntry, bool) {
+func (m *Map) Set(key MapKey, entry MapEntry) (MapEntry, bool) {
 	old, ok := m.entries[key]
 	m.entries[key] = entry
 	return old, ok
 }
 
-func (m *BoxedMap) Delete(key BoxedMapKey) (BoxedMapEntry, bool) {
+func (m *Map) Delete(key MapKey) (MapEntry, bool) {
 	old, ok := m.entries[key]
 	if ok {
 		delete(m.entries, key)
@@ -177,29 +177,29 @@ func (m *BoxedMap) Delete(key BoxedMapKey) (BoxedMapEntry, bool) {
 	return old, ok
 }
 
-func (m *BoxedMap) Range(fn func(BoxedMapKey, BoxedMapEntry)) {
+func (m *Map) Range(fn func(MapKey, MapEntry)) {
 	for key, entry := range m.entries {
 		fn(key, entry)
 	}
 }
 
-func (m *BoxedMap) Clear(fn func(BoxedMapEntry)) {
+func (m *Map) Clear(fn func(MapEntry)) {
 	for key, entry := range m.entries {
 		fn(entry)
 		delete(m.entries, key)
 	}
 }
 
-func (m *BoxedMap) String() string {
+func (m *Map) String() string {
 	parts := make([]string, 0, m.Len())
-	m.Range(func(key BoxedMapKey, entry BoxedMapEntry) {
+	m.Range(func(key MapKey, entry MapEntry) {
 		parts = append(parts, fmt.Sprintf("%s: %s", key.String(), entry.Value.String()))
 	})
 	sort.Strings(parts)
 	return fmt.Sprintf("%s{%s}", m.Typ, strings.Join(parts, ", "))
 }
 
-func (m *BoxedMap) Refs() []Ref {
+func (m *Map) Refs() []Ref {
 	traceKeys := m.Typ.TraceKeys
 	traceValues := m.Typ.TraceValues
 	if !traceKeys && !traceValues {
@@ -223,7 +223,7 @@ func (m *BoxedMap) Refs() []Ref {
 	return refs
 }
 
-func (k BoxedMapKey) String() string {
+func (k MapKey) String() string {
 	switch k.Kind {
 	case KindI32:
 		return BoxI32(int32(k.Bits)).String()
