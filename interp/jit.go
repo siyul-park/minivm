@@ -44,9 +44,9 @@ type jitTrace struct {
 }
 
 type jitRun struct {
-	c    *jitCompiler
-	a    *asm.Assembler
-	code []byte
+	compiler *jitCompiler
+	a        *asm.Assembler
+	code     []byte
 
 	labels  map[int]int
 	entries map[int]jitEntry
@@ -70,15 +70,15 @@ type jitSeg struct {
 	r *jitRun
 
 	assembler *asm.Assembler
+
 	code      []byte
 	constants []types.Boxed
 	labels    map[int]int
 
-	start int
-	end   int
-	ip    int
-	force bool
-
+	start   int
+	end     int
+	ip      int
+	force   bool
 	stack   []asm.VReg
 	params  []asm.VReg
 	facts   map[int]types.Kind
@@ -136,10 +136,10 @@ func (c *jitCompiler) Compile(code []byte) []func(*Interpreter) {
 
 	c.assembler.Reset()
 	r := &jitRun{
-		c:       c,
-		a:       c.assembler,
-		code:    plan.code,
-		entries: make(map[int]jitEntry),
+		compiler: c,
+		a:        c.assembler,
+		code:     plan.code,
+		entries:  make(map[int]jitEntry),
 	}
 	r.assign(plan.blocks)
 	objs := r.compile(plan)
@@ -270,23 +270,13 @@ func (c *jitCompiler) traces(plan jitPlan) []jitTrace {
 		eligible[b] = true
 	}
 
-	// adjacent reports whether b flows straight into its single successor: one
-	// successor block that begins exactly where b ends.
-	adjacent := func(b *analysis.BasicBlock) (*analysis.BasicBlock, bool) {
-		if len(b.Succs) != 1 {
-			return nil, false
-		}
-		next := plan.blocks[b.Succs[0]]
-		return next, b.End == next.Start
-	}
-
 	used := make(map[*analysis.BasicBlock]bool, len(plan.hot))
 	traces := make([]jitTrace, 0, len(plan.hot))
 	appendTrace := func(first *analysis.BasicBlock) {
 		trace := jitTrace{blocks: []*analysis.BasicBlock{first}}
 		used[first] = true
 		for current := first; ; {
-			next, ok := adjacent(current)
+			next, ok := plan.adjacent(current)
 			if !ok || used[next] || !eligible[next] {
 				break
 			}
@@ -297,23 +287,8 @@ func (c *jitCompiler) traces(plan jitPlan) []jitTrace {
 		traces = append(traces, trace)
 	}
 
-	// absorbed reports whether an eligible block flows straight into b, in which
-	// case b becomes a trace body rather than a head.
-	absorbed := func(b *analysis.BasicBlock) bool {
-		for _, p := range b.Preds {
-			if p < 0 || p >= len(plan.blocks) {
-				continue
-			}
-			prev := plan.blocks[p]
-			if next, ok := adjacent(prev); ok && eligible[prev] && next == b {
-				return true
-			}
-		}
-		return false
-	}
-
 	for _, first := range plan.hot {
-		if !used[first] && !absorbed(first) {
+		if !used[first] && !plan.absorbed(first, eligible) {
 			appendTrace(first)
 		}
 	}
@@ -323,6 +298,31 @@ func (c *jitCompiler) traces(plan jitPlan) []jitTrace {
 		}
 	}
 	return traces
+}
+
+// adjacent reports whether b flows straight into its single successor: one
+// successor block that begins exactly where b ends.
+func (p jitPlan) adjacent(b *analysis.BasicBlock) (*analysis.BasicBlock, bool) {
+	if len(b.Succs) != 1 {
+		return nil, false
+	}
+	next := p.blocks[b.Succs[0]]
+	return next, b.End == next.Start
+}
+
+// absorbed reports whether an eligible block flows straight into b, in which
+// case b becomes a trace body rather than a head.
+func (p jitPlan) absorbed(b *analysis.BasicBlock, eligible map[*analysis.BasicBlock]bool) bool {
+	for _, pred := range b.Preds {
+		if pred < 0 || pred >= len(p.blocks) {
+			continue
+		}
+		prev := p.blocks[pred]
+		if next, ok := p.adjacent(prev); ok && eligible[prev] && next == b {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *jitRun) assign(blocks []*analysis.BasicBlock) {
@@ -418,7 +418,7 @@ func (r *jitRun) segment(start, end int, force bool, boundaries []int) (*asm.Rel
 		r:         r,
 		assembler: r.a,
 		code:      r.code,
-		constants: r.c.constants,
+		constants: r.compiler.constants,
 		labels:    r.labels,
 		start:     start,
 		end:       end,
@@ -586,7 +586,7 @@ func (s *jitSeg) can(end, count int) (bool, bool) {
 	if count == 0 {
 		return false, false
 	}
-	if !s.force && count < s.r.c.cutoff {
+	if !s.force && count < s.r.compiler.cutoff {
 		return false, false
 	}
 	if !s.force && s.hot(s.start, end) == 0 {
@@ -596,15 +596,15 @@ func (s *jitSeg) can(end, count int) (bool, bool) {
 }
 
 func (s *jitSeg) hot(start, end int) uint64 {
-	return s.r.c.profile.Range(s.r.c.addr, start, end)
+	return s.r.compiler.profile.Range(s.r.compiler.addr, start, end)
 }
 
 func (s *jitSeg) abort(skip bool) {
 	s.assembler.Abort()
 	if skip {
-		s.r.c.profile.JITSkip()
+		s.r.compiler.profile.JITSkip()
 	} else {
-		s.r.c.profile.JITAbort()
+		s.r.compiler.profile.JITAbort()
 	}
 }
 
@@ -614,11 +614,11 @@ func (s *jitSeg) compile(next int, stop bool) (*asm.RelocObject, int, bool) {
 	obj, err := s.assembler.Compile()
 	if err != nil {
 		s.assembler.Abort()
-		s.r.c.profile.JITError()
+		s.r.compiler.profile.JITError()
 		return nil, next, false
 	}
 
-	s.r.c.profile.JITEmit(obj.Chunk.Size())
+	s.r.compiler.profile.JITEmit(obj.Chunk.Size())
 	return obj, next, stop
 }
 
@@ -626,11 +626,8 @@ func (s *jitSeg) compile(next int, stop bool) (*asm.RelocObject, int, bool) {
 // registers them as Site(0). The only place the assembler learns the VM's
 // eval-stack-derived call convention.
 func (s *jitSeg) finalize() {
-	for i, v := range s.params {
-		_ = s.assembler.Pin(v, asm.NewPReg(uint8(i), v.Type(), v.Width()))
-	}
 	if len(s.params) > 0 {
-		s.assembler.Site(0, s.params)
+		s.pin(s.params, 0)
 	}
 }
 
@@ -639,11 +636,17 @@ func (s *jitSeg) finalize() {
 // specific ret() helpers.
 func (s *jitSeg) pinReturn() int {
 	idx := s.assembler.Index()
-	for i, v := range s.stack {
+	s.pin(s.stack, idx)
+	return idx
+}
+
+// pin maps each reg to the ABI slot at its index and registers them as the
+// Site for the given instruction index.
+func (s *jitSeg) pin(regs []asm.VReg, site int) {
+	for i, v := range regs {
 		_ = s.assembler.Pin(v, asm.NewPReg(uint8(i), v.Type(), v.Width()))
 	}
-	s.assembler.Site(idx, s.stack)
-	return idx
+	s.assembler.Site(site, regs)
 }
 
 func (s *jitSeg) edge(target int) (int, int) {
@@ -659,7 +662,7 @@ func (s *jitSeg) edge(target int) (int, int) {
 }
 
 func (s *jitSeg) global(idx int) (int16, bool) {
-	if idx < 0 || idx >= len(s.r.c.globals) {
+	if idx < 0 || idx >= len(s.r.compiler.globals) {
 		return 0, false
 	}
 	offset := int16(idx * 8)
@@ -670,7 +673,7 @@ func (s *jitSeg) global(idx int) (int16, bool) {
 }
 
 func (s *jitSeg) local(idx int) (types.Type, bool) {
-	c := s.r.c
+	c := s.r.compiler
 	if c.addr <= 0 || c.addr >= len(c.heap) {
 		return nil, false
 	}
@@ -691,7 +694,7 @@ func (s *jitSeg) local(idx int) (types.Type, bool) {
 }
 
 func (s *jitSeg) regKind(r asm.Reg) (types.Kind, bool) {
-	return s.r.c.regKind(r)
+	return s.r.compiler.regKind(r)
 }
 
 func (c *jitCompiler) closure(fn asm.Caller, pregs []asm.PReg, sig *asm.Signature) func(*Interpreter) {
