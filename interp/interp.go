@@ -156,11 +156,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	var fuel int64 = -1
 	if opt.fuel > 0 {
 		ticks := (opt.fuel-1)/uint64(opt.tick) + 1
-		m := uint64(1<<63 - 1)
-		if ticks > m {
-			fuel = int64(m)
-		}
-		fuel = int64(ticks)
+		fuel = int64(min(ticks, 1<<63-1))
 	}
 
 	var threshold int64 = int64(opt.threshold)
@@ -319,11 +315,11 @@ func (i *Interpreter) Context() context.Context {
 }
 
 func (i *Interpreter) Func() int {
-	return i.frame().addr
+	return i.fr.addr
 }
 
 func (i *Interpreter) IP() int {
-	return i.frame().ip
+	return i.fr.ip
 }
 
 func (i *Interpreter) FP() int {
@@ -374,7 +370,7 @@ func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
 }
 
 func (i *Interpreter) Local(idx int) (types.Boxed, error) {
-	f := i.frame()
+	f := i.fr
 	addr := f.bp + idx
 	if addr < 0 || addr >= i.sp {
 		return 0, ErrSegmentationFault
@@ -383,7 +379,7 @@ func (i *Interpreter) Local(idx int) (types.Boxed, error) {
 }
 
 func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
-	f := i.frame()
+	f := i.fr
 	addr := f.bp + idx
 	if addr < 0 || addr >= i.sp {
 		return ErrSegmentationFault
@@ -551,12 +547,8 @@ func (i *Interpreter) jit(addr int) error {
 	return nil
 }
 
-func (i *Interpreter) frame() *frame {
-	return i.fr
-}
-
 func (i *Interpreter) error(r any) error {
-	ip := i.frame().ip
+	ip := i.fr.ip
 	switch e := r.(type) {
 	case error:
 		return fmt.Errorf("%w: at=%d", e, ip)
@@ -665,21 +657,13 @@ func (i *Interpreter) unbox(val types.Boxed) types.Value {
 }
 
 func (i *Interpreter) alloc(val types.Value) int {
-	if len(i.free) > 0 {
-		addr := i.free[len(i.free)-1]
-		i.free = i.free[:len(i.free)-1]
-		i.heap[addr] = val
-		i.rc[addr] = 1
+	if addr, ok := i.reuse(val); ok {
 		return addr
 	}
 
 	if len(i.heap) == cap(i.heap) {
 		i.gc()
-		if len(i.free) > 0 {
-			addr := i.free[len(i.free)-1]
-			i.free = i.free[:len(i.free)-1]
-			i.heap[addr] = val
-			i.rc[addr] = 1
+		if addr, ok := i.reuse(val); ok {
 			return addr
 		}
 
@@ -699,6 +683,17 @@ func (i *Interpreter) alloc(val types.Value) int {
 	i.heap = append(i.heap, val)
 	i.rc = append(i.rc, 1)
 	return len(i.heap) - 1
+}
+
+func (i *Interpreter) reuse(val types.Value) (int, bool) {
+	if len(i.free) == 0 {
+		return 0, false
+	}
+	addr := i.free[len(i.free)-1]
+	i.free = i.free[:len(i.free)-1]
+	i.heap[addr] = val
+	i.rc[addr] = 1
+	return addr, true
 }
 
 func (i *Interpreter) keep(val types.Value) int {
