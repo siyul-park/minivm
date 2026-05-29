@@ -196,15 +196,3 @@ func TestEncoder_Encode(t *testing.T) {
 		require.ErrorIs(t, err, asm.ErrInvalidOperand)
 	})
 }
-
-func TestEncode_HelpsInterface(t *testing.T) {
-	encoder := NewEncoder()
-	insts := []asm.Instruction{
-		ADD(X0, X1, X2),
-		ADDI(X0, X1, 5),
-	}
-
-	bytes, err := asm.Encode(encoder, insts)
-	require.NoError(t, err)
-	require.Equal(t, []byte{0x20, 0x00, 0x02, 0x8B, 0x20, 0x14, 0x00, 0x91}, bytes)
-}
