@@ -84,20 +84,21 @@ func (a *Assembler) Emit(insts ...Instruction) {
 	a.insts = append(a.insts, insts...)
 }
 
-// Build finalizes the instruction list into a Code: runs regalloc, encodes
-// every instruction, and resolves intra-Code label references. External
-// label references survive in Code.Relocs for Link to patch.
+// Build finalizes the instruction list into a Code: rewrites operands
+// from virtual to physical registers, encodes every instruction, and
+// resolves intra-Code label references. External label references survive
+// in Code.Relocs for Link to patch.
 func (a *Assembler) Build(sig Signature) (*Code, error) {
 	if a.err != nil {
 		return nil, a.err
 	}
 
-	sc := newScanner(a.arch.Registers(), a.insts, a.pins)
-	if err := sc.run(a.insts); err != nil {
+	rw := newRewriter(a.arch.Registers(), a.insts, a.pins)
+	rewritten, err := rw.run(a.insts)
+	if err != nil {
 		return nil, err
 	}
 
-	rewritten := rewrite(a.insts, sc.assigned, sc.widths)
 	bytes, byteLabels, relocs, err := encode(a.arch.Encoder(), rewritten, a.labels)
 	if err != nil {
 		return nil, err
