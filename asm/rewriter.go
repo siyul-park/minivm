@@ -10,8 +10,8 @@ import "fmt"
 // run is a single API call but the work is split internally into two
 // passes — first build the persistent vreg → preg assignment, then
 // substitute operands using that assignment. Splitting the passes lets
-// rewrite see the assignment of any vreg even after a pin-preemption has
-// evicted the original holder from the pool.
+// rewriteInst see the assignment of any vreg even after a pin-preemption
+// has evicted the original holder from the pool.
 type rewriter struct {
 	pool     *regAlloc
 	pins     map[int32]PReg
@@ -44,13 +44,14 @@ func (r *rewriter) run(insts []Instruction) ([]Instruction, error) {
 	if err := r.assign(insts); err != nil {
 		return nil, err
 	}
-	return r.rewriteAll(insts), nil
+	return r.rewrite(insts), nil
 }
 
 // assign walks insts in order, binding vregs as they are first used or
 // defined and releasing them once their last use has been processed. The
 // persistent assigned map records every vreg's binding; the pool releases
-// dead vregs so later vregs can claim their slots.
+// dead vregs so later vregs can claim their slots. Final pass fills any
+// widths still undefined from pin metadata.
 func (r *rewriter) assign(insts []Instruction) error {
 	for i, inst := range insts {
 		for _, v := range inst.Uses() {
@@ -69,7 +70,11 @@ func (r *rewriter) assign(insts []Instruction) error {
 			}
 		}
 	}
-	r.backfillPinWidths()
+	for id, pr := range r.pins {
+		if w, ok := r.widths[id]; !ok || w == WidthUndefined {
+			r.widths[id] = pr.Width()
+		}
+	}
 	return nil
 }
 
@@ -108,28 +113,24 @@ func (r *rewriter) recordWidth(v VReg) {
 	r.widths[v.ID()] = v.Width()
 }
 
-func (r *rewriter) backfillPinWidths() {
-	for id, pr := range r.pins {
-		if w, ok := r.widths[id]; !ok || w == WidthUndefined {
-			r.widths[id] = pr.Width()
-		}
-	}
-}
-
-// rewriteAll returns a copy of insts with every VReg / MemOperand-base
+// rewrite returns a copy of insts with every VReg / MemOperand-base
 // rewritten to its assigned PReg.
-func (r *rewriter) rewriteAll(insts []Instruction) []Instruction {
+func (r *rewriter) rewrite(insts []Instruction) []Instruction {
 	out := make([]Instruction, len(insts))
 	for i, inst := range insts {
-		out[i] = Instruction{
-			Op:   inst.Op,
-			Dst:  r.rewriteOp(inst.Dst),
-			Src1: r.rewriteOp(inst.Src1),
-			Src2: r.rewriteOp(inst.Src2),
-			Src3: r.rewriteOp(inst.Src3),
-		}
+		out[i] = r.rewriteInst(inst)
 	}
 	return out
+}
+
+func (r *rewriter) rewriteInst(inst Instruction) Instruction {
+	return Instruction{
+		Op:   inst.Op,
+		Dst:  r.rewriteOp(inst.Dst),
+		Src1: r.rewriteOp(inst.Src1),
+		Src2: r.rewriteOp(inst.Src2),
+		Src3: r.rewriteOp(inst.Src3),
+	}
 }
 
 func (r *rewriter) rewriteOp(op Operand) Operand {

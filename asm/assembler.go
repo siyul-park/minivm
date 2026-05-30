@@ -99,7 +99,7 @@ func (a *Assembler) Build(sig Signature) (*Code, error) {
 		return nil, err
 	}
 
-	bytes, byteLabels, relocs, err := encode(a.arch.Encoder(), rewritten, a.labels)
+	bytes, byteLabels, relocs, err := a.emit(rewritten)
 	if err != nil {
 		return nil, err
 	}
@@ -117,4 +117,96 @@ func (a *Assembler) Build(sig Signature) (*Code, error) {
 		}
 	}
 	return code, nil
+}
+
+// emit produces the final byte stream from a sequence of phys-allocated
+// instructions. It runs in two passes: emitDraft encodes each instruction
+// with placeholder zeros for label operands and records cumulative byte
+// offsets, emitFinal patches intra-Code label references and records
+// external ones as Relocations for the linker to resolve.
+func (a *Assembler) emit(insts []Instruction) ([]byte, map[Label]int, []Relocation, error) {
+	encoded, offsets, err := a.emitDraft(insts)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	byteLabels := make(map[Label]int, len(a.labels))
+	for id, idx := range a.labels {
+		byteLabels[id] = offsets[idx]
+	}
+
+	out, relocs, err := a.emitFinal(insts, encoded, offsets, byteLabels)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return out, byteLabels, relocs, nil
+}
+
+// emitDraft encodes each instruction with #0 substituted for label
+// operands so widths can be measured without knowing label offsets.
+func (a *Assembler) emitDraft(insts []Instruction) ([][]byte, []int, error) {
+	enc := a.arch.Encoder()
+	encoded := make([][]byte, len(insts))
+	offsets := make([]int, len(insts)+1)
+
+	for i, inst := range insts {
+		if inst.Op == OpPseudoLabel {
+			offsets[i+1] = offsets[i]
+			continue
+		}
+		toEncode := inst
+		if _, ok := toEncode.Src2.(LabelOperand); ok {
+			toEncode.Src2 = Imm(0)
+		}
+		bytes, err := enc.Encode(toEncode)
+		if err != nil {
+			return nil, nil, err
+		}
+		encoded[i] = bytes
+		offsets[i+1] = offsets[i] + len(bytes)
+	}
+	return encoded, offsets, nil
+}
+
+// emitFinal walks the encoded list, patching intra-Code label references
+// with their resolved delta and recording external references as
+// Relocations the linker will patch later.
+func (a *Assembler) emitFinal(
+	insts []Instruction,
+	encoded [][]byte,
+	offsets []int,
+	byteLabels map[Label]int,
+) ([]byte, []Relocation, error) {
+	enc := a.arch.Encoder()
+	out := make([]byte, 0, offsets[len(insts)])
+	var relocs []Relocation
+	for i, inst := range insts {
+		if inst.Op == OpPseudoLabel {
+			continue
+		}
+		lbl, isLabel := inst.Src2.(LabelOperand)
+		if !isLabel {
+			out = append(out, encoded[i]...)
+			continue
+		}
+		target, intra := byteLabels[lbl.ID]
+		if !intra {
+			relocs = append(relocs, Relocation{
+				InstrIdx: i,
+				Offset:   offsets[i],
+				Label:    lbl.ID,
+				Inst:     inst,
+			})
+			out = append(out, encoded[i]...)
+			continue
+		}
+		patched := inst
+		patched.Src2 = Imm(int64(target - offsets[i]))
+		bytes, err := enc.Encode(patched)
+		if err != nil {
+			return nil, nil, err
+		}
+		out = append(out, bytes...)
+	}
+	return out, relocs, nil
 }
