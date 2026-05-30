@@ -3,6 +3,8 @@
 package amd64
 
 import (
+	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/asm/amd64"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/jit"
 	"github.com/siyul-park/minivm/types"
@@ -10,6 +12,10 @@ import (
 
 type Lowerer struct{}
 
+var theArch = amd64.New()
+
+func (Lowerer) Arch() asm.Arch                             { return theArch }
 func (Lowerer) Prologue(_ *jit.Context, _ *types.Function) {}
 func (Lowerer) Epilogue(_ *jit.Context)                    {}
 func (Lowerer) Lower(_ *jit.Context, _ instr.Opcode) bool  { return false }
+func (Lowerer) Exit(_ *jit.Context, _ int)                 {}

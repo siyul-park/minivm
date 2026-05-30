@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"unsafe"
 
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
@@ -565,10 +566,41 @@ func (i *Interpreter) function(addr int) (*types.Function, bool) {
 }
 
 // adaptSegment wraps a native segment Callable in a threaded-style
-// closure. Until real lowering is enabled this path is unreachable
-// because Compile always returns an empty Segments map.
-func (i *Interpreter) adaptSegment(_ asm.Callable, _ *jit.Module) func(*Interpreter) {
-	return func(_ *Interpreter) {}
+// closure. The closure marshals the interpreter's stack base, current sp,
+// globals base, and constants base into the trampoline scratch slots; on
+// return it reads the segment's chosen next IP back out of the last slot.
+//
+// Scratch slot conventions (must match jit/arm64/lowerer.go):
+//
+//	0 → &i.stack[0]
+//	1 → i.sp (in/out)
+//	2 → &i.globals[0]
+//	3 → &i.constants[0]
+//	4 → next IP (out)
+func (i *Interpreter) adaptSegment(callable asm.Callable, _ *jit.Module) func(*Interpreter) {
+	scratch := make([]uint64, 5)
+	return func(i *Interpreter) {
+		scratch[0] = stackBase(i.stack)
+		scratch[1] = uint64(i.sp)
+		scratch[2] = stackBase(i.globals)
+		scratch[3] = stackBase(i.constants)
+		scratch[4] = 0
+		if _, err := callable.Call(nil, scratch); err != nil {
+			panic(err)
+		}
+		i.sp = int(scratch[1])
+		i.fr.ip = int(scratch[4])
+	}
+}
+
+// stackBase returns the address of the first slot in s as a uintptr packed
+// into a uint64. Returns 0 for an empty slice so native code receives a
+// well-defined sentinel rather than a wild pointer.
+func stackBase(s []types.Boxed) uint64 {
+	if len(s) == 0 {
+		return 0
+	}
+	return uint64(uintptr(unsafe.Pointer(&s[0])))
 }
 
 func (i *Interpreter) error(r any) error {

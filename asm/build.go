@@ -54,11 +54,13 @@ func build(
 func assignRegs(info RegInfo, insts []Instruction, pins map[int32]PReg) (map[int32]PReg, error) {
 	ra := newRegAlloc(info)
 
-	// Block the architecture's scratch set so regalloc never picks one.
+	// Exclude the architecture's scratch set from auto-alloc. The scratch
+	// registers remain reservable via Pin so lowerers can route VM
+	// context pointers through them.
 	for i := uint8(0); i < 64; i++ {
 		if info.Scratch.Contains(i) {
-			ra.block(NewPReg(i, RegTypeInt, Width64))
-			ra.block(NewPReg(i, RegTypeFloat, Width64))
+			ra.exclude(NewPReg(i, RegTypeInt, Width64))
+			ra.exclude(NewPReg(i, RegTypeFloat, Width64))
 		}
 	}
 

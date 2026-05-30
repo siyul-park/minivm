@@ -1,14 +1,23 @@
 package asm
 
-// regAlloc is the assembler's internal linear-scan allocator. It is private
-// because callers should not be reaching past Assembler.Pin.
+// regAlloc is the assembler's internal linear-scan allocator. It is
+// package-private because callers should not be reaching past Assembler.Pin.
+//
+// Three masks govern selection:
+//
+//   - avail: physical registers free to be drawn by alloc.
+//   - excluded: registers withheld from auto-alloc but still reservable
+//     via Pin (for example, ABI scratch).
+//   - blocked: registers that may not be used at all (FP, LR, etc.).
 type regAlloc struct {
-	info         RegInfo
-	phys         map[int32]PReg
-	intAvail     RegMask
-	floatAvail   RegMask
-	blockedInt   RegMask
-	blockedFloat RegMask
+	info        RegInfo
+	phys        map[int32]PReg
+	intAvail    RegMask
+	floatAvail  RegMask
+	intExcluded RegMask
+	fltExcluded RegMask
+	intBlocked  RegMask
+	fltBlocked  RegMask
 }
 
 func newRegAlloc(info RegInfo) *regAlloc {
@@ -25,9 +34,9 @@ func (ra *regAlloc) alloc(vreg VReg) (PReg, error) {
 		return phys, nil
 	}
 
-	mask := ra.intAvail &^ ra.blockedInt
+	mask := ra.intAvail &^ ra.intExcluded &^ ra.intBlocked
 	if vreg.Type() == RegTypeFloat {
-		mask = ra.floatAvail &^ ra.blockedFloat
+		mask = ra.floatAvail &^ ra.fltExcluded &^ ra.fltBlocked
 	}
 
 	id := mask.First()
@@ -35,12 +44,10 @@ func (ra *regAlloc) alloc(vreg VReg) (PReg, error) {
 		return PReg{}, ErrNoRegistersAvailable
 	}
 
-	_, newMask := mask.PopFirst()
-
 	if vreg.Type() == RegTypeFloat {
-		ra.floatAvail = newMask
+		ra.floatAvail = ra.floatAvail.Clear(id)
 	} else {
-		ra.intAvail = newMask
+		ra.intAvail = ra.intAvail.Clear(id)
 	}
 
 	p := NewPReg(id, vreg.Type(), vreg.Width())
@@ -58,12 +65,12 @@ func (ra *regAlloc) reserve(vreg VReg, preg PReg) error {
 	}
 
 	if preg.Type() == RegTypeFloat {
-		if !ra.floatAvail.Contains(preg.ID()) || ra.blockedFloat.Contains(preg.ID()) {
+		if ra.fltBlocked.Contains(preg.ID()) {
 			return ErrNoRegistersAvailable
 		}
 		ra.floatAvail = ra.floatAvail.Clear(preg.ID())
 	} else {
-		if !ra.intAvail.Contains(preg.ID()) || ra.blockedInt.Contains(preg.ID()) {
+		if ra.intBlocked.Contains(preg.ID()) {
 			return ErrNoRegistersAvailable
 		}
 		ra.intAvail = ra.intAvail.Clear(preg.ID())
@@ -82,11 +89,11 @@ func (ra *regAlloc) free(vreg VReg) {
 
 	switch preg.Type() {
 	case RegTypeFloat:
-		if !ra.blockedFloat.Contains(preg.ID()) {
+		if !ra.fltBlocked.Contains(preg.ID()) {
 			ra.floatAvail = ra.floatAvail.Set(preg.ID())
 		}
 	default:
-		if !ra.blockedInt.Contains(preg.ID()) {
+		if !ra.intBlocked.Contains(preg.ID()) {
 			ra.intAvail = ra.intAvail.Set(preg.ID())
 		}
 	}
@@ -95,10 +102,19 @@ func (ra *regAlloc) free(vreg VReg) {
 func (ra *regAlloc) block(preg PReg) {
 	switch preg.Type() {
 	case RegTypeFloat:
-		ra.blockedFloat = ra.blockedFloat.Set(preg.ID())
+		ra.fltBlocked = ra.fltBlocked.Set(preg.ID())
 		ra.floatAvail = ra.floatAvail.Clear(preg.ID())
 	default:
-		ra.blockedInt = ra.blockedInt.Set(preg.ID())
+		ra.intBlocked = ra.intBlocked.Set(preg.ID())
 		ra.intAvail = ra.intAvail.Clear(preg.ID())
+	}
+}
+
+func (ra *regAlloc) exclude(preg PReg) {
+	switch preg.Type() {
+	case RegTypeFloat:
+		ra.fltExcluded = ra.fltExcluded.Set(preg.ID())
+	default:
+		ra.intExcluded = ra.intExcluded.Set(preg.ID())
 	}
 }
