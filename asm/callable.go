@@ -1,6 +1,9 @@
 package asm
 
-import "unsafe"
+import (
+	"errors"
+	"unsafe"
+)
 
 // Callable is a fully linked, directly invokable entry into the executable
 // buffer. Implementations are produced by ABI.NewCallable and returned from
@@ -10,3 +13,5 @@ type Callable interface {
 	Call(args []Value, scratch []uint64) (returns []Value, err error)
 	Addr() unsafe.Pointer
 }
+
+var ErrInvalidArgs = errors.New("invalid arguments")

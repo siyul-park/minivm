@@ -1,6 +1,9 @@
 package asm
 
-import "unsafe"
+import (
+	"errors"
+	"unsafe"
+)
 
 // ABI describes a target architecture's call boundary policy: which physical
 // registers carry args/returns and what trampoline binds a Code to a
@@ -27,3 +30,8 @@ type ABI interface {
 	// outlives every Call.
 	NewCallable(sig Signature, addr unsafe.Pointer) (Callable, error)
 }
+
+var (
+	ErrTooManyArgs    = errors.New("too many args")
+	ErrTooManyReturns = errors.New("too many returns")
+)

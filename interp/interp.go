@@ -617,16 +617,6 @@ func (i *Interpreter) adaptSegment(callable asm.Callable, _ *jit.Module) func(*I
 	}
 }
 
-// stackBase returns the address of the first slot in s as a uintptr packed
-// into a uint64. Returns 0 for an empty slice so native code receives a
-// well-defined sentinel rather than a wild pointer.
-func stackBase(s []types.Boxed) uint64 {
-	if len(s) == 0 {
-		return 0
-	}
-	return uint64(uintptr(unsafe.Pointer(&s[0])))
-}
-
 func (i *Interpreter) error(r any) error {
 	ip := i.fr.ip
 	switch e := r.(type) {
@@ -926,4 +916,14 @@ func unboxRef[T types.Value](i *Interpreter, val types.Boxed) T {
 	}
 	i.release(addr)
 	return v
+}
+
+// stackBase returns the address of the first slot in s as a uintptr packed
+// into a uint64. Returns 0 for an empty slice so native code receives a
+// well-defined sentinel rather than a wild pointer.
+func stackBase(s []types.Boxed) uint64 {
+	if len(s) == 0 {
+		return 0
+	}
+	return uint64(uintptr(unsafe.Pointer(&s[0])))
 }

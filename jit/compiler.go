@@ -18,6 +18,9 @@ type Compiler struct {
 	cutoff  int
 }
 
+// Option mutates the Compiler's config at construction time.
+type Option func(*config)
+
 type config struct {
 	lowerer Lowerer
 	arch    asm.Arch
@@ -25,9 +28,6 @@ type config struct {
 	data    *asm.Data
 	cutoff  int
 }
-
-// Option mutates the Compiler's config at construction time.
-type Option func(*config)
 
 // WithBuffer overrides the default executable buffer.
 func WithBuffer(b *asm.Buffer) Option { return func(c *config) { c.buffer = b } }

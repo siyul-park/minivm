@@ -13,6 +13,9 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// Lowerer is the AArch64 opcode emitter.
+type Lowerer struct{}
+
 // Scratch slot assignments for every Phase A segment. The interp adapter
 // fills slots 0..3 before the trampoline call and reads slots 1 and 4 back
 // afterwards. CONST_GET emits the constant inline at compile time, so the
@@ -25,10 +28,10 @@ const (
 	scratchNext   = 4 // X14 — segment's next IP (out)
 )
 
-// Lowerer is the AArch64 opcode emitter.
-type Lowerer struct{}
-
-var theArch = arm64.New()
+var (
+	_       jit.Lowerer = Lowerer{}
+	theArch             = arm64.New()
+)
 
 // Arch returns the asm.Arch the compiler should use when targeting this
 // backend.

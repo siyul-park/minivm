@@ -1,6 +1,7 @@
 package asm
 
 import (
+	"errors"
 	"fmt"
 	"unsafe"
 )
@@ -10,6 +11,8 @@ import (
 // or a host function). Implementations may return ErrUnresolvedLabel to
 // signal a hard miss.
 type Resolver func(Label) (unsafe.Pointer, error)
+
+var ErrUnresolvedLabel = errors.New("unresolved label")
 
 // Link installs each Code into buf, patches its external relocations using
 // resolve, and constructs one Callable per Code via the architecture's ABI.

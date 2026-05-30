@@ -6,13 +6,18 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// Snapshot is the consumer-side state the JIT may inspect at compile time
-// for opcodes whose lowering depends on runtime kinds (CONST_GET, GLOBAL_*,
-// LOCAL_*). Each field is a read-only view into the consumer's tables.
-type Snapshot struct {
-	Constants []types.Boxed
-	Globals   []types.Boxed
-	Locals    []types.Kind
+// Lowerer is the arch-specific opcode emitter. Arch returns the asm.Arch
+// the compiler should use to encode and link emitted code. Prologue/
+// Epilogue are explicit roles for whole-function compilation. Lower
+// handles a single bytecode opcode; the driver advances IP only when
+// Lower returns true. Exit emits the segment's terminator (write next IP
+// to the agreed scratch slot and return from native).
+type Lowerer interface {
+	Arch() asm.Arch
+	Prologue(c *Context, fn *types.Function)
+	Epilogue(c *Context)
+	Lower(c *Context, op instr.Opcode) bool
+	Exit(c *Context, nextIP int)
 }
 
 // Context is the per-segment state the Lowerer reads and mutates while
@@ -60,16 +65,11 @@ type Context struct {
 	Layout Layout
 }
 
-// Lowerer is the arch-specific opcode emitter. Arch returns the asm.Arch
-// the compiler should use to encode and link emitted code. Prologue/
-// Epilogue are explicit roles for whole-function compilation. Lower
-// handles a single bytecode opcode; the driver advances IP only when
-// Lower returns true. Exit emits the segment's terminator (write next IP
-// to the agreed scratch slot and return from native).
-type Lowerer interface {
-	Arch() asm.Arch
-	Prologue(c *Context, fn *types.Function)
-	Epilogue(c *Context)
-	Lower(c *Context, op instr.Opcode) bool
-	Exit(c *Context, nextIP int)
+// Snapshot is the consumer-side state the JIT may inspect at compile time
+// for opcodes whose lowering depends on runtime kinds (CONST_GET, GLOBAL_*,
+// LOCAL_*). Each field is a read-only view into the consumer's tables.
+type Snapshot struct {
+	Constants []types.Boxed
+	Globals   []types.Boxed
+	Locals    []types.Kind
 }

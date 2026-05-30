@@ -1,6 +1,7 @@
 package asm
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"unsafe"
@@ -16,6 +17,8 @@ type Buffer struct {
 	offset int
 	sealed bool
 }
+
+var ErrBufferFull = errors.New("buffer full")
 
 // NewBuffer allocates a fresh executable buffer with the given byte
 // capacity, rounded up to a page boundary.

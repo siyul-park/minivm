@@ -10,9 +10,13 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// Lowerer is the stub x86_64 emitter.
 type Lowerer struct{}
 
-var theArch = amd64.New()
+var (
+	_       jit.Lowerer = Lowerer{}
+	theArch             = amd64.New()
+)
 
 func (Lowerer) Arch() asm.Arch                             { return theArch }
 func (Lowerer) Prologue(_ *jit.Context, _ *types.Function) {}

@@ -1,5 +1,7 @@
 package asm
 
+import "errors"
+
 // regAlloc is the assembler's internal linear-scan allocator. It is
 // package-private because callers should not be reaching past Assembler.Pin.
 //
@@ -19,6 +21,8 @@ type regAlloc struct {
 	intBlocked  RegMask
 	fltBlocked  RegMask
 }
+
+var ErrNoRegistersAvailable = errors.New("no registers available")
 
 func newRegAlloc(info RegInfo) *regAlloc {
 	return &regAlloc{

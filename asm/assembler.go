@@ -1,6 +1,7 @@
 package asm
 
 import (
+	"errors"
 	"fmt"
 )
 
@@ -21,6 +22,8 @@ type Assembler struct {
 	nextLbl  Label
 	err      error
 }
+
+var ErrConflictingPin = errors.New("conflicting pin")
 
 // New constructs an Assembler targeting the given architecture.
 func New(arch Arch) *Assembler {

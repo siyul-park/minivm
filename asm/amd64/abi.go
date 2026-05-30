@@ -8,6 +8,8 @@ import (
 
 type abi struct{}
 
+var _ asm.ABI = abi{}
+
 func (abi) MaxArgs() int    { return 0 }
 func (abi) MaxReturns() int { return 0 }
 

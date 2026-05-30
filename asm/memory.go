@@ -1,6 +1,7 @@
 package asm
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"syscall"
@@ -8,6 +9,13 @@ import (
 )
 
 type memory []byte
+
+var (
+	ErrInvalidSize    = errors.New("invalid size")
+	ErrMmapFailed     = errors.New("mmap failed")
+	ErrMprotectFailed = errors.New("mprotect failed")
+	ErrMunmapFailed   = errors.New("munmap failed")
+)
 
 func allocMemory(size int) (memory, error) {
 	if size <= 0 {

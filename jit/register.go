@@ -5,6 +5,11 @@ import (
 	"sync"
 )
 
+var (
+	registryMu sync.Mutex
+	registry   = make(map[string]Lowerer)
+)
+
 // Register installs the Lowerer that the compiler will dispatch to. Arch
 // packages call this from init(); the consumer blank-imports the desired
 // arch package to opt in.
@@ -25,8 +30,3 @@ func Lookup(arch string) Lowerer {
 func Active() Lowerer {
 	return Lookup(runtime.GOARCH)
 }
-
-var (
-	registryMu sync.Mutex
-	registry   = make(map[string]Lowerer)
-)

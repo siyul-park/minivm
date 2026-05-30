@@ -2,6 +2,14 @@ package arm64
 
 import "github.com/siyul-park/minivm/asm"
 
+type arch struct {
+	registers asm.RegInfo
+	encoder   *Encoder
+	abi       abi
+}
+
+var _ asm.Arch = arch{}
+
 // New returns an asm.Arch targeting ARM64. The arch's encoder and ABI are
 // stateless singletons; allocate once per process.
 func New() asm.Arch {
@@ -19,12 +27,6 @@ func New() asm.Arch {
 		encoder: NewEncoder(),
 		abi:     abi{},
 	}
-}
-
-type arch struct {
-	registers asm.RegInfo
-	encoder   *Encoder
-	abi       abi
 }
 
 func (a arch) Registers() asm.RegInfo { return a.registers }

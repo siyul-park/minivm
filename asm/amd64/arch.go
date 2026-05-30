@@ -5,6 +5,14 @@ package amd64
 
 import "github.com/siyul-park/minivm/asm"
 
+type arch struct {
+	registers asm.RegInfo
+	encoder   encoder
+	abi       abi
+}
+
+var _ asm.Arch = arch{}
+
 // New returns an asm.Arch placeholder for amd64. Every operation that would
 // actually need to emit machine code returns asm.ErrNotImplemented.
 func New() asm.Arch {
@@ -13,12 +21,6 @@ func New() asm.Arch {
 		encoder:   encoder{},
 		abi:       abi{},
 	}
-}
-
-type arch struct {
-	registers asm.RegInfo
-	encoder   encoder
-	abi       abi
 }
 
 func (a arch) Registers() asm.RegInfo { return a.registers }
