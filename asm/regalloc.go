@@ -1,8 +1,8 @@
 package asm
 
-import "errors"
-
-type RegAlloc struct {
+// regAlloc is the assembler's internal linear-scan allocator. It is private
+// because callers should not be reaching past Assembler.Pin.
+type regAlloc struct {
 	info         RegInfo
 	phys         map[int32]PReg
 	intAvail     RegMask
@@ -11,20 +11,16 @@ type RegAlloc struct {
 	blockedFloat RegMask
 }
 
-var ErrNoRegistersAvailable = errors.New("no registers available")
-
-func NewRegAlloc(info RegInfo) *RegAlloc {
-	return &RegAlloc{
-		info:         info,
-		phys:         make(map[int32]PReg),
-		intAvail:     info.Allocatable(RegTypeInt),
-		floatAvail:   info.Allocatable(RegTypeFloat),
-		blockedInt:   0,
-		blockedFloat: 0,
+func newRegAlloc(info RegInfo) *regAlloc {
+	return &regAlloc{
+		info:       info,
+		phys:       make(map[int32]PReg),
+		intAvail:   info.Allocatable(RegTypeInt),
+		floatAvail: info.Allocatable(RegTypeFloat),
 	}
 }
 
-func (ra *RegAlloc) Alloc(vreg VReg) (PReg, error) {
+func (ra *regAlloc) alloc(vreg VReg) (PReg, error) {
 	if phys, ok := ra.phys[vreg.ID()]; ok {
 		return phys, nil
 	}
@@ -49,44 +45,39 @@ func (ra *RegAlloc) Alloc(vreg VReg) (PReg, error) {
 
 	p := NewPReg(id, vreg.Type(), vreg.Width())
 	ra.phys[vreg.ID()] = p
-
 	return p, nil
 }
 
-func (ra *RegAlloc) Reserve(vreg VReg, preg PReg) error {
+func (ra *regAlloc) reserve(vreg VReg, preg PReg) error {
 	p, ok := ra.phys[vreg.ID()]
 	if ok && p == preg {
 		return nil
 	}
 	if ok {
-		ra.Free(vreg)
+		ra.free(vreg)
 	}
 
-	var mask RegMask
 	if preg.Type() == RegTypeFloat {
-		mask = ra.floatAvail
-		if !mask.Contains(preg.ID()) || ra.blockedFloat.Contains(preg.ID()) {
+		if !ra.floatAvail.Contains(preg.ID()) || ra.blockedFloat.Contains(preg.ID()) {
 			return ErrNoRegistersAvailable
 		}
-		ra.floatAvail = mask.Clear(preg.ID())
+		ra.floatAvail = ra.floatAvail.Clear(preg.ID())
 	} else {
-		mask = ra.intAvail
-		if !mask.Contains(preg.ID()) || ra.blockedInt.Contains(preg.ID()) {
+		if !ra.intAvail.Contains(preg.ID()) || ra.blockedInt.Contains(preg.ID()) {
 			return ErrNoRegistersAvailable
 		}
-		ra.intAvail = mask.Clear(preg.ID())
+		ra.intAvail = ra.intAvail.Clear(preg.ID())
 	}
 
 	ra.phys[vreg.ID()] = preg
 	return nil
 }
 
-func (ra *RegAlloc) Free(vreg VReg) {
+func (ra *regAlloc) free(vreg VReg) {
 	preg, ok := ra.phys[vreg.ID()]
 	if !ok {
 		return
 	}
-
 	delete(ra.phys, vreg.ID())
 
 	switch preg.Type() {
@@ -101,7 +92,7 @@ func (ra *RegAlloc) Free(vreg VReg) {
 	}
 }
 
-func (ra *RegAlloc) Block(preg PReg) {
+func (ra *regAlloc) block(preg PReg) {
 	switch preg.Type() {
 	case RegTypeFloat:
 		ra.blockedFloat = ra.blockedFloat.Set(preg.ID())
@@ -110,14 +101,4 @@ func (ra *RegAlloc) Block(preg PReg) {
 		ra.blockedInt = ra.blockedInt.Set(preg.ID())
 		ra.intAvail = ra.intAvail.Clear(preg.ID())
 	}
-}
-
-func (ra *RegAlloc) Reset() {
-	clear(ra.phys)
-
-	ra.intAvail = ra.info.Allocatable(RegTypeInt)
-	ra.floatAvail = ra.info.Allocatable(RegTypeFloat)
-
-	ra.blockedInt = 0
-	ra.blockedFloat = 0
 }

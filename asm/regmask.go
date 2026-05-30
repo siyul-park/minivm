@@ -2,6 +2,7 @@ package asm
 
 import "math/bits"
 
+// RegMask is a bitmask of physical register IDs (0..63).
 type RegMask uint64
 
 func NewRegMask(ids []uint8) RegMask {

@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/jit"
+	_ "github.com/siyul-park/minivm/jit/amd64"
+	_ "github.com/siyul-park/minivm/jit/arm64"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -3059,7 +3062,7 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 	})
 
 	t.Run("zero attempts jit on first sample", func(t *testing.T) {
-		if arch == nil {
+		if jit.Active() == nil {
 			t.Skip("jit is not available on this architecture")
 		}
 		p := prof.New()
@@ -3098,7 +3101,7 @@ func TestInterpreter_WithProfile(t *testing.T) {
 	})
 
 	t.Run("records jit counters", func(t *testing.T) {
-		if arch == nil {
+		if jit.Active() == nil {
 			t.Skip("jit is not available on this architecture")
 		}
 		p := prof.New()
@@ -3335,7 +3338,7 @@ func TestInterpreter_WithDebugger(t *testing.T) {
 
 func TestInterpreter_JIT(t *testing.T) {
 	t.Run("compiles numeric globals", func(t *testing.T) {
-		if arch == nil {
+		if jit.Active() == nil {
 			t.Skip("jit is not available on this architecture")
 		}
 		p := prof.New()
@@ -3359,7 +3362,7 @@ func TestInterpreter_JIT(t *testing.T) {
 	})
 
 	t.Run("skips ref globals", func(t *testing.T) {
-		if arch == nil {
+		if jit.Active() == nil {
 			t.Skip("jit is not available on this architecture")
 		}
 		p := prof.New()
@@ -3381,7 +3384,7 @@ func TestInterpreter_JIT(t *testing.T) {
 	})
 
 	t.Run("executes compiled prefix before unsupported opcode", func(t *testing.T) {
-		if arch == nil {
+		if jit.Active() == nil {
 			t.Skip("jit is not available on this architecture")
 		}
 		p := prof.New()
@@ -3407,7 +3410,7 @@ func TestInterpreter_JIT(t *testing.T) {
 	})
 
 	t.Run("links branches", func(t *testing.T) {
-		if arch == nil {
+		if jit.Active() == nil {
 			t.Skip("jit is not available on this architecture")
 		}
 
@@ -3560,7 +3563,7 @@ func TestInterpreter_JIT(t *testing.T) {
 	})
 
 	t.Run("merges fallthrough block with internal entry", func(t *testing.T) {
-		if arch == nil {
+		if jit.Active() == nil {
 			t.Skip("jit is not available on this architecture")
 		}
 
@@ -3601,7 +3604,7 @@ func TestInterpreter_JIT(t *testing.T) {
 	})
 
 	t.Run("keeps internal entry with cold predecessor", func(t *testing.T) {
-		if arch == nil {
+		if jit.Active() == nil {
 			t.Skip("jit is not available on this architecture")
 		}
 
@@ -3629,7 +3632,7 @@ func TestInterpreter_JIT(t *testing.T) {
 	})
 
 	t.Run("splits trace when internal entry rejects", func(t *testing.T) {
-		if arch == nil {
+		if jit.Active() == nil {
 			t.Skip("jit is not available on this architecture")
 		}
 		p := prof.New()
@@ -3658,7 +3661,7 @@ func TestInterpreter_JIT(t *testing.T) {
 	})
 
 	t.Run("compiles forced successor after merged prefix rejects", func(t *testing.T) {
-		if arch == nil {
+		if jit.Active() == nil {
 			t.Skip("jit is not available on this architecture")
 		}
 		p := prof.New()
@@ -3680,7 +3683,7 @@ func TestInterpreter_JIT(t *testing.T) {
 	})
 
 	t.Run("skips cold segments", func(t *testing.T) {
-		if arch == nil {
+		if jit.Active() == nil {
 			t.Skip("jit is not available on this architecture")
 		}
 		p := prof.New()

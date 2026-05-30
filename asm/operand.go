@@ -2,6 +2,8 @@ package asm
 
 import "fmt"
 
+// Operand is a parameter slot on an Instruction. Each kind carries its
+// payload directly so encoders can pattern-match without further unwrapping.
 type Operand interface {
 	operand()
 	String() string
@@ -49,8 +51,11 @@ func (o ImmOperand) String() string {
 	return fmt.Sprintf("#%d", o.Value)
 }
 
+// LabelOperand references a Label by id. Inside the same Code, the offset is
+// resolved during Build. References to labels bound in other Codes survive
+// in Code.Relocs until Link patches them.
 type LabelOperand struct {
-	ID int
+	ID Label
 }
 
 func (LabelOperand) operand() {}
@@ -59,7 +64,7 @@ func (o LabelOperand) String() string {
 	return fmt.Sprintf("label%d", o.ID)
 }
 
-func Label(id int) LabelOperand {
+func LabelOp(id Label) LabelOperand {
 	return LabelOperand{ID: id}
 }
 

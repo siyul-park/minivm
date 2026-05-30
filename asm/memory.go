@@ -1,23 +1,15 @@
 package asm
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"syscall"
 	"unsafe"
 )
 
-var (
-	ErrInvalidSize    = errors.New("invalid size")
-	ErrMmapFailed     = errors.New("mmap failed")
-	ErrMprotectFailed = errors.New("mprotect failed")
-	ErrMunmapFailed   = errors.New("munmap failed")
-)
+type memory []byte
 
-type Memory []byte
-
-func Alloc(size int) (Memory, error) {
+func allocMemory(size int) (memory, error) {
 	if size <= 0 {
 		return nil, fmt.Errorf("%w: %d", ErrInvalidSize, size)
 	}
@@ -36,7 +28,7 @@ func Alloc(size int) (Memory, error) {
 	return data, nil
 }
 
-func (m Memory) Executable() error {
+func (m memory) executable() error {
 	if len(m) == 0 {
 		return nil
 	}
@@ -53,7 +45,7 @@ func (m Memory) Executable() error {
 	return nil
 }
 
-func (m Memory) Writable() error {
+func (m memory) writable() error {
 	if len(m) == 0 {
 		return nil
 	}
@@ -69,14 +61,14 @@ func (m Memory) Writable() error {
 	return nil
 }
 
-func (m Memory) Ptr() unsafe.Pointer {
+func (m memory) ptr() unsafe.Pointer {
 	if len(m) == 0 {
 		return nil
 	}
 	return unsafe.Pointer(&m[0])
 }
 
-func (m Memory) Free() error {
+func (m memory) free() error {
 	if len(m) == 0 {
 		return nil
 	}

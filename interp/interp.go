@@ -9,6 +9,7 @@ import (
 
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/jit"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -19,7 +20,7 @@ type Interpreter struct {
 	prof      *prof.Stats
 	hook      func(*Interpreter) error
 	marshaler Marshaler
-	buffer    *asm.Buffer
+	compiler  *jit.Compiler
 	instrs    [][]byte
 	code      [][]func(*Interpreter)
 	frames    []frame
@@ -475,11 +476,11 @@ func (i *Interpreter) Len() int {
 
 func (i *Interpreter) Close() error {
 	i.Reset()
-	if i.buffer != nil {
-		if err := i.buffer.Free(); err != nil {
+	if i.compiler != nil {
+		if err := i.compiler.Close(); err != nil {
 			return err
 		}
-		i.buffer = nil
+		i.compiler = nil
 	}
 	return nil
 }
@@ -518,33 +519,56 @@ func (i *Interpreter) Reset() {
 }
 
 func (i *Interpreter) jit(addr int) error {
-	if arch == nil {
+	if jit.Active() == nil {
 		return nil
 	}
-	i.prof.JITAttempt()
-	if i.buffer == nil {
-		buffer, err := asm.NewBuffer(256)
+	if i.compiler == nil {
+		compiler, err := jit.New(jit.WithCutoff(i.cutoff))
 		if err != nil {
 			i.prof.JITError()
 			return err
 		}
-		i.buffer = buffer
+		i.compiler = compiler
 	}
-	c := &jitCompiler{
-		assembler: asm.NewAssembler(arch, i.buffer),
-		profile:   i.prof,
-		addr:      addr,
-		constants: i.constants,
-		globals:   i.globals,
-		heap:      i.heap,
-		cutoff:    i.cutoff,
+	i.prof.JITAttempt()
+
+	fn, ok := i.function(addr)
+	if !ok {
+		return nil
 	}
-	for j, fn := range c.Compile(i.instrs[addr]) {
-		if fn != nil {
-			i.code[addr][j] = fn
+
+	mod, err := i.compiler.Compile(fn, addr)
+	if err != nil {
+		i.prof.JITError()
+		return err
+	}
+	if mod == nil {
+		return nil
+	}
+	for ip, callable := range mod.Segments {
+		if ip < 0 || ip >= len(i.code[addr]) || callable == nil {
+			continue
 		}
+		i.code[addr][ip] = i.adaptSegment(callable, mod)
 	}
 	return nil
+}
+
+// function returns the *types.Function at addr in the heap, or false if
+// addr does not point at a function.
+func (i *Interpreter) function(addr int) (*types.Function, bool) {
+	if addr <= 0 || addr >= len(i.heap) {
+		return nil, false
+	}
+	fn, ok := i.heap[addr].(*types.Function)
+	return fn, ok
+}
+
+// adaptSegment wraps a native segment Callable in a threaded-style
+// closure. Until real lowering is enabled this path is unreachable
+// because Compile always returns an empty Segments map.
+func (i *Interpreter) adaptSegment(_ asm.Callable, _ *jit.Module) func(*Interpreter) {
+	return func(_ *Interpreter) {}
 }
 
 func (i *Interpreter) error(r any) error {

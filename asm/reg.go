@@ -2,18 +2,22 @@ package asm
 
 import "fmt"
 
+// Reg is implemented by both physical and virtual registers.
 type Reg interface {
 	Type() RegType
 	Width() RegWidth
 	String() string
 }
 
+// PReg is a physical register selected by the architecture.
 type PReg struct {
 	id    uint8
 	typ   RegType
 	width RegWidth
 }
 
+// VReg is a virtual register allocated by the assembler. Its physical
+// binding is resolved during Build.
 type VReg struct {
 	id    int32
 	typ   RegType
@@ -35,6 +39,8 @@ const (
 	Width64        RegWidth = 64
 )
 
+// Value is the runtime payload passed across a Callable boundary. Type and
+// width describe how Bits is interpreted by both sides of the ABI.
 type Value struct {
 	typ   RegType
 	width RegWidth
@@ -50,6 +56,7 @@ func (v Value) RegType() RegType { return v.typ }
 func (v Value) Width() RegWidth  { return v.width }
 func (v Value) Valid() bool      { return v.width != WidthUndefined }
 func (v Value) Bits() uint64     { return v.bits }
+
 func (v Value) String() string {
 	switch {
 	case v.typ == RegTypeInt && v.width == Width32:
@@ -93,8 +100,7 @@ func Compatible(a, b Reg) bool {
 	return a.Type() == b.Type() && a.Width() == b.Width()
 }
 
-// Compatibles reports whether a and b are element-wise shape-compatible: equal
-// length with matching type and width at every position.
+// Compatibles reports whether a and b are element-wise shape-compatible.
 func Compatibles[A, B Reg](a []A, b []B) bool {
 	if len(a) != len(b) {
 		return false

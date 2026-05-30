@@ -7,153 +7,98 @@ import (
 	"github.com/siyul-park/minivm/asm"
 )
 
-// Header bit layout (must match abi_arm64.s):
+// caller implements asm.Callable for an arm64 native entry. The trampoline
+// at addr is invoked with a packed argv buffer carrying the header, scratch
+// slots, and argument values; results land in the same argv buffer.
 //
-//	bits[ 7: 0] = nParams
-//	bits[15: 8] = nReturns
-//	bits[23:16] = nScratch
-//	bits[31:24] = paramTypes   (float bitmask, 1=float)
-//	bits[39:32] = returnTypes  (float bitmask, 1=float)
-//	bits[47:40] = paramWidths  (width bitmask, 1=64-bit)
-//	bits[55:48] = returnWidths (width bitmask, 1=64-bit)
-
+// The header is described in detail in abi_arm64.s.
 type caller struct {
-	chunk *asm.Chunk
+	addr unsafe.Pointer
 
 	header   uint64
 	argv     []uint64
 	rets     []asm.Value
+	retTypes []asm.PReg
 	nScratch int
 }
 
-const (
-	abiRegs    = 8 // X0–X7 / F0–F7: ABI parameter/return registers
-	maxScratch = 5 // X10–X14: slots available in invoke trampoline
-)
+var _ asm.Callable = (*caller)(nil)
 
-var _ asm.Caller = (*caller)(nil)
-
-func NewCaller(sig *asm.Signature, chunk *asm.Chunk) (asm.Caller, error) {
-	params := sig.Params
-	if len(params) > abiRegs {
-		return nil, fmt.Errorf("%w: %d params exceed ABI limit of %d",
-			asm.ErrTooManyParams, len(params), abiRegs)
+func newCaller(sig asm.Signature, addr unsafe.Pointer) (*caller, error) {
+	if len(sig.Args) > abiArgs {
+		return nil, fmt.Errorf("%w: %d args exceed ABI limit of %d",
+			asm.ErrTooManyArgs, len(sig.Args), abiArgs)
 	}
-	for idx, regs := range sig.Returns {
-		if len(regs) > abiRegs {
-			return nil, fmt.Errorf("%w: %d returns at idx %d exceed ABI limit of %d",
-				asm.ErrTooManyReturns, len(regs), idx, abiRegs)
-		}
+	if len(sig.Returns) > abiArgs {
+		return nil, fmt.Errorf("%w: %d returns exceed ABI limit of %d",
+			asm.ErrTooManyReturns, len(sig.Returns), abiArgs)
 	}
 	if len(sig.Scratch) > maxScratch {
 		return nil, fmt.Errorf("%w: %d scratch registers exceed trampoline limit of %d",
 			asm.ErrInvalidArgs, len(sig.Scratch), maxScratch)
 	}
-	for i, p := range params {
-		if p.ID() >= abiRegs {
-			return nil, fmt.Errorf("%w: param[%d] register %v (id=%d) outside ABI range [0,%d)",
-				asm.ErrTooManyParams, i, p, p.ID(), abiRegs)
+
+	for i, p := range sig.Args {
+		if p.ID() >= abiArgs {
+			return nil, fmt.Errorf("%w: arg[%d] %v outside ABI range",
+				asm.ErrTooManyArgs, i, p)
 		}
 	}
-	for idx, regs := range sig.Returns {
-		for i, p := range regs {
-			if p.ID() >= abiRegs {
-				return nil, fmt.Errorf("%w: return[%d] at idx %d register %v (id=%d) outside ABI range [0,%d)",
-					asm.ErrTooManyReturns, i, idx, p, p.ID(), abiRegs)
-			}
+	for i, p := range sig.Returns {
+		if p.ID() >= abiArgs {
+			return nil, fmt.Errorf("%w: return[%d] %v outside ABI range",
+				asm.ErrTooManyReturns, i, p)
 		}
 	}
 	for i, p := range sig.Scratch {
-		// Scratch registers must be outside the ABI param/return range (X0–X7).
-		// The invoke trampoline reserves X10–X14 for this purpose.
-		if p.ID() < abiRegs {
-			return nil, fmt.Errorf("%w: scratch[%d] register %v (id=%d) overlaps ABI range [0,%d)",
-				asm.ErrInvalidArgs, i, p, p.ID(), abiRegs)
+		if p.ID() < abiArgs {
+			return nil, fmt.Errorf("%w: scratch[%d] %v overlaps ABI range",
+				asm.ErrInvalidArgs, i, p)
 		}
-	}
-	nReturns := sig.MaxReturns()
-	nScratch := len(sig.Scratch)
-	// Default initial header is derived from the longest return site so
-	// callees that omit an X15 write still produce a usable header layout
-	// for trivial single-exit functions.
-	rregs := sig.Returns[0]
-	for _, regs := range sig.Returns {
-		if len(regs) > len(rregs) {
-			rregs = regs
-		}
-	}
-	if len(rregs) < nReturns {
-		rregs = append(rregs, make([]asm.PReg, nReturns-len(rregs))...)
 	}
 
+	returns := append([]asm.PReg(nil), sig.Returns...)
+	nScratch := len(sig.Scratch)
+
 	return &caller{
-		chunk:    chunk,
-		header:   Header(params, rregs, nScratch),
-		argv:     make([]uint64, 1+nScratch+abiRegs),
-		rets:     make([]asm.Value, abiRegs),
+		addr:     addr,
+		header:   header(sig.Args, returns, nScratch),
+		argv:     make([]uint64, 1+nScratch+abiArgs),
+		rets:     make([]asm.Value, abiArgs),
+		retTypes: returns,
 		nScratch: nScratch,
 	}, nil
 }
 
-// Header encodes the ABI calling convention header for the invoke trampoline.
-// R15 carries this value in/out across the call boundary (custom ABI).
-// Any JIT callee must write R15 before returning to provide the output header.
-func Header(params, returns []asm.PReg, nScratch int) uint64 {
-	var pTyp, rTyp, pWid, rWid uint8
-	for i, p := range params {
-		if p.Type() == asm.RegTypeFloat {
-			pTyp |= 1 << uint(i)
-		}
-		if p.Width() == asm.Width64 {
-			pWid |= 1 << uint(i)
-		}
-	}
-	for i, p := range returns {
-		if p.Type() == asm.RegTypeFloat {
-			rTyp |= 1 << uint(i)
-		}
-		if p.Width() == asm.Width64 {
-			rWid |= 1 << uint(i)
-		}
-	}
-	return uint64(len(params)) |
-		uint64(len(returns))<<8 |
-		uint64(nScratch)<<16 |
-		uint64(pTyp)<<24 |
-		uint64(rTyp)<<32 |
-		uint64(pWid)<<40 |
-		uint64(rWid)<<48
-}
+func (c *caller) Addr() unsafe.Pointer { return c.addr }
 
-func (c *caller) Call(params []asm.Value, scratch *[]uint64) ([]asm.Value, error) {
-	if len(params) > abiRegs {
-		return nil, fmt.Errorf("%w: too many params", asm.ErrTooManyParams)
+func (c *caller) Call(args []asm.Value, scratch []uint64) ([]asm.Value, error) {
+	if len(args) > abiArgs {
+		return nil, fmt.Errorf("%w: %d args", asm.ErrTooManyArgs, len(args))
 	}
 
 	nScratch := c.nScratch
 	argv := c.argv
-	// argv layout: [ header | scratch×nScratch | values×abiRegs ]
 	argv[0] = c.header
 
-	if scratch != nil && nScratch > 0 {
-		copy(argv[1:1+nScratch], (*scratch)[:min(nScratch, len(*scratch))])
+	if nScratch > 0 && len(scratch) > 0 {
+		copy(argv[1:1+nScratch], scratch[:min(nScratch, len(scratch))])
 	}
-	for i, v := range params {
+	for i, v := range args {
 		argv[1+nScratch+i] = v.Bits()
 	}
 
-	invoke(uintptr(c.chunk.Ptr()), uintptr(unsafe.Pointer(&argv[0])))
+	invoke(uintptr(c.addr), uintptr(unsafe.Pointer(&argv[0])))
 
 	h := argv[0]
 	nReturns := int((h >> 8) & 0xFF)
-	if nReturns > abiRegs {
-		return nil, fmt.Errorf("callee returned %d values but argv only has %d slots", nReturns, abiRegs)
+	if nReturns > abiArgs {
+		return nil, fmt.Errorf("%w: callee returned %d values, max %d",
+			asm.ErrTooManyReturns, nReturns, abiArgs)
 	}
-	if scratch != nil && nScratch > 0 {
-		if len(*scratch) < nScratch {
-			*scratch = append(*scratch, make([]uint64, nScratch-len(*scratch))...)
-		}
-		copy(*scratch, argv[1:1+nScratch])
+
+	if nScratch > 0 && len(scratch) >= nScratch {
+		copy(scratch, argv[1:1+nScratch])
 	}
 
 	retTypes := uint8((h >> 32) & 0xFF)
@@ -174,4 +119,33 @@ func (c *caller) Call(params []asm.Value, scratch *[]uint64) ([]asm.Value, error
 		}
 	}
 	return rets, nil
+}
+
+// header packs the trampoline's input/output header. See abi_arm64.s for
+// the bit layout.
+func header(args, returns []asm.PReg, nScratch int) uint64 {
+	var aTyp, rTyp, aWid, rWid uint8
+	for i, p := range args {
+		if p.Type() == asm.RegTypeFloat {
+			aTyp |= 1 << uint(i)
+		}
+		if p.Width() == asm.Width64 {
+			aWid |= 1 << uint(i)
+		}
+	}
+	for i, p := range returns {
+		if p.Type() == asm.RegTypeFloat {
+			rTyp |= 1 << uint(i)
+		}
+		if p.Width() == asm.Width64 {
+			rWid |= 1 << uint(i)
+		}
+	}
+	return uint64(len(args)) |
+		uint64(len(returns))<<8 |
+		uint64(nScratch)<<16 |
+		uint64(aTyp)<<24 |
+		uint64(rTyp)<<32 |
+		uint64(aWid)<<40 |
+		uint64(rWid)<<48
 }

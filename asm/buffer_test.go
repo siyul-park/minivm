@@ -1,101 +1,30 @@
-package asm
+package asm_test
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/siyul-park/minivm/asm"
 )
 
-func TestNewCodeBuffer(t *testing.T) {
-	b, err := NewBuffer(64)
-	require.NoError(t, err)
-	require.NotNil(t, b)
-	require.NoError(t, b.Free())
-}
-
-func TestBuffer_Append(t *testing.T) {
-	t.Run("basic", func(t *testing.T) {
-		b, err := NewBuffer(64)
+func TestBuffer_Write(t *testing.T) {
+	t.Run("appends bytes and returns stable pointer", func(t *testing.T) {
+		b, err := asm.NewBuffer(64)
 		require.NoError(t, err)
 		defer b.Free()
 
-		chunk, err := b.Append([]byte{0x90, 0x90, 0x90})
+		p1, err := b.Write([]byte{0x01, 0x02, 0x03, 0x04})
 		require.NoError(t, err)
-		require.NotNil(t, chunk)
-	})
-	t.Run("when sealed", func(t *testing.T) {
-		b, err := NewBuffer(64)
+		require.NotNil(t, p1)
+
+		p2, err := b.Write([]byte{0x05, 0x06})
 		require.NoError(t, err)
-		defer b.Free()
-
-		require.NoError(t, b.Seal())
-		_, err = b.Append([]byte{0x90})
-		require.ErrorIs(t, err, ErrBufferSealed)
-	})
-}
-
-func TestBuffer_Seal(t *testing.T) {
-	b, err := NewBuffer(64)
-	require.NoError(t, err)
-	defer b.Free()
-
-	err = b.Seal()
-	require.NoError(t, err)
-}
-
-func TestBuffer_Unseal(t *testing.T) {
-	b, err := NewBuffer(64)
-	require.NoError(t, err)
-	defer b.Free()
-
-	err = b.Seal()
-	require.NoError(t, err)
-
-	err = b.Unseal()
-	require.NoError(t, err)
-}
-
-func TestBuffer_Sealed(t *testing.T) {
-	b, err := NewBuffer(64)
-	require.NoError(t, err)
-	defer b.Free()
-
-	require.False(t, b.Sealed())
-
-	require.NoError(t, b.Seal())
-	require.True(t, b.Sealed())
-
-	require.NoError(t, b.Unseal())
-	require.False(t, b.Sealed())
-}
-
-func TestChunk_Ptr(t *testing.T) {
-	b, err := NewBuffer(64)
-	require.NoError(t, err)
-	defer b.Free()
-
-	chunk, err := b.Append([]byte{0x90, 0x91})
-	require.NoError(t, err)
-	require.NotNil(t, chunk.Ptr())
-}
-
-func TestChunk_At(t *testing.T) {
-	b, err := NewBuffer(64)
-	require.NoError(t, err)
-	defer b.Free()
-
-	chunk, err := b.Append([]byte{0x90, 0x91, 0x92})
-	require.NoError(t, err)
-
-	t.Run("subchunk", func(t *testing.T) {
-		sub, err := chunk.Slice(1)
-		require.NoError(t, err)
-		require.Equal(t, 2, sub.Size())
-		require.NotEqual(t, chunk.Ptr(), sub.Ptr())
+		require.NotEqual(t, p1, p2)
 	})
 
-	t.Run("invalid offset", func(t *testing.T) {
-		_, err := chunk.Slice(4)
-		require.ErrorIs(t, err, ErrInvalidArgs)
+	t.Run("invalid size", func(t *testing.T) {
+		_, err := asm.NewBuffer(0)
+		require.ErrorIs(t, err, asm.ErrInvalidSize)
 	})
 }

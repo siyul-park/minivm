@@ -1,0 +1,15 @@
+// Package amd64 is a stub Lowerer for x86_64. It rejects every opcode so
+// the threaded interpreter handles all execution.
+package amd64
+
+import (
+	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/jit"
+	"github.com/siyul-park/minivm/types"
+)
+
+type Lowerer struct{}
+
+func (Lowerer) Prologue(_ *jit.Context, _ *types.Function) {}
+func (Lowerer) Epilogue(_ *jit.Context)                    {}
+func (Lowerer) Lower(_ *jit.Context, _ instr.Opcode) bool  { return false }
