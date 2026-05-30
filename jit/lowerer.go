@@ -58,10 +58,12 @@ type Context struct {
 	// scratch slot.
 	Scratch []asm.PReg
 
-	// Slots is the indirection table for direct-BL CALL lowering.
+	// Slots is the indirection table for direct-BL CALL lowering. May be
+	// nil before Step 4 wires it up.
 	Slots *Slots
 
-	// Layout is a snapshot of the consumer's struct layout.
+	// Layout is a snapshot of the consumer's struct layout. Empty until
+	// the consumer calls Bind during init.
 	Layout Layout
 }
 

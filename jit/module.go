@@ -20,8 +20,8 @@ import (
 //     Each segment shares the segment-level exit convention (rNext carries
 //     the next interpreter IP).
 //   - Signature describes Entry's ABI; it is meaningless when Entry is nil.
-//   - ParamKinds/ReturnKinds let the caller box/unbox VM stack values
-//     across the native boundary without re-deriving them from fn.Typ.
+//   - ParamKinds and ReturnKinds let the consumer box/unbox stack values
+//     across the Entry boundary without re-deriving them from fn.Typ.
 type Module struct {
 	Addr        int
 	Entry       asm.Callable

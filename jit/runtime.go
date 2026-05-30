@@ -46,7 +46,6 @@ type Layout struct {
 var (
 	layoutMu sync.RWMutex
 	layout   Layout
-	bound    bool
 )
 
 // Bind installs the consumer-side struct layout. Subsequent calls overwrite
@@ -55,7 +54,6 @@ func Bind(l Layout) {
 	layoutMu.Lock()
 	defer layoutMu.Unlock()
 	layout = l
-	bound = true
 }
 
 // RuntimeLayout returns the currently bound layout.
@@ -63,11 +61,4 @@ func RuntimeLayout() Layout {
 	layoutMu.RLock()
 	defer layoutMu.RUnlock()
 	return layout
-}
-
-// Bound reports whether Bind has been called.
-func Bound() bool {
-	layoutMu.RLock()
-	defer layoutMu.RUnlock()
-	return bound
 }

@@ -6,9 +6,9 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// Compiler is the top-level driver. It owns the executable buffer, the slot
-// table for direct-BL targets, and the cutoff that controls when partial
-// segments are kept vs. discarded.
+// Compiler is the top-level driver. It owns the executable buffer, the
+// writable data region used for direct-BL slot tables, and the cutoff that
+// controls when partial segments are kept vs. discarded.
 type Compiler struct {
 	lowerer Lowerer
 	arch    asm.Arch
@@ -23,7 +23,6 @@ type Option func(*config)
 
 type config struct {
 	lowerer Lowerer
-	arch    asm.Arch
 	buffer  *asm.Buffer
 	data    *asm.Data
 	cutoff  int
@@ -55,8 +54,9 @@ func New(opts ...Option) (*Compiler, error) {
 	if cfg.lowerer == nil {
 		cfg.lowerer = Active()
 	}
-	if cfg.lowerer != nil && cfg.arch == nil {
-		cfg.arch = cfg.lowerer.Arch()
+	var arch asm.Arch
+	if cfg.lowerer != nil {
+		arch = cfg.lowerer.Arch()
 	}
 
 	if cfg.buffer == nil {
@@ -76,26 +76,19 @@ func New(opts ...Option) (*Compiler, error) {
 
 	return &Compiler{
 		lowerer: cfg.lowerer,
-		arch:    cfg.arch,
+		arch:    arch,
 		buffer:  cfg.buffer,
 		data:    cfg.data,
 		cutoff:  cfg.cutoff,
 	}, nil
 }
 
-// Buffer exposes the executable buffer for callers that need to participate
-// in linking (for example, when emitting auxiliary trampolines).
-func (c *Compiler) Buffer() *asm.Buffer { return c.buffer }
-
-// Data exposes the writable data region.
-func (c *Compiler) Data() *asm.Data { return c.data }
-
-// Slots returns the indirection table backing direct-BL CALL lowering.
-// The slot table is lazily created on first use; if no fallback has been
-// installed yet, Slots returns nil.
+// Slots returns the direct-BL indirection table, lazily building it on
+// first request. Returns nil when no Lowerer is wired up.
 func (c *Compiler) Slots() *Slots { return c.slots }
 
 // SetSlots installs the slot table the Compiler should hand to lowerers.
+// Phase A leaves the table nil; Step 4 will wire it in.
 func (c *Compiler) SetSlots(s *Slots) { c.slots = s }
 
 // Close releases the underlying buffer and data region.
@@ -115,11 +108,9 @@ func (c *Compiler) Close() error {
 // the consumer-side tables (constants, globals, local kinds) that
 // kind-sensitive opcodes need at compile time.
 func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module, error) {
-	if c.lowerer == nil {
-		return emptyModule(addr, fn), nil
-	}
-	if fn == nil || len(fn.Code) == 0 {
-		return emptyModule(addr, fn), nil
+	mod := newModule(fn, addr)
+	if c.lowerer == nil || fn == nil || len(fn.Code) == 0 {
+		return mod, nil
 	}
 
 	seg, ok, err := c.compileSegment(fn, 0, snap)
@@ -127,15 +118,13 @@ func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module
 		return nil, err
 	}
 	if !ok {
-		return emptyModule(addr, fn), nil
+		return mod, nil
 	}
 
 	callables, err := asm.Link(c.buffer, c.arch, []*asm.Code{seg}, nil)
 	if err != nil {
 		return nil, err
 	}
-
-	mod := emptyModule(addr, fn)
 	mod.Segments[0] = callables[0]
 	return mod, nil
 }
@@ -183,11 +172,7 @@ func (c *Compiler) compileSegment(fn *types.Function, startIP int, snap Snapshot
 
 	c.lowerer.Exit(ctx, ctx.IP)
 
-	sig := asm.Signature{
-		Args:    nil,
-		Returns: nil,
-		Scratch: scratch,
-	}
+	sig := asm.Signature{Args: nil, Returns: nil, Scratch: scratch}
 	code, err := a.Build(sig)
 	if err != nil {
 		return nil, false, err
@@ -195,33 +180,24 @@ func (c *Compiler) compileSegment(fn *types.Function, startIP int, snap Snapshot
 	return code, true, nil
 }
 
-func emptyModule(addr int, fn *types.Function) *Module {
+// newModule returns a default Module that carries fn's boxing metadata.
+// The Segments map starts empty; the compiler fills it as segments link.
+func newModule(fn *types.Function, addr int) *Module {
+	var params, returns []types.Kind
+	if fn != nil && fn.Typ != nil {
+		params = make([]types.Kind, len(fn.Typ.Params))
+		for i, t := range fn.Typ.Params {
+			params[i] = t.Kind()
+		}
+		returns = make([]types.Kind, len(fn.Typ.Returns))
+		for i, t := range fn.Typ.Returns {
+			returns[i] = t.Kind()
+		}
+	}
 	return &Module{
 		Addr:        addr,
 		Segments:    map[int]asm.Callable{},
-		ParamKinds:  paramKinds(fn),
-		ReturnKinds: returnKinds(fn),
+		ParamKinds:  params,
+		ReturnKinds: returns,
 	}
-}
-
-func paramKinds(fn *types.Function) []types.Kind {
-	if fn == nil || fn.Typ == nil {
-		return nil
-	}
-	kinds := make([]types.Kind, len(fn.Typ.Params))
-	for i, p := range fn.Typ.Params {
-		kinds[i] = p.Kind()
-	}
-	return kinds
-}
-
-func returnKinds(fn *types.Function) []types.Kind {
-	if fn == nil || fn.Typ == nil {
-		return nil
-	}
-	kinds := make([]types.Kind, len(fn.Typ.Returns))
-	for i, r := range fn.Typ.Returns {
-		kinds[i] = r.Kind()
-	}
-	return kinds
 }
