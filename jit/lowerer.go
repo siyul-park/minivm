@@ -6,6 +6,15 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// Snapshot is the consumer-side state the JIT may inspect at compile time
+// for opcodes whose lowering depends on runtime kinds (CONST_GET, GLOBAL_*,
+// LOCAL_*). Each field is a read-only view into the consumer's tables.
+type Snapshot struct {
+	Constants []types.Boxed
+	Globals   []types.Boxed
+	Locals    []types.Kind
+}
+
 // Context is the per-segment state the Lowerer reads and mutates while
 // emitting native code. The driver sets up Context once per segment;
 // architectures see it as a read-mostly bag of pointers plus a VM-stack
@@ -32,16 +41,16 @@ type Context struct {
 	// before End.
 	End int
 
-	// Constants is the function's constant pool. Lowerers may read this
-	// to compute pre-boxed immediate values.
-	Constants []types.Boxed
+	// Snap is the consumer-side state available to lowerers at compile
+	// time.
+	Snap Snapshot
 
 	// Stack tracks values pushed onto the VM stack within this segment.
 	// Top of the slice is top of stack.
 	Stack []asm.VReg
 
 	// Scratch holds the physical registers assigned to each segment-wide
-	// scratch slot (stack base, sp, globals, constants, next IP).
+	// scratch slot.
 	Scratch []asm.PReg
 
 	// Slots is the indirection table for direct-BL CALL lowering.

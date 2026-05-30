@@ -538,7 +538,7 @@ func (i *Interpreter) jit(addr int) error {
 		return nil
 	}
 
-	mod, err := i.compiler.Compile(fn, addr)
+	mod, err := i.compiler.Compile(fn, addr, i.snapshot(fn))
 	if err != nil {
 		i.prof.JITError()
 		return err
@@ -553,6 +553,30 @@ func (i *Interpreter) jit(addr int) error {
 		i.code[addr][ip] = i.adaptSegment(callable, mod)
 	}
 	return nil
+}
+
+// snapshot bundles the consumer-side tables the JIT inspects at compile
+// time. Locals concatenates the function's params and declared locals so
+// LOCAL_* lowering can check kinds by raw index.
+func (i *Interpreter) snapshot(fn *types.Function) jit.Snapshot {
+	var locals []types.Kind
+	if fn != nil && fn.Typ != nil {
+		size := len(fn.Typ.Params) + len(fn.Locals)
+		if size > 0 {
+			locals = make([]types.Kind, 0, size)
+			for _, t := range fn.Typ.Params {
+				locals = append(locals, t.Kind())
+			}
+			for _, t := range fn.Locals {
+				locals = append(locals, t.Kind())
+			}
+		}
+	}
+	return jit.Snapshot{
+		Constants: i.constants,
+		Globals:   i.globals,
+		Locals:    locals,
+	}
 }
 
 // function returns the *types.Function at addr in the heap, or false if
@@ -583,7 +607,7 @@ func (i *Interpreter) adaptSegment(callable asm.Callable, _ *jit.Module) func(*I
 		scratch[0] = stackBase(i.stack)
 		scratch[1] = uint64(i.sp)
 		scratch[2] = stackBase(i.globals)
-		scratch[3] = stackBase(i.constants)
+		scratch[3] = uint64(i.fr.bp)
 		scratch[4] = 0
 		if _, err := callable.Call(nil, scratch); err != nil {
 			panic(err)

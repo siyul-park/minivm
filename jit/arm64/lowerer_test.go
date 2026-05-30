@@ -32,7 +32,7 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 
-		mod, err := c.Compile(fn, 1)
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
 		require.NoError(t, err)
 		require.Contains(t, mod.Segments, 0)
 
@@ -55,7 +55,7 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 
-		mod, err := c.Compile(fn, 1)
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
 		require.NoError(t, err)
 		require.Contains(t, mod.Segments, 0)
 
@@ -90,7 +90,7 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 
-		mod, err := c.Compile(fn, 1)
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
 		require.NoError(t, err)
 		require.Contains(t, mod.Segments, 0)
 
@@ -121,7 +121,7 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 
-		mod, err := c.Compile(fn, 1)
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
 		require.NoError(t, err)
 		require.Contains(t, mod.Segments, 0)
 
@@ -139,5 +139,131 @@ func TestLowerer_Compile(t *testing.T) {
 		require.Equal(t, uint64(2), scratch[1])
 		require.Equal(t, types.BoxI32(42), stack[0])
 		require.Equal(t, types.BoxI32(42), stack[1])
+	})
+
+	t.Run("swap reorders top two", func(t *testing.T) {
+		// I32_CONST 5; I32_CONST 9; SWAP
+		code := []byte{
+			byte(instr.I32_CONST), 0x05, 0x00, 0x00, 0x00,
+			byte(instr.I32_CONST), 0x09, 0x00, 0x00, 0x00,
+			byte(instr.SWAP),
+		}
+		fn := &types.Function{Code: code}
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		stack := make([]types.Boxed, 16)
+		scratch := []uint64{
+			uint64(uintptr(unsafe.Pointer(&stack[0]))),
+			0, 0, 0, 0,
+		}
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Equal(t, uint64(2), scratch[1])
+		require.Equal(t, types.BoxI32(9), stack[0])
+		require.Equal(t, types.BoxI32(5), stack[1])
+	})
+
+	t.Run("const_get emits compile-time immediate", func(t *testing.T) {
+		// CONST_GET 1
+		code := []byte{byte(instr.CONST_GET), 0x01}
+		fn := &types.Function{Code: code}
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		snap := jit.Snapshot{Constants: []types.Boxed{types.BoxI32(0), types.BoxI32(77)}}
+		mod, err := c.Compile(fn, 1, snap)
+		require.NoError(t, err)
+
+		stack := make([]types.Boxed, 16)
+		scratch := []uint64{
+			uint64(uintptr(unsafe.Pointer(&stack[0]))),
+			0, 0, 0, 0,
+		}
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Equal(t, uint64(1), scratch[1])
+		require.Equal(t, types.BoxI32(77), stack[0])
+	})
+
+	t.Run("global_set then global_get roundtrips through memory", func(t *testing.T) {
+		// I32_CONST 25; GLOBAL_SET 0; GLOBAL_GET 0
+		code := []byte{
+			byte(instr.I32_CONST), 0x19, 0x00, 0x00, 0x00,
+			byte(instr.GLOBAL_SET), 0x00, 0x00,
+			byte(instr.GLOBAL_GET), 0x00, 0x00,
+		}
+		fn := &types.Function{Code: code}
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		globals := []types.Boxed{types.BoxI32(0)}
+		snap := jit.Snapshot{Globals: globals}
+		mod, err := c.Compile(fn, 1, snap)
+		require.NoError(t, err)
+
+		stack := make([]types.Boxed, 16)
+		scratch := []uint64{
+			uint64(uintptr(unsafe.Pointer(&stack[0]))),
+			0,
+			uint64(uintptr(unsafe.Pointer(&globals[0]))),
+			0,
+			0,
+		}
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Equal(t, types.BoxI32(25), globals[0])
+		require.Equal(t, uint64(1), scratch[1])
+		require.Equal(t, types.BoxI32(25), stack[0])
+	})
+
+	t.Run("local_set then local_get with bp offset", func(t *testing.T) {
+		// I32_CONST 88; LOCAL_SET 1; LOCAL_GET 1
+		code := []byte{
+			byte(instr.I32_CONST), 0x58, 0x00, 0x00, 0x00,
+			byte(instr.LOCAL_SET), 0x01,
+			byte(instr.LOCAL_GET), 0x01,
+		}
+		fn := &types.Function{
+			Typ:  &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}},
+			Code: code,
+		}
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		snap := jit.Snapshot{Locals: []types.Kind{types.KindI32, types.KindI32}}
+		mod, err := c.Compile(fn, 1, snap)
+		require.NoError(t, err)
+
+		// Frame layout: stack[bp..bp+2] hold the two locals; entry sp = bp + 2.
+		const bp = 0
+		stack := make([]types.Boxed, 16)
+		scratch := []uint64{
+			uint64(uintptr(unsafe.Pointer(&stack[0]))),
+			2, // entry sp
+			0,
+			uint64(bp),
+			0,
+		}
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Equal(t, types.BoxI32(88), stack[bp+1])
+		require.Equal(t, types.BoxI32(88), stack[2])
+		require.Equal(t, uint64(3), scratch[1])
 	})
 }

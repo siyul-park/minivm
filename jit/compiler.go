@@ -111,8 +111,10 @@ func (c *Compiler) Close() error {
 // dispatch (empty Module) when the active Lowerer rejects any opcode.
 //
 // addr is the heap index of the function in the consumer's heap; it is
-// echoed back in Module.Addr so installers can disambiguate.
-func (c *Compiler) Compile(fn *types.Function, addr int) (*Module, error) {
+// echoed back in Module.Addr so installers can disambiguate. snap carries
+// the consumer-side tables (constants, globals, local kinds) that
+// kind-sensitive opcodes need at compile time.
+func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module, error) {
 	if c.lowerer == nil {
 		return emptyModule(addr, fn), nil
 	}
@@ -120,7 +122,7 @@ func (c *Compiler) Compile(fn *types.Function, addr int) (*Module, error) {
 		return emptyModule(addr, fn), nil
 	}
 
-	seg, ok, err := c.compileSegment(fn, 0)
+	seg, ok, err := c.compileSegment(fn, 0, snap)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +147,7 @@ func (c *Compiler) Compile(fn *types.Function, addr int) (*Module, error) {
 //
 // Returns (code, true, nil) when at least cutoff opcodes lowered, otherwise
 // (nil, false, nil).
-func (c *Compiler) compileSegment(fn *types.Function, startIP int) (*asm.Code, bool, error) {
+func (c *Compiler) compileSegment(fn *types.Function, startIP int, snap Snapshot) (*asm.Code, bool, error) {
 	a := asm.New(c.arch)
 	scratch := c.arch.ABI().Scratch()
 
@@ -155,7 +157,7 @@ func (c *Compiler) compileSegment(fn *types.Function, startIP int) (*asm.Code, b
 		Start:     startIP,
 		IP:        startIP,
 		End:       len(fn.Code),
-		Constants: nil,
+		Snap:      snap,
 		Scratch:   scratch,
 		Slots:     c.slots,
 		Layout:    RuntimeLayout(),
