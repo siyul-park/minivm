@@ -346,4 +346,134 @@ func TestLowerer_Compile(t *testing.T) {
 			require.Equal(t, types.BoxI32(0), stack[0])
 		})
 	})
+
+	t.Run("i32_lt_s distinguishes signed less-than from unsigned bit pattern", func(t *testing.T) {
+		// I32_CONST -1; I32_CONST 1; I32_LT_S — signed compare must say -1 < 1 → 1.
+		code := []byte{
+			byte(instr.I32_CONST), 0xFF, 0xFF, 0xFF, 0xFF,
+			byte(instr.I32_CONST), 0x01, 0x00, 0x00, 0x00,
+			byte(instr.I32_LT_S),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		stack := make([]types.Boxed, 16)
+		scratch := []uint64{
+			uint64(uintptr(unsafe.Pointer(&stack[0]))),
+			0, 0, 0, 0,
+		}
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Equal(t, types.BoxI32(1), stack[0])
+	})
+
+	t.Run("i32_lt_u treats high bit as positive", func(t *testing.T) {
+		// I32_CONST -1; I32_CONST 1; I32_LT_U — unsigned -1 == 0xFFFFFFFF, so NOT < 1.
+		code := []byte{
+			byte(instr.I32_CONST), 0xFF, 0xFF, 0xFF, 0xFF,
+			byte(instr.I32_CONST), 0x01, 0x00, 0x00, 0x00,
+			byte(instr.I32_LT_U),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		stack := make([]types.Boxed, 16)
+		scratch := []uint64{
+			uint64(uintptr(unsafe.Pointer(&stack[0]))),
+			0, 0, 0, 0,
+		}
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Equal(t, types.BoxI32(0), stack[0])
+	})
+
+	t.Run("i32_shl masks shift count to five bits", func(t *testing.T) {
+		// I32_CONST 1; I32_CONST 3; I32_SHL → 8.
+		code := []byte{
+			byte(instr.I32_CONST), 0x01, 0x00, 0x00, 0x00,
+			byte(instr.I32_CONST), 0x03, 0x00, 0x00, 0x00,
+			byte(instr.I32_SHL),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		stack := make([]types.Boxed, 16)
+		scratch := []uint64{
+			uint64(uintptr(unsafe.Pointer(&stack[0]))),
+			0, 0, 0, 0,
+		}
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Equal(t, types.BoxI32(8), stack[0])
+	})
+
+	t.Run("i32_shr_s preserves sign for negative inputs", func(t *testing.T) {
+		// I32_CONST -8; I32_CONST 1; I32_SHR_S → -4.
+		code := []byte{
+			byte(instr.I32_CONST), 0xF8, 0xFF, 0xFF, 0xFF,
+			byte(instr.I32_CONST), 0x01, 0x00, 0x00, 0x00,
+			byte(instr.I32_SHR_S),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		stack := make([]types.Boxed, 16)
+		scratch := []uint64{
+			uint64(uintptr(unsafe.Pointer(&stack[0]))),
+			0, 0, 0, 0,
+		}
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Equal(t, types.BoxI32(-4), stack[0])
+	})
+
+	t.Run("i32_shr_u zero-fills the high bit", func(t *testing.T) {
+		// I32_CONST -8; I32_CONST 1; I32_SHR_U → unsigned -8 >> 1 = 0x7FFFFFFC.
+		code := []byte{
+			byte(instr.I32_CONST), 0xF8, 0xFF, 0xFF, 0xFF,
+			byte(instr.I32_CONST), 0x01, 0x00, 0x00, 0x00,
+			byte(instr.I32_SHR_U),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		stack := make([]types.Boxed, 16)
+		scratch := []uint64{
+			uint64(uintptr(unsafe.Pointer(&stack[0]))),
+			0, 0, 0, 0,
+		}
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Equal(t, types.BoxI32(0x7FFFFFFC), stack[0])
+	})
 }

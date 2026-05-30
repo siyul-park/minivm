@@ -87,6 +87,32 @@ func (l Lowerer) Lower(c *jit.Context, op instr.Opcode) bool {
 		return l.lowerI32Xor(c)
 	case instr.I32_EQZ:
 		return l.lowerI32Eqz(c)
+	case instr.I32_SHL:
+		return l.lowerI32Shl(c)
+	case instr.I32_SHR_S:
+		return l.lowerI32ShrS(c)
+	case instr.I32_SHR_U:
+		return l.lowerI32ShrU(c)
+	case instr.I32_EQ:
+		return l.lowerI32Cmp(c, nil, arm64.CondEQ)
+	case instr.I32_NE:
+		return l.lowerI32Cmp(c, nil, arm64.CondNE)
+	case instr.I32_LT_S:
+		return l.lowerI32Cmp(c, signExtendI32, arm64.CondLT)
+	case instr.I32_LE_S:
+		return l.lowerI32Cmp(c, signExtendI32, arm64.CondLE)
+	case instr.I32_GT_S:
+		return l.lowerI32Cmp(c, signExtendI32, arm64.CondGT)
+	case instr.I32_GE_S:
+		return l.lowerI32Cmp(c, signExtendI32, arm64.CondGE)
+	case instr.I32_LT_U:
+		return l.lowerI32Cmp(c, zeroExtendI32, arm64.CondCC)
+	case instr.I32_LE_U:
+		return l.lowerI32Cmp(c, zeroExtendI32, arm64.CondLS)
+	case instr.I32_GT_U:
+		return l.lowerI32Cmp(c, zeroExtendI32, arm64.CondHI)
+	case instr.I32_GE_U:
+		return l.lowerI32Cmp(c, zeroExtendI32, arm64.CondCS)
 	}
 	return false
 }
@@ -466,6 +492,97 @@ func (l Lowerer) lowerI32Eqz(c *jit.Context) bool {
 	c.Stack[len(c.Stack)-1] = boxed
 	c.IP += instrWidth(c.Code, c.IP)
 	return true
+}
+
+// lowerI32Shl lowers a logical left shift on boxed i32 inputs. The shift
+// count is masked to 5 bits before LSL because ARM64 register-shifts
+// read more bits than i32 shift semantics allow.
+func (l Lowerer) lowerI32Shl(c *jit.Context) bool {
+	return l.lowerI32Shift(c, arm64.LSL, zeroExtendI32)
+}
+
+// lowerI32ShrS lowers an arithmetic right shift; the value lane must be
+// sign-extended so the high bits carry the correct fill.
+func (l Lowerer) lowerI32ShrS(c *jit.Context) bool {
+	return l.lowerI32Shift(c, arm64.ASR, signExtendI32)
+}
+
+// lowerI32ShrU lowers a logical right shift; zero-extending the value
+// lane drops any tag bits before the shift.
+func (l Lowerer) lowerI32ShrU(c *jit.Context) bool {
+	return l.lowerI32Shift(c, arm64.LSR, zeroExtendI32)
+}
+
+func (l Lowerer) lowerI32Shift(
+	c *jit.Context,
+	op func(dst, src1, src2 asm.Reg) asm.Instruction,
+	prep func(*jit.Context, asm.VReg) asm.VReg,
+) bool {
+	if len(c.Stack) < 2 {
+		return false
+	}
+	b := c.Stack[len(c.Stack)-1]
+	a := c.Stack[len(c.Stack)-2]
+
+	shift := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ANDI(shift, b, 0x1F))
+
+	val := prep(c, a)
+	raw := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(op(raw, val, shift))
+
+	boxed := l.boxI32(c, raw)
+	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// lowerI32Cmp pops two boxed i32 values, optionally preps each (sign- or
+// zero-extending to 64 bits for signed/unsigned compares), runs CMP on
+// the prepared operands, and pushes a boxed 0/1 from the chosen
+// condition code. prep is nil for EQ/NE because the boxed tag is
+// identical across both operands, so a raw 64-bit compare is correct.
+func (l Lowerer) lowerI32Cmp(
+	c *jit.Context,
+	prep func(*jit.Context, asm.VReg) asm.VReg,
+	cond uint8,
+) bool {
+	if len(c.Stack) < 2 {
+		return false
+	}
+	b := c.Stack[len(c.Stack)-1]
+	a := c.Stack[len(c.Stack)-2]
+
+	if prep != nil {
+		a = prep(c, a)
+		b = prep(c, b)
+	}
+	c.Assembler.Emit(arm64.CMP(a, b))
+
+	flag := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.CSET(flag, cond))
+
+	boxed := l.boxI32(c, flag)
+	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// signExtendI32 sign-extends the low 32 bits of v into a fresh 64-bit
+// vreg so signed 64-bit compares and arithmetic produce correct results.
+func signExtendI32(c *jit.Context, v asm.VReg) asm.VReg {
+	out := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.SXTW(out, v))
+	return out
+}
+
+// zeroExtendI32 masks v down to its low 32 bits in a fresh 64-bit vreg,
+// dropping the tag bits so the result can feed into shifts or unsigned
+// 64-bit compares without contamination.
+func zeroExtendI32(c *jit.Context, v asm.VReg) asm.VReg {
+	out := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ANDI(out, v, i32LoMask))
+	return out
 }
 
 // boxI32 takes a vreg holding a value whose low 32 bits carry the
