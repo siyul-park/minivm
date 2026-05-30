@@ -57,14 +57,14 @@ func (s *scanner) run(insts []Instruction) error {
 			}
 		}
 	}
-	s.backfillPinWidths()
+	s.backfill()
 	return nil
 }
 
 // ensure binds v to a preg if it is not already bound. Pinned vregs evict
 // any conflicting holder of their target slot before reserving.
 func (s *scanner) ensure(v VReg) error {
-	s.recordWidth(v)
+	s.record(v)
 	if _, ok := s.pool.bindings[v.ID()]; ok {
 		return nil
 	}
@@ -73,8 +73,7 @@ func (s *scanner) ensure(v VReg) error {
 			s.pool.free(NewVReg(id, pin.Type(), pin.Width()))
 		}
 		if err := s.pool.reserve(v, pin); err != nil {
-			return fmt.Errorf("%w: vreg %v pin %v: %w",
-				ErrConflictingPin, v, pin, err)
+			return fmt.Errorf("%w: vreg %v pin %v: %w", ErrConflictingPin, v, pin, err)
 		}
 		s.assigned[v.ID()] = pin
 		return nil
@@ -87,7 +86,7 @@ func (s *scanner) ensure(v VReg) error {
 	return nil
 }
 
-func (s *scanner) recordWidth(v VReg) {
+func (s *scanner) record(v VReg) {
 	if v.Width() == WidthUndefined {
 		return
 	}
@@ -97,7 +96,7 @@ func (s *scanner) recordWidth(v VReg) {
 	s.widths[v.ID()] = v.Width()
 }
 
-func (s *scanner) backfillPinWidths() {
+func (s *scanner) backfill() {
 	for id, pr := range s.pins {
 		if w, ok := s.widths[id]; !ok || w == WidthUndefined {
 			s.widths[id] = pr.Width()
