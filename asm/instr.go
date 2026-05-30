@@ -18,6 +18,34 @@ type Instruction struct {
 	Src3 Operand
 }
 
+// Def returns the destination vreg if Dst is a virtual-register operand.
+// Pure operand inspection — no side effects.
+func (i Instruction) Def() (VReg, bool) {
+	if v, ok := i.Dst.(VRegOperand); ok {
+		return v.Reg, true
+	}
+	return VReg{}, false
+}
+
+// Uses returns every vreg the instruction reads, including memory-base
+// references in any operand slot. Order is Dst-base, Src1, Src2, Src3.
+func (i Instruction) Uses() []VReg {
+	var regs []VReg
+	if base, ok := memBase(i.Dst); ok {
+		regs = append(regs, base)
+	}
+	for _, op := range []Operand{i.Src1, i.Src2, i.Src3} {
+		if v, ok := op.(VRegOperand); ok {
+			regs = append(regs, v.Reg)
+			continue
+		}
+		if base, ok := memBase(op); ok {
+			regs = append(regs, base)
+		}
+	}
+	return regs
+}
+
 func (i Instruction) String() string {
 	switch {
 	case i.Dst != nil && i.Src1 != nil && i.Src2 != nil:
@@ -29,4 +57,19 @@ func (i Instruction) String() string {
 	default:
 		return fmt.Sprintf("%v", i.Op)
 	}
+}
+
+// memBase returns the base vreg of a MemOperand, if op is a memory
+// reference whose base is a virtual register. Used by scan-time analysis
+// to track every vreg an instruction touches.
+func memBase(op Operand) (VReg, bool) {
+	mem, ok := op.(MemOperand)
+	if !ok {
+		return VReg{}, false
+	}
+	v, ok := mem.Base.(VRegOperand)
+	if !ok {
+		return VReg{}, false
+	}
+	return v.Reg, true
 }

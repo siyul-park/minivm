@@ -91,5 +91,29 @@ func (a *Assembler) Build(sig Signature) (*Code, error) {
 	if a.err != nil {
 		return nil, a.err
 	}
-	return build(a.arch, a.insts, a.pins, a.labels, sig, a.entries)
+
+	sc := newScanner(a.arch.Registers(), a.insts, a.pins)
+	if err := sc.run(a.insts); err != nil {
+		return nil, err
+	}
+
+	rewritten := rewrite(a.insts, sc.assigned, sc.widths)
+	bytes, byteLabels, relocs, err := encode(a.arch.Encoder(), rewritten, a.labels)
+	if err != nil {
+		return nil, err
+	}
+
+	code := &Code{
+		Bytes:     bytes,
+		Labels:    byteLabels,
+		Relocs:    relocs,
+		Signature: sig,
+	}
+	if len(a.entries) > 0 {
+		code.Entries = make(map[Label]Signature, len(a.entries))
+		for k, v := range a.entries {
+			code.Entries[k] = v
+		}
+	}
+	return code, nil
 }
