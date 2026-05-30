@@ -73,6 +73,20 @@ func (l Lowerer) Lower(c *jit.Context, op instr.Opcode) bool {
 		return l.lowerLocalGet(c)
 	case instr.LOCAL_SET:
 		return l.lowerLocalSet(c)
+	case instr.I32_ADD:
+		return l.lowerI32Add(c)
+	case instr.I32_SUB:
+		return l.lowerI32Sub(c)
+	case instr.I32_MUL:
+		return l.lowerI32Mul(c)
+	case instr.I32_AND:
+		return l.lowerI32And(c)
+	case instr.I32_OR:
+		return l.lowerI32Or(c)
+	case instr.I32_XOR:
+		return l.lowerI32Xor(c)
+	case instr.I32_EQZ:
+		return l.lowerI32Eqz(c)
 	}
 	return false
 }
@@ -344,6 +358,130 @@ func (Lowerer) localAddr(c *jit.Context, idx int) (asm.VReg, bool) {
 		return offset, true
 	}
 	return vBase, true
+}
+
+// boxedI32Tag is the upper 32 bits common to every NaN-boxed i32. ORing
+// the raw 32-bit value into a register pre-cleared above bit 31 produces
+// a valid Boxed.
+const boxedI32Tag = uint64(0x7FF6_0000_0000_0000)
+
+// i32LoMask isolates the 32-bit value lane of a NaN-boxed i32.
+const i32LoMask = uint64(0xFFFFFFFF)
+
+func (l Lowerer) lowerI32Add(c *jit.Context) bool {
+	return l.lowerI32BinOp(c, arm64.ADD)
+}
+
+func (l Lowerer) lowerI32Sub(c *jit.Context) bool {
+	return l.lowerI32BinOp(c, arm64.SUB)
+}
+
+func (l Lowerer) lowerI32Mul(c *jit.Context) bool {
+	return l.lowerI32BinOp(c, arm64.MUL)
+}
+
+// lowerI32BinOp lowers an i32 binary arithmetic opcode whose result can
+// land in any bit pattern (ADD, SUB, MUL). The lowered sequence runs the
+// op on the boxed inputs in 64-bit registers, then re-masks and re-tags
+// the result so it lands as a fresh boxed i32 on the segment stack.
+func (l Lowerer) lowerI32BinOp(c *jit.Context, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
+	if len(c.Stack) < 2 {
+		return false
+	}
+	b := c.Stack[len(c.Stack)-1]
+	a := c.Stack[len(c.Stack)-2]
+
+	raw := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(op(raw, a, b))
+
+	boxed := l.boxI32(c, raw)
+	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// lowerI32And and lowerI32Or take the fast path: ANDing or ORing two
+// boxed i32 values preserves the tag bits because both operands share
+// the same tag pattern (tag&tag == tag, tag|tag == tag). No re-box step
+// is required.
+func (l Lowerer) lowerI32And(c *jit.Context) bool {
+	return l.lowerI32Logical(c, arm64.AND)
+}
+
+func (l Lowerer) lowerI32Or(c *jit.Context) bool {
+	return l.lowerI32Logical(c, arm64.ORR)
+}
+
+func (Lowerer) lowerI32Logical(c *jit.Context, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
+	if len(c.Stack) < 2 {
+		return false
+	}
+	b := c.Stack[len(c.Stack)-1]
+	a := c.Stack[len(c.Stack)-2]
+	dst := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(op(dst, a, b))
+	c.Stack = append(c.Stack[:len(c.Stack)-2], dst)
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// lowerI32Xor needs an explicit re-tag: XORing two same-tagged inputs
+// cancels the tag bits in the upper half, so we OR the tag back in.
+func (l Lowerer) lowerI32Xor(c *jit.Context) bool {
+	if len(c.Stack) < 2 {
+		return false
+	}
+	b := c.Stack[len(c.Stack)-1]
+	a := c.Stack[len(c.Stack)-2]
+
+	xord := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.EOR(xord, a, b))
+
+	tag := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.LDI(tag, boxedI32Tag)...)
+	boxed := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ORR(boxed, xord, tag))
+
+	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// lowerI32Eqz pops one boxed i32, compares its low 32 bits to zero, and
+// pushes a boxed i32 1 (equal) or 0 (not equal).
+func (l Lowerer) lowerI32Eqz(c *jit.Context) bool {
+	if len(c.Stack) == 0 {
+		return false
+	}
+	a := c.Stack[len(c.Stack)-1]
+
+	lo := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ANDI(lo, a, i32LoMask))
+	c.Assembler.Emit(arm64.CMPI(lo, 0))
+
+	flag := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.CSET(flag, arm64.CondEQ))
+
+	boxed := l.boxI32(c, flag)
+	c.Stack[len(c.Stack)-1] = boxed
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// boxI32 takes a vreg holding a value whose low 32 bits carry the
+// integer and whose upper 32 bits are zero (any ARM64 32-bit op or an
+// ANDI mask of 0xFFFFFFFF gives this shape), and produces a fresh
+// vreg holding the NaN-boxed Boxed.
+func (Lowerer) boxI32(c *jit.Context, val asm.VReg) asm.VReg {
+	lo := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ANDI(lo, val, i32LoMask))
+
+	tag := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.LDI(tag, boxedI32Tag)...)
+
+	boxed := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ORR(boxed, lo, tag))
+	return boxed
 }
 
 // instrWidth returns the encoded width in bytes of the opcode at code[ip].

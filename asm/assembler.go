@@ -99,14 +99,14 @@ func (a *Assembler) Build(sig Signature) (*Code, error) {
 		return nil, err
 	}
 
-	bytes, byteLabels, relocs, err := a.emit(rewritten)
+	bytes, labels, relocs, err := a.emit(rewritten)
 	if err != nil {
 		return nil, err
 	}
 
 	code := &Code{
 		Bytes:     bytes,
-		Labels:    byteLabels,
+		Labels:    labels,
 		Relocs:    relocs,
 		Signature: sig,
 	}

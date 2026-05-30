@@ -266,4 +266,84 @@ func TestLowerer_Compile(t *testing.T) {
 		require.Equal(t, types.BoxI32(88), stack[2])
 		require.Equal(t, uint64(3), scratch[1])
 	})
+
+	t.Run("i32_add of two consts produces boxed sum", func(t *testing.T) {
+		// I32_CONST 7; I32_CONST 5; I32_ADD
+		code := []byte{
+			byte(instr.I32_CONST), 0x07, 0x00, 0x00, 0x00,
+			byte(instr.I32_CONST), 0x05, 0x00, 0x00, 0x00,
+			byte(instr.I32_ADD),
+		}
+		fn := &types.Function{Code: code}
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		stack := make([]types.Boxed, 16)
+		scratch := []uint64{
+			uint64(uintptr(unsafe.Pointer(&stack[0]))),
+			0, 0, 0, 0,
+		}
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Equal(t, uint64(1), scratch[1])
+		require.Equal(t, types.BoxI32(12), stack[0])
+	})
+
+	t.Run("i32_eqz returns boxed 1 for zero and 0 otherwise", func(t *testing.T) {
+		t.Run("zero", func(t *testing.T) {
+			// I32_CONST 0; I32_EQZ
+			code := []byte{
+				byte(instr.I32_CONST), 0x00, 0x00, 0x00, 0x00,
+				byte(instr.I32_EQZ),
+			}
+			fn := &types.Function{Code: code}
+			c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+			require.NoError(t, err)
+			defer c.Close()
+
+			mod, err := c.Compile(fn, 1, jit.Snapshot{})
+			require.NoError(t, err)
+
+			stack := make([]types.Boxed, 16)
+			scratch := []uint64{
+				uint64(uintptr(unsafe.Pointer(&stack[0]))),
+				0, 0, 0, 0,
+			}
+			_, err = mod.Segments[0].Call(nil, scratch)
+			require.NoError(t, err)
+
+			require.Equal(t, types.BoxI32(1), stack[0])
+		})
+
+		t.Run("non-zero", func(t *testing.T) {
+			// I32_CONST 42; I32_EQZ
+			code := []byte{
+				byte(instr.I32_CONST), 0x2A, 0x00, 0x00, 0x00,
+				byte(instr.I32_EQZ),
+			}
+			fn := &types.Function{Code: code}
+			c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+			require.NoError(t, err)
+			defer c.Close()
+
+			mod, err := c.Compile(fn, 1, jit.Snapshot{})
+			require.NoError(t, err)
+
+			stack := make([]types.Boxed, 16)
+			scratch := []uint64{
+				uint64(uintptr(unsafe.Pointer(&stack[0]))),
+				0, 0, 0, 0,
+			}
+			_, err = mod.Segments[0].Call(nil, scratch)
+			require.NoError(t, err)
+
+			require.Equal(t, types.BoxI32(0), stack[0])
+		})
+	})
 }
