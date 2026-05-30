@@ -1,20 +1,5 @@
 package asm
 
-// lastUses returns the highest instruction index at which each vreg is
-// referenced (use or def).
-func lastUses(insts []Instruction) map[int32]int {
-	last := make(map[int32]int)
-	for i, inst := range insts {
-		if dst, ok := inst.Def(); ok {
-			last[dst.ID()] = i
-		}
-		for _, v := range inst.Uses() {
-			last[v.ID()] = i
-		}
-	}
-	return last
-}
-
 // rewrite returns a copy of insts with every VReg / MemOperand-base
 // rewritten to its assigned PReg. Width defaults to the operand's
 // declared width; undefined widths fall back to the per-vreg widths map.
