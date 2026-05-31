@@ -476,4 +476,116 @@ func TestLowerer_Compile(t *testing.T) {
 
 		require.Equal(t, types.BoxI32(0x7FFFFFFC), stack[0])
 	})
+
+	t.Run("i64_add of two boxable consts produces boxed sum", func(t *testing.T) {
+		// I64_CONST 7; I64_CONST 5; I64_ADD → boxed 12.
+		code := []byte{
+			byte(instr.I64_CONST), 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			byte(instr.I64_CONST), 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			byte(instr.I64_ADD),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		stack := make([]types.Boxed, 16)
+		scratch := []uint64{
+			uint64(uintptr(unsafe.Pointer(&stack[0]))),
+			0, 0, 0, 0,
+		}
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Equal(t, types.BoxI64(12), stack[0])
+	})
+
+	t.Run("i64_lt_s recognises negative values via sign extension", func(t *testing.T) {
+		// I64_CONST -3; I64_CONST 2; I64_LT_S → 1 (signed).
+		code := []byte{
+			byte(instr.I64_CONST), 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+			byte(instr.I64_CONST), 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			byte(instr.I64_LT_S),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		stack := make([]types.Boxed, 16)
+		scratch := []uint64{
+			uint64(uintptr(unsafe.Pointer(&stack[0]))),
+			0, 0, 0, 0,
+		}
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Equal(t, types.BoxI32(1), stack[0])
+	})
+
+	t.Run("i64_eqz returns boxed 1 for zero and 0 otherwise", func(t *testing.T) {
+		t.Run("zero", func(t *testing.T) {
+			code := []byte{
+				byte(instr.I64_CONST), 0, 0, 0, 0, 0, 0, 0, 0,
+				byte(instr.I64_EQZ),
+			}
+			fn := &types.Function{Code: code}
+			c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+			require.NoError(t, err)
+			defer c.Close()
+			mod, err := c.Compile(fn, 1, jit.Snapshot{})
+			require.NoError(t, err)
+			stack := make([]types.Boxed, 16)
+			scratch := []uint64{uint64(uintptr(unsafe.Pointer(&stack[0]))), 0, 0, 0, 0}
+			_, err = mod.Segments[0].Call(nil, scratch)
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(1), stack[0])
+		})
+		t.Run("non-zero", func(t *testing.T) {
+			code := []byte{
+				byte(instr.I64_CONST), 0x09, 0, 0, 0, 0, 0, 0, 0,
+				byte(instr.I64_EQZ),
+			}
+			fn := &types.Function{Code: code}
+			c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+			require.NoError(t, err)
+			defer c.Close()
+			mod, err := c.Compile(fn, 1, jit.Snapshot{})
+			require.NoError(t, err)
+			stack := make([]types.Boxed, 16)
+			scratch := []uint64{uint64(uintptr(unsafe.Pointer(&stack[0]))), 0, 0, 0, 0}
+			_, err = mod.Segments[0].Call(nil, scratch)
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(0), stack[0])
+		})
+	})
+
+	t.Run("i64_shl masks shift count to six bits", func(t *testing.T) {
+		// I64_CONST 1; I64_CONST 4; I64_SHL → 16.
+		code := []byte{
+			byte(instr.I64_CONST), 1, 0, 0, 0, 0, 0, 0, 0,
+			byte(instr.I64_CONST), 4, 0, 0, 0, 0, 0, 0, 0,
+			byte(instr.I64_SHL),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		stack := make([]types.Boxed, 16)
+		scratch := []uint64{uint64(uintptr(unsafe.Pointer(&stack[0]))), 0, 0, 0, 0}
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Equal(t, types.BoxI64(16), stack[0])
+	})
 }

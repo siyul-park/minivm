@@ -113,6 +113,40 @@ func (l Lowerer) Lower(c *jit.Context, op instr.Opcode) bool {
 		return l.lowerI32Cmp(c, zeroExtendI32, arm64.CondHI)
 	case instr.I32_GE_U:
 		return l.lowerI32Cmp(c, zeroExtendI32, arm64.CondCS)
+	case instr.I64_ADD:
+		return l.lowerI64BinOp(c, arm64.ADD)
+	case instr.I64_SUB:
+		return l.lowerI64BinOp(c, arm64.SUB)
+	case instr.I64_MUL:
+		return l.lowerI64BinOp(c, arm64.MUL)
+	case instr.I64_EQ:
+		return l.lowerI64Cmp(c, nil, arm64.CondEQ)
+	case instr.I64_NE:
+		return l.lowerI64Cmp(c, nil, arm64.CondNE)
+	case instr.I64_EQZ:
+		return l.lowerI64Eqz(c)
+	case instr.I64_LT_S:
+		return l.lowerI64Cmp(c, signExtendI64, arm64.CondLT)
+	case instr.I64_LE_S:
+		return l.lowerI64Cmp(c, signExtendI64, arm64.CondLE)
+	case instr.I64_GT_S:
+		return l.lowerI64Cmp(c, signExtendI64, arm64.CondGT)
+	case instr.I64_GE_S:
+		return l.lowerI64Cmp(c, signExtendI64, arm64.CondGE)
+	case instr.I64_LT_U:
+		return l.lowerI64Cmp(c, zeroExtendI64, arm64.CondCC)
+	case instr.I64_LE_U:
+		return l.lowerI64Cmp(c, zeroExtendI64, arm64.CondLS)
+	case instr.I64_GT_U:
+		return l.lowerI64Cmp(c, zeroExtendI64, arm64.CondHI)
+	case instr.I64_GE_U:
+		return l.lowerI64Cmp(c, zeroExtendI64, arm64.CondCS)
+	case instr.I64_SHL:
+		return l.lowerI64Shift(c, arm64.LSL, zeroExtendI64)
+	case instr.I64_SHR_S:
+		return l.lowerI64Shift(c, arm64.ASR, signExtendI64)
+	case instr.I64_SHR_U:
+		return l.lowerI64Shift(c, arm64.LSR, zeroExtendI64)
 	}
 	return false
 }
@@ -394,6 +428,18 @@ const boxedI32Tag = uint64(0x7FF6_0000_0000_0000)
 // i32LoMask isolates the 32-bit value lane of a NaN-boxed i32.
 const i32LoMask = uint64(0xFFFFFFFF)
 
+// boxedI64Tag covers bits 49..62 of every NaN-boxed i64 — KindI64 (2) in
+// bits 49..51 and the 0x7FF exponent fill in bits 52..62.
+const boxedI64Tag = uint64(0x7FF4_0000_0000_0000)
+
+// i64ValMask isolates the 49-bit signed value lane of a NaN-boxed i64.
+// Inputs to types.IsBoxable must already fit within this range.
+const i64ValMask = uint64(0x0001_FFFF_FFFF_FFFF)
+
+// i64SignShift is the left-then-right shift count used to sign-extend
+// bit 48 of an i64 value lane into all bits above it.
+const i64SignShift = uint8(15)
+
 func (l Lowerer) lowerI32Add(c *jit.Context) bool {
 	return l.lowerI32BinOp(c, arm64.ADD)
 }
@@ -583,6 +629,145 @@ func zeroExtendI32(c *jit.Context, v asm.VReg) asm.VReg {
 	out := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.Assembler.Emit(arm64.ANDI(out, v, i32LoMask))
 	return out
+}
+
+// signExtendI64 sign-extends bit 48 of v's value lane into bits 49..63.
+// LSL by 15 pushes bit 48 to bit 63; ASR by 15 then drags the sign back
+// down so the full 64-bit register holds the i64 in two's complement.
+func signExtendI64(c *jit.Context, v asm.VReg) asm.VReg {
+	tmp := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.LSLI(tmp, v, i64SignShift))
+	out := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ASRI(out, tmp, i64SignShift))
+	return out
+}
+
+// zeroExtendI64 masks v down to its 49-bit value lane in a fresh 64-bit
+// vreg, dropping the tag bits so the result can feed into shifts or
+// unsigned 64-bit compares without contamination.
+func zeroExtendI64(c *jit.Context, v asm.VReg) asm.VReg {
+	out := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ANDI(out, v, i64ValMask))
+	return out
+}
+
+// lowerI64BinOp lowers an i64 binary arithmetic opcode (ADD / SUB / MUL).
+// Inputs are sign-extended to 64 bits, the op runs on the extended
+// values, and the result is re-masked to the 49-bit value lane and
+// re-tagged. Results that overflow the boxable range silently wrap;
+// full Boxable-vs-heap promotion lands in a later phase.
+func (l Lowerer) lowerI64BinOp(
+	c *jit.Context,
+	op func(dst, src1, src2 asm.Reg) asm.Instruction,
+) bool {
+	if len(c.Stack) < 2 {
+		return false
+	}
+	b := c.Stack[len(c.Stack)-1]
+	a := c.Stack[len(c.Stack)-2]
+
+	av := signExtendI64(c, a)
+	bv := signExtendI64(c, b)
+	raw := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(op(raw, av, bv))
+
+	boxed := l.boxI64(c, raw)
+	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// lowerI64Cmp pops two boxed i64 inputs, optionally preps each (sign- or
+// zero-extending to 64 bits for signed/unsigned compares), runs CMP, and
+// pushes a boxed 0/1 from the chosen condition. prep is nil for EQ/NE
+// because matching tags make a 64-bit compare sufficient.
+func (l Lowerer) lowerI64Cmp(
+	c *jit.Context,
+	prep func(*jit.Context, asm.VReg) asm.VReg,
+	cond uint8,
+) bool {
+	if len(c.Stack) < 2 {
+		return false
+	}
+	b := c.Stack[len(c.Stack)-1]
+	a := c.Stack[len(c.Stack)-2]
+
+	if prep != nil {
+		a = prep(c, a)
+		b = prep(c, b)
+	}
+	c.Assembler.Emit(arm64.CMP(a, b))
+
+	flag := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.CSET(flag, cond))
+
+	boxed := l.boxI32(c, flag)
+	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// lowerI64Eqz pops one boxed i64, masks off the tag, compares the value
+// lane to zero, and pushes the boxed 0/1 result (as a boxed i32 per the
+// WebAssembly EQZ semantics).
+func (l Lowerer) lowerI64Eqz(c *jit.Context) bool {
+	if len(c.Stack) == 0 {
+		return false
+	}
+	a := c.Stack[len(c.Stack)-1]
+
+	val := zeroExtendI64(c, a)
+	c.Assembler.Emit(arm64.CMPI(val, 0))
+	flag := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.CSET(flag, arm64.CondEQ))
+
+	boxed := l.boxI32(c, flag)
+	c.Stack[len(c.Stack)-1] = boxed
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// lowerI64Shift lowers SHL / SHR_S / SHR_U on boxed i64 inputs. The
+// shift count is masked to 6 bits because ARM64 register-shifts read
+// more bits than WebAssembly's i64 shift modulo 64. The value lane is
+// prepped per opcode (sign or zero extend) so the shift sees the right
+// upper bits.
+func (l Lowerer) lowerI64Shift(
+	c *jit.Context,
+	op func(dst, src1, src2 asm.Reg) asm.Instruction,
+	prep func(*jit.Context, asm.VReg) asm.VReg,
+) bool {
+	if len(c.Stack) < 2 {
+		return false
+	}
+	b := c.Stack[len(c.Stack)-1]
+	a := c.Stack[len(c.Stack)-2]
+
+	shift := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ANDI(shift, b, 0x3F))
+
+	val := prep(c, a)
+	raw := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(op(raw, val, shift))
+
+	boxed := l.boxI64(c, raw)
+	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// boxI64 masks val to the 49-bit value lane and ORs in the i64 tag.
+// val may carry sign-extended high bits — the ANDI step drops them.
+func (Lowerer) boxI64(c *jit.Context, val asm.VReg) asm.VReg {
+	lo := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ANDI(lo, val, i64ValMask))
+
+	tag := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.LDI(tag, boxedI64Tag)...)
+
+	boxed := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ORR(boxed, lo, tag))
+	return boxed
 }
 
 // boxI32 takes a vreg holding a value whose low 32 bits carry the
