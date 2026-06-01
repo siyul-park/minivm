@@ -126,6 +126,7 @@ func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module
 		return nil, err
 	}
 	mod.Segments[0] = callables[0]
+	mod.Stacks[0] = len(seg.Signature.Args)
 	return mod, nil
 }
 
@@ -137,14 +138,45 @@ func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module
 // Returns (code, true, nil) when at least cutoff opcodes lowered, otherwise
 // (nil, false, nil).
 func (c *Compiler) compileSegment(fn *types.Function, startIP int, snap Snapshot) (*asm.Code, bool, error) {
-	a := asm.New(c.arch)
 	scratch := c.arch.ABI().Scratch()
 	if len(scratch) < ScratchCount {
 		return nil, false, nil
 	}
 	scratch = scratch[:ScratchCount]
 
-	ctx := &Context{
+	plan := c.context(asm.New(c.arch), fn, startIP, snap, scratch)
+	lowered := c.lower(plan)
+	if lowered < c.cutoff {
+		return nil, false, nil
+	}
+	if !c.fits(plan) {
+		return nil, false, nil
+	}
+
+	a := asm.New(c.arch)
+	ctx := c.context(a, fn, startIP, snap, scratch)
+	seedInputs(ctx, len(plan.Inputs))
+	c.lowerer.Prologue(ctx, fn)
+	lowered = c.lower(ctx)
+	if lowered < c.cutoff || ctx.IP != plan.IP || len(ctx.Inputs) != len(plan.Inputs) {
+		return nil, false, nil
+	}
+	if !c.fits(ctx) {
+		return nil, false, nil
+	}
+
+	c.lowerer.Exit(ctx, ctx.IP)
+
+	sig := asm.Signature{Args: ctx.Args, Returns: ctx.Returns, Scratch: scratch}
+	code, err := a.Build(sig)
+	if err != nil {
+		return nil, false, err
+	}
+	return code, true, nil
+}
+
+func (c *Compiler) context(a *asm.Assembler, fn *types.Function, startIP int, snap Snapshot, scratch []asm.PReg) *Context {
+	return &Context{
 		Assembler: a,
 		Code:      fn.Code,
 		Start:     startIP,
@@ -155,10 +187,12 @@ func (c *Compiler) compileSegment(fn *types.Function, startIP int, snap Snapshot
 		Slots:     c.slots,
 		Layout:    RuntimeLayout(),
 	}
+}
 
+func (c *Compiler) lower(ctx *Context) int {
 	lowered := 0
 	for ctx.IP < ctx.End {
-		op := instr.Opcode(fn.Code[ctx.IP])
+		op := instr.Opcode(ctx.Code[ctx.IP])
 		ipBefore := ctx.IP
 		if !c.lowerer.Lower(ctx, op) {
 			break
@@ -169,22 +203,20 @@ func (c *Compiler) compileSegment(fn *types.Function, startIP int, snap Snapshot
 		}
 		lowered++
 	}
+	return lowered
+}
 
-	if lowered < c.cutoff {
-		return nil, false, nil
-	}
-	if len(ctx.Stack) > c.arch.ABI().MaxReturns() {
-		return nil, false, nil
-	}
+func (c *Compiler) fits(ctx *Context) bool {
+	return len(ctx.Inputs) <= c.arch.ABI().MaxArgs() &&
+		len(ctx.Stack) <= c.arch.ABI().MaxReturns()
+}
 
-	c.lowerer.Exit(ctx, ctx.IP)
-
-	sig := asm.Signature{Args: nil, Returns: ctx.Returns, Scratch: scratch}
-	code, err := a.Build(sig)
-	if err != nil {
-		return nil, false, err
+func seedInputs(ctx *Context, n int) {
+	for i := 0; i < n; i++ {
+		v := ctx.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.Inputs = append(ctx.Inputs, v)
+		ctx.Stack = append(ctx.Stack, v)
 	}
-	return code, true, nil
 }
 
 // newModule returns a default Module that carries fn's boxing metadata.
@@ -204,6 +236,7 @@ func newModule(fn *types.Function, addr int) *Module {
 	return &Module{
 		Addr:        addr,
 		Segments:    map[int]asm.Callable{},
+		Stacks:      map[int]int{},
 		ParamKinds:  params,
 		ReturnKinds: returns,
 	}

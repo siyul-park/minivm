@@ -7,11 +7,9 @@ import (
 )
 
 // Lowerer is the arch-specific opcode emitter. Arch returns the asm.Arch
-// the compiler should use to encode and link emitted code. Prologue/
-// Epilogue are explicit roles for whole-function compilation. Lower
-// handles a single bytecode opcode; the driver advances IP only when
-// Lower returns true. Exit emits the segment's terminator, writes next IP
-// through scratch, and maps the segment stack shadow to ABI returns.
+// the compiler should use to encode and link emitted code. Prologue binds
+// segment entry state; Lower handles one opcode; Exit emits the terminator,
+// writes next IP through scratch, and maps stack values to ABI returns.
 type Lowerer interface {
 	Arch() asm.Arch
 	Prologue(c *Context, fn *types.Function)
@@ -50,9 +48,16 @@ type Context struct {
 	// time.
 	Snap Snapshot
 
-	// Stack tracks values pushed onto the VM stack within this segment.
-	// Top of the slice is top of stack.
+	// Stack tracks values currently visible on the VM stack within this
+	// segment. Top of the slice is top of stack.
 	Stack []asm.VReg
+
+	// Inputs records VM stack values that existed before segment entry.
+	// Order is bottom-to-top, matching the interpreter stack slice.
+	Inputs []asm.VReg
+
+	// Args records ABI argument registers populated by Exit from Inputs.
+	Args []asm.PReg
 
 	// Scratch holds the physical registers assigned to each segment-wide
 	// scratch slot.

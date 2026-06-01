@@ -17,7 +17,8 @@ import (
 //   - Entry, when non-nil, is the whole-function direct-callable. Other
 //     JIT-compiled callers can target Entry.Addr() via direct BL.
 //   - Segments maps source IP → per-block native chunks for partial JIT.
-//     Segment stack results return through the Callable return values;
+//     Stacks records how many VM stack values each segment consumes as
+//     Callable args. Segment stack results return through Callable returns;
 //     scratch carries VM context and next interpreter IP.
 //   - Signature describes Entry's ABI; it is meaningless when Entry is nil.
 //   - ParamKinds and ReturnKinds let the consumer box/unbox stack values
@@ -26,6 +27,7 @@ type Module struct {
 	Addr        int
 	Entry       asm.Callable
 	Segments    map[int]asm.Callable
+	Stacks      map[int]int
 	Signature   asm.Signature
 	ParamKinds  []types.Kind
 	ReturnKinds []types.Kind

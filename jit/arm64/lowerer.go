@@ -36,8 +36,14 @@ var (
 // backend.
 func (Lowerer) Arch() asm.Arch { return theArch }
 
-// Prologue is a no-op until whole-function Entry lowering lands.
-func (Lowerer) Prologue(_ *jit.Context, _ *types.Function) {}
+// Prologue binds segment live-ins to ABI args and emits no-op moves so the
+// allocator treats them as live from entry.
+func (Lowerer) Prologue(c *jit.Context, _ *types.Function) {
+	bindInputs(c)
+	for _, v := range c.Inputs {
+		c.Assembler.Emit(arm64.MOV(v, v))
+	}
+}
 
 // Epilogue is a no-op until whole-function Entry lowering lands.
 func (Lowerer) Epilogue(_ *jit.Context) {}
@@ -147,6 +153,8 @@ func (l Lowerer) Lower(c *jit.Context, op instr.Opcode) bool {
 func (Lowerer) Exit(c *jit.Context, nextIP int) {
 	rNext := c.Scratch[jit.ScratchNext]
 
+	bindInputs(c)
+
 	c.Returns = c.Returns[:0]
 	for i, v := range c.Stack {
 		ret := theArch.ABI().Return(i, v.Type(), v.Width())
@@ -166,7 +174,7 @@ func (Lowerer) nop(c *jit.Context) bool {
 }
 
 func (Lowerer) drop(c *jit.Context) bool {
-	if len(c.Stack) == 0 {
+	if !need(c, 1) {
 		return false
 	}
 	c.IP += instrWidth(c.Code, c.IP)
@@ -175,7 +183,7 @@ func (Lowerer) drop(c *jit.Context) bool {
 }
 
 func (Lowerer) dup(c *jit.Context) bool {
-	if len(c.Stack) == 0 {
+	if !need(c, 1) {
 		return false
 	}
 	top := c.Stack[len(c.Stack)-1]
@@ -231,7 +239,7 @@ func (Lowerer) pushImm(c *jit.Context, boxed uint64, width int) bool {
 }
 
 func (Lowerer) swap(c *jit.Context) bool {
-	if len(c.Stack) < 2 {
+	if !need(c, 2) {
 		return false
 	}
 	last := len(c.Stack) - 1
@@ -284,15 +292,15 @@ func (Lowerer) globalGet(c *jit.Context) bool {
 // SET overwriting a previously held ref would leak it, so a current ref in
 // globals[idx] also rejects.
 func (Lowerer) globalSet(c *jit.Context) bool {
-	if len(c.Stack) == 0 {
-		return false
-	}
 	width := instrWidth(c.Code, c.IP)
 	idx := int(uint16(c.Code[c.IP+1]) | uint16(c.Code[c.IP+2])<<8)
 	if idx >= len(c.Snap.Globals) {
 		return false
 	}
 	if c.Snap.Globals[idx].Kind() == types.KindRef {
+		return false
+	}
+	if !need(c, 1) {
 		return false
 	}
 
@@ -335,15 +343,15 @@ func (l Lowerer) localGet(c *jit.Context) bool {
 
 // localSet pops the segment stack top into stack[bp+idx].
 func (l Lowerer) localSet(c *jit.Context) bool {
-	if len(c.Stack) == 0 {
-		return false
-	}
 	width := instrWidth(c.Code, c.IP)
 	idx := int(c.Code[c.IP+1])
 	if idx >= len(c.Snap.Locals) {
 		return false
 	}
 	if c.Snap.Locals[idx] == types.KindRef {
+		return false
+	}
+	if !need(c, 1) {
 		return false
 	}
 
@@ -404,7 +412,7 @@ func (l Lowerer) i32Mul(c *jit.Context) bool {
 // op on the boxed inputs in 64-bit registers, then re-masks and re-tags
 // the result so it lands as a fresh boxed i32 on the segment stack.
 func (l Lowerer) i32BinOp(c *jit.Context, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
-	if len(c.Stack) < 2 {
+	if !need(c, 2) {
 		return false
 	}
 	b := c.Stack[len(c.Stack)-1]
@@ -432,7 +440,7 @@ func (l Lowerer) i32Or(c *jit.Context) bool {
 }
 
 func (Lowerer) i32Logic(c *jit.Context, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
-	if len(c.Stack) < 2 {
+	if !need(c, 2) {
 		return false
 	}
 	b := c.Stack[len(c.Stack)-1]
@@ -447,7 +455,7 @@ func (Lowerer) i32Logic(c *jit.Context, op func(dst, src1, src2 asm.Reg) asm.Ins
 // i32Xor needs an explicit re-tag: XORing two same-tagged inputs
 // cancels the tag bits in the upper half, so we OR the tag back in.
 func (l Lowerer) i32Xor(c *jit.Context) bool {
-	if len(c.Stack) < 2 {
+	if !need(c, 2) {
 		return false
 	}
 	b := c.Stack[len(c.Stack)-1]
@@ -469,7 +477,7 @@ func (l Lowerer) i32Xor(c *jit.Context) bool {
 // i32Eqz pops one boxed i32, compares its low 32 bits to zero, and
 // pushes a boxed i32 1 (equal) or 0 (not equal).
 func (l Lowerer) i32Eqz(c *jit.Context) bool {
-	if len(c.Stack) == 0 {
+	if !need(c, 1) {
 		return false
 	}
 	a := c.Stack[len(c.Stack)-1]
@@ -511,7 +519,7 @@ func (l Lowerer) i32Shift(
 	op func(dst, src1, src2 asm.Reg) asm.Instruction,
 	prep func(*jit.Context, asm.VReg) asm.VReg,
 ) bool {
-	if len(c.Stack) < 2 {
+	if !need(c, 2) {
 		return false
 	}
 	b := c.Stack[len(c.Stack)-1]
@@ -540,7 +548,7 @@ func (l Lowerer) i32Cmp(
 	prep func(*jit.Context, asm.VReg) asm.VReg,
 	cond uint8,
 ) bool {
-	if len(c.Stack) < 2 {
+	if !need(c, 2) {
 		return false
 	}
 	b := c.Stack[len(c.Stack)-1]
@@ -607,7 +615,7 @@ func (l Lowerer) i64Cmp(
 	prep func(*jit.Context, asm.VReg) asm.VReg,
 	cond uint8,
 ) bool {
-	if len(c.Stack) < 2 {
+	if !need(c, 2) {
 		return false
 	}
 	b := c.Stack[len(c.Stack)-1]
@@ -632,7 +640,7 @@ func (l Lowerer) i64Cmp(
 // lane to zero, and pushes the boxed 0/1 result (as a boxed i32 per the
 // WebAssembly EQZ semantics).
 func (l Lowerer) i64Eqz(c *jit.Context) bool {
-	if len(c.Stack) == 0 {
+	if !need(c, 1) {
 		return false
 	}
 	a := c.Stack[len(c.Stack)-1]
@@ -652,7 +660,7 @@ func (l Lowerer) i64Eqz(c *jit.Context) bool {
 // boxable i64 stays boxable. Left shift and unsigned right shift can
 // produce values that the interpreter heap-promotes, so they reject.
 func (l Lowerer) i64ShrS(c *jit.Context) bool {
-	if len(c.Stack) < 2 {
+	if !need(c, 2) {
 		return false
 	}
 	b := c.Stack[len(c.Stack)-1]
@@ -704,4 +712,31 @@ func (Lowerer) boxI32(c *jit.Context, val asm.VReg) asm.VReg {
 // instrWidth returns the encoded width in bytes of the opcode at code[ip].
 func instrWidth(code []byte, ip int) int {
 	return instr.Instruction(code[ip:]).Width()
+}
+
+func need(c *jit.Context, n int) bool {
+	missing := n - len(c.Stack)
+	if missing <= 0 {
+		return true
+	}
+	if len(c.Inputs)+missing > theArch.ABI().MaxArgs() {
+		return false
+	}
+
+	inputs := make([]asm.VReg, missing)
+	for i := range inputs {
+		inputs[i] = c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	}
+	c.Inputs = append(inputs, c.Inputs...)
+	c.Stack = append(inputs, c.Stack...)
+	return true
+}
+
+func bindInputs(c *jit.Context) {
+	c.Args = c.Args[:0]
+	for i, v := range c.Inputs {
+		arg := theArch.ABI().Arg(i, v.Type(), v.Width())
+		_ = c.Assembler.Pin(v, arg)
+		c.Args = append(c.Args, arg)
+	}
 }

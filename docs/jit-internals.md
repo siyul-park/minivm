@@ -85,11 +85,17 @@ Rules:
 ## Segment ABI
 
 ARM64 JIT uses the normal `asm.Callable` ABI for stack values: segment
-results are declared as `asm.Signature.Returns` and returned in `X0-X7` /
-`D0-D7`. Scratch is reserved for VM context and control metadata only.
+inputs consumed from the interpreter stack are declared as
+`asm.Signature.Args`, and segment results are declared as
+`asm.Signature.Returns`. Scratch is reserved for VM context and control
+metadata only.
 
-The interpreter adapter appends returned `asm.Value` payloads to the VM
-stack, then reads `nextIP` from scratch and updates the current frame.
+The interpreter adapter pops the declared stack inputs, passes them as
+`asm.Value` args, appends returned `asm.Value` payloads to the VM stack,
+then reads `nextIP` from scratch and updates the current frame.
+Input args are ordered bottom-to-top, matching the interpreter stack slice.
+Compilation first plans a segment to discover required stack inputs, then
+emits the real segment with those inputs live from entry.
 
 `jit.Scratch*` defines the shared slot layout. The compiler declares
 only the first `jit.ScratchCount` architectural scratch registers in
@@ -172,7 +178,7 @@ Two-layer IR emission:
 
 `jitSeg.assembler` delegates IR emission to `Assembler`; `jitSeg.stack` and `jitSeg.params` track VM stack shape. `Site()` called at function entry and return points to expose ABI signatures.
 
-`asm.Signature.Args` is the callable's input register layout, used to construct a `Caller`. Segment stack results use `asm.Signature.Returns`; VM context and `nextIP` use `asm.Signature.Scratch`. `asm.Caller` executes compiled chunks and returns typed `asm.Value` results while copying scratch inputs/outputs through the separate scratch slice.
+`asm.Signature.Args` is the callable's input register layout, used to construct a `Caller`. Segment stack inputs use `asm.Signature.Args`; segment stack results use `asm.Signature.Returns`; VM context and `nextIP` use `asm.Signature.Scratch`. `asm.Caller` executes compiled chunks and returns typed `asm.Value` results while copying scratch inputs/outputs through the separate scratch slice.
 
 Pipeline:
 

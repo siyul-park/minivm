@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/jit"
 	jitarm64 "github.com/siyul-park/minivm/jit/arm64"
@@ -65,9 +66,9 @@ func TestLowerer_Compile(t *testing.T) {
 
 		require.Equal(t, uint64(len(code)), scratch[jit.ScratchNext])
 		require.Len(t, got, 3)
-		require.Equal(t, types.BoxI32(7), types.Boxed(got[0].Bits()))
-		require.Equal(t, types.BoxI32(11), types.Boxed(got[1].Bits()))
-		require.Equal(t, types.BoxI32(13), types.Boxed(got[2].Bits()))
+		require.Equal(t, types.BoxI32(7), jit.Ret(got[0]))
+		require.Equal(t, types.BoxI32(11), jit.Ret(got[1]))
+		require.Equal(t, types.BoxI32(13), jit.Ret(got[2]))
 	})
 
 	t.Run("drop after const removes top from returns", func(t *testing.T) {
@@ -92,7 +93,7 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Len(t, got, 1)
-		require.Equal(t, types.BoxI32(9), types.Boxed(got[0].Bits()))
+		require.Equal(t, types.BoxI32(9), jit.Ret(got[0]))
 	})
 
 	t.Run("dup duplicates top of stack", func(t *testing.T) {
@@ -116,8 +117,8 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Len(t, got, 2)
-		require.Equal(t, types.BoxI32(42), types.Boxed(got[0].Bits()))
-		require.Equal(t, types.BoxI32(42), types.Boxed(got[1].Bits()))
+		require.Equal(t, types.BoxI32(42), jit.Ret(got[0]))
+		require.Equal(t, types.BoxI32(42), jit.Ret(got[1]))
 	})
 
 	t.Run("swap reorders top two", func(t *testing.T) {
@@ -141,8 +142,8 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Len(t, got, 2)
-		require.Equal(t, types.BoxI32(9), types.Boxed(got[0].Bits()))
-		require.Equal(t, types.BoxI32(5), types.Boxed(got[1].Bits()))
+		require.Equal(t, types.BoxI32(9), jit.Ret(got[0]))
+		require.Equal(t, types.BoxI32(5), jit.Ret(got[1]))
 	})
 
 	t.Run("const_get emits compile-time immediate", func(t *testing.T) {
@@ -163,7 +164,7 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Len(t, got, 1)
-		require.Equal(t, types.BoxI32(77), types.Boxed(got[0].Bits()))
+		require.Equal(t, types.BoxI32(77), jit.Ret(got[0]))
 	})
 
 	t.Run("global_set then global_get roundtrips through memory", func(t *testing.T) {
@@ -193,7 +194,7 @@ func TestLowerer_Compile(t *testing.T) {
 
 		require.Equal(t, types.BoxI32(25), globals[0])
 		require.Len(t, got, 1)
-		require.Equal(t, types.BoxI32(25), types.Boxed(got[0].Bits()))
+		require.Equal(t, types.BoxI32(25), jit.Ret(got[0]))
 	})
 
 	t.Run("local_set then local_get with bp offset", func(t *testing.T) {
@@ -227,7 +228,7 @@ func TestLowerer_Compile(t *testing.T) {
 
 		require.Equal(t, types.BoxI32(88), stack[bp+1])
 		require.Len(t, got, 1)
-		require.Equal(t, types.BoxI32(88), types.Boxed(got[0].Bits()))
+		require.Equal(t, types.BoxI32(88), jit.Ret(got[0]))
 	})
 
 	t.Run("i32_add of two consts produces boxed sum", func(t *testing.T) {
@@ -251,7 +252,56 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Len(t, got, 1)
-		require.Equal(t, types.BoxI32(12), types.Boxed(got[0].Bits()))
+		require.Equal(t, types.BoxI32(12), jit.Ret(got[0]))
+	})
+
+	t.Run("i32_add consumes caller args", func(t *testing.T) {
+		code := []byte{byte(instr.I32_ADD)}
+		fn := &types.Function{Code: code}
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+		require.Contains(t, mod.Segments, 0)
+		require.Equal(t, 2, mod.Stacks[0])
+
+		args := []asm.Value{jit.Arg(types.BoxI32(7)), jit.Arg(types.BoxI32(5))}
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(args, scratch)
+		require.NoError(t, err)
+
+		require.Equal(t, uint64(len(code)), scratch[jit.ScratchNext])
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(12), jit.Ret(got[0]))
+	})
+
+	t.Run("caller args keep stack order across staged underflow", func(t *testing.T) {
+		code := []byte{
+			byte(instr.I32_CONST), 0x01, 0x00, 0x00, 0x00,
+			byte(instr.I32_ADD),
+			byte(instr.I32_ADD),
+		}
+		fn := &types.Function{Code: code}
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+		require.Contains(t, mod.Segments, 0)
+		require.Equal(t, 2, mod.Stacks[0])
+
+		args := []asm.Value{jit.Arg(types.BoxI32(7)), jit.Arg(types.BoxI32(5))}
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(args, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(13), jit.Ret(got[0]))
 	})
 
 	t.Run("i32_eqz returns boxed 1 for zero and 0 otherwise", func(t *testing.T) {
@@ -274,7 +324,7 @@ func TestLowerer_Compile(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Len(t, got, 1)
-			require.Equal(t, types.BoxI32(1), types.Boxed(got[0].Bits()))
+			require.Equal(t, types.BoxI32(1), jit.Ret(got[0]))
 		})
 
 		t.Run("non-zero", func(t *testing.T) {
@@ -296,7 +346,7 @@ func TestLowerer_Compile(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Len(t, got, 1)
-			require.Equal(t, types.BoxI32(0), types.Boxed(got[0].Bits()))
+			require.Equal(t, types.BoxI32(0), jit.Ret(got[0]))
 		})
 	})
 
@@ -320,7 +370,7 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Len(t, got, 1)
-		require.Equal(t, types.BoxI32(1), types.Boxed(got[0].Bits()))
+		require.Equal(t, types.BoxI32(1), jit.Ret(got[0]))
 	})
 
 	t.Run("i32_lt_u treats high bit as positive", func(t *testing.T) {
@@ -343,7 +393,7 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Len(t, got, 1)
-		require.Equal(t, types.BoxI32(0), types.Boxed(got[0].Bits()))
+		require.Equal(t, types.BoxI32(0), jit.Ret(got[0]))
 	})
 
 	t.Run("i32_shl masks shift count to five bits", func(t *testing.T) {
@@ -366,7 +416,7 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Len(t, got, 1)
-		require.Equal(t, types.BoxI32(8), types.Boxed(got[0].Bits()))
+		require.Equal(t, types.BoxI32(8), jit.Ret(got[0]))
 	})
 
 	t.Run("i32_shr_s preserves sign for negative inputs", func(t *testing.T) {
@@ -389,7 +439,7 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Len(t, got, 1)
-		require.Equal(t, types.BoxI32(-4), types.Boxed(got[0].Bits()))
+		require.Equal(t, types.BoxI32(-4), jit.Ret(got[0]))
 	})
 
 	t.Run("i32_shr_u zero-fills the high bit", func(t *testing.T) {
@@ -412,7 +462,7 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Len(t, got, 1)
-		require.Equal(t, types.BoxI32(0x7FFFFFFC), types.Boxed(got[0].Bits()))
+		require.Equal(t, types.BoxI32(0x7FFFFFFC), jit.Ret(got[0]))
 	})
 
 	t.Run("i64_add rejects before heap-promotion-sensitive arithmetic", func(t *testing.T) {
@@ -436,8 +486,8 @@ func TestLowerer_Compile(t *testing.T) {
 
 		require.Len(t, got, 2)
 		require.Equal(t, uint64(18), scratch[jit.ScratchNext])
-		require.Equal(t, types.BoxI64(7), types.Boxed(got[0].Bits()))
-		require.Equal(t, types.BoxI64(5), types.Boxed(got[1].Bits()))
+		require.Equal(t, types.BoxI64(7), jit.Ret(got[0]))
+		require.Equal(t, types.BoxI64(5), jit.Ret(got[1]))
 	})
 
 	t.Run("i64_lt_s recognises negative values via sign extension", func(t *testing.T) {
@@ -460,7 +510,7 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Len(t, got, 1)
-		require.Equal(t, types.BoxI32(1), types.Boxed(got[0].Bits()))
+		require.Equal(t, types.BoxI32(1), jit.Ret(got[0]))
 	})
 
 	t.Run("i64_eqz returns boxed 1 for zero and 0 otherwise", func(t *testing.T) {
@@ -479,7 +529,7 @@ func TestLowerer_Compile(t *testing.T) {
 			got, err := mod.Segments[0].Call(nil, scratch)
 			require.NoError(t, err)
 			require.Len(t, got, 1)
-			require.Equal(t, types.BoxI32(1), types.Boxed(got[0].Bits()))
+			require.Equal(t, types.BoxI32(1), jit.Ret(got[0]))
 		})
 		t.Run("non-zero", func(t *testing.T) {
 			code := []byte{
@@ -496,7 +546,7 @@ func TestLowerer_Compile(t *testing.T) {
 			got, err := mod.Segments[0].Call(nil, scratch)
 			require.NoError(t, err)
 			require.Len(t, got, 1)
-			require.Equal(t, types.BoxI32(0), types.Boxed(got[0].Bits()))
+			require.Equal(t, types.BoxI32(0), jit.Ret(got[0]))
 		})
 	})
 
@@ -520,6 +570,6 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Len(t, got, 1)
-		require.Equal(t, types.BoxI64(-4), types.Boxed(got[0].Bits()))
+		require.Equal(t, types.BoxI64(-4), jit.Ret(got[0]))
 	})
 }

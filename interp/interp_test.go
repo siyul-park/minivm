@@ -3337,6 +3337,30 @@ func TestInterpreter_WithDebugger(t *testing.T) {
 }
 
 func TestInterpreter_JIT(t *testing.T) {
+	t.Run("passes stack inputs as segment args", func(t *testing.T) {
+		if jit.Active() == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_ADD),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.I32_ADD))
+		require.NoError(t, i.Push(types.I32(7)))
+		require.NoError(t, i.Push(types.I32(5)))
+		require.NoError(t, i.jit(0))
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(12), v)
+
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Attempts)
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
 	t.Run("compiles numeric globals", func(t *testing.T) {
 		if jit.Active() == nil {
 			t.Skip("jit is not available on this architecture")

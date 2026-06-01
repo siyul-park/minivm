@@ -550,7 +550,7 @@ func (i *Interpreter) jit(addr int) error {
 		if ip < 0 || ip >= len(i.code[addr]) || callable == nil {
 			continue
 		}
-		i.code[addr][ip] = i.adaptSegment(callable, mod)
+		i.code[addr][ip] = i.adaptSegment(callable, mod.Stacks[ip])
 	}
 	return nil
 }
@@ -590,9 +590,9 @@ func (i *Interpreter) function(addr int) (*types.Function, bool) {
 }
 
 // adaptSegment wraps a native segment Callable in a threaded-style
-// closure. The closure marshals VM context through scratch slots; stack
-// results return through the Callable's ABI returns and are appended to
-// the interpreter stack by the adapter.
+// closure. The closure passes consumed VM stack values as Callable args,
+// marshals VM context through scratch slots, and appends Callable returns
+// back to the interpreter stack.
 //
 // Scratch slot conventions use jit.Scratch*:
 //
@@ -600,22 +600,32 @@ func (i *Interpreter) function(addr int) (*types.Function, bool) {
 //	ScratchGlobals → &i.globals[0]
 //	ScratchBP      → i.fr.bp
 //	ScratchNext    → next IP (out)
-func (i *Interpreter) adaptSegment(callable asm.Callable, _ *jit.Module) func(*Interpreter) {
+func (i *Interpreter) adaptSegment(callable asm.Callable, argc int) func(*Interpreter) {
+	in := make([]asm.Value, argc)
 	scratch := make([]uint64, jit.ScratchCount)
 	return func(i *Interpreter) {
+		if i.sp < argc {
+			panic(ErrStackUnderflow)
+		}
+		base := i.sp - argc
+		for n := range in {
+			in[n] = jit.Arg(i.stack[base+n])
+		}
+
 		scratch[jit.ScratchStack] = stackBase(i.stack)
 		scratch[jit.ScratchGlobals] = stackBase(i.globals)
 		scratch[jit.ScratchBP] = uint64(i.fr.bp)
 		scratch[jit.ScratchNext] = 0
-		returns, err := callable.Call(nil, scratch)
+		returns, err := callable.Call(in, scratch)
 		if err != nil {
 			panic(err)
 		}
+		i.sp = base
 		if i.sp+len(returns) > len(i.stack) {
 			panic(ErrStackOverflow)
 		}
 		for _, ret := range returns {
-			i.stack[i.sp] = types.Boxed(ret.Bits())
+			i.stack[i.sp] = jit.Ret(ret)
 			i.sp++
 		}
 		i.fr.ip = int(scratch[jit.ScratchNext])
