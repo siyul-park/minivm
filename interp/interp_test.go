@@ -3610,8 +3610,8 @@ func TestInterpreter_JIT(t *testing.T) {
 
 		require.NoError(t, i.jit(0))
 		jit := p.Snapshot().JIT
-		require.Equal(t, uint64(3), jit.Emits)
-		require.Equal(t, uint64(4), jit.Links)
+		require.Equal(t, uint64(2), jit.Emits)
+		require.Equal(t, uint64(3), jit.Links)
 
 		i.fr.ip = 5
 		require.NoError(t, i.Push(types.I32(40)))
@@ -3647,7 +3647,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NoError(t, i.jit(0))
 		jit := p.Snapshot().JIT
 		require.Equal(t, uint64(1), jit.Emits)
-		require.Equal(t, uint64(2), jit.Links)
+		require.Equal(t, uint64(1), jit.Links)
 
 		require.NoError(t, i.Run(context.Background()))
 		value, err := i.Pop()

@@ -67,7 +67,7 @@ func (a *Assembler) Entry(id Label, sig Signature) {
 // Pin forces v to occupy preg. A vreg can be pinned to only one preg; a
 // conflicting Pin records an error returned from Build.
 func (a *Assembler) Pin(v VReg, preg PReg) error {
-	if existing, ok := a.pins[v.ID()]; ok && existing.ID() != preg.ID() {
+	if existing, ok := a.pins[v.ID()]; ok && (existing.ID() != preg.ID() || existing.Type() != preg.Type()) {
 		err := fmt.Errorf("%w: %v already pinned to %v, got %v",
 			ErrConflictingPin, v, existing, preg)
 		if a.err == nil {
@@ -77,6 +77,12 @@ func (a *Assembler) Pin(v VReg, preg PReg) error {
 	}
 	a.pins[v.ID()] = preg
 	return nil
+}
+
+// CanPin reports whether Pin(v, preg) would avoid a vreg slot conflict.
+func (a *Assembler) CanPin(v VReg, preg PReg) bool {
+	existing, ok := a.pins[v.ID()]
+	return !ok || (existing.ID() == preg.ID() && existing.Type() == preg.Type())
 }
 
 // Emit appends one or more instructions.

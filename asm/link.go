@@ -12,6 +12,14 @@ import (
 // signal a hard miss.
 type Resolver func(Label) (unsafe.Pointer, error)
 
+// Linked is the linked native surface for one Code. Callable is the primary
+// entry at Code.Bytes[0]; Entries contains additional callables declared by
+// Code.Entries and keyed by their labels.
+type Linked struct {
+	Callable Callable
+	Entries  map[Label]Callable
+}
+
 var ErrUnresolvedLabel = errors.New("unresolved label")
 
 // Link installs each Code into buf, patches its external relocations using
@@ -19,6 +27,20 @@ var ErrUnresolvedLabel = errors.New("unresolved label")
 //
 // The order of returned Callables matches the order of codes.
 func Link(buf *Buffer, arch Arch, codes []*Code, resolve Resolver) ([]Callable, error) {
+	linked, err := LinkAll(buf, arch, codes, resolve)
+	if err != nil {
+		return nil, err
+	}
+	callables := make([]Callable, len(linked))
+	for i, code := range linked {
+		callables[i] = code.Callable
+	}
+	return callables, nil
+}
+
+// LinkAll is Link plus callable construction for Code.Entries. The order of
+// returned Linked values matches the order of codes.
+func LinkAll(buf *Buffer, arch Arch, codes []*Code, resolve Resolver) ([]Linked, error) {
 	if buf == nil {
 		return nil, fmt.Errorf("%w: nil buffer", ErrInvalidArgs)
 	}
@@ -36,15 +58,31 @@ func Link(buf *Buffer, arch Arch, codes []*Code, resolve Resolver) ([]Callable, 
 		return nil, err
 	}
 
-	callables := make([]Callable, len(codes))
+	linked := make([]Linked, len(codes))
 	for i, c := range codes {
 		callable, err := arch.ABI().NewCallable(c.Signature, bases[i])
 		if err != nil {
 			return nil, err
 		}
-		callables[i] = callable
+		linked[i].Callable = callable
+
+		if len(c.Entries) == 0 {
+			continue
+		}
+		linked[i].Entries = make(map[Label]Callable, len(c.Entries))
+		for id, sig := range c.Entries {
+			off, ok := c.Labels[id]
+			if !ok {
+				return nil, fmt.Errorf("%w: entry label %d", ErrUnresolvedLabel, id)
+			}
+			entry, err := arch.ABI().NewCallable(sig, unsafe.Add(bases[i], off))
+			if err != nil {
+				return nil, err
+			}
+			linked[i].Entries[id] = entry
+		}
 	}
-	return callables, nil
+	return linked, nil
 }
 
 // patchExternalRelocs re-encodes every Relocation whose target lives

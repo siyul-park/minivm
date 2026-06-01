@@ -132,6 +132,9 @@ Emit rules:
 
 - completed segment emits when lowered opcode count is `>= c.cutoff`
 - hot profile IPs are initial compile entries; no profile falls back to entry `0`
+- hot IPs reached inside an already accepted trace are emitted as internal
+  entries on the same native code object when their live stack can be mapped
+  to ABI args without pin conflicts
 - `BR` targets are forced successors unless the target is a `NOP` or outside the function
 - rejected `CALL` boundaries do not force cold successors
 - other rejected opcodes force only safe structural successors (`NOP` or `BR`)
@@ -147,10 +150,12 @@ block [A B X C D E F]  X unsupported
 
 ## Single-Compile Linking
 
-Each accepted segment is compiled once and linked once through `asm.Link`.
-Current `asm.Link` exposes one callable per `asm.Code`; JIT accounting also
-counts internal branch-target entries inside a segment as linkable entries so
-profile counters reflect the selected trace shape.
+Each accepted segment is compiled once and linked once through `asm.LinkAll`.
+`asm.Link` exposes one primary callable per `asm.Code`. `asm.LinkAll` also
+exposes `Code.Entries` as callables at their bound instruction offsets. JIT
+uses those internal callables to install hot IPs that were merged into a
+longer trace, avoiding duplicate native code for compatible fallthrough
+entries.
 
 ## Assembler And JIT Segment
 

@@ -79,7 +79,7 @@ type Context struct {
 	// copies it into the Code signature after lowering completes.
 	Returns []asm.PReg
 
-	// Slots is the indirection table for direct-BL CALL lowering. May be
+	// Slots is the indirection table for direct CALL lowering. May be
 	// nil before Step 4 wires it up.
 	Slots *Slots
 
