@@ -139,6 +139,10 @@ func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module
 func (c *Compiler) compileSegment(fn *types.Function, startIP int, snap Snapshot) (*asm.Code, bool, error) {
 	a := asm.New(c.arch)
 	scratch := c.arch.ABI().Scratch()
+	if len(scratch) < ScratchCount {
+		return nil, false, nil
+	}
+	scratch = scratch[:ScratchCount]
 
 	ctx := &Context{
 		Assembler: a,
@@ -169,10 +173,13 @@ func (c *Compiler) compileSegment(fn *types.Function, startIP int, snap Snapshot
 	if lowered < c.cutoff {
 		return nil, false, nil
 	}
+	if len(ctx.Stack) > c.arch.ABI().MaxReturns() {
+		return nil, false, nil
+	}
 
 	c.lowerer.Exit(ctx, ctx.IP)
 
-	sig := asm.Signature{Args: nil, Returns: nil, Scratch: scratch}
+	sig := asm.Signature{Args: nil, Returns: ctx.Returns, Scratch: scratch}
 	code, err := a.Build(sig)
 	if err != nil {
 		return nil, false, err

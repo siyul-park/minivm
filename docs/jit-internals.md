@@ -82,18 +82,25 @@ Rules:
 - non-branch segments use `jitEpilogue`
 - `jitPrologue` seeds next-IP scratch with `s.end`; `jitEpilogue` reloads final `s.end` and emits `RET`
 
-## Scratch And Next IP
+## Segment ABI
 
-ARM64 JIT reserves `arch.Scratch = X10-X15` as metadata channels outside normal params/returns.
+ARM64 JIT uses the normal `asm.Callable` ABI for stack values: segment
+results are declared as `asm.Signature.Returns` and returned in `X0-X7` /
+`D0-D7`. Scratch is reserved for VM context and control metadata only.
+
+The interpreter adapter appends returned `asm.Value` payloads to the VM
+stack, then reads `nextIP` from scratch and updates the current frame.
+
+`jit.Scratch*` defines the shared slot layout. The compiler declares
+only the first `jit.ScratchCount` architectural scratch registers in
+the callable signature.
 
 | Scratch | Purpose |
 |---|---|
-| `rStack` | `&i.stack[f.bp]` input |
-| `rHeap` | heap pointer input |
-| `rGlobals` | globals pointer input |
-| `rNext` | next interpreter IP output |
-
-`jitCompiler.closure()` writes scratch inputs, calls native code, receives typed `asm.Value` results, reads JIT-owned `rNext`, restores stack values, then sets `i.frames[fp-1].ip`.
+| `ScratchStack` (`X10`) | `&i.stack[0]` input, used for local loads/stores |
+| `ScratchGlobals` (`X11`) | `&i.globals[0]` input |
+| `ScratchBP` (`X12`) | current frame `bp` input |
+| `ScratchNext` (`X13`) | next interpreter IP output |
 
 ## Branches And Globals
 
@@ -165,7 +172,7 @@ Two-layer IR emission:
 
 `jitSeg.assembler` delegates IR emission to `Assembler`; `jitSeg.stack` and `jitSeg.params` track VM stack shape. `Site()` called at function entry and return points to expose ABI signatures.
 
-`asm.Signature.Params` is the primary entry's input register layout, used to construct a `Caller`. `asm.RelocObject.Entries map[int]Entry{Offset, Params}` records internal callable entries keyed by assembler label. `asm.Signature.Returns` stores return signatures keyed by return-site instruction index. `asm.Caller` only executes a compiled chunk; signature inspection belongs to the `Signature` returned by `Compile()`. Negative labels are reserved and invalid for `Entry`.
+`asm.Signature.Args` is the callable's input register layout, used to construct a `Caller`. Segment stack results use `asm.Signature.Returns`; VM context and `nextIP` use `asm.Signature.Scratch`. `asm.Caller` executes compiled chunks and returns typed `asm.Value` results while copying scratch inputs/outputs through the separate scratch slice.
 
 Pipeline:
 

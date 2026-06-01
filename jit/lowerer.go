@@ -10,8 +10,8 @@ import (
 // the compiler should use to encode and link emitted code. Prologue/
 // Epilogue are explicit roles for whole-function compilation. Lower
 // handles a single bytecode opcode; the driver advances IP only when
-// Lower returns true. Exit emits the segment's terminator (write next IP
-// to the agreed scratch slot and return from native).
+// Lower returns true. Exit emits the segment's terminator, writes next IP
+// through scratch, and maps the segment stack shadow to ABI returns.
 type Lowerer interface {
 	Arch() asm.Arch
 	Prologue(c *Context, fn *types.Function)
@@ -57,6 +57,10 @@ type Context struct {
 	// Scratch holds the physical registers assigned to each segment-wide
 	// scratch slot.
 	Scratch []asm.PReg
+
+	// Returns records ABI return registers populated by Exit. The compiler
+	// copies it into the Code signature after lowering completes.
+	Returns []asm.PReg
 
 	// Slots is the indirection table for direct-BL CALL lowering. May be
 	// nil before Step 4 wires it up.

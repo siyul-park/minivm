@@ -590,30 +590,35 @@ func (i *Interpreter) function(addr int) (*types.Function, bool) {
 }
 
 // adaptSegment wraps a native segment Callable in a threaded-style
-// closure. The closure marshals the interpreter's stack base, current sp,
-// globals base, and constants base into the trampoline scratch slots; on
-// return it reads the segment's chosen next IP back out of the last slot.
+// closure. The closure marshals VM context through scratch slots; stack
+// results return through the Callable's ABI returns and are appended to
+// the interpreter stack by the adapter.
 //
-// Scratch slot conventions (must match jit/arm64/lowerer.go):
+// Scratch slot conventions use jit.Scratch*:
 //
-//	0 → &i.stack[0]
-//	1 → i.sp (in/out)
-//	2 → &i.globals[0]
-//	3 → &i.constants[0]
-//	4 → next IP (out)
+//	ScratchStack   → &i.stack[0]
+//	ScratchGlobals → &i.globals[0]
+//	ScratchBP      → i.fr.bp
+//	ScratchNext    → next IP (out)
 func (i *Interpreter) adaptSegment(callable asm.Callable, _ *jit.Module) func(*Interpreter) {
-	scratch := make([]uint64, 5)
+	scratch := make([]uint64, jit.ScratchCount)
 	return func(i *Interpreter) {
-		scratch[0] = stackBase(i.stack)
-		scratch[1] = uint64(i.sp)
-		scratch[2] = stackBase(i.globals)
-		scratch[3] = uint64(i.fr.bp)
-		scratch[4] = 0
-		if _, err := callable.Call(nil, scratch); err != nil {
+		scratch[jit.ScratchStack] = stackBase(i.stack)
+		scratch[jit.ScratchGlobals] = stackBase(i.globals)
+		scratch[jit.ScratchBP] = uint64(i.fr.bp)
+		scratch[jit.ScratchNext] = 0
+		returns, err := callable.Call(nil, scratch)
+		if err != nil {
 			panic(err)
 		}
-		i.sp = int(scratch[1])
-		i.fr.ip = int(scratch[4])
+		if i.sp+len(returns) > len(i.stack) {
+			panic(ErrStackOverflow)
+		}
+		for _, ret := range returns {
+			i.stack[i.sp] = types.Boxed(ret.Bits())
+			i.sp++
+		}
+		i.fr.ip = int(scratch[jit.ScratchNext])
 	}
 }
 

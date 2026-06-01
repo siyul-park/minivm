@@ -36,13 +36,13 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, mod.Segments, 0)
 
-		scratch := make([]uint64, 5)
+		scratch := make([]uint64, jit.ScratchCount)
 		_, err = mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
-		require.Equal(t, uint64(nopCount), scratch[4])
+		require.Equal(t, uint64(nopCount), scratch[jit.ScratchNext])
 	})
 
-	t.Run("i32_const sequence spills boxed values to stack memory", func(t *testing.T) {
+	t.Run("i32_const sequence returns boxed values", func(t *testing.T) {
 		// I32_CONST 7; I32_CONST 11; I32_CONST 13
 		code := []byte{
 			byte(instr.I32_CONST), 0x07, 0x00, 0x00, 0x00,
@@ -59,25 +59,18 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, mod.Segments, 0)
 
-		stack := make([]types.Boxed, 16)
-		scratch := []uint64{
-			uint64(uintptr(unsafe.Pointer(&stack[0]))),
-			2, // entry sp
-			0,
-			0,
-			0,
-		}
-		_, err = mod.Segments[0].Call(nil, scratch)
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
 
-		require.Equal(t, uint64(len(code)), scratch[4])
-		require.Equal(t, uint64(5), scratch[1])
-		require.Equal(t, types.BoxI32(7), stack[2])
-		require.Equal(t, types.BoxI32(11), stack[3])
-		require.Equal(t, types.BoxI32(13), stack[4])
+		require.Equal(t, uint64(len(code)), scratch[jit.ScratchNext])
+		require.Len(t, got, 3)
+		require.Equal(t, types.BoxI32(7), types.Boxed(got[0].Bits()))
+		require.Equal(t, types.BoxI32(11), types.Boxed(got[1].Bits()))
+		require.Equal(t, types.BoxI32(13), types.Boxed(got[2].Bits()))
 	})
 
-	t.Run("drop after const removes top without spilling it", func(t *testing.T) {
+	t.Run("drop after const removes top from returns", func(t *testing.T) {
 		// I32_CONST 9; I32_CONST 21; DROP
 		code := []byte{
 			byte(instr.I32_CONST), 0x09, 0x00, 0x00, 0x00,
@@ -94,19 +87,12 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, mod.Segments, 0)
 
-		stack := make([]types.Boxed, 16)
-		scratch := []uint64{
-			uint64(uintptr(unsafe.Pointer(&stack[0]))),
-			0,
-			0,
-			0,
-			0,
-		}
-		_, err = mod.Segments[0].Call(nil, scratch)
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
 
-		require.Equal(t, uint64(1), scratch[1])
-		require.Equal(t, types.BoxI32(9), stack[0])
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(9), types.Boxed(got[0].Bits()))
 	})
 
 	t.Run("dup duplicates top of stack", func(t *testing.T) {
@@ -125,20 +111,13 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, mod.Segments, 0)
 
-		stack := make([]types.Boxed, 16)
-		scratch := []uint64{
-			uint64(uintptr(unsafe.Pointer(&stack[0]))),
-			0,
-			0,
-			0,
-			0,
-		}
-		_, err = mod.Segments[0].Call(nil, scratch)
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
 
-		require.Equal(t, uint64(2), scratch[1])
-		require.Equal(t, types.BoxI32(42), stack[0])
-		require.Equal(t, types.BoxI32(42), stack[1])
+		require.Len(t, got, 2)
+		require.Equal(t, types.BoxI32(42), types.Boxed(got[0].Bits()))
+		require.Equal(t, types.BoxI32(42), types.Boxed(got[1].Bits()))
 	})
 
 	t.Run("swap reorders top two", func(t *testing.T) {
@@ -157,17 +136,13 @@ func TestLowerer_Compile(t *testing.T) {
 		mod, err := c.Compile(fn, 1, jit.Snapshot{})
 		require.NoError(t, err)
 
-		stack := make([]types.Boxed, 16)
-		scratch := []uint64{
-			uint64(uintptr(unsafe.Pointer(&stack[0]))),
-			0, 0, 0, 0,
-		}
-		_, err = mod.Segments[0].Call(nil, scratch)
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
 
-		require.Equal(t, uint64(2), scratch[1])
-		require.Equal(t, types.BoxI32(9), stack[0])
-		require.Equal(t, types.BoxI32(5), stack[1])
+		require.Len(t, got, 2)
+		require.Equal(t, types.BoxI32(9), types.Boxed(got[0].Bits()))
+		require.Equal(t, types.BoxI32(5), types.Boxed(got[1].Bits()))
 	})
 
 	t.Run("const_get emits compile-time immediate", func(t *testing.T) {
@@ -183,16 +158,12 @@ func TestLowerer_Compile(t *testing.T) {
 		mod, err := c.Compile(fn, 1, snap)
 		require.NoError(t, err)
 
-		stack := make([]types.Boxed, 16)
-		scratch := []uint64{
-			uint64(uintptr(unsafe.Pointer(&stack[0]))),
-			0, 0, 0, 0,
-		}
-		_, err = mod.Segments[0].Call(nil, scratch)
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
 
-		require.Equal(t, uint64(1), scratch[1])
-		require.Equal(t, types.BoxI32(77), stack[0])
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(77), types.Boxed(got[0].Bits()))
 	})
 
 	t.Run("global_set then global_get roundtrips through memory", func(t *testing.T) {
@@ -214,19 +185,15 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 
 		stack := make([]types.Boxed, 16)
-		scratch := []uint64{
-			uint64(uintptr(unsafe.Pointer(&stack[0]))),
-			0,
-			uint64(uintptr(unsafe.Pointer(&globals[0]))),
-			0,
-			0,
-		}
-		_, err = mod.Segments[0].Call(nil, scratch)
+		scratch := make([]uint64, jit.ScratchCount)
+		scratch[jit.ScratchStack] = uint64(uintptr(unsafe.Pointer(&stack[0])))
+		scratch[jit.ScratchGlobals] = uint64(uintptr(unsafe.Pointer(&globals[0])))
+		got, err := mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
 
 		require.Equal(t, types.BoxI32(25), globals[0])
-		require.Equal(t, uint64(1), scratch[1])
-		require.Equal(t, types.BoxI32(25), stack[0])
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(25), types.Boxed(got[0].Bits()))
 	})
 
 	t.Run("local_set then local_get with bp offset", func(t *testing.T) {
@@ -252,19 +219,15 @@ func TestLowerer_Compile(t *testing.T) {
 		// Frame layout: stack[bp..bp+2] hold the two locals; entry sp = bp + 2.
 		const bp = 0
 		stack := make([]types.Boxed, 16)
-		scratch := []uint64{
-			uint64(uintptr(unsafe.Pointer(&stack[0]))),
-			2, // entry sp
-			0,
-			uint64(bp),
-			0,
-		}
-		_, err = mod.Segments[0].Call(nil, scratch)
+		scratch := make([]uint64, jit.ScratchCount)
+		scratch[jit.ScratchStack] = uint64(uintptr(unsafe.Pointer(&stack[0])))
+		scratch[jit.ScratchBP] = uint64(bp)
+		got, err := mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
 
 		require.Equal(t, types.BoxI32(88), stack[bp+1])
-		require.Equal(t, types.BoxI32(88), stack[2])
-		require.Equal(t, uint64(3), scratch[1])
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(88), types.Boxed(got[0].Bits()))
 	})
 
 	t.Run("i32_add of two consts produces boxed sum", func(t *testing.T) {
@@ -283,16 +246,12 @@ func TestLowerer_Compile(t *testing.T) {
 		mod, err := c.Compile(fn, 1, jit.Snapshot{})
 		require.NoError(t, err)
 
-		stack := make([]types.Boxed, 16)
-		scratch := []uint64{
-			uint64(uintptr(unsafe.Pointer(&stack[0]))),
-			0, 0, 0, 0,
-		}
-		_, err = mod.Segments[0].Call(nil, scratch)
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
 
-		require.Equal(t, uint64(1), scratch[1])
-		require.Equal(t, types.BoxI32(12), stack[0])
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(12), types.Boxed(got[0].Bits()))
 	})
 
 	t.Run("i32_eqz returns boxed 1 for zero and 0 otherwise", func(t *testing.T) {
@@ -310,15 +269,12 @@ func TestLowerer_Compile(t *testing.T) {
 			mod, err := c.Compile(fn, 1, jit.Snapshot{})
 			require.NoError(t, err)
 
-			stack := make([]types.Boxed, 16)
-			scratch := []uint64{
-				uint64(uintptr(unsafe.Pointer(&stack[0]))),
-				0, 0, 0, 0,
-			}
-			_, err = mod.Segments[0].Call(nil, scratch)
+			scratch := make([]uint64, jit.ScratchCount)
+			got, err := mod.Segments[0].Call(nil, scratch)
 			require.NoError(t, err)
 
-			require.Equal(t, types.BoxI32(1), stack[0])
+			require.Len(t, got, 1)
+			require.Equal(t, types.BoxI32(1), types.Boxed(got[0].Bits()))
 		})
 
 		t.Run("non-zero", func(t *testing.T) {
@@ -335,15 +291,12 @@ func TestLowerer_Compile(t *testing.T) {
 			mod, err := c.Compile(fn, 1, jit.Snapshot{})
 			require.NoError(t, err)
 
-			stack := make([]types.Boxed, 16)
-			scratch := []uint64{
-				uint64(uintptr(unsafe.Pointer(&stack[0]))),
-				0, 0, 0, 0,
-			}
-			_, err = mod.Segments[0].Call(nil, scratch)
+			scratch := make([]uint64, jit.ScratchCount)
+			got, err := mod.Segments[0].Call(nil, scratch)
 			require.NoError(t, err)
 
-			require.Equal(t, types.BoxI32(0), stack[0])
+			require.Len(t, got, 1)
+			require.Equal(t, types.BoxI32(0), types.Boxed(got[0].Bits()))
 		})
 	})
 
@@ -362,15 +315,12 @@ func TestLowerer_Compile(t *testing.T) {
 		mod, err := c.Compile(fn, 1, jit.Snapshot{})
 		require.NoError(t, err)
 
-		stack := make([]types.Boxed, 16)
-		scratch := []uint64{
-			uint64(uintptr(unsafe.Pointer(&stack[0]))),
-			0, 0, 0, 0,
-		}
-		_, err = mod.Segments[0].Call(nil, scratch)
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
 
-		require.Equal(t, types.BoxI32(1), stack[0])
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(1), types.Boxed(got[0].Bits()))
 	})
 
 	t.Run("i32_lt_u treats high bit as positive", func(t *testing.T) {
@@ -388,15 +338,12 @@ func TestLowerer_Compile(t *testing.T) {
 		mod, err := c.Compile(fn, 1, jit.Snapshot{})
 		require.NoError(t, err)
 
-		stack := make([]types.Boxed, 16)
-		scratch := []uint64{
-			uint64(uintptr(unsafe.Pointer(&stack[0]))),
-			0, 0, 0, 0,
-		}
-		_, err = mod.Segments[0].Call(nil, scratch)
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
 
-		require.Equal(t, types.BoxI32(0), stack[0])
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(0), types.Boxed(got[0].Bits()))
 	})
 
 	t.Run("i32_shl masks shift count to five bits", func(t *testing.T) {
@@ -414,15 +361,12 @@ func TestLowerer_Compile(t *testing.T) {
 		mod, err := c.Compile(fn, 1, jit.Snapshot{})
 		require.NoError(t, err)
 
-		stack := make([]types.Boxed, 16)
-		scratch := []uint64{
-			uint64(uintptr(unsafe.Pointer(&stack[0]))),
-			0, 0, 0, 0,
-		}
-		_, err = mod.Segments[0].Call(nil, scratch)
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
 
-		require.Equal(t, types.BoxI32(8), stack[0])
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(8), types.Boxed(got[0].Bits()))
 	})
 
 	t.Run("i32_shr_s preserves sign for negative inputs", func(t *testing.T) {
@@ -440,15 +384,12 @@ func TestLowerer_Compile(t *testing.T) {
 		mod, err := c.Compile(fn, 1, jit.Snapshot{})
 		require.NoError(t, err)
 
-		stack := make([]types.Boxed, 16)
-		scratch := []uint64{
-			uint64(uintptr(unsafe.Pointer(&stack[0]))),
-			0, 0, 0, 0,
-		}
-		_, err = mod.Segments[0].Call(nil, scratch)
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
 
-		require.Equal(t, types.BoxI32(-4), stack[0])
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(-4), types.Boxed(got[0].Bits()))
 	})
 
 	t.Run("i32_shr_u zero-fills the high bit", func(t *testing.T) {
@@ -466,19 +407,16 @@ func TestLowerer_Compile(t *testing.T) {
 		mod, err := c.Compile(fn, 1, jit.Snapshot{})
 		require.NoError(t, err)
 
-		stack := make([]types.Boxed, 16)
-		scratch := []uint64{
-			uint64(uintptr(unsafe.Pointer(&stack[0]))),
-			0, 0, 0, 0,
-		}
-		_, err = mod.Segments[0].Call(nil, scratch)
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
 
-		require.Equal(t, types.BoxI32(0x7FFFFFFC), stack[0])
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(0x7FFFFFFC), types.Boxed(got[0].Bits()))
 	})
 
-	t.Run("i64_add of two boxable consts produces boxed sum", func(t *testing.T) {
-		// I64_CONST 7; I64_CONST 5; I64_ADD → boxed 12.
+	t.Run("i64_add rejects before heap-promotion-sensitive arithmetic", func(t *testing.T) {
+		// I64_CONST 7; I64_CONST 5; I64_ADD
 		code := []byte{
 			byte(instr.I64_CONST), 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 			byte(instr.I64_CONST), 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -492,15 +430,14 @@ func TestLowerer_Compile(t *testing.T) {
 		mod, err := c.Compile(fn, 1, jit.Snapshot{})
 		require.NoError(t, err)
 
-		stack := make([]types.Boxed, 16)
-		scratch := []uint64{
-			uint64(uintptr(unsafe.Pointer(&stack[0]))),
-			0, 0, 0, 0,
-		}
-		_, err = mod.Segments[0].Call(nil, scratch)
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
 
-		require.Equal(t, types.BoxI64(12), stack[0])
+		require.Len(t, got, 2)
+		require.Equal(t, uint64(18), scratch[jit.ScratchNext])
+		require.Equal(t, types.BoxI64(7), types.Boxed(got[0].Bits()))
+		require.Equal(t, types.BoxI64(5), types.Boxed(got[1].Bits()))
 	})
 
 	t.Run("i64_lt_s recognises negative values via sign extension", func(t *testing.T) {
@@ -518,15 +455,12 @@ func TestLowerer_Compile(t *testing.T) {
 		mod, err := c.Compile(fn, 1, jit.Snapshot{})
 		require.NoError(t, err)
 
-		stack := make([]types.Boxed, 16)
-		scratch := []uint64{
-			uint64(uintptr(unsafe.Pointer(&stack[0]))),
-			0, 0, 0, 0,
-		}
-		_, err = mod.Segments[0].Call(nil, scratch)
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
 
-		require.Equal(t, types.BoxI32(1), stack[0])
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(1), types.Boxed(got[0].Bits()))
 	})
 
 	t.Run("i64_eqz returns boxed 1 for zero and 0 otherwise", func(t *testing.T) {
@@ -541,11 +475,11 @@ func TestLowerer_Compile(t *testing.T) {
 			defer c.Close()
 			mod, err := c.Compile(fn, 1, jit.Snapshot{})
 			require.NoError(t, err)
-			stack := make([]types.Boxed, 16)
-			scratch := []uint64{uint64(uintptr(unsafe.Pointer(&stack[0]))), 0, 0, 0, 0}
-			_, err = mod.Segments[0].Call(nil, scratch)
+			scratch := make([]uint64, jit.ScratchCount)
+			got, err := mod.Segments[0].Call(nil, scratch)
 			require.NoError(t, err)
-			require.Equal(t, types.BoxI32(1), stack[0])
+			require.Len(t, got, 1)
+			require.Equal(t, types.BoxI32(1), types.Boxed(got[0].Bits()))
 		})
 		t.Run("non-zero", func(t *testing.T) {
 			code := []byte{
@@ -558,20 +492,20 @@ func TestLowerer_Compile(t *testing.T) {
 			defer c.Close()
 			mod, err := c.Compile(fn, 1, jit.Snapshot{})
 			require.NoError(t, err)
-			stack := make([]types.Boxed, 16)
-			scratch := []uint64{uint64(uintptr(unsafe.Pointer(&stack[0]))), 0, 0, 0, 0}
-			_, err = mod.Segments[0].Call(nil, scratch)
+			scratch := make([]uint64, jit.ScratchCount)
+			got, err := mod.Segments[0].Call(nil, scratch)
 			require.NoError(t, err)
-			require.Equal(t, types.BoxI32(0), stack[0])
+			require.Len(t, got, 1)
+			require.Equal(t, types.BoxI32(0), types.Boxed(got[0].Bits()))
 		})
 	})
 
-	t.Run("i64_shl masks shift count to six bits", func(t *testing.T) {
-		// I64_CONST 1; I64_CONST 4; I64_SHL → 16.
+	t.Run("i64_shr_s preserves sign for negative inputs", func(t *testing.T) {
+		// I64_CONST -8; I64_CONST 1; I64_SHR_S
 		code := []byte{
+			byte(instr.I64_CONST), 0xF8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 			byte(instr.I64_CONST), 1, 0, 0, 0, 0, 0, 0, 0,
-			byte(instr.I64_CONST), 4, 0, 0, 0, 0, 0, 0, 0,
-			byte(instr.I64_SHL),
+			byte(instr.I64_SHR_S),
 		}
 		fn := &types.Function{Code: code}
 		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
@@ -581,11 +515,11 @@ func TestLowerer_Compile(t *testing.T) {
 		mod, err := c.Compile(fn, 1, jit.Snapshot{})
 		require.NoError(t, err)
 
-		stack := make([]types.Boxed, 16)
-		scratch := []uint64{uint64(uintptr(unsafe.Pointer(&stack[0]))), 0, 0, 0, 0}
-		_, err = mod.Segments[0].Call(nil, scratch)
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
 		require.NoError(t, err)
 
-		require.Equal(t, types.BoxI64(16), stack[0])
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI64(-4), types.Boxed(got[0].Bits()))
 	})
 }

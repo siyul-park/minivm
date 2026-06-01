@@ -17,8 +17,8 @@ import (
 //   - Entry, when non-nil, is the whole-function direct-callable. Other
 //     JIT-compiled callers can target Entry.Addr() via direct BL.
 //   - Segments maps source IP → per-block native chunks for partial JIT.
-//     Each segment shares the segment-level exit convention (rNext carries
-//     the next interpreter IP).
+//     Segment stack results return through the Callable return values;
+//     scratch carries VM context and next interpreter IP.
 //   - Signature describes Entry's ABI; it is meaningless when Entry is nil.
 //   - ParamKinds and ReturnKinds let the consumer box/unbox stack values
 //     across the Entry boundary without re-deriving them from fn.Typ.
