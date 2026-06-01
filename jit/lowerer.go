@@ -39,6 +39,18 @@ type Context struct {
 	// reject.
 	IP int
 
+	// Stop tells the compiler that the last successfully lowered opcode
+	// ended the segment.
+	Stop bool
+
+	// Closed tells the compiler that the lowerer already emitted every
+	// native exit path for the segment.
+	Closed bool
+
+	// Successor is a forced follow-up entry IP discovered by a terminal
+	// opcode. -1 means no forced successor.
+	Successor int
+
 	// End is the IP one past the last opcode the segment is allowed to
 	// lower. Terminator opcodes (BR, RETURN, …) may emit code that exits
 	// before End.
@@ -83,4 +95,5 @@ type Snapshot struct {
 	Constants []types.Boxed
 	Globals   []types.Boxed
 	Locals    []types.Kind
+	Hot       []int
 }

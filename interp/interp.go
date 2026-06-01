@@ -538,13 +538,22 @@ func (i *Interpreter) jit(addr int) error {
 		return nil
 	}
 
-	mod, err := i.compiler.Compile(fn, addr, i.snapshot(fn))
+	mod, err := i.compiler.Compile(fn, addr, i.snapshot(addr, fn))
 	if err != nil {
 		i.prof.JITError()
 		return err
 	}
 	if mod == nil {
 		return nil
+	}
+	for _, n := range mod.Bytes {
+		i.prof.JITEmit(n)
+	}
+	for range mod.Links {
+		i.prof.JITLink()
+	}
+	for range mod.Skips {
+		i.prof.JITSkip()
 	}
 	for ip, callable := range mod.Segments {
 		if ip < 0 || ip >= len(i.code[addr]) || callable == nil {
@@ -558,7 +567,7 @@ func (i *Interpreter) jit(addr int) error {
 // snapshot bundles the consumer-side tables the JIT inspects at compile
 // time. Locals concatenates the function's params and declared locals so
 // LOCAL_* lowering can check kinds by raw index.
-func (i *Interpreter) snapshot(fn *types.Function) jit.Snapshot {
+func (i *Interpreter) snapshot(addr int, fn *types.Function) jit.Snapshot {
 	var locals []types.Kind
 	if fn != nil && fn.Typ != nil {
 		size := len(fn.Typ.Params) + len(fn.Locals)
@@ -576,12 +585,28 @@ func (i *Interpreter) snapshot(fn *types.Function) jit.Snapshot {
 		Constants: i.constants,
 		Globals:   i.globals,
 		Locals:    locals,
+		Hot:       i.hotIPs(addr),
 	}
+}
+
+func (i *Interpreter) hotIPs(addr int) []int {
+	fn := i.prof.Func(addr)
+	if len(fn.IPs) == 0 {
+		return nil
+	}
+	ips := make([]int, 0, len(fn.IPs))
+	for _, ip := range fn.IPs {
+		ips = append(ips, ip.Offset)
+	}
+	return ips
 }
 
 // function returns the *types.Function at addr in the heap, or false if
 // addr does not point at a function.
 func (i *Interpreter) function(addr int) (*types.Function, bool) {
+	if addr == 0 {
+		return &types.Function{Code: i.instrs[0]}, true
+	}
 	if addr <= 0 || addr >= len(i.heap) {
 		return nil, false
 	}

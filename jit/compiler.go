@@ -1,6 +1,9 @@
 package jit
 
 import (
+	"encoding/binary"
+	"sort"
+
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/types"
@@ -16,6 +19,22 @@ type Compiler struct {
 	data    *asm.Data
 	slots   *Slots
 	cutoff  int
+}
+
+type segment struct {
+	start int
+	end   int
+	code  *asm.Code
+	stack int
+	next  int
+	force bool
+}
+
+type result struct {
+	count  int
+	end    int
+	reject int
+	op     instr.Opcode
 }
 
 // Option mutates the Compiler's config at construction time.
@@ -113,21 +132,64 @@ func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module
 		return mod, nil
 	}
 
-	seg, ok, err := c.compileSegment(fn, 0, snap)
+	segs, err := c.compileSegments(fn, snap, mod)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
+	if len(segs) == 0 {
 		return mod, nil
 	}
 
-	callables, err := asm.Link(c.buffer, c.arch, []*asm.Code{seg}, nil)
+	codes := make([]*asm.Code, len(segs))
+	for i, seg := range segs {
+		codes[i] = seg.code
+		mod.Bytes = append(mod.Bytes, len(seg.code.Bytes))
+	}
+	callables, err := asm.Link(c.buffer, c.arch, codes, nil)
 	if err != nil {
 		return nil, err
 	}
-	mod.Segments[0] = callables[0]
-	mod.Stacks[0] = len(seg.Signature.Args)
+	for i, seg := range segs {
+		mod.Segments[seg.start] = callables[i]
+		mod.Stacks[seg.start] = seg.stack
+	}
+	mod.Links = len(segs) + internalEntries(fn, segs)
 	return mod, nil
+}
+
+func (c *Compiler) compileSegments(fn *types.Function, snap Snapshot, mod *Module) ([]segment, error) {
+	hot := hotSet(fn, snap.Hot)
+	queue := starts(fn, snap.Hot)
+	seen := make(map[int]bool, len(queue))
+	var out []segment
+
+	for len(queue) > 0 {
+		start := queue[0]
+		queue = queue[1:]
+		if seen[start] || start < 0 || start >= len(fn.Code) {
+			continue
+		}
+		seen[start] = true
+
+		seg, ok, err := c.compileSegment(fn, start, snap)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		out = append(out, seg)
+
+		if seg.next < 0 || seen[seg.next] {
+			continue
+		}
+		if seg.force || hot[seg.next] {
+			queue = append(queue, seg.next)
+			continue
+		}
+		mod.Skips++
+	}
+	return out, nil
 }
 
 // compileSegment lowers a contiguous run of opcodes starting at startIP.
@@ -137,42 +199,52 @@ func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module
 //
 // Returns (code, true, nil) when at least cutoff opcodes lowered, otherwise
 // (nil, false, nil).
-func (c *Compiler) compileSegment(fn *types.Function, startIP int, snap Snapshot) (*asm.Code, bool, error) {
+func (c *Compiler) compileSegment(fn *types.Function, startIP int, snap Snapshot) (segment, bool, error) {
 	scratch := c.arch.ABI().Scratch()
 	if len(scratch) < ScratchCount {
-		return nil, false, nil
+		return segment{}, false, nil
 	}
 	scratch = scratch[:ScratchCount]
 
 	plan := c.context(asm.New(c.arch), fn, startIP, snap, scratch)
-	lowered := c.lower(plan)
-	if lowered < c.cutoff {
-		return nil, false, nil
+	planned := c.lower(plan)
+	if planned.count < c.cutoff {
+		return segment{}, false, nil
 	}
 	if !c.fits(plan) {
-		return nil, false, nil
+		return segment{}, false, nil
 	}
 
 	a := asm.New(c.arch)
 	ctx := c.context(a, fn, startIP, snap, scratch)
 	seedInputs(ctx, len(plan.Inputs))
 	c.lowerer.Prologue(ctx, fn)
-	lowered = c.lower(ctx)
-	if lowered < c.cutoff || ctx.IP != plan.IP || len(ctx.Inputs) != len(plan.Inputs) {
-		return nil, false, nil
+	lowered := c.lower(ctx)
+	if lowered.count < c.cutoff || ctx.IP != plan.IP || len(ctx.Inputs) != len(plan.Inputs) {
+		return segment{}, false, nil
 	}
 	if !c.fits(ctx) {
-		return nil, false, nil
+		return segment{}, false, nil
 	}
 
-	c.lowerer.Exit(ctx, ctx.IP)
+	if !ctx.Closed {
+		c.lowerer.Exit(ctx, ctx.IP)
+	}
 
 	sig := asm.Signature{Args: ctx.Args, Returns: ctx.Returns, Scratch: scratch}
 	code, err := a.Build(sig)
 	if err != nil {
-		return nil, false, err
+		return segment{}, false, err
 	}
-	return code, true, nil
+	next, force := c.next(fn, plan, planned)
+	return segment{
+		start: startIP,
+		end:   planned.end,
+		code:  code,
+		stack: len(sig.Args),
+		next:  next,
+		force: force,
+	}, true, nil
 }
 
 func (c *Compiler) context(a *asm.Assembler, fn *types.Function, startIP int, snap Snapshot, scratch []asm.PReg) *Context {
@@ -182,6 +254,7 @@ func (c *Compiler) context(a *asm.Assembler, fn *types.Function, startIP int, sn
 		Start:     startIP,
 		IP:        startIP,
 		End:       len(fn.Code),
+		Successor: -1,
 		Snap:      snap,
 		Scratch:   scratch,
 		Slots:     c.slots,
@@ -189,21 +262,30 @@ func (c *Compiler) context(a *asm.Assembler, fn *types.Function, startIP int, sn
 	}
 }
 
-func (c *Compiler) lower(ctx *Context) int {
-	lowered := 0
+func (c *Compiler) lower(ctx *Context) result {
+	out := result{reject: -1}
 	for ctx.IP < ctx.End {
 		op := instr.Opcode(ctx.Code[ctx.IP])
 		ipBefore := ctx.IP
+		width := instrWidth(ctx.Code, ipBefore)
 		if !c.lowerer.Lower(ctx, op) {
+			out.reject = ipBefore
+			out.op = op
 			break
 		}
-		if ctx.IP == ipBefore {
+		if ctx.IP == ipBefore && !ctx.Stop {
 			// Lowerer reported success but did not advance IP.
+			out.reject = ipBefore
+			out.op = op
 			break
 		}
-		lowered++
+		out.count++
+		out.end = max(out.end, ipBefore+width)
+		if ctx.Stop {
+			break
+		}
 	}
-	return lowered
+	return out
 }
 
 func (c *Compiler) fits(ctx *Context) bool {
@@ -217,6 +299,105 @@ func seedInputs(ctx *Context, n int) {
 		ctx.Inputs = append(ctx.Inputs, v)
 		ctx.Stack = append(ctx.Stack, v)
 	}
+}
+
+func (c *Compiler) next(fn *types.Function, ctx *Context, res result) (int, bool) {
+	if ctx.Successor >= 0 {
+		if ctx.Successor >= len(fn.Code) || instr.Opcode(fn.Code[ctx.Successor]) == instr.NOP {
+			return -1, false
+		}
+		return ctx.Successor, true
+	}
+	if res.reject < 0 {
+		return -1, false
+	}
+	next := res.reject + instrWidth(fn.Code, res.reject)
+	if next >= len(fn.Code) {
+		return -1, false
+	}
+	return next, forceReject(fn.Code, next, res.op)
+}
+
+func hotSet(fn *types.Function, hot []int) map[int]bool {
+	set := make(map[int]bool, len(hot))
+	for _, ip := range hot {
+		if ip >= 0 && ip < len(fn.Code) {
+			set[ip] = true
+		}
+	}
+	return set
+}
+
+func starts(fn *types.Function, hot []int) []int {
+	if len(hot) == 0 {
+		return []int{0}
+	}
+	set := hotSet(fn, hot)
+	out := make([]int, 0, len(set))
+	for ip := range set {
+		out = append(out, ip)
+	}
+	sort.Ints(out)
+	return out
+}
+
+func instrWidth(code []byte, ip int) int {
+	return instr.Instruction(code[ip:]).Width()
+}
+
+func forceReject(code []byte, next int, op instr.Opcode) bool {
+	if op == instr.CALL {
+		return false
+	}
+	switch instr.Opcode(code[next]) {
+	case instr.NOP, instr.BR:
+		return true
+	default:
+		return false
+	}
+}
+
+func internalEntries(fn *types.Function, segs []segment) int {
+	targets := branchTargets(fn.Code)
+	n := 0
+	for _, seg := range segs {
+		for target := range targets {
+			if target > seg.start && target < seg.end {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+func branchTargets(code []byte) map[int]bool {
+	targets := map[int]bool{}
+	for ip := 0; ip < len(code); {
+		op := instr.Opcode(code[ip])
+		width := instrWidth(code, ip)
+		switch op {
+		case instr.BR, instr.BR_IF:
+			target := ip + width + int(i16(code, ip+1))
+			if target >= 0 && target < len(code) {
+				targets[target] = true
+			}
+		case instr.BR_TABLE:
+			count := int(code[ip+1])
+			for i := 0; i <= count; i++ {
+				at := ip + 2 + i*2
+				target := ip + width + int(i16(code, at))
+				if target >= 0 && target < len(code) {
+					targets[target] = true
+				}
+			}
+		}
+		ip += width
+	}
+	return targets
+}
+
+func i16(code []byte, at int) int16 {
+	return int16(binary.LittleEndian.Uint16(code[at : at+2]))
 }
 
 // newModule returns a default Module that carries fn's boxing metadata.

@@ -142,6 +142,22 @@ func (l Lowerer) Lower(c *jit.Context, op instr.Opcode) bool {
 		return l.i64Cmp(c, zeroExtendI64, arm64.CondCS)
 	case instr.I64_SHR_S:
 		return l.i64ShrS(c)
+	case instr.BR:
+		return l.br(c)
+	case instr.BR_IF:
+		return l.brIf(c)
+	case instr.SELECT:
+		return l.selectOp(c)
+	case instr.LOCAL_TEE:
+		return l.localTee(c)
+	case instr.GLOBAL_TEE:
+		return l.globalTee(c)
+	case instr.I32_TO_I64_S:
+		return l.i32ToI64S(c)
+	case instr.I32_TO_I64_U:
+		return l.i32ToI64U(c)
+	case instr.I64_TO_I32:
+		return l.i64ToI32(c)
 	}
 	return false
 }
@@ -707,6 +723,185 @@ func (Lowerer) boxI32(c *jit.Context, val asm.VReg) asm.VReg {
 	boxed := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.Assembler.Emit(arm64.ORR(boxed, lo, tag))
 	return boxed
+}
+
+// selectOp implements SELECT: pops cond, val2, val1 (bottom-to-top) and
+// pushes val1 if cond != 0, else val2. The condition is tested against the
+// low 32 bits (the i32 value lane).
+func (Lowerer) selectOp(c *jit.Context) bool {
+	if !need(c, 3) {
+		return false
+	}
+	cond := c.Stack[len(c.Stack)-1]
+	v2 := c.Stack[len(c.Stack)-2]
+	v1 := c.Stack[len(c.Stack)-3]
+
+	lo := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ANDI(lo, cond, maskI32))
+	c.Assembler.Emit(arm64.CMPI(lo, 0))
+
+	dst := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.CSEL(dst, v1, v2, arm64.CondNE))
+
+	c.Stack = append(c.Stack[:len(c.Stack)-3], dst)
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// localTee stores the stack top to stack[bp+idx] and leaves it on the stack.
+func (l Lowerer) localTee(c *jit.Context) bool {
+	width := instrWidth(c.Code, c.IP)
+	idx := int(c.Code[c.IP+1])
+	if idx >= len(c.Snap.Locals) {
+		return false
+	}
+	if c.Snap.Locals[idx] == types.KindRef {
+		return false
+	}
+	if !need(c, 1) {
+		return false
+	}
+
+	src := c.Stack[len(c.Stack)-1]
+	addr, ok := l.localAddr(c, idx)
+	if !ok {
+		return false
+	}
+	c.Assembler.Emit(arm64.STR(src, addr, 0))
+	c.IP += width
+	return true
+}
+
+// globalTee stores the stack top to globals[idx] and leaves it on the stack.
+func (Lowerer) globalTee(c *jit.Context) bool {
+	width := instrWidth(c.Code, c.IP)
+	idx := int(uint16(c.Code[c.IP+1]) | uint16(c.Code[c.IP+2])<<8)
+	if idx >= len(c.Snap.Globals) {
+		return false
+	}
+	if c.Snap.Globals[idx].Kind() == types.KindRef {
+		return false
+	}
+	if !need(c, 1) {
+		return false
+	}
+
+	src := c.Stack[len(c.Stack)-1]
+	vGlobal := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	if err := c.Assembler.Pin(vGlobal, c.Scratch[jit.ScratchGlobals]); err != nil {
+		return false
+	}
+	c.Assembler.Emit(arm64.STR(src, vGlobal, int16(idx*8)))
+	c.IP += width
+	return true
+}
+
+// i32ToI64S sign-extends the i32 value lane of a boxed i32 to a full 64-bit
+// value, then boxes the result as an i64. All i32 values are within the
+// boxable i64 range, so no overflow check is needed.
+func (l Lowerer) i32ToI64S(c *jit.Context) bool {
+	if !need(c, 1) {
+		return false
+	}
+	a := c.Stack[len(c.Stack)-1]
+	// Sign-extend the low 32 bits (i32 value lane) to 64 bits.
+	ext := signExtendI32(c, a)
+	boxed := l.boxI64(c, ext)
+	c.Stack[len(c.Stack)-1] = boxed
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// i32ToI64U zero-extends the i32 value lane of a boxed i32 to a 64-bit value,
+// then boxes the result as an i64.
+func (l Lowerer) i32ToI64U(c *jit.Context) bool {
+	if !need(c, 1) {
+		return false
+	}
+	a := c.Stack[len(c.Stack)-1]
+	// Zero-extend: mask to lower 32 bits (unsigned i32).
+	ext := zeroExtendI32(c, a)
+	boxed := l.boxI64(c, ext)
+	c.Stack[len(c.Stack)-1] = boxed
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// i64ToI32 extracts the low 32 bits of a boxed i64's value lane and boxes
+// the result as a boxed i32.
+func (l Lowerer) i64ToI32(c *jit.Context) bool {
+	if !need(c, 1) {
+		return false
+	}
+	a := c.Stack[len(c.Stack)-1]
+	// Mask to 32-bit value lane from the boxed i64 (49-bit value lane contains i64).
+	lo := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ANDI(lo, a, maskI32))
+	boxed := l.boxI32(c, lo)
+	c.Stack[len(c.Stack)-1] = boxed
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// br lowers an unconditional branch. No instructions are emitted; Exit writes
+// the target IP to scratch.
+func (Lowerer) br(c *jit.Context) bool {
+	offset := int(int16(binary.LittleEndian.Uint16(c.Code[c.IP+1 : c.IP+3])))
+	c.IP += 3 + offset
+	c.Successor = c.IP
+	c.Stop = true
+	return true
+}
+
+// brIf lowers a conditional branch. It pops the boxed i32 condition,
+// emits a CBNZ that splits into two inline exit paths (false-target and
+// taken-target), each writing the appropriate nextIP to scratch and
+// RET-ing.
+func (l Lowerer) brIf(c *jit.Context) bool {
+	if !need(c, 1) {
+		return false
+	}
+	offset := int(int16(binary.LittleEndian.Uint16(c.Code[c.IP+1 : c.IP+3])))
+	falseTarget := c.IP + 3
+	takenTarget := c.IP + 3 + offset
+
+	cond := c.Stack[len(c.Stack)-1]
+	c.Stack = c.Stack[:len(c.Stack)-1]
+
+	// Extract i32 value lane from the boxed condition.
+	condI32 := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ANDI(condI32, cond, maskI32))
+
+	// Pin remaining stack and inputs to ABI registers — same for both paths.
+	bindInputs(c)
+	c.Returns = c.Returns[:0]
+	for i, v := range c.Stack {
+		ret := theArch.ABI().Return(i, v.Type(), v.Width())
+		_ = c.Assembler.Pin(v, ret)
+		c.Returns = append(c.Returns, ret)
+	}
+
+	rNext := c.Scratch[jit.ScratchNext]
+	takenLbl := c.Assembler.Label()
+	c.Assembler.Emit(arm64.CBNZLabel(condI32, takenLbl))
+
+	// Fall-through path: condition was zero.
+	vNextFalse := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	_ = c.Assembler.Pin(vNextFalse, rNext)
+	c.Assembler.Emit(arm64.LDI(vNextFalse, uint64(falseTarget))...)
+	c.Assembler.Emit(arm64.RET())
+
+	// Taken path: condition was non-zero.
+	c.Assembler.Bind(takenLbl)
+	vNextTaken := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	_ = c.Assembler.Pin(vNextTaken, rNext)
+	c.Assembler.Emit(arm64.LDI(vNextTaken, uint64(takenTarget))...)
+	c.Assembler.Emit(arm64.RET())
+
+	c.IP = falseTarget
+	c.Stop = true
+	c.Closed = true
+	return true
 }
 
 // instrWidth returns the encoded width in bytes of the opcode at code[ip].

@@ -110,24 +110,32 @@ the callable signature.
 
 ## Branches And Globals
 
-Branches (`BR`, `BR_IF`, `BR_TABLE`) terminate traces. Branch offsets are signed i16 relative to instruction end. Each lowered branch emits a deferred edge label and a local fallback `RET` stub. After all objects are compiled once, compatible targets alias the edge to the target entry; missing or incompatible targets alias it to the fallback stub.
+`BR` and `BR_IF` terminate traces. Branch offsets are signed i16 relative
+to instruction end. `BR` records its target as a forced successor and lets
+the common segment exit write that target to `ScratchNext`. `BR_IF` emits
+both native exit paths inline: the not-taken path writes the fallthrough IP,
+and the taken path writes the branch target.
 
-Branch handlers must not fall through `jitEpilogue`, because that would overwrite branch-selected `rNext`.
+Branch handlers that emit their own `RET` paths mark the context closed, so
+the compiler does not append the common exit and overwrite branch-selected
+`ScratchNext`.
 
 Mutable globals have no declared runtime kind. `GLOBAL_SET` / `GLOBAL_TEE` infer kind from source register and store it in same-segment `s.facts`. `GLOBAL_GET` compiles only after same-segment store proves kind. Never specialize `GLOBAL_GET` from current global value; dynamic kind changes would need deopt stack reconstruction, which current JIT ABI lacks.
 
 ## Segment Selection
 
-`jitCompiler.Compile(code)` builds basic blocks, scores each with `profile.Range(addr,start,end)`, selects hot blocks plus direct CFG successors, and builds JIT-only fallthrough traces. `analysis.BasicBlock` remains the CFG source of truth.
+`jit.Compiler.Compile(fn)` receives hot IPs from the interpreter profile via
+`jit.Snapshot.Hot`, compiles each hot entry at most once, and queues selected
+successors discovered while lowering.
 
 Emit rules:
 
-- completed segment emits when `count >= c.cutoff` (default `8`) and segment range has a profile sample
-- direct-successor entry segments may emit with one compilable instruction so linked branches can enter them
-- truncated or branch-terminated segments emit only when they meet same cutoff and range from start to last compiled IP is sampled
-- otherwise `assembler.Abort()` discards segment state
-- adjacent eligible blocks joined only by natural fallthrough may emit as one object
-- if the first opcode at an internal entry rejects, discard that merged attempt and compile the blocks separately
+- completed segment emits when lowered opcode count is `>= c.cutoff`
+- hot profile IPs are initial compile entries; no profile falls back to entry `0`
+- `BR` targets are forced successors unless the target is a `NOP` or outside the function
+- rejected `CALL` boundaries do not force cold successors
+- other rejected opcodes force only safe structural successors (`NOP` or `BR`)
+- cold successors that are discovered but not forced are counted as skips
 - each bytecode entry IP is installed at most once per JIT attempt
 - JIT makes one function-level compilation attempt; no later tier-up/retry
 
@@ -139,13 +147,10 @@ block [A B X C D E F]  X unsupported
 
 ## Single-Compile Linking
 
-Each trace is compiled once into the real executable buffer.
-
-1. Compile traces and collect primary/internal entry signatures and deferred branch edges.
-2. Alias compatible edges to compiled entry labels; alias all other edges to their local fallback stubs.
-3. Link relocations and install one interpreter-callable closure per accepted entry IP.
-
-Natural fallthrough trace `A+B` records an internal callable entry at `B`. A cold or uncompiled additional predecessor does not prevent installing that entry, so threaded dispatch at `B` can still enter native code. If a compiled incoming edge has a mismatched type/width signature, the internal entry is not installed and that edge uses its fallback stub; merged fallthrough code remains valid for `A`.
+Each accepted segment is compiled once and linked once through `asm.Link`.
+Current `asm.Link` exposes one callable per `asm.Code`; JIT accounting also
+counts internal branch-target entries inside a segment as linkable entries so
+profile counters reflect the selected trace shape.
 
 ## Assembler And JIT Segment
 

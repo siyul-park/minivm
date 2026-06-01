@@ -28,6 +28,9 @@ type Module struct {
 	Entry       asm.Callable
 	Segments    map[int]asm.Callable
 	Stacks      map[int]int
+	Bytes       []int
+	Links       int
+	Skips       int
 	Signature   asm.Signature
 	ParamKinds  []types.Kind
 	ReturnKinds []types.Kind

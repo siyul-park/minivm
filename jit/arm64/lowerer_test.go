@@ -550,6 +550,87 @@ func TestLowerer_Compile(t *testing.T) {
 		})
 	})
 
+	t.Run("br writes branch target to scratch", func(t *testing.T) {
+		// 10 NOPs then BR +5: target = 10 + 3 + 5 = 18
+		const nopCount = 10
+		const offset int16 = 5
+		code := make([]byte, nopCount+3)
+		for i := 0; i < nopCount; i++ {
+			code[i] = byte(instr.NOP)
+		}
+		code[nopCount] = byte(instr.BR)
+		code[nopCount+1] = byte(offset)
+		code[nopCount+2] = byte(offset >> 8)
+
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+		require.Contains(t, mod.Segments, 0)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+		require.Equal(t, uint64(nopCount+3+int(offset)), scratch[jit.ScratchNext])
+	})
+
+	t.Run("br_if taken writes taken-target to scratch", func(t *testing.T) {
+		// I32_CONST 42; I32_CONST 1; BR_IF +7
+		// takenTarget = 10 + 3 + 7 = 20; falseTarget = 10 + 3 = 13
+		const offset int16 = 7
+		code := []byte{
+			byte(instr.I32_CONST), 42, 0, 0, 0, // IP 0..4
+			byte(instr.I32_CONST), 1, 0, 0, 0, // IP 5..9
+			byte(instr.BR_IF), byte(offset), byte(offset >> 8), // IP 10..12
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+		require.Contains(t, mod.Segments, 0)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+		// condition was 1 (non-zero): taken path
+		require.Equal(t, uint64(10+3+int(offset)), scratch[jit.ScratchNext])
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(42), jit.Ret(got[0]))
+	})
+
+	t.Run("br_if not-taken writes fall-through IP to scratch", func(t *testing.T) {
+		// I32_CONST 42; I32_CONST 0; BR_IF +7
+		// falseTarget = 10 + 3 = 13
+		const offset int16 = 7
+		code := []byte{
+			byte(instr.I32_CONST), 42, 0, 0, 0, // IP 0..4
+			byte(instr.I32_CONST), 0, 0, 0, 0, // IP 5..9
+			byte(instr.BR_IF), byte(offset), byte(offset >> 8), // IP 10..12
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+		require.Contains(t, mod.Segments, 0)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+		// condition was 0: fall-through path
+		require.Equal(t, uint64(10+3), scratch[jit.ScratchNext])
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(42), jit.Ret(got[0]))
+	})
+
 	t.Run("i64_shr_s preserves sign for negative inputs", func(t *testing.T) {
 		// I64_CONST -8; I64_CONST 1; I64_SHR_S
 		code := []byte{
