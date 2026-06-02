@@ -4408,6 +4408,23 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		require.Equal(t, []int8{-1, 0x7F}, i8s)
 	})
 
+	t.Run("array", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		var bs [3]byte
+		require.NoError(t, i.Unmarshal(types.TypedArray[int8]{0x00, 0x7F, -1}, &bs))
+		require.Equal(t, [3]byte{0x00, 0x7F, 0xFF}, bs)
+
+		var i8s [2]int8
+		require.NoError(t, i.Unmarshal(types.TypedArray[int8]{-1, 0x7F}, &i8s))
+		require.Equal(t, [2]int8{-1, 0x7F}, i8s)
+
+		var mismatch [2]byte
+		err := i.Unmarshal(types.TypedArray[int8]{1, 2, 3}, &mismatch)
+		require.ErrorIs(t, err, ErrValueOverflow)
+	})
+
 	t.Run("map", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
