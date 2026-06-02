@@ -24,6 +24,8 @@ const (
 	tagI64  = uint64(0x7FF4_0000_0000_0000)
 	maskI64 = uint64(0x0001_FFFF_FFFF_FFFF)
 
+	tagF32 = uint64(0x7FF2_0000_0000_0000)
+
 	signI64 = uint8(15)
 )
 
@@ -158,6 +160,66 @@ func (l Lowerer) Lower(c *jit.Context, op instr.Opcode) bool {
 		return l.i32ToI64U(c)
 	case instr.I64_TO_I32:
 		return l.i64ToI32(c)
+	case instr.F32_ADD:
+		return l.f32BinOp(c, arm64.FADD)
+	case instr.F32_SUB:
+		return l.f32BinOp(c, arm64.FSUB)
+	case instr.F32_MUL:
+		return l.f32BinOp(c, arm64.FMUL)
+	case instr.F32_DIV:
+		return l.f32BinOp(c, arm64.FDIV)
+	case instr.F32_EQ:
+		return l.f32Cmp(c, arm64.CondEQ)
+	case instr.F32_NE:
+		return l.f32Cmp(c, arm64.CondNE)
+	case instr.F32_LT:
+		return l.f32Cmp(c, arm64.CondMI)
+	case instr.F32_GT:
+		return l.f32Cmp(c, arm64.CondGT)
+	case instr.F32_LE:
+		return l.f32Cmp(c, arm64.CondLS)
+	case instr.F32_GE:
+		return l.f32Cmp(c, arm64.CondGE)
+	case instr.F64_ADD:
+		return l.f64BinOp(c, arm64.FADD)
+	case instr.F64_SUB:
+		return l.f64BinOp(c, arm64.FSUB)
+	case instr.F64_MUL:
+		return l.f64BinOp(c, arm64.FMUL)
+	case instr.F64_DIV:
+		return l.f64BinOp(c, arm64.FDIV)
+	case instr.F64_EQ:
+		return l.f64Cmp(c, arm64.CondEQ)
+	case instr.F64_NE:
+		return l.f64Cmp(c, arm64.CondNE)
+	case instr.F64_LT:
+		return l.f64Cmp(c, arm64.CondMI)
+	case instr.F64_GT:
+		return l.f64Cmp(c, arm64.CondGT)
+	case instr.F64_LE:
+		return l.f64Cmp(c, arm64.CondLS)
+	case instr.F64_GE:
+		return l.f64Cmp(c, arm64.CondGE)
+	case instr.I32_TO_F32_S:
+		return l.intToFloat(c, asm.Width32, arm64.SCVTF, signExtendI32)
+	case instr.I32_TO_F32_U:
+		return l.intToFloat(c, asm.Width32, arm64.UCVTF, zeroExtendI32)
+	case instr.I64_TO_F32_S:
+		return l.intToFloat(c, asm.Width32, arm64.SCVTF, signExtendI64)
+	case instr.I64_TO_F32_U:
+		return l.intToFloat(c, asm.Width32, arm64.UCVTF, zeroExtendI64)
+	case instr.I32_TO_F64_S:
+		return l.intToFloat(c, asm.Width64, arm64.SCVTF, signExtendI32)
+	case instr.I32_TO_F64_U:
+		return l.intToFloat(c, asm.Width64, arm64.UCVTF, zeroExtendI32)
+	case instr.I64_TO_F64_S:
+		return l.intToFloat(c, asm.Width64, arm64.SCVTF, signExtendI64)
+	case instr.I64_TO_F64_U:
+		return l.intToFloat(c, asm.Width64, arm64.UCVTF, zeroExtendI64)
+	case instr.F32_TO_F64:
+		return l.f32ToF64(c)
+	case instr.F64_TO_F32:
+		return l.f64ToF32(c)
 	}
 	return false
 }
@@ -902,6 +964,194 @@ func (l Lowerer) brIf(c *jit.Context) bool {
 	c.Stop = true
 	c.Closed = true
 	return true
+}
+
+// f32BinOp lowers an F32 binary arithmetic opcode. Both boxed-f32 inputs are
+// unboxed to float32 registers, the operation is performed, and the result is
+// reboxed as a boxed f32.
+func (l Lowerer) f32BinOp(c *jit.Context, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
+	if !need(c, 2) {
+		return false
+	}
+	b := c.Stack[len(c.Stack)-1]
+	a := c.Stack[len(c.Stack)-2]
+
+	fa := l.unboxF32(c, a)
+	fb := l.unboxF32(c, b)
+	fr := c.Assembler.Reg(asm.RegTypeFloat, asm.Width32)
+	c.Assembler.Emit(op(fr, fa, fb))
+
+	boxed := l.reboxF32(c, fr)
+	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// f64BinOp lowers an F64 binary arithmetic opcode. Both boxed-f64 inputs are
+// unboxed to float64 registers, the operation is performed, and the result is
+// reboxed as a boxed f64.
+func (l Lowerer) f64BinOp(c *jit.Context, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
+	if !need(c, 2) {
+		return false
+	}
+	b := c.Stack[len(c.Stack)-1]
+	a := c.Stack[len(c.Stack)-2]
+
+	fa := unboxF64(c, a)
+	fb := unboxF64(c, b)
+	fr := c.Assembler.Reg(asm.RegTypeFloat, asm.Width64)
+	c.Assembler.Emit(op(fr, fa, fb))
+
+	boxed := reboxF64(c, fr)
+	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// f32Cmp pops two boxed f32 values, runs FCMP on them, and pushes a boxed i32
+// 0/1 from the chosen condition code. NaN comparisons are unordered; EQ/NE
+// may not fully honour WebAssembly NaN semantics in Phase A.
+func (l Lowerer) f32Cmp(c *jit.Context, cond uint8) bool {
+	if !need(c, 2) {
+		return false
+	}
+	b := c.Stack[len(c.Stack)-1]
+	a := c.Stack[len(c.Stack)-2]
+
+	fa := l.unboxF32(c, a)
+	fb := l.unboxF32(c, b)
+	c.Assembler.Emit(arm64.FCMP(fa, fb))
+
+	flag := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.CSET(flag, cond))
+
+	boxed := l.boxI32(c, flag)
+	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// f64Cmp pops two boxed f64 values, runs FCMP on them, and pushes a boxed i32
+// 0/1 from the chosen condition code.
+func (l Lowerer) f64Cmp(c *jit.Context, cond uint8) bool {
+	if !need(c, 2) {
+		return false
+	}
+	b := c.Stack[len(c.Stack)-1]
+	a := c.Stack[len(c.Stack)-2]
+
+	fa := unboxF64(c, a)
+	fb := unboxF64(c, b)
+	c.Assembler.Emit(arm64.FCMP(fa, fb))
+
+	flag := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.CSET(flag, cond))
+
+	boxed := l.boxI32(c, flag)
+	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// intToFloat pops one boxed integer value, extracts its value lane via prep,
+// converts it to a float of fWidth using cvtf (SCVTF or UCVTF), then boxes
+// the result as f32 (Width32) or f64 (Width64).
+func (l Lowerer) intToFloat(
+	c *jit.Context,
+	fWidth asm.RegWidth,
+	cvtf func(dst, src asm.Reg) asm.Instruction,
+	prep func(*jit.Context, asm.VReg) asm.VReg,
+) bool {
+	if !need(c, 1) {
+		return false
+	}
+	a := c.Stack[len(c.Stack)-1]
+	val := prep(c, a)
+	fr := c.Assembler.Reg(asm.RegTypeFloat, fWidth)
+	c.Assembler.Emit(cvtf(fr, val))
+
+	var boxed asm.VReg
+	if fWidth == asm.Width32 {
+		boxed = l.reboxF32(c, fr)
+	} else {
+		boxed = reboxF64(c, fr)
+	}
+	c.Stack[len(c.Stack)-1] = boxed
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// f32ToF64 pops a boxed f32, converts its float32 value to float64 via
+// FCVT, and pushes the result as a boxed f64.
+func (l Lowerer) f32ToF64(c *jit.Context) bool {
+	if !need(c, 1) {
+		return false
+	}
+	a := c.Stack[len(c.Stack)-1]
+	fa := l.unboxF32(c, a)
+	fd := c.Assembler.Reg(asm.RegTypeFloat, asm.Width64)
+	c.Assembler.Emit(arm64.FCVT(fd, fa))
+	boxed := reboxF64(c, fd)
+	c.Stack[len(c.Stack)-1] = boxed
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// f64ToF32 pops a boxed f64, converts its float64 value to float32 via
+// FCVT, and pushes the result as a boxed f32.
+func (l Lowerer) f64ToF32(c *jit.Context) bool {
+	if !need(c, 1) {
+		return false
+	}
+	a := c.Stack[len(c.Stack)-1]
+	fa := unboxF64(c, a)
+	fs := c.Assembler.Reg(asm.RegTypeFloat, asm.Width32)
+	c.Assembler.Emit(arm64.FCVT(fs, fa))
+	boxed := l.reboxF32(c, fs)
+	c.Stack[len(c.Stack)-1] = boxed
+	c.IP += instrWidth(c.Code, c.IP)
+	return true
+}
+
+// unboxF32 extracts the float32 bit pattern from a boxed f32 (tagF32 | bits)
+// by masking to the low 32 bits and issuing FMOV with a Width64 int source
+// (the encoder uses the physical W alias, i.e. the low 32 bits of the X register).
+func (l Lowerer) unboxF32(c *jit.Context, v asm.VReg) asm.VReg {
+	bits := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ANDI(bits, v, maskI32))
+	f := c.Assembler.Reg(asm.RegTypeFloat, asm.Width32)
+	c.Assembler.Emit(arm64.FMOV(f, bits))
+	return f
+}
+
+// reboxF32 boxes a float32 register back to a boxed f32 value. FMOV with a
+// Width64 int destination zero-extends the float32 bits to 64 bits, then
+// tagF32 is OR-ed in.
+func (l Lowerer) reboxF32(c *jit.Context, f asm.VReg) asm.VReg {
+	bits := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.FMOV(bits, f))
+	tag := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.LDI(tag, tagF32)...)
+	boxed := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ORR(boxed, bits, tag))
+	return boxed
+}
+
+// unboxF64 interprets the raw bits of a boxed f64 (stored as IEEE 754 float64
+// bits) as a Float64 register via FMOV.
+func unboxF64(c *jit.Context, v asm.VReg) asm.VReg {
+	f := c.Assembler.Reg(asm.RegTypeFloat, asm.Width64)
+	c.Assembler.Emit(arm64.FMOV(f, v))
+	return f
+}
+
+// reboxF64 packs a Float64 register back to a boxed f64 by moving the raw
+// bits into an Int64 register via FMOV. BoxF64 stores the raw float64 bits
+// directly, so no tag OR is needed.
+func reboxF64(c *jit.Context, f asm.VReg) asm.VReg {
+	bits := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.FMOV(bits, f))
+	return bits
 }
 
 // instrWidth returns the encoded width in bytes of the opcode at code[ip].

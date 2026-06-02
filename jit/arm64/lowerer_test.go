@@ -653,4 +653,162 @@ func TestLowerer_Compile(t *testing.T) {
 		require.Len(t, got, 1)
 		require.Equal(t, types.BoxI64(-4), jit.Ret(got[0]))
 	})
+
+	t.Run("f64_add adds two float64 values", func(t *testing.T) {
+		// F64_CONST 2.0; F64_CONST 3.0; F64_ADD
+		code := []byte{
+			byte(instr.F64_CONST), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, // 2.0
+			byte(instr.F64_CONST), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x40, // 3.0
+			byte(instr.F64_ADD),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxF64(5.0), jit.Ret(got[0]))
+	})
+
+	t.Run("f32_add adds two float32 values", func(t *testing.T) {
+		// F32_CONST 2.0; F32_CONST 3.0; F32_ADD
+		code := []byte{
+			byte(instr.F32_CONST), 0x00, 0x00, 0x00, 0x40, // 2.0
+			byte(instr.F32_CONST), 0x00, 0x00, 0x40, 0x40, // 3.0
+			byte(instr.F32_ADD),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxF32(5.0), jit.Ret(got[0]))
+	})
+
+	t.Run("f32_lt returns 1 when less", func(t *testing.T) {
+		// F32_CONST 1.0; F32_CONST 2.0; F32_LT  →  1.0 < 2.0 → 1
+		code := []byte{
+			byte(instr.F32_CONST), 0x00, 0x00, 0x80, 0x3F, // 1.0
+			byte(instr.F32_CONST), 0x00, 0x00, 0x00, 0x40, // 2.0
+			byte(instr.F32_LT),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(1), jit.Ret(got[0]))
+	})
+
+	t.Run("f64_gt returns 1 when greater", func(t *testing.T) {
+		// F64_CONST 3.0; F64_CONST 1.0; F64_GT  →  3.0 > 1.0 → 1
+		code := []byte{
+			byte(instr.F64_CONST), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x40, // 3.0
+			byte(instr.F64_CONST), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x3F, // 1.0
+			byte(instr.F64_GT),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(1), jit.Ret(got[0]))
+	})
+
+	t.Run("i32_to_f64_s converts signed i32 to f64", func(t *testing.T) {
+		// I32_CONST 42; I32_TO_F64_S
+		code := []byte{
+			byte(instr.I32_CONST), 42, 0, 0, 0,
+			byte(instr.I32_TO_F64_S),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxF64(42.0), jit.Ret(got[0]))
+	})
+
+	t.Run("f32_to_f64 widens float32 to float64", func(t *testing.T) {
+		// F32_CONST 1.5; F32_TO_F64
+		code := []byte{
+			byte(instr.F32_CONST), 0x00, 0x00, 0xC0, 0x3F, // 1.5
+			byte(instr.F32_TO_F64),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxF64(1.5), jit.Ret(got[0]))
+	})
+
+	t.Run("f64_to_f32 narrows float64 to float32", func(t *testing.T) {
+		// F64_CONST 1.5; F64_TO_F32
+		code := []byte{
+			byte(instr.F64_CONST), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF8, 0x3F, // 1.5
+			byte(instr.F64_TO_F32),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxF32(1.5), jit.Ret(got[0]))
+	})
 }
