@@ -165,51 +165,89 @@ Do not split tiny single-use helpers out of nearby logic unless the helper names
 
 ### 1.5 Methods vs package-level functions
 
-Behavior belongs with type owning required context.
+Behavior belongs with the type owning required context. Receiver syntax marks ownership even when the receiver itself is unused.
 
-**Rule**: Functions used by only one type → method on that type when the behavior depends on that type's state or owns that type's workflow. Repeatedly passing same receiver means helper should be method.
+**Rule**: A function used by only one type is a method on that type, regardless of whether it touches receiver state. Package-level functions are reserved for one of:
+
+- Used by ≥2 types
+- Public and general enough to be reused outside this package
+- Constructor (see exception)
+- Consumed only by other package-level functions — i.e. no struct ever participates
 
 ```go
-// ✗ package-level helper (used only by jitCompiler)
-func makeBranchClosure(fn Caller, sig *Signature) func(*Interpreter) {
-    ...
-}
+// ✗ package-level helper (used only by Compiler)
+func mergeBlockInputs(inputs map[int][]VReg, blocks []*BasicBlock, ...) bool { ... }
 
-// ✓ ownership is explicit (method on jitCompiler)
-func (c *jitCompiler) branchClosure(fn Caller, sig *Signature) func(*Interpreter) {
-    ...
-}
+// ✓ ownership is explicit, even though receiver is unused
+func (*Compiler) merge(inputs map[int][]VReg, blocks []*BasicBlock, ...) bool { ... }
 ```
 
-**Exception**: Stateless callback or strategy functions can remain package-level functions even when only one type uses them. Receiver syntax suggests state, so do not add a receiver merely to pass the function as an argument.
+**Strategy callbacks pass as method values, not package functions.** If a helper is passed as a `func(...)` argument, it still becomes a method; the call site uses the method value `t.fn`:
 
 ```go
-// ✓ stateless function value
-func sign32(c *Context, v VReg) VReg { ... }
+// ✓ method + method value at pass site
+func (Lowerer) sign32(c *Context, v VReg) VReg { ... }
 
 func (l Lowerer) cmp(c *Context) bool {
-    return l.compare(c, sign32)
+    return l.compare(c, l.sign32)   // bound method value
 }
 
-// ✗ fake state; receiver adds no ownership signal
-func (Lowerer) sign32(c *Context, v VReg) VReg { ... }
+// ✗ package function dropped in because the call shape looks like a callback
+func sign32(c *Context, v VReg) VReg { ... }
+func (l Lowerer) cmp(c *Context) bool { return l.compare(c, sign32) }
 ```
 
-**Exception**: Constructors for types remain standalone and live with the type:
+**Counter-rule (single-use inline)**: Do not extract a tiny helper used by exactly one call site just to satisfy this rule. If the body is ≤~15 straight-line lines (no looping branch logic worth a name), inline it at the one caller. §1.4 "do not split single-use helpers" outranks the method-conversion rule when the only call site is the helper's only justification.
 
 ```go
-// ✓ standalone constructor (not a method on Assembler)
-func newCompiler(arch *Arch, p program) *compiler {
-    ...
+// ✗ method with unused receiver, used only once at construction
+func (*caller) packHeader(args, returns []PReg, n int) uint64 { /* 20 lines bit packing */ }
+func newCaller(...) (*caller, error) {
+    c := &caller{...}
+    c.header = c.packHeader(sig.Args, returns, nScratch)
+    return c, nil
 }
 
-// ✗ would be unclear if written as:
-func (a *Assembler) newCompiler(arch *Arch, p program) *compiler {
-    // "new" suggests constructor, but receiver suggests method
+// ✓ inline at the single call site
+func newCaller(...) (*caller, error) {
+    var aTyp, rTyp, aWid, rWid uint8
+    /* bit packing inline */
+    return &caller{header: uint64(...) | ..., ...}, nil
 }
 ```
 
-Match type visibility and constructor visibility unless construction is intentionally restricted. Public concrete type with a normal constructor should use `NewType` in the same file as the type. Private type should use `newType`.
+**Constructor-helper pattern (2-phase init)**: When a constructor needs a value computed by a method on the type, AND the helper is large enough to extract (not subject to the counter-rule), build the struct first with the field zero, call the method, assign, return:
+
+```go
+func newRewriter(info RegInfo, insts []Instruction, pins map[int32]PReg) *rewriter {
+    r := &rewriter{pool: ..., pins: pins, assigned: ..., widths: ...}
+    r.last = r.scanLastUses(insts)   // extracted because the scan loop names a real operation
+    return r
+}
+```
+
+**Exception**: Constructors themselves remain standalone, never methods:
+
+```go
+// ✓ standalone constructor
+func newCompiler(arch *Arch, p program) *compiler { ... }
+
+// ✗ "new" + receiver is contradictory
+func (a *Assembler) newCompiler(arch *Arch, p program) *compiler { ... }
+```
+
+Match type visibility and constructor visibility unless construction is intentionally restricted. Public concrete type with a normal constructor uses `NewType` in the same file as the type. Private type uses `newType`.
+
+**Method expressions for callbacks**: When a callback's body is exactly one method call on its argument, pass the method expression rather than a wrapper:
+
+```go
+// ✓ method expression
+b.grow(end, memory.executable)   // func(memory) error
+
+// ✗ wrapper that adds no value
+func sealRegion(m memory) error { return m.executable() }
+b.grow(end, sealRegion)
+```
 
 For JIT: keep architecture-neutral `jitCompiler` state + helpers in `interp/jit.go`. Put only arch selection, opcode handlers, ISA-specific helpers in `interp/jit_<arch>.go`.
 
