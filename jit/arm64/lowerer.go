@@ -162,6 +162,8 @@ func (l Lowerer) Lower(c *jit.Context, op instr.Opcode) bool {
 		return l.br(c)
 	case instr.BR_IF:
 		return l.brIf(c)
+	case instr.BR_TABLE:
+		return l.brTable(c)
 	case instr.SELECT:
 		return l.choose(c)
 	case instr.LOCAL_TEE:
@@ -1185,6 +1187,76 @@ func (l Lowerer) brIf(c *jit.Context) bool {
 	c.IP = falseTarget
 	c.Stop = true
 	c.Closed = true
+	return true
+}
+
+// brTable lowers BR_TABLE. It pops a boxed i32 condition, clamps it to
+// [0..count], and emits a linear scan of CMPI+B.EQ pairs — one per case — that
+// each jump to an inline exit path. The default exit falls through below the
+// scan. Every exit pins the remaining shadow stack to ABI returns, loads the
+// compile-time target IP into ScratchNext, and RETs.
+func (l Lowerer) brTable(c *jit.Context) bool {
+	if !l.need(c, 1) {
+		return false
+	}
+
+	count := int(c.Code[c.IP+1])
+	width := count*2 + 4
+
+	targets := make([]int, count+1)
+	for i := range targets {
+		at := c.IP + 2 + i*2
+		offset := int(int16(binary.LittleEndian.Uint16(c.Code[at : at+2])))
+		targets[i] = c.IP + width + offset
+	}
+
+	cond := c.Stack[len(c.Stack)-1]
+	c.Stack = c.Stack[:len(c.Stack)-1]
+
+	// Extract unsigned i32 value lane (negative i32s become large unsigned
+	// values and fall through to the default).
+	condI32 := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.ANDI(condI32, cond, maskI32))
+
+	// Pin remaining shadow stack and inputs to ABI registers once — all exit
+	// paths share the same live-value shape.
+	l.bind(c)
+	c.Returns = c.Returns[:0]
+	for i, v := range c.Stack {
+		ret := theArch.ABI().Return(i, v.Type(), v.Width())
+		_ = c.Assembler.Pin(v, ret)
+		c.Returns = append(c.Returns, ret)
+	}
+
+	rNext := c.Scratch[jit.ScratchNext]
+
+	// Emit one CMPI+B.EQ per case.
+	labels := make([]asm.Label, count)
+	for i := range labels {
+		labels[i] = c.Assembler.Label()
+		c.Assembler.Emit(arm64.CMPI(condI32, uint16(i)))
+		c.Assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, labels[i]))
+	}
+
+	// Default exit (fall-through when no case matched).
+	vNextDef := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	_ = c.Assembler.Pin(vNextDef, rNext)
+	c.Assembler.Emit(arm64.LDI(vNextDef, uint64(targets[count]))...)
+	c.Assembler.Emit(arm64.RET())
+
+	// Per-case exits.
+	for i := 0; i < count; i++ {
+		c.Assembler.Bind(labels[i])
+		vNext := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+		_ = c.Assembler.Pin(vNext, rNext)
+		c.Assembler.Emit(arm64.LDI(vNext, uint64(targets[i]))...)
+		c.Assembler.Emit(arm64.RET())
+	}
+
+	c.IP += width
+	c.Stop = true
+	c.Closed = true
+	c.Successor = targets[count]
 	return true
 }
 

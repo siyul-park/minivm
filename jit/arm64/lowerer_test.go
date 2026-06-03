@@ -1053,4 +1053,88 @@ func TestLowerer_Compile(t *testing.T) {
 		require.Len(t, got, 1)
 		require.Equal(t, types.BoxI32(1), jit.Ret(got[0]))
 	})
+
+	// BR_TABLE tests: I32_CONST <cond>; BR_TABLE 2, 0, 8, 16
+	//   IP 0: I32_CONST (5 bytes)
+	//   IP 5: BR_TABLE count=2, width=8
+	//   targets: [5+8+0=13, 5+8+8=21, default=5+8+16=29]
+	t.Run("br_table first case routes to targets[0]", func(t *testing.T) {
+		code := []byte{
+			byte(instr.I32_CONST), 0, 0, 0, 0, // cond = 0  (IP 0)
+			byte(instr.BR_TABLE), 2, 0, 0, 8, 0, 16, 0, // IP 5, width=8
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+		require.Contains(t, mod.Segments, 0)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+		require.Equal(t, uint64(13), scratch[jit.ScratchNext]) // 5+8+0
+	})
+
+	t.Run("br_table second case routes to targets[1]", func(t *testing.T) {
+		code := []byte{
+			byte(instr.I32_CONST), 1, 0, 0, 0, // cond = 1  (IP 0)
+			byte(instr.BR_TABLE), 2, 0, 0, 8, 0, 16, 0, // IP 5, width=8
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+		require.Contains(t, mod.Segments, 0)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+		require.Equal(t, uint64(21), scratch[jit.ScratchNext]) // 5+8+8
+	})
+
+	t.Run("br_table out-of-range uses default", func(t *testing.T) {
+		code := []byte{
+			byte(instr.I32_CONST), 5, 0, 0, 0, // cond = 5 >= count (IP 0)
+			byte(instr.BR_TABLE), 2, 0, 0, 8, 0, 16, 0, // IP 5, width=8
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+		require.Contains(t, mod.Segments, 0)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+		require.Equal(t, uint64(29), scratch[jit.ScratchNext]) // 5+8+16
+	})
+
+	t.Run("br_table negative i32 uses default", func(t *testing.T) {
+		code := []byte{
+			byte(instr.I32_CONST), 0xFF, 0xFF, 0xFF, 0xFF, // cond = -1 as i32 (IP 0)
+			byte(instr.BR_TABLE), 2, 0, 0, 8, 0, 16, 0, // IP 5, width=8
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+		require.Contains(t, mod.Segments, 0)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		_, err = mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+		require.Equal(t, uint64(29), scratch[jit.ScratchNext]) // 5+8+16
+	})
 }
