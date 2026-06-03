@@ -1,5 +1,7 @@
-// Package amd64 is a stub Lowerer for x86_64. It rejects every opcode so
-// the threaded interpreter handles all execution.
+// Package amd64 carries a skeletal Lowerer for x86_64. The skeleton
+// rejects every opcode and is not registered with jit; see register.go
+// for why. The type remains so an actual codegen pass can drop in later
+// without restructuring callers.
 package amd64
 
 import (
