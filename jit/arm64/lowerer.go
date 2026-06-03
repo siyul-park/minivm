@@ -378,17 +378,8 @@ func (l Lowerer) constGet(c *jit.Context) bool {
 // LDR from the globals base. Rejects when globals[idx] is a ref because
 // Phase A does not yet model the runtime retain.
 func (Lowerer) globalGet(c *jit.Context) bool {
-	width := instr.Instruction(c.Code[c.IP:]).Width()
-	idx := int(uint16(c.Code[c.IP+1]) | uint16(c.Code[c.IP+2])<<8)
-	if idx >= len(c.Snap.Globals) {
-		return false
-	}
-	if c.Snap.Globals[idx].Kind() == types.KindRef {
-		return false
-	}
-
-	// LDR unsigned-offset encodes at most 12 bits (0..4095 slots × 8 bytes).
-	if idx > 4095 {
+	idx, width, ok := global(c)
+	if !ok {
 		return false
 	}
 	vGlobal := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -407,19 +398,11 @@ func (Lowerer) globalGet(c *jit.Context) bool {
 // SET overwriting a previously held ref would leak it, so a current ref in
 // globals[idx] also rejects.
 func (l Lowerer) globalSet(c *jit.Context) bool {
-	width := instr.Instruction(c.Code[c.IP:]).Width()
-	idx := int(uint16(c.Code[c.IP+1]) | uint16(c.Code[c.IP+2])<<8)
-	if idx >= len(c.Snap.Globals) {
-		return false
-	}
-	if c.Snap.Globals[idx].Kind() == types.KindRef {
+	idx, width, ok := global(c)
+	if !ok {
 		return false
 	}
 	if !l.need(c, 1) {
-		return false
-	}
-	// STR unsigned-offset encodes at most 12 bits (0..4095 slots × 8 bytes).
-	if idx > 4095 {
 		return false
 	}
 
@@ -877,12 +860,8 @@ func (l Lowerer) localTee(c *jit.Context) bool {
 
 // globalTee stores the stack top to globals[idx] and leaves it on the stack.
 func (l Lowerer) globalTee(c *jit.Context) bool {
-	width := instr.Instruction(c.Code[c.IP:]).Width()
-	idx := int(uint16(c.Code[c.IP+1]) | uint16(c.Code[c.IP+2])<<8)
-	if idx >= len(c.Snap.Globals) {
-		return false
-	}
-	if c.Snap.Globals[idx].Kind() == types.KindRef {
+	idx, width, ok := global(c)
+	if !ok {
 		return false
 	}
 	if !l.need(c, 1) {
@@ -1512,6 +1491,9 @@ func (Lowerer) need(c *jit.Context, n int) bool {
 	if missing <= 0 {
 		return true
 	}
+	if c.Whole {
+		return false
+	}
 	if len(c.Inputs)+missing > theArch.ABI().MaxArgs() {
 		return false
 	}
@@ -1523,6 +1505,22 @@ func (Lowerer) need(c *jit.Context, n int) bool {
 	c.Inputs = append(inputs, c.Inputs...)
 	c.Stack = append(inputs, c.Stack...)
 	return true
+}
+
+func global(c *jit.Context) (int, int, bool) {
+	width := instr.Instruction(c.Code[c.IP:]).Width()
+	idx := int(uint16(c.Code[c.IP+1]) | uint16(c.Code[c.IP+2])<<8)
+	if idx >= len(c.Snap.Globals) {
+		return 0, 0, false
+	}
+	if c.Snap.Globals[idx].Kind() == types.KindRef {
+		return 0, 0, false
+	}
+	// LDR/STR unsigned-offset encodes at most 12 bits (0..4095 slots x 8 bytes).
+	if idx > 4095 {
+		return 0, 0, false
+	}
+	return idx, width, true
 }
 
 func (Lowerer) bind(c *jit.Context) {

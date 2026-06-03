@@ -49,6 +49,7 @@ func (b *Buffer) Write(code []byte) (unsafe.Pointer, error) {
 			_ = b.seal()
 			return nil, err
 		}
+		end = b.offset + len(code)
 	}
 
 	copy(b.mem[b.offset:end], code)

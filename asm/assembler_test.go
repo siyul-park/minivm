@@ -54,6 +54,9 @@ func TestAssembler_Build(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		require.Equal(t, uint64(7), got[0].Bits())
+
+		_, err = callables[0].Call([]asm.Value{asm.I64(3)}, nil)
+		require.ErrorIs(t, err, asm.ErrInvalidArgs)
 	})
 }
 

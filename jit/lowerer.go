@@ -36,10 +36,6 @@ type Context struct {
 	// Slots is the indirection table for direct CALL lowering. May be nil.
 	Slots *Slots
 
-	// Layout is a snapshot of the consumer's struct layout. Empty until
-	// the consumer calls Bind during init.
-	Layout Layout
-
 	// Code is the bytecode of the function being compiled.
 	Code []byte
 

@@ -58,10 +58,9 @@ type Context struct {
     Args      []asm.PReg   // resolved ABI args (for signature)
     Returns   []asm.PReg   // resolved ABI returns (for signature)
     Scratch   []asm.PReg   // scratch physical registers
-    Params    []asm.VReg
-    Facts     map[int]types.Kind
     Snap      Snapshot
     IP        int
+    Start     int
     End       int
     Target    int
     Successor int
@@ -72,7 +71,7 @@ type Context struct {
 }
 ```
 
-`Stack` is the segment-local shadow stack of boxed VRegs. `Inputs` are the live-in VRegs for the segment's declared ABI args. `Target` carries the static call target address set by `CONST_GET` of a Ref constant; `Lower` clears it before every opcode except `CALL`. `Whole` is true only during whole-function Entry compilation; `RETURN` must check this flag.
+`Stack` is the segment-local shadow stack of boxed VRegs. `Inputs` are the live-in VRegs for a partial segment's declared ABI args. Whole-function Entry compilation must finish with no `Inputs`; Entry receives function params through VM stack scratch/local loads, not `asm.Signature.Args`. `Target` carries the static call target address set by `CONST_GET` of a Ref constant; `Lower` clears it before every opcode except `CALL`. `Whole` is true only during whole-function Entry compilation; `RETURN` must check this flag.
 
 ## RETURN Lowering Contract
 
@@ -112,9 +111,9 @@ Only functions with numeric-only signatures (no KindRef params/returns) are elig
 
 `BR` targets are forced successors unless the target is a `NOP` or outside the function. Rejected ops force only safe structural successors (`NOP` or `BR` following the rejected opcode). Rejected `CALL` does not force successors.
 
-## Global Kind Inference
+## Globals
 
-Mutable globals carry no declared kind. `GLOBAL_SET`/`GLOBAL_TEE` infer kind from the source VReg and record it in `ctx.Facts`. `GLOBAL_GET` compiles only after a same-segment `GLOBAL_SET` has established the kind. Never specialize from the current runtime global value — that would require deoptimization on kind change.
+`GLOBAL_GET`/`GLOBAL_SET`/`GLOBAL_TEE` lower only for in-range non-ref globals whose slot offset fits the ARM64 unsigned LDR/STR immediate. Ref globals fall back to threaded code so retain/release ownership stays in the interpreter.
 
 ## Phase A Opcode Coverage
 

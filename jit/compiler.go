@@ -157,7 +157,7 @@ func (c *Compiler) Close() error {
 // the consumer-side tables (constants, globals, local kinds) that
 // kind-sensitive opcodes need at compile time.
 func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module, error) {
-	mod := NewModule(fn, addr)
+	mod := newModule(addr)
 	if c.lowerer == nil || fn == nil || len(fn.Code) == 0 {
 		return mod, nil
 	}
@@ -167,19 +167,9 @@ func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module
 	if seg, ok, err := c.whole(fn, snap); err != nil {
 		return nil, err
 	} else if ok {
-		linked, err := asm.LinkAll(c.buffer, c.arch, []*asm.Code{seg.code}, nil)
-		if err != nil {
+		if err := c.installEntry(mod, seg); err != nil {
 			return nil, err
 		}
-		mod.Entry = linked[0].Callable
-		if c.slots != nil {
-			if err := c.slots.Set(addr, mod.Entry); err != nil {
-				return nil, fmt.Errorf("set entry slot: %w", err)
-			}
-		}
-		mod.Signature = seg.code.Signature
-		mod.Bytes = append(mod.Bytes, len(seg.code.Bytes))
-		mod.Links = 1
 		return mod, nil
 	}
 
@@ -188,19 +178,9 @@ func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module
 	if seg, ok, err := c.blocks(fn, snap); err != nil {
 		return nil, err
 	} else if ok {
-		linked, err := asm.LinkAll(c.buffer, c.arch, []*asm.Code{seg.code}, nil)
-		if err != nil {
+		if err := c.installEntry(mod, seg); err != nil {
 			return nil, err
 		}
-		mod.Entry = linked[0].Callable
-		if c.slots != nil {
-			if err := c.slots.Set(addr, mod.Entry); err != nil {
-				return nil, fmt.Errorf("set entry slot: %w", err)
-			}
-		}
-		mod.Signature = seg.code.Signature
-		mod.Bytes = append(mod.Bytes, len(seg.code.Bytes))
-		mod.Links = 1
 		return mod, nil
 	}
 
@@ -218,21 +198,34 @@ func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module
 	return mod, nil
 }
 
+func (c *Compiler) installEntry(mod *Module, seg segment) error {
+	linked, err := asm.LinkAll(c.buffer, c.arch, []*asm.Code{seg.code}, nil)
+	if err != nil {
+		return err
+	}
+	mod.Entry = linked[0].Callable
+	if c.slots != nil {
+		if err := c.slots.Set(mod.Addr, mod.Entry); err != nil {
+			return fmt.Errorf("set entry slot: %w", err)
+		}
+	}
+	mod.Signature = seg.code.Signature
+	mod.Bytes = append(mod.Bytes, len(seg.code.Bytes))
+	mod.Links = 1
+	return nil
+}
+
 // whole attempts to lower the entire function as a single native chunk.
 // It succeeds only when every opcode lowers without rejection. On success the
 // returned segment's code is the Entry; its ABI follows the standard segment
 // convention (params accessed via LOCAL_GET / scratch slots, results in ABI
 // return registers).
 func (c *Compiler) whole(fn *types.Function, snap Snapshot) (segment, bool, error) {
-	scratch := c.arch.ABI().Scratch()
-	if len(scratch) < ScratchCount {
+	scratch, ok := c.scratch()
+	if !ok {
 		return segment{}, false, nil
 	}
-	scratch = scratch[:ScratchCount]
-	returns := 0
-	if fn.Typ != nil {
-		returns = len(fn.Typ.Returns)
-	}
+	returns := entryReturns(fn)
 
 	// Plan phase: require all opcodes to lower (reject < 0) and the function
 	// to terminate via RETURN (Stop=true, no branch Successor, not Closed by
@@ -247,10 +240,7 @@ func (c *Compiler) whole(fn *types.Function, snap Snapshot) (segment, bool, erro
 	if !terminated {
 		return segment{}, false, nil
 	}
-	if !c.fits(plan) {
-		return segment{}, false, nil
-	}
-	if len(plan.Stack) != returns {
+	if !c.validEntry(plan, returns) {
 		return segment{}, false, nil
 	}
 
@@ -263,10 +253,7 @@ func (c *Compiler) whole(fn *types.Function, snap Snapshot) (segment, bool, erro
 	if lowered.reject >= 0 || lowered.count == 0 {
 		return segment{}, false, nil
 	}
-	if !c.fits(ctx) {
-		return segment{}, false, nil
-	}
-	if len(ctx.Stack) != returns {
+	if !c.validEntry(ctx, returns) {
 		return segment{}, false, nil
 	}
 
@@ -274,8 +261,7 @@ func (c *Compiler) whole(fn *types.Function, snap Snapshot) (segment, bool, erro
 		c.lowerer.Exit(ctx, ctx.IP)
 	}
 
-	sig := asm.Signature{Args: ctx.Args, Returns: ctx.Returns, Scratch: scratch}
-	code, err := a.Build(sig)
+	code, err := buildCode(a, ctx, scratch)
 	if err != nil {
 		return segment{}, false, err
 	}
@@ -293,11 +279,10 @@ func (c *Compiler) whole(fn *types.Function, snap Snapshot) (segment, bool, erro
 // lowers without rejection. Falls back gracefully when a branch target is not a
 // known block start (e.g. brTable), leaving segments() to handle those cases.
 func (c *Compiler) blocks(fn *types.Function, snap Snapshot) (segment, bool, error) {
-	scratch := c.arch.ABI().Scratch()
-	if len(scratch) < ScratchCount {
+	scratch, ok := c.scratch()
+	if !ok {
 		return segment{}, false, nil
 	}
-	scratch = scratch[:ScratchCount]
 
 	m := pass.NewManager()
 	if err := m.Run(fn); err != nil {
@@ -333,14 +318,8 @@ func (c *Compiler) blocks(fn *types.Function, snap Snapshot) (segment, bool, err
 	}
 	// Require that the stack depth at end of the last block matches the
 	// function's declared return count, exactly like whole() does.
-	returns := 0
-	if fn.Typ != nil {
-		returns = len(fn.Typ.Returns)
-	}
-	if len(pctx.Stack) != returns {
-		return segment{}, false, nil
-	}
-	if !c.fits(pctx) {
+	returns := entryReturns(fn)
+	if !c.validEntry(pctx, returns) {
 		return segment{}, false, nil
 	}
 
@@ -374,9 +353,10 @@ func (c *Compiler) blocks(fn *types.Function, snap Snapshot) (segment, bool, err
 			c.lowerer.Exit(ctx, ctx.IP)
 		}
 	}
-
-	sig := asm.Signature{Args: ctx.Args, Returns: ctx.Returns, Scratch: scratch}
-	code, err := a.Build(sig)
+	if !c.validEntry(ctx, returns) {
+		return segment{}, false, nil
+	}
+	code, err := buildCode(a, ctx, scratch)
 	if err != nil {
 		return segment{}, false, err
 	}
@@ -445,11 +425,10 @@ func (c *Compiler) segments(fn *types.Function, snap Snapshot, mod *Module) ([]s
 // Returns (code, true, nil) when at least cutoff opcodes lowered, otherwise
 // (nil, false, nil).
 func (c *Compiler) segment(fn *types.Function, startIP int, snap Snapshot, hot map[int]bool) (segment, bool, error) {
-	scratch := c.arch.ABI().Scratch()
-	if len(scratch) < ScratchCount {
+	scratch, ok := c.scratch()
+	if !ok {
 		return segment{}, false, nil
 	}
-	scratch = scratch[:ScratchCount]
 
 	plan := c.context(asm.New(c.arch), fn, startIP, snap, scratch)
 	planned, plans := c.plan(plan, hot)
@@ -488,11 +467,11 @@ func (c *Compiler) segment(fn *types.Function, startIP int, snap Snapshot, hot m
 		c.lowerer.Exit(ctx, ctx.IP)
 	}
 
-	sig := asm.Signature{Args: ctx.Args, Returns: ctx.Returns, Scratch: scratch}
-	code, err := a.Build(sig)
+	code, err := buildCode(a, ctx, scratch)
 	if err != nil {
 		return segment{}, false, err
 	}
+	sig := code.Signature
 	if len(entries) > 0 {
 		code.Entries = make(map[asm.Label]asm.Signature, len(entries))
 		for _, ent := range entries {
@@ -519,11 +498,10 @@ func (c *Compiler) fallback() (asm.Callable, error) {
 	if c.lowerer == nil {
 		return nil, nil
 	}
-	scratch := c.arch.ABI().Scratch()
-	if len(scratch) < ScratchCount {
+	scratch, ok := c.scratch()
+	if !ok {
 		return nil, nil
 	}
-	scratch = scratch[:ScratchCount]
 
 	stub := &types.Function{Code: []byte{}}
 	a := asm.New(c.arch)
@@ -538,6 +516,29 @@ func (c *Compiler) fallback() (asm.Callable, error) {
 		return nil, fmt.Errorf("link fallback: %w", err)
 	}
 	return linked[0].Callable, nil
+}
+
+func (c *Compiler) scratch() ([]asm.PReg, bool) {
+	scratch := c.arch.ABI().Scratch()
+	if len(scratch) < ScratchCount {
+		return nil, false
+	}
+	return scratch[:ScratchCount], true
+}
+
+func entryReturns(fn *types.Function) int {
+	if fn != nil && fn.Typ != nil {
+		return len(fn.Typ.Returns)
+	}
+	return 0
+}
+
+func (c *Compiler) validEntry(ctx *Context, returns int) bool {
+	return c.fits(ctx) && len(ctx.Inputs) == 0 && len(ctx.Stack) == returns
+}
+
+func buildCode(a *asm.Assembler, ctx *Context, scratch []asm.PReg) (*asm.Code, error) {
+	return a.Build(asm.Signature{Args: ctx.Args, Returns: ctx.Returns, Scratch: scratch})
 }
 
 func (c *Compiler) link(mod *Module, segs []segment) error {
@@ -577,7 +578,6 @@ func (c *Compiler) context(a *asm.Assembler, fn *types.Function, startIP int, sn
 		Snap:      snap,
 		Scratch:   scratch,
 		Slots:     c.slots,
-		Layout:    RuntimeLayout(),
 		Target:    -1,
 	}
 }

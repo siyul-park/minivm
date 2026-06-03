@@ -1,4 +1,4 @@
-package asm_test
+package asm
 
 import (
 	"sync"
@@ -6,13 +6,11 @@ import (
 	"unsafe"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/siyul-park/minivm/asm"
 )
 
 func TestData_Alloc(t *testing.T) {
 	t.Run("returns distinct, stable slot addresses", func(t *testing.T) {
-		d, err := asm.NewData(64)
+		d, err := NewData(64)
 		require.NoError(t, err)
 		defer d.Free()
 
@@ -24,7 +22,7 @@ func TestData_Alloc(t *testing.T) {
 	})
 
 	t.Run("stores and loads pointers", func(t *testing.T) {
-		d, err := asm.NewData(64)
+		d, err := NewData(64)
 		require.NoError(t, err)
 		defer d.Free()
 
@@ -38,7 +36,7 @@ func TestData_Alloc(t *testing.T) {
 	})
 
 	t.Run("survives concurrent stores", func(t *testing.T) {
-		d, err := asm.NewData(64)
+		d, err := NewData(64)
 		require.NoError(t, err)
 		defer d.Free()
 
@@ -58,5 +56,23 @@ func TestData_Alloc(t *testing.T) {
 
 		got := d.Load(slot)
 		require.NotNil(t, got)
+	})
+
+	t.Run("resets offset after grow", func(t *testing.T) {
+		d, err := NewData(1)
+		require.NoError(t, err)
+		defer d.Free()
+
+		slotSize := int(unsafe.Sizeof(uintptr(0)))
+		for range len(d.mem) / slotSize {
+			_, err = d.Alloc()
+			require.NoError(t, err)
+		}
+		require.Equal(t, len(d.mem), d.offset)
+
+		_, err = d.Alloc()
+		require.NoError(t, err)
+		require.Len(t, d.old, 1)
+		require.Equal(t, slotSize, d.offset)
 	})
 }

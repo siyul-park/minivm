@@ -977,6 +977,24 @@ func TestLowerer_Compile(t *testing.T) {
 		require.Nil(t, mod.Entry)
 	})
 
+	t.Run("entry: rejects synthetic stack inputs", func(t *testing.T) {
+		code := []byte{
+			byte(instr.DROP),
+			byte(instr.RETURN),
+		}
+		fn := &types.Function{
+			Code: code,
+			Typ:  &types.FunctionType{},
+		}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+		require.Nil(t, mod.Entry)
+	})
+
 	t.Run("call: direct-BL call from Entry to compiled callee doubles value", func(t *testing.T) {
 		// Callee: LOCAL_GET 0; I32_CONST 2; I32_MUL; RETURN  — (i32) → i32
 		calleeFn := &types.Function{
@@ -1197,6 +1215,22 @@ func TestLowerer_Compile(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		require.Equal(t, types.BoxI32(1), jit.Ret(got[0]))
+	})
+
+	t.Run("global_tee rejects large offset", func(t *testing.T) {
+		code := []byte{
+			byte(instr.GLOBAL_TEE), 0x00, 0x10,
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		globals := make([]types.Boxed, 4097)
+		mod, err := c.Compile(fn, 1, jit.Snapshot{Globals: globals})
+		require.NoError(t, err)
+		require.Nil(t, mod.Entry)
+		require.Empty(t, mod.Segments)
 	})
 
 	// BR_TABLE tests: I32_CONST <cond>; BR_TABLE 2, 0, 8, 16

@@ -19,6 +19,7 @@ type caller struct {
 	argv     []uint64
 	rets     []asm.Value
 	retTypes []asm.PReg
+	nArgs    int
 	nScratch int
 }
 
@@ -66,6 +67,7 @@ func newCaller(sig asm.Signature, addr unsafe.Pointer) (*caller, error) {
 		argv:     make([]uint64, 1+nScratch+abiArgs),
 		rets:     make([]asm.Value, abiArgs),
 		retTypes: returns,
+		nArgs:    len(sig.Args),
 		nScratch: nScratch,
 	}, nil
 }
@@ -73,8 +75,8 @@ func newCaller(sig asm.Signature, addr unsafe.Pointer) (*caller, error) {
 func (c *caller) Addr() unsafe.Pointer { return c.addr }
 
 func (c *caller) Call(args []asm.Value, scratch []uint64) ([]asm.Value, error) {
-	if len(args) > abiArgs {
-		return nil, fmt.Errorf("%w: %d args", asm.ErrTooManyArgs, len(args))
+	if len(args) != c.nArgs {
+		return nil, fmt.Errorf("%w: got %d args, want %d", asm.ErrInvalidArgs, len(args), c.nArgs)
 	}
 
 	nScratch := c.nScratch

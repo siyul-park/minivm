@@ -42,6 +42,7 @@ func (d *Data) Alloc() (unsafe.Pointer, error) {
 		if err := d.grow(end); err != nil {
 			return nil, err
 		}
+		end = d.offset + slotSize
 	}
 	ptr := unsafe.Pointer(&d.mem[d.offset])
 	d.offset = end
