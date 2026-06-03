@@ -304,21 +304,33 @@ func (c *Compiler) blocks(fn *types.Function, addr int, snap Snapshot) (segment,
 		pctx.Labels[blk.Start] = planA.Label()
 	}
 	returns := entryReturns(fn)
+	reachable := reachableBlocks(blks)
+	inputs := map[int][]asm.VReg{0: nil}
 	planA.Bind(pctx.Entry)
 	c.lowerer.Prologue(pctx, fn)
 	for _, blk := range blks {
+		if !reachable[blk.Start] {
+			continue
+		}
+		stack, ok := inputs[blk.Start]
+		if !ok {
+			return segment{}, false, nil
+		}
 		planA.Bind(pctx.Labels[blk.Start])
 		pctx.IP = blk.Start
 		pctx.End = blk.End
 		pctx.Stop = false
 		pctx.Closed = false
 		pctx.Successor = -1
-		pctx.Stack = nil
+		pctx.Stack = append(pctx.Stack[:0], stack...)
 		res, _ := c.plan(pctx, nil)
 		if res.reject >= 0 {
 			return segment{}, false, nil
 		}
 		if pctx.Stop && !pctx.Closed && !c.validEntry(pctx, returns) {
+			return segment{}, false, nil
+		}
+		if !mergeBlockInputs(inputs, blks, blk, pctx.Stack) {
 			return segment{}, false, nil
 		}
 	}
@@ -336,16 +348,24 @@ func (c *Compiler) blocks(fn *types.Function, addr int, snap Snapshot) (segment,
 	for _, blk := range blks {
 		ctx.Labels[blk.Start] = a.Label()
 	}
+	inputs = map[int][]asm.VReg{0: nil}
 	a.Bind(ctx.Entry)
 	c.lowerer.Prologue(ctx, fn)
 	for _, blk := range blks {
+		if !reachable[blk.Start] {
+			continue
+		}
+		stack, ok := inputs[blk.Start]
+		if !ok {
+			return segment{}, false, nil
+		}
 		a.Bind(ctx.Labels[blk.Start])
 		ctx.IP = blk.Start
 		ctx.End = blk.End
 		ctx.Stop = false
 		ctx.Closed = false
 		ctx.Successor = -1
-		ctx.Stack = nil
+		ctx.Stack = append(ctx.Stack[:0], stack...)
 		res, _ := c.emit(ctx, fn, nil)
 		if res.reject >= 0 {
 			// A lowerer rejected during emit despite passing the plan phase
@@ -360,6 +380,9 @@ func (c *Compiler) blocks(fn *types.Function, addr int, snap Snapshot) (segment,
 				return segment{}, false, nil
 			}
 			c.lowerer.Exit(ctx, ctx.IP)
+		}
+		if !mergeBlockInputs(inputs, blks, blk, ctx.Stack) {
+			return segment{}, false, nil
 		}
 	}
 	if !c.validEntry(ctx, returns) {
@@ -548,6 +571,53 @@ func (c *Compiler) validEntry(ctx *Context, returns int) bool {
 
 func buildCode(a *asm.Assembler, ctx *Context, scratch []asm.PReg) (*asm.Code, error) {
 	return a.Build(asm.Signature{Args: ctx.Args, Returns: ctx.Returns, Scratch: scratch})
+}
+
+func reachableBlocks(blocks []*analysis.BasicBlock) map[int]bool {
+	reachable := map[int]bool{}
+	if len(blocks) == 0 {
+		return reachable
+	}
+	queue := []int{0}
+	for len(queue) > 0 {
+		idx := queue[0]
+		queue = queue[1:]
+		if idx < 0 || idx >= len(blocks) || reachable[blocks[idx].Start] {
+			continue
+		}
+		reachable[blocks[idx].Start] = true
+		queue = append(queue, blocks[idx].Succs...)
+	}
+	return reachable
+}
+
+func mergeBlockInputs(inputs map[int][]asm.VReg, blocks []*analysis.BasicBlock, block *analysis.BasicBlock, stack []asm.VReg) bool {
+	for _, idx := range block.Succs {
+		if idx < 0 || idx >= len(blocks) {
+			return false
+		}
+		start := blocks[idx].Start
+		if existing, ok := inputs[start]; ok {
+			if !sameStack(existing, stack) {
+				return false
+			}
+			continue
+		}
+		inputs[start] = append([]asm.VReg(nil), stack...)
+	}
+	return true
+}
+
+func sameStack(a, b []asm.VReg) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].ID() != b[i].ID() {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Compiler) link(mod *Module, segs []segment) error {

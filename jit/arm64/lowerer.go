@@ -1156,9 +1156,6 @@ func (Lowerer) br(c *jit.Context) bool {
 		if !ok {
 			return false
 		}
-		if len(c.Stack) > 0 {
-			return false
-		}
 		c.Assembler.Emit(arm64.BLabel(lbl))
 		c.IP = target
 		c.Stop = true
@@ -1194,13 +1191,8 @@ func (l Lowerer) brIf(c *jit.Context) bool {
 	if c.Labels != nil {
 		// Blocks mode: emit intra-function conditional branch. Both targets
 		// must be known block starts; fall back to segment mode if not.
-		// Stack must be empty after popping the condition — blocks() resets
-		// ctx.Stack=nil at each block entry, so values cannot cross boundaries.
 		takenLbl, ok := c.Labels[takenTarget]
 		if !ok {
-			return false
-		}
-		if len(c.Stack) > 0 {
 			return false
 		}
 		c.Assembler.Emit(arm64.CBNZLabel(condI32, takenLbl))

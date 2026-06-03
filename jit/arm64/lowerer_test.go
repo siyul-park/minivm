@@ -1185,6 +1185,35 @@ func TestLowerer_Compile(t *testing.T) {
 		require.Equal(t, types.BoxI32(13), jit.Ret(got[0]))
 	})
 
+	t.Run("entry: carries stack values across branch block", func(t *testing.T) {
+		code := instr.Marshal([]instr.Instruction{
+			instr.New(instr.I32_CONST, 40),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.BR_IF, 0),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+		})
+		fn := &types.Function{
+			Code: code,
+			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},
+		}
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+		require.NotNil(t, mod.Entry)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Entry.Call(nil, scratch)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(42), jit.Ret(got[0]))
+	})
+
 	t.Run("entry: two-param add function compiles to Entry", func(t *testing.T) {
 		// LOCAL_GET 0; LOCAL_GET 1; I32_ADD; RETURN  — (i32, i32) → i32.
 		// Params live at stack[bp+0] and stack[bp+1] via scratch slots.

@@ -113,6 +113,8 @@ In whole-function Entry mode, values below the callee arguments on the caller sh
 
 `BR` targets are forced successors unless the target is a `NOP` or outside the function. Rejected ops force only safe structural successors (`NOP` or `BR` following the rejected opcode). Rejected `CALL` does not force successors.
 
+Whole-function block mode carries shadow-stack values across block boundaries when every reachable predecessor agrees on the same VReg stack shape. If predecessors need a merge/phi, block mode rejects and falls back to segment compilation.
+
 ## Globals
 
 `GLOBAL_GET`/`GLOBAL_SET`/`GLOBAL_TEE` lower only for in-range non-ref globals whose slot offset fits the ARM64 unsigned LDR/STR immediate. Ref globals fall back to threaded code so retain/release ownership stays in the interpreter.
