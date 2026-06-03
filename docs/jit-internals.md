@@ -44,7 +44,7 @@ type Lowerer interface {
 - `Prologue` binds live-in ABI args to the shadow stack's initial VRegs. Called once per segment or whole-function attempt.
 - `Epilogue` is currently a no-op; reserved for whole-function teardown (frame pop) when needed.
 - `Exit` pins shadow stack values to ABI return registers, loads `nextIP` into `ScratchNext`, and emits `RET`. Called at the end of every non-closed segment.
-- `Lower` dispatches one opcode. Returns `false` (without mutating `Context`) to reject.
+- `Lower` dispatches one opcode. Returns `false` (without mutating `Context`) to reject. On success the driver advances `c.IP` by the opcode width; handlers must leave `c.IP` alone unless they also set `c.Stop` (e.g. branch/RETURN), in which case they own the resume position.
 
 Backends register via `jit.Register(arch string, Lowerer)` from an `init()` in a blank-importable package.
 

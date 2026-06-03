@@ -259,13 +259,7 @@ func (l Lowerer) Exit(c *jit.Context, nextIP int) {
 	rNext := c.Scratch[jit.ScratchNext]
 
 	l.bind(c)
-
-	c.Returns = c.Returns[:0]
-	for i, v := range c.Stack {
-		ret := theArch.ABI().Return(i, v.Type(), v.Width())
-		_ = c.Assembler.Pin(v, ret)
-		c.Returns = append(c.Returns, ret)
-	}
+	l.pinReturns(c)
 
 	vNext := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	_ = c.Assembler.Pin(vNext, rNext)
@@ -291,8 +285,7 @@ func (Lowerer) popLR(c *jit.Context) {
 	c.Assembler.Emit(arm64.ADDI(vSP, vSP, 16))
 }
 
-func (Lowerer) nop(c *jit.Context) bool {
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
+func (Lowerer) nop(_ *jit.Context) bool {
 	return true
 }
 
@@ -300,7 +293,6 @@ func (l Lowerer) drop(c *jit.Context) bool {
 	if !l.need(c, 1) {
 		return false
 	}
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	c.Stack = c.Stack[:len(c.Stack)-1]
 	return true
 }
@@ -312,7 +304,6 @@ func (l Lowerer) dup(c *jit.Context) bool {
 	top := c.Stack[len(c.Stack)-1]
 	dst := c.Assembler.Reg(top.Type(), top.Width())
 	c.Assembler.Emit(arm64.MOV(dst, top))
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	c.Stack = append(c.Stack, dst)
 	return true
 }
@@ -320,8 +311,7 @@ func (l Lowerer) dup(c *jit.Context) bool {
 func (l Lowerer) i32Const(c *jit.Context) bool {
 	width := instr.Instruction(c.Code[c.IP:]).Width()
 	val := int32(binary.LittleEndian.Uint32(c.Code[c.IP+1 : c.IP+width]))
-	boxed := uint64(types.BoxI32(val))
-	return l.imm(c, boxed, width)
+	return l.imm(c, uint64(types.BoxI32(val)))
 }
 
 func (l Lowerer) i64Const(c *jit.Context) bool {
@@ -332,31 +322,27 @@ func (l Lowerer) i64Const(c *jit.Context) bool {
 	if !types.IsBoxable(val) {
 		return false
 	}
-	boxed := uint64(types.BoxI64(val))
-	return l.imm(c, boxed, width)
+	return l.imm(c, uint64(types.BoxI64(val)))
 }
 
 func (l Lowerer) f32Const(c *jit.Context) bool {
 	width := instr.Instruction(c.Code[c.IP:]).Width()
 	bits := binary.LittleEndian.Uint32(c.Code[c.IP+1 : c.IP+width])
-	boxed := uint64(types.BoxF32(math.Float32frombits(bits)))
-	return l.imm(c, boxed, width)
+	return l.imm(c, uint64(types.BoxF32(math.Float32frombits(bits))))
 }
 
 func (l Lowerer) f64Const(c *jit.Context) bool {
 	width := instr.Instruction(c.Code[c.IP:]).Width()
 	bits := binary.LittleEndian.Uint64(c.Code[c.IP+1 : c.IP+width])
-	boxed := uint64(types.BoxF64(math.Float64frombits(bits)))
-	return l.imm(c, boxed, width)
+	return l.imm(c, uint64(types.BoxF64(math.Float64frombits(bits))))
 }
 
 // imm loads boxed as a 64-bit immediate into a fresh VReg and tracks it
-// on the segment-local stack shadow. width is the encoded byte length of
-// the source opcode; the IP advances by that many bytes on success.
-func (Lowerer) imm(c *jit.Context, boxed uint64, width int) bool {
+// on the segment-local stack shadow. The driver advances IP after Lower
+// returns true.
+func (Lowerer) imm(c *jit.Context, boxed uint64) bool {
 	dst := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.Assembler.Emit(arm64.LDI(dst, boxed)...)
-	c.IP += width
 	c.Stack = append(c.Stack, dst)
 	return true
 }
@@ -367,7 +353,6 @@ func (l Lowerer) swap(c *jit.Context) bool {
 	}
 	last := len(c.Stack) - 1
 	c.Stack[last], c.Stack[last-1] = c.Stack[last-1], c.Stack[last]
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -388,16 +373,16 @@ func (l Lowerer) constGet(c *jit.Context) bool {
 			return false
 		}
 		c.Target = addr
-		return l.imm(c, uint64(v), width)
+		return l.imm(c, uint64(v))
 	}
-	return l.imm(c, uint64(v), width)
+	return l.imm(c, uint64(v))
 }
 
 // globalGet pushes globals[idx] onto the segment stack via a direct
 // LDR from the globals base. Rejects when globals[idx] is a ref because
 // Phase A does not yet model the runtime retain.
 func (l Lowerer) globalGet(c *jit.Context) bool {
-	idx, width, ok := l.global(c)
+	idx, ok := l.global(c)
 	if !ok {
 		return false
 	}
@@ -407,7 +392,6 @@ func (l Lowerer) globalGet(c *jit.Context) bool {
 	}
 	dst := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.Assembler.Emit(arm64.LDR(dst, vGlobal, int16(idx*8)))
-	c.IP += width
 	c.Stack = append(c.Stack, dst)
 	return true
 }
@@ -417,7 +401,7 @@ func (l Lowerer) globalGet(c *jit.Context) bool {
 // SET overwriting a previously held ref would leak it, so a current ref in
 // globals[idx] also rejects.
 func (l Lowerer) globalSet(c *jit.Context) bool {
-	idx, width, ok := l.global(c)
+	idx, ok := l.global(c)
 	if !ok {
 		return false
 	}
@@ -433,7 +417,6 @@ func (l Lowerer) globalSet(c *jit.Context) bool {
 	}
 	c.Assembler.Emit(arm64.STR(src, vGlobal, int16(idx*8)))
 
-	c.IP += width
 	c.Stack = c.Stack[:len(c.Stack)-1]
 	return true
 }
@@ -442,7 +425,6 @@ func (l Lowerer) globalSet(c *jit.Context) bool {
 // segment stack via LDR. Ref locals reject for the same reason GLOBAL_GET
 // rejects ref globals.
 func (l Lowerer) localGet(c *jit.Context) bool {
-	width := instr.Instruction(c.Code[c.IP:]).Width()
 	idx := int(c.Code[c.IP+1])
 	if idx >= len(c.Snap.Locals) {
 		return false
@@ -457,14 +439,12 @@ func (l Lowerer) localGet(c *jit.Context) bool {
 	}
 	dst := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.Assembler.Emit(arm64.LDR(dst, addr, 0))
-	c.IP += width
 	c.Stack = append(c.Stack, dst)
 	return true
 }
 
 // localSet pops the segment stack top into stack[bp+idx].
 func (l Lowerer) localSet(c *jit.Context) bool {
-	width := instr.Instruction(c.Code[c.IP:]).Width()
 	idx := int(c.Code[c.IP+1])
 	if idx >= len(c.Snap.Locals) {
 		return false
@@ -483,7 +463,6 @@ func (l Lowerer) localSet(c *jit.Context) bool {
 	}
 	c.Assembler.Emit(arm64.STR(src, addr, 0))
 
-	c.IP += width
 	c.Stack = c.Stack[:len(c.Stack)-1]
 	return true
 }
@@ -544,7 +523,6 @@ func (l Lowerer) i32Binary(c *jit.Context, op func(dst, src1, src2 asm.Reg) asm.
 
 	boxed := l.boxI32(c, raw)
 	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -569,7 +547,6 @@ func (l Lowerer) i32Logic(c *jit.Context, op func(dst, src1, src2 asm.Reg) asm.I
 	dst := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.Assembler.Emit(op(dst, a, b))
 	c.Stack = append(c.Stack[:len(c.Stack)-2], dst)
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -591,7 +568,6 @@ func (l Lowerer) i32Xor(c *jit.Context) bool {
 	c.Assembler.Emit(arm64.ORR(boxed, xord, tag))
 
 	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -612,7 +588,6 @@ func (l Lowerer) i32Eqz(c *jit.Context) bool {
 
 	boxed := l.boxI32(c, flag)
 	c.Stack[len(c.Stack)-1] = boxed
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -655,7 +630,6 @@ func (l Lowerer) i32Shift(
 
 	boxed := l.boxI32(c, raw)
 	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -686,7 +660,6 @@ func (l Lowerer) i32Cmp(
 
 	boxed := l.boxI32(c, flag)
 	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -753,7 +726,6 @@ func (l Lowerer) i64Cmp(
 
 	boxed := l.boxI32(c, flag)
 	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -773,7 +745,6 @@ func (l Lowerer) i64Eqz(c *jit.Context) bool {
 
 	boxed := l.boxI32(c, flag)
 	c.Stack[len(c.Stack)-1] = boxed
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -796,7 +767,6 @@ func (l Lowerer) i64ShrS(c *jit.Context) bool {
 
 	boxed := l.boxI64(c, raw)
 	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -849,13 +819,11 @@ func (l Lowerer) choose(c *jit.Context) bool {
 	c.Assembler.Emit(arm64.CSEL(dst, v1, v2, arm64.CondNE))
 
 	c.Stack = append(c.Stack[:len(c.Stack)-3], dst)
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
 // localTee stores the stack top to stack[bp+idx] and leaves it on the stack.
 func (l Lowerer) localTee(c *jit.Context) bool {
-	width := instr.Instruction(c.Code[c.IP:]).Width()
 	idx := int(c.Code[c.IP+1])
 	if idx >= len(c.Snap.Locals) {
 		return false
@@ -873,13 +841,12 @@ func (l Lowerer) localTee(c *jit.Context) bool {
 		return false
 	}
 	c.Assembler.Emit(arm64.STR(src, addr, 0))
-	c.IP += width
 	return true
 }
 
 // globalTee stores the stack top to globals[idx] and leaves it on the stack.
 func (l Lowerer) globalTee(c *jit.Context) bool {
-	idx, width, ok := l.global(c)
+	idx, ok := l.global(c)
 	if !ok {
 		return false
 	}
@@ -893,7 +860,6 @@ func (l Lowerer) globalTee(c *jit.Context) bool {
 		return false
 	}
 	c.Assembler.Emit(arm64.STR(src, vGlobal, int16(idx*8)))
-	c.IP += width
 	return true
 }
 
@@ -909,7 +875,6 @@ func (l Lowerer) i32ToI64S(c *jit.Context) bool {
 	ext := l.sign32(c, a)
 	boxed := l.boxI64(c, ext)
 	c.Stack[len(c.Stack)-1] = boxed
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -924,7 +889,6 @@ func (l Lowerer) i32ToI64U(c *jit.Context) bool {
 	ext := l.zero32(c, a)
 	boxed := l.boxI64(c, ext)
 	c.Stack[len(c.Stack)-1] = boxed
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -940,7 +904,6 @@ func (l Lowerer) i64ToI32(c *jit.Context) bool {
 	c.Assembler.Emit(arm64.ANDI(lo, a, maskI32))
 	boxed := l.boxI32(c, lo)
 	c.Stack[len(c.Stack)-1] = boxed
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -951,7 +914,6 @@ func (Lowerer) ret(c *jit.Context) bool {
 	if !c.Whole {
 		return false
 	}
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	c.Stop = true
 	return true
 }
@@ -1041,7 +1003,6 @@ func (l Lowerer) call(c *jit.Context) bool {
 	c.Stack = survVregs
 	c.Stack = append(c.Stack, retVregs...)
 
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -1101,7 +1062,7 @@ func (Lowerer) target(c *jit.Context, addr int, stackLen int) (call, bool) {
 
 // refNull pushes the null reference constant (BoxedNull) onto the shadow stack.
 func (l Lowerer) refNull(c *jit.Context) bool {
-	return l.imm(c, uint64(types.BoxedNull), instr.Instruction(c.Code[c.IP:]).Width())
+	return l.imm(c, uint64(types.BoxedNull))
 }
 
 // refIsNull pops a boxed ref and pushes BoxI32(1) if it is null (addr == 0),
@@ -1121,7 +1082,6 @@ func (l Lowerer) refIsNull(c *jit.Context) bool {
 
 	boxed := l.boxI32(c, flag)
 	c.Stack[len(c.Stack)-1] = boxed
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -1141,7 +1101,6 @@ func (l Lowerer) refEq(c *jit.Context) bool {
 
 	boxed := l.boxI32(c, flag)
 	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -1205,12 +1164,7 @@ func (l Lowerer) brIf(c *jit.Context) bool {
 
 	// Segment mode: pin remaining stack to ABI registers for both paths.
 	l.bind(c)
-	c.Returns = c.Returns[:0]
-	for i, v := range c.Stack {
-		ret := theArch.ABI().Return(i, v.Type(), v.Width())
-		_ = c.Assembler.Pin(v, ret)
-		c.Returns = append(c.Returns, ret)
-	}
+	l.pinReturns(c)
 
 	rNext := c.Scratch[jit.ScratchNext]
 	takenLbl := c.Assembler.Label()
@@ -1272,12 +1226,7 @@ func (l Lowerer) brTable(c *jit.Context) bool {
 	// Pin remaining shadow stack and inputs to ABI registers once — all exit
 	// paths share the same live-value shape.
 	l.bind(c)
-	c.Returns = c.Returns[:0]
-	for i, v := range c.Stack {
-		ret := theArch.ABI().Return(i, v.Type(), v.Width())
-		_ = c.Assembler.Pin(v, ret)
-		c.Returns = append(c.Returns, ret)
-	}
+	l.pinReturns(c)
 
 	rNext := c.Scratch[jit.ScratchNext]
 
@@ -1304,7 +1253,6 @@ func (l Lowerer) brTable(c *jit.Context) bool {
 		c.Assembler.Emit(arm64.RET())
 	}
 
-	c.IP += width
 	c.Stop = true
 	c.Closed = true
 	c.Successor = targets[count]
@@ -1328,7 +1276,6 @@ func (l Lowerer) f32Binary(c *jit.Context, op func(dst, src1, src2 asm.Reg) asm.
 
 	boxed := l.reboxF32(c, fr)
 	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -1349,7 +1296,6 @@ func (l Lowerer) f64Binary(c *jit.Context, op func(dst, src1, src2 asm.Reg) asm.
 
 	boxed := l.reboxF64(c, fr)
 	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -1372,7 +1318,6 @@ func (l Lowerer) f32Cmp(c *jit.Context, cond uint8) bool {
 
 	boxed := l.boxI32(c, flag)
 	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -1394,7 +1339,6 @@ func (l Lowerer) f64Cmp(c *jit.Context, cond uint8) bool {
 
 	boxed := l.boxI32(c, flag)
 	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -1422,7 +1366,6 @@ func (l Lowerer) toFloat(
 		boxed = l.reboxF64(c, fr)
 	}
 	c.Stack[len(c.Stack)-1] = boxed
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -1438,7 +1381,6 @@ func (l Lowerer) f32ToF64(c *jit.Context) bool {
 	c.Assembler.Emit(arm64.FCVT(fd, fa))
 	boxed := l.reboxF64(c, fd)
 	c.Stack[len(c.Stack)-1] = boxed
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -1454,7 +1396,6 @@ func (l Lowerer) f64ToF32(c *jit.Context) bool {
 	c.Assembler.Emit(arm64.FCVT(fs, fa))
 	boxed := l.reboxF32(c, fs)
 	c.Stack[len(c.Stack)-1] = boxed
-	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
 	return true
 }
 
@@ -1520,20 +1461,19 @@ func (Lowerer) need(c *jit.Context, n int) bool {
 	return true
 }
 
-func (Lowerer) global(c *jit.Context) (int, int, bool) {
-	width := instr.Instruction(c.Code[c.IP:]).Width()
+func (Lowerer) global(c *jit.Context) (int, bool) {
 	idx := int(uint16(c.Code[c.IP+1]) | uint16(c.Code[c.IP+2])<<8)
 	if idx >= len(c.Snap.Globals) {
-		return 0, 0, false
+		return 0, false
 	}
 	if c.Snap.Globals[idx].Kind() == types.KindRef {
-		return 0, 0, false
+		return 0, false
 	}
 	// LDR/STR unsigned-offset encodes at most 12 bits (0..4095 slots x 8 bytes).
 	if idx > 4095 {
-		return 0, 0, false
+		return 0, false
 	}
-	return idx, width, true
+	return idx, true
 }
 
 func (Lowerer) bind(c *jit.Context) {
@@ -1542,5 +1482,14 @@ func (Lowerer) bind(c *jit.Context) {
 		arg := theArch.ABI().Arg(i, v.Type(), v.Width())
 		_ = c.Assembler.Pin(v, arg)
 		c.Args = append(c.Args, arg)
+	}
+}
+
+func (Lowerer) pinReturns(c *jit.Context) {
+	c.Returns = c.Returns[:0]
+	for i, v := range c.Stack {
+		ret := theArch.ABI().Return(i, v.Type(), v.Width())
+		_ = c.Assembler.Pin(v, ret)
+		c.Returns = append(c.Returns, ret)
 	}
 }

@@ -208,79 +208,20 @@ func (c *Compiler) installEntry(mod *Module, seg segment) error {
 	return nil
 }
 
-// whole attempts to lower the entire function as a single native chunk.
-// It succeeds only when every opcode lowers without rejection. On success the
-// returned segment's code is the Entry; its ABI follows the standard segment
-// convention (params accessed via LOCAL_GET / scratch slots, results in ABI
-// return registers).
+// whole lowers fn as a single native chunk. Succeeds only when every
+// opcode lowers cleanly AND the function terminates via RETURN
+// (Stop=true, no branch Successor, not Closed by BR_IF inline exits).
+// On success the returned segment's code is the Entry.
 func (c *Compiler) whole(fn *types.Function, addr int, snap Snapshot) (segment, bool, error) {
-	scratch, ok := c.scratch()
-	if !ok {
-		return segment{}, false, nil
-	}
-	returns := 0
-	if fn.Typ != nil {
-		returns = len(fn.Typ.Returns)
-	}
-
-	// Plan phase: require all opcodes to lower (reject < 0) and the function
-	// to terminate via RETURN (Stop=true, no branch Successor, not Closed by
-	// BR_IF inline exits).
-	plan := c.context(asm.New(c.arch), fn, addr, 0, snap, scratch)
-	plan.Whole = true
-	planned, _ := c.plan(plan, nil)
-	if planned.reject >= 0 || planned.count == 0 {
-		return segment{}, false, nil
-	}
-	terminated := plan.Stop && plan.Successor < 0 && !plan.Closed
-	if !terminated {
-		return segment{}, false, nil
-	}
-	if !c.validEntry(plan, returns) {
-		return segment{}, false, nil
-	}
-
-	// Emit phase: re-lower with the real assembler.
-	a := asm.New(c.arch)
-	ctx := c.context(a, fn, addr, 0, snap, scratch)
-	ctx.Whole = true
-	a.Bind(ctx.Entry)
-	c.lowerer.Prologue(ctx, fn)
-	lowered, _ := c.emit(ctx, fn, nil)
-	if lowered.reject >= 0 || lowered.count == 0 {
-		return segment{}, false, nil
-	}
-	if !c.validEntry(ctx, returns) {
-		return segment{}, false, nil
-	}
-
-	if !ctx.Closed {
-		c.lowerer.Exit(ctx, ctx.IP)
-	}
-
-	code, err := a.Build(asm.Signature{Args: ctx.Args, Returns: ctx.Returns, Scratch: scratch})
-	if err != nil {
-		return segment{}, false, err
-	}
-	return segment{
-		start: 0,
-		end:   len(fn.Code),
-		code:  code,
-	}, true, nil
+	return c.function(fn, addr, snap, []*analysis.BasicBlock{{Start: 0, End: len(fn.Code)}}, true)
 }
 
-// blocks attempts to lower the entire function as a sequence of basic blocks
-// connected by intra-function labels. Unlike whole(), it handles branch
-// instructions (BR_IF, BR) by emitting native branches to block-start labels
-// instead of interpreter exits. Succeeds only when every opcode in every block
-// lowers without rejection. Falls back gracefully when a branch target is not a
-// known block start (e.g. brTable), leaving segments() to handle those cases.
+// blocks lowers fn as a sequence of basic blocks connected by
+// intra-function labels. Branches (BR_IF, BR) become native branches to
+// block-start labels instead of interpreter exits. Returns (_, false, _)
+// when a target is not a known block start (e.g. brTable), so segments()
+// can handle those cases.
 func (c *Compiler) blocks(fn *types.Function, addr int, snap Snapshot) (segment, bool, error) {
-	scratch, ok := c.scratch()
-	if !ok {
-		return segment{}, false, nil
-	}
-
 	m := pass.NewManager()
 	if err := m.Run(fn); err != nil {
 		return segment{}, false, err
@@ -289,66 +230,76 @@ func (c *Compiler) blocks(fn *types.Function, addr int, snap Snapshot) (segment,
 	if err != nil || len(blks) <= 1 {
 		return segment{}, false, nil
 	}
+	return c.function(fn, addr, snap, blks, false)
+}
 
-	// Plan phase: dry-run with a counting assembler to validate that every
-	// opcode in every block lowers without rejection.
-	planA := asm.New(c.arch)
-	pctx := c.context(planA, fn, addr, 0, snap, scratch)
-	pctx.Whole = true
-	pctx.Labels = make(map[int]asm.Label, len(blks))
-	for _, blk := range blks {
-		pctx.Labels[blk.Start] = planA.Label()
+// function runs a two-phase (plan + emit) compilation over blks. When
+// requireTerminated is true the plan phase additionally checks that the
+// last successfully lowered opcode left ctx in a RETURN-terminated state.
+// Labels are bound per block only when len(blks) > 1; with a single
+// synthetic block the function behaves as a straight-line whole-function
+// compilation.
+func (c *Compiler) function(fn *types.Function, addr int, snap Snapshot, blks []*analysis.BasicBlock, requireTerminated bool) (segment, bool, error) {
+	scratch, ok := c.scratch()
+	if !ok {
+		return segment{}, false, nil
 	}
 	returns := 0
 	if fn.Typ != nil {
 		returns = len(fn.Typ.Returns)
 	}
-	reachable := c.reachable(blks)
-	inputs := map[int][]asm.VReg{0: nil}
-	planA.Bind(pctx.Entry)
-	c.lowerer.Prologue(pctx, fn)
-	for _, blk := range blks {
-		if !reachable[blk.Start] {
-			continue
-		}
-		stack, ok := inputs[blk.Start]
-		if !ok {
-			return segment{}, false, nil
-		}
-		planA.Bind(pctx.Labels[blk.Start])
-		pctx.IP = blk.Start
-		pctx.End = blk.End
-		pctx.Stop = false
-		pctx.Closed = false
-		pctx.Successor = -1
-		pctx.Stack = append(pctx.Stack[:0], stack...)
-		res, _ := c.plan(pctx, nil)
-		if res.reject >= 0 {
-			return segment{}, false, nil
-		}
-		if pctx.Stop && !pctx.Closed && !c.validEntry(pctx, returns) {
-			return segment{}, false, nil
-		}
-		if !c.merge(inputs, blks, blk, pctx.Stack) {
-			return segment{}, false, nil
-		}
+
+	planCtx := c.prepare(fn, addr, snap, scratch, blks)
+	if !c.walkFunction(planCtx, fn, blks, returns, false) {
+		return segment{}, false, nil
 	}
-	// Require that the stack depth at end of the last block matches the
-	// function's declared return count, exactly like whole() does.
-	if !c.validEntry(pctx, returns) {
+	if requireTerminated && !(planCtx.Stop && planCtx.Successor < 0 && !planCtx.Closed) {
+		return segment{}, false, nil
+	}
+	if !c.validEntry(planCtx, returns) {
 		return segment{}, false, nil
 	}
 
-	// Emit phase: real assembler, same block traversal order.
+	ctx := c.prepare(fn, addr, snap, scratch, blks)
+	if !c.walkFunction(ctx, fn, blks, returns, true) {
+		return segment{}, false, nil
+	}
+	if !c.validEntry(ctx, returns) {
+		return segment{}, false, nil
+	}
+
+	code, err := ctx.Assembler.Build(asm.Signature{Args: ctx.Args, Returns: ctx.Returns, Scratch: scratch})
+	if err != nil {
+		return segment{}, false, err
+	}
+	return segment{start: 0, end: len(fn.Code), code: code}, true, nil
+}
+
+// prepare constructs a fresh assembler + Context for a whole-function or
+// multi-block compilation. Labels are pre-allocated per block when blks
+// has more than one entry.
+func (c *Compiler) prepare(fn *types.Function, addr int, snap Snapshot, scratch []asm.PReg, blks []*analysis.BasicBlock) *Context {
 	a := asm.New(c.arch)
 	ctx := c.context(a, fn, addr, 0, snap, scratch)
 	ctx.Whole = true
-	ctx.Labels = make(map[int]asm.Label, len(blks))
-	for _, blk := range blks {
-		ctx.Labels[blk.Start] = a.Label()
+	if len(blks) > 1 {
+		ctx.Labels = make(map[int]asm.Label, len(blks))
+		for _, blk := range blks {
+			ctx.Labels[blk.Start] = a.Label()
+		}
 	}
-	inputs = map[int][]asm.VReg{0: nil}
-	a.Bind(ctx.Entry)
+	return ctx
+}
+
+// walkFunction drives the per-block plan or emit loop. For each reachable
+// block it resets ctx scope, runs walk, and forwards merged stacks to
+// successor blocks. emit selects between planning (dry-run with the
+// counting assembler) and emission (real code, includes Exit terminators
+// for RETURN-ending blocks).
+func (c *Compiler) walkFunction(ctx *Context, fn *types.Function, blks []*analysis.BasicBlock, returns int, emit bool) bool {
+	reachable := c.reachable(blks)
+	inputs := map[int][]asm.VReg{0: nil}
+	ctx.Assembler.Bind(ctx.Entry)
 	c.lowerer.Prologue(ctx, fn)
 	for _, blk := range blks {
 		if !reachable[blk.Start] {
@@ -356,46 +307,40 @@ func (c *Compiler) blocks(fn *types.Function, addr int, snap Snapshot) (segment,
 		}
 		stack, ok := inputs[blk.Start]
 		if !ok {
-			return segment{}, false, nil
+			return false
 		}
-		a.Bind(ctx.Labels[blk.Start])
+		if ctx.Labels != nil {
+			ctx.Assembler.Bind(ctx.Labels[blk.Start])
+		}
 		ctx.IP = blk.Start
 		ctx.End = blk.End
 		ctx.Stop = false
 		ctx.Closed = false
 		ctx.Successor = -1
 		ctx.Stack = append(ctx.Stack[:0], stack...)
-		res, _ := c.emit(ctx, fn, nil)
-		if res.reject >= 0 {
-			// A lowerer rejected during emit despite passing the plan phase
-			// (e.g. a Pin conflict after earlier blocks changed register state).
-			// Bail rather than installing malformed native code.
-			return segment{}, false, nil
+
+		var res result
+		if emit {
+			res, _ = c.emit(ctx, fn, nil)
+		} else {
+			res, _ = c.plan(ctx, nil)
 		}
-		// RETURN terminates the native entry from any block. Fallthrough
-		// blocks connect to the next label in native code.
-		if !ctx.Closed && ctx.Stop {
+		if res.reject >= 0 {
+			return false
+		}
+		if ctx.Stop && !ctx.Closed {
 			if !c.validEntry(ctx, returns) {
-				return segment{}, false, nil
+				return false
 			}
-			c.lowerer.Exit(ctx, ctx.IP)
+			if emit {
+				c.lowerer.Exit(ctx, ctx.IP)
+			}
 		}
 		if !c.merge(inputs, blks, blk, ctx.Stack) {
-			return segment{}, false, nil
+			return false
 		}
 	}
-	if !c.validEntry(ctx, returns) {
-		return segment{}, false, nil
-	}
-	code, err := a.Build(asm.Signature{Args: ctx.Args, Returns: ctx.Returns, Scratch: scratch})
-	if err != nil {
-		return segment{}, false, err
-	}
-	return segment{
-		start: 0,
-		end:   len(fn.Code),
-		code:  code,
-	}, true, nil
+	return true
 }
 
 func (c *Compiler) segments(fn *types.Function, snap Snapshot, mod *Module) ([]segment, error) {
@@ -593,14 +538,14 @@ func (c *Compiler) context(a *asm.Assembler, fn *types.Function, addr int, start
 		Slots:     c.slots,
 		Code:      fn.Code,
 		Snap:      snap,
-		Target:    -1,
-		Successor: -1,
+		Scratch:   scratch,
+		Entry:     a.Label(),
 		IP:        startIP,
 		Start:     startIP,
-		Self:      addr,
 		End:       len(fn.Code),
-		Entry:     a.Label(),
-		Scratch:   scratch,
+		Self:      addr,
+		Target:    -1,
+		Successor: -1,
 	}
 }
 
@@ -608,6 +553,10 @@ func (c *Compiler) context(a *asm.Assembler, fn *types.Function, addr int, start
 // entry IP the caller supplies before (run before Lower; in plan this snapshots
 // ctx.Stack so the after callback can commit a frozen copy on success) and
 // after (run only after Lower advances IP). Either may be nil.
+//
+// On Lower success the driver advances ctx.IP by the opcode width unless the
+// handler set ctx.Stop (in which case the handler owns ctx.IP). Handlers
+// therefore never touch ctx.IP on the straight-line path.
 func (c *Compiler) walk(ctx *Context, entries map[int]bool, before, after func(ip int)) result {
 	out := result{reject: -1}
 	for ctx.IP < ctx.End {
@@ -622,10 +571,8 @@ func (c *Compiler) walk(ctx *Context, entries map[int]bool, before, after func(i
 			out.reject = ipBefore
 			break
 		}
-		if ctx.IP == ipBefore && !ctx.Stop {
-			// Lowerer reported success but did not advance IP.
-			out.reject = ipBefore
-			break
+		if !ctx.Stop {
+			ctx.IP = ipBefore + width
 		}
 		out.count++
 		out.end = max(out.end, ipBefore+width)
@@ -666,28 +613,49 @@ func (c *Compiler) fits(ctx *Context) bool {
 		len(ctx.Stack) <= c.arch.ABI().MaxReturns()
 }
 
+// entries filters plans down to those whose stack shape can be pinned to
+// segment-entry ABI Arg registers without conflicting with the segment-wide
+// vreg-to-preg basis (Inputs as Args, Stack as Returns). Each candidate
+// re-validates against the basis plus its own first-seen assignments.
 func (c *Compiler) entries(ctx *Context, plans []plan) []plan {
 	if len(plans) == 0 {
 		return nil
 	}
+	abi := c.arch.ABI()
 
-	pins := map[int32]asm.PReg{}
-	keep := make([]plan, 0, len(plans))
+	basis := map[int32]asm.PReg{}
 	for i, v := range ctx.Inputs {
-		if !c.pin(pins, v, c.arch.ABI().Arg(i, v.Type(), v.Width())) {
+		if !c.assign(basis, v, abi.Arg(i, v.Type(), v.Width())) {
 			return nil
 		}
 	}
 	for i, v := range ctx.Stack {
-		if !c.pin(pins, v, c.arch.ABI().Return(i, v.Type(), v.Width())) {
+		if !c.assign(basis, v, abi.Return(i, v.Type(), v.Width())) {
 			return nil
 		}
 	}
-	for _, plan := range plans {
-		if len(plan.stack) > c.arch.ABI().MaxArgs() || !c.pins(pins, plan.stack) {
+
+	maxArgs := abi.MaxArgs()
+	keep := make([]plan, 0, len(plans))
+next:
+	for _, p := range plans {
+		if len(p.stack) > maxArgs {
 			continue
 		}
-		keep = append(keep, plan)
+		local := map[int32]asm.PReg{}
+		for i, v := range p.stack {
+			arg := abi.Arg(i, v.Type(), v.Width())
+			if fixed, ok := basis[v.ID()]; ok {
+				if fixed.ID() != arg.ID() || fixed.Type() != arg.Type() {
+					continue next
+				}
+				continue
+			}
+			if !c.assign(local, v, arg) {
+				continue next
+			}
+		}
+		keep = append(keep, p)
 	}
 	return keep
 }
@@ -719,26 +687,12 @@ func (c *Compiler) mark(ctx *Context, fn *types.Function, ip int) (entry, bool) 
 	return entry{ip: ip, label: label, stack: len(ctx.Stack), args: entryArgs}, true
 }
 
-func (c *Compiler) pins(pins map[int32]asm.PReg, stack []asm.VReg) bool {
-	added := make([]asm.VReg, 0, len(stack))
-	for i, v := range stack {
-		if _, ok := pins[v.ID()]; !ok {
-			added = append(added, v)
-		}
-		if !c.pin(pins, v, c.arch.ABI().Arg(i, v.Type(), v.Width())) {
-			for _, v := range added {
-				delete(pins, v.ID())
-			}
-			return false
-		}
-	}
-	return true
-}
-
-func (c *Compiler) pin(pins map[int32]asm.PReg, v asm.VReg, preg asm.PReg) bool {
-	existing, ok := pins[v.ID()]
+// assign records v's binding to preg in m. Returns false when v is already
+// bound to a different preg slot.
+func (*Compiler) assign(m map[int32]asm.PReg, v asm.VReg, preg asm.PReg) bool {
+	existing, ok := m[v.ID()]
 	if !ok {
-		pins[v.ID()] = preg
+		m[v.ID()] = preg
 		return true
 	}
 	return existing.ID() == preg.ID() && existing.Type() == preg.Type()

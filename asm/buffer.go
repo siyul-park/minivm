@@ -72,42 +72,38 @@ func (b *Buffer) writeAt(ptr unsafe.Pointer, code []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Current region: use unseal/seal to keep b.sealed consistent.
-	if len(b.mem) > 0 {
-		base := uintptr(unsafe.Pointer(&b.mem[0]))
-		off := uintptr(ptr) - base
-		if off <= uintptr(len(b.mem)) && off+uintptr(len(code)) <= uintptr(len(b.mem)) {
-			if err := b.unseal(); err != nil {
-				return 0, err
-			}
-			copy(b.mem[off:off+uintptr(len(code))], code)
-			if err := b.seal(); err != nil {
-				return 0, err
-			}
-			return len(code), nil
-		}
+	mem, off, current, ok := b.locate(ptr, len(code))
+	if !ok {
+		return 0, fmt.Errorf("%w: writeAt out of range", ErrInvalidArgs)
 	}
 
-	// Archived regions: temporarily make writable, patch, re-seal.
-	for _, r := range b.old {
-		if len(r) == 0 {
-			continue
-		}
-		base := uintptr(unsafe.Pointer(&r[0]))
-		off := uintptr(ptr) - base
-		if off > uintptr(len(r)) || off+uintptr(len(code)) > uintptr(len(r)) {
-			continue
-		}
-		if err := r.writable(); err != nil {
-			return 0, err
-		}
-		copy(r[off:off+uintptr(len(code))], code)
-		if err := r.executable(); err != nil {
-			return 0, err
-		}
-		return len(code), nil
+	open, close := mem.writable, mem.executable
+	if current {
+		open, close = b.unseal, b.seal
 	}
-	return 0, fmt.Errorf("%w: writeAt out of range", ErrInvalidArgs)
+	if err := open(); err != nil {
+		return 0, err
+	}
+	copy(mem[off:off+len(code)], code)
+	if err := close(); err != nil {
+		return 0, err
+	}
+	return len(code), nil
+}
+
+// locate finds the region containing ptr's n-byte range. current is true
+// when the hit is the active mapping (callers must round-trip seal/unseal
+// to keep b.sealed consistent).
+func (b *Buffer) locate(ptr unsafe.Pointer, n int) (memory, int, bool, bool) {
+	if off, ok := b.mem.within(ptr, n); ok {
+		return b.mem, off, true, true
+	}
+	for _, r := range b.old {
+		if off, ok := r.within(ptr, n); ok {
+			return r, off, false, true
+		}
+	}
+	return nil, 0, false, false
 }
 
 func (b *Buffer) unseal() error {

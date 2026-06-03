@@ -125,6 +125,20 @@ func (m memory) ptr() unsafe.Pointer {
 	return unsafe.Pointer(&m[0])
 }
 
+// within reports whether ptr's n-byte range lies inside m. The returned
+// offset is the byte index of ptr from the start of m.
+func (m memory) within(ptr unsafe.Pointer, n int) (int, bool) {
+	if len(m) == 0 {
+		return 0, false
+	}
+	base := uintptr(unsafe.Pointer(&m[0]))
+	off := uintptr(ptr) - base
+	if off > uintptr(len(m)) || off+uintptr(n) > uintptr(len(m)) {
+		return 0, false
+	}
+	return int(off), true
+}
+
 func (m memory) free() error {
 	if len(m) == 0 {
 		return nil

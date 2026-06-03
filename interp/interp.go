@@ -232,20 +232,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	i.code[0] = c.Compile(prog.Code, nil)
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
-			var locals []types.Kind
-			if fn.Typ != nil {
-				if size := len(fn.Typ.Params) + len(fn.Locals); size != 0 {
-					locals = make([]types.Kind, 0, size)
-					for _, typ := range fn.Typ.Params {
-						locals = append(locals, typ.Kind())
-					}
-					for _, typ := range fn.Locals {
-						locals = append(locals, typ.Kind())
-					}
-				}
-			}
 			i.instrs[j+1] = fn.Code
-			i.code[j+1] = c.Compile(fn.Code, locals)
+			i.code[j+1] = c.Compile(fn.Code, fn.LocalKinds())
 		}
 	}
 
@@ -530,6 +518,30 @@ func (i *Interpreter) jit(addr int) error {
 	if jit.Active() == nil {
 		return nil
 	}
+	if err := i.ensure(); err != nil {
+		return err
+	}
+	i.prof.JITAttempt()
+
+	fn, ok := i.function(addr)
+	if !ok {
+		return nil
+	}
+	mod, err := i.compiler.Compile(fn, addr, i.snapshot(addr, fn))
+	if err != nil {
+		i.prof.JITError()
+		return err
+	}
+	if mod == nil {
+		return nil
+	}
+	i.install(mod, addr)
+	return nil
+}
+
+// ensure lazily constructs the JIT compiler and warms its slot
+// table. Any failure here is recorded as a JIT error and propagated.
+func (i *Interpreter) ensure() error {
 	if i.compiler == nil {
 		compiler, err := jit.New(jit.WithCutoff(i.cutoff))
 		if err != nil {
@@ -542,21 +554,13 @@ func (i *Interpreter) jit(addr int) error {
 		i.prof.JITError()
 		return err
 	}
-	i.prof.JITAttempt()
+	return nil
+}
 
-	fn, ok := i.function(addr)
-	if !ok {
-		return nil
-	}
-
-	mod, err := i.compiler.Compile(fn, addr, i.snapshot(addr, fn))
-	if err != nil {
-		i.prof.JITError()
-		return err
-	}
-	if mod == nil {
-		return nil
-	}
+// install accounts a successful Compile and rewires the dispatch table:
+// the whole-function Entry replaces the first opcode handler, every
+// emitted segment replaces its corresponding handler.
+func (i *Interpreter) install(mod *jit.Module, addr int) {
 	for _, n := range mod.Bytes {
 		i.prof.JITEmit(n)
 	}
@@ -579,7 +583,6 @@ func (i *Interpreter) jit(addr int) error {
 		}
 		i.code[addr][ip] = i.segment(callable, mod.Stacks[ip])
 	}
-	return nil
 }
 
 // snapshot bundles the consumer-side tables the JIT inspects at compile
@@ -587,17 +590,8 @@ func (i *Interpreter) jit(addr int) error {
 // LOCAL_* lowering can check kinds by raw index.
 func (i *Interpreter) snapshot(addr int, fn *types.Function) jit.Snapshot {
 	var locals []types.Kind
-	if fn != nil && fn.Typ != nil {
-		size := len(fn.Typ.Params) + len(fn.Locals)
-		if size > 0 {
-			locals = make([]types.Kind, 0, size)
-			for _, t := range fn.Typ.Params {
-				locals = append(locals, t.Kind())
-			}
-			for _, t := range fn.Locals {
-				locals = append(locals, t.Kind())
-			}
-		}
+	if fn != nil {
+		locals = fn.LocalKinds()
 	}
 	// Collect any function refs present in constants so the CALL lowerer can
 	// look up param/return types at compile time.

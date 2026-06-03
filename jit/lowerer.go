@@ -26,6 +26,7 @@ type Lowerer interface {
 // A Lowerer must return false from Lower without mutating any field in
 // Context when an opcode is unsupported.
 type Context struct {
+	// Assembler emits the lowered instructions and owns vreg allocation.
 	Assembler *asm.Assembler
 
 	// Slots is the indirection table for direct CALL lowering. May be nil.
@@ -37,6 +38,18 @@ type Context struct {
 	// Snap is the consumer-side state available to lowerers at compile
 	// time.
 	Snap Snapshot
+
+	// Scratch holds the physical registers assigned to each segment-wide
+	// scratch slot.
+	Scratch []asm.PReg
+
+	// Entry is the native entry label for a whole-function compilation.
+	Entry asm.Label
+
+	// Labels maps basic-block-start IPs to assembler labels. Non-nil only
+	// during multi-block whole-function compilation. When set, branch
+	// lowerers emit intra-function branches instead of interpreter exits.
+	Labels map[int]asm.Label
 
 	// Stack tracks values currently visible on the VM stack within this
 	// segment. Top of the slice is top of stack.
@@ -53,10 +66,20 @@ type Context struct {
 	// copies it into the Code signature after lowering completes.
 	Returns []asm.PReg
 
-	// Labels maps basic-block-start IPs to assembler labels.
-	// Non-nil only during blocks() compilation. When set, branch
-	// lowerers emit intra-function branches instead of interpreter exits.
-	Labels map[int]asm.Label
+	// IP is the current decode position. The driver advances IP by the
+	// opcode width after Lower returns true; Lowerers must leave IP alone
+	// except on the Stop path, where they may set IP to the resume point.
+	IP int
+
+	// Start is the segment's first opcode IP.
+	Start int
+
+	// End is the IP one past the last opcode the segment is allowed to
+	// lower. Terminator opcodes may emit code that exits before End.
+	End int
+
+	// Self is the heap address of the function currently being compiled.
+	Self int
 
 	// Target is a Lowerer-private carry slot for one int of state that
 	// must survive between two adjacent opcodes (e.g. CONST_GET preloading
@@ -76,28 +99,6 @@ type Context struct {
 	// Closed tells the compiler that the lowerer already emitted every
 	// native exit path for the segment.
 	Closed bool
-
-	// IP is the current decode position. Lowerers advance IP exactly by
-	// the lowered opcode's width on success and leave it untouched on
-	// reject.
-	IP int
-
-	// Start is the segment's first opcode IP.
-	Start int
-
-	// Self is the heap address of the function currently being compiled.
-	Self int
-
-	// End is the IP one past the last opcode the segment is allowed to
-	// lower. Terminator opcodes may emit code that exits before End.
-	End int
-
-	// Entry is the native entry label for a whole-function compilation.
-	Entry asm.Label
-
-	// Scratch holds the physical registers assigned to each segment-wide
-	// scratch slot.
-	Scratch []asm.PReg
 
 	// Whole is true while compiling a whole-function native entry.
 	// Partial segments leave it false and must reject RETURN so the
