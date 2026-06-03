@@ -989,6 +989,56 @@ func TestLowerer_Compile(t *testing.T) {
 		require.Equal(t, types.BoxI32(42), jit.Ret(got[0]))
 	})
 
+	t.Run("blocks mode: backward br_if loop compiles to entry", func(t *testing.T) {
+		// Countdown loop: param[0] starts at 3, decrements to 0, returns 0.
+		// whole() cannot compile this (BR_IF sets Closed=true), so blocks() must
+		// succeed and produce a non-nil Entry.
+		//
+		// IP 0: LOCAL_GET 0   (2 bytes)
+		// IP 2: I32_CONST 1   (5 bytes)
+		// IP 7: I32_SUB       (1 byte)
+		// IP 8: LOCAL_TEE 0   (2 bytes)
+		// IP 10: BR_IF -13    (3 bytes)  takenTarget = 10+3-13 = 0
+		// IP 13: LOCAL_GET 0  (2 bytes)
+		// IP 15: RETURN        (1 byte)
+		fn := &types.Function{
+			Code: instr.Marshal([]instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.LOCAL_TEE, 0),
+				instr.New(instr.BR_IF, uint64(uint16(-13+1<<16))),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.RETURN),
+			}),
+			Typ: &types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			},
+		}
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		snap := jit.Snapshot{Locals: []types.Kind{types.KindI32}}
+		mod, err := c.Compile(fn, 1, snap)
+		require.NoError(t, err)
+		require.NotNil(t, mod.Entry, "blocks() should produce a whole-function Entry for BR_IF loops")
+
+		// param[0] = 3: after 3 decrements, local[0] = 0 → returns I32(0).
+		vmStack := [8]types.Boxed{types.BoxI32(3)}
+		scratch := make([]uint64, jit.ScratchCount)
+		scratch[jit.ScratchStack] = uint64(uintptr(unsafe.Pointer(&vmStack[0])))
+		scratch[jit.ScratchGlobals] = scratch[jit.ScratchStack]
+		scratch[jit.ScratchBP] = 0
+
+		got, err := mod.Entry.Call(nil, scratch)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(0), jit.Ret(got[0]))
+	})
+
 	t.Run("ref_null pushes null reference", func(t *testing.T) {
 		code := []byte{byte(instr.REF_NULL)}
 		fn := &types.Function{Code: code}

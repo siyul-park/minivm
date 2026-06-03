@@ -95,6 +95,11 @@ type Context struct {
 	// lowerer sets this in constGet and reads it in call. Lower resets
 	// it to -1 before each dispatch so stale values never cross opcodes.
 	Target int
+
+	// Labels maps basic-block-start IPs to assembler labels.
+	// Non-nil only during blocks() compilation. When set, branch
+	// lowerers emit intra-function branches instead of interpreter exits.
+	Labels map[int]asm.Label
 }
 
 // Snapshot is the consumer-side state the JIT may inspect at compile time

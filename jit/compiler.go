@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -181,6 +183,27 @@ func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module
 		return mod, nil
 	}
 
+	// Attempt multi-block Entry: handles functions with BR_IF / BR that
+	// whole() cannot compile (it requires !Closed after the last opcode).
+	if seg, ok, err := c.blocks(fn, snap); err != nil {
+		return nil, err
+	} else if ok {
+		linked, err := asm.LinkAll(c.buffer, c.arch, []*asm.Code{seg.code}, nil)
+		if err != nil {
+			return nil, err
+		}
+		mod.Entry = linked[0].Callable
+		if c.slots != nil {
+			if err := c.slots.Set(addr, mod.Entry); err != nil {
+				return nil, fmt.Errorf("set entry slot: %w", err)
+			}
+		}
+		mod.Signature = seg.code.Signature
+		mod.Bytes = append(mod.Bytes, len(seg.code.Bytes))
+		mod.Links = 1
+		return mod, nil
+	}
+
 	segs, err := c.segments(fn, snap, mod)
 	if err != nil {
 		return nil, err
@@ -249,6 +272,101 @@ func (c *Compiler) whole(fn *types.Function, snap Snapshot) (segment, bool, erro
 
 	if !ctx.Closed {
 		c.lowerer.Exit(ctx, ctx.IP)
+	}
+
+	sig := asm.Signature{Args: ctx.Args, Returns: ctx.Returns, Scratch: scratch}
+	code, err := a.Build(sig)
+	if err != nil {
+		return segment{}, false, err
+	}
+	return segment{
+		start: 0,
+		end:   len(fn.Code),
+		code:  code,
+	}, true, nil
+}
+
+// blocks attempts to lower the entire function as a sequence of basic blocks
+// connected by intra-function labels. Unlike whole(), it handles branch
+// instructions (BR_IF, BR) by emitting native branches to block-start labels
+// instead of interpreter exits. Succeeds only when every opcode in every block
+// lowers without rejection. Falls back gracefully when a branch target is not a
+// known block start (e.g. brTable), leaving segments() to handle those cases.
+func (c *Compiler) blocks(fn *types.Function, snap Snapshot) (segment, bool, error) {
+	scratch := c.arch.ABI().Scratch()
+	if len(scratch) < ScratchCount {
+		return segment{}, false, nil
+	}
+	scratch = scratch[:ScratchCount]
+
+	m := pass.NewManager()
+	if err := m.Run(fn); err != nil {
+		return segment{}, false, err
+	}
+	blks, err := analysis.NewBasicBlocksPass().Run(m)
+	if err != nil || len(blks) <= 1 {
+		return segment{}, false, nil
+	}
+
+	// Plan phase: dry-run with a counting assembler to validate that every
+	// opcode in every block lowers without rejection.
+	planA := asm.New(c.arch)
+	pctx := c.context(planA, fn, 0, snap, scratch)
+	pctx.Whole = true
+	pctx.Labels = make(map[int]asm.Label, len(blks))
+	for _, blk := range blks {
+		pctx.Labels[blk.Start] = planA.Label()
+	}
+	c.lowerer.Prologue(pctx, fn)
+	for _, blk := range blks {
+		planA.Bind(pctx.Labels[blk.Start])
+		pctx.IP = blk.Start
+		pctx.End = blk.End
+		pctx.Stop = false
+		pctx.Closed = false
+		pctx.Successor = -1
+		pctx.Stack = nil
+		res, _ := c.plan(pctx, nil)
+		if res.reject >= 0 {
+			return segment{}, false, nil
+		}
+	}
+	// Require that the stack depth at end of the last block matches the
+	// function's declared return count, exactly like whole() does.
+	returns := 0
+	if fn.Typ != nil {
+		returns = len(fn.Typ.Returns)
+	}
+	if len(pctx.Stack) != returns {
+		return segment{}, false, nil
+	}
+	if !c.fits(pctx) {
+		return segment{}, false, nil
+	}
+
+	// Emit phase: real assembler, same block traversal order.
+	a := asm.New(c.arch)
+	ctx := c.context(a, fn, 0, snap, scratch)
+	ctx.Whole = true
+	ctx.Labels = make(map[int]asm.Label, len(blks))
+	for _, blk := range blks {
+		ctx.Labels[blk.Start] = a.Label()
+	}
+	c.lowerer.Prologue(ctx, fn)
+	for _, blk := range blks {
+		a.Bind(ctx.Labels[blk.Start])
+		ctx.IP = blk.Start
+		ctx.End = blk.End
+		ctx.Stop = false
+		ctx.Closed = false
+		ctx.Successor = -1
+		ctx.Stack = nil
+		c.emit(ctx, fn, nil)
+		// Only emit an interpreter exit for terminal blocks (end of function
+		// body). Fallthrough blocks connect to the next label in native code.
+		if !ctx.Closed && ctx.IP >= len(fn.Code) {
+			c.lowerer.Exit(ctx, ctx.IP)
+		}
 	}
 
 	sig := asm.Signature{Args: ctx.Args, Returns: ctx.Returns, Scratch: scratch}

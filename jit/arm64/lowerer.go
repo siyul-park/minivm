@@ -966,6 +966,14 @@ func (l Lowerer) call(c *jit.Context) bool {
 	if !l.need(c, plan.params+1) {
 		return false
 	}
+	// Survivor check: if the stack has values beyond funcRef+params, those
+	// would need to survive the BLR but the register allocator has no
+	// caller-save spill logic. Reject so the caller falls back to a mode
+	// that handles cross-call liveness (e.g. segments() exits before the call
+	// and the interpreter re-enters afterwards).
+	if len(c.Stack) > plan.params+1 {
+		return false
+	}
 
 	// Write args to stack[callee_bp .. callee_bp+nParams-1].
 	// At this point X12 = caller_bp, so callee_bp = caller_bp + spOffset,
@@ -1129,20 +1137,37 @@ func (l Lowerer) refEq(c *jit.Context) bool {
 	return true
 }
 
-// br lowers an unconditional branch. No instructions are emitted; Exit writes
-// the target IP to scratch.
+// br lowers an unconditional branch. In blocks mode it emits a direct
+// BLabel to the target; otherwise no instructions are emitted and Exit
+// writes the target IP to scratch.
 func (Lowerer) br(c *jit.Context) bool {
 	offset := int(int16(binary.LittleEndian.Uint16(c.Code[c.IP+1 : c.IP+3])))
-	c.IP += 3 + offset
+	target := c.IP + 3 + offset
+	if c.Labels != nil {
+		lbl, ok := c.Labels[target]
+		if !ok {
+			return false
+		}
+		if len(c.Stack) > 0 {
+			return false
+		}
+		c.Assembler.Emit(arm64.BLabel(lbl))
+		c.IP = target
+		c.Stop = true
+		c.Closed = true
+		return true
+	}
+	c.IP = target
 	c.Successor = c.IP
 	c.Stop = true
 	return true
 }
 
-// brIf lowers a conditional branch. It pops the boxed i32 condition,
-// emits a CBNZ that splits into two inline exit paths (false-target and
-// taken-target), each writing the appropriate nextIP to scratch and
-// RET-ing.
+// brIf lowers a conditional branch. In blocks mode (c.Labels != nil) it
+// emits a single CBNZ to the taken label and falls through to the false
+// target, closing the block without interpreter exits. In segment mode
+// it emits two inline exit paths (false-target and taken-target), each
+// writing the appropriate nextIP to scratch and RET-ing.
 func (l Lowerer) brIf(c *jit.Context) bool {
 	if !l.need(c, 1) {
 		return false
@@ -1158,7 +1183,27 @@ func (l Lowerer) brIf(c *jit.Context) bool {
 	condI32 := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.Assembler.Emit(arm64.ANDI(condI32, cond, maskI32))
 
-	// Pin remaining stack and inputs to ABI registers — same for both paths.
+	if c.Labels != nil {
+		// Blocks mode: emit intra-function conditional branch. Both targets
+		// must be known block starts; fall back to segment mode if not.
+		// Stack must be empty after popping the condition — blocks() resets
+		// ctx.Stack=nil at each block entry, so values cannot cross boundaries.
+		takenLbl, ok := c.Labels[takenTarget]
+		if !ok {
+			return false
+		}
+		if len(c.Stack) > 0 {
+			return false
+		}
+		c.Assembler.Emit(arm64.CBNZLabel(condI32, takenLbl))
+		// Fall through to falseTarget — no interpreter exit needed.
+		c.IP = falseTarget
+		c.Stop = true
+		c.Closed = true
+		return true
+	}
+
+	// Segment mode: pin remaining stack to ABI registers for both paths.
 	l.bind(c)
 	c.Returns = c.Returns[:0]
 	for i, v := range c.Stack {
@@ -1195,7 +1240,13 @@ func (l Lowerer) brIf(c *jit.Context) bool {
 // each jump to an inline exit path. The default exit falls through below the
 // scan. Every exit pins the remaining shadow stack to ABI returns, loads the
 // compile-time target IP into ScratchNext, and RETs.
+//
+// In blocks mode (c.Labels != nil) label-based dispatch is not yet
+// implemented, so brTable rejects and blocks() falls back to segments().
 func (l Lowerer) brTable(c *jit.Context) bool {
+	if c.Labels != nil {
+		return false
+	}
 	if !l.need(c, 1) {
 		return false
 	}
