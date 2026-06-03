@@ -1064,6 +1064,127 @@ func TestLowerer_Compile(t *testing.T) {
 		require.Equal(t, types.BoxI32(42), jit.Ret(got[0]))
 	})
 
+	t.Run("call: direct-BL preserves survivor across second call", func(t *testing.T) {
+		calleeFn := &types.Function{
+			Code: []byte{
+				byte(instr.LOCAL_GET), 0,
+				byte(instr.I32_CONST), 2, 0, 0, 0,
+				byte(instr.I32_MUL),
+				byte(instr.RETURN),
+			},
+			Typ: &types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			},
+		}
+		const calleeAddr = 7
+
+		callerFn := &types.Function{
+			Code: []byte{
+				byte(instr.LOCAL_GET), 0,
+				byte(instr.CONST_GET), 0, 0,
+				byte(instr.CALL),
+				byte(instr.LOCAL_GET), 0,
+				byte(instr.CONST_GET), 0, 0,
+				byte(instr.CALL),
+				byte(instr.I32_ADD),
+				byte(instr.RETURN),
+			},
+			Typ: &types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			},
+		}
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+		_, err = c.Slots()
+		require.NoError(t, err)
+
+		calleeMod, err := c.Compile(calleeFn, calleeAddr, jit.Snapshot{Locals: []types.Kind{types.KindI32}})
+		require.NoError(t, err)
+		require.NotNil(t, calleeMod.Entry)
+
+		callerMod, err := c.Compile(callerFn, 2, jit.Snapshot{
+			Constants: []types.Boxed{types.BoxRef(calleeAddr)},
+			Locals:    []types.Kind{types.KindI32},
+			Functions: map[int]*types.Function{calleeAddr: calleeFn},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, callerMod.Entry)
+
+		var vmStack [8]types.Boxed
+		vmStack[0] = types.BoxI32(21)
+		scratch := make([]uint64, jit.ScratchCount)
+		scratch[jit.ScratchStack] = uint64(uintptr(unsafe.Pointer(&vmStack[0])))
+		scratch[jit.ScratchGlobals] = scratch[jit.ScratchStack]
+		scratch[jit.ScratchBP] = 0
+
+		got, err := callerMod.Entry.Call(nil, scratch)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(84), jit.Ret(got[0]))
+	})
+
+	t.Run("call: self-recursive fibonacci compiles to Entry", func(t *testing.T) {
+		code := instr.Marshal([]instr.Instruction{
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_LT_S),
+			instr.New(instr.BR_IF, 26),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.RETURN),
+		})
+		fn := &types.Function{
+			Code: code,
+			Typ: &types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			},
+		}
+		const selfAddr = 11
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+		_, err = c.Slots()
+		require.NoError(t, err)
+
+		mod, err := c.Compile(fn, selfAddr, jit.Snapshot{
+			Constants: []types.Boxed{types.BoxRef(selfAddr)},
+			Locals:    []types.Kind{types.KindI32},
+			Functions: map[int]*types.Function{selfAddr: fn},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, mod.Entry)
+		require.Empty(t, mod.Segments)
+
+		var vmStack [64]types.Boxed
+		vmStack[0] = types.BoxI32(7)
+		scratch := make([]uint64, jit.ScratchCount)
+		scratch[jit.ScratchStack] = uint64(uintptr(unsafe.Pointer(&vmStack[0])))
+		scratch[jit.ScratchGlobals] = scratch[jit.ScratchStack]
+		scratch[jit.ScratchBP] = 0
+
+		got, err := mod.Entry.Call(nil, scratch)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(13), jit.Ret(got[0]))
+	})
+
 	t.Run("entry: two-param add function compiles to Entry", func(t *testing.T) {
 		// LOCAL_GET 0; LOCAL_GET 1; I32_ADD; RETURN  — (i32, i32) → i32.
 		// Params live at stack[bp+0] and stack[bp+1] via scratch slots.

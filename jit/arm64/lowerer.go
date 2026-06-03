@@ -944,7 +944,8 @@ func (Lowerer) ret(c *jit.Context) bool {
 //  2. ADDI X12, X12, spOffset   (advance the native base pointer).
 //  3. LDI+LDR slot_addr → entry ; BLR entry.
 //  4. SUBI X12, X12, spOffset   (restore the native base pointer).
-//  5. Pop funcRef + N args; push M result VRegs from ABI return regs.
+//  5. Reload stack values that survived the call.
+//  6. Pop funcRef + N args; push M result VRegs from ABI return regs.
 func (l Lowerer) call(c *jit.Context) bool {
 	plan, ok := l.target(c, c.Target, len(c.Stack))
 	if !ok {
@@ -953,13 +954,14 @@ func (l Lowerer) call(c *jit.Context) bool {
 	if !l.need(c, plan.params+1) {
 		return false
 	}
-	// Survivor check: if the stack has values beyond funcRef+params, those
-	// would need to survive the BLR but the register allocator has no
-	// caller-save spill logic. Reject so the caller falls back to a mode
-	// that handles cross-call liveness (e.g. segments() exits before the call
-	// and the interpreter re-enters afterwards).
-	if len(c.Stack) > plan.params+1 {
+
+	survivors := len(c.Stack) - plan.params - 1
+	if !c.Whole && survivors > 0 {
 		return false
+	}
+	for i := 0; i < survivors; i++ {
+		addr, _ := l.localAddr(c, len(c.Snap.Locals)+i)
+		c.Assembler.Emit(arm64.STR(c.Stack[i], addr, 0))
 	}
 
 	// Write args to stack[callee_bp .. callee_bp+nParams-1].
@@ -1017,8 +1019,16 @@ func (l Lowerer) call(c *jit.Context) bool {
 		retVregs[i] = v
 	}
 
+	survVregs := make([]asm.VReg, survivors)
+	for i := range survVregs {
+		addr, _ := l.localAddr(c, len(c.Snap.Locals)+i)
+		v := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+		c.Assembler.Emit(arm64.LDR(v, addr, 0))
+		survVregs[i] = v
+	}
+
 	// Update the shadow stack: pop funcRef + N args, push M results.
-	c.Stack = c.Stack[:len(c.Stack)-plan.params-1]
+	c.Stack = survVregs
 	c.Stack = append(c.Stack, retVregs...)
 
 	c.IP += instr.Instruction(c.Code[c.IP:]).Width()

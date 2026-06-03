@@ -608,7 +608,7 @@ func (i *Interpreter) snapshot(addr int, fn *types.Function) jit.Snapshot {
 			continue
 		}
 		a := v.Ref()
-		if !i.jitted[a] {
+		if !i.jitted[a] && a != addr {
 			continue
 		}
 		fn, ok := i.function(a)

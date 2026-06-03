@@ -3475,6 +3475,57 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.Equal(t, types.I32(42), value)
 	})
 
+	t.Run("compiles recursive fibonacci as entry", func(t *testing.T) {
+		if jit.Active() == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		fib := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_LT_S),
+			instr.New(instr.BR_IF, 26),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.RETURN),
+		).Build()
+		p := prof.New()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 20),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fib),
+		), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+
+		addr := i.constants[0].Ref()
+		require.NoError(t, i.jit(addr))
+		require.True(t, i.jitted[addr])
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Emits)
+		require.Equal(t, uint64(1), jit.Links)
+
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(6765), value)
+	})
+
 	t.Run("skips ref globals", func(t *testing.T) {
 		if jit.Active() == nil {
 			t.Skip("jit is not available on this architecture")

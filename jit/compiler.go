@@ -302,6 +302,7 @@ func (c *Compiler) blocks(fn *types.Function, snap Snapshot) (segment, bool, err
 	for _, blk := range blks {
 		pctx.Labels[blk.Start] = planA.Label()
 	}
+	returns := entryReturns(fn)
 	c.lowerer.Prologue(pctx, fn)
 	for _, blk := range blks {
 		planA.Bind(pctx.Labels[blk.Start])
@@ -315,10 +316,12 @@ func (c *Compiler) blocks(fn *types.Function, snap Snapshot) (segment, bool, err
 		if res.reject >= 0 {
 			return segment{}, false, nil
 		}
+		if pctx.Stop && !pctx.Closed && !c.validEntry(pctx, returns) {
+			return segment{}, false, nil
+		}
 	}
 	// Require that the stack depth at end of the last block matches the
 	// function's declared return count, exactly like whole() does.
-	returns := entryReturns(fn)
 	if !c.validEntry(pctx, returns) {
 		return segment{}, false, nil
 	}
@@ -347,9 +350,12 @@ func (c *Compiler) blocks(fn *types.Function, snap Snapshot) (segment, bool, err
 			// Bail rather than installing malformed native code.
 			return segment{}, false, nil
 		}
-		// Only emit an interpreter exit for terminal blocks (end of function
-		// body). Fallthrough blocks connect to the next label in native code.
-		if !ctx.Closed && ctx.IP >= len(fn.Code) {
+		// RETURN terminates the native entry from any block. Fallthrough
+		// blocks connect to the next label in native code.
+		if !ctx.Closed && ctx.Stop {
+			if !c.validEntry(ctx, returns) {
+				return segment{}, false, nil
+			}
 			c.lowerer.Exit(ctx, ctx.IP)
 		}
 	}
