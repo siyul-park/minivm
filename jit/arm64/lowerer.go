@@ -49,7 +49,7 @@ func (Lowerer) Arch() asm.Arch { return theArch }
 // Prologue binds segment live-ins to ABI args and emits no-op moves so the
 // allocator treats them as live from entry.
 func (l Lowerer) Prologue(c *jit.Context, _ *types.Function) {
-	l.bind(c)
+	l.params(c)
 	for _, v := range c.Inputs {
 		c.Assembler.Emit(arm64.MOV(v, v))
 	}
@@ -258,8 +258,8 @@ func (l Lowerer) Lower(c *jit.Context, op instr.Opcode) bool {
 func (l Lowerer) Exit(c *jit.Context, nextIP int) {
 	rNext := c.Scratch[jit.ScratchNext]
 
-	l.bind(c)
-	l.pinReturns(c)
+	l.params(c)
+	l.returns(c)
 
 	vNext := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	_ = c.Assembler.Pin(vNext, rNext)
@@ -1163,8 +1163,8 @@ func (l Lowerer) brIf(c *jit.Context) bool {
 	}
 
 	// Segment mode: pin remaining stack to ABI registers for both paths.
-	l.bind(c)
-	l.pinReturns(c)
+	l.params(c)
+	l.returns(c)
 
 	rNext := c.Scratch[jit.ScratchNext]
 	takenLbl := c.Assembler.Label()
@@ -1225,8 +1225,8 @@ func (l Lowerer) brTable(c *jit.Context) bool {
 
 	// Pin remaining shadow stack and inputs to ABI registers once — all exit
 	// paths share the same live-value shape.
-	l.bind(c)
-	l.pinReturns(c)
+	l.params(c)
+	l.returns(c)
 
 	rNext := c.Scratch[jit.ScratchNext]
 
@@ -1476,7 +1476,7 @@ func (Lowerer) global(c *jit.Context) (int, bool) {
 	return idx, true
 }
 
-func (Lowerer) bind(c *jit.Context) {
+func (Lowerer) params(c *jit.Context) {
 	c.Args = c.Args[:0]
 	for i, v := range c.Inputs {
 		arg := theArch.ABI().Arg(i, v.Type(), v.Width())
@@ -1485,7 +1485,7 @@ func (Lowerer) bind(c *jit.Context) {
 	}
 }
 
-func (Lowerer) pinReturns(c *jit.Context) {
+func (Lowerer) returns(c *jit.Context) {
 	c.Returns = c.Returns[:0]
 	for i, v := range c.Stack {
 		ret := theArch.ABI().Return(i, v.Type(), v.Width())
