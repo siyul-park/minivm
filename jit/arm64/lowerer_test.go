@@ -772,6 +772,101 @@ func TestLowerer_Compile(t *testing.T) {
 		require.Equal(t, types.BoxI32(1), jit.Ret(got[0]))
 	})
 
+	// NaN comparison tests: AArch64 FCMP with a NaN operand sets NZCV=0011
+	// (N=0,Z=0,C=1,V=1). All six Wasm ordered-comparison conditions correctly
+	// produce 0 (false) for NaN inputs except F32_NE which produces 1 (true).
+	t.Run("f32_lt with NaN returns 0", func(t *testing.T) {
+		// F32_CONST NaN(0x7FC00000); F32_CONST 1.0; F32_LT → 0
+		code := []byte{
+			byte(instr.F32_CONST), 0x00, 0x00, 0xC0, 0x7F, // NaN
+			byte(instr.F32_CONST), 0x00, 0x00, 0x80, 0x3F, // 1.0
+			byte(instr.F32_LT),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(0), jit.Ret(got[0]))
+	})
+
+	t.Run("f32_gt with NaN returns 0", func(t *testing.T) {
+		// F32_CONST NaN; F32_CONST 1.0; F32_GT → 0
+		code := []byte{
+			byte(instr.F32_CONST), 0x00, 0x00, 0xC0, 0x7F, // NaN
+			byte(instr.F32_CONST), 0x00, 0x00, 0x80, 0x3F, // 1.0
+			byte(instr.F32_GT),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(0), jit.Ret(got[0]))
+	})
+
+	t.Run("f32_ge with NaN returns 0", func(t *testing.T) {
+		// F32_CONST NaN; F32_CONST 1.0; F32_GE → 0
+		code := []byte{
+			byte(instr.F32_CONST), 0x00, 0x00, 0xC0, 0x7F, // NaN
+			byte(instr.F32_CONST), 0x00, 0x00, 0x80, 0x3F, // 1.0
+			byte(instr.F32_GE),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(0), jit.Ret(got[0]))
+	})
+
+	t.Run("f32_ne with NaN returns 1", func(t *testing.T) {
+		// F32_CONST NaN; F32_CONST 1.0; F32_NE → 1
+		code := []byte{
+			byte(instr.F32_CONST), 0x00, 0x00, 0xC0, 0x7F, // NaN
+			byte(instr.F32_CONST), 0x00, 0x00, 0x80, 0x3F, // 1.0
+			byte(instr.F32_NE),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(1), jit.Ret(got[0]))
+	})
+
 	t.Run("i32_to_f64_s converts signed i32 to f64", func(t *testing.T) {
 		// I32_CONST 42; I32_TO_F64_S
 		code := []byte{

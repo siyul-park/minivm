@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	registryMu sync.Mutex
+	registryMu sync.RWMutex
 	registry   = make(map[string]Lowerer)
 )
 
@@ -21,8 +21,8 @@ func Register(arch string, l Lowerer) {
 
 // Lookup returns the Lowerer registered for arch, or nil if none.
 func Lookup(arch string) Lowerer {
-	registryMu.Lock()
-	defer registryMu.Unlock()
+	registryMu.RLock()
+	defer registryMu.RUnlock()
 	return registry[arch]
 }
 

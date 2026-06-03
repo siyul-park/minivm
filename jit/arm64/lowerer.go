@@ -387,6 +387,10 @@ func (Lowerer) globalGet(c *jit.Context) bool {
 		return false
 	}
 
+	// LDR unsigned-offset encodes at most 12 bits (0..4095 slots × 8 bytes).
+	if idx > 4095 {
+		return false
+	}
 	vGlobal := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	if err := c.Assembler.Pin(vGlobal, c.Scratch[jit.ScratchGlobals]); err != nil {
 		return false
@@ -412,6 +416,10 @@ func (l Lowerer) globalSet(c *jit.Context) bool {
 		return false
 	}
 	if !l.need(c, 1) {
+		return false
+	}
+	// STR unsigned-offset encodes at most 12 bits (0..4095 slots × 8 bytes).
+	if idx > 4095 {
 		return false
 	}
 

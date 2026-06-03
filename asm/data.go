@@ -14,6 +14,7 @@ import (
 // serializes on an internal lock.
 type Data struct {
 	mu     sync.Mutex
+	old    []memory // retired regions kept alive; compiled code holds raw pointers into them
 	mem    memory
 	offset int
 }
@@ -58,10 +59,16 @@ func (d *Data) Load(slot unsafe.Pointer) unsafe.Pointer {
 	return atomic.LoadPointer((*unsafe.Pointer)(slot))
 }
 
-// Free releases the underlying mmap region.
+// Free releases all underlying mmap regions.
 func (d *Data) Free() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	for _, r := range d.old {
+		if err := r.free(); err != nil {
+			return err
+		}
+	}
+	d.old = nil
 	return d.mem.free()
 }
 
@@ -74,11 +81,10 @@ func (d *Data) grow(need int) error {
 	if err != nil {
 		return err
 	}
-	copy(mem, d.mem[:d.offset])
-	if err := d.mem.free(); err != nil {
-		_ = mem.free()
-		return err
-	}
+	// Retire current region without freeing: Alloc pointers baked into
+	// compiled native code still reference addresses inside it.
+	d.old = append(d.old, d.mem)
 	d.mem = mem
+	d.offset = 0
 	return nil
 }

@@ -13,6 +13,7 @@ import (
 // internal lock and remap pages to RW for the duration of the write.
 type Buffer struct {
 	mu     sync.Mutex
+	old    []memory // sealed regions kept alive; live Callable values hold pointers into them
 	mem    memory
 	offset int
 	sealed bool
@@ -60,33 +61,62 @@ func (b *Buffer) Write(code []byte) (unsafe.Pointer, error) {
 	return ptr, nil
 }
 
-// Free releases the underlying mmap region.
+// Free releases all underlying mmap regions.
 func (b *Buffer) Free() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	for _, r := range b.old {
+		if err := r.free(); err != nil {
+			return err
+		}
+	}
+	b.old = nil
 	return b.mem.free()
 }
 
 // writeAt overwrites the bytes starting at ptr with code. ptr must point
-// inside this buffer's mmap region. Used by Link to patch relocations.
+// inside any region managed by this buffer (current or previously grown).
+// Used by Link to patch relocations.
 func (b *Buffer) writeAt(ptr unsafe.Pointer, code []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	base := uintptr(unsafe.Pointer(&b.mem[0]))
-	off := uintptr(ptr) - base
-	if off > uintptr(len(b.mem)) || off+uintptr(len(code)) > uintptr(len(b.mem)) {
-		return 0, fmt.Errorf("%w: writeAt out of range", ErrInvalidArgs)
+	// Current region: use unseal/seal to keep b.sealed consistent.
+	if len(b.mem) > 0 {
+		base := uintptr(unsafe.Pointer(&b.mem[0]))
+		off := uintptr(ptr) - base
+		if off <= uintptr(len(b.mem)) && off+uintptr(len(code)) <= uintptr(len(b.mem)) {
+			if err := b.unseal(); err != nil {
+				return 0, err
+			}
+			copy(b.mem[off:off+uintptr(len(code))], code)
+			if err := b.seal(); err != nil {
+				return 0, err
+			}
+			return len(code), nil
+		}
 	}
 
-	if err := b.unseal(); err != nil {
-		return 0, err
+	// Archived regions: temporarily make writable, patch, re-seal.
+	for _, r := range b.old {
+		if len(r) == 0 {
+			continue
+		}
+		base := uintptr(unsafe.Pointer(&r[0]))
+		off := uintptr(ptr) - base
+		if off > uintptr(len(r)) || off+uintptr(len(code)) > uintptr(len(r)) {
+			continue
+		}
+		if err := r.writable(); err != nil {
+			return 0, err
+		}
+		copy(r[off:off+uintptr(len(code))], code)
+		if err := r.executable(); err != nil {
+			return 0, err
+		}
+		return len(code), nil
 	}
-	copy(b.mem[off:off+uintptr(len(code))], code)
-	if err := b.seal(); err != nil {
-		return 0, err
-	}
-	return len(code), nil
+	return 0, fmt.Errorf("%w: writeAt out of range", ErrInvalidArgs)
 }
 
 func (b *Buffer) unseal() error {
@@ -121,12 +151,17 @@ func (b *Buffer) grow(need int) error {
 	if err != nil {
 		return fmt.Errorf("%w: grow to %d", ErrBufferFull, size)
 	}
-	copy(mem, b.mem[:b.offset])
 
-	if err := b.mem.free(); err != nil {
+	// Seal current region before archiving so it stays executable.
+	// b.sealed is false here (Write calls unseal before grow).
+	if err := b.mem.executable(); err != nil {
 		_ = mem.free()
 		return err
 	}
+	// Retire without freeing: live Callable values hold pointers into it.
+	b.old = append(b.old, b.mem)
 	b.mem = mem
+	b.offset = 0
+	// b.sealed stays false; new region is writable from allocMemory.
 	return nil
 }

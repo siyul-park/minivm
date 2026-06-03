@@ -361,7 +361,13 @@ func (c *Compiler) blocks(fn *types.Function, snap Snapshot) (segment, bool, err
 		ctx.Closed = false
 		ctx.Successor = -1
 		ctx.Stack = nil
-		c.emit(ctx, fn, nil)
+		res, _ := c.emit(ctx, fn, nil)
+		if res.reject >= 0 {
+			// A lowerer rejected during emit despite passing the plan phase
+			// (e.g. a Pin conflict after earlier blocks changed register state).
+			// Bail rather than installing malformed native code.
+			return segment{}, false, nil
+		}
 		// Only emit an interpreter exit for terminal blocks (end of function
 		// body). Fallthrough blocks connect to the next label in native code.
 		if !ctx.Closed && ctx.IP >= len(fn.Code) {
