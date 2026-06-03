@@ -81,6 +81,7 @@ Rules:
 - branch terminators return `true`; the basic-block/trace boundary ends compilation and skips `jitEpilogue`
 - non-branch segments use `jitEpilogue`
 - `jitPrologue` seeds next-IP scratch with `s.end`; `jitEpilogue` reloads final `s.end` and emits `RET`
+- `RETURN` lowers only for whole-function Entry compilation; partial segments reject it so threaded execution performs frame teardown
 
 ## Segment ABI
 

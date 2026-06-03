@@ -21,17 +21,40 @@ import (
 //     Callable args. Segment stack results return through Callable returns;
 //     scratch carries VM context and next interpreter IP.
 //   - Signature describes Entry's ABI; it is meaningless when Entry is nil.
-//   - ParamKinds and ReturnKinds let the consumer box/unbox stack values
+//   - Params and Returns let the consumer box/unbox stack values
 //     across the Entry boundary without re-deriving them from fn.Typ.
 type Module struct {
-	Addr        int
-	Entry       asm.Callable
-	Segments    map[int]asm.Callable
-	Stacks      map[int]int
-	Bytes       []int
-	Links       int
-	Skips       int
-	Signature   asm.Signature
-	ParamKinds  []types.Kind
-	ReturnKinds []types.Kind
+	Addr      int
+	Params    []types.Kind
+	Returns   []types.Kind
+	Entry     asm.Callable
+	Signature asm.Signature
+	Segments  map[int]asm.Callable
+	Stacks    map[int]int
+	Bytes     []int
+	Links     int
+	Skips     int
+}
+
+// NewModule returns a default Module that carries fn's boxing metadata.
+// The Segments map starts empty; the compiler fills it as segments link.
+func NewModule(fn *types.Function, addr int) *Module {
+	var params, returns []types.Kind
+	if fn != nil && fn.Typ != nil {
+		params = make([]types.Kind, len(fn.Typ.Params))
+		for i, t := range fn.Typ.Params {
+			params[i] = t.Kind()
+		}
+		returns = make([]types.Kind, len(fn.Typ.Returns))
+		for i, t := range fn.Typ.Returns {
+			returns[i] = t.Kind()
+		}
+	}
+	return &Module{
+		Addr:     addr,
+		Segments: map[int]asm.Callable{},
+		Stacks:   map[int]int{},
+		Params:   params,
+		Returns:  returns,
+	}
 }

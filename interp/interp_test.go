@@ -3385,6 +3385,94 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NotZero(t, jit.Links)
 	})
 
+	t.Run("does not install entry on root frame", func(t *testing.T) {
+		if jit.Active() == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 42),
+			instr.New(instr.RETURN),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.I32_CONST))
+
+		require.NoError(t, i.jit(0))
+		require.ErrorIs(t, i.Run(context.Background()), ErrFrameUnderflow)
+	})
+
+	t.Run("keeps return in threaded frame teardown for partial segments", func(t *testing.T) {
+		if jit.Active() == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		fn := types.NewFunctionBuilder(nil).WithReturns(types.TypeI32).Emit(
+			instr.New(instr.REF_NULL),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 42),
+			instr.New(instr.RETURN),
+		).Build()
+		returnIP := len(instr.Marshal([]instr.Instruction{
+			instr.New(instr.REF_NULL),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 42),
+		}))
+		p := prof.New()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fn),
+		), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		addr := i.constants[0].Ref()
+		p.Add(addr, returnIP, byte(instr.RETURN))
+
+		require.NoError(t, i.jit(addr))
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 1, i.FP())
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(42), value)
+		require.Zero(t, p.Snapshot().JIT.Emits)
+	})
+
+	t.Run("updates entry slot for direct call", func(t *testing.T) {
+		if jit.Active() == nil {
+			t.Skip("jit is not available on this architecture")
+		}
+		callee := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_MUL),
+			instr.New(instr.RETURN),
+		).Build()
+		caller := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.RETURN),
+		).Build()
+		p := prof.New()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 21),
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(callee, caller),
+		), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+
+		require.NoError(t, i.jit(i.constants[0].Ref()))
+		require.NoError(t, i.jit(i.constants[1].Ref()))
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 1, i.FP())
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(42), value)
+	})
+
 	t.Run("skips ref globals", func(t *testing.T) {
 		if jit.Active() == nil {
 			t.Skip("jit is not available on this architecture")

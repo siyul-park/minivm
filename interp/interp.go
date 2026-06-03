@@ -21,51 +21,61 @@ type Interpreter struct {
 	prof      *prof.Stats
 	hook      func(*Interpreter) error
 	marshaler Marshaler
-	compiler  *jit.Compiler
-	instrs    [][]byte
-	code      [][]func(*Interpreter)
-	frames    []frame
+
+	compiler *jit.Compiler
+
 	types     []types.Type
 	constants []types.Boxed
 	globals   []types.Boxed
-	interned  map[string]types.Ref
-	stack     []types.Boxed
-	roots     []types.Boxed
-	heap      []types.Value
-	free      []int
-	rc        []int
-	fr        *frame
-	fp        int
-	sp        int
-	tick      int
+	instrs    [][]byte
+	code      [][]func(*Interpreter)
+
+	frames   []frame
+	fr       *frame
+	stack    []types.Boxed
+	roots    []types.Boxed
+	heap     []types.Value
+	interned map[string]types.Ref
+	jitted   map[int]bool
+	free     []int
+	rc       []int
+
+	fp int
+	sp int
+
 	threshold int64
-	fuel      int64
 	cutoff    int
+	tick      int
+	fuel      int64
 }
 
 type frame struct {
-	code    []func(*Interpreter)
-	upvals  []types.Boxed
 	addr    int
-	ref     int
-	ip      int
-	bp      int
-	release bool
 	returns int
+
+	code   []func(*Interpreter)
+	upvals []types.Boxed
+
+	ref     int
+	release bool
+
+	ip int
+	bp int
 }
 
 type option struct {
 	profile   *prof.Stats
 	hook      func(*Interpreter) error
 	marshaler Marshaler
-	frame     int
-	globals   int
-	stack     int
-	heap      int
-	tick      int
 	threshold int
-	fuel      uint64
 	cutoff    int
+
+	frame   int
+	globals int
+	stack   int
+	heap    int
+	tick    int
+	fuel    uint64
 }
 
 var (
@@ -172,23 +182,21 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		prof:      p,
 		hook:      opt.hook,
 		marshaler: m,
-		instrs:    make([][]byte, len(prog.Constants)+1),
-		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
-		frames:    make([]frame, opt.frame),
+		threshold: threshold,
+		cutoff:    opt.cutoff,
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
 		globals:   make([]types.Boxed, 0, opt.globals),
-		interned:  make(map[string]types.Ref),
+		instrs:    make([][]byte, len(prog.Constants)+1),
+		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
+		frames:    make([]frame, opt.frame),
 		stack:     make([]types.Boxed, opt.stack),
 		heap:      make([]types.Value, 0, opt.heap),
+		interned:  make(map[string]types.Ref),
 		free:      make([]int, 0, opt.heap),
 		rc:        make([]int, 0, opt.heap),
-		fp:        0,
-		sp:        0,
 		tick:      opt.tick,
-		threshold: threshold,
 		fuel:      fuel,
-		cutoff:    opt.cutoff,
 	}
 
 	i.alloc(types.Null)
@@ -531,6 +539,10 @@ func (i *Interpreter) jit(addr int) error {
 		}
 		i.compiler = compiler
 	}
+	if _, err := i.compiler.Slots(); err != nil {
+		i.prof.JITError()
+		return err
+	}
 	i.prof.JITAttempt()
 
 	fn, ok := i.function(addr)
@@ -555,11 +567,18 @@ func (i *Interpreter) jit(addr int) error {
 	for range mod.Skips {
 		i.prof.JITSkip()
 	}
+	if mod.Entry != nil && addr > 0 && addr < len(i.code) && len(i.code[addr]) > 0 {
+		i.code[addr][0] = i.entry(mod.Entry)
+		if i.jitted == nil {
+			i.jitted = make(map[int]bool)
+		}
+		i.jitted[addr] = true
+	}
 	for ip, callable := range mod.Segments {
 		if ip < 0 || ip >= len(i.code[addr]) || callable == nil {
 			continue
 		}
-		i.code[addr][ip] = i.adaptSegment(callable, mod.Stacks[ip])
+		i.code[addr][ip] = i.segment(callable, mod.Stacks[ip])
 	}
 	return nil
 }
@@ -581,15 +600,36 @@ func (i *Interpreter) snapshot(addr int, fn *types.Function) jit.Snapshot {
 			}
 		}
 	}
+	// Collect any function refs present in constants so the CALL lowerer can
+	// look up param/return types at compile time.
+	var functions map[int]*types.Function
+	for _, v := range i.constants {
+		if v.Kind() != types.KindRef {
+			continue
+		}
+		a := v.Ref()
+		if !i.jitted[a] {
+			continue
+		}
+		fn, ok := i.function(a)
+		if !ok {
+			continue
+		}
+		if functions == nil {
+			functions = make(map[int]*types.Function)
+		}
+		functions[a] = fn
+	}
 	return jit.Snapshot{
 		Constants: i.constants,
 		Globals:   i.globals,
 		Locals:    locals,
-		Hot:       i.hotIPs(addr),
+		Functions: functions,
+		Hot:       i.hot(addr),
 	}
 }
 
-func (i *Interpreter) hotIPs(addr int) []int {
+func (i *Interpreter) hot(addr int) []int {
 	fn := i.prof.Func(addr)
 	if len(fn.IPs) == 0 {
 		return nil
@@ -614,10 +654,10 @@ func (i *Interpreter) function(addr int) (*types.Function, bool) {
 	return fn, ok
 }
 
-// adaptSegment wraps a native segment Callable in a threaded-style
-// closure. The closure passes consumed VM stack values as Callable args,
-// marshals VM context through scratch slots, and appends Callable returns
-// back to the interpreter stack.
+// segment wraps a native segment Callable in a threaded-style closure. The
+// closure passes consumed VM stack values as Callable args, marshals VM
+// context through scratch slots, and appends Callable returns back to the
+// interpreter stack.
 //
 // Scratch slot conventions use jit.Scratch*:
 //
@@ -625,7 +665,7 @@ func (i *Interpreter) function(addr int) (*types.Function, bool) {
 //	ScratchGlobals → &i.globals[0]
 //	ScratchBP      → i.fr.bp
 //	ScratchNext    → next IP (out)
-func (i *Interpreter) adaptSegment(callable asm.Callable, argc int) func(*Interpreter) {
+func (i *Interpreter) segment(callable asm.Callable, argc int) func(*Interpreter) {
 	in := make([]asm.Value, argc)
 	scratch := make([]uint64, jit.ScratchCount)
 	return func(i *Interpreter) {
@@ -654,6 +694,39 @@ func (i *Interpreter) adaptSegment(callable asm.Callable, argc int) func(*Interp
 			i.sp++
 		}
 		i.fr.ip = int(scratch[jit.ScratchNext])
+	}
+}
+
+// entry wraps a whole-function Entry Callable. Unlike segment, the CALL
+// handler has already pushed a frame and set i.fr before this closure runs.
+// The native Entry reads params from stack scratch slots, then this closure
+// performs the frame teardown that RETURN would normally do in the threaded
+// interpreter.
+func (i *Interpreter) entry(callable asm.Callable) func(*Interpreter) {
+	scratch := make([]uint64, jit.ScratchCount)
+	return func(i *Interpreter) {
+		scratch[jit.ScratchStack] = stackBase(i.stack)
+		scratch[jit.ScratchGlobals] = stackBase(i.globals)
+		scratch[jit.ScratchBP] = uint64(i.fr.bp)
+		scratch[jit.ScratchNext] = 0
+
+		returns, err := callable.Call(nil, scratch)
+		if err != nil {
+			panic(err)
+		}
+
+		// Perform the frame teardown that the threaded RETURN handler does.
+		f := i.fr
+		for k, ret := range returns {
+			i.stack[f.bp+k] = jit.Ret(ret)
+		}
+		i.sp = f.bp + f.returns
+		if f.release {
+			i.release(f.ref)
+		}
+		f.code = nil
+		i.fp--
+		i.fr = &i.frames[i.fp-1]
 	}
 }
 

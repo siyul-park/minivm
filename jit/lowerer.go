@@ -26,13 +26,33 @@ type Lowerer interface {
 // A Lowerer must return false from Lower without mutating any field in
 // Context when an opcode is unsupported.
 type Context struct {
+	// Whole is true while compiling a whole-function native entry.
+	// Partial segments leave it false and must reject RETURN so the
+	// threaded handler keeps frame teardown ownership.
+	Whole bool
+
 	Assembler *asm.Assembler
+
+	// Slots is the indirection table for direct CALL lowering. May be nil.
+	Slots *Slots
+
+	// Layout is a snapshot of the consumer's struct layout. Empty until
+	// the consumer calls Bind during init.
+	Layout Layout
 
 	// Code is the bytecode of the function being compiled.
 	Code []byte
 
 	// Start is the segment's first opcode IP.
 	Start int
+
+	// End is the IP one past the last opcode the segment is allowed to
+	// lower. Terminator opcodes may emit code that exits before End.
+	End int
+
+	// Snap is the consumer-side state available to lowerers at compile
+	// time.
+	Snap Snapshot
 
 	// IP is the current decode position. Lowerers advance IP exactly by
 	// the lowered opcode's width on success and leave it untouched on
@@ -50,15 +70,6 @@ type Context struct {
 	// Successor is a forced follow-up entry IP discovered by a terminal
 	// opcode. -1 means no forced successor.
 	Successor int
-
-	// End is the IP one past the last opcode the segment is allowed to
-	// lower. Terminator opcodes (BR, RETURN, …) may emit code that exits
-	// before End.
-	End int
-
-	// Snap is the consumer-side state available to lowerers at compile
-	// time.
-	Snap Snapshot
 
 	// Stack tracks values currently visible on the VM stack within this
 	// segment. Top of the slice is top of stack.
@@ -79,21 +90,21 @@ type Context struct {
 	// copies it into the Code signature after lowering completes.
 	Returns []asm.PReg
 
-	// Slots is the indirection table for direct CALL lowering. May be
-	// nil before Step 4 wires it up.
-	Slots *Slots
-
-	// Layout is a snapshot of the consumer's struct layout. Empty until
-	// the consumer calls Bind during init.
-	Layout Layout
+	// Target is the heap address of the callee when the immediately
+	// preceding opcode was CONST_GET of a function reference. The arm64
+	// lowerer sets this in constGet and reads it in call. Lower resets
+	// it to -1 before each dispatch so stale values never cross opcodes.
+	Target int
 }
 
 // Snapshot is the consumer-side state the JIT may inspect at compile time
 // for opcodes whose lowering depends on runtime kinds (CONST_GET, GLOBAL_*,
 // LOCAL_*). Each field is a read-only view into the consumer's tables.
 type Snapshot struct {
+	Hot []int
+
+	Functions map[int]*types.Function // heap addr -> *Function for direct-BL CALL lowering
 	Constants []types.Boxed
 	Globals   []types.Boxed
 	Locals    []types.Kind
-	Hot       []int
 }

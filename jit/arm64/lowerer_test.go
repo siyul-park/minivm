@@ -147,8 +147,8 @@ func TestLowerer_Compile(t *testing.T) {
 	})
 
 	t.Run("const_get emits compile-time immediate", func(t *testing.T) {
-		// CONST_GET 1
-		code := []byte{byte(instr.CONST_GET), 0x01}
+		// CONST_GET 1  (3-byte encoding: opcode + uint16 index)
+		code := []byte{byte(instr.CONST_GET), 0x01, 0x00}
 		fn := &types.Function{Code: code}
 
 		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
@@ -165,6 +165,32 @@ func TestLowerer_Compile(t *testing.T) {
 
 		require.Len(t, got, 1)
 		require.Equal(t, types.BoxI32(77), jit.Ret(got[0]))
+	})
+
+	t.Run("const_get ref rejects without immediate call", func(t *testing.T) {
+		code := []byte{
+			byte(instr.CONST_GET), 0x00, 0x00,
+			byte(instr.DROP),
+		}
+		fn := &types.Function{Code: code}
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		slots, err := c.Slots()
+		require.NoError(t, err)
+		require.NotNil(t, slots)
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{
+			Constants: []types.Boxed{types.BoxRef(7)},
+			Functions: map[int]*types.Function{
+				7: &types.Function{Typ: &types.FunctionType{}},
+			},
+		})
+		require.NoError(t, err)
+		require.Nil(t, mod.Entry)
+		require.Empty(t, mod.Segments)
 	})
 
 	t.Run("global_set then global_get roundtrips through memory", func(t *testing.T) {
@@ -810,5 +836,156 @@ func TestLowerer_Compile(t *testing.T) {
 
 		require.Len(t, got, 1)
 		require.Equal(t, types.BoxF32(1.5), jit.Ret(got[0]))
+	})
+
+	t.Run("entry: const-return function compiles to Entry", func(t *testing.T) {
+		// I32_CONST 99; RETURN  — leaf function with no params, one i32 return.
+		code := []byte{
+			byte(instr.I32_CONST), 99, 0, 0, 0,
+			byte(instr.RETURN),
+		}
+		fn := &types.Function{
+			Code: code,
+			Typ:  &types.FunctionType{Params: nil, Returns: []types.Type{types.TypeI32}},
+		}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+		require.NotNil(t, mod.Entry, "whole-function Entry should be set")
+		require.Empty(t, mod.Segments, "segments must be empty when Entry is set")
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Entry.Call(nil, scratch)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(99), jit.Ret(got[0]))
+	})
+
+	t.Run("entry: rejects declared return mismatch", func(t *testing.T) {
+		code := []byte{
+			byte(instr.I32_CONST), 99, 0, 0, 0,
+			byte(instr.RETURN),
+		}
+		fn := &types.Function{
+			Code: code,
+			Typ:  &types.FunctionType{},
+		}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+		require.Nil(t, mod.Entry)
+	})
+
+	t.Run("call: direct-BL call from Entry to compiled callee doubles value", func(t *testing.T) {
+		// Callee: LOCAL_GET 0; I32_CONST 2; I32_MUL; RETURN  — (i32) → i32
+		calleeFn := &types.Function{
+			Code: []byte{
+				byte(instr.LOCAL_GET), 0,
+				byte(instr.I32_CONST), 2, 0, 0, 0,
+				byte(instr.I32_MUL),
+				byte(instr.RETURN),
+			},
+			Typ: &types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			},
+		}
+		const calleeAddr = 7 // arbitrary heap addr for the callee
+
+		// Caller: LOCAL_GET 0; CONST_GET 0; CALL; RETURN  — (i32) → i32
+		callerFn := &types.Function{
+			Code: []byte{
+				byte(instr.LOCAL_GET), 0,
+				byte(instr.CONST_GET), 0, 0,
+				byte(instr.CALL),
+				byte(instr.RETURN),
+			},
+			Typ: &types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			},
+		}
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		// Build slots + fallback.
+		slots, err := c.Slots()
+		require.NoError(t, err)
+		require.NotNil(t, slots)
+
+		// Compile callee first so the compiler populates its slot.
+		calleeSnap := jit.Snapshot{Locals: []types.Kind{types.KindI32}}
+		calleeMod, err := c.Compile(calleeFn, calleeAddr, calleeSnap)
+		require.NoError(t, err)
+		require.NotNil(t, calleeMod.Entry, "callee must compile to Entry")
+
+		// Compile caller with the callee visible in Snap.Functions.
+		callerSnap := jit.Snapshot{
+			Constants: []types.Boxed{types.BoxRef(calleeAddr)},
+			Locals:    []types.Kind{types.KindI32},
+			Functions: map[int]*types.Function{calleeAddr: calleeFn},
+		}
+		callerMod, err := c.Compile(callerFn, 2, callerSnap)
+		require.NoError(t, err)
+		require.NotNil(t, callerMod.Entry, "caller must compile to Entry")
+
+		// Set up a fake VM stack: vmStack[0] = BoxI32(21) at bp=0.
+		var vmStack [8]types.Boxed
+		vmStack[0] = types.BoxI32(21)
+		scratch := make([]uint64, jit.ScratchCount)
+		scratch[jit.ScratchStack] = uint64(uintptr(unsafe.Pointer(&vmStack[0])))
+		scratch[jit.ScratchGlobals] = scratch[jit.ScratchStack]
+		scratch[jit.ScratchBP] = 0
+
+		got, err := callerMod.Entry.Call(nil, scratch)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(42), jit.Ret(got[0]))
+	})
+
+	t.Run("entry: two-param add function compiles to Entry", func(t *testing.T) {
+		// LOCAL_GET 0; LOCAL_GET 1; I32_ADD; RETURN  — (i32, i32) → i32.
+		// Params live at stack[bp+0] and stack[bp+1] via scratch slots.
+		code := []byte{
+			byte(instr.LOCAL_GET), 0,
+			byte(instr.LOCAL_GET), 1,
+			byte(instr.I32_ADD),
+			byte(instr.RETURN),
+		}
+		fn := &types.Function{
+			Code: code,
+			Typ: &types.FunctionType{
+				Params:  []types.Type{types.TypeI32, types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			},
+		}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		snap := jit.Snapshot{Locals: []types.Kind{types.KindI32, types.KindI32}}
+		mod, err := c.Compile(fn, 1, snap)
+		require.NoError(t, err)
+		require.NotNil(t, mod.Entry, "whole-function Entry should be set")
+
+		// Place boxed params in a fake VM stack, set ScratchBP.
+		vmStack := [8]types.Boxed{types.BoxI32(10), types.BoxI32(32)}
+		scratch := make([]uint64, jit.ScratchCount)
+		scratch[jit.ScratchStack] = uint64(uintptr(unsafe.Pointer(&vmStack[0])))
+		scratch[jit.ScratchGlobals] = scratch[jit.ScratchStack] // unused but non-nil
+		scratch[jit.ScratchBP] = 0                              // bp=0: params at vmStack[0..1]
+
+		got, err := mod.Entry.Call(nil, scratch)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(42), jit.Ret(got[0]))
 	})
 }

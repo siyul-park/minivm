@@ -15,10 +15,12 @@ import (
 //
 // Slot pointers are stable for the lifetime of the underlying Data region.
 type Slots struct {
-	mu       sync.Mutex
-	data     *asm.Data
+	slots map[int]unsafe.Pointer
+
 	fallback asm.Callable
-	slots    map[int]unsafe.Pointer
+	data     *asm.Data
+
+	mu sync.Mutex
 }
 
 // NewSlots builds a Slots backed by data. fallback is the address every
@@ -56,14 +58,4 @@ func (s *Slots) Set(addr int, entry asm.Callable) error {
 	}
 	s.data.Set(p, entry.Addr())
 	return nil
-}
-
-// Load returns the current target of the slot for addr, allocating the slot
-// first if it does not yet exist.
-func (s *Slots) Load(addr int) (unsafe.Pointer, error) {
-	p, err := s.For(addr)
-	if err != nil {
-		return nil, err
-	}
-	return s.data.Load(p), nil
 }
