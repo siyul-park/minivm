@@ -3406,13 +3406,15 @@ func TestInterpreter_JIT(t *testing.T) {
 			t.Skip("jit is not available on this architecture")
 		}
 		fn := types.NewFunctionBuilder(nil).WithReturns(types.TypeI32).Emit(
-			instr.New(instr.REF_NULL),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.REF_NEW),
 			instr.New(instr.DROP),
 			instr.New(instr.I32_CONST, 42),
 			instr.New(instr.RETURN),
 		).Build()
 		returnIP := len(instr.Marshal([]instr.Instruction{
-			instr.New(instr.REF_NULL),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.REF_NEW),
 			instr.New(instr.DROP),
 			instr.New(instr.I32_CONST, 42),
 		}))
@@ -3779,7 +3781,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		p := prof.New()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.NOP),
-			instr.New(instr.REF_NULL),
+			instr.New(instr.REF_NEW),
 			instr.New(instr.NOP),
 			instr.New(instr.BR, 3),
 			instr.New(instr.BR, uint64(uint16(1<<16-7))),

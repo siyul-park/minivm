@@ -988,4 +988,69 @@ func TestLowerer_Compile(t *testing.T) {
 		require.Len(t, got, 1)
 		require.Equal(t, types.BoxI32(42), jit.Ret(got[0]))
 	})
+
+	t.Run("ref_null pushes null reference", func(t *testing.T) {
+		code := []byte{byte(instr.REF_NULL)}
+		fn := &types.Function{Code: code}
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+		require.Contains(t, mod.Segments, 0)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxedNull, jit.Ret(got[0]))
+	})
+
+	t.Run("ref_is_null returns 1 for null ref", func(t *testing.T) {
+		code := []byte{
+			byte(instr.REF_NULL),
+			byte(instr.REF_IS_NULL),
+		}
+		fn := &types.Function{Code: code}
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+		require.Contains(t, mod.Segments, 0)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(1), jit.Ret(got[0]))
+	})
+
+	t.Run("ref_eq returns 1 for same ref", func(t *testing.T) {
+		// REF_NULL; REF_NULL; REF_EQ  → 1 (both null)
+		code := []byte{
+			byte(instr.REF_NULL),
+			byte(instr.REF_NULL),
+			byte(instr.REF_EQ),
+		}
+		fn := &types.Function{Code: code}
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+		require.Contains(t, mod.Segments, 0)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(1), jit.Ret(got[0]))
+	})
 }

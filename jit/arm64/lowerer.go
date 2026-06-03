@@ -238,6 +238,12 @@ func (l Lowerer) Lower(c *jit.Context, op instr.Opcode) bool {
 		return l.ret(c)
 	case instr.CALL:
 		return l.call(c)
+	case instr.REF_NULL:
+		return l.refNull(c)
+	case instr.REF_IS_NULL:
+		return l.refIsNull(c)
+	case instr.REF_EQ:
+		return l.refEq(c)
 	}
 	return false
 }
@@ -1073,6 +1079,52 @@ func (Lowerer) target(c *jit.Context, addr int, stackLen int) (call, bool) {
 		offset:  spOffset,
 		slot:    uintptr(slot),
 	}, true
+}
+
+// refNull pushes the null reference constant (BoxedNull) onto the shadow stack.
+func (l Lowerer) refNull(c *jit.Context) bool {
+	return l.imm(c, uint64(types.BoxedNull), instr.Instruction(c.Code[c.IP:]).Width())
+}
+
+// refIsNull pops a boxed ref and pushes BoxI32(1) if it is null (addr == 0),
+// BoxI32(0) otherwise. Null is defined as a raw bit-pattern equal to BoxedNull.
+func (l Lowerer) refIsNull(c *jit.Context) bool {
+	if !l.need(c, 1) {
+		return false
+	}
+	a := c.Stack[len(c.Stack)-1]
+
+	vNull := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.LDI(vNull, uint64(types.BoxedNull))...)
+	c.Assembler.Emit(arm64.CMP(a, vNull))
+
+	flag := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.CSET(flag, arm64.CondEQ))
+
+	boxed := l.boxI32(c, flag)
+	c.Stack[len(c.Stack)-1] = boxed
+	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
+	return true
+}
+
+// refEq pops two boxed refs and pushes BoxI32(1) if they are the same
+// reference (identical bit-pattern), BoxI32(0) otherwise.
+func (l Lowerer) refEq(c *jit.Context) bool {
+	if !l.need(c, 2) {
+		return false
+	}
+	b := c.Stack[len(c.Stack)-1]
+	a := c.Stack[len(c.Stack)-2]
+
+	c.Assembler.Emit(arm64.CMP(a, b))
+
+	flag := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.Assembler.Emit(arm64.CSET(flag, arm64.CondEQ))
+
+	boxed := l.boxI32(c, flag)
+	c.Stack = append(c.Stack[:len(c.Stack)-2], boxed)
+	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
+	return true
 }
 
 // br lowers an unconditional branch. No instructions are emitted; Exit writes
