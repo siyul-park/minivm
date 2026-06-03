@@ -92,7 +92,7 @@ Stack values are passed as `asm.Signature.Args` (bottom-to-top) and returned as 
 
 ## Direct-BL CALL
 
-When `CONST_GET` of a Ref constant immediately precedes `CALL`, and the target is whole-function compiled or is the current function being compiled, the caller-JIT emits an indirect call through the slot table:
+When `CONST_GET` of a Ref constant immediately precedes `CALL`, and the target is whole-function compiled or is the current function being compiled, the caller-JIT emits a direct native call. Self-recursive calls branch to the same Code's Entry label with `BL`; other targets use the slot table:
 
 ```asm
 LDR  Xt, [slot_addr]   ; load entry pointer from slot
@@ -101,9 +101,9 @@ BLR  Xt                ; call callee Entry natively
 
 `slot_addr` is a stable pointer from `Slots.For(addr)`, baked into the code at link time via a relocation. Initially the slot points at a fallback stub (sets `ScratchNext=0`, returns). When the callee's Entry is compiled, `Slots.Set(addr, Entry)` atomically updates the pointer.
 
-BLR clobbers X30 (LR). The lowerer saves LR on the system stack before BLR and restores it after.
+BL/BLR clobbers X30 (LR). The lowerer saves LR on the system stack before native calls and restores it after.
 
-Only functions with numeric-only signatures (no KindRef params/returns) are eligible for direct-BL. Closures and host functions always fall back to threaded. Self-recursive functions may reference their own slot before Entry exists; `installEntry` patches that slot before native execution can reach it.
+Only functions with numeric-only signatures (no KindRef params/returns) are eligible for direct-BL. Closures and host functions always fall back to threaded. Self-recursive whole-function entries avoid the `LDI+LDR` slot indirection on recursive calls.
 
 In whole-function Entry mode, values below the callee arguments on the caller shadow stack are spilled to scratch slots above the caller's locals before `BLR`, then reloaded after BP is restored. This preserves cross-call liveness for patterns such as `fib(n-1) + fib(n-2)`. Partial segments still reject survivor values across `CALL`.
 

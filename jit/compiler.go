@@ -164,7 +164,7 @@ func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module
 
 	// Attempt whole-function Entry first. If every opcode lowers cleanly the
 	// function becomes directly callable without a Go-side trampoline per call.
-	if seg, ok, err := c.whole(fn, snap); err != nil {
+	if seg, ok, err := c.whole(fn, addr, snap); err != nil {
 		return nil, err
 	} else if ok {
 		if err := c.installEntry(mod, seg); err != nil {
@@ -175,7 +175,7 @@ func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module
 
 	// Attempt multi-block Entry: handles functions with BR_IF / BR that
 	// whole() cannot compile (it requires !Closed after the last opcode).
-	if seg, ok, err := c.blocks(fn, snap); err != nil {
+	if seg, ok, err := c.blocks(fn, addr, snap); err != nil {
 		return nil, err
 	} else if ok {
 		if err := c.installEntry(mod, seg); err != nil {
@@ -220,7 +220,7 @@ func (c *Compiler) installEntry(mod *Module, seg segment) error {
 // returned segment's code is the Entry; its ABI follows the standard segment
 // convention (params accessed via LOCAL_GET / scratch slots, results in ABI
 // return registers).
-func (c *Compiler) whole(fn *types.Function, snap Snapshot) (segment, bool, error) {
+func (c *Compiler) whole(fn *types.Function, addr int, snap Snapshot) (segment, bool, error) {
 	scratch, ok := c.scratch()
 	if !ok {
 		return segment{}, false, nil
@@ -230,7 +230,7 @@ func (c *Compiler) whole(fn *types.Function, snap Snapshot) (segment, bool, erro
 	// Plan phase: require all opcodes to lower (reject < 0) and the function
 	// to terminate via RETURN (Stop=true, no branch Successor, not Closed by
 	// BR_IF inline exits).
-	plan := c.context(asm.New(c.arch), fn, 0, snap, scratch)
+	plan := c.context(asm.New(c.arch), fn, addr, 0, snap, scratch)
 	plan.Whole = true
 	planned, _ := c.plan(plan, nil)
 	if planned.reject >= 0 || planned.count == 0 {
@@ -246,8 +246,9 @@ func (c *Compiler) whole(fn *types.Function, snap Snapshot) (segment, bool, erro
 
 	// Emit phase: re-lower with the real assembler.
 	a := asm.New(c.arch)
-	ctx := c.context(a, fn, 0, snap, scratch)
+	ctx := c.context(a, fn, addr, 0, snap, scratch)
 	ctx.Whole = true
+	a.Bind(ctx.Entry)
 	c.lowerer.Prologue(ctx, fn)
 	lowered, _ := c.emit(ctx, fn, nil)
 	if lowered.reject >= 0 || lowered.count == 0 {
@@ -278,7 +279,7 @@ func (c *Compiler) whole(fn *types.Function, snap Snapshot) (segment, bool, erro
 // instead of interpreter exits. Succeeds only when every opcode in every block
 // lowers without rejection. Falls back gracefully when a branch target is not a
 // known block start (e.g. brTable), leaving segments() to handle those cases.
-func (c *Compiler) blocks(fn *types.Function, snap Snapshot) (segment, bool, error) {
+func (c *Compiler) blocks(fn *types.Function, addr int, snap Snapshot) (segment, bool, error) {
 	scratch, ok := c.scratch()
 	if !ok {
 		return segment{}, false, nil
@@ -296,13 +297,14 @@ func (c *Compiler) blocks(fn *types.Function, snap Snapshot) (segment, bool, err
 	// Plan phase: dry-run with a counting assembler to validate that every
 	// opcode in every block lowers without rejection.
 	planA := asm.New(c.arch)
-	pctx := c.context(planA, fn, 0, snap, scratch)
+	pctx := c.context(planA, fn, addr, 0, snap, scratch)
 	pctx.Whole = true
 	pctx.Labels = make(map[int]asm.Label, len(blks))
 	for _, blk := range blks {
 		pctx.Labels[blk.Start] = planA.Label()
 	}
 	returns := entryReturns(fn)
+	planA.Bind(pctx.Entry)
 	c.lowerer.Prologue(pctx, fn)
 	for _, blk := range blks {
 		planA.Bind(pctx.Labels[blk.Start])
@@ -328,12 +330,13 @@ func (c *Compiler) blocks(fn *types.Function, snap Snapshot) (segment, bool, err
 
 	// Emit phase: real assembler, same block traversal order.
 	a := asm.New(c.arch)
-	ctx := c.context(a, fn, 0, snap, scratch)
+	ctx := c.context(a, fn, addr, 0, snap, scratch)
 	ctx.Whole = true
 	ctx.Labels = make(map[int]asm.Label, len(blks))
 	for _, blk := range blks {
 		ctx.Labels[blk.Start] = a.Label()
 	}
+	a.Bind(ctx.Entry)
 	c.lowerer.Prologue(ctx, fn)
 	for _, blk := range blks {
 		a.Bind(ctx.Labels[blk.Start])
@@ -399,7 +402,7 @@ func (c *Compiler) segments(fn *types.Function, snap Snapshot, mod *Module) ([]s
 		}
 		seen[start] = true
 
-		seg, ok, err := c.segment(fn, start, snap, hot)
+		seg, ok, err := c.segment(fn, mod.Addr, start, snap, hot)
 		if err != nil {
 			return nil, err
 		}
@@ -430,13 +433,13 @@ func (c *Compiler) segments(fn *types.Function, snap Snapshot, mod *Module) ([]s
 //
 // Returns (code, true, nil) when at least cutoff opcodes lowered, otherwise
 // (nil, false, nil).
-func (c *Compiler) segment(fn *types.Function, startIP int, snap Snapshot, hot map[int]bool) (segment, bool, error) {
+func (c *Compiler) segment(fn *types.Function, addr int, startIP int, snap Snapshot, hot map[int]bool) (segment, bool, error) {
 	scratch, ok := c.scratch()
 	if !ok {
 		return segment{}, false, nil
 	}
 
-	plan := c.context(asm.New(c.arch), fn, startIP, snap, scratch)
+	plan := c.context(asm.New(c.arch), fn, addr, startIP, snap, scratch)
 	planned, plans := c.plan(plan, hot)
 	if planned.count < c.cutoff {
 		return segment{}, false, nil
@@ -447,7 +450,7 @@ func (c *Compiler) segment(fn *types.Function, startIP int, snap Snapshot, hot m
 	plans = c.entries(plan, plans)
 
 	a := asm.New(c.arch)
-	ctx := c.context(a, fn, startIP, snap, scratch)
+	ctx := c.context(a, fn, addr, startIP, snap, scratch)
 	for i := 0; i < len(plan.Inputs); i++ {
 		v := ctx.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.Inputs = append(ctx.Inputs, v)
@@ -511,7 +514,7 @@ func (c *Compiler) fallback() (asm.Callable, error) {
 
 	stub := &types.Function{Code: []byte{}}
 	a := asm.New(c.arch)
-	ctx := c.context(a, stub, 0, Snapshot{}, scratch)
+	ctx := c.context(a, stub, -1, 0, Snapshot{}, scratch)
 	c.lowerer.Exit(ctx, 0)
 	code, err := a.Build(asm.Signature{Scratch: scratch})
 	if err != nil {
@@ -573,11 +576,13 @@ func (c *Compiler) link(mod *Module, segs []segment) error {
 	return nil
 }
 
-func (c *Compiler) context(a *asm.Assembler, fn *types.Function, startIP int, snap Snapshot, scratch []asm.PReg) *Context {
+func (c *Compiler) context(a *asm.Assembler, fn *types.Function, addr int, startIP int, snap Snapshot, scratch []asm.PReg) *Context {
 	return &Context{
 		Assembler: a,
 		Code:      fn.Code,
 		Start:     startIP,
+		Self:      addr,
+		Entry:     a.Label(),
 		End:       len(fn.Code),
 		IP:        startIP,
 		Successor: -1,

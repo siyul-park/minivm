@@ -21,6 +21,7 @@ type call struct {
 	returns int
 	offset  int
 	slot    uintptr
+	self    bool
 }
 
 // Boxing masks and tags used by scalar lowering.
@@ -270,6 +271,24 @@ func (l Lowerer) Exit(c *jit.Context, nextIP int) {
 	_ = c.Assembler.Pin(vNext, rNext)
 	c.Assembler.Emit(arm64.LDI(vNext, uint64(nextIP))...)
 	c.Assembler.Emit(arm64.RET())
+}
+
+func pushLR(c *jit.Context) {
+	vSP := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	_ = c.Assembler.Pin(vSP, arm64.XZR)
+	vLR := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	_ = c.Assembler.Pin(vLR, arm64.X30)
+	c.Assembler.Emit(arm64.SUBI(vSP, vSP, 16))
+	c.Assembler.Emit(arm64.STR(vLR, vSP, 0))
+}
+
+func popLR(c *jit.Context) {
+	vSP := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	_ = c.Assembler.Pin(vSP, arm64.XZR)
+	vLR := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+	_ = c.Assembler.Pin(vLR, arm64.X30)
+	c.Assembler.Emit(arm64.LDR(vLR, vSP, 0))
+	c.Assembler.Emit(arm64.ADDI(vSP, vSP, 16))
 }
 
 func (Lowerer) nop(c *jit.Context) bool {
@@ -980,28 +999,19 @@ func (l Lowerer) call(c *jit.Context) bool {
 	_ = c.Assembler.Pin(vBPdst, c.Scratch[jit.ScratchBP])
 	c.Assembler.Emit(arm64.ADDI(vBPdst, vBPsrc, uint16(plan.offset)))
 
-	// Load entry from slot and call it.
-	vSlotAddr := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
-	c.Assembler.Emit(arm64.LDI(vSlotAddr, uint64(plan.slot))...)
-	vEntry := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
-	c.Assembler.Emit(arm64.LDR(vEntry, vSlotAddr, 0))
-
-	// BLR clobbers X30 (LR). Save LR on the stack so the outer RET
-	// returns to the trampoline, not back into this function.
-	// XZR (id=31) encodes as SP in arithmetic and load/store contexts.
-	vSP := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = c.Assembler.Pin(vSP, arm64.XZR)
-	vLR := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = c.Assembler.Pin(vLR, arm64.X30)
-	c.Assembler.Emit(arm64.SUBI(vSP, vSP, 16)) // SUB SP, SP, #16
-	c.Assembler.Emit(arm64.STR(vLR, vSP, 0))   // STR X30, [SP, #0]
-	c.Assembler.Emit(arm64.BLR(vEntry))
-	vSP2 := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = c.Assembler.Pin(vSP2, arm64.XZR)
-	vLR2 := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = c.Assembler.Pin(vLR2, arm64.X30)
-	c.Assembler.Emit(arm64.LDR(vLR2, vSP2, 0))   // LDR X30, [SP, #0]
-	c.Assembler.Emit(arm64.ADDI(vSP2, vSP2, 16)) // ADD SP, SP, #16
+	// BL/BLR clobbers X30. Save LR so this native entry can return to its
+	// caller after the callee returns.
+	pushLR(c)
+	if plan.self && c.Whole {
+		c.Assembler.Emit(arm64.BLLabel(c.Entry))
+	} else {
+		vSlotAddr := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+		c.Assembler.Emit(arm64.LDI(vSlotAddr, uint64(plan.slot))...)
+		vEntry := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+		c.Assembler.Emit(arm64.LDR(vEntry, vSlotAddr, 0))
+		c.Assembler.Emit(arm64.BLR(vEntry))
+	}
+	popLR(c)
 
 	// Restore X12 to caller_bp.
 	vBPrestore := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -1085,6 +1095,7 @@ func (Lowerer) target(c *jit.Context, addr int, stackLen int) (call, bool) {
 		returns: nReturns,
 		offset:  spOffset,
 		slot:    uintptr(slot),
+		self:    addr == c.Self,
 	}, true
 }
 

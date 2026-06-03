@@ -42,6 +42,12 @@ type Context struct {
 	// Start is the segment's first opcode IP.
 	Start int
 
+	// Self is the heap address of the function currently being compiled.
+	Self int
+
+	// Entry is the native entry label for a whole-function compilation.
+	Entry asm.Label
+
 	// End is the IP one past the last opcode the segment is allowed to
 	// lower. Terminator opcodes may emit code that exits before End.
 	End int

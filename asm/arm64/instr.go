@@ -575,6 +575,10 @@ func BLabel(id asm.Label) asm.Instruction {
 	return asm.Instruction{Op: uint16(OpB), Src2: asm.LabelOperand{ID: id}}
 }
 
+func BLLabel(id asm.Label) asm.Instruction {
+	return asm.Instruction{Op: uint16(OpBL), Src2: asm.LabelOperand{ID: id}}
+}
+
 // condOp must be one of OpBEQ, OpBNE, OpBLT, OpBGT, OpBLE, OpBGE, …
 func BCondLabel(condOp Op, id asm.Label) asm.Instruction {
 	return asm.Instruction{Op: uint16(condOp), Src2: asm.LabelOperand{ID: id}}
