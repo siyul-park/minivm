@@ -15,14 +15,14 @@ import (
 // writable data region used for direct-call slot tables, and the cutoff that
 // controls when partial segments are kept vs. discarded.
 type Compiler struct {
-	cutoff  int
 	lowerer Lowerer
 
 	arch   asm.Arch
 	buffer *asm.Buffer
 	data   *asm.Data
+	slots  *Slots
 
-	slots *Slots
+	cutoff int
 }
 
 // Option mutates the Compiler's config at construction time.
@@ -45,7 +45,6 @@ type result struct {
 	end   int
 
 	reject int
-	op     instr.Opcode
 }
 
 type entry struct {
@@ -67,20 +66,6 @@ type config struct {
 	buffer *asm.Buffer
 	data   *asm.Data
 }
-
-// WithBuffer overrides the default executable buffer.
-func WithBuffer(buffer *asm.Buffer) Option { return func(option *config) { option.buffer = buffer } }
-
-// WithData overrides the default writable data region used for slots.
-func WithData(data *asm.Data) Option { return func(option *config) { option.data = data } }
-
-// WithLowerer overrides the Lowerer the compiler dispatches to. By default
-// the compiler picks the Lowerer registered for runtime.GOARCH.
-func WithLowerer(lowerer Lowerer) Option { return func(option *config) { option.lowerer = lowerer } }
-
-// WithCutoff sets the minimum number of opcodes a segment must lower
-// before it is installed.
-func WithCutoff(cutoff int) Option { return func(option *config) { option.cutoff = cutoff } }
 
 // New constructs a Compiler. When no Lowerer is registered for the active
 // architecture, Compile returns an empty Module so callers continue running
@@ -115,13 +100,27 @@ func New(opts ...Option) (*Compiler, error) {
 	}
 
 	return &Compiler{
-		cutoff:  cfg.cutoff,
 		lowerer: cfg.lowerer,
 		arch:    arch,
 		buffer:  cfg.buffer,
 		data:    cfg.data,
+		cutoff:  cfg.cutoff,
 	}, nil
 }
+
+// WithBuffer overrides the default executable buffer.
+func WithBuffer(buffer *asm.Buffer) Option { return func(option *config) { option.buffer = buffer } }
+
+// WithData overrides the default writable data region used for slots.
+func WithData(data *asm.Data) Option { return func(option *config) { option.data = data } }
+
+// WithLowerer overrides the Lowerer the compiler dispatches to. By default
+// the compiler picks the Lowerer registered for runtime.GOARCH.
+func WithLowerer(lowerer Lowerer) Option { return func(option *config) { option.lowerer = lowerer } }
+
+// WithCutoff sets the minimum number of opcodes a segment must lower
+// before it is installed.
+func WithCutoff(cutoff int) Option { return func(option *config) { option.cutoff = cutoff } }
 
 // Slots returns the direct-call indirection table, creating it on first use.
 func (c *Compiler) Slots() (*Slots, error) {
@@ -162,22 +161,17 @@ func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module
 		return mod, nil
 	}
 
-	// Attempt whole-function Entry first. If every opcode lowers cleanly the
-	// function becomes directly callable without a Go-side trampoline per call.
-	if seg, ok, err := c.whole(fn, addr, snap); err != nil {
-		return nil, err
-	} else if ok {
-		if err := c.installEntry(mod, seg); err != nil {
+	// Try whole-function Entry, then multi-block Entry. The first one that
+	// lowers cleanly makes the function directly callable without a Go-side
+	// trampoline per call. blocks() handles BR_IF / BR that whole() cannot.
+	for _, attempt := range []func(*types.Function, int, Snapshot) (segment, bool, error){c.whole, c.blocks} {
+		seg, ok, err := attempt(fn, addr, snap)
+		if err != nil {
 			return nil, err
 		}
-		return mod, nil
-	}
-
-	// Attempt multi-block Entry: handles functions with BR_IF / BR that
-	// whole() cannot compile (it requires !Closed after the last opcode).
-	if seg, ok, err := c.blocks(fn, addr, snap); err != nil {
-		return nil, err
-	} else if ok {
+		if !ok {
+			continue
+		}
 		if err := c.installEntry(mod, seg); err != nil {
 			return nil, err
 		}
@@ -191,7 +185,6 @@ func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module
 	if len(segs) == 0 {
 		return mod, nil
 	}
-
 	if err := c.link(mod, segs); err != nil {
 		return nil, err
 	}
@@ -225,7 +218,10 @@ func (c *Compiler) whole(fn *types.Function, addr int, snap Snapshot) (segment, 
 	if !ok {
 		return segment{}, false, nil
 	}
-	returns := entryReturns(fn)
+	returns := 0
+	if fn.Typ != nil {
+		returns = len(fn.Typ.Returns)
+	}
 
 	// Plan phase: require all opcodes to lower (reject < 0) and the function
 	// to terminate via RETURN (Stop=true, no branch Successor, not Closed by
@@ -262,7 +258,7 @@ func (c *Compiler) whole(fn *types.Function, addr int, snap Snapshot) (segment, 
 		c.lowerer.Exit(ctx, ctx.IP)
 	}
 
-	code, err := buildCode(a, ctx, scratch)
+	code, err := a.Build(asm.Signature{Args: ctx.Args, Returns: ctx.Returns, Scratch: scratch})
 	if err != nil {
 		return segment{}, false, err
 	}
@@ -303,8 +299,11 @@ func (c *Compiler) blocks(fn *types.Function, addr int, snap Snapshot) (segment,
 	for _, blk := range blks {
 		pctx.Labels[blk.Start] = planA.Label()
 	}
-	returns := entryReturns(fn)
-	reachable := reachableBlocks(blks)
+	returns := 0
+	if fn.Typ != nil {
+		returns = len(fn.Typ.Returns)
+	}
+	reachable := c.reachable(blks)
 	inputs := map[int][]asm.VReg{0: nil}
 	planA.Bind(pctx.Entry)
 	c.lowerer.Prologue(pctx, fn)
@@ -330,7 +329,7 @@ func (c *Compiler) blocks(fn *types.Function, addr int, snap Snapshot) (segment,
 		if pctx.Stop && !pctx.Closed && !c.validEntry(pctx, returns) {
 			return segment{}, false, nil
 		}
-		if !mergeBlockInputs(inputs, blks, blk, pctx.Stack) {
+		if !c.merge(inputs, blks, blk, pctx.Stack) {
 			return segment{}, false, nil
 		}
 	}
@@ -381,14 +380,14 @@ func (c *Compiler) blocks(fn *types.Function, addr int, snap Snapshot) (segment,
 			}
 			c.lowerer.Exit(ctx, ctx.IP)
 		}
-		if !mergeBlockInputs(inputs, blks, blk, ctx.Stack) {
+		if !c.merge(inputs, blks, blk, ctx.Stack) {
 			return segment{}, false, nil
 		}
 	}
 	if !c.validEntry(ctx, returns) {
 		return segment{}, false, nil
 	}
-	code, err := buildCode(a, ctx, scratch)
+	code, err := a.Build(asm.Signature{Args: ctx.Args, Returns: ctx.Returns, Scratch: scratch})
 	if err != nil {
 		return segment{}, false, err
 	}
@@ -499,7 +498,7 @@ func (c *Compiler) segment(fn *types.Function, addr int, startIP int, snap Snaps
 		c.lowerer.Exit(ctx, ctx.IP)
 	}
 
-	code, err := buildCode(a, ctx, scratch)
+	code, err := a.Build(asm.Signature{Args: ctx.Args, Returns: ctx.Returns, Scratch: scratch})
 	if err != nil {
 		return segment{}, false, err
 	}
@@ -524,6 +523,32 @@ func (c *Compiler) segment(fn *types.Function, addr int, startIP int, snap Snaps
 		next:    next,
 		force:   force,
 	}, true, nil
+}
+
+func (c *Compiler) link(mod *Module, segs []segment) error {
+	codes := make([]*asm.Code, len(segs))
+	for i, seg := range segs {
+		codes[i] = seg.code
+		mod.Bytes = append(mod.Bytes, len(seg.code.Bytes))
+	}
+	linked, err := asm.LinkAll(c.buffer, c.arch, codes, nil)
+	if err != nil {
+		return err
+	}
+	for i, seg := range segs {
+		mod.Segments[seg.start] = linked[i].Callable
+		mod.Stacks[seg.start] = seg.stack
+		for _, ent := range seg.entries {
+			callable := linked[i].Entries[ent.label]
+			if callable == nil {
+				return fmt.Errorf("missing linked entry %d at ip %d", ent.label, ent.ip)
+			}
+			mod.Segments[ent.ip] = callable
+			mod.Stacks[ent.ip] = ent.stack
+		}
+	}
+	mod.Links = len(mod.Segments)
+	return nil
 }
 
 func (c *Compiler) fallback() (asm.Callable, error) {
@@ -558,176 +583,82 @@ func (c *Compiler) scratch() ([]asm.PReg, bool) {
 	return scratch[:ScratchCount], true
 }
 
-func entryReturns(fn *types.Function) int {
-	if fn != nil && fn.Typ != nil {
-		return len(fn.Typ.Returns)
-	}
-	return 0
-}
-
 func (c *Compiler) validEntry(ctx *Context, returns int) bool {
 	return c.fits(ctx) && len(ctx.Inputs) == 0 && len(ctx.Stack) == returns
-}
-
-func buildCode(a *asm.Assembler, ctx *Context, scratch []asm.PReg) (*asm.Code, error) {
-	return a.Build(asm.Signature{Args: ctx.Args, Returns: ctx.Returns, Scratch: scratch})
-}
-
-func reachableBlocks(blocks []*analysis.BasicBlock) map[int]bool {
-	reachable := map[int]bool{}
-	if len(blocks) == 0 {
-		return reachable
-	}
-	queue := []int{0}
-	for len(queue) > 0 {
-		idx := queue[0]
-		queue = queue[1:]
-		if idx < 0 || idx >= len(blocks) || reachable[blocks[idx].Start] {
-			continue
-		}
-		reachable[blocks[idx].Start] = true
-		queue = append(queue, blocks[idx].Succs...)
-	}
-	return reachable
-}
-
-func mergeBlockInputs(inputs map[int][]asm.VReg, blocks []*analysis.BasicBlock, block *analysis.BasicBlock, stack []asm.VReg) bool {
-	for _, idx := range block.Succs {
-		if idx < 0 || idx >= len(blocks) {
-			return false
-		}
-		start := blocks[idx].Start
-		if existing, ok := inputs[start]; ok {
-			if !sameStack(existing, stack) {
-				return false
-			}
-			continue
-		}
-		inputs[start] = append([]asm.VReg(nil), stack...)
-	}
-	return true
-}
-
-func sameStack(a, b []asm.VReg) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].ID() != b[i].ID() {
-			return false
-		}
-	}
-	return true
-}
-
-func (c *Compiler) link(mod *Module, segs []segment) error {
-	codes := make([]*asm.Code, len(segs))
-	for i, seg := range segs {
-		codes[i] = seg.code
-		mod.Bytes = append(mod.Bytes, len(seg.code.Bytes))
-	}
-	linked, err := asm.LinkAll(c.buffer, c.arch, codes, nil)
-	if err != nil {
-		return err
-	}
-	for i, seg := range segs {
-		mod.Segments[seg.start] = linked[i].Callable
-		mod.Stacks[seg.start] = seg.stack
-		for _, ent := range seg.entries {
-			callable := linked[i].Entries[ent.label]
-			if callable == nil {
-				return fmt.Errorf("missing linked entry %d at ip %d", ent.label, ent.ip)
-			}
-			mod.Segments[ent.ip] = callable
-			mod.Stacks[ent.ip] = ent.stack
-		}
-	}
-	mod.Links = len(mod.Segments)
-	return nil
 }
 
 func (c *Compiler) context(a *asm.Assembler, fn *types.Function, addr int, startIP int, snap Snapshot, scratch []asm.PReg) *Context {
 	return &Context{
 		Assembler: a,
+		Slots:     c.slots,
 		Code:      fn.Code,
+		Snap:      snap,
+		Target:    -1,
+		Successor: -1,
+		IP:        startIP,
 		Start:     startIP,
 		Self:      addr,
-		Entry:     a.Label(),
 		End:       len(fn.Code),
-		IP:        startIP,
-		Successor: -1,
-		Snap:      snap,
+		Entry:     a.Label(),
 		Scratch:   scratch,
-		Slots:     c.slots,
-		Target:    -1,
 	}
+}
+
+// walk drives the per-opcode lowering loop shared by plan and emit. For each
+// entry IP the caller supplies before (run before Lower; in plan this snapshots
+// ctx.Stack so the after callback can commit a frozen copy on success) and
+// after (run only after Lower advances IP). Either may be nil.
+func (c *Compiler) walk(ctx *Context, entries map[int]bool, before, after func(ip int)) result {
+	out := result{reject: -1}
+	for ctx.IP < ctx.End {
+		op := instr.Opcode(ctx.Code[ctx.IP])
+		ipBefore := ctx.IP
+		width := instr.Instruction(ctx.Code[ipBefore:]).Width()
+		hit := entries[ipBefore] && ipBefore != ctx.Start
+		if hit && before != nil {
+			before(ipBefore)
+		}
+		if !c.lowerer.Lower(ctx, op) {
+			out.reject = ipBefore
+			break
+		}
+		if ctx.IP == ipBefore && !ctx.Stop {
+			// Lowerer reported success but did not advance IP.
+			out.reject = ipBefore
+			break
+		}
+		out.count++
+		out.end = max(out.end, ipBefore+width)
+		if hit && after != nil {
+			after(ipBefore)
+		}
+		if ctx.Stop {
+			break
+		}
+	}
+	return out
 }
 
 func (c *Compiler) plan(ctx *Context, entries map[int]bool) (result, []plan) {
-	out := result{reject: -1}
 	var plans []plan
-	for ctx.IP < ctx.End {
-		op := instr.Opcode(ctx.Code[ctx.IP])
-		ipBefore := ctx.IP
-		width := instr.Instruction(ctx.Code[ipBefore:]).Width()
-		mark := entries[ipBefore] && ipBefore != ctx.Start
-		var stack []asm.VReg
-		if mark {
-			stack = append([]asm.VReg(nil), ctx.Stack...)
-		}
-		if !c.lowerer.Lower(ctx, op) {
-			out.reject = ipBefore
-			out.op = op
-			break
-		}
-		if ctx.IP == ipBefore && !ctx.Stop {
-			// Lowerer reported success but did not advance IP.
-			out.reject = ipBefore
-			out.op = op
-			break
-		}
-		out.count++
-		out.end = max(out.end, ipBefore+width)
-		if mark {
-			plans = append(plans, plan{ip: ipBefore, stack: stack})
-		}
-		if ctx.Stop {
-			break
-		}
+	var pending []asm.VReg
+	before := func(int) {
+		pending = append(pending[:0], ctx.Stack...)
 	}
-	return out, plans
+	after := func(ip int) {
+		plans = append(plans, plan{ip: ip, stack: append([]asm.VReg(nil), pending...)})
+	}
+	return c.walk(ctx, entries, before, after), plans
 }
 
 func (c *Compiler) emit(ctx *Context, fn *types.Function, entries map[int]bool) (result, []entry) {
-	out := result{reject: -1}
 	var internal []entry
-	for ctx.IP < ctx.End {
-		op := instr.Opcode(ctx.Code[ctx.IP])
-		ipBefore := ctx.IP
-		width := instr.Instruction(ctx.Code[ipBefore:]).Width()
-		if entries[ipBefore] && ipBefore != ctx.Start {
-			if ent, ok := c.mark(ctx, fn, ipBefore); ok {
-				internal = append(internal, ent)
-			}
-		}
-		if !c.lowerer.Lower(ctx, op) {
-			out.reject = ipBefore
-			out.op = op
-			break
-		}
-		if ctx.IP == ipBefore && !ctx.Stop {
-			// Lowerer reported success but did not advance IP.
-			out.reject = ipBefore
-			out.op = op
-			break
-		}
-		out.count++
-		out.end = max(out.end, ipBefore+width)
-		if ctx.Stop {
-			break
+	before := func(ip int) {
+		if ent, ok := c.mark(ctx, fn, ip); ok {
+			internal = append(internal, ent)
 		}
 	}
-	return out, internal
+	return c.walk(ctx, entries, before, nil), internal
 }
 
 func (c *Compiler) fits(ctx *Context) bool {
@@ -827,7 +758,7 @@ func (c *Compiler) next(fn *types.Function, ctx *Context, res result) (int, bool
 	if next >= len(fn.Code) {
 		return -1, false
 	}
-	if res.op == instr.CALL {
+	if instr.Opcode(fn.Code[res.reject]) == instr.CALL {
 		return next, false
 	}
 	switch instr.Opcode(fn.Code[next]) {
@@ -836,4 +767,45 @@ func (c *Compiler) next(fn *types.Function, ctx *Context, res result) (int, bool
 	default:
 		return next, false
 	}
+}
+
+func (c *Compiler) reachable(blocks []*analysis.BasicBlock) map[int]bool {
+	reachable := map[int]bool{}
+	if len(blocks) == 0 {
+		return reachable
+	}
+	queue := []int{0}
+	for len(queue) > 0 {
+		idx := queue[0]
+		queue = queue[1:]
+		if idx < 0 || idx >= len(blocks) || reachable[blocks[idx].Start] {
+			continue
+		}
+		reachable[blocks[idx].Start] = true
+		queue = append(queue, blocks[idx].Succs...)
+	}
+	return reachable
+}
+
+func (c *Compiler) merge(inputs map[int][]asm.VReg, blocks []*analysis.BasicBlock, block *analysis.BasicBlock, stack []asm.VReg) bool {
+	for _, idx := range block.Succs {
+		if idx < 0 || idx >= len(blocks) {
+			return false
+		}
+		start := blocks[idx].Start
+		existing, ok := inputs[start]
+		if !ok {
+			inputs[start] = append([]asm.VReg(nil), stack...)
+			continue
+		}
+		if len(existing) != len(stack) {
+			return false
+		}
+		for i := range existing {
+			if existing[i].ID() != stack[i].ID() {
+				return false
+			}
+		}
+	}
+	return true
 }

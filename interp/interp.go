@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"unsafe"
 
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
@@ -23,6 +22,7 @@ type Interpreter struct {
 	marshaler Marshaler
 
 	compiler *jit.Compiler
+	jitted   map[int]bool
 
 	types     []types.Type
 	constants []types.Boxed
@@ -36,7 +36,6 @@ type Interpreter struct {
 	roots    []types.Boxed
 	heap     []types.Value
 	interned map[string]types.Ref
-	jitted   map[int]bool
 	free     []int
 	rc       []int
 
@@ -655,45 +654,33 @@ func (i *Interpreter) function(addr int) (*types.Function, bool) {
 }
 
 // segment wraps a native segment Callable in a threaded-style closure. The
-// closure passes consumed VM stack values as Callable args, marshals VM
-// context through scratch slots, and appends Callable returns back to the
-// interpreter stack.
-//
-// Scratch slot conventions use jit.Scratch*:
-//
-//	ScratchStack   → &i.stack[0]
-//	ScratchGlobals → &i.globals[0]
-//	ScratchBP      → i.fr.bp
-//	ScratchNext    → next IP (out)
+// closure marshals VM stack values as Callable args via jit.Invoke and
+// appends Callable returns back to the interpreter stack.
 func (i *Interpreter) segment(callable asm.Callable, argc int) func(*Interpreter) {
-	in := make([]asm.Value, argc)
-	scratch := make([]uint64, jit.ScratchCount)
+	args := make([]asm.Value, argc)
 	return func(i *Interpreter) {
 		if i.sp < argc {
 			panic(ErrStackUnderflow)
 		}
 		base := i.sp - argc
-		for n := range in {
-			in[n] = jit.Arg(i.stack[base+n])
+		for n := range args {
+			args[n] = jit.Arg(i.stack[base+n])
 		}
-
-		scratch[jit.ScratchStack] = stackBase(i.stack)
-		scratch[jit.ScratchGlobals] = stackBase(i.globals)
-		scratch[jit.ScratchBP] = uint64(i.fr.bp)
-		scratch[jit.ScratchNext] = 0
-		returns, err := callable.Call(in, scratch)
+		out, err := jit.Invoke(callable, jit.Call{
+			Stack: i.stack, Globals: i.globals, BP: i.fr.bp,
+		}, args)
 		if err != nil {
 			panic(err)
 		}
 		i.sp = base
-		if i.sp+len(returns) > len(i.stack) {
+		if i.sp+len(out.Returns) > len(i.stack) {
 			panic(ErrStackOverflow)
 		}
-		for _, ret := range returns {
+		for _, ret := range out.Returns {
 			i.stack[i.sp] = jit.Ret(ret)
 			i.sp++
 		}
-		i.fr.ip = int(scratch[jit.ScratchNext])
+		i.fr.ip = out.NextIP
 	}
 }
 
@@ -703,21 +690,17 @@ func (i *Interpreter) segment(callable asm.Callable, argc int) func(*Interpreter
 // performs the frame teardown that RETURN would normally do in the threaded
 // interpreter.
 func (i *Interpreter) entry(callable asm.Callable) func(*Interpreter) {
-	scratch := make([]uint64, jit.ScratchCount)
 	return func(i *Interpreter) {
-		scratch[jit.ScratchStack] = stackBase(i.stack)
-		scratch[jit.ScratchGlobals] = stackBase(i.globals)
-		scratch[jit.ScratchBP] = uint64(i.fr.bp)
-		scratch[jit.ScratchNext] = 0
-
-		returns, err := callable.Call(nil, scratch)
+		out, err := jit.Invoke(callable, jit.Call{
+			Stack: i.stack, Globals: i.globals, BP: i.fr.bp,
+		}, nil)
 		if err != nil {
 			panic(err)
 		}
 
 		// Perform the frame teardown that the threaded RETURN handler does.
 		f := i.fr
-		for k, ret := range returns {
+		for k, ret := range out.Returns {
 			i.stack[f.bp+k] = jit.Ret(ret)
 		}
 		i.sp = f.bp + f.returns
@@ -1029,14 +1012,4 @@ func unboxRef[T types.Value](i *Interpreter, val types.Boxed) T {
 	}
 	i.release(addr)
 	return v
-}
-
-// stackBase returns the address of the first slot in s as a uintptr packed
-// into a uint64. Returns 0 for an empty slice so native code receives a
-// well-defined sentinel rather than a wild pointer.
-func stackBase(s []types.Boxed) uint64 {
-	if len(s) == 0 {
-		return 0
-	}
-	return uint64(uintptr(unsafe.Pointer(&s[0])))
 }

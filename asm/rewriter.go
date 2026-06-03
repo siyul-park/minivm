@@ -28,13 +28,14 @@ func newRewriter(info RegInfo, insts []Instruction, pins map[int32]PReg) *rewrit
 			pool.exclude(NewPReg(i, RegTypeFloat, Width64))
 		}
 	}
-	return &rewriter{
+	r := &rewriter{
 		pool:     pool,
 		pins:     pins,
-		last:     lastUses(insts),
 		assigned: make(map[int32]PReg),
 		widths:   make(map[int32]RegWidth),
 	}
+	r.last = r.scanLastUses(insts)
+	return r
 }
 
 // run produces the rewritten instruction list. It first walks insts to
@@ -166,9 +167,9 @@ func (r *rewriter) resolve(v VReg) (PReg, bool) {
 	return NewPReg(pr.ID(), pr.Type(), w), true
 }
 
-// lastUses returns the highest instruction index at which each vreg is
+// scanLastUses returns the highest instruction index at which each vreg is
 // referenced (use or def).
-func lastUses(insts []Instruction) map[int32]int {
+func (*rewriter) scanLastUses(insts []Instruction) map[int32]int {
 	last := make(map[int32]int)
 	for i, inst := range insts {
 		if dst, ok := inst.Def(); ok {

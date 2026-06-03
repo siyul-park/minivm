@@ -120,21 +120,21 @@ func (l Lowerer) Lower(c *jit.Context, op instr.Opcode) bool {
 	case instr.I32_NE:
 		return l.i32Cmp(c, nil, arm64.CondNE)
 	case instr.I32_LT_S:
-		return l.i32Cmp(c, sign32, arm64.CondLT)
+		return l.i32Cmp(c, l.sign32, arm64.CondLT)
 	case instr.I32_LE_S:
-		return l.i32Cmp(c, sign32, arm64.CondLE)
+		return l.i32Cmp(c, l.sign32, arm64.CondLE)
 	case instr.I32_GT_S:
-		return l.i32Cmp(c, sign32, arm64.CondGT)
+		return l.i32Cmp(c, l.sign32, arm64.CondGT)
 	case instr.I32_GE_S:
-		return l.i32Cmp(c, sign32, arm64.CondGE)
+		return l.i32Cmp(c, l.sign32, arm64.CondGE)
 	case instr.I32_LT_U:
-		return l.i32Cmp(c, zero32, arm64.CondCC)
+		return l.i32Cmp(c, l.zero32, arm64.CondCC)
 	case instr.I32_LE_U:
-		return l.i32Cmp(c, zero32, arm64.CondLS)
+		return l.i32Cmp(c, l.zero32, arm64.CondLS)
 	case instr.I32_GT_U:
-		return l.i32Cmp(c, zero32, arm64.CondHI)
+		return l.i32Cmp(c, l.zero32, arm64.CondHI)
 	case instr.I32_GE_U:
-		return l.i32Cmp(c, zero32, arm64.CondCS)
+		return l.i32Cmp(c, l.zero32, arm64.CondCS)
 	case instr.I64_EQ:
 		return l.i64Cmp(c, nil, arm64.CondEQ)
 	case instr.I64_NE:
@@ -142,21 +142,21 @@ func (l Lowerer) Lower(c *jit.Context, op instr.Opcode) bool {
 	case instr.I64_EQZ:
 		return l.i64Eqz(c)
 	case instr.I64_LT_S:
-		return l.i64Cmp(c, sign64, arm64.CondLT)
+		return l.i64Cmp(c, l.sign64, arm64.CondLT)
 	case instr.I64_LE_S:
-		return l.i64Cmp(c, sign64, arm64.CondLE)
+		return l.i64Cmp(c, l.sign64, arm64.CondLE)
 	case instr.I64_GT_S:
-		return l.i64Cmp(c, sign64, arm64.CondGT)
+		return l.i64Cmp(c, l.sign64, arm64.CondGT)
 	case instr.I64_GE_S:
-		return l.i64Cmp(c, sign64, arm64.CondGE)
+		return l.i64Cmp(c, l.sign64, arm64.CondGE)
 	case instr.I64_LT_U:
-		return l.i64Cmp(c, zero64, arm64.CondCC)
+		return l.i64Cmp(c, l.zero64, arm64.CondCC)
 	case instr.I64_LE_U:
-		return l.i64Cmp(c, zero64, arm64.CondLS)
+		return l.i64Cmp(c, l.zero64, arm64.CondLS)
 	case instr.I64_GT_U:
-		return l.i64Cmp(c, zero64, arm64.CondHI)
+		return l.i64Cmp(c, l.zero64, arm64.CondHI)
 	case instr.I64_GE_U:
-		return l.i64Cmp(c, zero64, arm64.CondCS)
+		return l.i64Cmp(c, l.zero64, arm64.CondCS)
 	case instr.I64_SHR_S:
 		return l.i64ShrS(c)
 	case instr.BR:
@@ -218,21 +218,21 @@ func (l Lowerer) Lower(c *jit.Context, op instr.Opcode) bool {
 	case instr.F64_GE:
 		return l.f64Cmp(c, arm64.CondGE)
 	case instr.I32_TO_F32_S:
-		return l.toFloat(c, asm.Width32, arm64.SCVTF, sign32)
+		return l.toFloat(c, asm.Width32, arm64.SCVTF, l.sign32)
 	case instr.I32_TO_F32_U:
-		return l.toFloat(c, asm.Width32, arm64.UCVTF, zero32)
+		return l.toFloat(c, asm.Width32, arm64.UCVTF, l.zero32)
 	case instr.I64_TO_F32_S:
-		return l.toFloat(c, asm.Width32, arm64.SCVTF, sign64)
+		return l.toFloat(c, asm.Width32, arm64.SCVTF, l.sign64)
 	case instr.I64_TO_F32_U:
-		return l.toFloat(c, asm.Width32, arm64.UCVTF, zero64)
+		return l.toFloat(c, asm.Width32, arm64.UCVTF, l.zero64)
 	case instr.I32_TO_F64_S:
-		return l.toFloat(c, asm.Width64, arm64.SCVTF, sign32)
+		return l.toFloat(c, asm.Width64, arm64.SCVTF, l.sign32)
 	case instr.I32_TO_F64_U:
-		return l.toFloat(c, asm.Width64, arm64.UCVTF, zero32)
+		return l.toFloat(c, asm.Width64, arm64.UCVTF, l.zero32)
 	case instr.I64_TO_F64_S:
-		return l.toFloat(c, asm.Width64, arm64.SCVTF, sign64)
+		return l.toFloat(c, asm.Width64, arm64.SCVTF, l.sign64)
 	case instr.I64_TO_F64_U:
-		return l.toFloat(c, asm.Width64, arm64.UCVTF, zero64)
+		return l.toFloat(c, asm.Width64, arm64.UCVTF, l.zero64)
 	case instr.F32_TO_F64:
 		return l.f32ToF64(c)
 	case instr.F64_TO_F32:
@@ -273,7 +273,7 @@ func (l Lowerer) Exit(c *jit.Context, nextIP int) {
 	c.Assembler.Emit(arm64.RET())
 }
 
-func pushLR(c *jit.Context) {
+func (Lowerer) pushLR(c *jit.Context) {
 	vSP := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	_ = c.Assembler.Pin(vSP, arm64.XZR)
 	vLR := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -282,7 +282,7 @@ func pushLR(c *jit.Context) {
 	c.Assembler.Emit(arm64.STR(vLR, vSP, 0))
 }
 
-func popLR(c *jit.Context) {
+func (Lowerer) popLR(c *jit.Context) {
 	vSP := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	_ = c.Assembler.Pin(vSP, arm64.XZR)
 	vLR := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -396,8 +396,8 @@ func (l Lowerer) constGet(c *jit.Context) bool {
 // globalGet pushes globals[idx] onto the segment stack via a direct
 // LDR from the globals base. Rejects when globals[idx] is a ref because
 // Phase A does not yet model the runtime retain.
-func (Lowerer) globalGet(c *jit.Context) bool {
-	idx, width, ok := global(c)
+func (l Lowerer) globalGet(c *jit.Context) bool {
+	idx, width, ok := l.global(c)
 	if !ok {
 		return false
 	}
@@ -417,7 +417,7 @@ func (Lowerer) globalGet(c *jit.Context) bool {
 // SET overwriting a previously held ref would leak it, so a current ref in
 // globals[idx] also rejects.
 func (l Lowerer) globalSet(c *jit.Context) bool {
-	idx, width, ok := global(c)
+	idx, width, ok := l.global(c)
 	if !ok {
 		return false
 	}
@@ -620,19 +620,19 @@ func (l Lowerer) i32Eqz(c *jit.Context) bool {
 // count is masked to 5 bits before LSL because ARM64 register-shifts
 // read more bits than i32 shift semantics allow.
 func (l Lowerer) i32Shl(c *jit.Context) bool {
-	return l.i32Shift(c, arm64.LSL, zero32)
+	return l.i32Shift(c, arm64.LSL, l.zero32)
 }
 
 // i32ShrS lowers an arithmetic right shift; the value lane must be
 // sign-extended so the high bits carry the correct fill.
 func (l Lowerer) i32ShrS(c *jit.Context) bool {
-	return l.i32Shift(c, arm64.ASR, sign32)
+	return l.i32Shift(c, arm64.ASR, l.sign32)
 }
 
 // i32ShrU lowers a logical right shift; zero-extending the value
 // lane drops any tag bits before the shift.
 func (l Lowerer) i32ShrU(c *jit.Context) bool {
-	return l.i32Shift(c, arm64.LSR, zero32)
+	return l.i32Shift(c, arm64.LSR, l.zero32)
 }
 
 func (l Lowerer) i32Shift(
@@ -690,27 +690,27 @@ func (l Lowerer) i32Cmp(
 	return true
 }
 
-// sign32 sign-extends the low 32 bits of v into a fresh 64-bit
+// l.sign32 sign-extends the low 32 bits of v into a fresh 64-bit
 // vreg so signed 64-bit compares and arithmetic produce correct results.
-func sign32(c *jit.Context, v asm.VReg) asm.VReg {
+func (Lowerer) sign32(c *jit.Context, v asm.VReg) asm.VReg {
 	out := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.Assembler.Emit(arm64.SXTW(out, v))
 	return out
 }
 
-// zero32 masks v down to its low 32 bits in a fresh 64-bit vreg,
+// l.zero32 masks v down to its low 32 bits in a fresh 64-bit vreg,
 // dropping the tag bits so the result can feed into shifts or unsigned
 // 64-bit compares without contamination.
-func zero32(c *jit.Context, v asm.VReg) asm.VReg {
+func (Lowerer) zero32(c *jit.Context, v asm.VReg) asm.VReg {
 	out := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.Assembler.Emit(arm64.ANDI(out, v, maskI32))
 	return out
 }
 
-// sign64 sign-extends bit 48 of v's value lane into bits 49..63.
+// l.sign64 sign-extends bit 48 of v's value lane into bits 49..63.
 // LSL by 15 pushes bit 48 to bit 63; ASR by 15 then drags the sign back
 // down so the full 64-bit register holds the i64 in two's complement.
-func sign64(c *jit.Context, v asm.VReg) asm.VReg {
+func (Lowerer) sign64(c *jit.Context, v asm.VReg) asm.VReg {
 	tmp := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.Assembler.Emit(arm64.LSLI(tmp, v, signI64))
 	out := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -718,10 +718,10 @@ func sign64(c *jit.Context, v asm.VReg) asm.VReg {
 	return out
 }
 
-// zero64 masks v down to its 49-bit value lane in a fresh 64-bit
+// l.zero64 masks v down to its 49-bit value lane in a fresh 64-bit
 // vreg, dropping the tag bits so the result can feed into shifts or
 // unsigned 64-bit compares without contamination.
-func zero64(c *jit.Context, v asm.VReg) asm.VReg {
+func (Lowerer) zero64(c *jit.Context, v asm.VReg) asm.VReg {
 	out := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.Assembler.Emit(arm64.ANDI(out, v, maskI64))
 	return out
@@ -766,7 +766,7 @@ func (l Lowerer) i64Eqz(c *jit.Context) bool {
 	}
 	a := c.Stack[len(c.Stack)-1]
 
-	val := zero64(c, a)
+	val := l.zero64(c, a)
 	c.Assembler.Emit(arm64.CMPI(val, 0))
 	flag := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.Assembler.Emit(arm64.CSET(flag, arm64.CondEQ))
@@ -790,7 +790,7 @@ func (l Lowerer) i64ShrS(c *jit.Context) bool {
 	shift := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.Assembler.Emit(arm64.ANDI(shift, b, 0x3F))
 
-	val := sign64(c, a)
+	val := l.sign64(c, a)
 	raw := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.Assembler.Emit(arm64.ASR(raw, val, shift))
 
@@ -879,7 +879,7 @@ func (l Lowerer) localTee(c *jit.Context) bool {
 
 // globalTee stores the stack top to globals[idx] and leaves it on the stack.
 func (l Lowerer) globalTee(c *jit.Context) bool {
-	idx, width, ok := global(c)
+	idx, width, ok := l.global(c)
 	if !ok {
 		return false
 	}
@@ -906,7 +906,7 @@ func (l Lowerer) i32ToI64S(c *jit.Context) bool {
 	}
 	a := c.Stack[len(c.Stack)-1]
 	// Sign-extend the low 32 bits (i32 value lane) to 64 bits.
-	ext := sign32(c, a)
+	ext := l.sign32(c, a)
 	boxed := l.boxI64(c, ext)
 	c.Stack[len(c.Stack)-1] = boxed
 	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
@@ -921,7 +921,7 @@ func (l Lowerer) i32ToI64U(c *jit.Context) bool {
 	}
 	a := c.Stack[len(c.Stack)-1]
 	// Zero-extend: mask to lower 32 bits (unsigned i32).
-	ext := zero32(c, a)
+	ext := l.zero32(c, a)
 	boxed := l.boxI64(c, ext)
 	c.Stack[len(c.Stack)-1] = boxed
 	c.IP += instr.Instruction(c.Code[c.IP:]).Width()
@@ -1001,7 +1001,7 @@ func (l Lowerer) call(c *jit.Context) bool {
 
 	// BL/BLR clobbers X30. Save LR so this native entry can return to its
 	// caller after the callee returns.
-	pushLR(c)
+	l.pushLR(c)
 	if plan.self && c.Whole {
 		c.Assembler.Emit(arm64.BLLabel(c.Entry))
 	} else {
@@ -1011,7 +1011,7 @@ func (l Lowerer) call(c *jit.Context) bool {
 		c.Assembler.Emit(arm64.LDR(vEntry, vSlotAddr, 0))
 		c.Assembler.Emit(arm64.BLR(vEntry))
 	}
-	popLR(c)
+	l.popLR(c)
 
 	// Restore X12 to caller_bp.
 	vBPrestore := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -1520,7 +1520,7 @@ func (Lowerer) need(c *jit.Context, n int) bool {
 	return true
 }
 
-func global(c *jit.Context) (int, int, bool) {
+func (Lowerer) global(c *jit.Context) (int, int, bool) {
 	width := instr.Instruction(c.Code[c.IP:]).Width()
 	idx := int(uint16(c.Code[c.IP+1]) | uint16(c.Code[c.IP+2])<<8)
 	if idx >= len(c.Snap.Globals) {

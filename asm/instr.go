@@ -31,7 +31,7 @@ func (i Instruction) Def() (VReg, bool) {
 // references in any operand slot. Order is Dst-base, Src1, Src2, Src3.
 func (i Instruction) Uses() []VReg {
 	var regs []VReg
-	if base, ok := memBase(i.Dst); ok {
+	if base, ok := i.memBase(i.Dst); ok {
 		regs = append(regs, base)
 	}
 	for _, op := range []Operand{i.Src1, i.Src2, i.Src3} {
@@ -39,7 +39,7 @@ func (i Instruction) Uses() []VReg {
 			regs = append(regs, v.Reg)
 			continue
 		}
-		if base, ok := memBase(op); ok {
+		if base, ok := i.memBase(op); ok {
 			regs = append(regs, base)
 		}
 	}
@@ -59,10 +59,10 @@ func (i Instruction) String() string {
 	}
 }
 
-// memBase returns the base vreg of a MemOperand, if op is a memory
-// reference whose base is a virtual register. Used by scan-time analysis
-// to track every vreg an instruction touches.
-func memBase(op Operand) (VReg, bool) {
+// memBase returns the base vreg of op when op is a MemOperand whose base
+// is a virtual register. Used by Uses to track every vreg an instruction
+// touches.
+func (Instruction) memBase(op Operand) (VReg, bool) {
 	mem, ok := op.(MemOperand)
 	if !ok {
 		return VReg{}, false

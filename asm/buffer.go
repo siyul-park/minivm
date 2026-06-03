@@ -3,7 +3,6 @@ package asm
 import (
 	"errors"
 	"fmt"
-	"sync"
 	"unsafe"
 )
 
@@ -12,10 +11,7 @@ import (
 // entry pointer via Ptr. Concurrent reads are safe; writes serialize on an
 // internal lock and remap pages to RW for the duration of the write.
 type Buffer struct {
-	mu     sync.Mutex
-	old    []memory // sealed regions kept alive; live Callable values hold pointers into them
-	mem    memory
-	offset int
+	region
 	sealed bool
 }
 
@@ -28,7 +24,7 @@ func NewBuffer(size int) (*Buffer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Buffer{mem: mem}, nil
+	return &Buffer{region: region{mem: mem}}, nil
 }
 
 // Write appends bytes to the buffer and returns a pointer to the start of
@@ -45,9 +41,11 @@ func (b *Buffer) Write(code []byte) (unsafe.Pointer, error) {
 
 	end := b.offset + len(code)
 	if end > len(b.mem) {
-		if err := b.grow(end); err != nil {
+		// Seal the outgoing region before retention so pointers callers
+		// stamped into it stay executable.
+		if err := b.grow(end, memory.executable); err != nil {
 			_ = b.seal()
-			return nil, err
+			return nil, fmt.Errorf("%w: grow to %d", ErrBufferFull, end)
 		}
 		end = b.offset + len(code)
 	}
@@ -64,15 +62,7 @@ func (b *Buffer) Write(code []byte) (unsafe.Pointer, error) {
 
 // Free releases all underlying mmap regions.
 func (b *Buffer) Free() error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, r := range b.old {
-		if err := r.free(); err != nil {
-			return err
-		}
-	}
-	b.old = nil
-	return b.mem.free()
+	return b.region.free()
 }
 
 // writeAt overwrites the bytes starting at ptr with code. ptr must point
@@ -139,30 +129,5 @@ func (b *Buffer) seal() error {
 		return err
 	}
 	b.sealed = true
-	return nil
-}
-
-func (b *Buffer) grow(need int) error {
-	size := len(b.mem) * 2
-	if size < need {
-		size = need
-	}
-
-	mem, err := allocMemory(size)
-	if err != nil {
-		return fmt.Errorf("%w: grow to %d", ErrBufferFull, size)
-	}
-
-	// Seal current region before archiving so it stays executable.
-	// b.sealed is false here (Write calls unseal before grow).
-	if err := b.mem.executable(); err != nil {
-		_ = mem.free()
-		return err
-	}
-	// Retire without freeing: live Callable values hold pointers into it.
-	b.old = append(b.old, b.mem)
-	b.mem = mem
-	b.offset = 0
-	// b.sealed stays false; new region is writable from allocMemory.
 	return nil
 }

@@ -1,7 +1,6 @@
 package asm
 
 import (
-	"sync"
 	"sync/atomic"
 	"unsafe"
 )
@@ -13,10 +12,7 @@ import (
 // All slots are pointer-sized. Concurrent Set calls are safe; allocation
 // serializes on an internal lock.
 type Data struct {
-	mu     sync.Mutex
-	old    []memory // retired regions kept alive; compiled code holds raw pointers into them
-	mem    memory
-	offset int
+	region
 }
 
 // NewData allocates a fresh writable data region of the given capacity,
@@ -26,7 +22,7 @@ func NewData(size int) (*Data, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Data{mem: mem}, nil
+	return &Data{region: region{mem: mem}}, nil
 }
 
 // Alloc reserves one pointer-sized slot and returns its address. The slot's
@@ -39,7 +35,7 @@ func (d *Data) Alloc() (unsafe.Pointer, error) {
 	const slotSize = int(unsafe.Sizeof(uintptr(0)))
 	end := d.offset + slotSize
 	if end > len(d.mem) {
-		if err := d.grow(end); err != nil {
+		if err := d.grow(end, nil); err != nil {
 			return nil, err
 		}
 		end = d.offset + slotSize
@@ -62,30 +58,5 @@ func (d *Data) Load(slot unsafe.Pointer) unsafe.Pointer {
 
 // Free releases all underlying mmap regions.
 func (d *Data) Free() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for _, r := range d.old {
-		if err := r.free(); err != nil {
-			return err
-		}
-	}
-	d.old = nil
-	return d.mem.free()
-}
-
-func (d *Data) grow(need int) error {
-	size := len(d.mem) * 2
-	if size < need {
-		size = need
-	}
-	mem, err := allocMemory(size)
-	if err != nil {
-		return err
-	}
-	// Retire current region without freeing: Alloc pointers baked into
-	// compiled native code still reference addresses inside it.
-	d.old = append(d.old, d.mem)
-	d.mem = mem
-	d.offset = 0
-	return nil
+	return d.region.free()
 }

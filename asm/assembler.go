@@ -5,6 +5,12 @@ import (
 	"fmt"
 )
 
+// Label identifies a position in the emitted instruction stream. Labels are
+// allocated via Assembler.Label and bound via Assembler.Bind. Cross-Code
+// references remain unresolved inside Code.Relocs until Link supplies their
+// target addresses.
+type Label int
+
 // Assembler emits target-architecture instructions into a single-shot
 // buffer. Allocate vregs with Reg, declare labels with Label/Bind, pin
 // vregs to specific pregs with Pin, append instructions with Emit, and
