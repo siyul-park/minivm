@@ -2,124 +2,128 @@ package asm
 
 import (
 	"errors"
+	"fmt"
 	"unsafe"
 )
 
+// Buffer is an mmap'd executable memory region. It manages its own W^X
+// transitions: callers append bytes via Write, then read back the resulting
+// entry pointer via Ptr. Concurrent reads are safe; writes serialize on an
+// internal lock and remap pages to RW for the duration of the write.
 type Buffer struct {
-	mem    Memory
-	offset int
+	region
 	sealed bool
 }
 
-type Chunk struct {
-	buf    *Buffer
-	offset int
-	size   int
-}
+var ErrBufferFull = errors.New("buffer full")
 
-var (
-	ErrBufferSealed = errors.New("buffer is sealed")
-)
-
+// NewBuffer allocates a fresh executable buffer with the given byte
+// capacity, rounded up to a page boundary.
 func NewBuffer(size int) (*Buffer, error) {
-	mem, err := Alloc(size)
+	mem, err := allocMemory(size)
 	if err != nil {
 		return nil, err
 	}
-	return &Buffer{mem: mem}, nil
+	return &Buffer{region: region{mem: mem}}, nil
 }
 
-func (b *Buffer) Append(code []byte) (*Chunk, error) {
-	if b.sealed {
-		return nil, ErrBufferSealed
+// Write appends bytes to the buffer and returns a pointer to the start of
+// the written region. The pointer is stable for the lifetime of the Buffer
+// (or until grow re-mmap's). The buffer is left sealed (executable) on
+// return.
+func (b *Buffer) Write(code []byte) (unsafe.Pointer, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if err := b.unseal(); err != nil {
+		return nil, err
 	}
 
 	end := b.offset + len(code)
 	if end > len(b.mem) {
-		if err := b.grow(end); err != nil {
-			return nil, err
+		// Seal the outgoing region before retention so pointers callers
+		// stamped into it stay executable.
+		if err := b.grow(end, memory.executable); err != nil {
+			_ = b.seal()
+			return nil, fmt.Errorf("%w: grow to %d", ErrBufferFull, end)
 		}
+		end = b.offset + len(code)
 	}
 
 	copy(b.mem[b.offset:end], code)
-
-	chunk := &Chunk{
-		buf:    b,
-		offset: b.offset,
-		size:   len(code),
-	}
-
+	ptr := unsafe.Pointer(&b.mem[b.offset])
 	b.offset = end
-	return chunk, nil
+
+	if err := b.seal(); err != nil {
+		return nil, err
+	}
+	return ptr, nil
 }
 
-func (b *Buffer) Seal() error {
-	if b.sealed {
-		return nil
-	}
-	if err := b.mem.Executable(); err != nil {
-		return err
-	}
-	b.sealed = true
-	return nil
+// Free releases all underlying mmap regions.
+func (b *Buffer) Free() error {
+	return b.region.free()
 }
 
-func (b *Buffer) Unseal() error {
+// writeAt overwrites the bytes starting at ptr with code. ptr must point
+// inside any region managed by this buffer (current or previously grown).
+// Used by Link to patch relocations.
+func (b *Buffer) writeAt(ptr unsafe.Pointer, code []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	mem, off, current, ok := b.locate(ptr, len(code))
+	if !ok {
+		return 0, fmt.Errorf("%w: writeAt out of range", ErrInvalidArgs)
+	}
+
+	open, close := mem.writable, mem.executable
+	if current {
+		open, close = b.unseal, b.seal
+	}
+	if err := open(); err != nil {
+		return 0, err
+	}
+	copy(mem[off:off+len(code)], code)
+	if err := close(); err != nil {
+		return 0, err
+	}
+	return len(code), nil
+}
+
+// locate finds the region containing ptr's n-byte range. current is true
+// when the hit is the active mapping (callers must round-trip seal/unseal
+// to keep b.sealed consistent).
+func (b *Buffer) locate(ptr unsafe.Pointer, n int) (memory, int, bool, bool) {
+	if off, ok := b.mem.within(ptr, n); ok {
+		return b.mem, off, true, true
+	}
+	for _, r := range b.old {
+		if off, ok := r.within(ptr, n); ok {
+			return r, off, false, true
+		}
+	}
+	return nil, 0, false, false
+}
+
+func (b *Buffer) unseal() error {
 	if !b.sealed {
 		return nil
 	}
-	if err := b.mem.Writable(); err != nil {
+	if err := b.mem.writable(); err != nil {
 		return err
 	}
 	b.sealed = false
 	return nil
 }
 
-func (b *Buffer) Free() error {
-	return b.mem.Free()
-}
-
-func (b *Buffer) Sealed() bool {
-	return b.sealed
-}
-
-func (c *Chunk) Ptr() unsafe.Pointer {
-	return unsafe.Pointer(&c.buf.mem[c.offset])
-}
-
-func (c *Chunk) Size() int {
-	return c.size
-}
-
-// Slice returns a sub-Chunk starting at the given byte offset.
-func (c *Chunk) Slice(offset int) (*Chunk, error) {
-	if offset < 0 || offset > c.size {
-		return nil, ErrInvalidArgs
+func (b *Buffer) seal() error {
+	if b.sealed {
+		return nil
 	}
-	return &Chunk{
-		buf:    c.buf,
-		offset: c.offset + offset,
-		size:   c.size - offset,
-	}, nil
-}
-
-func (b *Buffer) grow(s int) error {
-	size := len(b.mem) * 2
-	if size < s {
-		size = s
-	}
-
-	mem, err := Alloc(size)
-	if err != nil {
+	if err := b.mem.executable(); err != nil {
 		return err
 	}
-
-	copy(mem, b.mem[:b.offset])
-
-	if err := b.mem.Free(); err != nil {
-		return err
-	}
-
-	b.mem = mem
+	b.sealed = true
 	return nil
 }

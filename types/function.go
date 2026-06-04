@@ -110,6 +110,29 @@ func (f *Function) String() string {
 	return sb.String()
 }
 
+// LocalKinds returns the kind of each stack slot addressable by LOCAL_*
+// opcodes: first the function's params (in order), then its declared
+// locals. Returns nil when the function has neither.
+func (f *Function) LocalKinds() []Kind {
+	if f.Typ == nil {
+		return Kinds(f.Locals)
+	}
+	if len(f.Typ.Params) == 0 {
+		return Kinds(f.Locals)
+	}
+	if len(f.Locals) == 0 {
+		return Kinds(f.Typ.Params)
+	}
+	out := make([]Kind, 0, len(f.Typ.Params)+len(f.Locals))
+	for _, t := range f.Typ.Params {
+		out = append(out, t.Kind())
+	}
+	for _, t := range f.Locals {
+		out = append(out, t.Kind())
+	}
+	return out
+}
+
 func (t *FunctionType) Kind() Kind {
 	return KindRef
 }

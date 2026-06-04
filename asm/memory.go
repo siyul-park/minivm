@@ -4,9 +4,61 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"syscall"
 	"unsafe"
 )
+
+type memory []byte
+
+// region is a growable mmap-backed area. Older mappings are retained so
+// pointers stamped into them by callers (e.g. linked code, slot tables)
+// remain valid. Concurrent access serializes on mu.
+type region struct {
+	old    []memory
+	mem    memory
+	offset int
+
+	mu sync.Mutex
+}
+
+// free releases the current and archived mappings.
+func (r *region) free() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, m := range r.old {
+		if err := m.free(); err != nil {
+			return err
+		}
+	}
+	r.old = nil
+	return r.mem.free()
+}
+
+// grow archives the current mapping and installs a freshly mapped region at
+// least need bytes long. archive, when non-nil, runs on the outgoing region
+// before it is retained (e.g. to flip code back to executable). The caller
+// must hold r.mu.
+func (r *region) grow(need int, archive func(memory) error) error {
+	size := len(r.mem) * 2
+	if size < need {
+		size = need
+	}
+	mem, err := allocMemory(size)
+	if err != nil {
+		return err
+	}
+	if archive != nil {
+		if err := archive(r.mem); err != nil {
+			_ = mem.free()
+			return err
+		}
+	}
+	r.old = append(r.old, r.mem)
+	r.mem = mem
+	r.offset = 0
+	return nil
+}
 
 var (
 	ErrInvalidSize    = errors.New("invalid size")
@@ -15,9 +67,7 @@ var (
 	ErrMunmapFailed   = errors.New("munmap failed")
 )
 
-type Memory []byte
-
-func Alloc(size int) (Memory, error) {
+func allocMemory(size int) (memory, error) {
 	if size <= 0 {
 		return nil, fmt.Errorf("%w: %d", ErrInvalidSize, size)
 	}
@@ -36,7 +86,7 @@ func Alloc(size int) (Memory, error) {
 	return data, nil
 }
 
-func (m Memory) Executable() error {
+func (m memory) executable() error {
 	if len(m) == 0 {
 		return nil
 	}
@@ -53,7 +103,7 @@ func (m Memory) Executable() error {
 	return nil
 }
 
-func (m Memory) Writable() error {
+func (m memory) writable() error {
 	if len(m) == 0 {
 		return nil
 	}
@@ -69,14 +119,28 @@ func (m Memory) Writable() error {
 	return nil
 }
 
-func (m Memory) Ptr() unsafe.Pointer {
+func (m memory) ptr() unsafe.Pointer {
 	if len(m) == 0 {
 		return nil
 	}
 	return unsafe.Pointer(&m[0])
 }
 
-func (m Memory) Free() error {
+// within reports whether ptr's n-byte range lies inside m. The returned
+// offset is the byte index of ptr from the start of m.
+func (m memory) within(ptr unsafe.Pointer, n int) (int, bool) {
+	if len(m) == 0 {
+		return 0, false
+	}
+	base := uintptr(unsafe.Pointer(&m[0]))
+	off := uintptr(ptr) - base
+	if off > uintptr(len(m)) || off+uintptr(n) > uintptr(len(m)) {
+		return 0, false
+	}
+	return int(off), true
+}
+
+func (m memory) free() error {
 	if len(m) == 0 {
 		return nil
 	}

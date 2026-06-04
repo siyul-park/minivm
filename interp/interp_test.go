@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/jit"
+	_ "github.com/siyul-park/minivm/jit/amd64"
+	_ "github.com/siyul-park/minivm/jit/arm64"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -2441,6 +2444,13 @@ func (m *recordingMarshaler) Unmarshal(_ *Interpreter, _ types.Value, dst any) e
 	return nil
 }
 
+func requireJIT(t *testing.T) {
+	t.Helper()
+	if jit.Active() == nil {
+		t.Skip("jit is not available on this architecture")
+	}
+}
+
 func TestInterpreter_Context(t *testing.T) {
 	t.Run("propagates value", func(t *testing.T) {
 		i := New(program.New(nil))
@@ -2753,44 +2763,35 @@ func TestInterpreter_Reset(t *testing.T) {
 }
 
 func TestInterpreter_Run(t *testing.T) {
-	t.Run("default", func(t *testing.T) {
-		for _, tt := range tests {
-			tt := tt
-			t.Run(tt.program.String(), func(t *testing.T) {
-				i := New(tt.program)
-				defer i.Close()
-				if tt.before != nil {
-					tt.before(t, i)
-				}
-				err := i.Run(context.Background())
-				require.NoError(t, err)
-				for _, val := range tt.values {
-					v, err := i.Pop()
+	modes := []struct {
+		name string
+		opts []func(*option)
+	}{
+		{name: "default"},
+		{name: "jit", opts: []func(*option){WithTick(1), WithCutoff(1), WithThreshold(1)}},
+	}
+	for _, mode := range modes {
+		mode := mode
+		t.Run(mode.name, func(t *testing.T) {
+			for _, tt := range tests {
+				tt := tt
+				t.Run(tt.program.String(), func(t *testing.T) {
+					i := New(tt.program, mode.opts...)
+					defer i.Close()
+					if tt.before != nil {
+						tt.before(t, i)
+					}
+					err := i.Run(context.Background())
 					require.NoError(t, err)
-					require.Equal(t, val, v)
-				}
-			})
-		}
-	})
-	t.Run("jit", func(t *testing.T) {
-		for _, tt := range tests {
-			tt := tt
-			t.Run(tt.program.String(), func(t *testing.T) {
-				i := New(tt.program, WithTick(1), WithCutoff(1), WithThreshold(1))
-				defer i.Close()
-				if tt.before != nil {
-					tt.before(t, i)
-				}
-				err := i.Run(context.Background())
-				require.NoError(t, err)
-				for _, val := range tt.values {
-					v, err := i.Pop()
-					require.NoError(t, err)
-					require.Equal(t, val, v)
-				}
-			})
-		}
-	})
+					for _, val := range tt.values {
+						v, err := i.Pop()
+						require.NoError(t, err)
+						require.Equal(t, val, v)
+					}
+				})
+			}
+		})
+	}
 
 	t.Run("nested return restores caller frame for locals", func(t *testing.T) {
 		callee := types.NewFunctionBuilder(&types.FunctionType{
@@ -3091,9 +3092,7 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 	})
 
 	t.Run("zero attempts jit on first sample", func(t *testing.T) {
-		if arch == nil {
-			t.Skip("jit is not available on this architecture")
-		}
+		requireJIT(t)
 		p := prof.New()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
@@ -3130,9 +3129,7 @@ func TestInterpreter_WithProfile(t *testing.T) {
 	})
 
 	t.Run("records jit counters", func(t *testing.T) {
-		if arch == nil {
-			t.Skip("jit is not available on this architecture")
-		}
+		requireJIT(t)
 		p := prof.New()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
@@ -3366,10 +3363,30 @@ func TestInterpreter_WithDebugger(t *testing.T) {
 }
 
 func TestInterpreter_JIT(t *testing.T) {
+	t.Run("passes stack inputs as segment args", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_ADD),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.I32_ADD))
+		require.NoError(t, i.Push(types.I32(7)))
+		require.NoError(t, i.Push(types.I32(5)))
+		require.NoError(t, i.jit(0))
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(12), v)
+
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Attempts)
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
 	t.Run("compiles numeric globals", func(t *testing.T) {
-		if arch == nil {
-			t.Skip("jit is not available on this architecture")
-		}
+		requireJIT(t)
 		p := prof.New()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 9),
@@ -3390,10 +3407,140 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NotZero(t, jit.Links)
 	})
 
+	t.Run("does not install entry on root frame", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 42),
+			instr.New(instr.RETURN),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.I32_CONST))
+
+		require.NoError(t, i.jit(0))
+		require.ErrorIs(t, i.Run(context.Background()), ErrFrameUnderflow)
+	})
+
+	t.Run("keeps return in threaded frame teardown for partial segments", func(t *testing.T) {
+		requireJIT(t)
+		fn := types.NewFunctionBuilder(nil).WithReturns(types.TypeI32).Emit(
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.REF_NEW),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 42),
+			instr.New(instr.RETURN),
+		).Build()
+		returnIP := len(instr.Marshal([]instr.Instruction{
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.REF_NEW),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 42),
+		}))
+		p := prof.New()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fn),
+		), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		addr := i.constants[0].Ref()
+		p.Add(addr, returnIP, byte(instr.RETURN))
+
+		require.NoError(t, i.jit(addr))
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 1, i.FP())
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(42), value)
+		require.Zero(t, p.Snapshot().JIT.Emits)
+	})
+
+	t.Run("updates entry slot for direct call", func(t *testing.T) {
+		requireJIT(t)
+		callee := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_MUL),
+			instr.New(instr.RETURN),
+		).Build()
+		caller := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.RETURN),
+		).Build()
+		p := prof.New()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 21),
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(callee, caller),
+		), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+
+		require.NoError(t, i.jit(i.constants[0].Ref()))
+		require.NoError(t, i.jit(i.constants[1].Ref()))
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 1, i.FP())
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(42), value)
+	})
+
+	t.Run("compiles recursive fibonacci as entry", func(t *testing.T) {
+		requireJIT(t)
+		fib := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_LT_S),
+			instr.New(instr.BR_IF, 26),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.RETURN),
+		).Build()
+		p := prof.New()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 20),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fib),
+		), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+
+		addr := i.constants[0].Ref()
+		require.NoError(t, i.jit(addr))
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Emits)
+		require.Equal(t, uint64(1), jit.Links)
+
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(6765), value)
+	})
+
 	t.Run("skips ref globals", func(t *testing.T) {
-		if arch == nil {
-			t.Skip("jit is not available on this architecture")
-		}
+		requireJIT(t)
 		p := prof.New()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.GLOBAL_GET, 0),
@@ -3413,9 +3560,7 @@ func TestInterpreter_JIT(t *testing.T) {
 	})
 
 	t.Run("executes compiled prefix before unsupported opcode", func(t *testing.T) {
-		if arch == nil {
-			t.Skip("jit is not available on this architecture")
-		}
+		requireJIT(t)
 		p := prof.New()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 41),
@@ -3439,9 +3584,7 @@ func TestInterpreter_JIT(t *testing.T) {
 	})
 
 	t.Run("links branches", func(t *testing.T) {
-		if arch == nil {
-			t.Skip("jit is not available on this architecture")
-		}
+		requireJIT(t)
 
 		loop := types.NewFunctionBuilder(nil).WithLocals(types.TypeI32).Emit(
 			instr.New(instr.I32_CONST, 3),
@@ -3592,9 +3735,7 @@ func TestInterpreter_JIT(t *testing.T) {
 	})
 
 	t.Run("merges fallthrough block with internal entry", func(t *testing.T) {
-		if arch == nil {
-			t.Skip("jit is not available on this architecture")
-		}
+		requireJIT(t)
 
 		code := []instr.Instruction{
 			instr.New(instr.I32_CONST, 40),
@@ -3615,8 +3756,8 @@ func TestInterpreter_JIT(t *testing.T) {
 
 		require.NoError(t, i.jit(0))
 		jit := p.Snapshot().JIT
-		require.Equal(t, uint64(3), jit.Emits)
-		require.Equal(t, uint64(4), jit.Links)
+		require.Equal(t, uint64(2), jit.Emits)
+		require.Equal(t, uint64(3), jit.Links)
 
 		i.fr.ip = 5
 		require.NoError(t, i.Push(types.I32(40)))
@@ -3633,9 +3774,7 @@ func TestInterpreter_JIT(t *testing.T) {
 	})
 
 	t.Run("keeps internal entry with cold predecessor", func(t *testing.T) {
-		if arch == nil {
-			t.Skip("jit is not available on this architecture")
-		}
+		requireJIT(t)
 
 		code := []instr.Instruction{
 			instr.New(instr.I32_CONST, 40),
@@ -3652,7 +3791,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NoError(t, i.jit(0))
 		jit := p.Snapshot().JIT
 		require.Equal(t, uint64(1), jit.Emits)
-		require.Equal(t, uint64(2), jit.Links)
+		require.Equal(t, uint64(1), jit.Links)
 
 		require.NoError(t, i.Run(context.Background()))
 		value, err := i.Pop()
@@ -3661,9 +3800,7 @@ func TestInterpreter_JIT(t *testing.T) {
 	})
 
 	t.Run("splits trace when internal entry rejects", func(t *testing.T) {
-		if arch == nil {
-			t.Skip("jit is not available on this architecture")
-		}
+		requireJIT(t)
 		p := prof.New()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 42),
@@ -3690,13 +3827,11 @@ func TestInterpreter_JIT(t *testing.T) {
 	})
 
 	t.Run("compiles forced successor after merged prefix rejects", func(t *testing.T) {
-		if arch == nil {
-			t.Skip("jit is not available on this architecture")
-		}
+		requireJIT(t)
 		p := prof.New()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.NOP),
-			instr.New(instr.REF_NULL),
+			instr.New(instr.REF_NEW),
 			instr.New(instr.NOP),
 			instr.New(instr.BR, 3),
 			instr.New(instr.BR, uint64(uint16(1<<16-7))),
@@ -3712,9 +3847,7 @@ func TestInterpreter_JIT(t *testing.T) {
 	})
 
 	t.Run("skips cold segments", func(t *testing.T) {
-		if arch == nil {
-			t.Skip("jit is not available on this architecture")
-		}
+		requireJIT(t)
 		p := prof.New()
 		p.Add(0, 0, byte(instr.NOP))
 		i := New(program.New([]instr.Instruction{

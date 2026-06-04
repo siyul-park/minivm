@@ -9,6 +9,7 @@ import (
 
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/jit"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -19,51 +20,61 @@ type Interpreter struct {
 	prof      *prof.Stats
 	hook      func(*Interpreter) error
 	marshaler Marshaler
-	buffer    *asm.Buffer
-	instrs    [][]byte
-	code      [][]func(*Interpreter)
-	frames    []frame
+
+	compiler *jit.Compiler
+	jitted   map[int]bool
+
 	types     []types.Type
 	constants []types.Boxed
 	globals   []types.Boxed
-	interned  map[string]types.Ref
-	stack     []types.Boxed
-	roots     []types.Boxed
-	heap      []types.Value
-	free      []int
-	rc        []int
-	fr        *frame
-	fp        int
-	sp        int
-	tick      int
+	instrs    [][]byte
+	code      [][]func(*Interpreter)
+
+	frames   []frame
+	fr       *frame
+	stack    []types.Boxed
+	roots    []types.Boxed
+	heap     []types.Value
+	interned map[string]types.Ref
+	free     []int
+	rc       []int
+
+	fp int
+	sp int
+
 	threshold int64
-	fuel      int64
 	cutoff    int
+	tick      int
+	fuel      int64
 }
 
 type frame struct {
-	code    []func(*Interpreter)
-	upvals  []types.Boxed
 	addr    int
-	ref     int
-	ip      int
-	bp      int
-	release bool
 	returns int
+
+	code   []func(*Interpreter)
+	upvals []types.Boxed
+
+	ref     int
+	release bool
+
+	ip int
+	bp int
 }
 
 type option struct {
 	profile   *prof.Stats
 	hook      func(*Interpreter) error
 	marshaler Marshaler
-	frame     int
-	globals   int
-	stack     int
-	heap      int
-	tick      int
 	threshold int
-	fuel      uint64
 	cutoff    int
+
+	frame   int
+	globals int
+	stack   int
+	heap    int
+	tick    int
+	fuel    uint64
 }
 
 var (
@@ -170,23 +181,21 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		prof:      p,
 		hook:      opt.hook,
 		marshaler: m,
-		instrs:    make([][]byte, len(prog.Constants)+1),
-		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
-		frames:    make([]frame, opt.frame),
+		threshold: threshold,
+		cutoff:    opt.cutoff,
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
 		globals:   make([]types.Boxed, 0, opt.globals),
-		interned:  make(map[string]types.Ref),
+		instrs:    make([][]byte, len(prog.Constants)+1),
+		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
+		frames:    make([]frame, opt.frame),
 		stack:     make([]types.Boxed, opt.stack),
 		heap:      make([]types.Value, 0, opt.heap),
+		interned:  make(map[string]types.Ref),
 		free:      make([]int, 0, opt.heap),
 		rc:        make([]int, 0, opt.heap),
-		fp:        0,
-		sp:        0,
 		tick:      opt.tick,
-		threshold: threshold,
 		fuel:      fuel,
-		cutoff:    opt.cutoff,
 	}
 
 	i.alloc(types.Null)
@@ -223,20 +232,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	i.code[0] = c.Compile(prog.Code, nil)
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
-			var locals []types.Kind
-			if fn.Typ != nil {
-				if size := len(fn.Typ.Params) + len(fn.Locals); size != 0 {
-					locals = make([]types.Kind, 0, size)
-					for _, typ := range fn.Typ.Params {
-						locals = append(locals, typ.Kind())
-					}
-					for _, typ := range fn.Locals {
-						locals = append(locals, typ.Kind())
-					}
-				}
-			}
 			i.instrs[j+1] = fn.Code
-			i.code[j+1] = c.Compile(fn.Code, locals)
+			i.code[j+1] = c.Compile(fn.Code, fn.LocalKinds())
 		}
 	}
 
@@ -475,11 +472,11 @@ func (i *Interpreter) Len() int {
 
 func (i *Interpreter) Close() error {
 	i.Reset()
-	if i.buffer != nil {
-		if err := i.buffer.Free(); err != nil {
+	if i.compiler != nil {
+		if err := i.compiler.Close(); err != nil {
 			return err
 		}
-		i.buffer = nil
+		i.compiler = nil
 	}
 	return nil
 }
@@ -518,33 +515,196 @@ func (i *Interpreter) Reset() {
 }
 
 func (i *Interpreter) jit(addr int) error {
-	if arch == nil {
+	if jit.Active() == nil {
 		return nil
 	}
+	if err := i.ensure(); err != nil {
+		return err
+	}
 	i.prof.JITAttempt()
-	if i.buffer == nil {
-		buffer, err := asm.NewBuffer(256)
+
+	fn, ok := i.function(addr)
+	if !ok {
+		return nil
+	}
+	mod, err := i.compiler.Compile(fn, addr, i.snapshot(addr, fn))
+	if err != nil {
+		i.prof.JITError()
+		return err
+	}
+	if mod == nil {
+		return nil
+	}
+	i.install(mod, addr)
+	return nil
+}
+
+// ensure lazily constructs the JIT compiler and warms its slot
+// table. Any failure here is recorded as a JIT error and propagated.
+func (i *Interpreter) ensure() error {
+	if i.compiler == nil {
+		compiler, err := jit.New(jit.WithCutoff(i.cutoff))
 		if err != nil {
 			i.prof.JITError()
 			return err
 		}
-		i.buffer = buffer
+		i.compiler = compiler
 	}
-	c := &jitCompiler{
-		assembler: asm.NewAssembler(arch, i.buffer),
-		profile:   i.prof,
-		addr:      addr,
-		constants: i.constants,
-		globals:   i.globals,
-		heap:      i.heap,
-		cutoff:    i.cutoff,
-	}
-	for j, fn := range c.Compile(i.instrs[addr]) {
-		if fn != nil {
-			i.code[addr][j] = fn
-		}
+	if _, err := i.compiler.Slots(); err != nil {
+		i.prof.JITError()
+		return err
 	}
 	return nil
+}
+
+// install accounts a successful Compile and rewires the dispatch table:
+// the whole-function Entry replaces the first opcode handler, every
+// emitted segment replaces its corresponding handler.
+func (i *Interpreter) install(mod *jit.Module, addr int) {
+	for _, n := range mod.Bytes {
+		i.prof.JITEmit(n)
+	}
+	for range mod.Links {
+		i.prof.JITLink()
+	}
+	for range mod.Skips {
+		i.prof.JITSkip()
+	}
+	if mod.Entry != nil && addr > 0 && addr < len(i.code) && len(i.code[addr]) > 0 {
+		i.code[addr][0] = i.entry(mod.Entry)
+		if i.jitted == nil {
+			i.jitted = make(map[int]bool)
+		}
+		i.jitted[addr] = true
+	}
+	for ip, callable := range mod.Segments {
+		if ip < 0 || ip >= len(i.code[addr]) || callable == nil {
+			continue
+		}
+		i.code[addr][ip] = i.segment(callable, mod.Stacks[ip])
+	}
+}
+
+// snapshot bundles the consumer-side tables the JIT inspects at compile
+// time. Locals concatenates the function's params and declared locals so
+// LOCAL_* lowering can check kinds by raw index.
+func (i *Interpreter) snapshot(addr int, fn *types.Function) jit.Snapshot {
+	var locals []types.Kind
+	if fn != nil {
+		locals = fn.LocalKinds()
+	}
+	// Collect any function refs present in constants so the CALL lowerer can
+	// look up param/return types at compile time.
+	var functions map[int]*types.Function
+	for _, v := range i.constants {
+		if v.Kind() != types.KindRef {
+			continue
+		}
+		a := v.Ref()
+		if !i.jitted[a] && a != addr {
+			continue
+		}
+		fn, ok := i.function(a)
+		if !ok {
+			continue
+		}
+		if functions == nil {
+			functions = make(map[int]*types.Function)
+		}
+		functions[a] = fn
+	}
+	return jit.Snapshot{
+		Constants: i.constants,
+		Globals:   i.globals,
+		Locals:    locals,
+		Functions: functions,
+		Hot:       i.hot(addr),
+	}
+}
+
+func (i *Interpreter) hot(addr int) []int {
+	fn := i.prof.Func(addr)
+	if len(fn.IPs) == 0 {
+		return nil
+	}
+	ips := make([]int, 0, len(fn.IPs))
+	for _, ip := range fn.IPs {
+		ips = append(ips, ip.Offset)
+	}
+	return ips
+}
+
+// function returns the *types.Function at addr in the heap, or false if
+// addr does not point at a function.
+func (i *Interpreter) function(addr int) (*types.Function, bool) {
+	if addr == 0 {
+		return &types.Function{Code: i.instrs[0]}, true
+	}
+	if addr <= 0 || addr >= len(i.heap) {
+		return nil, false
+	}
+	fn, ok := i.heap[addr].(*types.Function)
+	return fn, ok
+}
+
+// segment wraps a native segment Callable in a threaded-style closure. The
+// closure marshals VM stack values as Callable args via jit.Invoke and
+// appends Callable returns back to the interpreter stack.
+func (i *Interpreter) segment(callable asm.Callable, argc int) func(*Interpreter) {
+	args := make([]asm.Value, argc)
+	return func(i *Interpreter) {
+		if i.sp < argc {
+			panic(ErrStackUnderflow)
+		}
+		base := i.sp - argc
+		for n := range args {
+			args[n] = jit.Arg(i.stack[base+n])
+		}
+		out, err := jit.Invoke(callable, jit.Call{
+			Stack: i.stack, Globals: i.globals, BP: i.fr.bp,
+		}, args)
+		if err != nil {
+			panic(err)
+		}
+		i.sp = base
+		if i.sp+len(out.Returns) > len(i.stack) {
+			panic(ErrStackOverflow)
+		}
+		for _, ret := range out.Returns {
+			i.stack[i.sp] = jit.Ret(ret)
+			i.sp++
+		}
+		i.fr.ip = out.NextIP
+	}
+}
+
+// entry wraps a whole-function Entry Callable. Unlike segment, the CALL
+// handler has already pushed a frame and set i.fr before this closure runs.
+// The native Entry reads params from stack scratch slots, then this closure
+// performs the frame teardown that RETURN would normally do in the threaded
+// interpreter.
+func (i *Interpreter) entry(callable asm.Callable) func(*Interpreter) {
+	return func(i *Interpreter) {
+		out, err := jit.Invoke(callable, jit.Call{
+			Stack: i.stack, Globals: i.globals, BP: i.fr.bp,
+		}, nil)
+		if err != nil {
+			panic(err)
+		}
+
+		// Perform the frame teardown that the threaded RETURN handler does.
+		f := i.fr
+		for k, ret := range out.Returns {
+			i.stack[f.bp+k] = jit.Ret(ret)
+		}
+		i.sp = f.bp + f.returns
+		if f.release {
+			i.release(f.ref)
+		}
+		f.code = nil
+		i.fp--
+		i.fr = &i.frames[i.fp-1]
+	}
 }
 
 func (i *Interpreter) error(r any) error {

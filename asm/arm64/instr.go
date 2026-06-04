@@ -570,13 +570,17 @@ func BLR(reg asm.Reg) asm.Instruction { return newReg1(OpBLR, reg) }
 func RET() asm.Instruction            { return newInst(OpRET, nil) }
 
 // Resolved immediately if the label is already placed; otherwise becomes a
-// Relocation patched by Assembler.Link.
-func BLabel(id int) asm.Instruction {
+// Relocation patched by Link.
+func BLabel(id asm.Label) asm.Instruction {
 	return asm.Instruction{Op: uint16(OpB), Src2: asm.LabelOperand{ID: id}}
 }
 
+func BLLabel(id asm.Label) asm.Instruction {
+	return asm.Instruction{Op: uint16(OpBL), Src2: asm.LabelOperand{ID: id}}
+}
+
 // condOp must be one of OpBEQ, OpBNE, OpBLT, OpBGT, OpBLE, OpBGE, …
-func BCondLabel(condOp Op, id int) asm.Instruction {
+func BCondLabel(condOp Op, id asm.Label) asm.Instruction {
 	return asm.Instruction{Op: uint16(condOp), Src2: asm.LabelOperand{ID: id}}
 }
 
@@ -591,11 +595,11 @@ func CBNZ(reg asm.Reg, offset int32) asm.Instruction {
 	return newInst(OpCBNZ, nil, regOperand(reg), imm(int64(offset)))
 }
 
-func CBZLabel(reg asm.Reg, id int) asm.Instruction {
+func CBZLabel(reg asm.Reg, id asm.Label) asm.Instruction {
 	return asm.Instruction{Op: uint16(OpCBZ), Src1: regOperand(reg), Src2: asm.LabelOperand{ID: id}}
 }
 
-func CBNZLabel(reg asm.Reg, id int) asm.Instruction {
+func CBNZLabel(reg asm.Reg, id asm.Label) asm.Instruction {
 	return asm.Instruction{Op: uint16(OpCBNZ), Src1: regOperand(reg), Src2: asm.LabelOperand{ID: id}}
 }
 

@@ -46,6 +46,19 @@ func IsNull(v Value) bool {
 	}
 }
 
+// Kinds projects each Type in ts to its Kind. Returns nil for an empty
+// input so callers can use the result as an optional table.
+func Kinds(ts []Type) []Kind {
+	if len(ts) == 0 {
+		return nil
+	}
+	out := make([]Kind, len(ts))
+	for i, t := range ts {
+		out[i] = t.Kind()
+	}
+	return out
+}
+
 type Kind byte
 
 const (

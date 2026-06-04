@@ -173,6 +173,18 @@ Incorrect ordering crashes on Apple Silicon.
 - Preserve interpreter/JIT behavioral parity.
 - Avoid hidden control flow.
 
+### Frequent Style Traps
+
+These traps have been seen in past refactors and are easy to repeat. Each maps to a `docs/coding-patterns.md` section. Run through them before reporting a change as done.
+
+- **Private package function with one-type use is a method (§1.5).** Even when the receiver is unused. Strategy callbacks pass as method values (`t.fn`), not as bare package functions. Package functions survive only when ≥2 types use them, the helper is reusable public utility, the helper is a constructor, or the helper has no struct in its call graph at all.
+- **Single-call helpers stay inline (§1.4 + §1.5 counter-rule).** Do not extract a tiny helper to satisfy the method rule. ≥2 same-type call sites → method; 1 call site → inline at the caller, even if the result is a 15-line bit-packing block.
+- **Don't expose interpreter internals through a callback interface to a downstream package (§0.5).** When pkg B integrates pkg A's output, A defines plain-value input/output structs; B fills the input, hands them over once, applies the output. Never define a `View`/`Engine` interface so A can reach back into B's mutable state.
+- **Slot order moves with conversions (§2.4).** When a package function (slot 10) becomes a method (slot 9) per §1.5, move its declaration up. The reverse is also true — don't let a private function linger in slot 9 territory.
+- **Constructors above their `With*` options (§1.3).** `New` is the orchestrator; `WithX` are lower-level. The functional-options template puts `With*` first in many codebases — this repo does not.
+- **Struct field layering distinguishes bridge state from runtime state (§2.5).** A "jitted" map that tracks integration with another package is infrastructure, not runtime state. Plain integer config (threshold, cutoff, tick, fuel) is read-only config near the bottom, not policy at the top.
+- **Refactor steps that prove non-viable get recorded, not silently dropped.** If a plan step turns out to be the wrong call (e.g. extracting a shared tail when the middles diverge too much, or moving arch-local state when the owning type is a singleton), say so in the final summary with the reason. Future passes re-derive the same conclusion if you don't.
+
 ## Test Conventions
 
 **Before writing/modifying tests, read relevant docs from Documentation Index and Task Router.**

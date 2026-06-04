@@ -859,19 +859,33 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 			}
 			return enc(0x1E604000 | reg(n)<<5 | reg(d)), nil // FMOV Dd, Dn
 		case dFloat && !nFloat: // int → float (bit-copy)
-			if n.Type() != asm.RegTypeInt || d.Width() != n.Width() {
+			if n.Type() != asm.RegTypeInt {
 				return nil, asm.ErrInvalidOperand
 			}
 			if d.Width() == asm.Width32 {
+				// Accept Width32 or Width64 int source; Width64 uses its low 32 bits.
+				if n.Width() != asm.Width32 && n.Width() != asm.Width64 {
+					return nil, asm.ErrInvalidOperand
+				}
 				return enc(0x1E270000 | reg(n)<<5 | reg(d)), nil // FMOV Sd, Wn
+			}
+			if d.Width() != asm.Width64 || n.Width() != asm.Width64 {
+				return nil, asm.ErrInvalidOperand
 			}
 			return enc(0x9E670000 | reg(n)<<5 | reg(d)), nil // FMOV Dd, Xn
 		case !dFloat && nFloat: // float → int (bit-copy)
-			if d.Type() != asm.RegTypeInt || d.Width() != n.Width() {
+			if d.Type() != asm.RegTypeInt {
 				return nil, asm.ErrInvalidOperand
 			}
 			if n.Width() == asm.Width32 {
-				return enc(0x1E260000 | reg(n)<<5 | reg(d)), nil // FMOV Wn, Sd
+				// Accept Width32 or Width64 int destination; Width64 zero-extends.
+				if d.Width() != asm.Width32 && d.Width() != asm.Width64 {
+					return nil, asm.ErrInvalidOperand
+				}
+				return enc(0x1E260000 | reg(n)<<5 | reg(d)), nil // FMOV Wn, Sd (zero-extends to Xn)
+			}
+			if n.Width() != asm.Width64 || d.Width() != asm.Width64 {
+				return nil, asm.ErrInvalidOperand
 			}
 			return enc(0x9E660000 | reg(n)<<5 | reg(d)), nil // FMOV Xn, Dd
 		default:

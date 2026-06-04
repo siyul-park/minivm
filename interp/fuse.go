@@ -65,6 +65,9 @@ func (c *threadedCompiler) fuseFunction(fn *types.Function, addr int) func(*Inte
 			i.sp += locals
 			i.fp++
 			i.fr = f
+			if i.jitted[addr] {
+				f.code[0](i)
+			}
 		}
 	case instr.CLOSURE_NEW:
 		captures := len(fn.Captures)

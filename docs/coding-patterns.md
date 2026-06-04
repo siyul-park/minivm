@@ -49,11 +49,19 @@ Put important logic first. Reading downward reveals detail progressively: policy
 
 ### 0.3 Avoid cleverness
 
-Don't optimize for brevity. Prefer mechanically obvious code, even if longer, when it reduces hidden state, avoids surprising flow, improves debuggability, or preserves interpreter/JIT symmetry.
+Prefer short, standard names, but do not make code cryptic. Prefer mechanically obvious code, even if longer, when it reduces hidden state, avoids surprising flow, improves debuggability, or preserves interpreter/JIT symmetry.
 
 ### 0.4 Behavioral symmetry
 
 Interpreter and JIT paths stay structurally similar when possible. Symmetry matters more than local optimization.
+
+### 0.5 Minimal surface and locality
+
+Minimize file count, type count, function count, method count, and argument count while keeping behavior explicit. Avoid splitting code merely because it can be split.
+
+Every file, type, function, method, and argument has design and maintenance cost. Prefer inline logic when a helper is used once and does not name a distinct domain operation. Extract only when it removes real duplication, isolates real complexity, or gives a behavior-level name callers need.
+
+Keep logically related code close together: shared state, validation, mutation, and cleanup for one behavior should be easy to see in one local area. Keep unrelated code apart so each file, type, function, and method has one cohesive reason to exist.
 
 ## 1. Function Design
 
@@ -117,6 +125,12 @@ Comments explaining transitions between statements signal mixed abstraction leve
 
 Names describe caller-visible outcomes, not internal mechanisms.
 
+Use the shortest standard name that clearly expresses the role. Use at most one word when the receiver, package, or surrounding code already provides context. Do not encode implementation steps in the name.
+
+Public names follow the same rule: keep them concise and role-based, but still clear to package users.
+
+Avoid one-letter abbreviations for types, fields, functions, and methods. Avoid other abbreviations unless they are standard in the domain or broadly recognized (`ID`, `IP`, `ABI`, `JIT`, `VM`, `CPU`). Prefer one short word over private shorthand.
+
 | ✗ Mechanism | ✓ Intent |
 |---|---|
 | `rewriteBranchAbsolute` | `normalize` |
@@ -147,36 +161,92 @@ Function does one conceptual thing: orchestrate, transform, validate, emit, or n
 
 Split when abstraction level changes, naming hard, comments explain sections, or temporary state lives too long.
 
+Do not split tiny single-use helpers out of nearby logic unless the helper names a meaningful behavior. A short helper that only hides one switch, loop, or predicate usually makes code harder to maintain because readers must chase another symbol.
+
 ### 1.5 Methods vs package-level functions
 
-Behavior belongs with type owning required context.
+Behavior belongs with the type owning required context. Receiver syntax marks ownership even when the receiver itself is unused.
 
-**Rule**: Functions used by only one type → method on that type. Repeatedly passing same receiver means helper should be method.
+**Rule**: A function used by only one type is a method on that type, regardless of whether it touches receiver state. Package-level functions are reserved for one of:
+
+- Used by ≥2 types
+- Public and general enough to be reused outside this package
+- Constructor (see exception)
+- Consumed only by other package-level functions — i.e. no struct ever participates
 
 ```go
-// ✗ package-level helper (used only by jitCompiler)
-func makeBranchClosure(fn Caller, sig *Signature) func(*Interpreter) {
-    ...
+// ✗ package-level helper (used only by Compiler)
+func mergeBlockInputs(inputs map[int][]VReg, blocks []*BasicBlock, ...) bool { ... }
+
+// ✓ ownership is explicit, even though receiver is unused
+func (*Compiler) merge(inputs map[int][]VReg, blocks []*BasicBlock, ...) bool { ... }
+```
+
+**Strategy callbacks pass as method values, not package functions.** If a helper is passed as a `func(...)` argument, it still becomes a method; the call site uses the method value `t.fn`:
+
+```go
+// ✓ method + method value at pass site
+func (Lowerer) sign32(c *Context, v VReg) VReg { ... }
+
+func (l Lowerer) cmp(c *Context) bool {
+    return l.compare(c, l.sign32)   // bound method value
 }
 
-// ✓ ownership is explicit (method on jitCompiler)
-func (c *jitCompiler) branchClosure(fn Caller, sig *Signature) func(*Interpreter) {
-    ...
+// ✗ package function dropped in because the call shape looks like a callback
+func sign32(c *Context, v VReg) VReg { ... }
+func (l Lowerer) cmp(c *Context) bool { return l.compare(c, sign32) }
+```
+
+**Counter-rule (single-use inline)**: Do not extract a tiny helper used by exactly one call site just to satisfy this rule. If the body is ≤~15 straight-line lines (no looping branch logic worth a name), inline it at the one caller. §1.4 "do not split single-use helpers" outranks the method-conversion rule when the only call site is the helper's only justification.
+
+```go
+// ✗ method with unused receiver, used only once at construction
+func (*caller) packHeader(args, returns []PReg, n int) uint64 { /* 20 lines bit packing */ }
+func newCaller(...) (*caller, error) {
+    c := &caller{...}
+    c.header = c.packHeader(sig.Args, returns, nScratch)
+    return c, nil
+}
+
+// ✓ inline at the single call site
+func newCaller(...) (*caller, error) {
+    var aTyp, rTyp, aWid, rWid uint8
+    /* bit packing inline */
+    return &caller{header: uint64(...) | ..., ...}, nil
 }
 ```
 
-**Exception**: Constructors for types can remain standalone:
+**Constructor-helper pattern (2-phase init)**: When a constructor needs a value computed by a method on the type, AND the helper is large enough to extract (not subject to the counter-rule), build the struct first with the field zero, call the method, assign, return:
 
 ```go
-// ✓ standalone constructor (not a method on Assembler)
-func newCompiler(arch *Arch, p program) *compiler {
-    ...
+func newRewriter(info RegInfo, insts []Instruction, pins map[int32]PReg) *rewriter {
+    r := &rewriter{pool: ..., pins: pins, assigned: ..., widths: ...}
+    r.last = r.scanLastUses(insts)   // extracted because the scan loop names a real operation
+    return r
 }
+```
 
-// ✗ would be unclear if written as:
-func (a *Assembler) newCompiler(arch *Arch, p program) *compiler {
-    // "new" suggests constructor, but receiver suggests method
-}
+**Exception**: Constructors themselves remain standalone, never methods:
+
+```go
+// ✓ standalone constructor
+func newCompiler(arch *Arch, p program) *compiler { ... }
+
+// ✗ "new" + receiver is contradictory
+func (a *Assembler) newCompiler(arch *Arch, p program) *compiler { ... }
+```
+
+Match type visibility and constructor visibility unless construction is intentionally restricted. Public concrete type with a normal constructor uses `NewType` in the same file as the type. Private type uses `newType`.
+
+**Method expressions for callbacks**: When a callback's body is exactly one method call on its argument, pass the method expression rather than a wrapper:
+
+```go
+// ✓ method expression
+b.grow(end, memory.executable)   // func(memory) error
+
+// ✗ wrapper that adds no value
+func sealRegion(m memory) error { return m.executable() }
+b.grow(end, sealRegion)
 ```
 
 For JIT: keep architecture-neutral `jitCompiler` state + helpers in `interp/jit.go`. Put only arch selection, opcode handlers, ISA-specific helpers in `interp/jit_<arch>.go`.
@@ -239,43 +309,75 @@ Constructors (`NewFoo`) are public functions (slot 7). Within each slot, follow 
 
 ### 2.5 Struct field ordering
 
-Struct layout mirrors human reasoning:
+Struct layout mirrors human reasoning: what the type IS and DOES before how it works internally.
 
-| Level | Examples |
-|---|---|
-| lifecycle / policy | `context.Context`, profiles, options |
-| infrastructure | assemblers, buffers, allocators |
-| program data | bytecode, constants, type tables |
-| runtime state | frames, stacks, heaps |
-| raw counters | pointers, ticks, indices |
+| Level | Characteristic | Examples |
+| --- | --- | --- |
+| lifecycle / policy | rich behavioral objects; caller-supplied | `context.Context`, profile collectors, hooks, marshalers |
+| infrastructure | stable complex objects; set at construction | assemblers, buffers, allocators, JIT compiler |
+| program data | loaded at init; stable during execution | bytecode, constants, type tables |
+| runtime state | mutated during execution | frames, stacks, heaps, caches |
+| mutable counters | small integers written every step | `fp`, `sp` |
+| read-only config | plain integers set at construction; never written back during execution | thresholds, cutoffs, tick intervals, fuel budgets |
+| sync primitives | raw concurrency mechanics | `sync.Mutex`, `sync.RWMutex` |
+
+Key rules:
+
+- **Behavioral objects vs plain integers**: Rich objects (interfaces, callbacks, object pointers) are lifecycle/policy even when set once at construction. Plain numeric parameters (`int`, `int64`) are read-only config, not lifecycle/policy — they go near the bottom.
+- **Mutable counters above read-only config**: `fp`/`sp` are written every operation, so they sit above threshold/cutoff/tick/fuel which are set once and only read.
+- **`sync.Mutex` always last**: It is a concurrency mechanic, not a semantic field.
+- **Separate layers with a blank line.**
 
 ```go
-// ✗ mixed ordering
+// ✗ plain ints mixed into policy, mutable and read-only counters merged
 type Interpreter struct {
-    ctx    context.Context
-    buffer *asm.Buffer
-    code   [][]func(*Interpreter)
-    prof   *prof.Profile
-    frames []frame
-    sp     int
+    ctx       context.Context
+    threshold int64
+    cutoff    int
+    compiler  *jit.Compiler
+    frames    []frame
+    fp        int
+    tick      int
 }
 
-// ✓ layered ordering
+// ✓ layered correctly
 type Interpreter struct {
-    ctx    context.Context
-    prof   *prof.Profile
+    ctx       context.Context         // lifecycle: behavioral objects
+    prof      *prof.Stats
+    hook      func(*Interpreter) error
+    marshaler Marshaler
 
-    buffer *asm.Buffer
+    compiler *jit.Compiler            // infrastructure
 
-    code   [][]func(*Interpreter)
+    types     []types.Type            // program data
+    constants []types.Boxed
 
-    frames []frame
+    frames []frame                    // runtime state
+    stack  []types.Boxed
 
-    sp     int
+    fp int                            // mutable counters (written every step)
+    sp int
+
+    threshold int64                   // read-only config (plain ints, set once)
+    cutoff    int
+    tick      int
+    fuel      int64
+}
+
+// ✓ sync.Mutex at absolute bottom
+type Slots struct {
+    slots map[int]unsafe.Pointer      // runtime state (semantic core)
+
+    fallback asm.Callable             // read-only config
+    data     *asm.Data                // infrastructure
+
+    mu sync.Mutex                     // sync primitive: always last
 }
 ```
 
 Struct literals preserve declaration order. Zero-value fields may omit, but remaining stay ordered.
+
+Field names stay as short as clarity allows. Prefer one short word. Avoid one-letter field names unless the domain convention is already that short. Exported API fields follow the same rule and keep enough meaning for package users.
 
 ## 3. API Design
 

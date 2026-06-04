@@ -2,4 +2,4 @@
 
 package asm
 
-func (m Memory) flushICache() {}
+func (m memory) flushICache() {}
