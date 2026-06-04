@@ -46,16 +46,16 @@ func TestAssembler_Build(t *testing.T) {
 		require.NoError(t, err)
 		defer buf.Free()
 
-		callables, err := asm.Link(buf, arch, []*asm.Code{code}, nil)
+		linked, err := asm.LinkAll(buf, arch, []*asm.Code{code}, nil)
 		require.NoError(t, err)
-		require.Len(t, callables, 1)
+		require.Len(t, linked, 1)
 
-		got, err := callables[0].Call([]asm.Value{asm.I64(3), asm.I64(4)}, nil)
+		got, err := linked[0].Callable.Call([]asm.Value{asm.I64(3), asm.I64(4)}, nil)
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		require.Equal(t, uint64(7), got[0].Bits())
 
-		_, err = callables[0].Call([]asm.Value{asm.I64(3)}, nil)
+		_, err = linked[0].Callable.Call([]asm.Value{asm.I64(3)}, nil)
 		require.ErrorIs(t, err, asm.ErrInvalidArgs)
 	})
 }

@@ -82,7 +82,11 @@ func (r *rewriter) assign(insts []Instruction) error {
 // ensure binds v to a preg if it is not already bound. Pinned vregs evict
 // any conflicting holder of their target slot before reserving.
 func (r *rewriter) ensure(v VReg) error {
-	r.recordWidth(v)
+	if w := v.Width(); w != WidthUndefined {
+		if _, ok := r.widths[v.ID()]; !ok {
+			r.widths[v.ID()] = w
+		}
+	}
 	if _, ok := r.pool.bindings[v.ID()]; ok {
 		return nil
 	}
@@ -102,16 +106,6 @@ func (r *rewriter) ensure(v VReg) error {
 	}
 	r.assigned[v.ID()] = pr
 	return nil
-}
-
-func (r *rewriter) recordWidth(v VReg) {
-	if v.Width() == WidthUndefined {
-		return
-	}
-	if _, ok := r.widths[v.ID()]; ok {
-		return
-	}
-	r.widths[v.ID()] = v.Width()
 }
 
 // rewrite returns a copy of insts with every VReg / MemOperand-base

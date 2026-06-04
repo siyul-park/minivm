@@ -22,24 +22,10 @@ type Linked struct {
 
 var ErrUnresolvedLabel = errors.New("unresolved label")
 
-// Link installs each Code into buf, patches its external relocations using
-// resolve, and constructs one Callable per Code via the architecture's ABI.
-//
-// The order of returned Callables matches the order of codes.
-func Link(buf *Buffer, arch Arch, codes []*Code, resolve Resolver) ([]Callable, error) {
-	linked, err := LinkAll(buf, arch, codes, resolve)
-	if err != nil {
-		return nil, err
-	}
-	callables := make([]Callable, len(linked))
-	for i, code := range linked {
-		callables[i] = code.Callable
-	}
-	return callables, nil
-}
-
-// LinkAll is Link plus callable construction for Code.Entries. The order of
-// returned Linked values matches the order of codes.
+// LinkAll installs each Code into buf, patches its external relocations using
+// resolve, and constructs one primary Callable per Code plus additional
+// callables for each Code.Entries label, via the architecture's ABI. The
+// order of returned Linked values matches the order of codes.
 func LinkAll(buf *Buffer, arch Arch, codes []*Code, resolve Resolver) ([]Linked, error) {
 	if buf == nil {
 		return nil, fmt.Errorf("%w: nil buffer", ErrInvalidArgs)

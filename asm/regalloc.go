@@ -112,7 +112,7 @@ func (a *regAlloc) free(vreg VReg) {
 		return
 	}
 	delete(a.bindings, vreg.ID())
-	delete(a.owners, a.keyOf(preg))
+	delete(a.owners, regKey{typ: preg.Type(), id: preg.ID()})
 
 	switch preg.Type() {
 	case RegTypeFloat:
@@ -153,15 +153,11 @@ func (a *regAlloc) exclude(preg PReg) {
 // owner reports the vreg that currently holds preg's slot, if any. The
 // query is width-insensitive — X0 and W0 occupy the same slot.
 func (a *regAlloc) owner(preg PReg) (int32, bool) {
-	id, ok := a.owners[a.keyOf(preg)]
+	id, ok := a.owners[regKey{typ: preg.Type(), id: preg.ID()}]
 	return id, ok
 }
 
 func (a *regAlloc) bind(vreg VReg, preg PReg) {
 	a.bindings[vreg.ID()] = preg
-	a.owners[a.keyOf(preg)] = vreg.ID()
-}
-
-func (*regAlloc) keyOf(p PReg) regKey {
-	return regKey{typ: p.Type(), id: p.ID()}
+	a.owners[regKey{typ: preg.Type(), id: preg.ID()}] = vreg.ID()
 }

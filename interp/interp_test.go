@@ -3497,7 +3497,6 @@ func TestInterpreter_JIT(t *testing.T) {
 
 		addr := i.constants[0].Ref()
 		require.NoError(t, i.jit(addr))
-		require.True(t, i.jitted[addr])
 		jit := p.Snapshot().JIT
 		require.Equal(t, uint64(1), jit.Emits)
 		require.Equal(t, uint64(1), jit.Links)

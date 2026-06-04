@@ -15,10 +15,11 @@ type memory []byte
 // pointers stamped into them by callers (e.g. linked code, slot tables)
 // remain valid. Concurrent access serializes on mu.
 type region struct {
-	mu     sync.Mutex
 	old    []memory
 	mem    memory
 	offset int
+
+	mu sync.Mutex
 }
 
 // free releases the current and archived mappings.
