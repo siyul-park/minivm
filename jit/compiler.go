@@ -192,7 +192,7 @@ func (c *Compiler) Compile(fn *types.Function, addr int, snap Snapshot) (*Module
 }
 
 func (c *Compiler) installEntry(mod *Module, seg segment) error {
-	linked, err := asm.LinkAll(c.buffer, c.arch, []*asm.Code{seg.code}, nil)
+	linked, err := asm.Link(c.buffer, c.arch, []*asm.Code{seg.code}, nil)
 	if err != nil {
 		return err
 	}
@@ -476,7 +476,7 @@ func (c *Compiler) link(mod *Module, segs []segment) error {
 		codes[i] = seg.code
 		mod.Bytes = append(mod.Bytes, len(seg.code.Bytes))
 	}
-	linked, err := asm.LinkAll(c.buffer, c.arch, codes, nil)
+	linked, err := asm.Link(c.buffer, c.arch, codes, nil)
 	if err != nil {
 		return err
 	}
@@ -513,7 +513,7 @@ func (c *Compiler) fallback() (asm.Callable, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build fallback: %w", err)
 	}
-	linked, err := asm.LinkAll(c.buffer, c.arch, []*asm.Code{code}, nil)
+	linked, err := asm.Link(c.buffer, c.arch, []*asm.Code{code}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("link fallback: %w", err)
 	}

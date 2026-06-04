@@ -46,7 +46,7 @@ func TestAssembler_Build(t *testing.T) {
 		require.NoError(t, err)
 		defer buf.Free()
 
-		linked, err := asm.LinkAll(buf, arch, []*asm.Code{code}, nil)
+		linked, err := asm.Link(buf, arch, []*asm.Code{code}, nil)
 		require.NoError(t, err)
 		require.Len(t, linked, 1)
 
@@ -79,7 +79,7 @@ func TestAssembler_CanPin(t *testing.T) {
 	require.False(t, a.CanPin(v, d0))
 }
 
-func TestLinkAll(t *testing.T) {
+func TestLink(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
 		t.Skipf("native invoke requires arm64, got %s", runtime.GOARCH)
 	}
@@ -108,7 +108,7 @@ func TestLinkAll(t *testing.T) {
 		require.NoError(t, err)
 		defer buf.Free()
 
-		linked, err := asm.LinkAll(buf, arch, []*asm.Code{code}, nil)
+		linked, err := asm.Link(buf, arch, []*asm.Code{code}, nil)
 		require.NoError(t, err)
 		require.Len(t, linked, 1)
 		require.Contains(t, linked[0].Entries, entry)

@@ -15,7 +15,7 @@ import (
 )
 
 // TestLowerer_Compile drives Phase A segments through the full
-// jit.Compile → asm.LinkAll → asm.Callable pipeline.
+// jit.Compile → asm.Link → asm.Callable pipeline.
 func TestLowerer_Compile(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
 		t.Skipf("native invoke requires arm64, got %s", runtime.GOARCH)
