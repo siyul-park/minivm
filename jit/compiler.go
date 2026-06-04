@@ -250,7 +250,7 @@ func (c *Compiler) function(fn *types.Function, addr int, snap Snapshot, blks []
 	}
 
 	planCtx := c.prepare(fn, addr, snap, scratch, blks)
-	if !c.walkFunction(planCtx, fn, blks, returns, false) {
+	if !c.walkBlocks(planCtx, fn, blks, returns, false) {
 		return segment{}, false, nil
 	}
 	if requireTerminated && !(planCtx.Stop && planCtx.Successor < 0 && !planCtx.Closed) {
@@ -261,7 +261,7 @@ func (c *Compiler) function(fn *types.Function, addr int, snap Snapshot, blks []
 	}
 
 	ctx := c.prepare(fn, addr, snap, scratch, blks)
-	if !c.walkFunction(ctx, fn, blks, returns, true) {
+	if !c.walkBlocks(ctx, fn, blks, returns, true) {
 		return segment{}, false, nil
 	}
 	if !c.validEntry(ctx, returns) {
@@ -280,7 +280,7 @@ func (c *Compiler) function(fn *types.Function, addr int, snap Snapshot, blks []
 // has more than one entry.
 func (c *Compiler) prepare(fn *types.Function, addr int, snap Snapshot, scratch []asm.PReg, blks []*analysis.BasicBlock) *Context {
 	a := asm.New(c.arch)
-	ctx := c.context(a, fn, addr, 0, snap, scratch)
+	ctx := c.newContext(a, fn, addr, 0, snap, scratch)
 	ctx.Whole = true
 	if len(blks) > 1 {
 		ctx.Labels = make(map[int]asm.Label, len(blks))
@@ -291,12 +291,12 @@ func (c *Compiler) prepare(fn *types.Function, addr int, snap Snapshot, scratch 
 	return ctx
 }
 
-// walkFunction drives the per-block plan or emit loop. For each reachable
+// walkBlocks drives the per-block plan or emit loop. For each reachable
 // block it resets ctx scope, runs walk, and forwards merged stacks to
 // successor blocks. emit selects between planning (dry-run with the
 // counting assembler) and emission (real code, includes Exit terminators
 // for RETURN-ending blocks).
-func (c *Compiler) walkFunction(ctx *Context, fn *types.Function, blks []*analysis.BasicBlock, returns int, emit bool) bool {
+func (c *Compiler) walkBlocks(ctx *Context, fn *types.Function, blks []*analysis.BasicBlock, returns int, emit bool) bool {
 	reachable := c.reachable(blks)
 	inputs := map[int][]asm.VReg{0: nil}
 	ctx.Assembler.Bind(ctx.Entry)
@@ -406,7 +406,7 @@ func (c *Compiler) segment(fn *types.Function, addr int, startIP int, snap Snaps
 		return segment{}, false, nil
 	}
 
-	plan := c.context(asm.New(c.arch), fn, addr, startIP, snap, scratch)
+	plan := c.newContext(asm.New(c.arch), fn, addr, startIP, snap, scratch)
 	planned, plans := c.plan(plan, hot)
 	if planned.count < c.cutoff {
 		return segment{}, false, nil
@@ -417,7 +417,7 @@ func (c *Compiler) segment(fn *types.Function, addr int, startIP int, snap Snaps
 	plans = c.entries(plan, plans)
 
 	a := asm.New(c.arch)
-	ctx := c.context(a, fn, addr, startIP, snap, scratch)
+	ctx := c.newContext(a, fn, addr, startIP, snap, scratch)
 	for i := 0; i < len(plan.Inputs); i++ {
 		v := ctx.Assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.Inputs = append(ctx.Inputs, v)
@@ -507,7 +507,7 @@ func (c *Compiler) fallback() (asm.Callable, error) {
 
 	stub := &types.Function{Code: []byte{}}
 	a := asm.New(c.arch)
-	ctx := c.context(a, stub, -1, 0, Snapshot{}, scratch)
+	ctx := c.newContext(a, stub, -1, 0, Snapshot{}, scratch)
 	c.lowerer.Exit(ctx, 0)
 	code, err := a.Build(asm.Signature{Scratch: scratch})
 	if err != nil {
@@ -532,7 +532,7 @@ func (c *Compiler) validEntry(ctx *Context, returns int) bool {
 	return c.fits(ctx) && len(ctx.Inputs) == 0 && len(ctx.Stack) == returns
 }
 
-func (c *Compiler) context(a *asm.Assembler, fn *types.Function, addr int, startIP int, snap Snapshot, scratch []asm.PReg) *Context {
+func (c *Compiler) newContext(a *asm.Assembler, fn *types.Function, addr int, startIP int, snap Snapshot, scratch []asm.PReg) *Context {
 	return &Context{
 		Assembler: a,
 		Slots:     c.slots,
