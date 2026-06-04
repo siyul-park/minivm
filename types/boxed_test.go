@@ -45,6 +45,10 @@ func TestIsBoxable(t *testing.T) {
 	}
 }
 
+func TestTag(t *testing.T) {
+	require.Equal(t, uint64(Box(0, KindI32)), Tag(KindI32))
+}
+
 func TestUnbox(t *testing.T) {
 	tests := []struct {
 		val   Boxed
@@ -69,6 +73,10 @@ func TestUnbox(t *testing.T) {
 		{
 			val:   BoxRef(3),
 			unbox: Ref(3),
+		},
+		{
+			val:   Box(0, Kind(255)),
+			unbox: nil,
 		},
 	}
 	for _, tt := range tests {
@@ -243,6 +251,14 @@ func TestBoxed_Type(t *testing.T) {
 			val: BoxF64(0),
 			typ: TypeF64,
 		},
+		{
+			val: BoxRef(0),
+			typ: TypeRef,
+		},
+		{
+			val: Box(0, Kind(255)),
+			typ: nil,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
@@ -271,6 +287,14 @@ func TestBoxed_String(t *testing.T) {
 		{
 			val: BoxF64(0),
 			str: "0",
+		},
+		{
+			val: BoxRef(3),
+			str: "3",
+		},
+		{
+			val: Box(0, Kind(255)),
+			str: "<invalid>",
 		},
 	}
 	for _, tt := range tests {

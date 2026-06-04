@@ -169,3 +169,23 @@ func TestInstruction_String(t *testing.T) {
 		require.Equal(t, "br_table 0x02 0x0000 0x0001 0x0000", instr.String())
 	})
 }
+
+func TestOpcode_IsBranch(t *testing.T) {
+	tests := []struct {
+		name string
+		op   Opcode
+		want bool
+	}{
+		{name: "br", op: BR, want: true},
+		{name: "br_if", op: BR_IF, want: true},
+		{name: "br_table", op: BR_TABLE, want: true},
+		{name: "return", op: RETURN, want: false},
+		{name: "unreachable", op: UNREACHABLE, want: false},
+		{name: "i32_add", op: I32_ADD, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, tt.op.IsBranch())
+		})
+	}
+}

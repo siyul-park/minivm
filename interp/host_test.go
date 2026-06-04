@@ -80,6 +80,21 @@ func TestNewHostFunction(t *testing.T) {
 }
 
 func TestHostObject(t *testing.T) {
+	t.Run("kind type and string", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(hostCounter{Count: 1})
+		require.NoError(t, err)
+		ho, ok := got.(*HostObject)
+		require.True(t, ok)
+
+		require.Equal(t, types.KindRef, ho.Kind())
+		require.Equal(t, ho.Typ, ho.Type())
+		require.Equal(t, "host<interp.hostCounter>", ho.String())
+		require.Equal(t, "host<>", (&HostObject{}).String())
+	})
+
 	t.Run("private fields trace without allocation", func(t *testing.T) {
 		type private struct {
 			Visible int32

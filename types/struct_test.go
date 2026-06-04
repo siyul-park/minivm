@@ -8,20 +8,39 @@ import (
 
 func TestStruct_FieldByName(t *testing.T) {
 	s := NewStruct(NewStructType(NewStructField(TypeI32, FieldWithName("foo"))))
-	val := s.FieldByName("foo")
-	require.Equal(t, int32(0), val.I32())
+
+	require.Equal(t, int32(0), s.FieldByName("foo").I32())
+	require.Zero(t, s.FieldByName("missing"))
 }
 
 func TestStruct_Field(t *testing.T) {
 	s := NewStruct(NewStructType(NewStructField(TypeI32)))
-	val := s.Field(0)
-	require.Equal(t, int32(0), val.I32())
+
+	require.Equal(t, int32(0), s.Field(0).I32())
+	require.Zero(t, s.Field(1))
 }
 
 func TestStruct_SetField(t *testing.T) {
-	s := NewStruct(NewStructType(NewStructField(TypeI32)))
+	s := NewStruct(NewStructType(
+		NewStructField(TypeI32),
+		NewStructField(TypeI64),
+		NewStructField(TypeF32),
+		NewStructField(TypeF64),
+		NewStructField(TypeRef),
+	))
+
 	s.SetField(0, BoxI32(1))
+	s.SetField(1, BoxI64(2))
+	s.SetField(2, BoxF32(3))
+	s.SetField(3, BoxF64(4))
+	s.SetField(4, BoxRef(5))
+	s.SetField(5, BoxRef(6))
+
 	require.Equal(t, int32(1), s.Field(0).I32())
+	require.Equal(t, int64(2), s.Field(1).I64())
+	require.Equal(t, float32(3), s.Field(2).F32())
+	require.Equal(t, float64(4), s.Field(3).F64())
+	require.Equal(t, 5, s.Field(4).Ref())
 }
 
 func TestStruct_Data(t *testing.T) {
@@ -62,8 +81,15 @@ func TestStruct_Type(t *testing.T) {
 }
 
 func TestStruct_String(t *testing.T) {
-	s := NewStruct(NewStructType())
-	require.Equal(t, "struct {}{}", s.String())
+	t.Run("empty", func(t *testing.T) {
+		s := NewStruct(NewStructType())
+		require.Equal(t, "struct {}{}", s.String())
+	})
+
+	t.Run("fields", func(t *testing.T) {
+		s := NewStruct(NewStructType(NewStructField(TypeI32), NewStructField(TypeRef)), BoxI32(1), BoxRef(2))
+		require.Equal(t, "struct {i32; ref}{1, 2}", s.String())
+	})
 }
 
 func TestStruct_Refs(t *testing.T) {
@@ -87,6 +113,52 @@ func TestStruct_Refs(t *testing.T) {
 
 		require.Equal(t, []Ref{1, 3}, s.Refs())
 	})
+}
+
+func TestStruct_Raw(t *testing.T) {
+	s := NewStruct(NewStructType(NewStructField(TypeI64)))
+	s.SetRaw(0, 42)
+
+	require.Equal(t, uint64(42), s.Raw(0))
+	require.Zero(t, s.Raw(1))
+}
+
+func TestStruct_SetRaw(t *testing.T) {
+	s := NewStruct(NewStructType(NewStructField(TypeI64)))
+	s.SetRaw(0, 42)
+	s.SetRaw(1, 99)
+
+	require.Equal(t, uint64(42), s.Raw(0))
+}
+
+func TestStructType_FieldByName(t *testing.T) {
+	typ := NewStructType(NewStructField(TypeI32, FieldWithName("foo")))
+
+	field, ok := typ.FieldByName("foo")
+	require.True(t, ok)
+	require.Equal(t, TypeI32, field.Type)
+
+	_, ok = typ.FieldByName("missing")
+	require.False(t, ok)
+}
+
+func TestStructType_Cast(t *testing.T) {
+	typ := NewStructType(NewStructField(TypeI32))
+
+	require.True(t, typ.Cast(typ))
+	require.True(t, typ.Cast(NewStructType(NewStructField(TypeI32), NewStructField(TypeI64))))
+	require.True(t, typ.Cast(NewStructType(NewStructField(TypeI64))))
+	require.False(t, typ.Cast(TypeI32))
+}
+
+func TestStructType_Equals(t *testing.T) {
+	typ := NewStructType(NewStructField(TypeI32), NewStructField(TypeRef))
+
+	require.True(t, typ.Equals(typ))
+	require.True(t, typ.Equals(NewStructType(NewStructField(TypeI32), NewStructField(TypeRef))))
+	require.False(t, typ.Equals(NewStructType(NewStructField(TypeI32))))
+	require.False(t, typ.Equals(NewStructType(NewStructField(TypeI32), NewStructField(TypeI64))))
+	require.False(t, typ.Equals(TypeI32))
 }
 
 func BenchmarkStruct_Refs(b *testing.B) {

@@ -223,6 +223,33 @@ func TestLowerer_Compile(t *testing.T) {
 		require.Equal(t, types.BoxI32(25), jit.Ret(got[0]))
 	})
 
+	t.Run("global_tee stores and keeps value on stack", func(t *testing.T) {
+		code := instr.Marshal([]instr.Instruction{
+			instr.New(instr.I32_CONST, 31),
+			instr.New(instr.GLOBAL_TEE, 0),
+		})
+		fn := &types.Function{Code: code}
+
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		globals := []types.Boxed{types.BoxI32(0)}
+		mod, err := c.Compile(fn, 1, jit.Snapshot{Globals: globals})
+		require.NoError(t, err)
+
+		stack := make([]types.Boxed, 16)
+		scratch := make([]uint64, jit.ScratchCount)
+		scratch[jit.ScratchStack] = uint64(uintptr(unsafe.Pointer(&stack[0])))
+		scratch[jit.ScratchGlobals] = uint64(uintptr(unsafe.Pointer(&globals[0])))
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Equal(t, types.BoxI32(31), globals[0])
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(31), jit.Ret(got[0]))
+	})
+
 	t.Run("local_set then local_get with bp offset", func(t *testing.T) {
 		// I32_CONST 88; LOCAL_SET 1; LOCAL_GET 1
 		code := []byte{
@@ -302,6 +329,83 @@ func TestLowerer_Compile(t *testing.T) {
 		require.Equal(t, uint64(len(code)), scratch[jit.ScratchNext])
 		require.Len(t, got, 1)
 		require.Equal(t, types.BoxI32(12), jit.Ret(got[0]))
+	})
+
+	t.Run("i32 logic ops preserve boxed results", func(t *testing.T) {
+		tests := []struct {
+			op   instr.Opcode
+			want types.Boxed
+		}{
+			{instr.I32_AND, types.BoxI32(0x02)},
+			{instr.I32_OR, types.BoxI32(0x07)},
+			{instr.I32_XOR, types.BoxI32(0x05)},
+		}
+		for _, tt := range tests {
+			code := instr.Marshal([]instr.Instruction{
+				instr.New(instr.I32_CONST, 0x03),
+				instr.New(instr.I32_CONST, 0x06),
+				instr.New(tt.op),
+			})
+			fn := &types.Function{Code: code}
+
+			c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+			require.NoError(t, err)
+			defer c.Close()
+
+			mod, err := c.Compile(fn, 1, jit.Snapshot{})
+			require.NoError(t, err)
+
+			scratch := make([]uint64, jit.ScratchCount)
+			got, err := mod.Segments[0].Call(nil, scratch)
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			require.Equal(t, tt.want, jit.Ret(got[0]))
+		}
+	})
+
+	t.Run("integer conversions preserve boxed lane", func(t *testing.T) {
+		tests := []struct {
+			insts []instr.Instruction
+			want  types.Boxed
+		}{
+			{
+				insts: []instr.Instruction{
+					instr.New(instr.I32_CONST, uint64(uint32(0xFFFFFFFF))),
+					instr.New(instr.I32_TO_I64_S),
+				},
+				want: types.BoxI64(-1),
+			},
+			{
+				insts: []instr.Instruction{
+					instr.New(instr.I32_CONST, uint64(uint32(0xFFFFFFFF))),
+					instr.New(instr.I32_TO_I64_U),
+				},
+				want: types.BoxI64(0xFFFFFFFF),
+			},
+			{
+				insts: []instr.Instruction{
+					instr.New(instr.I64_CONST, 0x100000001),
+					instr.New(instr.I64_TO_I32),
+				},
+				want: types.BoxI32(1),
+			},
+		}
+		for _, tt := range tests {
+			fn := &types.Function{Code: instr.Marshal(tt.insts)}
+
+			c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+			require.NoError(t, err)
+			defer c.Close()
+
+			mod, err := c.Compile(fn, 1, jit.Snapshot{})
+			require.NoError(t, err)
+
+			scratch := make([]uint64, jit.ScratchCount)
+			got, err := mod.Segments[0].Call(nil, scratch)
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			require.Equal(t, tt.want, jit.Ret(got[0]))
+		}
 	})
 
 	t.Run("caller args keep stack order across staged underflow", func(t *testing.T) {

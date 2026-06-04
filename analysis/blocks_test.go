@@ -9,10 +9,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBasicBlockPass_Run(t *testing.T) {
+func TestBasicBlocksPass_Run(t *testing.T) {
 	tests := []struct {
+		name   string
 		fn     *types.Function
 		blocks []*BasicBlock
+		err    error
 	}{
 		{
 			fn: types.NewFunctionBuilder(nil).Emit(
@@ -195,18 +197,40 @@ func TestBasicBlockPass_Run(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "invalid br target",
+			fn: types.NewFunctionBuilder(nil).Emit(
+				instr.New(instr.BR, 10),
+			).Build(),
+			err: ErrInvalidJump,
+		},
+		{
+			name: "invalid br_table target",
+			fn: types.NewFunctionBuilder(nil).Emit(
+				instr.New(instr.BR_TABLE, 1, 0, 10),
+			).Build(),
+			err: ErrInvalidJump,
+		},
 	}
 
 	for _, tt := range tests {
 		m := pass.NewManager()
 		_ = m.Register(NewBasicBlocksPass())
 
-		t.Run(tt.fn.String(), func(t *testing.T) {
+		name := tt.name
+		if name == "" {
+			name = tt.fn.String()
+		}
+		t.Run(name, func(t *testing.T) {
 			err := m.Run(tt.fn)
 			require.NoError(t, err)
 
 			var actual []*BasicBlock
 			err = m.Load(&actual)
+			if tt.err != nil {
+				require.ErrorIs(t, err, tt.err)
+				return
+			}
 			require.NoError(t, err)
 			require.Equal(t, tt.blocks, actual)
 		})

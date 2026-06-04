@@ -92,6 +92,31 @@ func TestArray_Refs(t *testing.T) {
 	})
 }
 
+func TestArrayType_Kind(t *testing.T) {
+	require.Equal(t, KindRef, NewArrayType(TypeI32).Kind())
+}
+
+func TestArrayType_String(t *testing.T) {
+	require.Equal(t, "[]i32", NewArrayType(TypeI32).String())
+}
+
+func TestArrayType_Cast(t *testing.T) {
+	typ := NewArrayType(TypeI32)
+
+	require.True(t, typ.Cast(NewArrayType(TypeI32)))
+	require.False(t, typ.Cast(NewArrayType(TypeI64)))
+	require.False(t, typ.Cast(TypeI32))
+}
+
+func TestArrayType_Equals(t *testing.T) {
+	typ := NewArrayType(TypeI32)
+
+	require.True(t, typ.Equals(typ))
+	require.True(t, typ.Equals(NewArrayType(TypeI32)))
+	require.False(t, typ.Equals(NewArrayType(TypeI64)))
+	require.False(t, typ.Equals(TypeI32))
+}
+
 func BenchmarkTypedArray_Refs(b *testing.B) {
 	b.Run("no refs", func(b *testing.B) {
 		a := NewArray(NewArrayType(TypeI32), BoxI32(1), BoxI32(2))

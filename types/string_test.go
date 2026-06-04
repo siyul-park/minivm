@@ -30,3 +30,13 @@ func TestString_String(t *testing.T) {
 		})
 	}
 }
+
+func TestStringType_Cast(t *testing.T) {
+	require.True(t, TypeString.Cast(TypeString))
+	require.False(t, TypeString.Cast(TypeI32))
+}
+
+func TestStringType_Equals(t *testing.T) {
+	require.True(t, TypeString.Equals(TypeString))
+	require.False(t, TypeString.Equals(TypeI32))
+}

@@ -217,6 +217,11 @@ func TestREPL_Run(t *testing.T) {
 			excludes: []string{"error:"},
 		},
 		{
+			// br_table also accepts @-absolute targets
+			input:    "i32.const 0\nbr_table 1 @11 @11\nnop\n.quit\n",
+			excludes: []string{"error:"},
+		},
+		{
 			// out-of-range absolute target reports error
 			input:    "br @0x0000\n.quit\n",
 			contains: []string{"error:"},

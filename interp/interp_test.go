@@ -2531,6 +2531,34 @@ func TestInterpreter_Pop(t *testing.T) {
 	})
 }
 
+func TestInterpreter_Peek(t *testing.T) {
+	t.Run("basic", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		require.NoError(t, i.Push(types.I32(1)))
+		require.NoError(t, i.Push(types.I32(2)))
+
+		got, err := i.Peek(0)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(2), got)
+		got, err = i.Peek(1)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(1), got)
+		require.Equal(t, 2, i.Len())
+	})
+
+	t.Run("underflow", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		for _, n := range []int{-1, 0} {
+			_, err := i.Peek(n)
+			require.ErrorIs(t, err, ErrStackUnderflow)
+		}
+	})
+}
+
 func TestInterpreter_Len(t *testing.T) {
 	i := New(program.New(nil))
 	defer i.Close()
@@ -2626,6 +2654,32 @@ func TestInterpreter_Store(t *testing.T) {
 		v, _ := i.Load(addr)
 		require.Equal(t, types.I64(99), v)
 	})
+	t.Run("boxed ref resolves before storing", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		dst, err := i.Alloc(types.I32(7))
+		require.NoError(t, err)
+		src, err := i.Alloc(types.String("value"))
+		require.NoError(t, err)
+
+		require.NoError(t, i.Store(dst, types.BoxRef(src)))
+		v, err := i.Load(dst)
+		require.NoError(t, err)
+		require.Equal(t, types.String("value"), v)
+	})
+	t.Run("boxed primitive unboxes before storing", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.I32(0))
+		require.NoError(t, err)
+
+		require.NoError(t, i.Store(addr, types.BoxI32(5)))
+		v, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), v)
+	})
 	t.Run("segfault", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
@@ -2699,6 +2753,63 @@ func TestInterpreter_Global(t *testing.T) {
 	})
 }
 
+func TestInterpreter_Local(t *testing.T) {
+	t.Run("basic", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		require.NoError(t, i.Push(types.I32(42)))
+		v, err := i.Local(0)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(42), v)
+	})
+
+	t.Run("segfault", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		for _, idx := range []int{-1, 0} {
+			_, err := i.Local(idx)
+			require.ErrorIs(t, err, ErrSegmentationFault)
+		}
+	})
+}
+
+func TestInterpreter_SetLocal(t *testing.T) {
+	t.Run("basic", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		require.NoError(t, i.Push(types.I32(1)))
+		require.NoError(t, i.SetLocal(0, types.BoxI32(2)))
+		v, err := i.Local(0)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(2), v)
+	})
+
+	t.Run("releases old ref", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		require.NoError(t, i.Push(types.String("old")))
+		old, err := i.Local(0)
+		require.NoError(t, err)
+		require.Equal(t, 1, i.rc[old.Ref()])
+
+		require.NoError(t, i.SetLocal(0, types.BoxI32(2)))
+		require.Zero(t, i.rc[old.Ref()])
+	})
+
+	t.Run("segfault", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		for _, idx := range []int{-1, 0} {
+			require.ErrorIs(t, i.SetLocal(idx, types.BoxI32(0)), ErrSegmentationFault)
+		}
+	})
+}
+
 func TestInterpreter_SetGlobal(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
 		prog := program.New(
@@ -2716,11 +2827,36 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int32(99), v.I32())
 	})
+	t.Run("releases old ref", func(t *testing.T) {
+		prog := program.New(
+			[]instr.Instruction{
+				instr.New(instr.REF_NULL),
+				instr.New(instr.GLOBAL_SET, 0),
+			},
+		)
+		i := New(prog, WithGlobals(1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+
+		addr, err := i.Alloc(types.String("old"))
+		require.NoError(t, err)
+		require.NoError(t, i.SetGlobal(0, types.BoxRef(addr)))
+		require.Equal(t, 1, i.rc[addr])
+
+		require.NoError(t, i.SetGlobal(0, types.BoxI32(1)))
+		require.Zero(t, i.rc[addr])
+	})
 	t.Run("segfault negative", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
 
 		require.ErrorIs(t, i.SetGlobal(-1, types.BoxI32(0)), ErrSegmentationFault)
+	})
+	t.Run("segfault upper bound", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		require.ErrorIs(t, i.SetGlobal(9999, types.BoxI32(0)), ErrSegmentationFault)
 	})
 }
 
@@ -4096,6 +4232,19 @@ func TestInterpreter_Marshal(t *testing.T) {
 		require.Equal(t, types.TypedArray[int8]{-0x55, -0x33}, got)
 	})
 
+	t.Run("primitive arrays", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal([2]int32{1, 2})
+		require.NoError(t, err)
+		require.Equal(t, types.TypedArray[int32]{1, 2}, got)
+
+		got, err = i.Marshal([2]uint8{0x7F, 0xFF})
+		require.NoError(t, err)
+		require.Equal(t, types.TypedArray[int8]{0x7F, -1}, got)
+	})
+
 	t.Run("reference slice", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
@@ -4573,6 +4722,22 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		require.Equal(t, []int8{-1, 0x7F}, i8s)
 	})
 
+	t.Run("array", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		var out [2]int32
+		require.NoError(t, i.Unmarshal(types.TypedArray[int32]{1, 2}, &out))
+		require.Equal(t, [2]int32{1, 2}, out)
+
+		var bytes [2]byte
+		require.NoError(t, i.Unmarshal(types.TypedArray[int8]{0x7F, -1}, &bytes))
+		require.Equal(t, [2]byte{0x7F, 0xFF}, bytes)
+
+		var tooShort [1]int32
+		require.ErrorIs(t, i.Unmarshal(types.TypedArray[int32]{1, 2}, &tooShort), ErrValueOverflow)
+	})
+
 	t.Run("map", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
@@ -4717,6 +4882,8 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		require.ErrorIs(t, i.Unmarshal(types.String("bad"), &m), ErrTypeMismatch)
 		var u32 uint32
 		require.ErrorIs(t, i.Unmarshal(types.I64(-1), &u32), ErrValueOverflow)
+		var ch chan int
+		require.ErrorIs(t, i.Unmarshal(types.I32(1), &ch), ErrUnsupportedMarshalType)
 	})
 }
 

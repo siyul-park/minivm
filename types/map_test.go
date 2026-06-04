@@ -322,6 +322,12 @@ func TestTypedMap_String(t *testing.T) {
 		m.Set(1, BoxI32(2))
 		require.Equal(t, "map[f64]i32{1: 2}", m.String())
 	})
+
+	t.Run("fallback key", func(t *testing.T) {
+		m := NewTypedMap[string](NewMapType(TypeString, TypeI32), 0)
+		m.Set("foo", BoxI32(2))
+		require.Equal(t, "map[string]i32{foo: 2}", m.String())
+	})
 }
 
 func TestTypedMap_Refs(t *testing.T) {
@@ -371,14 +377,41 @@ func TestMapType_TraceValues(t *testing.T) {
 	require.False(t, NewMapType(TypeI32, TypeI32).TraceValues)
 }
 
+func TestMapKey_String(t *testing.T) {
+	tests := []struct {
+		key MapKey
+		str string
+	}{
+		{MapKey{Kind: KindI32, Bits: 1}, "1"},
+		{MapKey{Kind: KindI64, Bits: 1}, "1"},
+		{MapKey{Kind: KindF32, Bits: uint64(math.Float32bits(1))}, "1"},
+		{MapKey{Kind: KindF64, Bits: math.Float64bits(1)}, "1"},
+		{MapKey{Kind: KindRef, Bits: 1}, "1"},
+		{MapKey{Kind: Kind(255)}, "<invalid>"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.str, func(t *testing.T) {
+			require.Equal(t, tt.str, tt.key.String())
+		})
+	}
+}
+
 func TestMapType_Cast(t *testing.T) {
-	require.True(t, NewMapType(TypeI32, TypeI32).Cast(NewMapType(TypeI32, TypeI32)))
-	require.False(t, NewMapType(TypeI32, TypeI32).Cast(NewMapType(TypeI64, TypeI32)))
+	typ := NewMapType(TypeI32, TypeI32)
+
+	require.True(t, typ.Cast(typ))
+	require.True(t, typ.Cast(NewMapType(TypeI32, TypeI32)))
+	require.False(t, typ.Cast(NewMapType(TypeI64, TypeI32)))
+	require.False(t, typ.Cast(TypeI32))
 }
 
 func TestMapType_Equals(t *testing.T) {
-	require.True(t, NewMapType(TypeI32, TypeI32).Equals(NewMapType(TypeI32, TypeI32)))
-	require.False(t, NewMapType(TypeI32, TypeI32).Equals(NewMapType(TypeI32, TypeI64)))
+	typ := NewMapType(TypeI32, TypeI32)
+
+	require.True(t, typ.Equals(typ))
+	require.True(t, typ.Equals(NewMapType(TypeI32, TypeI32)))
+	require.False(t, typ.Equals(NewMapType(TypeI32, TypeI64)))
+	require.False(t, typ.Equals(TypeI32))
 }
 
 func BenchmarkTypedMap_Get(b *testing.B) {
