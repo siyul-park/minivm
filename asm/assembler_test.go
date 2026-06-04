@@ -79,7 +79,29 @@ func TestAssembler_CanPin(t *testing.T) {
 	require.False(t, a.CanPin(v, d0))
 }
 
+func TestAssembler_Pin(t *testing.T) {
+	arch := arm64.New()
+	ab := arch.ABI()
+	x0 := ab.Arg(0, asm.RegTypeInt, asm.Width64)
+	x1 := ab.Arg(1, asm.RegTypeInt, asm.Width64)
+
+	a := asm.New(arch)
+	v := a.Reg(asm.RegTypeInt, asm.Width64)
+
+	require.NoError(t, a.Pin(v, x0))
+	require.NoError(t, a.Pin(v, x0))
+	require.ErrorIs(t, a.Pin(v, x1), asm.ErrConflictingPin)
+
+	_, err := a.Build(asm.Signature{})
+	require.ErrorIs(t, err, asm.ErrConflictingPin)
+}
+
 func TestLink(t *testing.T) {
+	t.Run("nil buffer", func(t *testing.T) {
+		_, err := asm.Link(nil, arm64.New(), nil, nil)
+		require.ErrorIs(t, err, asm.ErrInvalidArgs)
+	})
+
 	if runtime.GOARCH != "arm64" {
 		t.Skipf("native invoke requires arm64, got %s", runtime.GOARCH)
 	}

@@ -8,6 +8,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNewData(t *testing.T) {
+	_, err := NewData(0)
+	require.ErrorIs(t, err, ErrInvalidSize)
+}
+
 func TestData_Alloc(t *testing.T) {
 	t.Run("returns distinct, stable slot addresses", func(t *testing.T) {
 		d, err := NewData(64)

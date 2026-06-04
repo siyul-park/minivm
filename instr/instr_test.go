@@ -152,10 +152,30 @@ func TestInstruction_SetOperand(t *testing.T) {
 		instr.SetOperand(0, 42)
 		require.Equal(t, []uint64{42}, instr.Operands())
 	})
+	t.Run("narrow", func(t *testing.T) {
+		instr := New(LOCAL_GET, 1)
+		instr.SetOperand(0, 7)
+		require.Equal(t, []uint64{7}, instr.Operands())
+	})
+	t.Run("wide", func(t *testing.T) {
+		instr := New(I64_CONST, 1)
+		instr.SetOperand(0, 0x0102030405060708)
+		require.Equal(t, []uint64{0x0102030405060708}, instr.Operands())
+	})
 	t.Run("dynamic", func(t *testing.T) {
 		instr := New(BR_TABLE, 2, 0, 1, 0)
 		instr.SetOperand(1, 5)
 		require.Equal(t, []uint64{2, 5, 1, 0}, instr.Operands())
+	})
+	t.Run("dynamic count", func(t *testing.T) {
+		instr := New(BR_TABLE, 2, 0, 1, 0)
+		instr.SetOperand(0, 1)
+		require.Equal(t, []uint64{1, 0, 1}, instr.Operands())
+	})
+	t.Run("out of range", func(t *testing.T) {
+		instr := New(BR, 5)
+		instr.SetOperand(1, 9)
+		require.Equal(t, []uint64{5}, instr.Operands())
 	})
 }
 

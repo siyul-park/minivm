@@ -4223,13 +4223,29 @@ func TestInterpreter_Marshal(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.TypedArray[int8]{1, -1}, got)
 
+		got, err = i.Marshal([]int16{1, -1})
+		require.NoError(t, err)
+		require.Equal(t, types.TypedArray[int32]{1, -1}, got)
+
 		got, err = i.Marshal([]uint8{0x00, 0x7F, 0xFF})
 		require.NoError(t, err)
 		require.Equal(t, types.TypedArray[int8]{0, 0x7F, -1}, got)
 
+		got, err = i.Marshal([]uint16{0, math.MaxUint16})
+		require.NoError(t, err)
+		require.Equal(t, types.TypedArray[int32]{0, math.MaxUint16}, got)
+
 		got, err = i.Marshal([]byte{0xAB, 0xCD})
 		require.NoError(t, err)
 		require.Equal(t, types.TypedArray[int8]{-0x55, -0x33}, got)
+
+		got, err = i.Marshal([]float32{1.5})
+		require.NoError(t, err)
+		require.Equal(t, types.TypedArray[float32]{1.5}, got)
+
+		got, err = i.Marshal([]float64{2.5})
+		require.NoError(t, err)
+		require.Equal(t, types.TypedArray[float64]{2.5}, got)
 	})
 
 	t.Run("primitive arrays", func(t *testing.T) {
@@ -4335,6 +4351,14 @@ func TestInterpreter_Marshal(t *testing.T) {
 		gotF64, ok := mF64.Get(0)
 		require.True(t, ok)
 		require.Equal(t, types.BoxI32(1), gotF64)
+
+		f32, err := i.Marshal(map[float32]int32{1.5: 2})
+		require.NoError(t, err)
+		mF32, ok := f32.(*types.TypedMap[float32])
+		require.True(t, ok)
+		gotF32, ok := mF32.Get(1.5)
+		require.True(t, ok)
+		require.Equal(t, types.BoxI32(2), gotF32)
 	})
 
 	t.Run("ref identity map keys", func(t *testing.T) {
@@ -4401,6 +4425,70 @@ func TestInterpreter_Marshal(t *testing.T) {
 		require.True(t, s.Typ.Fields[0].Type.Equals(types.TypeString))
 		require.True(t, s.Typ.Fields[1].Type.Equals(types.TypeI32))
 		require.Equal(t, types.BoxI32(3), s.FieldByName("Count"))
+	})
+
+	t.Run("struct scalar fields", func(t *testing.T) {
+		type sample struct {
+			Bool   bool
+			I8     int8
+			I16    int16
+			I32    int32
+			I      int
+			I64    int64
+			U8     uint8
+			U16    uint16
+			U32    uint32
+			U      uint
+			U64    uint64
+			Uintpt uintptr
+			F32    float32
+			F64    float64
+			Text   string
+		}
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(sample{
+			Bool:   true,
+			I8:     -8,
+			I16:    -16,
+			I32:    -32,
+			I:      -64,
+			I64:    -128,
+			U8:     8,
+			U16:    16,
+			U32:    32,
+			U:      64,
+			U64:    128,
+			Uintpt: 256,
+			F32:    1.25,
+			F64:    2.5,
+			Text:   "go",
+		})
+		require.NoError(t, err)
+
+		s, ok := got.(*types.Struct)
+		require.True(t, ok)
+		require.Equal(t, types.BoxedTrue, s.FieldByName("Bool"))
+		require.Equal(t, types.BoxI32(-8), s.FieldByName("I8"))
+		require.Equal(t, types.BoxI32(-16), s.FieldByName("I16"))
+		require.Equal(t, types.BoxI32(-32), s.FieldByName("I32"))
+		require.Equal(t, types.BoxI64(-64), s.FieldByName("I"))
+		require.Equal(t, types.BoxI64(-128), s.FieldByName("I64"))
+		require.Equal(t, types.BoxI32(8), s.FieldByName("U8"))
+		require.Equal(t, types.BoxI32(16), s.FieldByName("U16"))
+		require.Equal(t, types.BoxI32(32), s.FieldByName("U32"))
+		require.Equal(t, types.BoxI64(64), s.FieldByName("U"))
+		require.Equal(t, types.BoxI64(128), s.FieldByName("U64"))
+		require.Equal(t, types.BoxI64(256), s.FieldByName("Uintpt"))
+		require.Equal(t, types.BoxF32(1.25), s.FieldByName("F32"))
+		require.Equal(t, types.BoxF64(2.5), s.FieldByName("F64"))
+
+		text := s.FieldByName("Text")
+		require.Equal(t, types.KindRef, text.Kind())
+		loaded, err := i.Load(text.Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.String("go"), loaded)
 	})
 
 	t.Run("struct with private field routes to HostObject", func(t *testing.T) {
@@ -4669,6 +4757,14 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		var n int32
 		require.NoError(t, i.Unmarshal(types.I32(7), &n))
 		require.Equal(t, int32(7), n)
+
+		var f32 float32
+		require.NoError(t, i.Unmarshal(types.F32(1.5), &f32))
+		require.Equal(t, float32(1.5), f32)
+
+		var f64 float64
+		require.NoError(t, i.Unmarshal(types.F64(2.5), &f64))
+		require.Equal(t, 2.5, f64)
 	})
 
 	t.Run("unsigned primitives preserve raw bits", func(t *testing.T) {
@@ -4720,6 +4816,14 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		var i8s []int8
 		require.NoError(t, i.Unmarshal(types.TypedArray[int8]{-1, 0x7F}, &i8s))
 		require.Equal(t, []int8{-1, 0x7F}, i8s)
+
+		var f32s []float32
+		require.NoError(t, i.Unmarshal(types.TypedArray[float32]{1.5}, &f32s))
+		require.Equal(t, []float32{1.5}, f32s)
+
+		var f64s []float64
+		require.NoError(t, i.Unmarshal(types.TypedArray[float64]{2.5}, &f64s))
+		require.Equal(t, []float64{2.5}, f64s)
 	})
 
 	t.Run("array", func(t *testing.T) {
@@ -4774,6 +4878,13 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		var outFloats map[float64]int32
 		require.NoError(t, i.Unmarshal(got, &outFloats))
 		require.Equal(t, floats, outFloats)
+
+		float32s := map[float32]int32{1.5: 2}
+		got, err = i.Marshal(float32s)
+		require.NoError(t, err)
+		var outFloat32s map[float32]int32
+		require.NoError(t, i.Unmarshal(got, &outFloat32s))
+		require.Equal(t, float32s, outFloat32s)
 	})
 
 	t.Run("ref identity map keys", func(t *testing.T) {

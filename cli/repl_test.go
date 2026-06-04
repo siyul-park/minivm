@@ -249,6 +249,11 @@ func TestREPL_Run(t *testing.T) {
 			contains: []string{"breakpoint 1", "func=0 ip=5"},
 		},
 		{
+			// breakpoint command errors stay in the REPL
+			input:    ".break\n.break bad\n.break bad:5\n.clear\n.clear bad\n.enable\n.disable\n.disable bad\n.enable 99\n.quit\n",
+			contains: []string{"usage: .break", "invalid bytecode offset", "invalid function index", "usage: .clear", "invalid breakpoint id", "usage: .enable", "usage: .disable", "breakpoint 99 not found"},
+		},
+		{
 			// .clear removes a breakpoint
 			input:    ".break 0\n.clear 1\n.breaks\n.quit\n",
 			contains: []string{"no breakpoints"},
@@ -309,6 +314,12 @@ func TestREPL_Run(t *testing.T) {
 			input:    "i32.const 42\ni32.const 8\n.debug\ns\nc\n.quit\n",
 			contains: []string{"stopped at", "42"},
 			excludes: []string{"error:"},
+		},
+		{
+			// debug sub-loop handles next, finish, empty line, break, clear
+			input:    "i32.const 42\ni32.const 8\n.debug\n\nnext\nbreak\nbreak bad\nbreak 5\nbreaks\nclear\nclear bad\nclear 99\nclear 1\nfinish\n.quit\n",
+			contains: []string{"stopped at", "usage: break", "invalid bytecode offset", "breakpoint 1", "usage: clear", "invalid breakpoint id", "breakpoint 99 not found", "breakpoint 1 cleared"},
+			excludes: []string{"panic"},
 		},
 		{
 			// unknown debug command reports error without crashing
