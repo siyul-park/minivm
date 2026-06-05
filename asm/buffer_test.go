@@ -2,6 +2,7 @@ package asm
 
 import (
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 )
@@ -39,5 +40,23 @@ func TestBuffer_Write(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, b.old, 1)
 		require.Equal(t, 3, b.offset)
+	})
+
+	t.Run("writeAt patches archived region after grow", func(t *testing.T) {
+		b, err := NewBuffer(1)
+		require.NoError(t, err)
+		defer b.Free()
+
+		ptr, err := b.Write([]byte{0x01})
+		require.NoError(t, err)
+
+		_, err = b.Write(make([]byte, len(b.mem)))
+		require.NoError(t, err)
+		require.Len(t, b.old, 1)
+
+		n, err := b.writeAt(ptr, []byte{0x7F})
+		require.NoError(t, err)
+		require.Equal(t, 1, n)
+		require.Equal(t, byte(0x7F), unsafe.Slice((*byte)(ptr), 1)[0])
 	})
 }

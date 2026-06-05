@@ -80,4 +80,28 @@ func TestData_Alloc(t *testing.T) {
 		require.Len(t, d.old, 1)
 		require.Equal(t, slotSize, d.offset)
 	})
+
+	t.Run("set and load archived slot after grow", func(t *testing.T) {
+		d, err := NewData(1)
+		require.NoError(t, err)
+		defer d.Free()
+
+		slot, err := d.Alloc()
+		require.NoError(t, err)
+
+		slotSize := int(unsafe.Sizeof(uintptr(0)))
+		for range len(d.mem)/slotSize - 1 {
+			_, err = d.Alloc()
+			require.NoError(t, err)
+		}
+
+		_, err = d.Alloc()
+		require.NoError(t, err)
+		require.Len(t, d.old, 1)
+
+		target := 99
+		want := unsafe.Pointer(&target)
+		d.Set(slot, want)
+		require.Equal(t, want, d.Load(slot))
+	})
 }
