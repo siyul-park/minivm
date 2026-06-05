@@ -237,6 +237,14 @@ func (l Lowerer) Lower(c *jit.Context, op instr.Opcode) bool {
 		return l.f32ToF64(c)
 	case instr.F64_TO_F32:
 		return l.f64ToF32(c)
+	case instr.F32_TO_I32_S:
+		return l.toI32(c, asm.Width32, l.unboxF32)
+	case instr.F32_TO_I32_U:
+		return l.toI32(c, asm.Width64, l.unboxF32)
+	case instr.F64_TO_I32_S:
+		return l.toI32(c, asm.Width32, l.unboxF64)
+	case instr.F64_TO_I32_U:
+		return l.toI32(c, asm.Width64, l.unboxF64)
 	case instr.RETURN:
 		return l.ret(c)
 	case instr.CALL:
@@ -1395,6 +1403,35 @@ func (l Lowerer) f64ToF32(c *jit.Context) bool {
 	fs := c.Assembler.Reg(asm.RegTypeFloat, asm.Width32)
 	c.Assembler.Emit(arm64.FCVT(fs, fa))
 	boxed := l.reboxF32(c, fs)
+	c.Stack[len(c.Stack)-1] = boxed
+	return true
+}
+
+// toI32 pops one boxed float, truncates it toward zero into an i32 via
+// FCVTZS, and pushes the boxed i32 result. dst selects the FCVTZS form that
+// matches the interpreter's Go codegen on arm64: a Width32 destination
+// reproduces int32(f) (FCVTZS Wd, saturating within the i32 range) for the
+// signed opcodes, while a Width64 destination reproduces int32(uint32(f))
+// (FCVTZS Xd, then the low-32 mask boxI32 applies) for the unsigned opcodes.
+// The Width32 result is zero-extended through UXTW so boxI32 sees a 64-bit
+// lane; F-to-i64 stays threaded because its result can exceed the boxable
+// lane and would heap-promote.
+func (l Lowerer) toI32(c *jit.Context, dst asm.RegWidth, unbox func(*jit.Context, asm.VReg) asm.VReg) bool {
+	if !l.need(c, 1) {
+		return false
+	}
+	a := c.Stack[len(c.Stack)-1]
+	f := unbox(c, a)
+
+	raw := c.Assembler.Reg(asm.RegTypeInt, dst)
+	c.Assembler.Emit(arm64.FCVTZS(raw, f))
+	if dst == asm.Width32 {
+		ext := c.Assembler.Reg(asm.RegTypeInt, asm.Width64)
+		c.Assembler.Emit(arm64.UXTW(ext, raw))
+		raw = ext
+	}
+
+	boxed := l.boxI32(c, raw)
 	c.Stack[len(c.Stack)-1] = boxed
 	return true
 }

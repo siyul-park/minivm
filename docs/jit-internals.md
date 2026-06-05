@@ -126,7 +126,7 @@ Fully lowered on ARM64:
 - Stack: `NOP`, `DROP`, `DUP`, `SWAP`, `SELECT`
 - Const: `I32_CONST`, `I64_CONST`, `F32_CONST`, `F64_CONST`, `CONST_GET`
 - Arithmetic: all I32/I64/F32/F64 add/sub/mul/div, I32/I64 rem, bitwise, shifts, comparisons, eqz
-- Conversions: `I32↔I64`, `I32↔F32/F64`, `F32↔F64`, `F→I`
+- Conversions: `I32↔I64`, `I32/I64→F32/F64`, `F32↔F64`, `F32/F64→I32`. `F32/F64→I32` uses `FCVTZS` with a W destination for the signed opcodes and an X destination (then low-32 mask) for the unsigned opcodes, matching the interpreter's Go `int32(f)` / `int32(uint32(f))` codegen on arm64. `F32/F64→I64` stays threaded because its result can exceed the boxable lane and would heap-promote.
 - Branches: `BR`, `BR_IF`, `BR_TABLE`
 - Locals + globals: `LOCAL_GET/SET/TEE`, `GLOBAL_GET/SET/TEE`
 - `CALL` (direct-BL when target is jitted; threaded otherwise)

@@ -1037,6 +1037,120 @@ func TestLowerer_Compile(t *testing.T) {
 		require.Equal(t, types.BoxF32(1.5), jit.Ret(got[0]))
 	})
 
+	t.Run("f32_to_i32_s truncates toward zero", func(t *testing.T) {
+		// F32_CONST -2.5; F32_TO_I32_S  → int32(-2.5) == -2
+		code := []byte{
+			byte(instr.F32_CONST), 0x00, 0x00, 0x20, 0xC0, // -2.5
+			byte(instr.F32_TO_I32_S),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(-2), jit.Ret(got[0]))
+	})
+
+	t.Run("f32_to_i32_u wraps via 64-bit truncation", func(t *testing.T) {
+		// F32_CONST 3e9; F32_TO_I32_U  → int32(uint32(3e9)) == -1294967296.
+		// 3e9 fits in int64 so FCVTZS does not saturate; the low 32 bits are
+		// architecture-independent, mirroring the interpreter's Go codegen.
+		code := []byte{
+			byte(instr.F32_CONST), 0x5E, 0xD0, 0x32, 0x4F, // 3e9
+			byte(instr.F32_TO_I32_U),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(-1294967296), jit.Ret(got[0]))
+	})
+
+	t.Run("f64_to_i32_s truncates toward zero", func(t *testing.T) {
+		// F64_CONST -2.5; F64_TO_I32_S  → int32(-2.5) == -2
+		code := []byte{
+			byte(instr.F64_CONST), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0xC0, // -2.5
+			byte(instr.F64_TO_I32_S),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(-2), jit.Ret(got[0]))
+	})
+
+	t.Run("f64_to_i32_u wraps via 64-bit truncation", func(t *testing.T) {
+		// F64_CONST 3e9; F64_TO_I32_U  → int32(uint32(3e9)) == -1294967296
+		code := []byte{
+			byte(instr.F64_CONST), 0x00, 0x00, 0x00, 0xC0, 0x0B, 0x5A, 0xE6, 0x41, // 3e9
+			byte(instr.F64_TO_I32_U),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, types.BoxI32(-1294967296), jit.Ret(got[0]))
+	})
+
+	t.Run("f32_to_i64_s rejects before heap-promotion-sensitive conversion", func(t *testing.T) {
+		// F32_CONST 1.5; F32_TO_I64_S  — the i64 result can exceed the boxable
+		// lane, so the conversion stays threaded and the segment exits at it.
+		code := []byte{
+			byte(instr.F32_CONST), 0x00, 0x00, 0xC0, 0x3F, // 1.5
+			byte(instr.F32_TO_I64_S),
+		}
+		fn := &types.Function{Code: code}
+		c, err := jit.New(jit.WithLowerer(jitarm64.Lowerer{}), jit.WithCutoff(1))
+		require.NoError(t, err)
+		defer c.Close()
+
+		mod, err := c.Compile(fn, 1, jit.Snapshot{})
+		require.NoError(t, err)
+
+		scratch := make([]uint64, jit.ScratchCount)
+		got, err := mod.Segments[0].Call(nil, scratch)
+		require.NoError(t, err)
+
+		require.Len(t, got, 1)
+		require.Equal(t, uint64(5), scratch[jit.ScratchNext])
+		require.Equal(t, types.BoxF32(1.5), jit.Ret(got[0]))
+	})
+
 	t.Run("entry: const-return function compiles to Entry", func(t *testing.T) {
 		// I32_CONST 99; RETURN  — leaf function with no params, one i32 return.
 		code := []byte{
