@@ -57,7 +57,11 @@ func (v Boxed) Kind() Kind {
 
 ```go
 func IsBoxable(v int64) bool {
-    return uint64(v+vMask) <= 2*vMask // vMask = (1<<49)-1
+    const (
+        minI64 = -1 << 48
+        maxI64 = 1<<48 - 1
+    )
+    return minI64 <= v && v <= maxI64
 }
 ```
 

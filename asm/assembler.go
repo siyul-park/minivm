@@ -105,15 +105,15 @@ func (a *Assembler) Build(sig Signature) (*Code, error) {
 		return nil, a.err
 	}
 
-	rw := newRewriter(a.arch.Registers(), a.insts, a.pins)
-	rewritten, err := rw.run(a.insts)
+	rw := newRewriter(a.arch, a.insts, a.pins)
+	rewritten, labels, err := rw.run(a.insts, a.labels)
 	if err != nil {
 		return nil, err
 	}
 
 	bytes, labels, relocs, err := (&emitter{
 		arch:   a.arch,
-		labels: a.labels,
+		labels: labels,
 	}).run(rewritten)
 	if err != nil {
 		return nil, err

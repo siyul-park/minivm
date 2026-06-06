@@ -5,13 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/jit"
-	_ "github.com/siyul-park/minivm/jit/amd64"
-	_ "github.com/siyul-park/minivm/jit/arm64"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -23,6 +21,12 @@ type test struct {
 	values  []types.Value
 	before  func(*testing.T, *Interpreter)
 	after   func(*testing.T, *Interpreter)
+}
+
+type callableFunc func([]uint64) error
+
+func (fn callableFunc) Call(argv []uint64) error {
+	return fn(argv)
 }
 
 var tests = []test{
@@ -2446,7 +2450,7 @@ func (m *recordingMarshaler) Unmarshal(_ *Interpreter, _ types.Value, dst any) e
 
 func requireJIT(t *testing.T) {
 	t.Helper()
-	if jit.Active() == nil {
+	if runtime.GOARCH != "arm64" {
 		t.Skip("jit is not available on this architecture")
 	}
 }
@@ -3499,7 +3503,7 @@ func TestInterpreter_WithDebugger(t *testing.T) {
 }
 
 func TestInterpreter_JIT(t *testing.T) {
-	t.Run("passes stack inputs as segment args", func(t *testing.T) {
+	t.Run("loads stack inputs through scratch", func(t *testing.T) {
 		requireJIT(t)
 		p := prof.New()
 		i := New(program.New([]instr.Instruction{
@@ -3514,6 +3518,50 @@ func TestInterpreter_JIT(t *testing.T) {
 		v, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(12), v)
+
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Attempts)
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
+	t.Run("lowers boxable i64 add", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I64_ADD),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.I64_ADD))
+		require.NoError(t, i.Push(types.I64(40)))
+		require.NoError(t, i.Push(types.I64(2)))
+		require.NoError(t, i.jit(0))
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64(42), v)
+
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Attempts)
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
+	t.Run("falls back when i64 add leaves boxable range", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I64_ADD),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.I64_ADD))
+		require.NoError(t, i.Push(types.I64((1<<48)-1)))
+		require.NoError(t, i.Push(types.I64(1)))
+		require.NoError(t, i.jit(0))
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64(1<<48), v)
 
 		jit := p.Snapshot().JIT
 		require.Equal(t, uint64(1), jit.Attempts)
@@ -3627,7 +3675,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.Equal(t, types.I32(42), value)
 	})
 
-	t.Run("compiles recursive fibonacci as entry", func(t *testing.T) {
+	t.Run("compiles recursive fibonacci complete entry", func(t *testing.T) {
 		requireJIT(t)
 		fib := types.NewFunctionBuilder(&types.FunctionType{
 			Params:  []types.Type{types.TypeI32},
@@ -3666,13 +3714,120 @@ func TestInterpreter_JIT(t *testing.T) {
 		addr := i.constants[0].Ref()
 		require.NoError(t, i.jit(addr))
 		jit := p.Snapshot().JIT
-		require.Equal(t, uint64(1), jit.Emits)
-		require.Equal(t, uint64(1), jit.Links)
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+		require.True(t, i.jitted[addr])
 
 		require.NoError(t, i.Run(context.Background()))
 		value, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(6765), value)
+	})
+
+	t.Run("compiles direct call scc complete entries", func(t *testing.T) {
+		requireJIT(t)
+		even := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_EQZ),
+			instr.New(instr.BR_IF, 13),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CALL),
+			instr.New(instr.RETURN),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.RETURN),
+		).Build()
+		odd := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_EQZ),
+			instr.New(instr.BR_IF, 13),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.RETURN),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.RETURN),
+		).Build()
+		p := prof.New()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 10),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(even, odd),
+		), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+
+		evenAddr := i.constants[0].Ref()
+		oddAddr := i.constants[1].Ref()
+		require.NoError(t, i.jit(evenAddr))
+		require.True(t, i.jitted[evenAddr])
+		require.True(t, i.jitted[oddAddr])
+
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1), value)
+	})
+
+	t.Run("entry fallback restores frame metadata", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{}).Emit(
+			instr.New(instr.NOP),
+			instr.New(instr.RETURN),
+		).Build()
+		i := New(program.New(nil, program.WithConstants(fn)))
+		defer i.Close()
+
+		addr := i.constants[0].Ref()
+		fallback := append([]func(*Interpreter){}, i.code[addr]...)
+		i.frames[1] = frame{addr: addr, ref: addr, code: i.code[addr]}
+		i.fp = 2
+		i.fr = &i.frames[1]
+
+		wrapped := i.entry(addr, callableFunc(func(argv []uint64) error {
+			argv[scratchSP] = 0
+			argv[scratchNext] = scratchFallback
+			return nil
+		}), fallback)
+		wrapped(i)
+
+		require.Same(t, &i.frames[1], i.fr)
+		require.Len(t, i.fr.code, len(i.code[addr]))
+		require.NotNil(t, i.fr.code[0])
+		require.Nil(t, i.fr.upvals)
+		require.Equal(t, 1, i.fr.ip)
+		require.Equal(t, 2, i.fp)
+	})
+
+	t.Run("restore frame metadata keeps closure upvals", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{}).WithCaptures(types.TypeI32).Emit(
+			instr.New(instr.RETURN),
+		).Build()
+		i := New(program.New(nil, program.WithConstants(fn)))
+		defer i.Close()
+
+		addr := i.constants[0].Ref()
+		upvals := []types.Boxed{types.BoxI32(7)}
+		closure := types.NewClosure(fn.Typ, types.Ref(addr), upvals)
+		ref := i.keep(closure)
+		f := &frame{addr: addr, ref: ref}
+
+		i.restoreFrame(f, addr)
+
+		require.Len(t, f.code, len(i.code[addr]))
+		require.NotNil(t, f.code[0])
+		require.Equal(t, upvals, f.upvals)
 	})
 
 	t.Run("skips ref globals", func(t *testing.T) {
@@ -3892,7 +4047,7 @@ func TestInterpreter_JIT(t *testing.T) {
 
 		require.NoError(t, i.jit(0))
 		jit := p.Snapshot().JIT
-		require.Equal(t, uint64(2), jit.Emits)
+		require.Equal(t, uint64(3), jit.Emits)
 		require.Equal(t, uint64(3), jit.Links)
 
 		i.fr.ip = 5

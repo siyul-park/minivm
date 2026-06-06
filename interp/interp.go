@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"unsafe"
 
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/jit"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -21,8 +21,9 @@ type Interpreter struct {
 	hook      func(*Interpreter) error
 	marshaler Marshaler
 
-	compiler *jit.Compiler
+	compiler *jitCompiler
 	jitted   map[int]bool
+	argv     [scratchCount]uint64
 
 	types     []types.Type
 	constants []types.Boxed
@@ -278,6 +279,7 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 			}
 
 			if i.hook != nil {
+				i.restoreFrame(f, f.addr)
 				if err := i.hook(i); err != nil {
 					return err
 				}
@@ -515,11 +517,11 @@ func (i *Interpreter) Reset() {
 }
 
 func (i *Interpreter) jit(addr int) error {
-	if jit.Active() == nil {
-		return nil
-	}
 	if err := i.ensure(); err != nil {
 		return err
+	}
+	if i.compiler == nil {
+		return nil
 	}
 	i.prof.JITAttempt()
 
@@ -527,7 +529,7 @@ func (i *Interpreter) jit(addr int) error {
 	if !ok {
 		return nil
 	}
-	mod, err := i.compiler.Compile(fn, addr, i.snapshot(addr, fn))
+	mod, err := i.compiler.Compile(i, addr, fn)
 	if err != nil {
 		i.prof.JITError()
 		return err
@@ -539,20 +541,16 @@ func (i *Interpreter) jit(addr int) error {
 	return nil
 }
 
-// ensure lazily constructs the JIT compiler and warms its slot
-// table. Any failure here is recorded as a JIT error and propagated.
+// ensure lazily constructs the native compiler. Any failure here is
+// recorded as a JIT error and propagated.
 func (i *Interpreter) ensure() error {
 	if i.compiler == nil {
-		compiler, err := jit.New(jit.WithCutoff(i.cutoff))
+		compiler, err := newJITCompiler(i.cutoff)
 		if err != nil {
 			i.prof.JITError()
 			return err
 		}
 		i.compiler = compiler
-	}
-	if _, err := i.compiler.Slots(); err != nil {
-		i.prof.JITError()
-		return err
 	}
 	return nil
 }
@@ -560,65 +558,47 @@ func (i *Interpreter) ensure() error {
 // install accounts a successful Compile and rewires the dispatch table:
 // the whole-function Entry replaces the first opcode handler, every
 // emitted segment replaces its corresponding handler.
-func (i *Interpreter) install(mod *jit.Module, addr int) {
-	for _, n := range mod.Bytes {
+func (i *Interpreter) install(mod *jitModule, addr int) {
+	for _, n := range mod.bytes {
 		i.prof.JITEmit(n)
 	}
-	for range mod.Links {
+	for range mod.links {
 		i.prof.JITLink()
 	}
-	for range mod.Skips {
+	for range mod.skips {
 		i.prof.JITSkip()
 	}
-	if mod.Entry != nil && addr > 0 && addr < len(i.code) && len(i.code[addr]) > 0 {
-		i.code[addr][0] = i.entry(mod.Entry)
+	if mod.entry != nil && addr > 0 && addr < len(i.code) && len(i.code[addr]) > 0 {
+		fallback := append([]func(*Interpreter){}, i.code[addr]...)
+		i.code[addr][0] = i.entry(addr, mod.entry, fallback)
 		if i.jitted == nil {
 			i.jitted = make(map[int]bool)
 		}
 		i.jitted[addr] = true
 	}
-	for ip, callable := range mod.Segments {
-		if ip < 0 || ip >= len(i.code[addr]) || callable == nil {
+	for entryAddr, callable := range mod.entries {
+		if entryAddr <= 0 || entryAddr >= len(i.code) || len(i.code[entryAddr]) == 0 || callable == nil {
 			continue
 		}
-		i.code[addr][ip] = i.segment(callable, mod.Stacks[ip])
+		fallback := append([]func(*Interpreter){}, i.code[entryAddr]...)
+		i.code[entryAddr][0] = i.entry(entryAddr, callable, fallback)
+		if i.jitted == nil {
+			i.jitted = make(map[int]bool)
+		}
+		i.jitted[entryAddr] = true
 	}
-}
-
-// snapshot bundles the consumer-side tables the JIT inspects at compile
-// time. Locals concatenates the function's params and declared locals so
-// LOCAL_* lowering can check kinds by raw index.
-func (i *Interpreter) snapshot(addr int, fn *types.Function) jit.Snapshot {
-	var locals []types.Kind
-	if fn != nil {
-		locals = fn.LocalKinds()
-	}
-	// Collect any function refs present in constants so the CALL lowerer can
-	// look up param/return types at compile time.
-	var functions map[int]*types.Function
-	for _, v := range i.constants {
-		if v.Kind() != types.KindRef {
+	for entry, callable := range mod.segments {
+		if entry.addr < 0 || entry.addr >= len(i.code) || entry.ip < 0 || entry.ip >= len(i.code[entry.addr]) || callable == nil {
 			continue
 		}
-		a := v.Ref()
-		if !i.jitted[a] && a != addr {
-			continue
+		fallback := i.code[entry.addr][entry.ip]
+		i.code[entry.addr][entry.ip] = i.segment(entry.addr, callable, mod.stacks[entry], fallback)
+		if entry.ip == 0 && entry.addr > 0 {
+			if i.jitted == nil {
+				i.jitted = make(map[int]bool)
+			}
+			i.jitted[entry.addr] = true
 		}
-		fn, ok := i.function(a)
-		if !ok {
-			continue
-		}
-		if functions == nil {
-			functions = make(map[int]*types.Function)
-		}
-		functions[a] = fn
-	}
-	return jit.Snapshot{
-		Constants: i.constants,
-		Globals:   i.globals,
-		Locals:    locals,
-		Functions: functions,
-		Hot:       i.hot(addr),
 	}
 }
 
@@ -647,34 +627,25 @@ func (i *Interpreter) function(addr int) (*types.Function, bool) {
 	return fn, ok
 }
 
-// segment wraps a native segment Callable in a threaded-style closure. The
-// closure marshals VM stack values as Callable args via jit.Invoke and
-// appends Callable returns back to the interpreter stack.
-func (i *Interpreter) segment(callable asm.Callable, argc int) func(*Interpreter) {
-	args := make([]asm.Value, argc)
+// segment wraps a native segment Callable in a threaded-style closure. Native
+// code reads and writes the VM stack directly through scratch argv.
+func (i *Interpreter) segment(addr int, callable asm.Callable, argc int, fallback func(*Interpreter)) func(*Interpreter) {
 	return func(i *Interpreter) {
 		if i.sp < argc {
 			panic(ErrStackUnderflow)
 		}
-		base := i.sp - argc
-		for n := range args {
-			args[n] = jit.Arg(i.stack[base+n])
-		}
-		out, err := jit.Invoke(callable, jit.Call{
-			Stack: i.stack, Globals: i.globals, BP: i.fr.bp,
-		}, args)
-		if err != nil {
+		scratch := i.scratch()
+		if err := callable.Call(scratch); err != nil {
 			panic(err)
 		}
-		i.sp = base
-		if i.sp+len(out.Returns) > len(i.stack) {
-			panic(ErrStackOverflow)
+
+		next := scratch[scratchNext]
+		i.sp = int(scratch[scratchSP])
+		i.fr.ip = int(next &^ scratchFallback)
+		if next&scratchFallback != 0 {
+			i.restoreFrame(i.fr, addr)
+			fallback(i)
 		}
-		for _, ret := range out.Returns {
-			i.stack[i.sp] = jit.Ret(ret)
-			i.sp++
-		}
-		i.fr.ip = out.NextIP
 	}
 }
 
@@ -683,20 +654,29 @@ func (i *Interpreter) segment(callable asm.Callable, argc int) func(*Interpreter
 // The native Entry reads params from stack scratch slots, then this closure
 // performs the frame teardown that RETURN would normally do in the threaded
 // interpreter.
-func (i *Interpreter) entry(callable asm.Callable) func(*Interpreter) {
+func (i *Interpreter) entry(addr int, callable asm.Callable, fallback []func(*Interpreter)) func(*Interpreter) {
 	return func(i *Interpreter) {
-		out, err := jit.Invoke(callable, jit.Call{
-			Stack: i.stack, Globals: i.globals, BP: i.fr.bp,
-		}, nil)
-		if err != nil {
+		i.fr.code = nil
+		i.fr.upvals = nil
+		scratch := i.scratch()
+		if err := callable.Call(scratch); err != nil {
 			panic(err)
+		}
+
+		next := scratch[scratchNext]
+		if next&scratchFallback != 0 {
+			i.sp = int(scratch[scratchSP])
+			i.fr.ip = int(next &^ scratchFallback)
+			i.restoreFrame(i.fr, addr)
+			if i.fr.ip < 0 || i.fr.ip >= len(fallback) {
+				panic(ErrSegmentationFault)
+			}
+			fallback[i.fr.ip](i)
+			return
 		}
 
 		// Perform the frame teardown that the threaded RETURN handler does.
 		f := i.fr
-		for k, ret := range out.Returns {
-			i.stack[f.bp+k] = jit.Ret(ret)
-		}
 		i.sp = f.bp + f.returns
 		if f.release {
 			i.release(f.ref)
@@ -705,6 +685,40 @@ func (i *Interpreter) entry(callable asm.Callable) func(*Interpreter) {
 		i.fp--
 		i.fr = &i.frames[i.fp-1]
 	}
+}
+
+func (i *Interpreter) restoreFrame(f *frame, addr int) {
+	if f == nil {
+		return
+	}
+	if addr <= 0 {
+		addr = f.addr
+	}
+	if addr < 0 || addr >= len(i.code) {
+		return
+	}
+	f.code = i.code[addr]
+	f.addr = addr
+	if f.ref > 0 && f.ref < len(i.heap) {
+		if cl, ok := i.heap[f.ref].(*types.Closure); ok && int(cl.Fn) == addr {
+			f.upvals = cl.Upvals
+			return
+		}
+	}
+	f.upvals = nil
+}
+
+func (i *Interpreter) scratch() []uint64 {
+	clear(i.argv[:])
+	i.argv[scratchBP] = uint64(i.fr.bp)
+	i.argv[scratchSP] = uint64(i.sp)
+	if len(i.stack) > 0 {
+		i.argv[scratchStack] = uint64(uintptr(unsafe.Pointer(&i.stack[0])))
+	}
+	if len(i.globals) > 0 {
+		i.argv[scratchGlobals] = uint64(uintptr(unsafe.Pointer(&i.globals[0])))
+	}
+	return i.argv[:]
 }
 
 func (i *Interpreter) error(r any) error {

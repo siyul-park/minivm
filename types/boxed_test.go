@@ -30,6 +30,22 @@ func TestIsBoxable(t *testing.T) {
 			expected: true,
 		},
 		{
+			val:      -(1 << 48),
+			expected: true,
+		},
+		{
+			val:      (1 << 48) - 1,
+			expected: true,
+		},
+		{
+			val:      -(1 << 48) - 1,
+			expected: false,
+		},
+		{
+			val:      1 << 48,
+			expected: false,
+		},
+		{
 			val:      math.MinInt64,
 			expected: false,
 		},

@@ -48,12 +48,15 @@ No manual build tags required for normal use. The Go toolchain selects correct f
 
 ## `unsafe` Usage
 
-`unsafe` is used in `asm/` package only:
+`unsafe` is used in a few low-level packages:
 
 - `asm/memory.go`: `mmap`/`mprotect` syscalls and pointer access to executable memory
-- `asm/buffer.go`, `asm/assembler.go`, `asm/reloc.go`: pointer arithmetic for native code patching
+- `asm/buffer.go`, `asm/link.go`, `asm/abi.go`, `asm/arm64/abi.go`: pointer arithmetic for native code patching and callable entry binding
+- `instr/instr.go`, `interp/threaded.go`: fixed-width bytecode operand loads
+- `interp/interp.go`: scratch pointers passed to native JIT code
+- `interp/host.go`, `interp/marshal.go`: host-object field access and reflection bridge
 
-No `unsafe` in `interp/`, `types/`, `instr/`, `program/`, `pass/`, `analysis/`, `transform/`, or `optimize/`. Guest bytecode cannot escape VM heap via `unsafe`.
+No `unsafe` in `types/`, `program/`, `pass/`, `analysis/`, `transform/`, or `optimize/`. Guest bytecode cannot escape VM heap via `unsafe`.
 
 ## Executable Memory
 

@@ -12,8 +12,8 @@ import (
 type memory []byte
 
 // region is a growable mmap-backed area. Older mappings are retained so
-// pointers stamped into them by callers (e.g. linked code, slot tables)
-// remain valid. Concurrent access serializes on mu.
+// pointers stamped into them by linked code remain valid. Concurrent access
+// serializes on mu.
 type region struct {
 	old    []memory
 	mem    memory

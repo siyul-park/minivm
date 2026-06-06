@@ -27,7 +27,11 @@ func Tag(kind Kind) uint64 {
 }
 
 func IsBoxable(v int64) bool {
-	return uint64(v+VMask) <= 2*VMask
+	const (
+		minI64 = -1 << (VBits - 1)
+		maxI64 = 1<<(VBits-1) - 1
+	)
+	return minI64 <= v && v <= maxI64
 }
 
 func BoxI32(v int32) Boxed {

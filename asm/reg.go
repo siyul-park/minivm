@@ -24,14 +24,6 @@ type VReg struct {
 	width RegWidth
 }
 
-// Value is the runtime payload passed across a Callable boundary. Type and
-// width describe how Bits is interpreted by both sides of the ABI.
-type Value struct {
-	typ   RegType
-	width RegWidth
-	bits  uint64
-}
-
 // RegType distinguishes the integer and floating-point register banks.
 type RegType uint8
 
@@ -58,18 +50,6 @@ func NewPReg(id uint8, typ RegType, w RegWidth) PReg {
 func NewVReg(id int32, typ RegType, w RegWidth) VReg {
 	return VReg{id: id, typ: typ, width: w}
 }
-
-// I32 boxes a 32-bit signed integer as a Value.
-func I32(v uint32) Value { return Value{typ: RegTypeInt, width: Width32, bits: uint64(v)} }
-
-// I64 boxes a 64-bit signed integer as a Value.
-func I64(v uint64) Value { return Value{typ: RegTypeInt, width: Width64, bits: v} }
-
-// F32 boxes the bit pattern of a 32-bit float as a Value.
-func F32(v uint32) Value { return Value{typ: RegTypeFloat, width: Width32, bits: uint64(v)} }
-
-// F64 boxes the bit pattern of a 64-bit float as a Value.
-func F64(v uint64) Value { return Value{typ: RegTypeFloat, width: Width64, bits: v} }
 
 // Compatible reports whether a and b share the same register type and width.
 func Compatible(a, b Reg) bool {
@@ -117,39 +97,4 @@ func (r VReg) String() string {
 		prefix = "vf"
 	}
 	return fmt.Sprintf("%s%d", prefix, r.id)
-}
-
-func (v Value) RegType() RegType { return v.typ }
-func (v Value) Width() RegWidth  { return v.width }
-func (v Value) Valid() bool      { return v.width != WidthUndefined }
-func (v Value) Bits() uint64     { return v.bits }
-
-func (v Value) String() string {
-	switch {
-	case v.typ == RegTypeInt && v.width == Width32:
-		return "i32"
-	case v.typ == RegTypeInt && v.width == Width64:
-		return "i64"
-	case v.typ == RegTypeFloat && v.width == Width32:
-		return "f32"
-	case v.typ == RegTypeFloat && v.width == Width64:
-		return "f64"
-	default:
-		return "<invalid>"
-	}
-}
-
-func (v Value) GoString() string {
-	switch {
-	case v.typ == RegTypeInt && v.width == Width32:
-		return fmt.Sprintf("I32(%d)", uint32(v.bits))
-	case v.typ == RegTypeInt && v.width == Width64:
-		return fmt.Sprintf("I64(%d)", v.bits)
-	case v.typ == RegTypeFloat && v.width == Width32:
-		return fmt.Sprintf("F32(%08x)", uint32(v.bits))
-	case v.typ == RegTypeFloat && v.width == Width64:
-		return fmt.Sprintf("F64(%016x)", v.bits)
-	default:
-		return "<invalid>"
-	}
 }

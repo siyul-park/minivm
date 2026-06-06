@@ -1,17 +1,12 @@
 package asm
 
-import (
-	"errors"
-	"unsafe"
-)
+import "errors"
 
 // Callable is a fully linked, directly invokable entry into the executable
 // buffer. Implementations are produced by ABI.NewCallable and returned from
-// Link. Addr exposes the raw entry address so callers can emit direct
-// branches without going back through Go.
+// Link.
 type Callable interface {
-	Call(args []Value, scratch []uint64) (returns []Value, err error)
-	Addr() unsafe.Pointer
+	Call(argv []uint64) error
 }
 
 var ErrInvalidArgs = errors.New("invalid arguments")
