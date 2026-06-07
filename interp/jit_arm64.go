@@ -146,6 +146,20 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 		return l.i64Eqz(ctx)
 	case instr.I64_ADD:
 		return l.i64Add(ctx)
+	case instr.I64_SUB:
+		return l.i64Sub(ctx)
+	case instr.I64_MUL:
+		return l.i64Mul(ctx)
+	case instr.I64_DIV_S:
+		return l.i64DivS(ctx)
+	case instr.I64_DIV_U:
+		return l.i64DivU(ctx)
+	case instr.I64_REM_S:
+		return l.i64RemS(ctx)
+	case instr.I64_REM_U:
+		return l.i64RemU(ctx)
+	case instr.I64_SHL:
+		return l.i64Shl(ctx)
 	case instr.I64_LT_S:
 		return l.i64Cmp(ctx, l.sign64, arm64.CondLT)
 	case instr.I64_LE_S:
@@ -164,6 +178,8 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 		return l.i64Cmp(ctx, l.zero64, arm64.CondCS)
 	case instr.I64_SHR_S:
 		return l.i64ShrS(ctx)
+	case instr.I64_SHR_U:
+		return l.i64ShrU(ctx)
 	case instr.BR:
 		return l.br(ctx)
 	case instr.BR_IF:
@@ -960,8 +976,11 @@ func (l arm64JIT) i64Cmp(
 	if !l.need(ctx, 2) {
 		return false
 	}
+	pre := append([]asm.VReg(nil), ctx.stack...)
 	b := ctx.stack[len(ctx.stack)-1]
 	a := ctx.stack[len(ctx.stack)-2]
+	l.guardI64Value(ctx, a, pre)
+	l.guardI64Value(ctx, b, pre)
 
 	if prep != nil {
 		a = prep(ctx, a)
@@ -984,7 +1003,9 @@ func (l arm64JIT) i64Eqz(ctx *jitContext) bool {
 	if !l.need(ctx, 1) {
 		return false
 	}
+	pre := append([]asm.VReg(nil), ctx.stack...)
 	a := ctx.stack[len(ctx.stack)-1]
+	l.guardI64Value(ctx, a, pre)
 
 	val := l.zero64(ctx, a)
 	ctx.assembler.Emit(arm64.CMPI(val, 0))
@@ -1000,16 +1021,142 @@ func (l arm64JIT) i64Eqz(ctx *jitContext) bool {
 // results outside the 49-bit boxed i64 range. The fallback materializes the
 // pre-op stack and resumes threaded execution at this opcode.
 func (l arm64JIT) i64Add(ctx *jitContext) bool {
+	return l.i64Binary(ctx, arm64.ADD, l.sign64, false)
+}
+
+func (l arm64JIT) i64Sub(ctx *jitContext) bool {
+	return l.i64Binary(ctx, arm64.SUB, l.sign64, false)
+}
+
+func (l arm64JIT) i64Mul(ctx *jitContext) bool {
+	return l.i64Binary(ctx, arm64.MUL, l.sign64, false)
+}
+
+func (l arm64JIT) i64DivS(ctx *jitContext) bool {
+	return l.i64Binary(ctx, arm64.SDIV, l.sign64, true)
+}
+
+func (l arm64JIT) i64DivU(ctx *jitContext) bool {
+	return l.i64Binary(ctx, arm64.UDIV, l.zero64, true)
+}
+
+func (l arm64JIT) i64RemS(ctx *jitContext) bool {
+	return l.i64Remainder(ctx, arm64.SDIV, l.sign64)
+}
+
+func (l arm64JIT) i64RemU(ctx *jitContext) bool {
+	return l.i64Remainder(ctx, arm64.UDIV, l.zero64)
+}
+
+func (l arm64JIT) i64Shl(ctx *jitContext) bool {
 	if !l.need(ctx, 2) {
 		return false
 	}
 	pre := append([]asm.VReg(nil), ctx.stack...)
 	b := ctx.stack[len(ctx.stack)-1]
 	a := ctx.stack[len(ctx.stack)-2]
+	l.guardI64Value(ctx, a, pre)
+	l.guardI64Value(ctx, b, pre)
+
+	shift := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ANDI(shift, b, 0x3F))
 
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ADD(raw, l.sign64(ctx, a), l.sign64(ctx, b)))
+	ctx.assembler.Emit(arm64.LSL(raw, l.sign64(ctx, a), shift))
+	return l.finishI64Binary(ctx, pre, raw)
+}
 
+// i64ShrS is safe to lower because arithmetic right shift of a boxable i64 stays boxable.
+func (l arm64JIT) i64ShrS(ctx *jitContext) bool {
+	if !l.need(ctx, 2) {
+		return false
+	}
+	pre := append([]asm.VReg(nil), ctx.stack...)
+	b := ctx.stack[len(ctx.stack)-1]
+	a := ctx.stack[len(ctx.stack)-2]
+	l.guardI64Value(ctx, a, pre)
+	l.guardI64Value(ctx, b, pre)
+
+	shift := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ANDI(shift, b, 0x3F))
+
+	val := l.sign64(ctx, a)
+	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ASR(raw, val, shift))
+
+	boxed := l.boxI64(ctx, raw)
+	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)
+	return true
+}
+
+func (l arm64JIT) i64ShrU(ctx *jitContext) bool {
+	if !l.need(ctx, 2) {
+		return false
+	}
+	pre := append([]asm.VReg(nil), ctx.stack...)
+	b := ctx.stack[len(ctx.stack)-1]
+	a := ctx.stack[len(ctx.stack)-2]
+	l.guardI64Value(ctx, a, pre)
+	l.guardI64Value(ctx, b, pre)
+
+	shift := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ANDI(shift, b, 0x3F))
+
+	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LSR(raw, l.zero64(ctx, a), shift))
+	return l.finishI64Binary(ctx, pre, raw)
+}
+
+func (l arm64JIT) i64Binary(
+	ctx *jitContext,
+	op func(dst, src1, src2 asm.Reg) asm.Instruction,
+	prep func(*jitContext, asm.VReg) asm.VReg,
+	guardZero bool,
+) bool {
+	if !l.need(ctx, 2) {
+		return false
+	}
+	pre := append([]asm.VReg(nil), ctx.stack...)
+	b := ctx.stack[len(ctx.stack)-1]
+	a := ctx.stack[len(ctx.stack)-2]
+	l.guardI64Value(ctx, a, pre)
+	l.guardI64Value(ctx, b, pre)
+	b = prep(ctx, b)
+	a = prep(ctx, a)
+	if guardZero {
+		l.guardNonZero(ctx, b, pre)
+	}
+
+	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(op(raw, a, b))
+	return l.finishI64Binary(ctx, pre, raw)
+}
+
+func (l arm64JIT) i64Remainder(
+	ctx *jitContext,
+	div func(dst, src1, src2 asm.Reg) asm.Instruction,
+	prep func(*jitContext, asm.VReg) asm.VReg,
+) bool {
+	if !l.need(ctx, 2) {
+		return false
+	}
+	pre := append([]asm.VReg(nil), ctx.stack...)
+	b := ctx.stack[len(ctx.stack)-1]
+	a := ctx.stack[len(ctx.stack)-2]
+	l.guardI64Value(ctx, a, pre)
+	l.guardI64Value(ctx, b, pre)
+	b = prep(ctx, b)
+	a = prep(ctx, a)
+	l.guardNonZero(ctx, b, pre)
+
+	quotient := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(div(quotient, a, b))
+	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.MSUB(raw, quotient, b, a))
+	return l.finishI64Binary(ctx, pre, raw)
+}
+
+func (l arm64JIT) finishI64Binary(ctx *jitContext, pre []asm.VReg, raw asm.VReg) bool {
 	shifted := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LSLI(shifted, raw, signI64))
 	extended := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -1030,28 +1177,6 @@ func (l arm64JIT) i64Add(ctx *jitContext) bool {
 
 	ctx.assembler.Bind(done)
 	ctx.stack = next
-	return true
-}
-
-// i64ShrS is safe to lower because arithmetic right shift of a
-// boxable i64 stays boxable. Left shift and unsigned right shift can
-// produce values that the interpreter heap-promotes, so they reject.
-func (l arm64JIT) i64ShrS(ctx *jitContext) bool {
-	if !l.need(ctx, 2) {
-		return false
-	}
-	b := ctx.stack[len(ctx.stack)-1]
-	a := ctx.stack[len(ctx.stack)-2]
-
-	shift := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ANDI(shift, b, 0x3F))
-
-	val := l.sign64(ctx, a)
-	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ASR(raw, val, shift))
-
-	boxed := l.boxI64(ctx, raw)
-	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)
 	return true
 }
 
@@ -1702,6 +1827,21 @@ func (l arm64JIT) guardRef(ctx *jitContext, v asm.VReg, pre []asm.VReg) {
 
 	ok := ctx.assembler.Label()
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, ok))
+	ctx.stack = append(ctx.stack[:0], pre...)
+	l.exitFallback(ctx, ctx.ip)
+	ctx.assembler.Bind(ok)
+	ctx.stack = append(ctx.stack[:0], pre...)
+}
+
+func (l arm64JIT) guardI64Value(ctx *jitContext, v asm.VReg, pre []asm.VReg) {
+	tag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LSRI(tag, v, uint8(types.VBits)))
+	want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(want, tagI64>>types.VBits)...)
+	ctx.assembler.Emit(arm64.CMP(tag, want))
+
+	ok := ctx.assembler.Label()
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, ok))
 	ctx.stack = append(ctx.stack[:0], pre...)
 	l.exitFallback(ctx, ctx.ip)
 	ctx.assembler.Bind(ok)

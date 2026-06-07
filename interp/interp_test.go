@@ -3816,6 +3816,107 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NotZero(t, jit.Links)
 	})
 
+	t.Run("lowers i64 arithmetic and shifts", func(t *testing.T) {
+		requireJIT(t)
+		cases := []struct {
+			name string
+			op   instr.Opcode
+			a    types.Value
+			b    types.Value
+			want types.Value
+		}{
+			{name: "sub", op: instr.I64_SUB, a: types.I64(50), b: types.I64(8), want: types.I64(42)},
+			{name: "mul", op: instr.I64_MUL, a: types.I64(6), b: types.I64(7), want: types.I64(42)},
+			{name: "div_s", op: instr.I64_DIV_S, a: types.I64(-84), b: types.I64(-2), want: types.I64(42)},
+			{name: "div_u", op: instr.I64_DIV_U, a: types.I64(84), b: types.I64(2), want: types.I64(42)},
+			{name: "rem_s", op: instr.I64_REM_S, a: types.I64(85), b: types.I64(43), want: types.I64(42)},
+			{name: "rem_u", op: instr.I64_REM_U, a: types.I64(85), b: types.I64(43), want: types.I64(42)},
+			{name: "shl", op: instr.I64_SHL, a: types.I64(21), b: types.I64(1), want: types.I64(42)},
+			{name: "shr_u", op: instr.I64_SHR_U, a: types.I64(84), b: types.I64(1), want: types.I64(42)},
+		}
+		for _, tt := range cases {
+			t.Run(tt.name, func(t *testing.T) {
+				p := prof.New()
+				i := New(program.New([]instr.Instruction{
+					instr.New(tt.op),
+				}), WithProfile(p), WithCutoff(1))
+				defer i.Close()
+				p.Add(0, 0, byte(tt.op))
+				require.NoError(t, i.Push(tt.a))
+				require.NoError(t, i.Push(tt.b))
+
+				require.NoError(t, i.jit(0))
+				require.NoError(t, i.Run(context.Background()))
+				value, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, tt.want, value)
+				jit := p.Snapshot().JIT
+				require.NotZero(t, jit.Emits)
+				require.NotZero(t, jit.Links)
+			})
+		}
+	})
+
+	t.Run("falls back when i64 stack input is heap promoted", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I64_ADD),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.I64_ADD))
+		require.NoError(t, i.Push(types.I64(1<<50)))
+		require.NoError(t, i.Push(types.I64(1)))
+
+		require.NoError(t, i.jit(0))
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64((1<<50)+1), value)
+		jit := p.Snapshot().JIT
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
+	t.Run("falls back when i64 op leaves boxable range", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I64_SHL),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.I64_SHL))
+		require.NoError(t, i.Push(types.I64(1<<47)))
+		require.NoError(t, i.Push(types.I64(2)))
+
+		require.NoError(t, i.jit(0))
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64(1<<49), value)
+		jit := p.Snapshot().JIT
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
+	t.Run("falls back on i64 divide by zero", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I64_DIV_S),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.I64_DIV_S))
+		require.NoError(t, i.Push(types.I64(1)))
+		require.NoError(t, i.Push(types.I64(0)))
+
+		require.NoError(t, i.jit(0))
+		require.ErrorIs(t, i.Run(context.Background()), ErrDivideByZero)
+		jit := p.Snapshot().JIT
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
 	t.Run("compiles numeric globals", func(t *testing.T) {
 		requireJIT(t)
 		p := prof.New()
