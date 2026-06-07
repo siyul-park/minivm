@@ -3030,6 +3030,41 @@ func TestInterpreter_Run(t *testing.T) {
 		require.ErrorIs(t, i.Run(context.Background()), ErrFrameOverflow)
 	})
 
+	t.Run("jit global get falls back when runtime value is ref", func(t *testing.T) {
+		requireJIT(t)
+
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.RETURN),
+		).Build()
+		p := prof.New()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fn),
+		), WithProfile(p), WithCutoff(1), WithGlobals(1))
+		defer i.Close()
+		i.globals = append(i.globals, types.BoxI32(1))
+
+		addr := i.constants[0].Ref()
+		require.NoError(t, i.jit(addr))
+		ref, err := i.Alloc(types.String("live"))
+		require.NoError(t, err)
+		require.NoError(t, i.SetGlobal(0, types.BoxRef(ref)))
+
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 2, i.rc[ref])
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.String("live"), value)
+		_, err = i.Load(ref)
+		require.NoError(t, err)
+	})
+
 	t.Run("nested return restores caller frame for locals", func(t *testing.T) {
 		callee := types.NewFunctionBuilder(&types.FunctionType{
 			Returns: []types.Type{types.TypeI32},

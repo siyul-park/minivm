@@ -23,6 +23,8 @@ const (
 
 	tagF32 = uint64(0x7FF2_0000_0000_0000)
 
+	tagRef = uint64(0x7FF8_0000_0000_0000)
+
 	signI64 = uint8(15)
 )
 
@@ -513,10 +515,12 @@ func (l arm64JIT) globalGet(c *jitContext) bool {
 	if !ok {
 		return false
 	}
+	pre := append([]asm.VReg(nil), c.stack...)
 	vGlobal := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	_ = c.assembler.Pin(vGlobal, c.scratch[scratchGlobals])
 	dst := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.assembler.Emit(arm64.LDR(dst, vGlobal, int16(idx*8)))
+	l.guardRef(c, dst, pre)
 	if c.globals[idx].Kind() == types.KindI64 {
 		l.guardI64(c, dst)
 	}
@@ -537,13 +541,16 @@ func (l arm64JIT) globalSet(c *jitContext) bool {
 		return false
 	}
 
+	pre := append([]asm.VReg(nil), c.stack...)
 	src := c.stack[len(c.stack)-1]
 
 	vGlobal := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	_ = c.assembler.Pin(vGlobal, c.scratch[scratchGlobals])
+	old := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.assembler.Emit(arm64.LDR(old, vGlobal, int16(idx*8)))
+	l.guardRef(c, old, pre)
+	l.guardRef(c, src, pre)
 	if c.globals[idx].Kind() == types.KindI64 {
-		old := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Emit(arm64.LDR(old, vGlobal, int16(idx*8)))
 		l.guardI64(c, old)
 	}
 	c.assembler.Emit(arm64.STR(src, vGlobal, int16(idx*8)))
@@ -1056,12 +1063,15 @@ func (l arm64JIT) globalTee(c *jitContext) bool {
 		return false
 	}
 
+	pre := append([]asm.VReg(nil), c.stack...)
 	src := c.stack[len(c.stack)-1]
 	vGlobal := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	_ = c.assembler.Pin(vGlobal, c.scratch[scratchGlobals])
+	old := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.assembler.Emit(arm64.LDR(old, vGlobal, int16(idx*8)))
+	l.guardRef(c, old, pre)
+	l.guardRef(c, src, pre)
 	if c.globals[idx].Kind() == types.KindI64 {
-		old := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		c.assembler.Emit(arm64.LDR(old, vGlobal, int16(idx*8)))
 		l.guardI64(c, old)
 	}
 	c.assembler.Emit(arm64.STR(src, vGlobal, int16(idx*8)))
@@ -1583,4 +1593,19 @@ func (arm64JIT) global(c *jitContext) (int, bool) {
 		return 0, false
 	}
 	return idx, true
+}
+
+func (l arm64JIT) guardRef(c *jitContext, v asm.VReg, pre []asm.VReg) {
+	tag := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.assembler.Emit(arm64.LSRI(tag, v, uint8(types.VBits)))
+	want := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.assembler.Emit(arm64.LDI(want, tagRef>>types.VBits)...)
+	c.assembler.Emit(arm64.CMP(tag, want))
+
+	ok := c.assembler.Label()
+	c.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, ok))
+	c.stack = append(c.stack[:0], pre...)
+	l.exitFallback(c, c.ip)
+	c.assembler.Bind(ok)
+	c.stack = append(c.stack[:0], pre...)
 }

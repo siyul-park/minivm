@@ -121,7 +121,11 @@ Whole-function block mode carries shadow-stack values across block boundaries wh
 
 ## Globals
 
-`GLOBAL_GET`/`GLOBAL_SET`/`GLOBAL_TEE` lower only for in-range non-ref globals whose slot offset fits the ARM64 unsigned LDR/STR immediate. Ref globals fall back to threaded code so retain/release ownership stays in the interpreter.
+`GLOBAL_GET`/`GLOBAL_SET`/`GLOBAL_TEE` lower only for in-range globals whose
+compile-time value is non-ref and whose slot offset fits the ARM64 unsigned
+LDR/STR immediate. Native code also checks the runtime old/value slot and the
+stored value; if either is a ref, it takes the guard fallback so retain/release
+ownership stays in the interpreter.
 
 ## Phase A Opcode Coverage
 
