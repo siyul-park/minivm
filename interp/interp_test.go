@@ -3972,6 +3972,61 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NotZero(t, jit.Links)
 	})
 
+	t.Run("lowers f64 to integer conversions", func(t *testing.T) {
+		requireJIT(t)
+		cases := []struct {
+			name string
+			op   instr.Opcode
+			in   types.Value
+			want types.Value
+		}{
+			{name: "i32_s", op: instr.F64_TO_I32_S, in: types.F64(-42.9), want: types.I32(-42)},
+			{name: "i32_u", op: instr.F64_TO_I32_U, in: types.F64(42.9), want: types.I32(42)},
+			{name: "i64_s", op: instr.F64_TO_I64_S, in: types.F64(-42.9), want: types.I64(-42)},
+			{name: "i64_u", op: instr.F64_TO_I64_U, in: types.F64(42.9), want: types.I64(42)},
+		}
+		for _, tt := range cases {
+			t.Run(tt.name, func(t *testing.T) {
+				p := prof.New()
+				i := New(program.New([]instr.Instruction{
+					instr.New(tt.op),
+				}), WithProfile(p), WithCutoff(1))
+				defer i.Close()
+				p.Add(0, 0, byte(tt.op))
+				require.NoError(t, i.Push(tt.in))
+
+				require.NoError(t, i.jit(0))
+				require.NoError(t, i.Run(context.Background()))
+				value, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, tt.want, value)
+				jit := p.Snapshot().JIT
+				require.NotZero(t, jit.Emits)
+				require.NotZero(t, jit.Links)
+			})
+		}
+	})
+
+	t.Run("falls back when f64 to i64 leaves boxable range", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.F64_TO_I64_U),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.F64_TO_I64_U))
+		require.NoError(t, i.Push(types.F64(float64(1<<50))))
+
+		require.NoError(t, i.jit(0))
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64(1<<50), value)
+		jit := p.Snapshot().JIT
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
 	t.Run("compiles numeric globals", func(t *testing.T) {
 		requireJIT(t)
 		p := prof.New()

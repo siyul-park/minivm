@@ -134,7 +134,7 @@ Fully lowered on ARM64:
 - Stack: `NOP`, `DROP`, `DUP`, `SWAP`, `SELECT`
 - Const: `I32_CONST`, `I64_CONST`, `F32_CONST`, `F64_CONST`, `CONST_GET`
 - Arithmetic: I32 add/sub/mul/div/rem/bitwise/shifts/comparisons/eqz; I64 add/sub/mul/div/rem/shifts/comparisons/eqz; F32/F64 add/sub/mul/div/comparisons
-- Conversions: `I32→I64`, `I64→I32`, `I32/I64→F32/F64`, `F32→I32/I64`, `F32↔F64`
+- Conversions: `I32→I64`, `I64→I32`, `I32/I64→F32/F64`, `F32/F64→I32/I64`, `F32↔F64`
 - Branches: `BR`, `BR_IF`, `BR_TABLE`
 - Locals + globals: `LOCAL_GET/SET/TEE`, `GLOBAL_GET/SET/TEE`
 - `RETURN` (whole-function Entry path only)

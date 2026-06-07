@@ -246,6 +246,14 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 		return l.f64Cmp(ctx, arm64.CondLS)
 	case instr.F64_GE:
 		return l.f64Cmp(ctx, arm64.CondGE)
+	case instr.F64_TO_I32_S:
+		return l.f64ToI32S(ctx)
+	case instr.F64_TO_I32_U:
+		return l.f64ToI32U(ctx)
+	case instr.F64_TO_I64_S:
+		return l.f64ToI64S(ctx)
+	case instr.F64_TO_I64_U:
+		return l.f64ToI64U(ctx)
 	case instr.I32_TO_F32_S:
 		return l.toFloat(ctx, asm.Width32, arm64.SCVTF, l.sign32)
 	case instr.I32_TO_F32_U:
@@ -1703,6 +1711,22 @@ func (l arm64JIT) f32ToI64U(ctx *jitContext) bool {
 	boxed := l.boxI64(ctx, ext)
 	ctx.stack[len(ctx.stack)-1] = boxed
 	return true
+}
+
+func (l arm64JIT) f64ToI32S(ctx *jitContext) bool {
+	return l.floatToI32(ctx, l.unboxF64, arm64.FCVTZS)
+}
+
+func (l arm64JIT) f64ToI32U(ctx *jitContext) bool {
+	return l.floatToI32(ctx, l.unboxF64, arm64.FCVTZU)
+}
+
+func (l arm64JIT) f64ToI64S(ctx *jitContext) bool {
+	return l.floatToI64(ctx, l.unboxF64, arm64.FCVTZS)
+}
+
+func (l arm64JIT) f64ToI64U(ctx *jitContext) bool {
+	return l.floatToI64(ctx, l.unboxF64, arm64.FCVTZU)
 }
 
 // toFloat pops one boxed integer value, extracts its value lane via prep,
