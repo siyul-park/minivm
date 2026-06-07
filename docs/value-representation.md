@@ -69,6 +69,8 @@ Approximate range: `-2^48 ≤ v ≤ 2^48 - 1`.
 
 When `!IsBoxable(v)`, interpreter heap-allocates `types.I64` and returns `KindRef`. Bytecode-transparent but costs heap allocation and RC work per out-of-range integer operation. Avoid tight loops over large I64 values when possible.
 
+The JIT only handles inline `KindI64`. Because an i64-typed local/global can hold a promoted `KindRef` at runtime, JIT i64 slot loads and stores tag-check the value and fall back to the interpreter on a ref (see `jit-internals.md`).
+
 ## Boxing Functions
 
 | Function | Input | Boxed Kind |

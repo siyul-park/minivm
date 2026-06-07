@@ -94,6 +94,8 @@ Guard fallbacks set the high bit of `scratchNext`. The segment wrapper clears th
 
 `i64.add` lowers only the boxable fast path. If the result is outside the 49-bit boxed i64 range, native materializes the pre-op stack and uses the guard fallback path so threaded execution can allocate the heap-spilled `types.I64`.
 
+JIT i64 ops require inline 49-bit operands — they read the value lane directly and skip the retain/release the threaded path does. An i64 local or global can still hold a heap-promoted `KindRef` at runtime (typed i64, but out of range). So every i64 slot **load** (`LOCAL_GET`, `GLOBAL_GET`) and **store** (`LOCAL_SET`, `GLOBAL_SET`, `LOCAL_TEE`, `GLOBAL_TEE`) emits a `requireInlineI64` tag check: a load tests the loaded value, a store tests the old slot value (the one a `*_SET` would `releaseBox`); if it is not the inline `KindI64` tag, native takes the guard fallback at the current IP so the interpreter — which owns heap i64 and refcounting — handles it. The check is emitted only for slots statically typed i64.
+
 ## CALL Boundaries
 
 Direct `CONST_GET function; CALL` sites can lower to native `BL` when every

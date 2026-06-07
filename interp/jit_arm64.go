@@ -74,7 +74,7 @@ func (l arm64JIT) lower(c *jitContext, op instr.Opcode) bool {
 	case instr.F64_CONST:
 		return l.f64Const(c)
 	case instr.CONST_GET:
-		if c.full && l.call(c) {
+		if c.framed && l.call(c) {
 			return true
 		}
 		return l.constGet(c)
@@ -275,7 +275,7 @@ func (l arm64JIT) exit(c *jitContext, nextIP uint64) {
 	_ = c.assembler.Pin(vNext, rNext)
 	c.assembler.Emit(arm64.LDI(vNext, nextIP)...)
 
-	if c.full {
+	if c.framed {
 		c.assembler.Emit(
 			arm64.LDR(arm64.LR, arm64.SP, 0),
 			arm64.ADDI(arm64.SP, arm64.SP, 16),
@@ -517,6 +517,9 @@ func (l arm64JIT) globalGet(c *jitContext) bool {
 	_ = c.assembler.Pin(vGlobal, c.scratch[scratchGlobals])
 	dst := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.assembler.Emit(arm64.LDR(dst, vGlobal, int16(idx*8)))
+	if c.globals[idx].Kind() == types.KindI64 {
+		l.guardI64(c, dst)
+	}
 	c.stack = append(c.stack, dst)
 	return true
 }
@@ -538,6 +541,11 @@ func (l arm64JIT) globalSet(c *jitContext) bool {
 
 	vGlobal := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	_ = c.assembler.Pin(vGlobal, c.scratch[scratchGlobals])
+	if c.globals[idx].Kind() == types.KindI64 {
+		old := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		c.assembler.Emit(arm64.LDR(old, vGlobal, int16(idx*8)))
+		l.guardI64(c, old)
+	}
 	c.assembler.Emit(arm64.STR(src, vGlobal, int16(idx*8)))
 
 	c.stack = c.stack[:len(c.stack)-1]
@@ -562,6 +570,9 @@ func (l arm64JIT) localGet(c *jitContext) bool {
 	}
 	dst := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	c.assembler.Emit(arm64.LDR(dst, addr, 0))
+	if c.locals[idx] == types.KindI64 {
+		l.guardI64(c, dst)
+	}
 	c.stack = append(c.stack, dst)
 	return true
 }
@@ -583,6 +594,11 @@ func (l arm64JIT) localSet(c *jitContext) bool {
 	addr, ok := l.localAddr(c, idx)
 	if !ok {
 		return false
+	}
+	if c.locals[idx] == types.KindI64 {
+		old := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		c.assembler.Emit(arm64.LDR(old, addr, 0))
+		l.guardI64(c, old)
 	}
 	c.assembler.Emit(arm64.STR(src, addr, 0))
 
@@ -612,6 +628,31 @@ func (arm64JIT) localAddr(c *jitContext, idx int) (asm.VReg, bool) {
 		return offset, true
 	}
 	return vBase, true
+}
+
+// guardI64 guards an i64 slot value against heap promotion. An i64
+// whose magnitude exceeds the 49-bit boxed range is stored by the interpreter
+// as a heap ref, which JIT i64 code can neither interpret (sign64/zero64 would
+// read the ref's address bits as a value) nor refcount. The check isolates the
+// 15 tag bits and, when they are not the inline KindI64 tag, restores the
+// pre-op stack and exits to the threaded interpreter at c.ip so it handles the
+// promotion (and the retain/release the JIT omits). Inline values fall through.
+// Emit only for slots statically typed i64.
+func (l arm64JIT) guardI64(c *jitContext, v asm.VReg) {
+	pre := append([]asm.VReg(nil), c.stack...)
+
+	tag := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.assembler.Emit(arm64.LSRI(tag, v, uint8(types.VBits)))
+	want := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	c.assembler.Emit(arm64.LDI(want, tagI64>>types.VBits)...)
+	c.assembler.Emit(arm64.CMP(tag, want))
+
+	ok := c.assembler.Label()
+	c.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, ok))
+	c.stack = pre
+	l.exitFallback(c, c.ip)
+	c.assembler.Bind(ok)
+	c.stack = pre
 }
 
 func (l arm64JIT) i32Add(c *jitContext) bool {
@@ -996,6 +1037,11 @@ func (l arm64JIT) localTee(c *jitContext) bool {
 	if !ok {
 		return false
 	}
+	if c.locals[idx] == types.KindI64 {
+		old := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		c.assembler.Emit(arm64.LDR(old, addr, 0))
+		l.guardI64(c, old)
+	}
 	c.assembler.Emit(arm64.STR(src, addr, 0))
 	return true
 }
@@ -1013,6 +1059,11 @@ func (l arm64JIT) globalTee(c *jitContext) bool {
 	src := c.stack[len(c.stack)-1]
 	vGlobal := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	_ = c.assembler.Pin(vGlobal, c.scratch[scratchGlobals])
+	if c.globals[idx].Kind() == types.KindI64 {
+		old := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		c.assembler.Emit(arm64.LDR(old, vGlobal, int16(idx*8)))
+		l.guardI64(c, old)
+	}
 	c.assembler.Emit(arm64.STR(src, vGlobal, int16(idx*8)))
 	return true
 }
@@ -1065,7 +1116,7 @@ func (l arm64JIT) i64ToI32(c *jitContext) bool {
 // here; the Exit call emitted by the compiler pins any stack values to ABI
 // return registers and emits RET.
 func (arm64JIT) ret(c *jitContext) bool {
-	if c.full {
+	if c.framed {
 		if len(c.stack) < c.returns {
 			return false
 		}

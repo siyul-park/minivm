@@ -2933,6 +2933,65 @@ func TestInterpreter_Run(t *testing.T) {
 		})
 	}
 
+	t.Run("jit guards heap-promoted i64 local", func(t *testing.T) {
+		// f(n) = n > 0 ? n + f(n-step) : 0, with n seeded above the 49-bit
+		// boxable range so the i64 param heap-promotes. Each level does
+		// LOCAL_GET 0 on the promoted param, exercising the JIT i64 load
+		// guard; the threaded interpreter is the ground truth.
+		const step = 1 << 45
+		const depth = 64
+
+		body := []instr.Instruction{
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I64_CONST, step),
+			instr.New(instr.I64_SUB),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.I64_ADD),
+			instr.New(instr.RETURN),
+		}
+		skip := 0
+		for _, in := range body {
+			skip += in.Width()
+		}
+		code := append([]instr.Instruction{
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I64_CONST, 0),
+			instr.New(instr.I64_LE_S),
+			instr.New(instr.BR_IF, uint64(skip)),
+		}, body...)
+		code = append(code,
+			instr.New(instr.I64_CONST, 0),
+			instr.New(instr.RETURN),
+		)
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI64},
+			Returns: []types.Type{types.TypeI64},
+		}).Emit(code...).Build()
+
+		want := types.I64(int64(depth) * (depth + 1) / 2 * step)
+
+		for _, mode := range modes {
+			t.Run(mode.name, func(t *testing.T) {
+				i := New(program.New(
+					[]instr.Instruction{
+						instr.New(instr.I64_CONST, depth*step),
+						instr.New(instr.CONST_GET, 0),
+						instr.New(instr.CALL),
+					},
+					program.WithConstants(fn),
+				), mode.opts...)
+				defer i.Close()
+
+				require.NoError(t, i.Run(context.Background()))
+				v, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, want, v)
+			})
+		}
+	})
+
 	t.Run("nested return restores caller frame for locals", func(t *testing.T) {
 		callee := types.NewFunctionBuilder(&types.FunctionType{
 			Returns: []types.Type{types.TypeI32},

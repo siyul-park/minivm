@@ -93,7 +93,7 @@ type jitContext struct {
 	stop      bool
 	closed    bool
 	whole     bool
-	full      bool
+	framed    bool
 	fallback  bool
 }
 
@@ -135,7 +135,7 @@ func (c *jitCompiler) Compile(i *Interpreter, addr int, fn *types.Function) (*ji
 		return nil, err
 	}
 	if ok {
-		if err := c.installEntry(mod, seg); err != nil {
+		if err := c.linkEntry(mod, seg); err != nil {
 			return nil, err
 		}
 		return mod, nil
@@ -146,7 +146,7 @@ func (c *jitCompiler) Compile(i *Interpreter, addr int, fn *types.Function) (*ji
 		return nil, err
 	}
 	if ok {
-		if err := c.installEntry(mod, seg); err != nil {
+		if err := c.linkEntry(mod, seg); err != nil {
 			return nil, err
 		}
 		return mod, nil
@@ -169,7 +169,7 @@ func (c *jitCompiler) Compile(i *Interpreter, addr int, fn *types.Function) (*ji
 	return mod, nil
 }
 
-func (c *jitCompiler) installEntry(mod *jitModule, seg segment) error {
+func (c *jitCompiler) linkEntry(mod *jitModule, seg segment) error {
 	linked, err := asm.Link(c.buffer, c.arch, []*asm.Code{seg.code}, nil)
 	if err != nil {
 		return err
@@ -209,7 +209,7 @@ func (c *jitCompiler) complete(i *Interpreter, addr int, fn *types.Function, mod
 		target := targets[targetAddr]
 		ctx := c.newContext(a, i, target.fn, target.fn.LocalKinds(), 0, scratch)
 		ctx.whole = true
-		ctx.full = true
+		ctx.framed = true
 		ctx.labels = target.labels
 		ctx.targets = targets
 		ctx.returns = target.returns
@@ -335,7 +335,7 @@ func (c *jitCompiler) function(i *Interpreter, fn *types.Function, locals []type
 	if requireTerminated && !(planCtx.stop && planCtx.successor < 0 && !planCtx.closed) {
 		return segment{}, false, nil
 	}
-	if !c.validEntry(planCtx, returns) {
+	if !c.valid(planCtx, returns) {
 		return segment{}, false, nil
 	}
 
@@ -345,7 +345,7 @@ func (c *jitCompiler) function(i *Interpreter, fn *types.Function, locals []type
 	if !c.walkBlocks(ctx, fn, blks, returns, true) {
 		return segment{}, false, nil
 	}
-	if !c.validEntry(ctx, returns) {
+	if !c.valid(ctx, returns) {
 		return segment{}, false, nil
 	}
 
@@ -405,7 +405,7 @@ func (c *jitCompiler) walkBlocks(ctx *jitContext, fn *types.Function, blks []*an
 			return false
 		}
 		if ctx.stop && !ctx.closed {
-			if !c.validEntry(ctx, returns) {
+			if !c.valid(ctx, returns) {
 				return false
 			}
 			if emit {
@@ -643,7 +643,7 @@ func (c *jitCompiler) scratch() ([]asm.PReg, bool) {
 	return scratch[:scratchCount], true
 }
 
-func (c *jitCompiler) validEntry(ctx *jitContext, returns int) bool {
+func (c *jitCompiler) valid(ctx *jitContext, returns int) bool {
 	return len(ctx.inputs) == 0 && len(ctx.stack) == returns
 }
 
