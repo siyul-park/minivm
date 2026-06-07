@@ -492,8 +492,7 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 	budget := ctx.pin(scratchNext)
 	hasFrame := ctx.assembler.Label()
 	ctx.assembler.Emit(
-		arm64.CMPI(budget, 0),
-		arm64.BCondLabel(arm64.OpBNE, hasFrame),
+		arm64.CBNZLabel(budget, hasFrame),
 	)
 	l.exitOverflow(ctx, ctx.ip)
 	ctx.assembler.Bind(hasFrame)
@@ -526,8 +525,7 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 	normal := ctx.assembler.Label()
 	ctx.assembler.Emit(
 		arm64.LSRI(trap, budget, 62),
-		arm64.CMPI(trap, 0),
-		arm64.BCondLabel(arm64.OpBEQ, normal),
+		arm64.CBZLabel(trap, normal),
 		arm64.LDR(oldBP, arm64.SP, 0),
 		arm64.LDR(oldSP, arm64.SP, 8),
 		arm64.ADDI(arm64.SP, arm64.SP, 16),

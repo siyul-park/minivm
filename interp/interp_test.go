@@ -5759,8 +5759,16 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 				ctx, cancel := context.WithCancel(context.TODO())
 				defer cancel()
 
-				i := New(tt.program, WithTick(1), WithThreshold(1), WithCutoff(1))
+				i := New(tt.program, WithThreshold(-1), WithCutoff(1))
 				defer i.Close()
+				for _, constant := range i.constants {
+					if constant.Kind() != types.KindRef {
+						continue
+					}
+					if _, ok := i.function(constant.Ref()); ok {
+						require.NoError(b, i.jit(constant.Ref()))
+					}
+				}
 
 				b.ResetTimer()
 
