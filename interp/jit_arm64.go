@@ -218,6 +218,14 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 		return l.f32Cmp(ctx, arm64.CondLS)
 	case instr.F32_GE:
 		return l.f32Cmp(ctx, arm64.CondGE)
+	case instr.F32_TO_I32_S:
+		return l.f32ToI32S(ctx)
+	case instr.F32_TO_I32_U:
+		return l.f32ToI32U(ctx)
+	case instr.F32_TO_I64_S:
+		return l.f32ToI64S(ctx)
+	case instr.F32_TO_I64_U:
+		return l.f32ToI64U(ctx)
 	case instr.F64_ADD:
 		return l.f64Binary(ctx, arm64.FADD)
 	case instr.F64_SUB:
@@ -1671,6 +1679,32 @@ func (l arm64JIT) f64Cmp(ctx *jitContext, cond uint8) bool {
 	return true
 }
 
+func (l arm64JIT) f32ToI32S(ctx *jitContext) bool {
+	return l.floatToI32(ctx, l.unboxF32, arm64.FCVTZS)
+}
+
+func (l arm64JIT) f32ToI32U(ctx *jitContext) bool {
+	return l.floatToI32(ctx, l.unboxF32, arm64.FCVTZU)
+}
+
+func (l arm64JIT) f32ToI64S(ctx *jitContext) bool {
+	return l.floatToI64(ctx, l.unboxF32, arm64.FCVTZS)
+}
+
+func (l arm64JIT) f32ToI64U(ctx *jitContext) bool {
+	if !l.need(ctx, 1) {
+		return false
+	}
+	a := ctx.stack[len(ctx.stack)-1]
+	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width32)
+	ctx.assembler.Emit(arm64.FCVTZU(raw, l.unboxF32(ctx, a)))
+	ext := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.UXTW(ext, raw))
+	boxed := l.boxI64(ctx, ext)
+	ctx.stack[len(ctx.stack)-1] = boxed
+	return true
+}
+
 // toFloat pops one boxed integer value, extracts its value lane via prep,
 // converts it to a float of fWidth using cvtf (SCVTF or UCVTF), then boxes
 // the result as f32 (Width32) or f64 (Width64).
@@ -1695,6 +1729,61 @@ func (l arm64JIT) toFloat(
 		boxed = l.reboxF64(ctx, fr)
 	}
 	ctx.stack[len(ctx.stack)-1] = boxed
+	return true
+}
+
+func (l arm64JIT) floatToI32(
+	ctx *jitContext,
+	unbox func(*jitContext, asm.VReg) asm.VReg,
+	cvt func(dst, src asm.Reg) asm.Instruction,
+) bool {
+	if !l.need(ctx, 1) {
+		return false
+	}
+	a := ctx.stack[len(ctx.stack)-1]
+	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(cvt(raw, unbox(ctx, a)))
+	boxed := l.boxI32(ctx, raw)
+	ctx.stack[len(ctx.stack)-1] = boxed
+	return true
+}
+
+func (l arm64JIT) floatToI64(
+	ctx *jitContext,
+	unbox func(*jitContext, asm.VReg) asm.VReg,
+	cvt func(dst, src asm.Reg) asm.Instruction,
+) bool {
+	if !l.need(ctx, 1) {
+		return false
+	}
+	pre := append([]asm.VReg(nil), ctx.stack...)
+	a := ctx.stack[len(ctx.stack)-1]
+	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(cvt(raw, unbox(ctx, a)))
+	return l.finishI64Unary(ctx, pre, raw)
+}
+
+func (l arm64JIT) finishI64Unary(ctx *jitContext, pre []asm.VReg, raw asm.VReg) bool {
+	shifted := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LSLI(shifted, raw, signI64))
+	extended := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ASRI(extended, shifted, signI64))
+	ctx.assembler.Emit(arm64.CMP(extended, raw))
+
+	fallback := ctx.assembler.Label()
+	done := ctx.assembler.Label()
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fallback))
+
+	boxed := l.boxI64(ctx, raw)
+	next := append(ctx.stack[:len(ctx.stack)-1:len(ctx.stack)-1], boxed)
+	ctx.assembler.Emit(arm64.BLabel(done))
+
+	ctx.assembler.Bind(fallback)
+	ctx.stack = pre
+	l.exitFallback(ctx, ctx.ip)
+
+	ctx.assembler.Bind(done)
+	ctx.stack = next
 	return true
 }
 
