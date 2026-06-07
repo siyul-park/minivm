@@ -3674,6 +3674,27 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NotZero(t, jit.Links)
 	})
 
+	t.Run("lowers ref ne", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.REF_NE),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.REF_NE))
+		require.NoError(t, i.Push(types.Ref(0)))
+		require.NoError(t, i.Push(types.Ref(1)))
+
+		require.NoError(t, i.jit(0))
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1), value)
+		jit := p.Snapshot().JIT
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
 	t.Run("loads stack inputs through scratch", func(t *testing.T) {
 		requireJIT(t)
 		p := prof.New()

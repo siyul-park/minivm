@@ -244,6 +244,8 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 		return l.refIsNull(ctx)
 	case instr.REF_EQ:
 		return l.refEq(ctx)
+	case instr.REF_NE:
+		return l.refNe(ctx)
 	}
 	return false
 }
@@ -1206,6 +1208,23 @@ func (l arm64JIT) refEq(ctx *jitContext) bool {
 
 	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.CSET(flag, arm64.CondEQ))
+
+	boxed := l.boxI32(ctx, flag)
+	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)
+	return true
+}
+
+func (l arm64JIT) refNe(ctx *jitContext) bool {
+	if !l.need(ctx, 2) {
+		return false
+	}
+	b := ctx.stack[len(ctx.stack)-1]
+	a := ctx.stack[len(ctx.stack)-2]
+
+	ctx.assembler.Emit(arm64.CMP(a, b))
+
+	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.CSET(flag, arm64.CondNE))
 
 	boxed := l.boxI32(ctx, flag)
 	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)

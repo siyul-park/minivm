@@ -147,6 +147,7 @@ Fast paths implemented on ARM64:
 - `REF_NULL`: push `BoxedNull` constant.
 - `REF_IS_NULL`: pop ref, compare full boxed word against `BoxedNull`, push BoxI32 result.
 - `REF_EQ`: pop two boxed values, compare at 64-bit level, push BoxI32 result.
+- `REF_NE`: pop two boxed values, compare at 64-bit level, push BoxI32 result.
 
 All other `REF_*` and `UPVAL_*` fall back to threaded.
 
