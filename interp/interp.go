@@ -189,6 +189,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		globals:   make([]types.Boxed, 0, opt.globals),
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
+		jitted:    map[int]bool{},
 		frames:    make([]frame, opt.frame),
 		stack:     make([]types.Boxed, opt.stack),
 		heap:      make([]types.Value, 0, opt.heap),
@@ -279,7 +280,7 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 			}
 
 			if i.hook != nil {
-				i.restoreFrame(f, f.addr)
+				i.restore(f, f.addr)
 				if err := i.hook(i); err != nil {
 					return err
 				}
@@ -569,23 +570,13 @@ func (i *Interpreter) install(mod *jitModule, addr int) {
 		i.prof.JITSkip()
 	}
 	if mod.entry != nil && addr > 0 && addr < len(i.code) && len(i.code[addr]) > 0 {
-		fallback := append([]func(*Interpreter){}, i.code[addr]...)
-		i.code[addr][0] = i.entry(addr, mod.entry, fallback)
-		if i.jitted == nil {
-			i.jitted = make(map[int]bool)
-		}
-		i.jitted[addr] = true
+		i.installEntry(addr, mod.entry)
 	}
 	for entryAddr, callable := range mod.entries {
 		if entryAddr <= 0 || entryAddr >= len(i.code) || len(i.code[entryAddr]) == 0 || callable == nil {
 			continue
 		}
-		fallback := append([]func(*Interpreter){}, i.code[entryAddr]...)
-		i.code[entryAddr][0] = i.entry(entryAddr, callable, fallback)
-		if i.jitted == nil {
-			i.jitted = make(map[int]bool)
-		}
-		i.jitted[entryAddr] = true
+		i.installEntry(entryAddr, callable)
 	}
 	for entry, callable := range mod.segments {
 		if entry.addr < 0 || entry.addr >= len(i.code) || entry.ip < 0 || entry.ip >= len(i.code[entry.addr]) || callable == nil {
@@ -594,12 +585,18 @@ func (i *Interpreter) install(mod *jitModule, addr int) {
 		fallback := i.code[entry.addr][entry.ip]
 		i.code[entry.addr][entry.ip] = i.segment(entry.addr, callable, mod.stacks[entry], fallback)
 		if entry.ip == 0 && entry.addr > 0 {
-			if i.jitted == nil {
-				i.jitted = make(map[int]bool)
-			}
 			i.jitted[entry.addr] = true
 		}
 	}
+}
+
+// installEntry swaps the first opcode handler at addr for the native
+// whole-function entry, retaining the threaded handlers as its fallback, and
+// records addr as jitted.
+func (i *Interpreter) installEntry(addr int, callable asm.Callable) {
+	fallback := append([]func(*Interpreter){}, i.code[addr]...)
+	i.code[addr][0] = i.entry(addr, callable, fallback)
+	i.jitted[addr] = true
 }
 
 func (i *Interpreter) hot(addr int) []int {
@@ -643,7 +640,7 @@ func (i *Interpreter) segment(addr int, callable asm.Callable, argc int, fallbac
 		i.sp = int(scratch[scratchSP])
 		i.fr.ip = int(next &^ scratchFallback)
 		if next&scratchFallback != 0 {
-			i.restoreFrame(i.fr, addr)
+			i.restore(i.fr, addr)
 			fallback(i)
 		}
 	}
@@ -667,7 +664,7 @@ func (i *Interpreter) entry(addr int, callable asm.Callable, fallback []func(*In
 		if next&scratchFallback != 0 {
 			i.sp = int(scratch[scratchSP])
 			i.fr.ip = int(next &^ scratchFallback)
-			i.restoreFrame(i.fr, addr)
+			i.restore(i.fr, addr)
 			if i.fr.ip < 0 || i.fr.ip >= len(fallback) {
 				panic(ErrSegmentationFault)
 			}
@@ -687,7 +684,7 @@ func (i *Interpreter) entry(addr int, callable asm.Callable, fallback []func(*In
 	}
 }
 
-func (i *Interpreter) restoreFrame(f *frame, addr int) {
+func (i *Interpreter) restore(f *frame, addr int) {
 	if f == nil {
 		return
 	}

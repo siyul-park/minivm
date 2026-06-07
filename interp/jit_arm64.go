@@ -43,10 +43,8 @@ func (l arm64JIT) prologue(ctx *jitContext, _ *types.Function) {
 	if len(ctx.inputs) == 0 {
 		return
 	}
-	vStack := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vStack, ctx.scratch[scratchStack])
-	vSP := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vSP, ctx.scratch[scratchSP])
+	vStack := ctx.pin(scratchStack)
+	vSP := ctx.pin(scratchSP)
 	for i, v := range ctx.inputs {
 		idx := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		back := len(ctx.inputs) - i
@@ -56,7 +54,7 @@ func (l arm64JIT) prologue(ctx *jitContext, _ *types.Function) {
 }
 
 // Lower dispatches one opcode. Returns false (leaving jitContext untouched)
-// for opcodes Phase A does not yet implement.
+// for opcodes this backend does not lower.
 func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 	switch op {
 	case instr.NOP:
@@ -283,9 +281,9 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 	case instr.REF_IS_NULL:
 		return l.refIsNull(ctx)
 	case instr.REF_EQ:
-		return l.refEq(ctx)
+		return l.refCmp(ctx, arm64.CondEQ)
 	case instr.REF_NE:
-		return l.refNe(ctx)
+		return l.refCmp(ctx, arm64.CondNE)
 	}
 	return false
 }
@@ -313,12 +311,10 @@ func (l arm64JIT) exit(ctx *jitContext, nextIP uint64) {
 
 	nextSP := l.materialize(ctx)
 
-	vSP := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vSP, ctx.scratch[scratchSP])
+	vSP := ctx.pin(scratchSP)
 	ctx.assembler.Emit(arm64.MOV(vSP, nextSP))
 
-	vNext := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vNext, rNext)
+	vNext := ctx.pinTo(rNext)
 	ctx.assembler.Emit(arm64.LDI(vNext, nextIP)...)
 
 	if ctx.framed {
@@ -330,56 +326,41 @@ func (l arm64JIT) exit(ctx *jitContext, nextIP uint64) {
 	ctx.assembler.Emit(arm64.RET())
 }
 
-func (arm64JIT) materialize(ctx *jitContext) asm.VReg {
-	vStack := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vStack, ctx.scratch[scratchStack])
-
-	vBase := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+func (l arm64JIT) materialize(ctx *jitContext) asm.VReg {
+	vStack := ctx.pin(scratchStack)
+	var vBase asm.VReg
 	if ctx.whole {
-		_ = ctx.assembler.Pin(vBase, ctx.scratch[scratchBP])
+		vBase = ctx.pin(scratchBP)
 	} else {
-		_ = ctx.assembler.Pin(vBase, ctx.scratch[scratchSP])
+		vBase = ctx.pin(scratchSP)
 		if len(ctx.inputs) > 0 {
 			out := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 			ctx.assembler.Emit(arm64.SUBI(out, vBase, uint16(len(ctx.inputs))))
 			vBase = out
 		}
 	}
-
-	for idx, v := range ctx.stack {
-		slot := vBase
-		if idx > 0 {
-			slot = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-			ctx.assembler.Emit(arm64.ADDI(slot, vBase, uint16(idx)))
-		}
-		(arm64JIT{}).store(ctx, v, vStack, slot)
-	}
-
-	nextSP := vBase
-	if len(ctx.stack) > 0 {
-		nextSP = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		ctx.assembler.Emit(arm64.ADDI(nextSP, vBase, uint16(len(ctx.stack))))
-	}
-	return nextSP
+	return l.flush(ctx, vStack, vBase)
 }
 
 func (l arm64JIT) materializeSP(ctx *jitContext) asm.VReg {
-	vStack := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vStack, ctx.scratch[scratchStack])
-	vSP := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vSP, ctx.scratch[scratchSP])
+	return l.flush(ctx, ctx.pin(scratchStack), ctx.pin(scratchSP))
+}
+
+// flush stores the shadow stack to consecutive slots starting at base and
+// returns the resulting stack pointer (base + len(stack)).
+func (l arm64JIT) flush(ctx *jitContext, vStack, base asm.VReg) asm.VReg {
 	for idx, v := range ctx.stack {
-		slot := vSP
+		slot := base
 		if idx > 0 {
 			slot = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-			ctx.assembler.Emit(arm64.ADDI(slot, vSP, uint16(idx)))
+			ctx.assembler.Emit(arm64.ADDI(slot, base, uint16(idx)))
 		}
 		l.store(ctx, v, vStack, slot)
 	}
-	nextSP := vSP
+	nextSP := base
 	if len(ctx.stack) > 0 {
 		nextSP = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		ctx.assembler.Emit(arm64.ADDI(nextSP, vSP, uint16(len(ctx.stack))))
+		ctx.assembler.Emit(arm64.ADDI(nextSP, base, uint16(len(ctx.stack))))
 	}
 	return nextSP
 }
@@ -486,6 +467,13 @@ func (l arm64JIT) constGet(ctx *jitContext) bool {
 	return l.imm(ctx, uint64(v))
 }
 
+// call fuses a CONST_GET+CALL into a native BL to the callee's framed entry,
+// keeping the call on the host stack instead of round-tripping the threaded
+// dispatcher. It is reachable only from a framed whole-component compile
+// (ctx.framed), which jitCompiler.complete currently gates off whenever any
+// function makes a direct call: a native BL skips the VM frame stack, so
+// recursion through this path would bypass the ErrFrameOverflow guard. Enabling
+// it needs a frame-depth check emitted here first.
 func (l arm64JIT) call(ctx *jitContext) bool {
 	if ctx.ip+3 >= len(ctx.code) || instr.Opcode(ctx.code[ctx.ip]) != instr.CONST_GET || instr.Opcode(ctx.code[ctx.ip+3]) != instr.CALL {
 		return false
@@ -516,8 +504,7 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 
 	calleeBP := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.SUBI(calleeBP, nextSP, uint16(params)))
-	vBP := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vBP, oldBP)
+	vBP := ctx.pinTo(oldBP)
 	ctx.assembler.Emit(arm64.MOV(vBP, calleeBP))
 
 	calleeSP := calleeBP
@@ -525,8 +512,7 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 		calleeSP = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.ADDI(calleeSP, calleeBP, uint16(params+locals)))
 	}
-	vSP := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vSP, oldSP)
+	vSP := ctx.pinTo(oldSP)
 	ctx.assembler.Emit(arm64.MOV(vSP, calleeSP))
 
 	ctx.assembler.Emit(arm64.BLLabel(target.label))
@@ -536,8 +522,7 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 		arm64.ADDI(arm64.SP, arm64.SP, 16),
 	)
 
-	vStack := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vStack, ctx.scratch[scratchStack])
+	vStack := ctx.pin(scratchStack)
 	base := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.MOV(base, oldSP))
 
@@ -560,15 +545,14 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 
 // globalGet pushes globals[idx] onto the segment stack via a direct
 // LDR from the globals base. Rejects when globals[idx] is a ref because
-// Phase A does not yet model the runtime retain.
+// the JIT does not model the runtime retain.
 func (l arm64JIT) globalGet(ctx *jitContext) bool {
 	idx, ok := l.global(ctx)
 	if !ok {
 		return false
 	}
 	pre := append([]asm.VReg(nil), ctx.stack...)
-	vGlobal := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vGlobal, ctx.scratch[scratchGlobals])
+	vGlobal := ctx.pin(scratchGlobals)
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(dst, vGlobal, int16(idx*8)))
 	l.guardRef(ctx, dst, pre)
@@ -595,8 +579,7 @@ func (l arm64JIT) globalSet(ctx *jitContext) bool {
 	pre := append([]asm.VReg(nil), ctx.stack...)
 	src := ctx.stack[len(ctx.stack)-1]
 
-	vGlobal := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vGlobal, ctx.scratch[scratchGlobals])
+	vGlobal := ctx.pin(scratchGlobals)
 	old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(old, vGlobal, int16(idx*8)))
 	l.guardRef(ctx, old, pre)
@@ -669,10 +652,8 @@ func (l arm64JIT) localSet(ctx *jitContext) bool {
 // final +idx*8 displacement is folded into the LDR/STR offset, so this
 // helper materializes only rStack + rBP*8 into the VReg.
 func (arm64JIT) localAddr(ctx *jitContext, idx int) (asm.VReg, bool) {
-	vStack := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vStack, ctx.scratch[scratchStack])
-	vBP := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vBP, ctx.scratch[scratchBP])
+	vStack := ctx.pin(scratchStack)
+	vBP := ctx.pin(scratchBP)
 
 	vShift := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	vBase := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -697,20 +678,7 @@ func (arm64JIT) localAddr(ctx *jitContext, idx int) (asm.VReg, bool) {
 // promotion (and the retain/release the JIT omits). Inline values fall through.
 // Emit only for slots statically typed i64.
 func (l arm64JIT) guardI64(ctx *jitContext, v asm.VReg) {
-	pre := append([]asm.VReg(nil), ctx.stack...)
-
-	tag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LSRI(tag, v, uint8(types.VBits)))
-	want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDI(want, tagI64>>types.VBits)...)
-	ctx.assembler.Emit(arm64.CMP(tag, want))
-
-	ok := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, ok))
-	ctx.stack = pre
-	l.exitFallback(ctx, ctx.ip)
-	ctx.assembler.Bind(ok)
-	ctx.stack = pre
+	l.guardI64Value(ctx, v, append([]asm.VReg(nil), ctx.stack...))
 }
 
 func (l arm64JIT) i32Add(ctx *jitContext) bool {
@@ -771,9 +739,7 @@ func (l arm64JIT) i32Quotient(
 	pre := append([]asm.VReg(nil), ctx.stack...)
 	b := prep(ctx, ctx.stack[len(ctx.stack)-1])
 	a := prep(ctx, ctx.stack[len(ctx.stack)-2])
-	if !l.guardNonZero(ctx, b, pre) {
-		return false
-	}
+	l.guardNonZero(ctx, b, pre)
 
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(div(raw, a, b))
@@ -793,9 +759,7 @@ func (l arm64JIT) i32Remainder(
 	pre := append([]asm.VReg(nil), ctx.stack...)
 	b := prep(ctx, ctx.stack[len(ctx.stack)-1])
 	a := prep(ctx, ctx.stack[len(ctx.stack)-2])
-	if !l.guardNonZero(ctx, b, pre) {
-		return false
-	}
+	l.guardNonZero(ctx, b, pre)
 
 	quotient := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(div(quotient, a, b))
@@ -863,11 +827,7 @@ func (l arm64JIT) i32Eqz(ctx *jitContext) bool {
 	ctx.assembler.Emit(arm64.ANDI(lo, a, maskI32))
 	ctx.assembler.Emit(arm64.CMPI(lo, 0))
 
-	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.CSET(flag, arm64.CondEQ))
-
-	boxed := l.boxI32(ctx, flag)
-	ctx.stack[len(ctx.stack)-1] = boxed
+	l.setBool(ctx, arm64.CondEQ, 1)
 	return true
 }
 
@@ -935,11 +895,7 @@ func (l arm64JIT) i32Cmp(
 	}
 	ctx.assembler.Emit(arm64.CMP(a, b))
 
-	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.CSET(flag, cond))
-
-	boxed := l.boxI32(ctx, flag)
-	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)
+	l.setBool(ctx, cond, 2)
 	return true
 }
 
@@ -1004,11 +960,7 @@ func (l arm64JIT) i64Cmp(
 	}
 	ctx.assembler.Emit(arm64.CMP(a, b))
 
-	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.CSET(flag, cond))
-
-	boxed := l.boxI32(ctx, flag)
-	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)
+	l.setBool(ctx, cond, 2)
 	return true
 }
 
@@ -1025,11 +977,7 @@ func (l arm64JIT) i64Eqz(ctx *jitContext) bool {
 
 	val := l.zero64(ctx, a)
 	ctx.assembler.Emit(arm64.CMPI(val, 0))
-	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.CSET(flag, arm64.CondEQ))
-
-	boxed := l.boxI32(ctx, flag)
-	ctx.stack[len(ctx.stack)-1] = boxed
+	l.setBool(ctx, arm64.CondEQ, 1)
 	return true
 }
 
@@ -1079,7 +1027,7 @@ func (l arm64JIT) i64Shl(ctx *jitContext) bool {
 
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LSL(raw, l.sign64(ctx, a), shift))
-	return l.finishI64Binary(ctx, pre, raw)
+	return l.finishI64(ctx, pre, raw, 2)
 }
 
 // i64ShrS is safe to lower because arithmetic right shift of a boxable i64 stays boxable.
@@ -1120,7 +1068,7 @@ func (l arm64JIT) i64ShrU(ctx *jitContext) bool {
 
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LSR(raw, l.zero64(ctx, a), shift))
-	return l.finishI64Binary(ctx, pre, raw)
+	return l.finishI64(ctx, pre, raw, 2)
 }
 
 func (l arm64JIT) i64Binary(
@@ -1145,7 +1093,7 @@ func (l arm64JIT) i64Binary(
 
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(op(raw, a, b))
-	return l.finishI64Binary(ctx, pre, raw)
+	return l.finishI64(ctx, pre, raw, 2)
 }
 
 func (l arm64JIT) i64Remainder(
@@ -1169,10 +1117,14 @@ func (l arm64JIT) i64Remainder(
 	ctx.assembler.Emit(div(quotient, a, b))
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.MSUB(raw, quotient, b, a))
-	return l.finishI64Binary(ctx, pre, raw)
+	return l.finishI64(ctx, pre, raw, 2)
 }
 
-func (l arm64JIT) finishI64Binary(ctx *jitContext, pre []asm.VReg, raw asm.VReg) bool {
+// finishI64 boxes raw as an inline i64 when it fits the 49-bit boxed range,
+// replacing the top pop operands with the result; otherwise it restores pre and
+// exits to the threaded interpreter, which handles the heap promotion the JIT
+// cannot.
+func (l arm64JIT) finishI64(ctx *jitContext, pre []asm.VReg, raw asm.VReg, pop int) bool {
 	shifted := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LSLI(shifted, raw, signI64))
 	extended := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -1184,7 +1136,8 @@ func (l arm64JIT) finishI64Binary(ctx *jitContext, pre []asm.VReg, raw asm.VReg)
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fallback))
 
 	boxed := l.boxI64(ctx, raw)
-	next := append(ctx.stack[:len(ctx.stack)-2:len(ctx.stack)-2], boxed)
+	keep := len(ctx.stack) - pop
+	next := append(ctx.stack[:keep:keep], boxed)
 	ctx.assembler.Emit(arm64.BLabel(done))
 
 	ctx.assembler.Bind(fallback)
@@ -1224,6 +1177,16 @@ func (arm64JIT) boxI32(ctx *jitContext, val asm.VReg) asm.VReg {
 	boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.ORR(boxed, lo, tag))
 	return boxed
+}
+
+// setBool replaces the top pop operands with a boxed i32 0/1 materialized from
+// the condition flags via CSET.
+func (l arm64JIT) setBool(ctx *jitContext, cond uint8, pop int) {
+	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.CSET(flag, cond))
+	boxed := l.boxI32(ctx, flag)
+	keep := len(ctx.stack) - pop
+	ctx.stack = append(ctx.stack[:keep], boxed)
 }
 
 // choose implements SELECT: pops cond, val2, val1 (bottom-to-top) and
@@ -1287,8 +1250,7 @@ func (l arm64JIT) globalTee(ctx *jitContext) bool {
 
 	pre := append([]asm.VReg(nil), ctx.stack...)
 	src := ctx.stack[len(ctx.stack)-1]
-	vGlobal := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vGlobal, ctx.scratch[scratchGlobals])
+	vGlobal := ctx.pin(scratchGlobals)
 	old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(old, vGlobal, int16(idx*8)))
 	l.guardRef(ctx, old, pre)
@@ -1347,15 +1309,13 @@ func (l arm64JIT) i64ToI32(ctx *jitContext) bool {
 // ret lowers RETURN. It signals the compiler to terminate the segment
 // here; the Exit call emitted by the compiler pins any stack values to ABI
 // return registers and emits RET.
-func (arm64JIT) ret(ctx *jitContext) bool {
+func (l arm64JIT) ret(ctx *jitContext) bool {
 	if ctx.framed {
 		if len(ctx.stack) < ctx.returns {
 			return false
 		}
-		vStack := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		_ = ctx.assembler.Pin(vStack, ctx.scratch[scratchStack])
-		vBP := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		_ = ctx.assembler.Pin(vBP, ctx.scratch[scratchBP])
+		vStack := ctx.pin(scratchStack)
+		vBP := ctx.pin(scratchBP)
 		for idx := 0; idx < ctx.returns; idx++ {
 			src := ctx.stack[len(ctx.stack)-ctx.returns+idx]
 			slot := vBP
@@ -1363,7 +1323,7 @@ func (arm64JIT) ret(ctx *jitContext) bool {
 				slot = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 				ctx.assembler.Emit(arm64.ADDI(slot, vBP, uint16(idx)))
 			}
-			(arm64JIT{}).store(ctx, src, vStack, slot)
+			l.store(ctx, src, vStack, slot)
 		}
 		ctx.assembler.Emit(
 			arm64.LDR(arm64.LR, arm64.SP, 0),
@@ -1398,17 +1358,13 @@ func (l arm64JIT) refIsNull(ctx *jitContext) bool {
 	ctx.assembler.Emit(arm64.LDI(vNull, uint64(types.BoxedNull))...)
 	ctx.assembler.Emit(arm64.CMP(a, vNull))
 
-	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.CSET(flag, arm64.CondEQ))
-
-	boxed := l.boxI32(ctx, flag)
-	ctx.stack[len(ctx.stack)-1] = boxed
+	l.setBool(ctx, arm64.CondEQ, 1)
 	return true
 }
 
-// refEq pops two boxed refs and pushes BoxI32(1) if they are the same
-// reference (identical bit-pattern), BoxI32(0) otherwise.
-func (l arm64JIT) refEq(ctx *jitContext) bool {
+// refCmp pops two boxed refs, compares their raw bit-patterns, and pushes
+// BoxI32(0/1) from cond (CondEQ for REF_EQ, CondNE for REF_NE).
+func (l arm64JIT) refCmp(ctx *jitContext, cond uint8) bool {
 	if !l.need(ctx, 2) {
 		return false
 	}
@@ -1417,28 +1373,7 @@ func (l arm64JIT) refEq(ctx *jitContext) bool {
 
 	ctx.assembler.Emit(arm64.CMP(a, b))
 
-	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.CSET(flag, arm64.CondEQ))
-
-	boxed := l.boxI32(ctx, flag)
-	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)
-	return true
-}
-
-func (l arm64JIT) refNe(ctx *jitContext) bool {
-	if !l.need(ctx, 2) {
-		return false
-	}
-	b := ctx.stack[len(ctx.stack)-1]
-	a := ctx.stack[len(ctx.stack)-2]
-
-	ctx.assembler.Emit(arm64.CMP(a, b))
-
-	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.CSET(flag, arm64.CondNE))
-
-	boxed := l.boxI32(ctx, flag)
-	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)
+	l.setBool(ctx, cond, 2)
 	return true
 }
 
@@ -1502,8 +1437,7 @@ func (l arm64JIT) brIf(ctx *jitContext) bool {
 
 	// Segment mode: materialize remaining stack once; both exits share it.
 	nextSP := l.materialize(ctx)
-	vSP := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vSP, ctx.scratch[scratchSP])
+	vSP := ctx.pin(scratchSP)
 	ctx.assembler.Emit(arm64.MOV(vSP, nextSP))
 
 	rNext := ctx.scratch[scratchNext]
@@ -1511,15 +1445,13 @@ func (l arm64JIT) brIf(ctx *jitContext) bool {
 	ctx.assembler.Emit(arm64.CBNZLabel(condI32, takenLbl))
 
 	// Fall-through path: condition was zero.
-	vNextFalse := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vNextFalse, rNext)
+	vNextFalse := ctx.pinTo(rNext)
 	ctx.assembler.Emit(arm64.LDI(vNextFalse, uint64(falseTarget))...)
 	ctx.assembler.Emit(arm64.RET())
 
 	// Taken path: condition was non-zero.
 	ctx.assembler.Bind(takenLbl)
-	vNextTaken := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vNextTaken, rNext)
+	vNextTaken := ctx.pinTo(rNext)
 	ctx.assembler.Emit(arm64.LDI(vNextTaken, uint64(takenTarget))...)
 	ctx.assembler.Emit(arm64.RET())
 
@@ -1539,8 +1471,8 @@ func (l arm64JIT) brIf(ctx *jitContext) bool {
 // scan. Every exit materializes the remaining shadow stack, writes SP and the
 // compile-time target IP through scratch, and RETs.
 //
-// In blocks mode (ctx.labels != nil) label-based dispatch is not yet
-// implemented, so brTable rejects and blocks() falls back to segments().
+// In blocks mode (ctx.labels != nil) label-based dispatch is unsupported, so
+// brTable rejects and blocks() falls back to segments().
 func (l arm64JIT) brTable(ctx *jitContext) bool {
 	if ctx.labels != nil {
 		return false
@@ -1569,8 +1501,7 @@ func (l arm64JIT) brTable(ctx *jitContext) bool {
 
 	// Materialize remaining shadow stack once — all exit paths share it.
 	nextSP := l.materialize(ctx)
-	vSP := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vSP, ctx.scratch[scratchSP])
+	vSP := ctx.pin(scratchSP)
 	ctx.assembler.Emit(arm64.MOV(vSP, nextSP))
 
 	rNext := ctx.scratch[scratchNext]
@@ -1584,16 +1515,14 @@ func (l arm64JIT) brTable(ctx *jitContext) bool {
 	}
 
 	// Default exit (fall-through when no case matched).
-	vNextDef := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vNextDef, rNext)
+	vNextDef := ctx.pinTo(rNext)
 	ctx.assembler.Emit(arm64.LDI(vNextDef, uint64(targets[count]))...)
 	ctx.assembler.Emit(arm64.RET())
 
 	// Per-case exits.
 	for i := 0; i < count; i++ {
 		ctx.assembler.Bind(labels[i])
-		vNext := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		_ = ctx.assembler.Pin(vNext, rNext)
+		vNext := ctx.pinTo(rNext)
 		ctx.assembler.Emit(arm64.LDI(vNext, uint64(targets[i]))...)
 		ctx.assembler.Emit(arm64.RET())
 	}
@@ -1646,7 +1575,7 @@ func (l arm64JIT) f64Binary(ctx *jitContext, op func(dst, src1, src2 asm.Reg) as
 
 // f32Cmp pops two boxed f32 values, runs FCMP on them, and pushes a boxed i32
 // 0/1 from the chosen condition code. NaN comparisons are unordered; EQ/NE
-// may not fully honour WebAssembly NaN semantics in Phase A.
+// may not fully honour WebAssembly NaN semantics.
 func (l arm64JIT) f32Cmp(ctx *jitContext, cond uint8) bool {
 	if !l.need(ctx, 2) {
 		return false
@@ -1658,11 +1587,7 @@ func (l arm64JIT) f32Cmp(ctx *jitContext, cond uint8) bool {
 	fb := l.unboxF32(ctx, b)
 	ctx.assembler.Emit(arm64.FCMP(fa, fb))
 
-	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.CSET(flag, cond))
-
-	boxed := l.boxI32(ctx, flag)
-	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)
+	l.setBool(ctx, cond, 2)
 	return true
 }
 
@@ -1679,11 +1604,7 @@ func (l arm64JIT) f64Cmp(ctx *jitContext, cond uint8) bool {
 	fb := l.unboxF64(ctx, b)
 	ctx.assembler.Emit(arm64.FCMP(fa, fb))
 
-	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.CSET(flag, cond))
-
-	boxed := l.boxI32(ctx, flag)
-	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)
+	l.setBool(ctx, cond, 2)
 	return true
 }
 
@@ -1699,6 +1620,9 @@ func (l arm64JIT) f32ToI64S(ctx *jitContext) bool {
 	return l.floatToI64(ctx, l.unboxF32, arm64.FCVTZS)
 }
 
+// f32ToI64U converts a boxed f32 to an unsigned i64. A 32-bit unsigned result
+// maxes out at 2^32-1, which always fits the 49-bit boxed range, so unlike
+// floatToI64 it boxes directly with no overflow guard.
 func (l arm64JIT) f32ToI64U(ctx *jitContext) bool {
 	if !l.need(ctx, 1) {
 		return false
@@ -1784,31 +1708,7 @@ func (l arm64JIT) floatToI64(
 	a := ctx.stack[len(ctx.stack)-1]
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(cvt(raw, unbox(ctx, a)))
-	return l.finishI64Unary(ctx, pre, raw)
-}
-
-func (l arm64JIT) finishI64Unary(ctx *jitContext, pre []asm.VReg, raw asm.VReg) bool {
-	shifted := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LSLI(shifted, raw, signI64))
-	extended := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ASRI(extended, shifted, signI64))
-	ctx.assembler.Emit(arm64.CMP(extended, raw))
-
-	fallback := ctx.assembler.Label()
-	done := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fallback))
-
-	boxed := l.boxI64(ctx, raw)
-	next := append(ctx.stack[:len(ctx.stack)-1:len(ctx.stack)-1], boxed)
-	ctx.assembler.Emit(arm64.BLabel(done))
-
-	ctx.assembler.Bind(fallback)
-	ctx.stack = pre
-	l.exitFallback(ctx, ctx.ip)
-
-	ctx.assembler.Bind(done)
-	ctx.stack = next
-	return true
+	return l.finishI64(ctx, pre, raw, 1)
 }
 
 // f32ToF64 pops a boxed f32, converts its float32 value to float64 via
@@ -1882,7 +1782,11 @@ func (arm64JIT) reboxF64(ctx *jitContext, f asm.VReg) asm.VReg {
 	return bits
 }
 
-func (arm64JIT) need(ctx *jitContext, n int) bool {
+// need ensures at least n operands sit on the shadow stack. In whole-function
+// mode missing operands cannot be synthesized, so it returns false; otherwise
+// it pulls the shortfall from the VM stack as fresh segment inputs and returns
+// true. The mutation (recording new inputs) is the point, not a side effect.
+func (l arm64JIT) need(ctx *jitContext, n int) bool {
 	missing := n - len(ctx.stack)
 	if missing <= 0 {
 		return true
@@ -1892,16 +1796,14 @@ func (arm64JIT) need(ctx *jitContext, n int) bool {
 	}
 
 	inputs := make([]asm.VReg, missing)
-	vStack := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vStack, ctx.scratch[scratchStack])
-	vSP := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = ctx.assembler.Pin(vSP, ctx.scratch[scratchSP])
+	vStack := ctx.pin(scratchStack)
+	vSP := ctx.pin(scratchSP)
 	for i := range inputs {
 		idx := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		back := missing + len(ctx.stack) - i
 		ctx.assembler.Emit(arm64.SUBI(idx, vSP, uint16(back)))
 		v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		(arm64JIT{}).load(ctx, v, vStack, idx)
+		l.load(ctx, v, vStack, idx)
 		inputs[i] = v
 	}
 	ctx.inputs = append(inputs, ctx.inputs...)
@@ -1931,37 +1833,38 @@ func (arm64JIT) global(ctx *jitContext) (int, bool) {
 	return idx, true
 }
 
+// guardTag exits to the threaded fallback when v's NaN-box tag check against
+// want fails, restoring pre on both the taken and fall-through paths. skip is
+// the branch that bypasses the exit: OpBNE keeps going when the tag differs
+// from want (reject on match), OpBEQ keeps going when it matches (reject on
+// mismatch).
+func (l arm64JIT) guardTag(ctx *jitContext, v asm.VReg, want uint64, skip arm64.Op, pre []asm.VReg) {
+	tag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LSRI(tag, v, uint8(types.VBits)))
+	wantReg := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(wantReg, want>>types.VBits)...)
+	ctx.assembler.Emit(arm64.CMP(tag, wantReg))
+
+	ok := ctx.assembler.Label()
+	ctx.assembler.Emit(arm64.BCondLabel(skip, ok))
+	ctx.stack = append(ctx.stack[:0], pre...)
+	l.exitFallback(ctx, ctx.ip)
+	ctx.assembler.Bind(ok)
+	ctx.stack = append(ctx.stack[:0], pre...)
+}
+
+// guardRef rejects when v carries a ref tag, which the JIT cannot retain/release.
 func (l arm64JIT) guardRef(ctx *jitContext, v asm.VReg, pre []asm.VReg) {
-	tag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LSRI(tag, v, uint8(types.VBits)))
-	want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDI(want, tagRef>>types.VBits)...)
-	ctx.assembler.Emit(arm64.CMP(tag, want))
-
-	ok := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, ok))
-	ctx.stack = append(ctx.stack[:0], pre...)
-	l.exitFallback(ctx, ctx.ip)
-	ctx.assembler.Bind(ok)
-	ctx.stack = append(ctx.stack[:0], pre...)
+	l.guardTag(ctx, v, tagRef, arm64.OpBNE, pre)
 }
 
+// guardI64Value rejects when v is not an inline i64 — a heap-promoted i64 whose
+// bits the JIT cannot read as a value.
 func (l arm64JIT) guardI64Value(ctx *jitContext, v asm.VReg, pre []asm.VReg) {
-	tag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LSRI(tag, v, uint8(types.VBits)))
-	want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDI(want, tagI64>>types.VBits)...)
-	ctx.assembler.Emit(arm64.CMP(tag, want))
-
-	ok := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, ok))
-	ctx.stack = append(ctx.stack[:0], pre...)
-	l.exitFallback(ctx, ctx.ip)
-	ctx.assembler.Bind(ok)
-	ctx.stack = append(ctx.stack[:0], pre...)
+	l.guardTag(ctx, v, tagI64, arm64.OpBEQ, pre)
 }
 
-func (l arm64JIT) guardNonZero(ctx *jitContext, v asm.VReg, pre []asm.VReg) bool {
+func (l arm64JIT) guardNonZero(ctx *jitContext, v asm.VReg, pre []asm.VReg) {
 	ctx.assembler.Emit(arm64.CMPI(v, 0))
 	ok := ctx.assembler.Label()
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, ok))
@@ -1969,5 +1872,4 @@ func (l arm64JIT) guardNonZero(ctx *jitContext, v asm.VReg, pre []asm.VReg) bool
 	l.exitFallback(ctx, ctx.ip)
 	ctx.assembler.Bind(ok)
 	ctx.stack = append(ctx.stack[:0], pre...)
-	return true
 }

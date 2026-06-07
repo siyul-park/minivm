@@ -4309,7 +4309,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		ref := i.keep(closure)
 		f := &frame{addr: addr, ref: ref}
 
-		i.restoreFrame(f, addr)
+		i.restore(f, addr)
 
 		require.Len(t, f.code, len(i.code[addr]))
 		require.NotNil(t, f.code[0])

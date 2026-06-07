@@ -88,13 +88,14 @@ type jitContext struct {
 
 	ip        int
 	end       int
-	returns   int
 	successor int
 	stop      bool
 	closed    bool
-	whole     bool
-	framed    bool
 	fallback  bool
+
+	whole   bool
+	framed  bool
+	returns int
 }
 
 const (
@@ -186,6 +187,14 @@ func (c *jitCompiler) complete(i *Interpreter, addr int, fn *types.Function, mod
 		return false, nil
 	}
 	funcs := c.component(i, addr, fn)
+	// A direct CALL lowered inside a framed entry becomes a native BL
+	// (see arm64JIT.call), which recurses on the host stack and never
+	// touches the VM frame stack. That bypasses the frame-overflow guard the
+	// threaded RETURN/CALL path enforces, so unbounded recursion would blow
+	// the host stack instead of returning ErrFrameOverflow. Until the native
+	// call path emits its own frame-depth guard, reject any component whose
+	// functions make direct calls and let them fall back to segment/threaded
+	// dispatch, where frame accounting still runs.
 	for _, targetFn := range funcs {
 		if len(c.calls(i, targetFn)) > 0 {
 			return false, nil
@@ -337,7 +346,7 @@ func (c *jitCompiler) function(i *Interpreter, fn *types.Function, locals []type
 	if !c.walkBlocks(ctx, fn, blks, returns, false) {
 		return segment{}, false, nil
 	}
-	if requireTerminated && !(ctx.stop && ctx.successor < 0 && !ctx.closed) {
+	if requireTerminated && !ctx.terminated() {
 		return segment{}, false, nil
 	}
 	if !c.valid(ctx, returns) {
@@ -397,12 +406,7 @@ func (c *jitCompiler) walkBlocks(ctx *jitContext, fn *types.Function, blks []*an
 		if ctx.labels != nil {
 			ctx.assembler.Bind(ctx.labels[blk.Start])
 		}
-		ctx.ip = blk.Start
-		ctx.end = blk.End
-		ctx.stop = false
-		ctx.closed = false
-		ctx.successor = -1
-		ctx.stack = append(ctx.stack[:0], stack...)
+		ctx.reset(blk, stack)
 
 		res := c.walk(ctx)
 		if res.reject >= 0 {
@@ -440,12 +444,7 @@ func (c *jitCompiler) walkFull(ctx *jitContext, target jitTarget) bool {
 		} else {
 			ctx.assembler.Bind(target.labels[block.Start])
 		}
-		ctx.ip = block.Start
-		ctx.end = block.End
-		ctx.stop = false
-		ctx.closed = false
-		ctx.successor = -1
-		ctx.stack = append(ctx.stack[:0], stack...)
+		ctx.reset(block, stack)
 
 		res := c.walk(ctx)
 		if res.reject >= 0 || ctx.fallback {
@@ -674,6 +673,36 @@ func (c *jitCompiler) newContext(a *asm.Assembler, i *Interpreter, fn *types.Fun
 		end:       len(fn.Code),
 		successor: -1,
 	}
+}
+
+// terminated reports whether the last walked block ended in a self-contained
+// RETURN: stopped, with no pending successor and no emitted exit.
+func (c *jitContext) terminated() bool {
+	return c.stop && c.successor < 0 && !c.closed
+}
+
+// reset positions ctx to walk block with stack as its entry operands.
+func (c *jitContext) reset(block *analysis.BasicBlock, stack []asm.VReg) {
+	c.ip = block.Start
+	c.end = block.End
+	c.stop = false
+	c.closed = false
+	c.successor = -1
+	c.stack = append(c.stack[:0], stack...)
+}
+
+// pin returns a fresh Width64 int vreg bound to the scratch register at idx.
+func (c *jitContext) pin(idx int) asm.VReg {
+	v := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	_ = c.assembler.Pin(v, c.scratch[idx])
+	return v
+}
+
+// pinTo returns a fresh Width64 int vreg bound to the physical register pr.
+func (c *jitContext) pinTo(pr asm.PReg) asm.VReg {
+	v := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	_ = c.assembler.Pin(v, pr)
+	return v
 }
 
 // walk mirrors threaded compilation: decode one opcode, ask the ARM64 emitter
