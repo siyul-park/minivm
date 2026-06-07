@@ -661,6 +661,12 @@ func (i *Interpreter) entry(addr int, callable asm.Callable, fallback []func(*In
 		}
 
 		next := scratch[scratchNext]
+		if next&scratchFrameOverflow != 0 {
+			i.sp = int(scratch[scratchSP])
+			i.fr.ip = int(next &^ scratchFrameOverflow)
+			i.restore(i.fr, addr)
+			panic(ErrFrameOverflow)
+		}
 		if next&scratchFallback != 0 {
 			i.sp = int(scratch[scratchSP])
 			i.fr.ip = int(next &^ scratchFallback)
@@ -709,6 +715,7 @@ func (i *Interpreter) scratch() []uint64 {
 	clear(i.argv[:])
 	i.argv[scratchBP] = uint64(i.fr.bp)
 	i.argv[scratchSP] = uint64(i.sp)
+	i.argv[scratchNext] = uint64(len(i.frames) - i.fp)
 	if len(i.stack) > 0 {
 		i.argv[scratchStack] = uint64(uintptr(unsafe.Pointer(&i.stack[0])))
 	}

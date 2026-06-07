@@ -107,7 +107,10 @@ const (
 	scratchCount
 )
 
-const scratchFallback = uint64(1) << 63
+const (
+	scratchFallback      = uint64(1) << 63
+	scratchFrameOverflow = uint64(1) << 62
+)
 
 func (c *jitCompiler) Close() error {
 	return c.buffer.Free()
@@ -187,19 +190,6 @@ func (c *jitCompiler) complete(i *Interpreter, addr int, fn *types.Function, mod
 		return false, nil
 	}
 	funcs := c.component(i, addr, fn)
-	// A direct CALL lowered inside a framed entry becomes a native BL
-	// (see arm64JIT.call), which recurses on the host stack and never
-	// touches the VM frame stack. That bypasses the frame-overflow guard the
-	// threaded RETURN/CALL path enforces, so unbounded recursion would blow
-	// the host stack instead of returning ErrFrameOverflow. Until the native
-	// call path emits its own frame-depth guard, reject any component whose
-	// functions make direct calls and let them fall back to segment/threaded
-	// dispatch, where frame accounting still runs.
-	for _, targetFn := range funcs {
-		if len(c.calls(i, targetFn)) > 0 {
-			return false, nil
-		}
-	}
 	targets, ok, err := c.targets(funcs)
 	if err != nil || !ok {
 		return false, err
@@ -582,52 +572,21 @@ func (c *jitCompiler) link(mod *jitModule, segs []segment) error {
 
 func (c *jitCompiler) component(i *Interpreter, addr int, fn *types.Function) map[int]*types.Function {
 	funcs := map[int]*types.Function{addr: fn}
-	edges := map[int][]int{}
-	var visit func(int, *types.Function)
-	visit = func(src int, current *types.Function) {
-		if _, ok := edges[src]; ok {
-			return
-		}
+	var visit func(*types.Function)
+	visit = func(current *types.Function) {
 		for _, dst := range c.calls(i, current) {
 			target, ok := i.function(dst)
 			if !ok {
 				continue
 			}
-			edges[src] = append(edges[src], dst)
 			if _, ok := funcs[dst]; !ok {
 				funcs[dst] = target
-				visit(dst, target)
+				visit(target)
 			}
 		}
 	}
-	visit(addr, fn)
-
-	reverse := map[int][]int{}
-	for src, dsts := range edges {
-		for _, dst := range dsts {
-			reverse[dst] = append(reverse[dst], src)
-		}
-	}
-
-	keep := map[int]bool{}
-	queue := []int{addr}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		if keep[current] {
-			continue
-		}
-		keep[current] = true
-		queue = append(queue, reverse[current]...)
-	}
-
-	out := map[int]*types.Function{}
-	for targetAddr, targetFn := range funcs {
-		if keep[targetAddr] {
-			out[targetAddr] = targetFn
-		}
-	}
-	return out
+	visit(fn)
+	return funcs
 }
 
 func (c *jitCompiler) calls(i *Interpreter, fn *types.Function) []int {

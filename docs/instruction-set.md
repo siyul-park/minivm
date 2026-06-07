@@ -72,8 +72,8 @@ Offsets are signed 16-bit values encoded little-endian. `BR 5` skips 5 bytes pas
 | `BR` | `{2}` | `→` | ◐ | Unconditional relative jump. JIT only when current segment has no pending return values. |
 | `BR_IF` | `{2}` | `cond →` | ◐ | Jump if `cond ≠ 0`, else fall through. JIT only for simple stack shapes. |
 | `BR_TABLE` | `{-2, 2}` | `index →` | ◐ | Jump table; negative or out-of-range index uses default target. JIT only for simple stack shapes. |
-| `CALL` | `{}` | `fn →` | ⬜ | Call `*Function`, `*HostFunction`, or `*Closure`; pushes a frame. |
-| `RETURN` | `{}` | `→` | ⬜ | Return from current frame. |
+| `CALL` | `{}` | `fn →` | ◐ | Call `*Function`, `*HostFunction`, or `*Closure`; complete JIT lowers eligible direct function calls to native `BL`. |
+| `RETURN` | `{}` | `→` | ◐ | Return from current frame; complete JIT lowers native entry returns. |
 
 ## Variables
 

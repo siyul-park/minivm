@@ -4133,6 +4133,45 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.Equal(t, types.I32(42), value)
 	})
 
+	t.Run("compiles direct call complete entries", func(t *testing.T) {
+		requireJIT(t)
+		callee := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_MUL),
+			instr.New(instr.RETURN),
+		).Build()
+		caller := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.RETURN),
+		).Build()
+		i := New(program.New(nil, program.WithConstants(callee, caller)), WithCutoff(1))
+		defer i.Close()
+		require.NoError(t, i.ensure())
+
+		calleeAddr := i.constants[0].Ref()
+		callerAddr := i.constants[1].Ref()
+		mod := &jitModule{
+			entries:  map[int]asm.Callable{},
+			segments: map[jitEntry]asm.Callable{},
+			stacks:   map[jitEntry]int{},
+		}
+
+		ok, err := i.compiler.complete(i, callerAddr, caller, mod)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, mod.entries[callerAddr])
+		require.NotNil(t, mod.entries[calleeAddr])
+	})
+
 	t.Run("compiles recursive fibonacci complete entry", func(t *testing.T) {
 		requireJIT(t)
 		fib := types.NewFunctionBuilder(&types.FunctionType{
@@ -4180,6 +4219,41 @@ func TestInterpreter_JIT(t *testing.T) {
 		value, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(6765), value)
+	})
+
+	t.Run("compiles recursive direct call complete entry", func(t *testing.T) {
+		requireJIT(t)
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_EQZ),
+			instr.New(instr.BR_IF, 13),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.RETURN),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.RETURN),
+		).Build()
+		i := New(program.New(nil, program.WithConstants(fn)), WithCutoff(1))
+		defer i.Close()
+		require.NoError(t, i.ensure())
+
+		addr := i.constants[0].Ref()
+		mod := &jitModule{
+			entries:  map[int]asm.Callable{},
+			segments: map[jitEntry]asm.Callable{},
+			stacks:   map[jitEntry]int{},
+		}
+
+		ok, err := i.compiler.complete(i, addr, fn, mod)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, mod.entries[addr])
 	})
 
 	t.Run("compiles direct call scc complete entries", func(t *testing.T) {

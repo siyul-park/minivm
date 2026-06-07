@@ -467,13 +467,9 @@ func (l arm64JIT) constGet(ctx *jitContext) bool {
 	return l.imm(ctx, uint64(v))
 }
 
-// call fuses a CONST_GET+CALL into a native BL to the callee's framed entry,
-// keeping the call on the host stack instead of round-tripping the threaded
-// dispatcher. It is reachable only from a framed whole-component compile
-// (ctx.framed), which jitCompiler.complete currently gates off whenever any
-// function makes a direct call: a native BL skips the VM frame stack, so
-// recursion through this path would bypass the ErrFrameOverflow guard. Enabling
-// it needs a frame-depth check emitted here first.
+// call fuses a CONST_GET+CALL into a native BL to the callee's framed entry.
+// scratchNext carries remaining VM frame budget while native entries call each
+// other; native overflow traps back to the Go entry wrapper as ErrFrameOverflow.
 func (l arm64JIT) call(ctx *jitContext) bool {
 	if ctx.ip+3 >= len(ctx.code) || instr.Opcode(ctx.code[ctx.ip]) != instr.CONST_GET || instr.Opcode(ctx.code[ctx.ip+3]) != instr.CALL {
 		return false
@@ -492,6 +488,16 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 	if !l.need(ctx, params) {
 		return false
 	}
+
+	budget := ctx.pin(scratchNext)
+	hasFrame := ctx.assembler.Label()
+	ctx.assembler.Emit(
+		arm64.CMPI(budget, 0),
+		arm64.BCondLabel(arm64.OpBNE, hasFrame),
+	)
+	l.exitOverflow(ctx, ctx.ip)
+	ctx.assembler.Bind(hasFrame)
+	ctx.assembler.Emit(arm64.SUBI(budget, budget, 1))
 
 	nextSP := l.materializeSP(ctx)
 	oldBP := ctx.scratch[scratchBP]
@@ -516,6 +522,19 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 	ctx.assembler.Emit(arm64.MOV(vSP, calleeSP))
 
 	ctx.assembler.Emit(arm64.BLLabel(target.label))
+	trap := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	normal := ctx.assembler.Label()
+	ctx.assembler.Emit(
+		arm64.LSRI(trap, budget, 62),
+		arm64.CMPI(trap, 0),
+		arm64.BCondLabel(arm64.OpBEQ, normal),
+		arm64.LDR(oldBP, arm64.SP, 0),
+		arm64.LDR(oldSP, arm64.SP, 8),
+		arm64.ADDI(arm64.SP, arm64.SP, 16),
+		arm64.RET(),
+	)
+	ctx.assembler.Bind(normal)
+	ctx.assembler.Emit(arm64.ADDI(budget, budget, 1))
 	ctx.assembler.Emit(
 		arm64.LDR(oldBP, arm64.SP, 0),
 		arm64.LDR(oldSP, arm64.SP, 8),
@@ -541,6 +560,10 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 	ctx.stack = stack
 	ctx.ip += 4
 	return true
+}
+
+func (l arm64JIT) exitOverflow(ctx *jitContext, nextIP int) {
+	l.exit(ctx, scratchFrameOverflow|uint64(nextIP))
 }
 
 // globalGet pushes globals[idx] onto the segment stack via a direct

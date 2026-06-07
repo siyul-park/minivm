@@ -86,7 +86,7 @@ Scratch registers carry VM context through the single `argv []uint64` callable A
 | `scratchGlobals` (1) | X11 | `&i.globals[0]` input |
 | `scratchBP` (2) | X12 | current frame `bp` input |
 | `scratchSP` (3) | X13 | interpreter `sp` in/out |
-| `scratchNext` (4) | X14 | next interpreter IP output |
+| `scratchNext` (4) | X14 | next interpreter IP output; native-call frame budget inside framed entries |
 
 Native code loads stack inputs from `scratchStack`/`scratchSP`, keeps operands in registers, and writes stack results back only on exit or fallback. The `interp` adapter does not marshal params or returns; it calls `Callable.Call(argv)` and copies back `scratchSP`/`scratchNext`.
 
@@ -98,14 +98,21 @@ JIT i64 ops require inline 49-bit operands — they read the value lane directly
 
 ## CALL Boundaries
 
-Direct `CONST_GET function; CALL` sites do not lower to native `BL` today.
-They stay threaded so frame limits, stack bounds, closure/host dispatch, ref
-retain/release, and observer-visible frame metadata remain interpreter-owned.
-The complete-JIT path rejects functions containing direct calls; supported
-prefix/suffix segments around the call may still be installed.
+Direct `CONST_GET function; CALL` sites lower to native `BL` only in complete
+whole-component JIT, when the target is a JIT-eligible `*types.Function` in the
+same direct-call closure. This includes recursive and mutually recursive SCCs.
+Closure calls, host calls, ref-typed signatures, and unsupported callees stay
+threaded through segment fallback.
 
 When a function is not complete-JIT eligible, supported prefix/suffix segments
 are still installed independently, including an `ip=0` partial entry.
+
+Native direct calls run on the host stack and do not push VM frames for each
+nested callee. `scratchNext` carries the remaining VM frame budget during
+framed native execution; each native `CALL` consumes one budget slot and restores
+it after return. If the budget is exhausted, native code materializes the current
+stack, returns a frame-overflow trap to the Go entry wrapper, and the wrapper
+panics with `ErrFrameOverflow`.
 
 Complete-JIT rejects any reachable native guard fallback. Guard fallback is
 still valid in segment mode because the segment wrapper restores frame metadata
