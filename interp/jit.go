@@ -318,12 +318,12 @@ func (c *jitCompiler) blocks(i *Interpreter, fn *types.Function, locals []types.
 	return c.function(i, fn, locals, blks, false)
 }
 
-// function runs a two-phase (plan + emit) compilation over blks. When
-// requireTerminated is true the plan phase additionally checks that the
-// last successfully lowered opcode left ctx in a RETURN-terminated state.
-// Labels are bound per block only when len(blks) > 1; with a single
-// synthetic block the function behaves as a straight-line whole-function
-// compilation.
+// function runs two walks over blks: a feasibility walk that rejects when any
+// opcode cannot lower, then an emit walk that produces real code. When
+// requireTerminated is true the feasibility walk also checks that the last
+// lowered opcode left ctx in a RETURN-terminated state. Labels are bound per
+// block only when len(blks) > 1; with a single synthetic block the function
+// behaves as a straight-line whole-function compilation.
 func (c *jitCompiler) function(i *Interpreter, fn *types.Function, locals []types.Kind, blks []*analysis.BasicBlock, requireTerminated bool) (segment, bool, error) {
 	scratch, ok := c.scratch()
 	if !ok {
@@ -333,20 +333,19 @@ func (c *jitCompiler) function(i *Interpreter, fn *types.Function, locals []type
 	if fn.Typ != nil {
 		returns = len(fn.Typ.Returns)
 	}
-	planCtx := c.prepare(i, fn, locals, scratch, blks)
-	if !c.walkBlocks(planCtx, fn, blks, returns, false) {
+	ctx := c.prepare(i, fn, locals, scratch, blks)
+	if !c.walkBlocks(ctx, fn, blks, returns, false) {
 		return segment{}, false, nil
 	}
-	if requireTerminated && !(planCtx.stop && planCtx.successor < 0 && !planCtx.closed) {
+	if requireTerminated && !(ctx.stop && ctx.successor < 0 && !ctx.closed) {
 		return segment{}, false, nil
 	}
-	if !c.valid(planCtx, returns) {
+	if !c.valid(ctx, returns) {
 		return segment{}, false, nil
 	}
 
-	// Plan succeeded; redo the walk on a fresh assembler, this time emitting
-	// real code (emit=true). The plan pass above only probed that fn lowers.
-	ctx := c.prepare(i, fn, locals, scratch, blks)
+	// Feasibility confirmed; redo on a fresh assembler, this time emitting.
+	ctx = c.prepare(i, fn, locals, scratch, blks)
 	if !c.walkBlocks(ctx, fn, blks, returns, true) {
 		return segment{}, false, nil
 	}
@@ -377,11 +376,11 @@ func (c *jitCompiler) prepare(i *Interpreter, fn *types.Function, locals []types
 	return ctx
 }
 
-// walkBlocks drives the per-block plan or emit loop. For each reachable
+// walkBlocks drives the per-block feasibility or emit loop. For each reachable
 // block it resets ctx scope, runs walk, and forwards merged stacks to
-// successor blocks. emit selects between planning (dry-run with the
-// counting assembler) and emission (real code, includes Exit terminators
-// for RETURN-ending blocks).
+// successor blocks. emit selects between a dry-run feasibility pass (counting
+// assembler) and emission (real code, includes Exit terminators for
+// RETURN-ending blocks).
 func (c *jitCompiler) walkBlocks(ctx *jitContext, fn *types.Function, blks []*analysis.BasicBlock, returns int, emit bool) bool {
 	reachable := c.reachable(blks)
 	inputs := map[int][]asm.VReg{0: nil}
@@ -524,22 +523,25 @@ func (c *jitCompiler) segment(i *Interpreter, fn *types.Function, locals []types
 		return segment{}, false, nil
 	}
 
-	plan := c.newContext(asm.New(c.arch), i, fn, locals, startIP, scratch)
-	planned := c.walk(plan)
-	if planned.count < c.cutoff {
+	ctx := c.newContext(asm.New(c.arch), i, fn, locals, startIP, scratch)
+	probed := c.walk(ctx)
+	if probed.count < c.cutoff {
 		return segment{}, false, nil
 	}
+	inputs := len(ctx.inputs)
+	endIP := ctx.ip
+	next, force := c.next(fn, ctx, probed)
 
 	a := asm.New(c.arch)
-	ctx := c.newContext(a, i, fn, locals, startIP, scratch)
-	for i := 0; i < len(plan.inputs); i++ {
+	ctx = c.newContext(a, i, fn, locals, startIP, scratch)
+	for i := 0; i < inputs; i++ {
 		v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.inputs = append(ctx.inputs, v)
 		ctx.stack = append(ctx.stack, v)
 	}
 	c.lowerer.prologue(ctx, fn)
 	lowered := c.walk(ctx)
-	if lowered.count < c.cutoff || ctx.ip != plan.ip || len(ctx.inputs) != len(plan.inputs) {
+	if lowered.count < c.cutoff || ctx.ip != endIP || len(ctx.inputs) != inputs {
 		return segment{}, false, nil
 	}
 
@@ -551,11 +553,10 @@ func (c *jitCompiler) segment(i *Interpreter, fn *types.Function, locals []types
 	if err != nil {
 		return segment{}, false, err
 	}
-	next, force := c.next(fn, plan, planned)
 	return segment{
 		start: startIP,
 		code:  code,
-		stack: len(plan.inputs),
+		stack: inputs,
 		next:  next,
 		force: force,
 	}, true, nil
