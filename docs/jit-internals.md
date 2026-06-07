@@ -98,20 +98,14 @@ JIT i64 ops require inline 49-bit operands — they read the value lane directly
 
 ## CALL Boundaries
 
-Direct `CONST_GET function; CALL` sites can lower to native `BL` when every
-function in the direct-call SCC is complete-JIT eligible: non-closure
-`*types.Function`, numeric params/returns/locals, no captures, and no
-unsupported reachable opcode. Native full calls use scalar frame state only;
-`frame.code` and `frame.upvals` stay untouched while native code is running.
-The Go entry wrapper clears those pointer fields on native entry and restores
-them only before observer hooks or threaded fallback handlers need to inspect
-or resume the active frame.
+Direct `CONST_GET function; CALL` sites do not lower to native `BL` today.
+They stay threaded so frame limits, stack bounds, closure/host dispatch, ref
+retain/release, and observer-visible frame metadata remain interpreter-owned.
+The complete-JIT path rejects functions containing direct calls; supported
+prefix/suffix segments around the call may still be installed.
 
 When a function is not complete-JIT eligible, supported prefix/suffix segments
-are still installed independently, including an `ip=0` partial entry. Unsupported
-calls remain threaded so closure/host dispatch, ref retain/release, stack
-bounds, fallback, and Go write-barrier-sensitive pointer fields stay
-interpreter-owned.
+are still installed independently, including an `ip=0` partial entry.
 
 Complete-JIT rejects any reachable native guard fallback. Guard fallback is
 still valid in segment mode because the segment wrapper restores frame metadata

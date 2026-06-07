@@ -2992,6 +2992,44 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("jit direct recursion preserves frame overflow", func(t *testing.T) {
+		requireJIT(t)
+
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_EQZ),
+			instr.New(instr.BR_IF, 13),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.RETURN),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.RETURN),
+		).Build()
+		p := prof.New()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fn),
+		), WithProfile(p), WithCutoff(1), WithFrame(2))
+		defer func() {
+			i.fp = 1
+			require.NoError(t, i.Close())
+		}()
+
+		addr := i.constants[0].Ref()
+		require.NoError(t, i.jit(addr))
+		require.ErrorIs(t, i.Run(context.Background()), ErrFrameOverflow)
+	})
+
 	t.Run("nested return restores caller frame for locals", func(t *testing.T) {
 		callee := types.NewFunctionBuilder(&types.FunctionType{
 			Returns: []types.Type{types.TypeI32},

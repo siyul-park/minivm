@@ -186,6 +186,11 @@ func (c *jitCompiler) complete(i *Interpreter, addr int, fn *types.Function, mod
 		return false, nil
 	}
 	funcs := c.component(i, addr, fn)
+	for _, targetFn := range funcs {
+		if len(c.calls(i, targetFn)) > 0 {
+			return false, nil
+		}
+	}
 	targets, ok, err := c.targets(funcs)
 	if err != nil || !ok {
 		return false, err
