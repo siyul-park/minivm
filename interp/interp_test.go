@@ -3658,6 +3658,22 @@ func TestInterpreter_WithDebugger(t *testing.T) {
 }
 
 func TestInterpreter_JIT(t *testing.T) {
+	t.Run("lowers unreachable through fallback", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.UNREACHABLE),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.UNREACHABLE))
+
+		require.NoError(t, i.jit(0))
+		require.ErrorIs(t, i.Run(context.Background()), ErrUnreachableExecuted)
+		jit := p.Snapshot().JIT
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
 	t.Run("loads stack inputs through scratch", func(t *testing.T) {
 		requireJIT(t)
 		p := prof.New()

@@ -61,6 +61,8 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 	switch op {
 	case instr.NOP:
 		return true
+	case instr.UNREACHABLE:
+		return l.unreachable(ctx)
 	case instr.DROP:
 		return l.drop(ctx)
 	case instr.DUP:
@@ -361,6 +363,13 @@ func (l arm64JIT) drop(ctx *jitContext) bool {
 		return false
 	}
 	ctx.stack = ctx.stack[:len(ctx.stack)-1]
+	return true
+}
+
+func (l arm64JIT) unreachable(ctx *jitContext) bool {
+	l.exitFallback(ctx, ctx.ip)
+	ctx.stop = true
+	ctx.closed = true
 	return true
 }
 
