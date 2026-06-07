@@ -3097,6 +3097,28 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, types.I32(7), v)
 	})
 
+	t.Run("fused direct call clears stale release flag", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{}).Emit(
+			instr.New(instr.RETURN),
+		).Build()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.NOP),
+				instr.New(instr.CALL),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fn),
+		))
+		defer i.Close()
+		addr := i.constants[0].Ref()
+
+		require.NoError(t, i.Run(context.Background()))
+		_, err := i.Load(addr)
+		require.NoError(t, err)
+	})
+
 	t.Run("canceled context", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()

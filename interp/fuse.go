@@ -62,6 +62,7 @@ func (c *threadedCompiler) fuseFunction(fn *types.Function, addr int) func(*Inte
 			f.ip = 0
 			f.bp = i.sp - params
 			f.returns = returns
+			f.release = false
 			i.sp += locals
 			i.fp++
 			i.fr = f
@@ -127,6 +128,7 @@ func (c *threadedCompiler) fuseClosure(fn *types.Closure, addr int) func(*Interp
 			f.ip = 0
 			f.bp = i.sp - params
 			f.returns = returns
+			f.release = false
 			i.sp += locals
 			i.fp++
 			i.fr = f
