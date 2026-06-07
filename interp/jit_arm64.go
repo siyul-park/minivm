@@ -96,6 +96,14 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 		return l.i32Sub(ctx)
 	case instr.I32_MUL:
 		return l.i32Mul(ctx)
+	case instr.I32_DIV_S:
+		return l.i32DivS(ctx)
+	case instr.I32_DIV_U:
+		return l.i32DivU(ctx)
+	case instr.I32_REM_S:
+		return l.i32RemS(ctx)
+	case instr.I32_REM_U:
+		return l.i32RemU(ctx)
 	case instr.I32_AND:
 		return l.i32And(ctx)
 	case instr.I32_OR:
@@ -685,6 +693,22 @@ func (l arm64JIT) i32Mul(ctx *jitContext) bool {
 	return l.i32Binary(ctx, arm64.MUL)
 }
 
+func (l arm64JIT) i32DivS(ctx *jitContext) bool {
+	return l.i32Quotient(ctx, arm64.SDIV, l.sign32)
+}
+
+func (l arm64JIT) i32DivU(ctx *jitContext) bool {
+	return l.i32Quotient(ctx, arm64.UDIV, l.zero32)
+}
+
+func (l arm64JIT) i32RemS(ctx *jitContext) bool {
+	return l.i32Remainder(ctx, arm64.SDIV, l.sign32)
+}
+
+func (l arm64JIT) i32RemU(ctx *jitContext) bool {
+	return l.i32Remainder(ctx, arm64.UDIV, l.zero32)
+}
+
 // i32Binary lowers an i32 binary arithmetic opcode whose result can
 // land in any bit pattern (ADD, SUB, MUL). The lowered sequence runs the
 // op on the boxed inputs in 64-bit registers, then re-masks and re-tags
@@ -699,6 +723,52 @@ func (l arm64JIT) i32Binary(ctx *jitContext, op func(dst, src1, src2 asm.Reg) as
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(op(raw, a, b))
 
+	boxed := l.boxI32(ctx, raw)
+	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)
+	return true
+}
+
+func (l arm64JIT) i32Quotient(
+	ctx *jitContext,
+	div func(dst, src1, src2 asm.Reg) asm.Instruction,
+	prep func(*jitContext, asm.VReg) asm.VReg,
+) bool {
+	if !l.need(ctx, 2) {
+		return false
+	}
+	pre := append([]asm.VReg(nil), ctx.stack...)
+	b := prep(ctx, ctx.stack[len(ctx.stack)-1])
+	a := prep(ctx, ctx.stack[len(ctx.stack)-2])
+	if !l.guardNonZero(ctx, b, pre) {
+		return false
+	}
+
+	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(div(raw, a, b))
+	boxed := l.boxI32(ctx, raw)
+	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)
+	return true
+}
+
+func (l arm64JIT) i32Remainder(
+	ctx *jitContext,
+	div func(dst, src1, src2 asm.Reg) asm.Instruction,
+	prep func(*jitContext, asm.VReg) asm.VReg,
+) bool {
+	if !l.need(ctx, 2) {
+		return false
+	}
+	pre := append([]asm.VReg(nil), ctx.stack...)
+	b := prep(ctx, ctx.stack[len(ctx.stack)-1])
+	a := prep(ctx, ctx.stack[len(ctx.stack)-2])
+	if !l.guardNonZero(ctx, b, pre) {
+		return false
+	}
+
+	quotient := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(div(quotient, a, b))
+	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.MSUB(raw, quotient, b, a))
 	boxed := l.boxI32(ctx, raw)
 	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)
 	return true
@@ -1636,4 +1706,15 @@ func (l arm64JIT) guardRef(ctx *jitContext, v asm.VReg, pre []asm.VReg) {
 	l.exitFallback(ctx, ctx.ip)
 	ctx.assembler.Bind(ok)
 	ctx.stack = append(ctx.stack[:0], pre...)
+}
+
+func (l arm64JIT) guardNonZero(ctx *jitContext, v asm.VReg, pre []asm.VReg) bool {
+	ctx.assembler.Emit(arm64.CMPI(v, 0))
+	ok := ctx.assembler.Label()
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, ok))
+	ctx.stack = append(ctx.stack[:0], pre...)
+	l.exitFallback(ctx, ctx.ip)
+	ctx.assembler.Bind(ok)
+	ctx.stack = append(ctx.stack[:0], pre...)
+	return true
 }

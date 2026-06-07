@@ -3695,6 +3695,61 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NotZero(t, jit.Links)
 	})
 
+	t.Run("lowers i32 div and rem", func(t *testing.T) {
+		requireJIT(t)
+		cases := []struct {
+			name string
+			op   instr.Opcode
+			a    types.Value
+			b    types.Value
+			want types.Value
+		}{
+			{name: "div_s", op: instr.I32_DIV_S, a: types.I32(-21), b: types.I32(5), want: types.I32(-4)},
+			{name: "div_u", op: instr.I32_DIV_U, a: types.I32(-1), b: types.I32(2), want: types.I32(2147483647)},
+			{name: "rem_s", op: instr.I32_REM_S, a: types.I32(-21), b: types.I32(5), want: types.I32(-1)},
+			{name: "rem_u", op: instr.I32_REM_U, a: types.I32(-1), b: types.I32(2), want: types.I32(1)},
+		}
+		for _, tt := range cases {
+			t.Run(tt.name, func(t *testing.T) {
+				p := prof.New()
+				i := New(program.New([]instr.Instruction{
+					instr.New(tt.op),
+				}), WithProfile(p), WithCutoff(1))
+				defer i.Close()
+				p.Add(0, 0, byte(tt.op))
+				require.NoError(t, i.Push(tt.a))
+				require.NoError(t, i.Push(tt.b))
+
+				require.NoError(t, i.jit(0))
+				require.NoError(t, i.Run(context.Background()))
+				value, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, tt.want, value)
+				jit := p.Snapshot().JIT
+				require.NotZero(t, jit.Emits)
+				require.NotZero(t, jit.Links)
+			})
+		}
+	})
+
+	t.Run("falls back on i32 divide by zero", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_DIV_S),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.I32_DIV_S))
+		require.NoError(t, i.Push(types.I32(1)))
+		require.NoError(t, i.Push(types.I32(0)))
+
+		require.NoError(t, i.jit(0))
+		require.ErrorIs(t, i.Run(context.Background()), ErrDivideByZero)
+		jit := p.Snapshot().JIT
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
 	t.Run("loads stack inputs through scratch", func(t *testing.T) {
 		requireJIT(t)
 		p := prof.New()
