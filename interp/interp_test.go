@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
@@ -3933,6 +3934,34 @@ func TestInterpreter_JIT(t *testing.T) {
 		value, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(1), value)
+	})
+
+	t.Run("complete entry merges stack across branch blocks", func(t *testing.T) {
+		requireJIT(t)
+
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.I32_CONST, 40),
+			instr.New(instr.BR, 0),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+		).Build()
+		i := New(program.New(nil, program.WithConstants(fn)))
+		defer i.Close()
+		require.NoError(t, i.ensure())
+		addr := i.constants[0].Ref()
+		mod := &jitModule{
+			entries:  map[int]asm.Callable{},
+			segments: map[jitEntry]asm.Callable{},
+			stacks:   map[jitEntry]int{},
+		}
+
+		ok, err := i.compiler.complete(i, addr, fn, mod)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, mod.entries[addr])
 	})
 
 	t.Run("entry fallback restores frame metadata", func(t *testing.T) {

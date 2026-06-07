@@ -426,9 +426,14 @@ func (c *jitCompiler) walkBlocks(ctx *jitContext, fn *types.Function, blks []*an
 
 func (c *jitCompiler) walkFull(ctx *jitContext, target jitTarget) bool {
 	reachable := c.reachable(target.blocks)
+	inputs := map[int][]asm.VReg{0: nil}
 	for _, block := range target.blocks {
 		if !reachable[block.Start] {
 			continue
+		}
+		stack, ok := inputs[block.Start]
+		if !ok {
+			return false
 		}
 		if block.Start == 0 {
 			ctx.assembler.Entry(target.label, asm.Signature{Scratch: ctx.scratch})
@@ -441,13 +446,16 @@ func (c *jitCompiler) walkFull(ctx *jitContext, target jitTarget) bool {
 		ctx.stop = false
 		ctx.closed = false
 		ctx.successor = -1
-		ctx.stack = ctx.stack[:0]
+		ctx.stack = append(ctx.stack[:0], stack...)
 
 		res := c.walk(ctx)
 		if res.reject >= 0 || ctx.fallback {
 			return false
 		}
 		if !ctx.stop && block.End >= len(target.fn.Code) {
+			return false
+		}
+		if !c.merge(inputs, target.blocks, block, ctx.stack) {
 			return false
 		}
 	}
