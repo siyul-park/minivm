@@ -60,9 +60,6 @@ func (c *caller) Call(argv []uint64) error {
 	if len(argv) < c.nScratch {
 		return fmt.Errorf("%w: got %d scratch values, want %d", asm.ErrInvalidArgs, len(argv), c.nScratch)
 	}
-	if c.nScratch == 0 {
-		return nil
-	}
 	// Build the header-prefixed buffer the trampoline expects: buf[0] is the
 	// scratch count it reads to load exactly nScratch registers, buf[1:]
 	// carries the values in and out. External callers never set the header.
