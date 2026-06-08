@@ -38,6 +38,11 @@ var (
 	FP  = X29
 	LR  = X30
 	XZR = asm.NewPReg(31, asm.RegTypeInt, asm.Width64)
+	// SP shares register id 31 with XZR. In data-processing instructions
+	// field 31 reads as the zero register; in add/subtract-immediate and
+	// load/store forms it encodes the stack pointer. Use SP where the stack
+	// pointer is meant so call sites do not appear to clobber XZR.
+	SP = asm.NewPReg(31, asm.RegTypeInt, asm.Width64)
 
 	W0  = asm.NewPReg(0, asm.RegTypeInt, asm.Width32)
 	W1  = asm.NewPReg(1, asm.RegTypeInt, asm.Width32)

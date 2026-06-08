@@ -1,123 +1,173 @@
 # JIT Internals
 
-Contracts for `jit/`, `jit/arm64/`, and their interaction with `interp/`. Read before editing any of these packages.
+Contracts for native JIT files in `interp/` and their interaction with `asm/`. Read before editing `interp/jit.go`, `interp/jit_arm64.go`, or asm callable ABI code.
 
 ## Checklist
 
 Before editing: check opcode width in `instr/type.go`; preserve threaded/JIT parity; keep threaded fallback correct; read `profile.md` for ticks, thresholds, and hot-block choice; read `value-representation.md` for boxing/unboxing; read `memory-model.md` for refs and heap objects.
 
-After editing: add or update tests in `jit/arm64/lowerer_test.go` for lowerer changes, `interp/interp_test.go` for interp wiring changes; run `go test ./jit/... ./interp/...`.
+After editing: add or update tests in `asm/assembler_test.go` for callable ABI changes and `interp/interp_test.go` for native lowering/wiring changes; run `go test ./asm/... ./interp/...`.
 
 ## Execution Model
 
 ```text
 program.Program
   -> threadedCompiler -> []func(*Interpreter)    always, portable fallback
-  -> jit.Compiler     -> *jit.Module             lazy, arch-gated
+  -> jitCompiler      -> *jitModule              lazy, ARM64-gated
 ```
 
 Both compilers read the same bytecode. `i.code[addr][ip]` is the primary dispatch table. JIT replaces selected entries after compilation. Rejected segments fall back cleanly to threaded code.
 
-## jit.Compiler
+## jitCompiler
 
-`jit.Compiler` is the entry point. `Compiler.Compile(fn, addr, snap)` attempts two strategies in order:
+`jitCompiler` is private to `interp` and lives in `jit.go`. `Compile(i, addr, fn)` reads the current interpreter state directly and attempts two strategies in order:
 
-1. **Whole-function Entry** (`compiler.whole`): all opcodes lower without rejection. On success, an `asm.Callable` is stored in `Module.Entry` and the function's slot is updated via `Slots.Set`. The `interp` side wraps `Entry` in a Go closure (`entry()`) that handles frame teardown after the native call returns.
+1. **Whole-function Entry** (`compiler.whole`): all opcodes lower without rejection. On success, an `asm.Callable` is stored in `jitModule.entry`. The `interp` side wraps `entry` in a Go closure that handles frame teardown after the native call returns.
 
-2. **Segment compilation** (`compiler.segments`): processes hot IPs from `snap.Hot`. Each hot IP seeds a segment; successors are queued when forced by `BR` or by a rejected op with a safe structural successor. Each accepted segment is stored in `Module.Segments[ip]`.
+2. **Segment compilation** (`compiler.segments`): processes hot IPs from the interpreter profiler. Each hot IP seeds a segment; successors are queued when forced by `BR` or by a rejected op with a safe structural successor. Each accepted segment is stored in `jitModule.segments[ip]`.
 
-Compilation is one-shot per function. There is no re-tier or deoptimization.
+Compilation is one-shot per function — there is no re-tiering. Runtime
+deoptimization does exist: a guard or unsupported boundary returns to the
+threaded interpreter, rebuilding VM frames from the journal (see CALL Boundaries).
 
-## jit.Lowerer Interface
+## Emitter (`lowerer`)
+
+`jit.go` is architecture-neutral. It depends on the `lowerer` interface — the
+architecture-specific opcode emitter — and never names a concrete backend.
+`jitCompiler` holds a `lowerer` field, set by the arch-specific
+`newJITCompiler`; every native-code emission in the pipeline goes through it.
+
+`jit_arm64.go` provides the only concrete `lowerer` today (`arm64JIT`), wired
+on arm64. On other architectures `jit_stub.go` returns a nil `jitCompiler`
+(JIT unavailable), so no `lowerer` is constructed. A second ISA is added by
+implementing `lowerer` in a new arch file and wiring it in that file's
+`newJITCompiler` — `jit.go` needs no change.
+
+The interface is four operations:
+
+- `prologue` loads declared live-ins from the VM stack into the shadow stack's initial VRegs.
+- `enter` emits the function entry sequence (frame/link save) for a whole-function target reached as its own callable.
+- `lower` dispatches one opcode. It returns `false` to reject and fall back to threaded execution.
+- `exitIP` materializes shadow stack values into `i.stack`, writes `scratchSP` and the journal (trap kind + resume IP), and emits `RET`.
+
+## jitContext
 
 ```go
-type Lowerer interface {
-    Arch()     asm.Arch
-    Prologue(c *Context, fn *types.Function)
-    Epilogue(c *Context)
-    Exit(c *Context, nextIP int)
-    Lower(c *Context, op instr.Opcode) bool
+type jitContext struct {
+    assembler *asm.Assembler
+    code      []byte
+    constants []types.Boxed
+    globals   []types.Boxed
+    locals    []types.Kind
+    scratch   []asm.PReg
+    stack     []asm.VReg   // shadow stack of live boxed values
+    inputs    []asm.VReg   // live-in VRegs loaded from VM stack
+    ip        int
+    start     int
+    end       int
+    successor int
+    whole     bool
+    stop      bool
+    closed    bool
 }
 ```
 
-- `Arch` returns the backend's `asm.Arch`.
-- `Prologue` binds live-in ABI args to the shadow stack's initial VRegs. Called once per segment or whole-function attempt.
-- `Epilogue` is currently a no-op; reserved for whole-function teardown (frame pop) when needed.
-- `Exit` pins shadow stack values to ABI return registers, loads `nextIP` into `ScratchNext`, and emits `RET`. Called at the end of every non-closed segment.
-- `Lower` dispatches one opcode. Returns `false` (without mutating `Context`) to reject. On success the driver advances `c.IP` by the opcode width; handlers must leave `c.IP` alone unless they also set `c.Stop` (e.g. branch/RETURN), in which case they own the resume position.
-
-Backends register via `jit.Register(arch string, Lowerer)` from an `init()` in a blank-importable package.
-
-## jit.Context
-
-```go
-type Context struct {
-    Assembler *asm.Assembler
-    Stack     []asm.VReg   // shadow stack of live boxed values
-    Inputs    []asm.VReg   // ABI input VRegs (pinned to Arg slots)
-    Args      []asm.PReg   // resolved ABI args (for signature)
-    Returns   []asm.PReg   // resolved ABI returns (for signature)
-    Scratch   []asm.PReg   // scratch physical registers
-    Snap      Snapshot
-    IP        int
-    Start     int
-    End       int
-    Target    int
-    Successor int
-    Whole     bool
-    Stop      bool
-    Closed    bool
-    Slots     *Slots
-}
-```
-
-`Stack` is the segment-local shadow stack of boxed VRegs. `Inputs` are the live-in VRegs for a partial segment's declared ABI args. Whole-function Entry compilation must finish with no `Inputs`; Entry receives function params through VM stack scratch/local loads, not `asm.Signature.Args`. `Target` carries the static call target address set by `CONST_GET` of a Ref constant; `Lower` clears it before every opcode except `CALL`. `Whole` is true only during whole-function Entry compilation; `RETURN` must check this flag.
+`stack` is the segment-local shadow stack of boxed VRegs. `inputs` are the live-in VRegs loaded from `i.stack` at segment entry. Whole-function Entry compilation must finish with no `inputs`; Entry receives function params through VM stack/local loads. `whole` is true only during whole-function Entry compilation; `RETURN` must check this flag.
 
 ## RETURN Lowering Contract
 
-`RETURN` lowers only when `c.Whole == true`. In segment mode it returns `false`, forcing threaded execution to handle frame teardown via the Go-side `entry()` wrapper. Violating this causes double frame teardown.
+`RETURN` lowers only when `c.whole == true`. In segment mode it returns `false`, forcing threaded execution to handle frame teardown via the Go-side `entry()` wrapper. Violating this causes double frame teardown.
 
 ## Segment ABI
 
-Scratch registers carry VM context. Only `ScratchCount` slots are declared in the callable ABI signature.
+Scratch registers carry VM context through the single `argv []uint64` callable ABI. `Callable.Call(argv)` loads `argv[0..4]` into X10..X14, calls native code, stores X10..X14 back into the same slots, and reports caller-side argument errors.
 
 | Constant | ARM64 | Purpose |
 | --- | --- | --- |
-| `ScratchStack` (0) | X10 | `&i.stack[0]` input |
-| `ScratchGlobals` (1) | X11 | `&i.globals[0]` input |
-| `ScratchBP` (2) | X12 | current frame `bp` input |
-| `ScratchNext` (3) | X13 | next interpreter IP output |
+| `scratchStack` (0) | X10 | `&i.stack[0]` input |
+| `scratchGlobals` (1) | X11 | `&i.globals[0]` input |
+| `scratchBP` (2) | X12 | current frame `bp` input |
+| `scratchSP` (3) | X13 | interpreter `sp` in/out |
+| `scratchCtrl` (4) | X14 | `&i.journal[0]` input — frame journal pointer |
 
-Stack values are passed as `asm.Signature.Args` (bottom-to-top) and returned as `asm.Signature.Returns`. The `interp` adapter pops declared inputs, calls `Callable.Call`, appends returned values, then reads `ScratchNext` to advance the frame IP.
+Native code loads stack inputs from `scratchStack`/`scratchSP`, keeps operands in registers, and writes stack results back only on exit or fallback. The `interp` adapter does not marshal params or returns; it calls `Callable.Call(argv)`, copies back `scratchSP`, and reads the trap/IP outputs from the journal.
 
-## Direct-BL CALL
+### Frame journal
 
-When `CONST_GET` of a Ref constant immediately precedes `CALL`, and the target is whole-function compiled or is the current function being compiled, the caller-JIT emits a direct native call. Self-recursive calls branch to the same Code's Entry label with `BL`; other targets use the slot table:
+The fifth scratch slot carries a pointer to `i.journal`, an Interpreter-owned
+`[]uint64` that both reports deopt state and records recoverable VM frames.
+Header cells precede a stack of fixed-stride records:
 
-```asm
-LDR  Xt, [slot_addr]   ; load entry pointer from slot
-BLR  Xt                ; call callee Entry natively
-```
+| Cell | Purpose |
+| --- | --- |
+| `journalDepth` (0) | native frames recorded; native read/write |
+| `journalCap` (1) | frame budget `len(i.frames)-i.fp`; read-only |
+| `journalTrap` (2) | exit kind out: `trapNone` \| `trapFallback` \| `trapOverflow` |
+| `journalNextIP` (3) | resume/fallback IP out for the single-frame path |
+| `journalHead` (4)… | records of `{addr, bp, ip, returns}`, stride 4 |
 
-`slot_addr` is a stable pointer from `Slots.For(addr)`, baked into the code at link time via a relocation. Initially the slot points at a fallback stub (sets `ScratchNext=0`, returns). When the callee's Entry is compiled, `Slots.Set(addr, Entry)` atomically updates the pointer.
+Guard fallbacks set `journalTrap = trapFallback` and the resume IP. The segment
+wrapper restores `fr.ip` and runs the original threaded handler for that opcode
+once, avoiding native re-entry loops at the segment start. A framed deopt also
+self-records its VM frame so the Go wrapper can rebuild the call chain (see CALL
+Boundaries).
 
-BL/BLR clobbers X30 (LR). The lowerer saves LR on the system stack before native calls and restores it after.
+`i64.add` lowers only the boxable fast path. If the result is outside the 49-bit boxed i64 range, native materializes the pre-op stack and uses the guard fallback path so threaded execution can allocate the heap-spilled `types.I64`.
 
-Only functions with numeric-only signatures (no KindRef params/returns) are eligible for direct-BL. Closures and host functions always fall back to threaded. Self-recursive whole-function entries avoid the `LDI+LDR` slot indirection on recursive calls.
+JIT i64 ops require inline 49-bit operands — they read the value lane directly and skip the retain/release the threaded path does. An i64 local or global can still hold a heap-promoted `KindRef` at runtime (typed i64, but out of range). So every i64 slot **load** (`LOCAL_GET`, `GLOBAL_GET`) and **store** (`LOCAL_SET`, `GLOBAL_SET`, `LOCAL_TEE`, `GLOBAL_TEE`) emits a `requireInlineI64` tag check: a load tests the loaded value, a store tests the old slot value (the one a `*_SET` would `releaseBox`); if it is not the inline `KindI64` tag, native takes the guard fallback at the current IP so the interpreter — which owns heap i64 and refcounting — handles it. The check is emitted only for slots statically typed i64.
 
-In whole-function Entry mode, values below the callee arguments on the caller shadow stack are spilled to scratch slots above the caller's locals before `BLR`, then reloaded after BP is restored. This preserves cross-call liveness for patterns such as `fib(n-1) + fib(n-2)`. Partial segments still reject survivor values across `CALL`.
+## CALL Boundaries
+
+Direct `CONST_GET function; CALL` sites lower to native `BL` only in complete
+whole-component JIT, when the target is a JIT-eligible `*types.Function` in the
+same direct-call closure. This includes recursive and mutually recursive SCCs.
+Closure calls, host calls, ref-typed signatures, and unsupported callees stay
+threaded through segment fallback.
+
+Native direct calls are **frame-aware**: before each `BL`, `call` records the
+caller's VM frame `{addr, bp, resume-ip, returns}` in the journal and bumps
+`journalDepth`; a normal return pops it. The journal slot is the recoverable VM
+frame the invariant requires — *every native call that may fall back has a
+recoverable VM frame* — so a callee can be entered natively even when it is only
+partially compiled (its body contains a guard that may deopt). Caller bp/sp are
+saved on the host stack across the `BL` and restored on return; the journal
+pointer (X14) is never written by native code, so it survives the call unsaved.
+
+On a **deopt** inside a nested callee, the innermost frame self-records its
+fallback frame, sets `journalTrap`, materializes its operands above its locals
+(`bp+nlocals`), and returns up the host call chain — each caller unwinds without
+touching the journal so the records stay intact. The Go wrapper then rebuilds the
+chain: `record[0]` reconciles the live outermost frame's IP; deeper records
+become new frames (ref retained, `code`/`upvals` restored via `restore`), `i.fp`
+advances, and threaded execution resumes at the innermost fallback IP.
+
+Frame overflow is reported when `journalDepth >= journalCap` at a call site:
+native materializes the current stack, sets `journalTrap = trapOverflow`, unwinds
+to the Go wrapper, and the wrapper panics with `ErrFrameOverflow` (never host
+stack overflow).
+
+Complete-JIT now **keeps** reachable guard fallbacks: a guard deopts safely
+through the journal, so a guard-bearing function (e.g. an i64 kernel that may
+heap-promote) compiles as a complete native entry and stays native until a guard
+actually fires at runtime. A *hard* reject (an opcode the backend cannot lower,
+or a non-`BL` CALL target) still drops the whole component to segment mode,
+because terminating a block early would leave native branch targets unbound.
 
 ## Branches
 
-`BR` and `BR_IF` terminate traces. Branch offsets are signed int16 relative to instruction end. `BR` records its target as a forced successor and exits with the successor IP in `ScratchNext`. `BR_IF` emits both exit paths inline; it marks the context closed so `Exit` is not appended.
+`BR` and `BR_IF` terminate traces. Branch offsets are signed int16 relative to instruction end. `BR` records its target as a forced successor and exits with the successor IP in `scratchNext`. `BR_IF` emits both exit paths inline; it marks the context closed so `Exit` is not appended.
 
-`BR` targets are forced successors unless the target is a `NOP` or outside the function. Rejected ops force only safe structural successors (`NOP` or `BR` following the rejected opcode). Rejected `CALL` does not force successors.
+`BR` targets are forced successors unless the target is a `NOP` or outside the function. Rejected ops force only safe structural successors (`NOP` or `BR` following the rejected opcode). A rejected direct `CONST_GET function; CALL` queues the post-call successor so supported work after the call remains eligible for JIT.
 
 Whole-function block mode carries shadow-stack values across block boundaries when every reachable predecessor agrees on the same VReg stack shape. If predecessors need a merge/phi, block mode rejects and falls back to segment compilation.
 
 ## Globals
 
-`GLOBAL_GET`/`GLOBAL_SET`/`GLOBAL_TEE` lower only for in-range non-ref globals whose slot offset fits the ARM64 unsigned LDR/STR immediate. Ref globals fall back to threaded code so retain/release ownership stays in the interpreter.
+`GLOBAL_GET`/`GLOBAL_SET`/`GLOBAL_TEE` lower only for in-range globals whose
+compile-time value is non-ref and whose slot offset fits the ARM64 unsigned
+LDR/STR immediate. Native code also checks the runtime old/value slot and the
+stored value; if either is a ref, it takes the guard fallback so retain/release
+ownership stays in the interpreter.
 
 ## Phase A Opcode Coverage
 
@@ -125,11 +175,10 @@ Fully lowered on ARM64:
 
 - Stack: `NOP`, `DROP`, `DUP`, `SWAP`, `SELECT`
 - Const: `I32_CONST`, `I64_CONST`, `F32_CONST`, `F64_CONST`, `CONST_GET`
-- Arithmetic: all I32/I64/F32/F64 add/sub/mul/div, I32/I64 rem, bitwise, shifts, comparisons, eqz
-- Conversions: `I32↔I64`, `I32↔F32/F64`, `F32↔F64`, `F→I`
+- Arithmetic: I32 add/sub/mul/div/rem/bitwise/shifts/comparisons/eqz; I64 add/sub/mul/div/rem/shifts/comparisons/eqz; F32/F64 add/sub/mul/div/comparisons
+- Conversions: `I32→I64`, `I64→I32`, `I32/I64→F32/F64`, `F32/F64→I32/I64`, `F32↔F64`
 - Branches: `BR`, `BR_IF`, `BR_TABLE`
 - Locals + globals: `LOCAL_GET/SET/TEE`, `GLOBAL_GET/SET/TEE`
-- `CALL` (direct-BL when target is jitted; threaded otherwise)
 - `RETURN` (whole-function Entry path only)
 - `UNREACHABLE`
 
@@ -140,6 +189,7 @@ Fast paths implemented on ARM64:
 - `REF_NULL`: push `BoxedNull` constant.
 - `REF_IS_NULL`: pop ref, compare full boxed word against `BoxedNull`, push BoxI32 result.
 - `REF_EQ`: pop two boxed values, compare at 64-bit level, push BoxI32 result.
+- `REF_NE`: pop two boxed values, compare at 64-bit level, push BoxI32 result.
 
 All other `REF_*` and `UPVAL_*` fall back to threaded.
 
@@ -163,7 +213,6 @@ Emit rules:
 
 - accepted segment emits when lowered opcode count ≥ `c.cutoff` (default 8)
 - hot profile IPs are initial compile entries; no profile falls back to entry IP 0
-- hot IPs reachable inside an accepted trace become internal entries on the same native code object when their live stack maps to compatible ABI args
 - `BR` targets are forced successors unless the target is `NOP` or out of range
 - rejected non-`CALL` ops force successors only when next opcode is `NOP` or `BR`
 - cold successors that are discovered but not forced count as skips
@@ -178,20 +227,20 @@ asm.New(arch)             allocate Assembler
   Emit(instruction)       append to IR list
   Label() / Bind(label)   create/place branch targets
   Build(sig) → *Code      regalloc + encode + intra-Code reloc resolution
-asm.LinkAll(buf, arch, []*Code, resolve) → []Linked
+asm.Link(buf, arch, []*Code, resolve) → []Linked
   patches external relocations, writes to Buffer, flushes icache
 ```
 
-`asm.Assembler` is single-shot: build it, link it, discard it. `Code` is immutable after `Build`. The W^X discipline is maintained by `asm.Buffer`: code is installed during `LinkAll` and the buffer is sealed (executable, non-writable) afterward.
+`asm.Assembler` is single-shot: build it, link it, discard it. `Code` is immutable after `Build`. The W^X discipline is maintained by `asm.Buffer`: code is installed during `Link` and the buffer is sealed (executable, non-writable) afterward.
 
-## Executable Buffer and Data Region
+## Executable Buffer
 
-`asm.Buffer` is a W^X mmap region for native code. `asm.Data` is a plain writable mmap region for runtime-patched pointers (slot table). Slots in `asm.Data` are updated atomically; no re-link is needed when a callee compiles.
+`asm.Buffer` is a W^X mmap region for native code.
 
-Apple Silicon (Darwin/ARM64) enforces W^X at the hardware level. `asm/icache_darwin_arm64.go` flushes the instruction cache after each `LinkAll`. Wrong seal/unseal ordering causes `SIGBUS` or `SIGILL`.
+Apple Silicon (Darwin/ARM64) enforces W^X at the hardware level. `asm/icache_darwin_arm64.go` flushes the instruction cache after each `Link`. Wrong seal/unseal ordering causes `SIGBUS` or `SIGILL`.
 
 ## ARM64 ABI Summary
 
-AAPCS64: integer args/returns `X0–X7`, float args/returns `D0–D7`/`S0–S7`. Scratch `X10–X13` (ScratchStack–ScratchNext). Trampoline temporaries use `X8`, `X9`, `X15`.
+AAPCS64: native VM callables use only scratch `X10–X14` (`scratchStack` through `scratchCtrl`) across the Go trampoline.
 
-The `abi_arm64.s` trampoline marshals `asm.Value` args into native registers, calls the native chunk, and collects return values back into `[]asm.Value`.
+The `abi_arm64.s` trampoline loads `argv[0..4]` into X10..X14, calls the native chunk, and stores X10..X14 back into `argv[0..4]`.

@@ -26,3 +26,4 @@ func New() asm.Arch {
 func (a arch) Registers() asm.RegInfo { return a.registers }
 func (a arch) Encoder() asm.Encoder   { return a.encoder }
 func (a arch) ABI() asm.ABI           { return a.abi }
+func (a arch) Frame() asm.Frame       { return nil }

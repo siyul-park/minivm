@@ -62,12 +62,10 @@ func (c *threadedCompiler) fuseFunction(fn *types.Function, addr int) func(*Inte
 			f.ip = 0
 			f.bp = i.sp - params
 			f.returns = returns
+			f.release = false
 			i.sp += locals
 			i.fp++
 			i.fr = f
-			if i.jitted[addr] {
-				f.code[0](i)
-			}
 		}
 	case instr.CLOSURE_NEW:
 		captures := len(fn.Captures)
@@ -127,6 +125,7 @@ func (c *threadedCompiler) fuseClosure(fn *types.Closure, addr int) func(*Interp
 			f.ip = 0
 			f.bp = i.sp - params
 			f.returns = returns
+			f.release = false
 			i.sp += locals
 			i.fp++
 			i.fr = f

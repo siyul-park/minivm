@@ -24,7 +24,6 @@ Import direction: `A → B` means `A` imports `B`.
 ```text
 program → instr
 interp  → program, instr, types, asm, prof, pass, analysis
-interp/jit_arm64 → asm/arm64
 asm/arm64 → asm
 analysis → pass, types, instr
 transform → analysis, pass, types, instr, program
@@ -38,7 +37,6 @@ Core paths:
 ```text
 program → instr → nothing
 interp → program, instr, types, asm, pass, analysis
-interp/jit_arm64 → asm/arm64
 asm/arm64 → asm
 optimize → transform → analysis → pass
 cli → instr, interp, program, types, cobra
@@ -100,7 +98,7 @@ Two layers:
 
 `threadedCompiler` (`threaded.go`): `[256]func` table populated in `init()`. Each compile-time entry reads operands, advances `c.ip`, and returns a runtime closure that captures constants and advances `f.ip` by instruction width.
 
-`jitCompiler` (`jit.go`): architecture-agnostic. Runs `BasicBlocksPass`, ranks blocks by heat, then groups eligible adjacent natural-fallthrough blocks into JIT traces. A trace compiles once into a native object; internal trace block starts may be callable entries when incoming stack signatures are proven compatible. Branches emit deferred aliases, resolved after entry signatures are known, then `assembler.Link()` patches relocations. Each accepted entry IP installs one closure. JIT does not recompile or tier-up.
+`jitCompiler` (`jit.go`, `jit_arm64.go`): ARM64 JIT kept private inside `interp`. Its opcode walk intentionally mirrors `threadedCompiler`: decode opcode, lower through a switch, advance IP unless the opcode terminates the segment. Native code uses a scratch-only `argv []uint64` call boundary, loads VM stack inputs directly, keeps operands in registers, and materializes `i.stack`, `sp`, and `ip` only on exits. Complete numeric direct-call closures, including recursive SCCs, lower `CONST_GET function; CALL` to native `BL`; native calls consume a scratch-carried frame budget and trap back to `ErrFrameOverflow` when exhausted. Incomplete functions still compile supported partial segments around threaded calls. JIT does not recompile or tier-up.
 
 `HostFunction` (`host.go`): wraps `func(i *Interpreter, params []Boxed) ([]Boxed, error)` as `types.Value`. Lives in constants, called by `CONST_GET` + `CALL`. Use `Interpreter.Marshal`/`Unmarshal` to convert Go values; the default converter caches per-type reflection plans, while arbitrary Go function calls still use `reflect.Call`. Go `func` marshals to `HostFunction`, final `error` return propagated as host-call error. `WithMarshaler` replaces the default converter.
 
@@ -116,31 +114,27 @@ Core API:
 
 - `NewVReg(type,width)`: allocate virtual register.
 - `Emit(inst)`: append instruction.
-- `Pin(vreg, preg)`: bind VReg to physical register (JIT uses for ABI slots).
-- `Site(0, live)`: declare the single entry parameter signature.
-- `Site(idx, live)` for `idx > 0`: declare a return site signature.
-- `Entry(label, live)`: declare a callable internal object entry.
-- `Alias(label, target)`: defer branch target choice until link.
-- `Compile()`: allocate physical regs, encode, append buffer, return `RelocObject`.
-- `Link([]*RelocObject)`: patch cross-segment labels, return native `Caller`s.
-- `CallerAt(obj, label)`: create a caller at an internal entry offset.
+- `Pin(vreg, preg)`: bind VReg to physical register.
+- `Entry(label, sig)`: declare a callable internal entry.
+- `Build(sig)`: allocate physical regs, encode bytes, and return `*Code`.
+- `Link(buf, arch, codes, resolve)`: patch relocations and return native `Callable`s.
 
-`Compile()` + `Link()`:
+`asm.Arch` supplies register info, encoder, ABI, and an optional spill `Frame`. `Frame()` returns nil when the backend does not support spill slots.
 
-1. `snapshot()`: capture instructions + VReg pins into immutable `program`.
-2. `newCompiler()`: allocate physical regs via `RegAlloc`, encode IR to machine code.
-3. `resolve()`: two-pass encode. Pass 1 measures sizes via `Imm(0)` placeholders; Pass 2 patches labels and records `Relocation`s.
-4. `buffer.Unseal()` → `buffer.Append(code)` → `buffer.Seal()`: write to executable memory.
-5. Return `*RelocObject` with chunk, `Signature{Params, Returns, Scratch}` for the primary entry, plus `Entries map[int]Entry{Offset, Params}` for internal callable entries, and relocations.
-6. `Link([]*RelocObject)`: unseal, resolve aliases/relocations, seal, create primary callers; `CallerAt` creates internal callers.
+`Build()` + `Link()`:
+
+1. `Assembler.Build`: rewrite VRegs to physical registers, insert spill frame code if needed, encode IR to machine code, and record relocations.
+2. `resolve()`: two-pass encode. Pass 1 measures sizes via `Imm(0)` placeholders; Pass 2 patches labels and records `Relocation`s.
+3. Return `*Code` with bytes, `Signature{Scratch}` for the primary entry, optional entry signatures, and relocations.
+4. `Link`: writes code into the executable buffer with `buffer.Unseal()` → `buffer.Append(code)` → `buffer.Seal()`, resolves relocations, and creates primary/internal `Callable`s.
 
 ### `asm/arm64/`
 
-Exposes the `asm.Arch` singleton and encoder/caller, with an unexported adapter implementing `asm.ABI`.
+Exposes the `asm.Arch` singleton and encoder/caller, with unexported adapters implementing `asm.ABI` and `asm.Frame`.
 
-`Caller` invokes native chunks through `abi_arm64.s`. The trampoline marshals `argv` as `[header, reserved…, params…]`, copies `argv[0]` into the header register, loads scratch `X10–X14`, calls with `BL`, copies the header register back to `argv[0]`, then writes scratch outputs and return values. `header uint64` encodes param/return counts, reserved count, and float/width masks. `X8`/`X9` are excluded from `arch.Scratch` for trampoline temporaries; `X15` is the header register.
+`Caller` invokes native chunks through `abi_arm64.s`. The trampoline treats `argv` as five scratch slots, loads `argv[0..4]` into X10–X14, calls with `BL`, then stores X10–X14 back into `argv[0..4]`. There is no param/return marshal path.
 
-ARM64-specific files use `//go:build arm64`; `abi_stub.go` with `//go:build !arm64` keeps other platforms compilable.
+The native trampoline uses `abi_arm64.go`/`abi_arm64.s` behind `//go:build arm64`; `abi_stub.go` with `//go:build !arm64` keeps other platforms compilable.
 
 ### `pass/`
 
@@ -211,10 +205,10 @@ Thin entrypoint around `cli.Root().Execute()`.
       jitCompiler.Compile(instrs[addr])
       └─ heat-sorted single-compile JIT trace pipeline:
          ├─ hot/forced basic blocks → natural-fallthrough traces
-         ├─ each trace compiles once, collecting entries and deferred edges
-         ├─ compatible edges alias to native entries; others alias to fallback exits
-         ├─ assembler.Link/CallerAt → primary and internal callers
-         └─ out[entryIP] = closure(caller, sig) per accepted entry
+         ├─ each trace compiles once and exits through scratch SP/IP
+         ├─ branches either stay in native code or exit to threaded successors
+         ├─ assembler.Link → primary/internal scratch-only Callables
+         └─ i.code[entryIP] = closure(callable) per accepted entry
 
 5. interp.Close()
    └─ buffer.Free() → munmap
@@ -226,7 +220,7 @@ Thin entrypoint around `cli.Root().Execute()`.
 
 | Area | Direction |
 |---|---|
-| JIT coverage | calls, globals, refs, heap objects stay threaded until benchmarks justify |
+| JIT coverage | supported segments around calls can compile; call setup, refs, heap objects stay threaded until benchmarks justify |
 | Architecture support | ARM64 optimized; x86-64 can follow once users + benchmarks clear |
 | Benchmarks | broaden numeric loops, host calls, heap-object workloads |
 | Program format | keep `instr`/`program` as compact Go-native bytecode surface |

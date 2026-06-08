@@ -201,18 +201,17 @@ func (l Lowerer) cmp(c *Context) bool { return l.compare(c, sign32) }
 
 ```go
 // ✗ method with unused receiver, used only once at construction
-func (*caller) packHeader(args, returns []PReg, n int) uint64 { /* 20 lines bit packing */ }
+func (*caller) validateScratch(sig Signature) error { /* 20 lines validation */ }
 func newCaller(...) (*caller, error) {
     c := &caller{...}
-    c.header = c.packHeader(sig.Args, returns, nScratch)
-    return c, nil
+    return c, c.validateScratch(sig)
 }
 
 // ✓ inline at the single call site
 func newCaller(...) (*caller, error) {
-    var aTyp, rTyp, aWid, rWid uint8
-    /* bit packing inline */
-    return &caller{header: uint64(...) | ..., ...}, nil
+    if len(sig.Scratch) > maxScratch { ... }
+    for i, p := range sig.Scratch { ... }
+    return &caller{addr: addr, nScratch: len(sig.Scratch)}, nil
 }
 ```
 
@@ -249,7 +248,7 @@ func sealRegion(m memory) error { return m.executable() }
 b.grow(end, sealRegion)
 ```
 
-For JIT: keep architecture-neutral `jitCompiler` state + helpers in `interp/jit.go`. Put only arch selection, opcode handlers, ISA-specific helpers in `interp/jit_<arch>.go`.
+For JIT: keep orchestration and VM adapter logic in `interp/jit.go`. Put ARM64 opcode handlers and ISA-specific helpers in `interp/jit_arm64.go`.
 
 ## 2. Type & Interface Design
 
@@ -334,7 +333,7 @@ type Interpreter struct {
     ctx       context.Context
     threshold int64
     cutoff    int
-    compiler  *jit.Compiler
+    compiler  *jitCompiler
     frames    []frame
     fp        int
     tick      int
@@ -347,7 +346,7 @@ type Interpreter struct {
     hook      func(*Interpreter) error
     marshaler Marshaler
 
-    compiler *jit.Compiler            // infrastructure
+    compiler *jitCompiler             // infrastructure
 
     types     []types.Type            // program data
     constants []types.Boxed
@@ -364,15 +363,8 @@ type Interpreter struct {
     fuel      int64
 }
 
-// ✓ sync.Mutex at absolute bottom
-type Slots struct {
-    slots map[int]unsafe.Pointer      // runtime state (semantic core)
-
-    fallback asm.Callable             // read-only config
-    data     *asm.Data                // infrastructure
-
-    mu sync.Mutex                     // sync primitive: always last
-}
+// ✓ sync.Mutex at absolute bottom when a type owns synchronization:
+// put data fields first, read-only config next, and the mutex last.
 ```
 
 Struct literals preserve declaration order. Zero-value fields may omit, but remaining stay ordered.

@@ -9,6 +9,7 @@ type Arch interface {
 	Registers() RegInfo
 	Encoder() Encoder
 	ABI() ABI
+	Frame() Frame
 }
 
 var ErrNotImplemented = errors.New("not implemented")
