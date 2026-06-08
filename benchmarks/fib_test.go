@@ -80,12 +80,13 @@ func BenchmarkFib35(b *testing.B) {
 		}
 	})
 
-	b.Run("minivm", func(b *testing.B) {
+	// minivm is measured twice: interpreter-only (JIT disabled via
+	// WithThreshold(-1)) and with the JIT enabled (default New, which
+	// promotes hot segments on ARM64). On architectures without a JIT
+	// backend the two rows coincide.
+	runMiniVM := func(b *testing.B, i *interp.Interpreter) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-
-		prog := Fib(fibN)
-		i := interp.New(prog)
 		defer i.Close()
 
 		b.ReportAllocs()
@@ -97,6 +98,14 @@ func BenchmarkFib35(b *testing.B) {
 		}
 		b.StopTimer()
 		require.NoError(b, err)
+	}
+
+	b.Run("minivm_interp", func(b *testing.B) {
+		runMiniVM(b, interp.New(Fib(fibN), interp.WithThreshold(-1)))
+	})
+
+	b.Run("minivm_jit", func(b *testing.B) {
+		runMiniVM(b, interp.New(Fib(fibN)))
 	})
 
 	b.Run("wazero", func(b *testing.B) {

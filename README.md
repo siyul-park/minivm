@@ -34,30 +34,31 @@ go get github.com/siyul-park/minivm
 
 ## Performance
 
-Recursive `fib(35)` — linux/amd64, Intel Xeon @ 2.10 GHz, Go 1.26.2:
+Recursive `fib(35)` — darwin/arm64, Apple M4 Pro, Go 1.26.2. minivm is measured twice: **interp** is the pure threaded interpreter, **JIT** is the default `New`, which promotes the hot recursive segment to native code on ARM64:
 
 | Runtime | ns/op | B/op | allocs/op | vs native Go | execution model |
 |---|---|---|---|---|---|
-| native Go | 56,441,552 | 0 | 0 | 1× | compiled |
-| wazero | 84,601,941 | 16 | 2 | 1.5× | WASM → native JIT |
-| **minivm** | **1,320,092,108** | **244** | **1** | **23×** | **threaded interpreter** |
-| tengo | 2,276,648,719 | 312,797,200 | 39,088,175 | 40× | bytecode VM |
-| gopher-lua | 3,002,897,021 | 971,008 | 3,793 | 53× | register VM |
-| goja | 3,962,089,181 | 380,400 | 46,377 | 70× | bytecode VM |
+| native Go | 18,912,368 | 0 | 0 | 1× | compiled |
+| wazero | 42,690,476 | 16 | 2 | 2.3× | WASM → native JIT |
+| **minivm (JIT)** | **71,776,495** | **1,727** | **21** | **3.8×** | **threaded interpreter + ARM64 JIT** |
+| minivm (interp) | 750,025,292 | 139 | 0 | 40× | threaded interpreter |
+| tengo | 1,142,455,492 | 312,798,644 | 39,088,178 | 60× | bytecode VM |
+| gopher-lua | 1,422,659,979 | 971,072 | 3,793 | 75× | register VM |
+| goja | 2,032,321,458 | 379,440 | 46,376 | 107× | bytecode VM |
 
-Among interpreters without JIT, minivm is fastest in this benchmark: **1.7× tengo, 2.3× gopher-lua, 3.0× goja**. Allocation count stays near zero regardless of recursion depth; tengo accumulates 39M allocations at fib(35).
+The JIT is worth **10× on this workload** (750 ms → 72 ms per call). Among pure interpreters, minivm (interp) leads and is effectively allocation-free: **1.5× faster than tengo, 1.9× gopher-lua, 2.7× goja**, at 0 allocs/op where tengo reaches 312 MB. With the JIT on, minivm joins wazero as the only runtimes reaching native code, pulling **16–28× ahead** of the script VMs.
 
-wazero's advantage is structural: it compiles the WebAssembly module to native x86-64 at load time. minivm closes this gap on ARM64, where JIT promotes hot numeric segments to native code.
+minivm's JIT compiles whole functions, not just numeric segments: fib's recursive `const.get; call` fuses into a native branch-and-link to the callee, so the recursion runs entirely in native code. It still trails wazero by 1.7× because of bookkeeping wazero skips — minivm keeps values NaN-boxed and guards each call with a frame-budget check and a deopt-journal record, while wazero AOT-compiles to unboxed native code with no fallback path.
 
-Single-instruction throughput (threaded interpreter):
+Single-instruction throughput (threaded interpreter, JIT disabled):
 
 | Workload | ns/op |
 |---|---|
-| i32/i64/f32/f64 arithmetic | ~17–25 |
-| branches (`br`, `br_if`) | ~20–24 |
-| bytecode function call | ~26–29 |
-| host function call | ~36 |
-| array / struct operations | ~82–117 |
+| i32/i64/f32/f64 arithmetic | ~11–13 |
+| branches (`br`, `br_if`) | ~10–14 |
+| bytecode function call | ~15–16 |
+| host function call | ~18 |
+| array / struct operations | ~30–44 |
 
 Full results: [`docs/benchmarks.md`](docs/benchmarks.md)
 
@@ -171,7 +172,7 @@ bytecode ──────────► threaded interpreter
                      replaces closures in-place
 ```
 
-JIT covers numeric computation: arithmetic, bitwise operations, comparisons, and type conversions across i32/i64/f32/f64. Stack ops, locals, constants, `select`, and branches compile when the stack shape fits a native segment signature. Calls, globals, refs, and heap-object ops stay threaded. The threaded interpreter uses closure dispatch rather than a switch table, so it stays useful before JIT kicks in.
+JIT covers numeric computation: arithmetic, bitwise operations, comparisons, and type conversions across i32/i64/f32/f64. Stack ops, locals, constants, `select`, and branches compile when the stack shape fits a native segment signature. Direct static calls (`const.get; call`) fuse into a native branch-and-link to the callee's compiled entry, and `return` lowers to a native return, so whole call trees — recursion included — run in native code. Indirect and host calls, ref-holding globals, and heap-object ops stay threaded. The threaded interpreter uses closure dispatch rather than a switch table, so it stays useful before JIT kicks in.
 
 ## Instruction set
 
