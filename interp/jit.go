@@ -64,13 +64,11 @@ type result struct {
 }
 
 type jitTarget struct {
-	addr    int
 	label   asm.Label
 	fn      *types.Function
 	blocks  []*analysis.BasicBlock
 	labels  map[int]asm.Label
 	returns int
-	locals  int
 }
 
 type jitContext struct {
@@ -91,7 +89,6 @@ type jitContext struct {
 	successor int
 	stop      bool
 	closed    bool
-	fallback  bool
 
 	whole   bool
 	framed  bool
@@ -221,9 +218,7 @@ func (c *jitCompiler) complete(i *Interpreter, addr int, fn *types.Function, mod
 
 	a := asm.New(c.arch)
 	for targetAddr, target := range targets {
-		for _, block := range target.blocks {
-			target.labels[block.Start] = a.Label()
-		}
+		target.labels = c.allocLabels(a, target.blocks)
 		target.label = target.labels[0]
 		targets[targetAddr] = target
 	}
@@ -242,7 +237,7 @@ func (c *jitCompiler) complete(i *Interpreter, addr int, fn *types.Function, mod
 		ctx.labels = target.labels
 		ctx.targets = targets
 		ctx.returns = target.returns
-		if !c.walkFull(ctx, target) {
+		if !c.walkBlocks(ctx, target.fn, target.blocks, target.returns, true) {
 			return false, nil
 		}
 	}
@@ -289,12 +284,9 @@ func (c *jitCompiler) targets(funcs map[int]*types.Function) (map[int]jitTarget,
 			returns = len(fn.Typ.Returns)
 		}
 		out[addr] = jitTarget{
-			addr:    addr,
 			fn:      fn,
 			blocks:  blocks,
-			labels:  map[int]asm.Label{},
 			returns: returns,
-			locals:  len(fn.LocalKinds()),
 		}
 	}
 	return out, true, nil
@@ -384,6 +376,15 @@ func (c *jitCompiler) function(i *Interpreter, fn *types.Function, locals []type
 	return segment{start: 0, code: code}, true, nil
 }
 
+// allocLabels assigns a fresh assembler label to each block start.
+func (c *jitCompiler) allocLabels(a *asm.Assembler, blocks []*analysis.BasicBlock) map[int]asm.Label {
+	labels := make(map[int]asm.Label, len(blocks))
+	for _, blk := range blocks {
+		labels[blk.Start] = a.Label()
+	}
+	return labels
+}
+
 // prepare constructs a fresh assembler + jitContext for a whole-function or
 // multi-block compilation. Labels are pre-allocated per block when blks
 // has more than one entry.
@@ -392,24 +393,31 @@ func (c *jitCompiler) prepare(i *Interpreter, fn *types.Function, locals []types
 	ctx := c.newContext(a, i, fn, locals, 0, scratch)
 	ctx.whole = true
 	if len(blks) > 1 {
-		ctx.labels = make(map[int]asm.Label, len(blks))
-		for _, blk := range blks {
-			ctx.labels[blk.Start] = a.Label()
-		}
+		ctx.labels = c.allocLabels(a, blks)
 	}
 	return ctx
 }
 
-// walkBlocks drives the per-block feasibility or emit loop. For each reachable
-// block it resets ctx scope, runs walk, and forwards merged stacks to
-// successor blocks. emit selects between a dry-run feasibility pass (counting
-// assembler) and emission (real code, includes Exit terminators for
-// RETURN-ending blocks).
+// walkBlocks drives the per-block feasibility or emit loop for both whole-function
+// and framed whole-component compilation. For each reachable block it binds the
+// block label, resets ctx scope, runs walk, and forwards merged stacks to
+// successor blocks. emit selects between a dry-run feasibility pass and emission.
+//
+// ctx.framed selects the entry/exit discipline:
+//   - non-framed: the entry label is bound once and live-ins loaded via prologue;
+//     a RETURN-terminated block emits an interpreter exit (exitIP).
+//   - framed: block 0 opens an Entry callable and saves the frame/link (enter);
+//     RETURN lowers to a native return itself, so no exitIP is appended, and a
+//     block reaching code end without stopping is rejected (a terminated-early
+//     block would leave native branch targets unbound). A guard fallback is kept —
+//     it deopts safely now that the wrapper rebuilds VM frames.
 func (c *jitCompiler) walkBlocks(ctx *jitContext, fn *types.Function, blks []*analysis.BasicBlock, returns int, emit bool) bool {
 	reachable := c.reachable(blks)
 	inputs := map[int][]asm.VReg{0: nil}
-	ctx.assembler.Bind(ctx.entry)
-	c.lowerer.prologue(ctx, fn)
+	if !ctx.framed {
+		ctx.assembler.Bind(ctx.entry)
+		c.lowerer.prologue(ctx, fn)
+	}
 	for _, blk := range blks {
 		if !reachable[blk.Start] {
 			continue
@@ -418,7 +426,11 @@ func (c *jitCompiler) walkBlocks(ctx *jitContext, fn *types.Function, blks []*an
 		if !ok {
 			return false
 		}
-		if ctx.labels != nil {
+		switch {
+		case ctx.framed && blk.Start == 0:
+			ctx.assembler.Entry(ctx.labels[0], asm.Signature{Scratch: ctx.scratch})
+			c.lowerer.enter(ctx)
+		case ctx.labels != nil:
 			ctx.assembler.Bind(ctx.labels[blk.Start])
 		}
 		ctx.reset(blk, stack)
@@ -427,7 +439,11 @@ func (c *jitCompiler) walkBlocks(ctx *jitContext, fn *types.Function, blks []*an
 		if res.reject >= 0 {
 			return false
 		}
-		if ctx.stop && !ctx.closed {
+		if ctx.framed {
+			if !ctx.stop && blk.End >= len(fn.Code) {
+				return false
+			}
+		} else if ctx.stop && !ctx.closed {
 			if !c.valid(ctx, returns) {
 				return false
 			}
@@ -436,43 +452,6 @@ func (c *jitCompiler) walkBlocks(ctx *jitContext, fn *types.Function, blks []*an
 			}
 		}
 		if !c.merge(inputs, blks, blk, ctx.stack) {
-			return false
-		}
-	}
-	return true
-}
-
-func (c *jitCompiler) walkFull(ctx *jitContext, target jitTarget) bool {
-	reachable := c.reachable(target.blocks)
-	inputs := map[int][]asm.VReg{0: nil}
-	for _, block := range target.blocks {
-		if !reachable[block.Start] {
-			continue
-		}
-		stack, ok := inputs[block.Start]
-		if !ok {
-			return false
-		}
-		if block.Start == 0 {
-			ctx.assembler.Entry(target.label, asm.Signature{Scratch: ctx.scratch})
-			c.lowerer.enter(ctx)
-		} else {
-			ctx.assembler.Bind(target.labels[block.Start])
-		}
-		ctx.reset(block, stack)
-
-		res := c.walk(ctx)
-		// A hard reject still drops the whole component to segment mode: a
-		// terminated-early block would leave native branch targets unbound. A
-		// guard fallback (ctx.fallback) is kept — it deopts safely now that the
-		// wrapper rebuilds VM frames, so the entry stays native up to the guard.
-		if res.reject >= 0 {
-			return false
-		}
-		if !ctx.stop && block.End >= len(target.fn.Code) {
-			return false
-		}
-		if !c.merge(inputs, target.blocks, block, ctx.stack) {
 			return false
 		}
 	}
@@ -621,9 +600,8 @@ func (c *jitCompiler) component(i *Interpreter, addr int, fn *types.Function) ma
 func (c *jitCompiler) calls(i *Interpreter, fn *types.Function) []int {
 	var out []int
 	for ip := 0; ip < len(fn.Code); {
-		inst := instr.Instruction(fn.Code[ip:])
-		next := ip + inst.Width()
-		if instr.Opcode(fn.Code[ip]) == instr.CONST_GET && next < len(fn.Code) && instr.Opcode(fn.Code[next]) == instr.CALL {
+		next := ip + instr.Instruction(fn.Code[ip:]).Width()
+		if c.directCall(fn, ip) {
 			idx := int(uint16(fn.Code[ip+1]) | uint16(fn.Code[ip+2])<<8)
 			if idx >= 0 && idx < len(i.constants) && i.constants[idx].Kind() == types.KindRef {
 				if _, ok := i.function(i.constants[idx].Ref()); ok {
