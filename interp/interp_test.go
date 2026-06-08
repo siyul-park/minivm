@@ -2411,7 +2411,7 @@ var tests = []test{
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.I64_LE_S),
-					instr.New(instr.BR_IF, 16),
+					instr.New(instr.BR_IF, 20),
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.I64_SUB),
@@ -2986,6 +2986,7 @@ func TestInterpreter_Run(t *testing.T) {
 				defer i.Close()
 
 				require.NoError(t, i.Run(context.Background()))
+				require.Equal(t, 1, i.FP())
 				v, err := i.Pop()
 				require.NoError(t, err)
 				require.Equal(t, want, v)
@@ -4213,7 +4214,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		jit := p.Snapshot().JIT
 		require.NotZero(t, jit.Emits)
 		require.NotZero(t, jit.Links)
-		require.True(t, i.jitted[addr])
+		require.Contains(t, i.fallbacks, addr)
 
 		require.NoError(t, i.Run(context.Background()))
 		value, err := i.Pop()
@@ -4254,6 +4255,105 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.NotNil(t, mod.entries[addr])
+	})
+
+	t.Run("completes guarded i64 factorial entry", func(t *testing.T) {
+		requireJIT(t)
+		// The i64 LOCAL_GET emits a heap-promotion guard, so this entry can deopt.
+		// It still compiles as a complete native entry; the guard recovers a real
+		// VM frame on fallback instead of blocking whole-function compilation.
+		// BR_IF 20 jumps to a dedicated base-case block (return 1) so the recursive
+		// and base paths return independently — no stack-shape merge to reject.
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI64},
+			Returns: []types.Type{types.TypeI64},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I64_CONST, 1),
+			instr.New(instr.I64_LE_S),
+			instr.New(instr.BR_IF, 20),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I64_CONST, 1),
+			instr.New(instr.I64_SUB),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I64_MUL),
+			instr.New(instr.RETURN),
+			instr.New(instr.I64_CONST, 1),
+			instr.New(instr.RETURN),
+		).Build()
+		i := New(program.New(nil, program.WithConstants(fn)), WithCutoff(1))
+		defer i.Close()
+		require.NoError(t, i.ensure())
+
+		addr := i.constants[0].Ref()
+		mod := &jitModule{
+			entries:  map[int]asm.Callable{},
+			segments: map[jitEntry]asm.Callable{},
+			stacks:   map[jitEntry]int{},
+		}
+
+		ok, err := i.compiler.complete(i, addr, fn, mod)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NotNil(t, mod.entries[addr])
+	})
+
+	t.Run("recovers nested native deopt across i64 overflow", func(t *testing.T) {
+		requireJIT(t)
+		// f(n) = n <= 0 ? 0 : LARGE + f(n-1) = n*LARGE. The param stays inline so
+		// each level calls the next natively (native BL), but the I64_ADD on the
+		// way up overflows the 49-bit boxed range partway, deopting a frame reached
+		// through several native callers — exercising the nested unwind + frame
+		// rebuild. Threaded is the ground truth.
+		const large = 1 << 45
+		const depth = 20
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI64},
+			Returns: []types.Type{types.TypeI64},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I64_CONST, 0),
+			instr.New(instr.I64_LE_S),
+			instr.New(instr.BR_IF, 27),
+			instr.New(instr.I64_CONST, large),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I64_CONST, 1),
+			instr.New(instr.I64_SUB),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.I64_ADD),
+			instr.New(instr.RETURN),
+			instr.New(instr.I64_CONST, 0),
+			instr.New(instr.RETURN),
+		).Build()
+		main := []instr.Instruction{
+			instr.New(instr.I64_CONST, depth),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}
+
+		want := types.I64(int64(depth) * large)
+
+		threaded := New(program.New(main, program.WithConstants(fn)))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		gt, err := threaded.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, gt)
+
+		i := New(program.New(main, program.WithConstants(fn)), WithCutoff(1))
+		defer i.Close()
+		addr := i.constants[0].Ref()
+		require.NoError(t, i.jit(addr))
+		require.Contains(t, i.fallbacks, addr)
+
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 1, i.FP())
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, value)
 	})
 
 	t.Run("compiles direct call scc complete entries", func(t *testing.T) {
@@ -4304,8 +4404,8 @@ func TestInterpreter_JIT(t *testing.T) {
 		evenAddr := i.constants[0].Ref()
 		oddAddr := i.constants[1].Ref()
 		require.NoError(t, i.jit(evenAddr))
-		require.True(t, i.jitted[evenAddr])
-		require.True(t, i.jitted[oddAddr])
+		require.Contains(t, i.fallbacks, evenAddr)
+		require.Contains(t, i.fallbacks, oddAddr)
 
 		require.NoError(t, i.Run(context.Background()))
 		value, err := i.Pop()
@@ -4350,16 +4450,18 @@ func TestInterpreter_JIT(t *testing.T) {
 		defer i.Close()
 
 		addr := i.constants[0].Ref()
-		fallback := append([]func(*Interpreter){}, i.code[addr]...)
+		i.fallbacks[addr] = i.code[addr][0]
 		i.frames[1] = frame{addr: addr, ref: addr, code: i.code[addr]}
 		i.fp = 2
 		i.fr = &i.frames[1]
 
 		wrapped := i.entry(addr, callableFunc(func(argv []uint64) error {
 			argv[scratchSP] = 0
-			argv[scratchNext] = scratchFallback
+			i.journal[journalDepth] = 1
+			i.journal[journalHead+recordIP] = 0
+			i.journal[journalTrap] = trapFallback
 			return nil
-		}), fallback)
+		}))
 		wrapped(i)
 
 		require.Same(t, &i.frames[1], i.fr)

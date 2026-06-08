@@ -21,9 +21,10 @@ type Interpreter struct {
 	hook      func(*Interpreter) error
 	marshaler Marshaler
 
-	compiler *jitCompiler
-	jitted   map[int]bool
-	argv     [scratchCount]uint64
+	compiler  *jitCompiler
+	fallbacks map[int]func(*Interpreter)
+	argv      [scratchCount]uint64
+	journal   []uint64
 
 	types     []types.Type
 	constants []types.Boxed
@@ -189,7 +190,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		globals:   make([]types.Boxed, 0, opt.globals),
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
-		jitted:    map[int]bool{},
+		fallbacks: map[int]func(*Interpreter){},
+		journal:   make([]uint64, journalHead+journalStride*opt.frame),
 		frames:    make([]frame, opt.frame),
 		stack:     make([]types.Boxed, opt.stack),
 		heap:      make([]types.Value, 0, opt.heap),
@@ -570,13 +572,15 @@ func (i *Interpreter) install(mod *jitModule, addr int) {
 		i.prof.JITSkip()
 	}
 	if mod.entry != nil && addr > 0 && addr < len(i.code) && len(i.code[addr]) > 0 {
-		i.installEntry(addr, mod.entry)
+		i.fallbacks[addr] = i.code[addr][0]
+		i.code[addr][0] = i.entry(addr, mod.entry)
 	}
-	for entryAddr, callable := range mod.entries {
-		if entryAddr <= 0 || entryAddr >= len(i.code) || len(i.code[entryAddr]) == 0 || callable == nil {
+	for addr, callable := range mod.entries {
+		if addr <= 0 || addr >= len(i.code) || len(i.code[addr]) == 0 || callable == nil {
 			continue
 		}
-		i.installEntry(entryAddr, callable)
+		i.fallbacks[addr] = i.code[addr][0]
+		i.code[addr][0] = i.entry(addr, callable)
 	}
 	for entry, callable := range mod.segments {
 		if entry.addr < 0 || entry.addr >= len(i.code) || entry.ip < 0 || entry.ip >= len(i.code[entry.addr]) || callable == nil {
@@ -584,19 +588,10 @@ func (i *Interpreter) install(mod *jitModule, addr int) {
 		}
 		fallback := i.code[entry.addr][entry.ip]
 		i.code[entry.addr][entry.ip] = i.segment(entry.addr, callable, mod.stacks[entry], fallback)
-		if entry.ip == 0 && entry.addr > 0 {
-			i.jitted[entry.addr] = true
+		if entry.ip == 0 && entry.addr > 0 && i.fallbacks[entry.addr] == nil {
+			i.fallbacks[entry.addr] = i.code[entry.addr][0]
 		}
 	}
-}
-
-// installEntry swaps the first opcode handler at addr for the native
-// whole-function entry, retaining the threaded handlers as its fallback, and
-// records addr as jitted.
-func (i *Interpreter) installEntry(addr int, callable asm.Callable) {
-	fallback := append([]func(*Interpreter){}, i.code[addr]...)
-	i.code[addr][0] = i.entry(addr, callable, fallback)
-	i.jitted[addr] = true
 }
 
 func (i *Interpreter) hot(addr int) []int {
@@ -636,10 +631,9 @@ func (i *Interpreter) segment(addr int, callable asm.Callable, argc int, fallbac
 			panic(err)
 		}
 
-		next := scratch[scratchNext]
 		i.sp = int(scratch[scratchSP])
-		i.fr.ip = int(next &^ scratchFallback)
-		if next&scratchFallback != 0 {
+		i.fr.ip = int(i.journal[journalNextIP])
+		if i.journal[journalTrap] == trapFallback {
 			i.restore(i.fr, addr)
 			fallback(i)
 		}
@@ -648,10 +642,11 @@ func (i *Interpreter) segment(addr int, callable asm.Callable, argc int, fallbac
 
 // entry wraps a whole-function Entry Callable. Unlike segment, the CALL
 // handler has already pushed a frame and set i.fr before this closure runs.
-// The native Entry reads params from stack scratch slots, then this closure
-// performs the frame teardown that RETURN would normally do in the threaded
-// interpreter.
-func (i *Interpreter) entry(addr int, callable asm.Callable, fallback []func(*Interpreter)) func(*Interpreter) {
+// The native Entry reads params from stack scratch slots; on a normal return
+// this closure performs the frame teardown that RETURN would do in the threaded
+// interpreter, and on a trap it rebuilds the native call chain into real VM
+// frames before resuming threaded execution at the fallback IP.
+func (i *Interpreter) entry(addr int, callable asm.Callable) func(*Interpreter) {
 	return func(i *Interpreter) {
 		i.fr.code = nil
 		i.fr.upvals = nil
@@ -660,34 +655,67 @@ func (i *Interpreter) entry(addr int, callable asm.Callable, fallback []func(*In
 			panic(err)
 		}
 
-		next := scratch[scratchNext]
-		if next&scratchFrameOverflow != 0 {
-			i.sp = int(scratch[scratchSP])
-			i.fr.ip = int(next &^ scratchFrameOverflow)
-			i.restore(i.fr, addr)
-			panic(ErrFrameOverflow)
-		}
-		if next&scratchFallback != 0 {
-			i.sp = int(scratch[scratchSP])
-			i.fr.ip = int(next &^ scratchFallback)
-			i.restore(i.fr, addr)
-			if i.fr.ip < 0 || i.fr.ip >= len(fallback) {
-				panic(ErrSegmentationFault)
+		if i.journal[journalTrap] == trapNone {
+			// Frame teardown the threaded RETURN handler does.
+			f := i.fr
+			i.sp = f.bp + f.returns
+			if f.release {
+				i.release(f.ref)
 			}
-			fallback[i.fr.ip](i)
+			f.code = nil
+			i.fp--
+			i.fr = &i.frames[i.fp-1]
 			return
 		}
 
-		// Perform the frame teardown that the threaded RETURN handler does.
-		f := i.fr
-		i.sp = f.bp + f.returns
-		if f.release {
-			i.release(f.ref)
+		// A trap rebuilt the native call chain into real VM frames; resume the
+		// innermost in the interpreter, or surface a frame overflow.
+		i.sp = int(scratch[scratchSP])
+		i.deopt(addr)
+		if i.journal[journalTrap] == trapOverflow {
+			panic(ErrFrameOverflow)
 		}
-		f.code = nil
-		i.fp--
-		i.fr = &i.frames[i.fp-1]
+		// IP 0 now dispatches to the native entry; run the handler it shadows once
+		// so we make progress instead of re-entering native and re-trapping. Any
+		// later IP is an untouched threaded handler the Run loop dispatches next.
+		if i.fr.ip == 0 {
+			i.fallbacks[i.fr.addr](i)
+		}
 	}
+}
+
+// deopt rebuilds VM frames from the native journal after a trap. record[0] is
+// the outermost native frame — already live at i.frames[i.fp-1], so only its IP
+// and code are reconciled; each deeper record becomes a fresh frame, matching
+// the fused direct call in fuse.go (ref unretained, code/upvals restored).
+func (i *Interpreter) deopt(addr int) {
+	depth := int(i.journal[journalDepth])
+	if depth == 0 {
+		return
+	}
+	base := i.fp - 1
+
+	// record[0] is the live outermost frame; only its resume IP and code change.
+	outer := &i.frames[base]
+	outer.ip = int(i.journal[journalHead+recordIP])
+	i.restore(outer, addr)
+
+	// Deeper records become fresh frames. Like the fused direct call in fuse.go,
+	// the callee ref was never pushed or retained, so release stays false.
+	for k := 1; k < depth; k++ {
+		rec := journalHead + k*journalStride
+		fn := int(i.journal[rec+recordAddr])
+		f := &i.frames[base+k]
+		f.addr = fn
+		f.ref = fn
+		f.release = false
+		f.bp = int(i.journal[rec+recordBP])
+		f.ip = int(i.journal[rec+recordIP])
+		f.returns = int(i.journal[rec+recordReturns])
+		i.restore(f, fn)
+	}
+	i.fp += depth - 1
+	i.fr = &i.frames[i.fp-1]
 }
 
 func (i *Interpreter) restore(f *frame, addr int) {
@@ -715,13 +743,17 @@ func (i *Interpreter) scratch() []uint64 {
 	clear(i.argv[:])
 	i.argv[scratchBP] = uint64(i.fr.bp)
 	i.argv[scratchSP] = uint64(i.sp)
-	i.argv[scratchNext] = uint64(len(i.frames) - i.fp)
+	i.argv[scratchCtrl] = uint64(uintptr(unsafe.Pointer(&i.journal[0])))
 	if len(i.stack) > 0 {
 		i.argv[scratchStack] = uint64(uintptr(unsafe.Pointer(&i.stack[0])))
 	}
 	if len(i.globals) > 0 {
 		i.argv[scratchGlobals] = uint64(uintptr(unsafe.Pointer(&i.globals[0])))
 	}
+
+	i.journal[journalDepth] = 0
+	i.journal[journalCap] = uint64(len(i.frames) - i.fp)
+	i.journal[journalTrap] = trapNone
 	return i.argv[:]
 }
 

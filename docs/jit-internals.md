@@ -26,7 +26,9 @@ Both compilers read the same bytecode. `i.code[addr][ip]` is the primary dispatc
 
 2. **Segment compilation** (`compiler.segments`): processes hot IPs from the interpreter profiler. Each hot IP seeds a segment; successors are queued when forced by `BR` or by a rejected op with a safe structural successor. Each accepted segment is stored in `jitModule.segments[ip]`.
 
-Compilation is one-shot per function. There is no re-tier or deoptimization.
+Compilation is one-shot per function — there is no re-tiering. Runtime
+deoptimization does exist: a guard or unsupported boundary returns to the
+threaded interpreter, rebuilding VM frames from the journal (see CALL Boundaries).
 
 ## Emitter (`lowerer`)
 
@@ -46,7 +48,7 @@ The interface is four operations:
 - `prologue` loads declared live-ins from the VM stack into the shadow stack's initial VRegs.
 - `enter` emits the function entry sequence (frame/link save) for a whole-function target reached as its own callable.
 - `lower` dispatches one opcode. It returns `false` to reject and fall back to threaded execution.
-- `exitIP` materializes shadow stack values into `i.stack`, writes `scratchSP` and `scratchNext`, and emits `RET`.
+- `exitIP` materializes shadow stack values into `i.stack`, writes `scratchSP` and the journal (trap kind + resume IP), and emits `RET`.
 
 ## jitContext
 
@@ -86,11 +88,29 @@ Scratch registers carry VM context through the single `argv []uint64` callable A
 | `scratchGlobals` (1) | X11 | `&i.globals[0]` input |
 | `scratchBP` (2) | X12 | current frame `bp` input |
 | `scratchSP` (3) | X13 | interpreter `sp` in/out |
-| `scratchNext` (4) | X14 | next interpreter IP output; native-call frame budget inside framed entries |
+| `scratchCtrl` (4) | X14 | `&i.journal[0]` input — frame journal pointer |
 
-Native code loads stack inputs from `scratchStack`/`scratchSP`, keeps operands in registers, and writes stack results back only on exit or fallback. The `interp` adapter does not marshal params or returns; it calls `Callable.Call(argv)` and copies back `scratchSP`/`scratchNext`.
+Native code loads stack inputs from `scratchStack`/`scratchSP`, keeps operands in registers, and writes stack results back only on exit or fallback. The `interp` adapter does not marshal params or returns; it calls `Callable.Call(argv)`, copies back `scratchSP`, and reads the trap/IP outputs from the journal.
 
-Guard fallbacks set the high bit of `scratchNext`. The segment wrapper clears that bit, restores `fr.ip`, and runs the original threaded handler for that opcode once, avoiding native re-entry loops at the segment start.
+### Frame journal
+
+The fifth scratch slot carries a pointer to `i.journal`, an Interpreter-owned
+`[]uint64` that both reports deopt state and records recoverable VM frames.
+Header cells precede a stack of fixed-stride records:
+
+| Cell | Purpose |
+| --- | --- |
+| `journalDepth` (0) | native frames recorded; native read/write |
+| `journalCap` (1) | frame budget `len(i.frames)-i.fp`; read-only |
+| `journalTrap` (2) | exit kind out: `trapNone` \| `trapFallback` \| `trapOverflow` |
+| `journalNextIP` (3) | resume/fallback IP out for the single-frame path |
+| `journalHead` (4)… | records of `{addr, bp, ip, returns}`, stride 4 |
+
+Guard fallbacks set `journalTrap = trapFallback` and the resume IP. The segment
+wrapper restores `fr.ip` and runs the original threaded handler for that opcode
+once, avoiding native re-entry loops at the segment start. A framed deopt also
+self-records its VM frame so the Go wrapper can rebuild the call chain (see CALL
+Boundaries).
 
 `i64.add` lowers only the boxable fast path. If the result is outside the 49-bit boxed i64 range, native materializes the pre-op stack and uses the guard fallback path so threaded execution can allocate the heap-spilled `types.I64`.
 
@@ -104,19 +124,34 @@ same direct-call closure. This includes recursive and mutually recursive SCCs.
 Closure calls, host calls, ref-typed signatures, and unsupported callees stay
 threaded through segment fallback.
 
-When a function is not complete-JIT eligible, supported prefix/suffix segments
-are still installed independently, including an `ip=0` partial entry.
+Native direct calls are **frame-aware**: before each `BL`, `call` records the
+caller's VM frame `{addr, bp, resume-ip, returns}` in the journal and bumps
+`journalDepth`; a normal return pops it. The journal slot is the recoverable VM
+frame the invariant requires — *every native call that may fall back has a
+recoverable VM frame* — so a callee can be entered natively even when it is only
+partially compiled (its body contains a guard that may deopt). Caller bp/sp are
+saved on the host stack across the `BL` and restored on return; the journal
+pointer (X14) is never written by native code, so it survives the call unsaved.
 
-Native direct calls run on the host stack and do not push VM frames for each
-nested callee. `scratchNext` carries the remaining VM frame budget during
-framed native execution; each native `CALL` consumes one budget slot and restores
-it after return. If the budget is exhausted, native code materializes the current
-stack, returns a frame-overflow trap to the Go entry wrapper, and the wrapper
-panics with `ErrFrameOverflow`.
+On a **deopt** inside a nested callee, the innermost frame self-records its
+fallback frame, sets `journalTrap`, materializes its operands above its locals
+(`bp+nlocals`), and returns up the host call chain — each caller unwinds without
+touching the journal so the records stay intact. The Go wrapper then rebuilds the
+chain: `record[0]` reconciles the live outermost frame's IP; deeper records
+become new frames (ref retained, `code`/`upvals` restored via `restore`), `i.fp`
+advances, and threaded execution resumes at the innermost fallback IP.
 
-Complete-JIT rejects any reachable native guard fallback. Guard fallback is
-still valid in segment mode because the segment wrapper restores frame metadata
-and runs the original threaded handler for the fallback IP.
+Frame overflow is reported when `journalDepth >= journalCap` at a call site:
+native materializes the current stack, sets `journalTrap = trapOverflow`, unwinds
+to the Go wrapper, and the wrapper panics with `ErrFrameOverflow` (never host
+stack overflow).
+
+Complete-JIT now **keeps** reachable guard fallbacks: a guard deopts safely
+through the journal, so a guard-bearing function (e.g. an i64 kernel that may
+heap-promote) compiles as a complete native entry and stays native until a guard
+actually fires at runtime. A *hard* reject (an opcode the backend cannot lower,
+or a non-`BL` CALL target) still drops the whole component to segment mode,
+because terminating a block early would leave native branch targets unbound.
 
 ## Branches
 
@@ -206,6 +241,6 @@ Apple Silicon (Darwin/ARM64) enforces W^X at the hardware level. `asm/icache_dar
 
 ## ARM64 ABI Summary
 
-AAPCS64: native VM callables use only scratch `X10–X14` (`scratchStack` through `scratchNext`) across the Go trampoline.
+AAPCS64: native VM callables use only scratch `X10–X14` (`scratchStack` through `scratchCtrl`) across the Go trampoline.
 
 The `abi_arm64.s` trampoline loads `argv[0..4]` into X10..X14, calls the native chunk, and stores X10..X14 back into `argv[0..4]`.

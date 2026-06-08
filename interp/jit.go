@@ -95,6 +95,7 @@ type jitContext struct {
 
 	whole   bool
 	framed  bool
+	addr    int
 	returns int
 }
 
@@ -103,13 +104,36 @@ const (
 	scratchGlobals
 	scratchBP
 	scratchSP
-	scratchNext
+	scratchCtrl
 	scratchCount
 )
 
+// Frame-journal layout. scratchCtrl carries &journal[0] — an Interpreter-owned
+// []uint64 that lets native code push a recoverable VM frame per direct call and
+// report deopt state back to the Go wrapper. Header cells precede a stack of
+// fixed-stride frame records; each record mirrors the int fields the threaded
+// interpreter needs to resume a frame.
 const (
-	scratchFallback      = uint64(1) << 63
-	scratchFrameOverflow = uint64(1) << 62
+	journalDepth  = iota // native frames recorded; native read/write
+	journalCap           // frame budget len(i.frames)-i.fp; read-only
+	journalTrap          // exit kind out: trapNone | trapFallback | trapOverflow
+	journalNextIP        // resume/fallback IP out for the single-frame path
+	journalHead          // first frame record cell
+)
+
+const journalStride = 4
+
+const (
+	recordAddr = iota
+	recordBP
+	recordIP
+	recordReturns
+)
+
+const (
+	trapNone = iota
+	trapFallback
+	trapOverflow
 )
 
 func (c *jitCompiler) Close() error {
@@ -214,6 +238,7 @@ func (c *jitCompiler) complete(i *Interpreter, addr int, fn *types.Function, mod
 		ctx := c.newContext(a, i, target.fn, target.fn.LocalKinds(), 0, scratch)
 		ctx.whole = true
 		ctx.framed = true
+		ctx.addr = targetAddr
 		ctx.labels = target.labels
 		ctx.targets = targets
 		ctx.returns = target.returns
@@ -437,7 +462,11 @@ func (c *jitCompiler) walkFull(ctx *jitContext, target jitTarget) bool {
 		ctx.reset(block, stack)
 
 		res := c.walk(ctx)
-		if res.reject >= 0 || ctx.fallback {
+		// A hard reject still drops the whole component to segment mode: a
+		// terminated-early block would leave native branch targets unbound. A
+		// guard fallback (ctx.fallback) is kept — it deopts safely now that the
+		// wrapper rebuilds VM frames, so the entry stays native up to the guard.
+		if res.reject >= 0 {
 			return false
 		}
 		if !ctx.stop && block.End >= len(target.fn.Code) {
