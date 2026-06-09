@@ -13,6 +13,7 @@ import (
 	"github.com/tetratelabs/wazero/api"
 
 	"github.com/siyul-park/minivm/interp"
+	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -66,6 +67,46 @@ func fibGo(n int32) int32 {
 		return n
 	}
 	return fibGo(n-1) + fibGo(n-2)
+}
+
+func TestFib35MinivmModes(t *testing.T) {
+	ctx := context.Background()
+	want := types.I32(fibGo(fibN))
+	modes := []struct {
+		name string
+		new  func() *interp.Interpreter
+	}{
+		{
+			name: "interp",
+			new: func() *interp.Interpreter {
+				return interp.New(Fib(fibN), interp.WithThreshold(-1))
+			},
+		},
+		{
+			name: "jit",
+			new: func() *interp.Interpreter {
+				return interp.New(Fib(fibN))
+			},
+		},
+	}
+
+	for _, mode := range modes {
+		mode := mode
+		t.Run(mode.name, func(t *testing.T) {
+			i := mode.new()
+			defer i.Close()
+
+			for run := 0; run < 2; run++ {
+				require.NoError(t, i.Run(ctx))
+
+				got, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, want, got)
+
+				i.Reset()
+			}
+		})
+	}
 }
 
 // BenchmarkFib35 compares recursive fib(35) across six runtimes.
