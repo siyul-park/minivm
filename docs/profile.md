@@ -20,6 +20,8 @@ Each sample records:
 
 Same tick drives context polling, fuel accounting, and hooks. Lower ticks give denser data but more overhead. `WithDebugger` uses instruction-accurate hooks. REPL `.profile` also uses `WithTick(1)` so small examples show exact per-instruction samples.
 
+A fully JIT-compiled loop runs in native code and bypasses this tick, so it carries its own safepoint at each back-edge: every `tick` back-edges it yields back to the interpreter and runs the same coordination (context, fuel, hook, profiling). The cadence is counted in back-edges, not instructions, so fuel/cancellation in a native loop is bounded but approximate. See `docs/jit-internals.md` (Loop Safepoints).
+
 ## Library API
 
 ```go

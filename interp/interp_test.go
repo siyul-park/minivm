@@ -2934,6 +2934,107 @@ func TestInterpreter_Run(t *testing.T) {
 		})
 	}
 
+	t.Run("jit loop matches threaded", func(t *testing.T) {
+		requireJIT(t)
+
+		// A function summing n..1 via a loop (header IP 7, back-edge BR at IP 30)
+		// compiles as a framed native loop; threaded and JIT must agree.
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).WithLocals(types.TypeI32).Emit(
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 0), // IP 7 header
+			instr.New(instr.I32_EQZ),
+			instr.New(instr.BR_IF, 20), // -> exit
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.BR, 0xFFE6), // -26 -> header
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.RETURN),
+		).Build()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 200),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		threaded := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+
+		jit := New(prog, WithTick(1), WithCutoff(1), WithThreshold(1))
+		defer jit.Close()
+		require.NoError(t, jit.Run(context.Background()))
+		got, err := jit.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("jit loop honors cancel", func(t *testing.T) {
+		requireJIT(t)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		calls := 0
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1<<30),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.GLOBAL_GET, 0), // IP 8 header
+			instr.New(instr.I32_EQZ),
+			instr.New(instr.BR_IF, 15), // -> exit (end)
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.BR, 0xFFEA), // -22 -> header
+		}), WithTick(1), WithCutoff(1), WithThreshold(1), WithHook(func(*Interpreter) error {
+			calls++
+			if calls == 5000 {
+				cancel()
+			}
+			return nil
+		}))
+		defer i.Close()
+		require.ErrorIs(t, i.Run(ctx), context.Canceled)
+		require.Equal(t, 5000, calls)
+	})
+
+	t.Run("jit main loop reenters natively", func(t *testing.T) {
+		requireJIT(t)
+
+		// A loop in the main body (addr 0) compiles via the non-framed blocks path.
+		// It drains a global from 300 to 0 and pushes the result; a clean 0 proves
+		// the yield/re-entry preserved state across many native safepoints.
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 300),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.GLOBAL_GET, 0), // IP 8 header
+			instr.New(instr.I32_EQZ),
+			instr.New(instr.BR_IF, 15), // -> exit (final GLOBAL_GET)
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.BR, 0xFFEA),    // -22 -> header
+			instr.New(instr.GLOBAL_GET, 0), // exit: push final value
+		}), WithTick(1), WithCutoff(1), WithThreshold(1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(0), v)
+	})
+
 	t.Run("jit guards heap-promoted i64 local", func(t *testing.T) {
 		// f(n) = n > 0 ? n + f(n-step) : 0, with n seeded above the 49-bit
 		// boxable range so the i64 param heap-promotes. Each level does
@@ -3440,6 +3541,28 @@ func TestInterpreter_WithProfile(t *testing.T) {
 		require.NotZero(t, jit.Links)
 		require.NotZero(t, jit.Bytes)
 	})
+
+	t.Run("samples jit loop", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 256),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.GLOBAL_GET, 0), // IP 8 header
+			instr.New(instr.I32_EQZ),
+			instr.New(instr.BR_IF, 15), // -> exit (end)
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.BR, 0xFFEA), // -22 -> header
+		}), WithProfile(p), WithTick(1), WithCutoff(1), WithThreshold(1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		// JIT fires at the first sample; further samples accrue only if the
+		// safepoint keeps sampling through the native loop.
+		require.Greater(t, p.Samples(0), uint64(1))
+	})
 }
 
 func TestInterpreter_WithFuel(t *testing.T) {
@@ -3514,15 +3637,37 @@ func TestInterpreter_WithFuel(t *testing.T) {
 		require.ErrorIs(t, i.Run(context.Background()), ErrFuelExhausted)
 	})
 
+	t.Run("exhausts jit loop", func(t *testing.T) {
+		requireJIT(t)
+
+		// The loop would run 2^30 iterations; fuel stops it inside the native loop.
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1<<30),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.GLOBAL_GET, 0), // IP 8 header
+			instr.New(instr.I32_EQZ),
+			instr.New(instr.BR_IF, 15), // -> exit (end)
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.BR, 0xFFEA), // -22 -> header
+		}), WithTick(1), WithCutoff(1), WithThreshold(1), WithFuel(500))
+		defer i.Close()
+		require.ErrorIs(t, i.Run(context.Background()), ErrFuelExhausted)
+	})
+
 	t.Run("reset restores fuel", func(t *testing.T) {
+		// Fuel is sized to complete exactly one run. A second run succeeds only if
+		// Reset restored the budget the first run consumed.
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.NOP),
 			instr.New(instr.I32_CONST, 7),
-		}), WithTick(1), WithFuel(1))
+		}), WithTick(1), WithFuel(2))
 		defer i.Close()
-		require.ErrorIs(t, i.Run(context.Background()), ErrFuelExhausted)
+		require.NoError(t, i.Run(context.Background()))
 		i.Reset()
-		require.ErrorIs(t, i.Run(context.Background()), ErrFuelExhausted)
+		require.NoError(t, i.Run(context.Background()))
 	})
 }
 

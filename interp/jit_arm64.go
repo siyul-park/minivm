@@ -555,7 +555,7 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 	ctx.assembler.Emit(arm64.CMP(depth, budget))
 	hasFrame := ctx.assembler.Label()
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBCC, hasFrame)) // depth < budget
-	l.exitOverflow(ctx, ctx.ip)
+	l.exit(ctx, trapOverflow, ctx.ip)
 	ctx.assembler.Bind(hasFrame)
 
 	// Record the caller frame (resuming just past this call) before descending,
@@ -634,8 +634,49 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 	return true
 }
 
-func (l arm64JIT) exitOverflow(ctx *jitContext, nextIP int) {
-	l.exit(ctx, trapOverflow, nextIP)
+// poll guards a native loop back-edge with the safepoint budget: it spends one
+// unit and, when the budget reaches zero, yields to header so the interpreter
+// can run a safepoint and re-dispatch the native re-entry installed there.
+// Callers emit it only at empty-stack back-edges, so there are no operands to
+// save across the exit.
+func (l arm64JIT) poll(ctx *jitContext, header int) {
+	vCtrl := ctx.pin(scratchCtrl)
+	budget := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(
+		arm64.LDR(budget, vCtrl, int16(journalBudget*8)),
+		arm64.SUBI(budget, budget, 1),
+		arm64.STR(budget, vCtrl, int16(journalBudget*8)),
+	)
+	cont := ctx.assembler.Label()
+	ctx.assembler.Emit(arm64.CBNZLabel(budget, cont))
+	l.yield(ctx, header)
+	ctx.assembler.Bind(cont)
+}
+
+// yield exits a fully-compiled loop at an empty-stack back-edge. It resets sp to
+// the frame's operand base, records the frame so the Go wrapper can deopt to it,
+// reports the resume IP, restores the saved link register on a framed entry, and
+// returns through the trampoline.
+func (l arm64JIT) yield(ctx *jitContext, header int) {
+	vBP := ctx.pin(scratchBP)
+	vSP := ctx.pin(scratchSP)
+	if n := len(ctx.locals); n > 0 {
+		ctx.assembler.Emit(arm64.ADDI(vSP, vBP, uint16(n)))
+	} else {
+		ctx.assembler.Emit(arm64.MOV(vSP, vBP))
+	}
+
+	vCtrl := ctx.pin(scratchCtrl)
+	l.record(ctx, vCtrl, header)
+	l.report(ctx, vCtrl, trapYield, header)
+
+	if ctx.framed {
+		ctx.assembler.Emit(
+			arm64.LDR(arm64.LR, arm64.SP, 0),
+			arm64.ADDI(arm64.SP, arm64.SP, 16),
+		)
+	}
+	ctx.assembler.Emit(arm64.RET())
 }
 
 // globalGet pushes globals[idx] onto the segment stack via a direct
@@ -1475,13 +1516,21 @@ func (l arm64JIT) refCmp(ctx *jitContext, cond uint8) bool {
 // br lowers an unconditional branch. In blocks mode it emits a direct
 // BLabel to the target; otherwise no instructions are emitted and Exit
 // writes the target IP to scratch.
-func (arm64JIT) br(ctx *jitContext) bool {
+func (l arm64JIT) br(ctx *jitContext) bool {
 	offset := int(int16(binary.LittleEndian.Uint16(ctx.code[ctx.ip+1 : ctx.ip+3])))
 	target := ctx.ip + 3 + offset
 	if ctx.labels != nil {
 		lbl, ok := ctx.labels[target]
 		if !ok {
 			return false
+		}
+		if target <= ctx.ip {
+			// Back-edge: a loop. Reject header IP 0 (re-entry there would re-run
+			// the prologue) and loops carrying operands; poll the budget otherwise.
+			if target == 0 || len(ctx.stack) != 0 {
+				return false
+			}
+			l.poll(ctx, target)
 		}
 		ctx.assembler.Emit(arm64.BLabel(lbl))
 		ctx.ip = target
@@ -1522,7 +1571,20 @@ func (l arm64JIT) brIf(ctx *jitContext) bool {
 		if !ok {
 			return false
 		}
-		ctx.assembler.Emit(arm64.CBNZLabel(condI32, takenLbl))
+		if takenTarget <= ctx.ip {
+			// Back-edge: poll the budget only when the branch is taken. Reject a
+			// header at IP 0 or a loop carrying operands; both break re-entry.
+			if takenTarget == 0 || len(ctx.stack) != 0 {
+				return false
+			}
+			skip := ctx.assembler.Label()
+			ctx.assembler.Emit(arm64.CBZLabel(condI32, skip))
+			l.poll(ctx, takenTarget)
+			ctx.assembler.Emit(arm64.BLabel(takenLbl))
+			ctx.assembler.Bind(skip)
+		} else {
+			ctx.assembler.Emit(arm64.CBNZLabel(condI32, takenLbl))
+		}
 		// Fall through to falseTarget — no interpreter exit needed.
 		ctx.ip = falseTarget
 		ctx.stop = true

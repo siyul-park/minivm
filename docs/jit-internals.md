@@ -102,9 +102,10 @@ Header cells precede a stack of fixed-stride records:
 | --- | --- |
 | `journalDepth` (0) | native frames recorded; native read/write |
 | `journalCap` (1) | frame budget `len(i.frames)-i.fp`; read-only |
-| `journalTrap` (2) | exit kind out: `trapNone` \| `trapFallback` \| `trapOverflow` |
+| `journalTrap` (2) | exit kind out: `trapNone` \| `trapFallback` \| `trapOverflow` \| `trapYield` |
 | `journalNextIP` (3) | resume/fallback IP out for the single-frame path |
-| `journalHead` (4)… | records of `{addr, bp, ip, returns}`, stride 4 |
+| `journalBudget` (4) | back-edges left before the next loop safepoint; native read/write |
+| `journalHead` (5)… | records of `{addr, bp, ip, returns}`, stride 4 |
 
 Guard fallbacks set `journalTrap = trapFallback` and the resume IP. The segment
 wrapper restores `fr.ip` and runs the original threaded handler for that opcode
@@ -160,6 +161,28 @@ because terminating a block early would leave native branch targets unbound.
 `BR` targets are forced successors unless the target is a `NOP` or outside the function. Rejected ops force only safe structural successors (`NOP` or `BR` following the rejected opcode). A rejected direct `CONST_GET function; CALL` queues the post-call successor so supported work after the call remains eligible for JIT.
 
 Whole-function block mode carries shadow-stack values across block boundaries when every reachable predecessor agrees on the same VReg stack shape. If predecessors need a merge/phi, block mode rejects and falls back to segment compilation.
+
+## Loop Safepoints
+
+A native loop runs entirely in native code, so the threaded `Run` loop's per-tick
+coordination — `ctx` cancellation, fuel, hook, profiling — is skipped while it
+spins. Each native loop back-edge (a backward `BR`/`BR_IF` in block mode) is guarded
+by a `poll`: it decrements `journalBudget` and, on reaching zero, `yield`s. A yield
+resets `sp` to the frame's operand base, records the frame, reports `trapYield` with
+the loop-header IP, and returns; the Go wrapper deopts to that frame and runs
+`Interpreter.safepoint` (the same coordination the `Run` loop runs every tick).
+
+Re-entry stays native: after a successful block/complete compile, `reenter` installs
+a plain segment at each loop header (`loops` finds them from back-edge predecessors),
+so the post-yield re-dispatch of `code[addr][header]` resumes natively rather than
+threaded. `journalBudget` is refilled to `i.tick` by `scratch` on every native entry,
+so the budget bounds back-edges between safepoints, not raw instructions — an
+approximate but bounded fuel/cancellation cadence.
+
+Back-edges are polled only when the loop header is at IP > 0 and the operand stack is
+empty there (loop state lives in locals); otherwise block mode rejects to segment
+compilation, where every back-edge already exits to the interpreter. This keeps the
+yield/re-entry path free of operand marshaling.
 
 ## Globals
 

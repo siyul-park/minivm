@@ -113,8 +113,9 @@ const (
 const (
 	journalDepth  = iota // native frames recorded; native read/write
 	journalCap           // frame budget len(i.frames)-i.fp; read-only
-	journalTrap          // exit kind out: trapNone | trapFallback | trapOverflow
+	journalTrap          // exit kind out: trapNone | trapFallback | trapOverflow | trapYield
 	journalNextIP        // resume/fallback IP out for the single-frame path
+	journalBudget        // back-edges remaining before the next safepoint; native read/write
 	journalHead          // first frame record cell
 )
 
@@ -131,6 +132,7 @@ const (
 	trapNone = iota
 	trapFallback
 	trapOverflow
+	trapYield
 )
 
 func (c *jitCompiler) Close() error {
@@ -166,12 +168,15 @@ func (c *jitCompiler) Compile(i *Interpreter, addr int, fn *types.Function) (*ji
 		return mod, nil
 	}
 
-	seg, ok, err = c.blocks(i, fn, locals)
+	seg, blks, ok, err := c.blocks(i, fn, locals)
 	if err != nil {
 		return nil, err
 	}
 	if ok {
 		if err := c.linkEntry(mod, seg); err != nil {
+			return nil, err
+		}
+		if err := c.reenter(i, addr, fn, locals, blks, mod); err != nil {
 			return nil, err
 		}
 		return mod, nil
@@ -262,6 +267,11 @@ func (c *jitCompiler) complete(i *Interpreter, addr int, fn *types.Function, mod
 		}
 		mod.entries[targetAddr] = callable
 	}
+	for targetAddr, target := range targets {
+		if err := c.reenter(i, targetAddr, target.fn, target.fn.LocalKinds(), target.blocks, mod); err != nil {
+			return false, err
+		}
+	}
 	return true, nil
 }
 
@@ -319,19 +329,21 @@ func (c *jitCompiler) eligible(fn *types.Function) bool {
 
 // blocks lowers fn as a sequence of basic blocks connected by
 // intra-function labels. Branches (BR_IF, BR) become native branches to
-// block-start labels instead of interpreter exits. Returns (_, false, _)
+// block-start labels instead of interpreter exits. It also returns the blocks
+// so the caller can install loop re-entry segments. Returns (_, _, false, _)
 // when a target is not a known block start (e.g. brTable), so segments()
 // can handle those cases.
-func (c *jitCompiler) blocks(i *Interpreter, fn *types.Function, locals []types.Kind) (segment, bool, error) {
+func (c *jitCompiler) blocks(i *Interpreter, fn *types.Function, locals []types.Kind) (segment, []*analysis.BasicBlock, bool, error) {
 	m := pass.NewManager()
 	if err := m.Run(fn); err != nil {
-		return segment{}, false, err
+		return segment{}, nil, false, err
 	}
 	blks, err := analysis.NewBasicBlocksPass().Run(m)
 	if err != nil || len(blks) <= 1 {
-		return segment{}, false, nil
+		return segment{}, nil, false, nil
 	}
-	return c.function(i, fn, locals, blks, false)
+	seg, ok, err := c.function(i, fn, locals, blks, false)
+	return seg, blks, ok, err
 }
 
 // function runs two walks over blks: a feasibility walk that rejects when any
@@ -574,8 +586,49 @@ func (c *jitCompiler) link(mod *jitModule, segs []segment) error {
 		mod.segments[entry] = linked[i].Callable
 		mod.stacks[entry] = seg.stack
 	}
-	mod.links = len(mod.segments)
+	mod.links += len(segs)
 	return nil
+}
+
+// reenter installs plain re-entry segments at the loop headers in blks, so a
+// budget yield from the native entry resumes natively at the header instead of
+// dropping to threaded dispatch.
+func (c *jitCompiler) reenter(i *Interpreter, addr int, fn *types.Function, locals []types.Kind, blks []*analysis.BasicBlock, mod *jitModule) error {
+	var segs []segment
+	for _, header := range c.loops(blks) {
+		seg, ok, err := c.segment(i, fn, locals, header)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		seg.addr = addr
+		segs = append(segs, seg)
+	}
+	if len(segs) == 0 {
+		return nil
+	}
+	return c.link(mod, segs)
+}
+
+// loops returns the start IPs of loop headers — blocks targeted by a back-edge
+// from a block at or below them. IP 0 is excluded: re-entry there would re-run
+// the entry prologue.
+func (c *jitCompiler) loops(blks []*analysis.BasicBlock) []int {
+	var out []int
+	for _, b := range blks {
+		if b.Start == 0 {
+			continue
+		}
+		for _, p := range b.Preds {
+			if p >= 0 && p < len(blks) && blks[p].Start >= b.Start {
+				out = append(out, b.Start)
+				break
+			}
+		}
+	}
+	return out
 }
 
 func (c *jitCompiler) component(i *Interpreter, addr int, fn *types.Function) map[int]*types.Function {

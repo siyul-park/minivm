@@ -41,8 +41,9 @@ type Interpreter struct {
 	free     []int
 	rc       []int
 
-	fp int
-	sp int
+	fp  int
+	sp  int
+	gas int64
 
 	threshold int64
 	cutoff    int
@@ -200,6 +201,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		rc:        make([]int, 0, opt.heap),
 		tick:      opt.tick,
 		fuel:      fuel,
+		gas:       fuel,
 	}
 
 	i.alloc(types.Null)
@@ -262,37 +264,13 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 	f := i.fr
 	code := f.code
 	tick := i.tick
-	fuel := i.fuel
 
 	for f.ip < len(code) {
 		tick--
 		if tick == 0 {
 			tick = i.tick
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-
-			if fuel >= 0 {
-				if fuel == 0 {
-					return ErrFuelExhausted
-				}
-				fuel--
-			}
-
-			if i.hook != nil {
-				i.restore(f, f.addr)
-				if err := i.hook(i); err != nil {
-					return err
-				}
-			}
-
-			i.prof.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
-			if i.threshold >= 0 && i.prof.Samples(f.addr) == uint64(i.threshold) {
-				if err := i.jit(f.addr); err != nil {
-					return err
-				}
+			if err := i.safepoint(); err != nil {
+				return err
 			}
 		}
 
@@ -501,6 +479,7 @@ func (i *Interpreter) Reset() {
 	i.globals = i.globals[:0]
 
 	i.sp = 0
+	i.gas = i.fuel
 	i.roots = i.roots[:0]
 	clear(i.interned)
 
@@ -619,6 +598,42 @@ func (i *Interpreter) function(addr int) (*types.Function, bool) {
 	return fn, ok
 }
 
+// safepoint runs one round of per-tick coordination shared by the threaded Run
+// loop and native loop yields: context cancellation, fuel metering, the user
+// hook, profile sampling, and the one-shot JIT trigger. It reads the current
+// frame i.fr, so a native yield must rebuild frames (deopt) and point i.fr at
+// the resumable frame before calling it.
+func (i *Interpreter) safepoint() error {
+	select {
+	case <-i.ctx.Done():
+		return i.ctx.Err()
+	default:
+	}
+
+	if i.gas >= 0 {
+		if i.gas == 0 {
+			return ErrFuelExhausted
+		}
+		i.gas--
+	}
+
+	f := i.fr
+	if i.hook != nil {
+		i.restore(f, f.addr)
+		if err := i.hook(i); err != nil {
+			return err
+		}
+	}
+
+	i.prof.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
+	if i.threshold >= 0 && i.prof.Samples(f.addr) == uint64(i.threshold) {
+		if err := i.jit(f.addr); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // segment wraps a native segment Callable in a threaded-style closure. Native
 // code reads and writes the VM stack directly through scratch argv.
 func (i *Interpreter) segment(addr int, callable asm.Callable, argc int, fallback func(*Interpreter)) func(*Interpreter) {
@@ -633,9 +648,17 @@ func (i *Interpreter) segment(addr int, callable asm.Callable, argc int, fallbac
 
 		i.sp = int(scratch[scratchSP])
 		i.fr.ip = int(i.journal[journalNextIP])
-		if i.journal[journalTrap] == trapFallback {
+		switch i.journal[journalTrap] {
+		case trapFallback:
 			i.restore(i.fr, addr)
 			fallback(i)
+		case trapYield:
+			// A loop-region back-edge spent its budget; i.fr.ip is the header.
+			// Service coordination, then let the Run loop re-dispatch this same
+			// segment for native resume.
+			if err := i.safepoint(); err != nil {
+				panic(err)
+			}
 		}
 	}
 }
@@ -669,17 +692,27 @@ func (i *Interpreter) entry(addr int, callable asm.Callable) func(*Interpreter) 
 		}
 
 		// A trap rebuilt the native call chain into real VM frames; resume the
-		// innermost in the interpreter, or surface a frame overflow.
+		// innermost in the interpreter, surface a frame overflow, or service a
+		// loop safepoint.
 		i.sp = int(scratch[scratchSP])
 		i.deopt(addr)
-		if i.journal[journalTrap] == trapOverflow {
+		switch i.journal[journalTrap] {
+		case trapOverflow:
 			panic(ErrFrameOverflow)
-		}
-		// IP 0 now dispatches to the native entry; run the handler it shadows once
-		// so we make progress instead of re-entering native and re-trapping. Any
-		// later IP is an untouched threaded handler the Run loop dispatches next.
-		if i.fr.ip == 0 {
-			i.fallbacks[i.fr.addr](i)
+		case trapYield:
+			// A loop back-edge spent its budget. deopt left i.fr at the loop header;
+			// run coordination, then let the Run loop re-dispatch the header — a
+			// native loop-region segment is installed there for in-place resume.
+			if err := i.safepoint(); err != nil {
+				panic(err)
+			}
+		default:
+			// IP 0 now dispatches to the native entry; run the handler it shadows once
+			// so we make progress instead of re-entering native and re-trapping. Any
+			// later IP is an untouched threaded handler the Run loop dispatches next.
+			if i.fr.ip == 0 {
+				i.fallbacks[i.fr.addr](i)
+			}
 		}
 	}
 }
@@ -754,6 +787,7 @@ func (i *Interpreter) scratch() []uint64 {
 	i.journal[journalDepth] = 0
 	i.journal[journalCap] = uint64(len(i.frames) - i.fp)
 	i.journal[journalTrap] = trapNone
+	i.journal[journalBudget] = uint64(i.tick)
 	return i.argv[:]
 }
 
