@@ -3,6 +3,7 @@ package asm
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"unsafe"
 )
 
@@ -10,8 +11,15 @@ import (
 // transitions: callers append bytes via Write, then read back the resulting
 // entry pointer via Ptr. Concurrent reads are safe; writes serialize on an
 // internal lock and remap pages to RW for the duration of the write.
+//
+// Older mappings are retained in old so pointers stamped into them by linked
+// code stay valid after a grow.
 type Buffer struct {
-	region
+	old    []memory
+	mem    memory
+	offset int
+
+	mu     sync.Mutex
 	sealed bool
 }
 
@@ -24,7 +32,7 @@ func NewBuffer(size int) (*Buffer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Buffer{region: region{mem: mem}}, nil
+	return &Buffer{mem: mem}, nil
 }
 
 // Write appends bytes to the buffer and returns a pointer to the start of
@@ -60,9 +68,17 @@ func (b *Buffer) Write(code []byte) (unsafe.Pointer, error) {
 	return ptr, nil
 }
 
-// Free releases all underlying mmap regions.
+// Free releases the current and archived mmap mappings.
 func (b *Buffer) Free() error {
-	return b.region.free()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, m := range b.old {
+		if err := m.free(); err != nil {
+			return err
+		}
+	}
+	b.old = nil
+	return b.mem.free()
 }
 
 // writeAt overwrites the bytes starting at ptr with code. ptr must point
@@ -104,6 +120,31 @@ func (b *Buffer) locate(ptr unsafe.Pointer, n int) (memory, int, bool, bool) {
 		}
 	}
 	return nil, 0, false, false
+}
+
+// grow archives the current mapping and installs a freshly mapped region at
+// least need bytes long. archive, when non-nil, runs on the outgoing region
+// before it is retained (e.g. to flip code back to executable). The caller
+// must hold b.mu.
+func (b *Buffer) grow(need int, archive func(memory) error) error {
+	size := len(b.mem) * 2
+	if size < need {
+		size = need
+	}
+	mem, err := allocMemory(size)
+	if err != nil {
+		return err
+	}
+	if archive != nil {
+		if err := archive(b.mem); err != nil {
+			_ = mem.free()
+			return err
+		}
+	}
+	b.old = append(b.old, b.mem)
+	b.mem = mem
+	b.offset = 0
+	return nil
 }
 
 func (b *Buffer) unseal() error {

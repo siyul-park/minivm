@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/asm"
@@ -498,6 +497,9 @@ func (i *Interpreter) Reset() {
 	i.free = i.free[:0]
 }
 
+// jit lazily builds the native compiler, compiles the function at addr, and
+// installs the result into the dispatch table. Triggered once per function from
+// the Run-loop safepoint when its sample count crosses the threshold.
 func (i *Interpreter) jit(addr int) error {
 	if err := i.ensure(); err != nil {
 		return err
@@ -519,7 +521,7 @@ func (i *Interpreter) jit(addr int) error {
 	if mod == nil {
 		return nil
 	}
-	i.install(mod, addr)
+	i.install(mod)
 	return nil
 }
 
@@ -540,7 +542,7 @@ func (i *Interpreter) ensure() error {
 // install accounts a successful Compile and rewires the dispatch table:
 // the whole-function Entry replaces the first opcode handler, every
 // emitted segment replaces its corresponding handler.
-func (i *Interpreter) install(mod *jitModule, addr int) {
+func (i *Interpreter) install(mod *jitModule) {
 	for _, n := range mod.bytes {
 		i.prof.JITEmit(n)
 	}
@@ -550,10 +552,6 @@ func (i *Interpreter) install(mod *jitModule, addr int) {
 	for range mod.skips {
 		i.prof.JITSkip()
 	}
-	if mod.entry != nil && addr > 0 && addr < len(i.code) && len(i.code[addr]) > 0 {
-		i.fallbacks[addr] = i.code[addr][0]
-		i.code[addr][0] = i.entry(addr, mod.entry)
-	}
 	for addr, callable := range mod.entries {
 		if addr <= 0 || addr >= len(i.code) || len(i.code[addr]) == 0 || callable == nil {
 			continue
@@ -561,14 +559,14 @@ func (i *Interpreter) install(mod *jitModule, addr int) {
 		i.fallbacks[addr] = i.code[addr][0]
 		i.code[addr][0] = i.entry(addr, callable)
 	}
-	for entry, callable := range mod.segments {
-		if entry.addr < 0 || entry.addr >= len(i.code) || entry.ip < 0 || entry.ip >= len(i.code[entry.addr]) || callable == nil {
+	for _, seg := range mod.segments {
+		if seg.addr < 0 || seg.addr >= len(i.code) || seg.ip < 0 || seg.ip >= len(i.code[seg.addr]) || seg.callable == nil {
 			continue
 		}
-		fallback := i.code[entry.addr][entry.ip]
-		i.code[entry.addr][entry.ip] = i.segment(entry.addr, callable, mod.stacks[entry], fallback)
-		if entry.ip == 0 && entry.addr > 0 && i.fallbacks[entry.addr] == nil {
-			i.fallbacks[entry.addr] = i.code[entry.addr][0]
+		fallback := i.code[seg.addr][seg.ip]
+		i.code[seg.addr][seg.ip] = i.segment(seg.addr, seg.callable, seg.stack, fallback)
+		if seg.ip == 0 && seg.addr > 0 && i.fallbacks[seg.addr] == nil {
+			i.fallbacks[seg.addr] = i.code[seg.addr][0]
 		}
 	}
 }
@@ -772,6 +770,9 @@ func (i *Interpreter) restore(f *frame, addr int) {
 	f.upvals = nil
 }
 
+// scratch resets and fills the argv/journal handed to native code: stack and
+// global base pointers, the current frame's BP/SP, the journal pointer, and the
+// per-call frame budget. Returns the argv slice the Callable reads and writes.
 func (i *Interpreter) scratch() []uint64 {
 	clear(i.argv[:])
 	i.argv[scratchBP] = uint64(i.fr.bp)
@@ -798,43 +799,6 @@ func (i *Interpreter) error(r any) error {
 		return fmt.Errorf("%w: at=%d", e, ip)
 	default:
 		return fmt.Errorf("%v: at=%d", r, ip)
-	}
-}
-
-func (i *Interpreter) unbox64(val types.Boxed) uint64 {
-	switch val.Kind() {
-	case types.KindI32:
-		return uint64(uint32(val.I32()))
-	case types.KindI64:
-		return uint64(val.I64())
-	case types.KindF32:
-		return uint64(math.Float32bits(val.F32()))
-	case types.KindF64:
-		return math.Float64bits(val.F64())
-	case types.KindRef:
-		addr := val.Ref()
-		v, _ := i.heap[addr].(types.I64)
-		i.release(addr)
-		return uint64(v)
-	default:
-		return uint64(val)
-	}
-}
-
-func (i *Interpreter) box64(val uint64, kind types.Kind) types.Boxed {
-	switch kind {
-	case types.KindI32:
-		return types.BoxI32(int32(val))
-	case types.KindI64:
-		return i.boxI64(int64(val))
-	case types.KindF32:
-		return types.BoxF32(math.Float32frombits(uint32(val)))
-	case types.KindF64:
-		return types.BoxF64(math.Float64frombits(val))
-	case types.KindRef:
-		return types.BoxRef(int(val))
-	default:
-		return types.Box(val, kind)
 	}
 }
 

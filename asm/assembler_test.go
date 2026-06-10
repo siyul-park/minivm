@@ -133,25 +133,6 @@ func TestAssembler_Build(t *testing.T) {
 	})
 }
 
-func TestAssembler_CanPin(t *testing.T) {
-	arch := arm64.New()
-	ab := arch.ABI()
-	x0 := ab.Scratch()[0]
-	x1 := ab.Scratch()[1]
-	w0 := asm.NewPReg(x0.ID(), asm.RegTypeInt, asm.Width32)
-	d0 := asm.NewPReg(x0.ID(), asm.RegTypeFloat, asm.Width64)
-
-	a := asm.New(arch)
-	v := a.Reg(asm.RegTypeInt, asm.Width64)
-
-	require.True(t, a.CanPin(v, x0))
-	require.NoError(t, a.Pin(v, x0))
-	require.True(t, a.CanPin(v, x0))
-	require.True(t, a.CanPin(v, w0))
-	require.False(t, a.CanPin(v, x1))
-	require.False(t, a.CanPin(v, d0))
-}
-
 func TestAssembler_Pin(t *testing.T) {
 	arch := arm64.New()
 	ab := arch.ABI()

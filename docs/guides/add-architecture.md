@@ -33,7 +33,7 @@ Return nil from `Arch.Frame()` when the backend has no spill-frame support. Back
 
 ## Step 2 - Add `interp/jit_<arch>.go`
 
-Add a concrete emitter in package `interp`, then provide a build-tagged `newJITCompiler` implementation for the architecture.
+Add a concrete `lowerer` in package `interp`, then provide a build-tagged `newJITCompiler` implementation for the architecture.
 
 ```go
 type archJIT struct{}

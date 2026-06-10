@@ -4305,11 +4305,7 @@ func TestInterpreter_JIT(t *testing.T) {
 
 		calleeAddr := i.constants[0].Ref()
 		callerAddr := i.constants[1].Ref()
-		mod := &jitModule{
-			entries:  map[int]asm.Callable{},
-			segments: map[jitEntry]asm.Callable{},
-			stacks:   map[jitEntry]int{},
-		}
+		mod := &jitModule{entries: map[int]asm.Callable{}}
 
 		ok, err := i.compiler.complete(i, callerAddr, caller, mod)
 		require.NoError(t, err)
@@ -4390,11 +4386,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NoError(t, i.ensure())
 
 		addr := i.constants[0].Ref()
-		mod := &jitModule{
-			entries:  map[int]asm.Callable{},
-			segments: map[jitEntry]asm.Callable{},
-			stacks:   map[jitEntry]int{},
-		}
+		mod := &jitModule{entries: map[int]asm.Callable{}}
 
 		ok, err := i.compiler.complete(i, addr, fn, mod)
 		require.NoError(t, err)
@@ -4433,11 +4425,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NoError(t, i.ensure())
 
 		addr := i.constants[0].Ref()
-		mod := &jitModule{
-			entries:  map[int]asm.Callable{},
-			segments: map[jitEntry]asm.Callable{},
-			stacks:   map[jitEntry]int{},
-		}
+		mod := &jitModule{entries: map[int]asm.Callable{}}
 
 		ok, err := i.compiler.complete(i, addr, fn, mod)
 		require.NoError(t, err)
@@ -4574,11 +4562,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		defer i.Close()
 		require.NoError(t, i.ensure())
 		addr := i.constants[0].Ref()
-		mod := &jitModule{
-			entries:  map[int]asm.Callable{},
-			segments: map[jitEntry]asm.Callable{},
-			stacks:   map[jitEntry]int{},
-		}
+		mod := &jitModule{entries: map[int]asm.Callable{}}
 
 		ok, err := i.compiler.complete(i, addr, fn, mod)
 		require.NoError(t, err)

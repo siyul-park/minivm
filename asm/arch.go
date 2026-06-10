@@ -1,6 +1,9 @@
 package asm
 
-import "errors"
+import (
+	"errors"
+	"unsafe"
+)
 
 // Arch bundles everything an Assembler needs to target a specific
 // architecture. Concrete arches expose a package-level New() Arch factory
@@ -12,4 +15,72 @@ type Arch interface {
 	Frame() Frame
 }
 
-var ErrNotImplemented = errors.New("not implemented")
+// Encoder turns one architecture-neutral Instruction into its machine
+// encoding. Implementations must be pure: same input → same output.
+type Encoder interface {
+	Encode(inst Instruction) ([]byte, error)
+}
+
+// ABI describes a target architecture's call boundary policy: which scratch
+// registers survive the trampoline and what binds a Code to a Callable.
+// ABI is pure-policy — it does not own any executable memory.
+type ABI interface {
+	// Scratch returns the set of physical registers reserved for
+	// pass-through context across the trampoline boundary (X10..X14 on
+	// arm64). Order is stable.
+	Scratch() []PReg
+
+	// NewCallable binds the raw native entry at addr to sig, returning a
+	// Callable. addr must point at executable memory whose lifetime
+	// outlives every Call.
+	NewCallable(sig Signature, addr unsafe.Pointer) (Callable, error)
+}
+
+// Frame is an optional Arch capability that supplies the instructions a
+// spilling register allocator injects when the physical register bank is
+// exhausted. The allocator reserves a stack spill area at entry, moves
+// values between physical registers and spill slots under pressure, and
+// releases the area before every return.
+//
+// An Arch whose Frame method returns nil disables spilling: allocation
+// fails with ErrNoRegistersAvailable once the bank is full.
+//
+// Slot indices are dense and zero-based; the allocator reports the high
+// watermark so Enter/Leave can size the area. Each slot holds one 64-bit
+// value.
+type Frame interface {
+	// Enter reserves space for spill slots at callable entry.
+	// Returns nil when slots == 0.
+	Enter(slots int) []Instruction
+	// Leave releases the spill area. Emitted immediately before every
+	// instruction Returns reports true for. Returns nil when slots == 0.
+	Leave(slots int) []Instruction
+	// Store writes reg into spill slot.
+	Store(slot int, reg PReg) Instruction
+	// Reload reads spill slot into reg.
+	Reload(reg PReg, slot int) Instruction
+	// Returns reports whether op transfers control out of the callable, so
+	// the allocator must restore the stack with Leave before it.
+	Returns(op uint16) bool
+}
+
+// Callable is a fully linked, directly invokable entry into the executable
+// buffer. Implementations are produced by ABI.NewCallable and returned from
+// Link.
+type Callable interface {
+	Call(argv []uint64) error
+}
+
+// Signature describes the scratch registers carried across a callable entry.
+//
+// Signature is pure data. Multi-exit semantics, VM-stack mapping, and other
+// caller-side concerns live above this package.
+type Signature struct {
+	Scratch []PReg
+}
+
+var (
+	ErrNotImplemented = errors.New("not implemented")
+	ErrInvalidOperand = errors.New("invalid operand")
+	ErrInvalidArgs    = errors.New("invalid arguments")
+)

@@ -35,18 +35,18 @@ type jitCompiler struct {
 }
 
 type jitModule struct {
-	entry    asm.Callable
 	entries  map[int]asm.Callable
-	segments map[jitEntry]asm.Callable
-	stacks   map[jitEntry]int
+	segments []jitSegment
 	bytes    []int
 	links    int
 	skips    int
 }
 
-type jitEntry struct {
-	addr int
-	ip   int
+type jitSegment struct {
+	addr     int
+	ip       int
+	stack    int
+	callable asm.Callable
 }
 
 type segment struct {
@@ -56,11 +56,6 @@ type segment struct {
 	stack int
 	next  int
 	force bool
-}
-
-type result struct {
-	count  int
-	reject int
 }
 
 type jitTarget struct {
@@ -142,11 +137,7 @@ func (c *jitCompiler) Close() error {
 // Compile attempts to lower fn into native code. Hot profile IPs seed segment
 // selection; rejected or short segments fall back to threaded dispatch.
 func (c *jitCompiler) Compile(i *Interpreter, addr int, fn *types.Function) (*jitModule, error) {
-	mod := &jitModule{
-		entries:  map[int]asm.Callable{},
-		segments: map[jitEntry]asm.Callable{},
-		stacks:   map[jitEntry]int{},
-	}
+	mod := &jitModule{entries: map[int]asm.Callable{}}
 	if fn == nil || len(fn.Code) == 0 {
 		return mod, nil
 	}
@@ -157,29 +148,22 @@ func (c *jitCompiler) Compile(i *Interpreter, addr int, fn *types.Function) (*ji
 	}
 	locals := fn.LocalKinds()
 
-	seg, ok, err := c.function(i, fn, locals, []*analysis.BasicBlock{{Start: 0, End: len(fn.Code)}}, true)
-	if err != nil {
-		return nil, err
-	}
-	if ok {
-		if err := c.linkEntry(mod, seg); err != nil {
+	// A failed analysis (e.g. a branch past the last instruction) only rules out
+	// whole-function compilation; the segment fallback below still applies.
+	if blks, err := c.analyze(fn); err == nil {
+		seg, ok, err := c.function(i, fn, locals, blks, len(blks) <= 1)
+		if err != nil {
 			return nil, err
 		}
-		return mod, nil
-	}
-
-	seg, blks, ok, err := c.blocks(i, fn, locals)
-	if err != nil {
-		return nil, err
-	}
-	if ok {
-		if err := c.linkEntry(mod, seg); err != nil {
-			return nil, err
+		if ok {
+			if err := c.linkEntry(mod, addr, seg); err != nil {
+				return nil, err
+			}
+			if err := c.reenter(i, addr, fn, locals, blks, mod); err != nil {
+				return nil, err
+			}
+			return mod, nil
 		}
-		if err := c.reenter(i, addr, fn, locals, blks, mod); err != nil {
-			return nil, err
-		}
-		return mod, nil
 	}
 
 	var segs []segment
@@ -199,12 +183,12 @@ func (c *jitCompiler) Compile(i *Interpreter, addr int, fn *types.Function) (*ji
 	return mod, nil
 }
 
-func (c *jitCompiler) linkEntry(mod *jitModule, seg segment) error {
+func (c *jitCompiler) linkEntry(mod *jitModule, addr int, seg segment) error {
 	linked, err := asm.Link(c.buffer, c.arch, []*asm.Code{seg.code}, nil)
 	if err != nil {
 		return err
 	}
-	mod.entry = linked[0].Callable
+	mod.entries[addr] = linked[0].Callable
 	mod.bytes = append(mod.bytes, len(seg.code.Bytes))
 	mod.links = 1
 	return nil
@@ -281,11 +265,7 @@ func (c *jitCompiler) targets(funcs map[int]*types.Function) (map[int]jitTarget,
 		if !c.eligible(fn) {
 			return nil, false, nil
 		}
-		m := pass.NewManager()
-		if err := m.Run(fn); err != nil {
-			return nil, false, err
-		}
-		blocks, err := analysis.NewBasicBlocksPass().Run(m)
+		blocks, err := c.analyze(fn)
 		if err != nil {
 			return nil, false, err
 		}
@@ -327,23 +307,15 @@ func (c *jitCompiler) eligible(fn *types.Function) bool {
 	return true
 }
 
-// blocks lowers fn as a sequence of basic blocks connected by
-// intra-function labels. Branches (BR_IF, BR) become native branches to
-// block-start labels instead of interpreter exits. It also returns the blocks
-// so the caller can install loop re-entry segments. Returns (_, _, false, _)
-// when a target is not a known block start (e.g. brTable), so segments()
-// can handle those cases.
-func (c *jitCompiler) blocks(i *Interpreter, fn *types.Function, locals []types.Kind) (segment, []*analysis.BasicBlock, bool, error) {
+// analyze runs the pass manager and basic-block analysis for fn, returning its
+// control-flow blocks. A single block means straight-line code; more than one
+// means branches split it into a connected block graph.
+func (c *jitCompiler) analyze(fn *types.Function) ([]*analysis.BasicBlock, error) {
 	m := pass.NewManager()
 	if err := m.Run(fn); err != nil {
-		return segment{}, nil, false, err
+		return nil, err
 	}
-	blks, err := analysis.NewBasicBlocksPass().Run(m)
-	if err != nil || len(blks) <= 1 {
-		return segment{}, nil, false, nil
-	}
-	seg, ok, err := c.function(i, fn, locals, blks, false)
-	return seg, blks, ok, err
+	return analysis.NewBasicBlocksPass().Run(m)
 }
 
 // function runs two walks over blks: a feasibility walk that rejects when any
@@ -447,8 +419,7 @@ func (c *jitCompiler) walkBlocks(ctx *jitContext, fn *types.Function, blks []*an
 		}
 		ctx.reset(blk, stack)
 
-		res := c.walk(ctx)
-		if res.reject >= 0 {
+		if _, reject := c.walk(ctx); reject >= 0 {
 			return false
 		}
 		if ctx.framed {
@@ -533,13 +504,13 @@ func (c *jitCompiler) segment(i *Interpreter, fn *types.Function, locals []types
 	}
 
 	ctx := c.newContext(asm.New(c.arch), i, fn, locals, startIP, scratch)
-	probed := c.walk(ctx)
-	if probed.count < c.cutoff {
+	probed, reject := c.walk(ctx)
+	if probed < c.cutoff {
 		return segment{}, false, nil
 	}
 	inputs := len(ctx.inputs)
 	endIP := ctx.ip
-	next, force := c.next(fn, ctx, probed)
+	next, force := c.next(fn, ctx, reject)
 
 	a := asm.New(c.arch)
 	ctx = c.newContext(a, i, fn, locals, startIP, scratch)
@@ -549,8 +520,8 @@ func (c *jitCompiler) segment(i *Interpreter, fn *types.Function, locals []types
 		ctx.stack = append(ctx.stack, v)
 	}
 	c.lowerer.prologue(ctx, fn)
-	lowered := c.walk(ctx)
-	if lowered.count < c.cutoff || ctx.ip != endIP || len(ctx.inputs) != inputs {
+	lowered, _ := c.walk(ctx)
+	if lowered < c.cutoff || ctx.ip != endIP || len(ctx.inputs) != inputs {
 		return segment{}, false, nil
 	}
 
@@ -582,9 +553,12 @@ func (c *jitCompiler) link(mod *jitModule, segs []segment) error {
 		return err
 	}
 	for i, seg := range segs {
-		entry := jitEntry{addr: seg.addr, ip: seg.start}
-		mod.segments[entry] = linked[i].Callable
-		mod.stacks[entry] = seg.stack
+		mod.segments = append(mod.segments, jitSegment{
+			addr:     seg.addr,
+			ip:       seg.start,
+			stack:    seg.stack,
+			callable: linked[i].Callable,
+		})
 	}
 	mod.links += len(segs)
 	return nil
@@ -727,49 +701,49 @@ func (c *jitContext) pinTo(pr asm.PReg) asm.VReg {
 // walk mirrors threaded compilation: decode one opcode, ask the ARM64 emitter
 // to lower it, then advance by the encoded width unless the opcode ended the
 // segment itself.
-func (c *jitCompiler) walk(ctx *jitContext) result {
-	out := result{reject: -1}
+func (c *jitCompiler) walk(ctx *jitContext) (count, reject int) {
+	reject = -1
 	for ctx.ip < ctx.end {
 		op := instr.Opcode(ctx.code[ctx.ip])
 		ipBefore := ctx.ip
 		width := instr.Instruction(ctx.code[ipBefore:]).Width()
 		if !c.lowerer.lower(ctx, op) {
-			out.reject = ipBefore
+			reject = ipBefore
 			break
 		}
 		if !ctx.stop && ctx.ip == ipBefore {
 			ctx.ip = ipBefore + width
 		}
-		out.count++
+		count++
 		if ctx.stop {
 			break
 		}
 	}
-	return out
+	return count, reject
 }
 
-func (c *jitCompiler) next(fn *types.Function, ctx *jitContext, res result) (int, bool) {
+func (c *jitCompiler) next(fn *types.Function, ctx *jitContext, reject int) (int, bool) {
 	if ctx.successor >= 0 {
 		if ctx.successor >= len(fn.Code) || instr.Opcode(fn.Code[ctx.successor]) == instr.NOP {
 			return -1, false
 		}
 		return ctx.successor, true
 	}
-	if res.reject < 0 {
+	if reject < 0 {
 		return -1, false
 	}
-	next := res.reject + instr.Instruction(fn.Code[res.reject:]).Width()
+	next := reject + instr.Instruction(fn.Code[reject:]).Width()
 	if next >= len(fn.Code) {
 		return -1, false
 	}
-	if c.directCall(fn, res.reject) {
+	if c.directCall(fn, reject) {
 		next += 1
 		if next >= len(fn.Code) {
 			return -1, false
 		}
 		return next, true
 	}
-	if instr.Opcode(fn.Code[res.reject]) == instr.CALL {
+	if instr.Opcode(fn.Code[reject]) == instr.CALL {
 		return next, false
 	}
 	switch instr.Opcode(fn.Code[next]) {

@@ -51,7 +51,7 @@ No manual build tags required for normal use. The Go toolchain selects correct f
 `unsafe` is used in a few low-level packages:
 
 - `asm/memory.go`: `mmap`/`mprotect` syscalls and pointer access to executable memory
-- `asm/buffer.go`, `asm/link.go`, `asm/abi.go`, `asm/arm64/abi.go`: pointer arithmetic for native code patching and callable entry binding
+- `asm/buffer.go`, `asm/link.go`, `asm/arch.go`, `asm/arm64/abi.go`: pointer arithmetic for native code patching and callable entry binding
 - `instr/instr.go`, `interp/threaded.go`: fixed-width bytecode operand loads
 - `interp/interp.go`: scratch pointers passed to native JIT code
 - `interp/host.go`, `interp/marshal.go`: host-object field access and reflection bridge

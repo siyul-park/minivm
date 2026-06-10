@@ -248,7 +248,9 @@ func sealRegion(m memory) error { return m.executable() }
 b.grow(end, sealRegion)
 ```
 
-For JIT: keep orchestration and VM adapter logic in `interp/jit.go`. Put ARM64 opcode handlers and ISA-specific helpers in `interp/jit_arm64.go`.
+**A file's methods belong to one type.** Split a large type across several files by concern, but every one of those files still holds that one type's methods — never another type's. `*Interpreter` is spread over `interp.go`, `threaded.go`, `fuse.go`, `host.go`, `marshal.go`, `pool.go`; each holds only `*Interpreter` methods. Do not move a type's methods into a *different* type's file to chase "locality": code that operates on type A's state is a method on A, declared in A's file, even when it integrates with subsystem B. If the behavior truly operates on B's state instead, make it a method on a B type — passing the other type in as an argument is the smell that you picked the wrong owner (see §0.5 cross-boundary structs).
+
+For JIT this means: `interp/jit.go` owns the `jitCompiler` / `jitContext` pipeline (arch-neutral block planning, segment selection, linking) and their methods; `interp/jit_arm64.go` owns the `lowerer` (`arm64JIT`) — opcode handlers and ISA-specific helpers. The `Interpreter`'s own JIT bridge (`jit`, `install`, `entry`, `segment`, `deopt`, `scratch`, `hot`, `function`) is `*Interpreter` behavior, so it stays in `interp.go` with the rest of the type — not in `jit.go`.
 
 ## 2. Type & Interface Design
 

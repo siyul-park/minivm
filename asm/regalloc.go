@@ -8,7 +8,8 @@ import "errors"
 // releasing — while leaving instruction-stream policy (linear scan,
 // lifetime tracking, pin preemption) to its caller (rewriter).
 //
-// Three masks govern selection:
+// Three masks govern selection, each indexed by RegType so the integer and
+// float banks share one code path:
 //
 //   - avail: physical registers free to be drawn by alloc.
 //   - excluded: registers withheld from auto-alloc but still reservable
@@ -19,13 +20,9 @@ import "errors"
 // either "what preg does this vreg occupy?" (bindings) or "who owns this
 // preg slot?" (owners) without maintaining their own reverse table.
 type regAlloc struct {
-	info        RegInfo
-	intAvail    RegMask
-	floatAvail  RegMask
-	intExcluded RegMask
-	fltExcluded RegMask
-	intBlocked  RegMask
-	fltBlocked  RegMask
+	avail    [2]RegMask
+	excluded [2]RegMask
+	blocked  [2]RegMask
 
 	bindings map[int32]PReg   // vreg id → preg
 	owners   map[regKey]int32 // preg key (type+id) → vreg id
@@ -42,11 +39,12 @@ var ErrNoRegistersAvailable = errors.New("no registers available")
 
 func newRegAlloc(info RegInfo) *regAlloc {
 	return &regAlloc{
-		info:       info,
-		intAvail:   info.Allocatable(RegTypeInt),
-		floatAvail: info.Allocatable(RegTypeFloat),
-		bindings:   make(map[int32]PReg),
-		owners:     make(map[regKey]int32),
+		avail: [2]RegMask{
+			RegTypeInt:   info.Allocatable(RegTypeInt),
+			RegTypeFloat: info.Allocatable(RegTypeFloat),
+		},
+		bindings: make(map[int32]PReg),
+		owners:   make(map[regKey]int32),
 	}
 }
 
@@ -58,23 +56,15 @@ func (a *regAlloc) alloc(vreg VReg) (PReg, error) {
 		return pr, nil
 	}
 
-	mask := a.intAvail &^ a.intExcluded &^ a.intBlocked
-	if vreg.Type() == RegTypeFloat {
-		mask = a.floatAvail &^ a.fltExcluded &^ a.fltBlocked
-	}
-
+	typ := vreg.Type()
+	mask := a.avail[typ] &^ a.excluded[typ] &^ a.blocked[typ]
 	id := mask.First()
 	if id == 0xFF {
 		return PReg{}, ErrNoRegistersAvailable
 	}
 
-	if vreg.Type() == RegTypeFloat {
-		a.floatAvail = a.floatAvail.Clear(id)
-	} else {
-		a.intAvail = a.intAvail.Clear(id)
-	}
-
-	pr := NewPReg(id, vreg.Type(), vreg.Width())
+	a.avail[typ] = a.avail[typ].Clear(id)
+	pr := NewPReg(id, typ, vreg.Width())
 	a.bind(vreg, pr)
 	return pr, nil
 }
@@ -89,17 +79,11 @@ func (a *regAlloc) reserve(vreg VReg, preg PReg) error {
 		a.free(vreg)
 	}
 
-	if preg.Type() == RegTypeFloat {
-		if a.fltBlocked.Contains(preg.ID()) {
-			return ErrNoRegistersAvailable
-		}
-		a.floatAvail = a.floatAvail.Clear(preg.ID())
-	} else {
-		if a.intBlocked.Contains(preg.ID()) {
-			return ErrNoRegistersAvailable
-		}
-		a.intAvail = a.intAvail.Clear(preg.ID())
+	typ := preg.Type()
+	if a.blocked[typ].Contains(preg.ID()) {
+		return ErrNoRegistersAvailable
 	}
+	a.avail[typ] = a.avail[typ].Clear(preg.ID())
 
 	a.bind(vreg, preg)
 	return nil
@@ -114,40 +98,25 @@ func (a *regAlloc) free(vreg VReg) {
 	delete(a.bindings, vreg.ID())
 	delete(a.owners, regKey{typ: preg.Type(), id: preg.ID()})
 
-	switch preg.Type() {
-	case RegTypeFloat:
-		if !a.fltBlocked.Contains(preg.ID()) {
-			a.floatAvail = a.floatAvail.Set(preg.ID())
-		}
-	default:
-		if !a.intBlocked.Contains(preg.ID()) {
-			a.intAvail = a.intAvail.Set(preg.ID())
-		}
+	typ := preg.Type()
+	if !a.blocked[typ].Contains(preg.ID()) {
+		a.avail[typ] = a.avail[typ].Set(preg.ID())
 	}
 }
 
 // block marks preg permanently unusable (neither alloc nor reserve can
 // claim it).
 func (a *regAlloc) block(preg PReg) {
-	switch preg.Type() {
-	case RegTypeFloat:
-		a.fltBlocked = a.fltBlocked.Set(preg.ID())
-		a.floatAvail = a.floatAvail.Clear(preg.ID())
-	default:
-		a.intBlocked = a.intBlocked.Set(preg.ID())
-		a.intAvail = a.intAvail.Clear(preg.ID())
-	}
+	typ := preg.Type()
+	a.blocked[typ] = a.blocked[typ].Set(preg.ID())
+	a.avail[typ] = a.avail[typ].Clear(preg.ID())
 }
 
 // exclude marks preg unavailable for alloc but still reservable. ABI
 // scratch registers use this so lowerers can pin them explicitly.
 func (a *regAlloc) exclude(preg PReg) {
-	switch preg.Type() {
-	case RegTypeFloat:
-		a.fltExcluded = a.fltExcluded.Set(preg.ID())
-	default:
-		a.intExcluded = a.intExcluded.Set(preg.ID())
-	}
+	typ := preg.Type()
+	a.excluded[typ] = a.excluded[typ].Set(preg.ID())
 }
 
 // owner reports the vreg that currently holds preg's slot, if any. The

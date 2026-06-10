@@ -1,6 +1,9 @@
 package asm
 
-import "fmt"
+import (
+	"fmt"
+	"math/bits"
+)
 
 // Reg is implemented by both physical and virtual registers.
 type Reg interface {
@@ -41,6 +44,20 @@ const (
 	Width64        RegWidth = 64
 )
 
+// RegMask is a bitmask of physical register IDs (0..63).
+type RegMask uint64
+
+// RegInfo enumerates the integer and float register banks of an
+// architecture and the IDs the assembler must avoid (ABI-reserved,
+// frame pointer, link register, etc.).
+type RegInfo struct {
+	NumInt      uint8
+	NumFloat    uint8
+	IntReserved RegMask
+	FltReserved RegMask
+	Scratch     RegMask
+}
+
 // NewPReg constructs a physical register descriptor.
 func NewPReg(id uint8, typ RegType, w RegWidth) PReg {
 	return PReg{id: id, typ: typ, width: w}
@@ -51,23 +68,24 @@ func NewVReg(id int32, typ RegType, w RegWidth) VReg {
 	return VReg{id: id, typ: typ, width: w}
 }
 
-// Compatible reports whether a and b share the same register type and width.
-func Compatible(a, b Reg) bool {
-	return a.Type() == b.Type() && a.Width() == b.Width()
+// NewRegMask builds a mask from a list of physical register IDs.
+func NewRegMask(ids []uint8) RegMask {
+	var m RegMask
+	for _, id := range ids {
+		m |= 1 << id
+	}
+	return m
 }
 
-// Compatibles reports whether a and b are element-wise shape-compatible:
-// equal length with matching type and width at every position.
-func Compatibles[A, B Reg](a []A, b []B) bool {
-	if len(a) != len(b) {
-		return false
+// NewRegInfo describes an architecture's register banks and reserved IDs.
+func NewRegInfo(numInt, numFloat uint8, intReserved, fltReserved, scratch []uint8) RegInfo {
+	return RegInfo{
+		NumInt:      numInt,
+		NumFloat:    numFloat,
+		IntReserved: NewRegMask(intReserved),
+		FltReserved: NewRegMask(fltReserved),
+		Scratch:     NewRegMask(scratch),
 	}
-	for i := range a {
-		if !Compatible(a[i], b[i]) {
-			return false
-		}
-	}
-	return true
 }
 
 func (r PReg) ID() uint8       { return r.id }
@@ -97,4 +115,59 @@ func (r VReg) String() string {
 		prefix = "vf"
 	}
 	return fmt.Sprintf("%s%d", prefix, r.id)
+}
+
+func (m RegMask) Set(id uint8) RegMask {
+	if id < 64 {
+		m |= 1 << id
+	}
+	return m
+}
+
+func (m RegMask) Clear(id uint8) RegMask {
+	if id < 64 {
+		m &^= 1 << id
+	}
+	return m
+}
+
+func (m RegMask) Contains(id uint8) bool {
+	return id < 64 && (m&(1<<id)) != 0
+}
+
+func (m RegMask) First() uint8 {
+	if m == 0 {
+		return 0xFF
+	}
+	return uint8(bits.TrailingZeros64(uint64(m)))
+}
+
+func (m RegMask) PopFirst() (uint8, RegMask) {
+	if m == 0 {
+		return 0xFF, m
+	}
+	i := uint8(bits.TrailingZeros64(uint64(m)))
+	m &^= 1 << i
+	return i, m
+}
+
+func (m RegMask) Count() int {
+	return bits.OnesCount64(uint64(m))
+}
+
+func (ri RegInfo) Allocatable(typ RegType) RegMask {
+	var count uint8
+	var reserved RegMask
+
+	if typ == RegTypeInt {
+		count = ri.NumInt
+		reserved = ri.IntReserved
+	} else {
+		count = ri.NumFloat
+		reserved = ri.FltReserved
+	}
+
+	mask := RegMask((1 << count) - 1)
+	mask &^= reserved
+	return mask
 }

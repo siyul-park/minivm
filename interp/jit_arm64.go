@@ -83,39 +83,39 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 	case instr.GLOBAL_GET:
 		return l.globalGet(ctx)
 	case instr.GLOBAL_SET:
-		return l.globalSet(ctx)
+		return l.globalPut(ctx, true)
 	case instr.LOCAL_GET:
 		return l.localGet(ctx)
 	case instr.LOCAL_SET:
-		return l.localSet(ctx)
+		return l.localPut(ctx, true)
 	case instr.I32_ADD:
-		return l.i32Add(ctx)
+		return l.i32Binary(ctx, arm64.ADD)
 	case instr.I32_SUB:
-		return l.i32Sub(ctx)
+		return l.i32Binary(ctx, arm64.SUB)
 	case instr.I32_MUL:
-		return l.i32Mul(ctx)
+		return l.i32Binary(ctx, arm64.MUL)
 	case instr.I32_DIV_S:
-		return l.i32DivS(ctx)
+		return l.i32Divide(ctx, arm64.SDIV, l.sign32, false)
 	case instr.I32_DIV_U:
-		return l.i32DivU(ctx)
+		return l.i32Divide(ctx, arm64.UDIV, l.zero32, false)
 	case instr.I32_REM_S:
-		return l.i32RemS(ctx)
+		return l.i32Divide(ctx, arm64.SDIV, l.sign32, true)
 	case instr.I32_REM_U:
-		return l.i32RemU(ctx)
+		return l.i32Divide(ctx, arm64.UDIV, l.zero32, true)
 	case instr.I32_AND:
-		return l.i32And(ctx)
+		return l.i32Logic(ctx, arm64.AND)
 	case instr.I32_OR:
-		return l.i32Or(ctx)
+		return l.i32Logic(ctx, arm64.ORR)
 	case instr.I32_XOR:
 		return l.i32Xor(ctx)
 	case instr.I32_EQZ:
 		return l.i32Eqz(ctx)
 	case instr.I32_SHL:
-		return l.i32Shl(ctx)
+		return l.i32Shift(ctx, arm64.LSL, l.zero32)
 	case instr.I32_SHR_S:
-		return l.i32ShrS(ctx)
+		return l.i32Shift(ctx, arm64.ASR, l.sign32)
 	case instr.I32_SHR_U:
-		return l.i32ShrU(ctx)
+		return l.i32Shift(ctx, arm64.LSR, l.zero32)
 	case instr.I32_EQ:
 		return l.i32Cmp(ctx, nil, arm64.CondEQ)
 	case instr.I32_NE:
@@ -143,21 +143,21 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 	case instr.I64_EQZ:
 		return l.i64Eqz(ctx)
 	case instr.I64_ADD:
-		return l.i64Add(ctx)
+		return l.i64Binary(ctx, arm64.ADD, l.sign64)
 	case instr.I64_SUB:
-		return l.i64Sub(ctx)
+		return l.i64Binary(ctx, arm64.SUB, l.sign64)
 	case instr.I64_MUL:
-		return l.i64Mul(ctx)
+		return l.i64Binary(ctx, arm64.MUL, l.sign64)
 	case instr.I64_DIV_S:
-		return l.i64DivS(ctx)
+		return l.i64Divide(ctx, arm64.SDIV, l.sign64, false)
 	case instr.I64_DIV_U:
-		return l.i64DivU(ctx)
+		return l.i64Divide(ctx, arm64.UDIV, l.zero64, false)
 	case instr.I64_REM_S:
-		return l.i64RemS(ctx)
+		return l.i64Divide(ctx, arm64.SDIV, l.sign64, true)
 	case instr.I64_REM_U:
-		return l.i64RemU(ctx)
+		return l.i64Divide(ctx, arm64.UDIV, l.zero64, true)
 	case instr.I64_SHL:
-		return l.i64Shl(ctx)
+		return l.i64Shift(ctx, arm64.LSL, l.sign64, true)
 	case instr.I64_LT_S:
 		return l.i64Cmp(ctx, l.sign64, arm64.CondLT)
 	case instr.I64_LE_S:
@@ -175,9 +175,9 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 	case instr.I64_GE_U:
 		return l.i64Cmp(ctx, l.zero64, arm64.CondCS)
 	case instr.I64_SHR_S:
-		return l.i64ShrS(ctx)
+		return l.i64Shift(ctx, arm64.ASR, l.sign64, false)
 	case instr.I64_SHR_U:
-		return l.i64ShrU(ctx)
+		return l.i64Shift(ctx, arm64.LSR, l.zero64, true)
 	case instr.BR:
 		return l.br(ctx)
 	case instr.BR_IF:
@@ -187,13 +187,13 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 	case instr.SELECT:
 		return l.choose(ctx)
 	case instr.LOCAL_TEE:
-		return l.localTee(ctx)
+		return l.localPut(ctx, false)
 	case instr.GLOBAL_TEE:
-		return l.globalTee(ctx)
+		return l.globalPut(ctx, false)
 	case instr.I32_TO_I64_S:
-		return l.i32ToI64S(ctx)
+		return l.i32ToI64(ctx, l.sign32)
 	case instr.I32_TO_I64_U:
-		return l.i32ToI64U(ctx)
+		return l.i32ToI64(ctx, l.zero32)
 	case instr.I64_TO_I32:
 		return l.i64ToI32(ctx)
 	case instr.F32_ADD:
@@ -217,11 +217,11 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 	case instr.F32_GE:
 		return l.f32Cmp(ctx, arm64.CondGE)
 	case instr.F32_TO_I32_S:
-		return l.f32ToI32S(ctx)
+		return l.floatToI32(ctx, l.unboxF32, arm64.FCVTZS)
 	case instr.F32_TO_I32_U:
-		return l.f32ToI32U(ctx)
+		return l.floatToI32(ctx, l.unboxF32, arm64.FCVTZU)
 	case instr.F32_TO_I64_S:
-		return l.f32ToI64S(ctx)
+		return l.floatToI64(ctx, l.unboxF32, arm64.FCVTZS)
 	case instr.F32_TO_I64_U:
 		return l.f32ToI64U(ctx)
 	case instr.F64_ADD:
@@ -245,13 +245,13 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 	case instr.F64_GE:
 		return l.f64Cmp(ctx, arm64.CondGE)
 	case instr.F64_TO_I32_S:
-		return l.f64ToI32S(ctx)
+		return l.floatToI32(ctx, l.unboxF64, arm64.FCVTZS)
 	case instr.F64_TO_I32_U:
-		return l.f64ToI32U(ctx)
+		return l.floatToI32(ctx, l.unboxF64, arm64.FCVTZU)
 	case instr.F64_TO_I64_S:
-		return l.f64ToI64S(ctx)
+		return l.floatToI64(ctx, l.unboxF64, arm64.FCVTZS)
 	case instr.F64_TO_I64_U:
-		return l.f64ToI64U(ctx)
+		return l.floatToI64(ctx, l.unboxF64, arm64.FCVTZU)
 	case instr.I32_TO_F32_S:
 		return l.toFloat(ctx, asm.Width32, arm64.SCVTF, l.sign32)
 	case instr.I32_TO_F32_U:
@@ -699,11 +699,11 @@ func (l arm64JIT) globalGet(ctx *jitContext) bool {
 	return true
 }
 
-// globalSet pops the segment stack top and stores it to globals[idx].
-// The same ref-handling restriction as globalGet applies; in addition,
-// SET overwriting a previously held ref would leak it, so a current ref in
-// globals[idx] also rejects.
-func (l arm64JIT) globalSet(ctx *jitContext) bool {
+// globalPut stores the segment stack top to globals[idx]; pop consumes it
+// (GLOBAL_SET) or leaves it on the stack (GLOBAL_TEE). The same ref-handling
+// restriction as globalGet applies; in addition, overwriting a previously
+// held ref would leak it, so a current ref in globals[idx] also rejects.
+func (l arm64JIT) globalPut(ctx *jitContext, pop bool) bool {
 	idx, ok := l.global(ctx)
 	if !ok {
 		return false
@@ -725,7 +725,9 @@ func (l arm64JIT) globalSet(ctx *jitContext) bool {
 	}
 	ctx.assembler.Emit(arm64.STR(src, vGlobal, int16(idx*8)))
 
-	ctx.stack = ctx.stack[:len(ctx.stack)-1]
+	if pop {
+		ctx.stack = ctx.stack[:len(ctx.stack)-1]
+	}
 	return true
 }
 
@@ -754,8 +756,9 @@ func (l arm64JIT) localGet(ctx *jitContext) bool {
 	return true
 }
 
-// localSet pops the segment stack top into stack[bp+idx].
-func (l arm64JIT) localSet(ctx *jitContext) bool {
+// localPut stores the segment stack top into stack[bp+idx]; pop consumes it
+// (LOCAL_SET) or leaves it on the stack (LOCAL_TEE).
+func (l arm64JIT) localPut(ctx *jitContext, pop bool) bool {
 	idx := int(ctx.code[ctx.ip+1])
 	if idx >= len(ctx.locals) {
 		return false
@@ -779,7 +782,9 @@ func (l arm64JIT) localSet(ctx *jitContext) bool {
 	}
 	ctx.assembler.Emit(arm64.STR(src, addr, 0))
 
-	ctx.stack = ctx.stack[:len(ctx.stack)-1]
+	if pop {
+		ctx.stack = ctx.stack[:len(ctx.stack)-1]
+	}
 	return true
 }
 
@@ -817,34 +822,6 @@ func (l arm64JIT) guardI64(ctx *jitContext, v asm.VReg) {
 	l.guardI64Value(ctx, v, append([]asm.VReg(nil), ctx.stack...))
 }
 
-func (l arm64JIT) i32Add(ctx *jitContext) bool {
-	return l.i32Binary(ctx, arm64.ADD)
-}
-
-func (l arm64JIT) i32Sub(ctx *jitContext) bool {
-	return l.i32Binary(ctx, arm64.SUB)
-}
-
-func (l arm64JIT) i32Mul(ctx *jitContext) bool {
-	return l.i32Binary(ctx, arm64.MUL)
-}
-
-func (l arm64JIT) i32DivS(ctx *jitContext) bool {
-	return l.i32Quotient(ctx, arm64.SDIV, l.sign32)
-}
-
-func (l arm64JIT) i32DivU(ctx *jitContext) bool {
-	return l.i32Quotient(ctx, arm64.UDIV, l.zero32)
-}
-
-func (l arm64JIT) i32RemS(ctx *jitContext) bool {
-	return l.i32Remainder(ctx, arm64.SDIV, l.sign32)
-}
-
-func (l arm64JIT) i32RemU(ctx *jitContext) bool {
-	return l.i32Remainder(ctx, arm64.UDIV, l.zero32)
-}
-
 // i32Binary lowers an i32 binary arithmetic opcode whose result can
 // land in any bit pattern (ADD, SUB, MUL). The lowered sequence runs the
 // op on the boxed inputs in 64-bit registers, then re-masks and re-tags
@@ -864,10 +841,14 @@ func (l arm64JIT) i32Binary(ctx *jitContext, op func(dst, src1, src2 asm.Reg) as
 	return true
 }
 
-func (l arm64JIT) i32Quotient(
+// i32Divide lowers i32 division: the quotient when rem is false, the
+// remainder (quotient + MSUB) when rem is true. prep extracts each operand's
+// value lane; a zero divisor exits to the threaded interpreter.
+func (l arm64JIT) i32Divide(
 	ctx *jitContext,
 	div func(dst, src1, src2 asm.Reg) asm.Instruction,
 	prep func(*jitContext, asm.VReg) asm.VReg,
+	rem bool,
 ) bool {
 	if !l.need(ctx, 2) {
 		return false
@@ -879,28 +860,11 @@ func (l arm64JIT) i32Quotient(
 
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(div(raw, a, b))
-	boxed := l.boxI32(ctx, raw)
-	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)
-	return true
-}
-
-func (l arm64JIT) i32Remainder(
-	ctx *jitContext,
-	div func(dst, src1, src2 asm.Reg) asm.Instruction,
-	prep func(*jitContext, asm.VReg) asm.VReg,
-) bool {
-	if !l.need(ctx, 2) {
-		return false
+	if rem {
+		quotient := raw
+		raw = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.MSUB(raw, quotient, b, a))
 	}
-	pre := append([]asm.VReg(nil), ctx.stack...)
-	b := prep(ctx, ctx.stack[len(ctx.stack)-1])
-	a := prep(ctx, ctx.stack[len(ctx.stack)-2])
-	l.guardNonZero(ctx, b, pre)
-
-	quotient := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(div(quotient, a, b))
-	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.MSUB(raw, quotient, b, a))
 	boxed := l.boxI32(ctx, raw)
 	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)
 	return true
@@ -1117,38 +1081,15 @@ func (l arm64JIT) i64Eqz(ctx *jitContext) bool {
 	return true
 }
 
-// i64Add lowers the boxable fast path and emits an inline fallback for
-// results outside the 49-bit boxed i64 range. The fallback materializes the
-// pre-op stack and resumes threaded execution at this opcode.
-func (l arm64JIT) i64Add(ctx *jitContext) bool {
-	return l.i64Binary(ctx, arm64.ADD, l.sign64, false)
-}
-
-func (l arm64JIT) i64Sub(ctx *jitContext) bool {
-	return l.i64Binary(ctx, arm64.SUB, l.sign64, false)
-}
-
-func (l arm64JIT) i64Mul(ctx *jitContext) bool {
-	return l.i64Binary(ctx, arm64.MUL, l.sign64, false)
-}
-
-func (l arm64JIT) i64DivS(ctx *jitContext) bool {
-	return l.i64Binary(ctx, arm64.SDIV, l.sign64, true)
-}
-
-func (l arm64JIT) i64DivU(ctx *jitContext) bool {
-	return l.i64Binary(ctx, arm64.UDIV, l.zero64, true)
-}
-
-func (l arm64JIT) i64RemS(ctx *jitContext) bool {
-	return l.i64Remainder(ctx, arm64.SDIV, l.sign64)
-}
-
-func (l arm64JIT) i64RemU(ctx *jitContext) bool {
-	return l.i64Remainder(ctx, arm64.UDIV, l.zero64)
-}
-
-func (l arm64JIT) i64Shl(ctx *jitContext) bool {
+// i64Shift lowers an i64 shift. checked routes the result through finishI64
+// for shifts that can leave the 49-bit boxed range (SHL, SHR_U); an
+// arithmetic right shift of a boxable i64 stays boxable, so it boxes directly.
+func (l arm64JIT) i64Shift(
+	ctx *jitContext,
+	op func(dst, src1, src2 asm.Reg) asm.Instruction,
+	prep func(*jitContext, asm.VReg) asm.VReg,
+	checked bool,
+) bool {
 	if !l.need(ctx, 2) {
 		return false
 	}
@@ -1161,57 +1102,25 @@ func (l arm64JIT) i64Shl(ctx *jitContext) bool {
 	shift := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.ANDI(shift, b, 0x3F))
 
+	val := prep(ctx, a)
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LSL(raw, l.sign64(ctx, a), shift))
-	return l.finishI64(ctx, pre, raw, 2)
-}
-
-// i64ShrS is safe to lower because arithmetic right shift of a boxable i64 stays boxable.
-func (l arm64JIT) i64ShrS(ctx *jitContext) bool {
-	if !l.need(ctx, 2) {
-		return false
+	ctx.assembler.Emit(op(raw, val, shift))
+	if checked {
+		return l.finishI64(ctx, pre, raw, 2)
 	}
-	pre := append([]asm.VReg(nil), ctx.stack...)
-	b := ctx.stack[len(ctx.stack)-1]
-	a := ctx.stack[len(ctx.stack)-2]
-	l.guardI64Value(ctx, a, pre)
-	l.guardI64Value(ctx, b, pre)
-
-	shift := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ANDI(shift, b, 0x3F))
-
-	val := l.sign64(ctx, a)
-	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ASR(raw, val, shift))
-
 	boxed := l.boxI64(ctx, raw)
 	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)
 	return true
 }
 
-func (l arm64JIT) i64ShrU(ctx *jitContext) bool {
-	if !l.need(ctx, 2) {
-		return false
-	}
-	pre := append([]asm.VReg(nil), ctx.stack...)
-	b := ctx.stack[len(ctx.stack)-1]
-	a := ctx.stack[len(ctx.stack)-2]
-	l.guardI64Value(ctx, a, pre)
-	l.guardI64Value(ctx, b, pre)
-
-	shift := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ANDI(shift, b, 0x3F))
-
-	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LSR(raw, l.zero64(ctx, a), shift))
-	return l.finishI64(ctx, pre, raw, 2)
-}
-
+// i64Binary lowers the boxable fast path of an i64 binary arithmetic opcode
+// and emits an inline fallback for results outside the 49-bit boxed i64
+// range. The fallback materializes the pre-op stack and resumes threaded
+// execution at this opcode.
 func (l arm64JIT) i64Binary(
 	ctx *jitContext,
 	op func(dst, src1, src2 asm.Reg) asm.Instruction,
 	prep func(*jitContext, asm.VReg) asm.VReg,
-	guardZero bool,
 ) bool {
 	if !l.need(ctx, 2) {
 		return false
@@ -1223,19 +1132,20 @@ func (l arm64JIT) i64Binary(
 	l.guardI64Value(ctx, b, pre)
 	b = prep(ctx, b)
 	a = prep(ctx, a)
-	if guardZero {
-		l.guardNonZero(ctx, b, pre)
-	}
 
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(op(raw, a, b))
 	return l.finishI64(ctx, pre, raw, 2)
 }
 
-func (l arm64JIT) i64Remainder(
+// i64Divide lowers i64 division: the quotient when rem is false, the
+// remainder (quotient + MSUB) when rem is true. A zero divisor exits to the
+// threaded interpreter.
+func (l arm64JIT) i64Divide(
 	ctx *jitContext,
 	div func(dst, src1, src2 asm.Reg) asm.Instruction,
 	prep func(*jitContext, asm.VReg) asm.VReg,
+	rem bool,
 ) bool {
 	if !l.need(ctx, 2) {
 		return false
@@ -1249,10 +1159,13 @@ func (l arm64JIT) i64Remainder(
 	a = prep(ctx, a)
 	l.guardNonZero(ctx, b, pre)
 
-	quotient := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(div(quotient, a, b))
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.MSUB(raw, quotient, b, a))
+	ctx.assembler.Emit(div(raw, a, b))
+	if rem {
+		quotient := raw
+		raw = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.MSUB(raw, quotient, b, a))
+	}
 	return l.finishI64(ctx, pre, raw, 2)
 }
 
@@ -1347,81 +1260,15 @@ func (l arm64JIT) choose(ctx *jitContext) bool {
 	return true
 }
 
-// localTee stores the stack top to stack[bp+idx] and leaves it on the stack.
-func (l arm64JIT) localTee(ctx *jitContext) bool {
-	idx := int(ctx.code[ctx.ip+1])
-	if idx >= len(ctx.locals) {
-		return false
-	}
-	if ctx.locals[idx] == types.KindRef {
-		return false
-	}
-	if !l.need(ctx, 1) {
-		return false
-	}
-
-	src := ctx.stack[len(ctx.stack)-1]
-	addr, ok := l.localAddr(ctx, idx)
-	if !ok {
-		return false
-	}
-	if ctx.locals[idx] == types.KindI64 {
-		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		ctx.assembler.Emit(arm64.LDR(old, addr, 0))
-		l.guardI64(ctx, old)
-	}
-	ctx.assembler.Emit(arm64.STR(src, addr, 0))
-	return true
-}
-
-// globalTee stores the stack top to globals[idx] and leaves it on the stack.
-func (l arm64JIT) globalTee(ctx *jitContext) bool {
-	idx, ok := l.global(ctx)
-	if !ok {
-		return false
-	}
-	if !l.need(ctx, 1) {
-		return false
-	}
-
-	pre := append([]asm.VReg(nil), ctx.stack...)
-	src := ctx.stack[len(ctx.stack)-1]
-	vGlobal := ctx.pin(scratchGlobals)
-	old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDR(old, vGlobal, int16(idx*8)))
-	l.guardRef(ctx, old, pre)
-	l.guardRef(ctx, src, pre)
-	if ctx.globals[idx].Kind() == types.KindI64 {
-		l.guardI64(ctx, old)
-	}
-	ctx.assembler.Emit(arm64.STR(src, vGlobal, int16(idx*8)))
-	return true
-}
-
-// i32ToI64S sign-extends the i32 value lane of a boxed i32 to a full 64-bit
-// value, then boxes the result as an i64. All i32 values are within the
-// boxable i64 range, so no overflow check is needed.
-func (l arm64JIT) i32ToI64S(ctx *jitContext) bool {
+// i32ToI64 extends the i32 value lane of a boxed i32 to 64 bits via prep
+// (sign- or zero-extension), then boxes the result as an i64. All i32 values
+// are within the boxable i64 range, so no overflow check is needed.
+func (l arm64JIT) i32ToI64(ctx *jitContext, prep func(*jitContext, asm.VReg) asm.VReg) bool {
 	if !l.need(ctx, 1) {
 		return false
 	}
 	a := ctx.stack[len(ctx.stack)-1]
-	// Sign-extend the low 32 bits (i32 value lane) to 64 bits.
-	ext := l.sign32(ctx, a)
-	boxed := l.boxI64(ctx, ext)
-	ctx.stack[len(ctx.stack)-1] = boxed
-	return true
-}
-
-// i32ToI64U zero-extends the i32 value lane of a boxed i32 to a 64-bit value,
-// then boxes the result as an i64.
-func (l arm64JIT) i32ToI64U(ctx *jitContext) bool {
-	if !l.need(ctx, 1) {
-		return false
-	}
-	a := ctx.stack[len(ctx.stack)-1]
-	// Zero-extend: mask to lower 32 bits (unsigned i32).
-	ext := l.zero32(ctx, a)
+	ext := prep(ctx, a)
 	boxed := l.boxI64(ctx, ext)
 	ctx.stack[len(ctx.stack)-1] = boxed
 	return true
@@ -1758,18 +1605,6 @@ func (l arm64JIT) f64Cmp(ctx *jitContext, cond uint8) bool {
 	return true
 }
 
-func (l arm64JIT) f32ToI32S(ctx *jitContext) bool {
-	return l.floatToI32(ctx, l.unboxF32, arm64.FCVTZS)
-}
-
-func (l arm64JIT) f32ToI32U(ctx *jitContext) bool {
-	return l.floatToI32(ctx, l.unboxF32, arm64.FCVTZU)
-}
-
-func (l arm64JIT) f32ToI64S(ctx *jitContext) bool {
-	return l.floatToI64(ctx, l.unboxF32, arm64.FCVTZS)
-}
-
 // f32ToI64U converts a boxed f32 to an unsigned i64. A 32-bit unsigned result
 // maxes out at 2^32-1, which always fits the 49-bit boxed range, so unlike
 // floatToI64 it boxes directly with no overflow guard.
@@ -1785,22 +1620,6 @@ func (l arm64JIT) f32ToI64U(ctx *jitContext) bool {
 	boxed := l.boxI64(ctx, ext)
 	ctx.stack[len(ctx.stack)-1] = boxed
 	return true
-}
-
-func (l arm64JIT) f64ToI32S(ctx *jitContext) bool {
-	return l.floatToI32(ctx, l.unboxF64, arm64.FCVTZS)
-}
-
-func (l arm64JIT) f64ToI32U(ctx *jitContext) bool {
-	return l.floatToI32(ctx, l.unboxF64, arm64.FCVTZU)
-}
-
-func (l arm64JIT) f64ToI64S(ctx *jitContext) bool {
-	return l.floatToI64(ctx, l.unboxF64, arm64.FCVTZS)
-}
-
-func (l arm64JIT) f64ToI64U(ctx *jitContext) bool {
-	return l.floatToI64(ctx, l.unboxF64, arm64.FCVTZU)
 }
 
 // toFloat pops one boxed integer value, extracts its value lane via prep,

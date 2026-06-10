@@ -22,9 +22,9 @@ Both compilers read the same bytecode. `i.code[addr][ip]` is the primary dispatc
 
 `jitCompiler` is private to `interp` and lives in `jit.go`. `Compile(i, addr, fn)` reads the current interpreter state directly and attempts two strategies in order:
 
-1. **Whole-function Entry** (`compiler.whole`): all opcodes lower without rejection. On success, an `asm.Callable` is stored in `jitModule.entry`. The `interp` side wraps `entry` in a Go closure that handles frame teardown after the native call returns.
+1. **Whole-function Entry** (`compiler.whole`): all opcodes lower without rejection. On success, an `asm.Callable` is stored in `jitModule.entries[addr]`. The `interp` side wraps that callable in a Go closure that handles frame teardown after the native call returns.
 
-2. **Segment compilation** (`compiler.segments`): processes hot IPs from the interpreter profiler. Each hot IP seeds a segment; successors are queued when forced by `BR` or by a rejected op with a safe structural successor. Each accepted segment is stored in `jitModule.segments[ip]`.
+2. **Segment compilation** (`compiler.segments`): processes hot IPs from the interpreter profiler. Each hot IP seeds a segment; successors are queued when forced by `BR` or by a rejected op with a safe structural successor. Each accepted segment is appended to `jitModule.segments` as a `jitSegment{addr, ip, stack, callable}`.
 
 Compilation is one-shot per function — there is no re-tiering. Runtime
 deoptimization does exist: a guard or unsupported boundary returns to the
