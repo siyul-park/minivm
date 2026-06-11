@@ -18,6 +18,13 @@ program.Program
 
 Both compilers read the same bytecode. `i.code[addr][ip]` is the primary dispatch table. JIT replaces selected entries after compilation. Rejected segments fall back cleanly to threaded code.
 
+Solo interpreters compile into a private `jitCompiler` and private `asm.Buffer`.
+Pool interpreters use a shared `Cache`: member-local profiles stay uncontended on
+the hot path, aggregate trigger counts live in atomics, and the winning member
+compiles with a throwaway compiler. Published modules share only immutable
+`asm.Callable`s; each interpreter still binds those callables into its own
+threaded closure table at a safepoint.
+
 ## jitCompiler
 
 `jitCompiler` is private to `interp` and lives in `jit.go`. `Compile(i, addr, fn)` reads the current interpreter state directly and attempts two strategies in order:
@@ -263,6 +270,11 @@ asm.Link(buf, arch, []*Code, resolve) → []Linked
 `asm.Buffer` is a W^X mmap region for native code.
 
 Apple Silicon (Darwin/ARM64) enforces W^X at the hardware level. `asm/icache_darwin_arm64.go` flushes the instruction cache after each `Link`. Wrong seal/unseal ordering causes `SIGBUS` or `SIGILL`.
+
+Pool-published buffers are sealed once and never written again after publication.
+Later pool members install shared `Callable`s from the cache into their own
+closures instead of linking into the same buffer. The cache holds each published
+buffer until its owner and every attached interpreter have closed.
 
 ## ARM64 ABI Summary
 

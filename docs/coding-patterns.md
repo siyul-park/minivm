@@ -521,8 +521,6 @@ t.Run("threaded", func(t *testing.T) {
 })
 ```
 
-Exception only: package-level helpers iterating shared test data where test body is identical across all cases and variation is purely in inputs.
-
 ### 6.2 File naming
 
 ```text
@@ -532,6 +530,9 @@ jit_arm64.go   → jit_arm64_test.go
 ```
 
 Default to matching production files with corresponding `_test.go` files.
+Tests for a public symbol live in the `_test.go` file matching the production
+file that defines that symbol's owning type or constructor. `Cache.Close` belongs
+in `cache_test.go`, not in a neighboring pool or interpreter test file.
 
 When implementation file only supports another type's public API, put tests in owner type's test file. E.g., interpreter option functions and `Interpreter` methods belong in `interp_test.go`, even if implemented in smaller supporting file.
 
@@ -586,7 +587,9 @@ func TestBuffer_Append(t *testing.T) {
 
 **No grouping wrappers** unless wrapper does meaningful shared setup that can't be inlined. Wrapper that only groups adds depth without gain — hoist to parent level.
 
-Shared setup across few cases: inline or extract local helper:
+Shared setup across few cases: inline it at each case. Do not extract a
+test-only data builder such as `smallProgram()` or `pooledArithmeticProgram()`;
+the duplicated setup is documentation of the API under test.
 
 ```go
 // WRONG: extra level just for grouping
@@ -595,28 +598,9 @@ t.Run("with auth", func(t *testing.T) {
     t.Run("expired token", func(t *testing.T) { ... })
 })
 
-// CORRECT: hoisted, setup duplicated or extracted
-makeCtx := func() context.Context { ... }
-t.Run("valid token", func(t *testing.T) { ctx := makeCtx(); ... })
-t.Run("expired token", func(t *testing.T) { ctx := makeCtx(); ... })
-```
-
-Multiple execution modes: extract helper, call from explicit `t.Run` blocks:
-
-```go
-func TestFoo_Run(t *testing.T) {
-    run := func(t *testing.T, opts ...Option) {
-        t.Helper()
-        for _, tt := range cases {
-            t.Run(fmt.Sprint(tt.in), func(t *testing.T) { ... })
-        }
-    }
-
-    t.Run("default", func(t *testing.T) { run(t) })
-    t.Run("jit", func(t *testing.T) { run(t, WithJIT()) })
-
-    t.Run("canceled context", func(t *testing.T) { ... })
-}
+// CORRECT: hoisted, setup visible in each case
+t.Run("valid token", func(t *testing.T) { ctx := context.WithValue(...); ... })
+t.Run("expired token", func(t *testing.T) { ctx := context.WithValue(...); ... })
 ```
 
 ### 6.5 Assertions
@@ -652,14 +636,9 @@ package arm64
 ### 6.8 Test helper policy
 
 No test helpers. Tests stay self-contained; don't hide setup, assertions, or execution flow.
-
-Exception only if all are true:
-
-1. logic repeats across multiple files
-2. duplication harms readability
-3. abstraction models a general use case
-
-Even then, prefer improving production API.
+Test-only helpers that return fixtures, programs, contexts, or configured
+objects are not allowed. Inline setup in the `t.Run` body or use a table when
+all cases share one assertion shape.
 
 ## 7. Git & PR Workflow
 

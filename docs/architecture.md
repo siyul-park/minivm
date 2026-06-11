@@ -94,7 +94,8 @@ Two layers:
 | `rc []int` | ref counts parallel to heap |
 | `free []int` | free heap indices |
 | `globals []Boxed` | globals |
-| `buffer *asm.Buffer` | shared executable memory, allocated on first JIT |
+| `compiler *jitCompiler` | private JIT compiler and executable buffer for solo interpreters |
+| `cache *Cache` | shared JIT module/profile cache when owned by an `interp.Pool` |
 
 `threadedCompiler` (`threaded.go`): `[256]func` table populated in `init()`. Each compile-time entry reads operands, advances `c.ip`, and returns a runtime closure that captures constants and advances `f.ip` by instruction width.
 
@@ -104,7 +105,7 @@ Two layers:
 
 `HostObject` (`host.go`): wraps a Go value that carries methods or unexported fields. `STRUCT_GET`/`STRUCT_SET` use it as the concrete host-value fallback after the native `*types.Struct` fast path. Field reads/writes use compiled metadata and unsafe offsets against an internal addressable copy of the receiver; methods are pre-bound as `*HostFunction` values allocated on the VM heap.
 
-`Pool` (`pool.go`): multi-goroutine entry point. `Interpreter` is single-goroutine; only `program.Program` is safe to share across goroutines. `NewPool(prog, size, opts...)` lazily lends up to `size` interpreters. Use `Get`/`Put` or `Run(ctx, fn)` to borrow one per goroutine. `Put` calls `Reset`; `Close` releases every idle interpreter's JIT buffer. Outstanding interpreters close on their next `Put` after `Close`. Heap refs from a borrowed interpreter are invalid after `Put` because `Reset` wipes the heap.
+`Pool` (`pool.go`): multi-goroutine entry point. `Interpreter` is single-goroutine; `NewPool(prog, size, opts...)` lazily lends up to `size` interpreters that share one `Cache`. The cache aggregates JIT trigger samples, compiles each hot function once, publishes immutable native modules, and exposes `Pool.Profile()` from member profiles flushed on `Put`/`Close`. Use `Get`/`Put` or `Run(ctx, fn)` to borrow one interpreter per goroutine. `Put` flushes profile samples, calls `Reset`, and returns the interpreter to idle storage. `Close` releases idle interpreters and drops the cache owner reference; executable buffers are freed only after the cache owner and all outstanding interpreters are closed. Heap refs from a borrowed interpreter are invalid after `Put` because `Reset` wipes the heap.
 
 ### `asm/`
 
@@ -201,8 +202,8 @@ Thin entrypoint around `cli.Root().Execute()`.
    ├─ main loop: code[f.ip](i)
    ├─ every 128 instructions:
    │  check ctx, consume fuel, call hook, prof.Add(addr, ip, opcode)
-   └─ if JIT enabled and prof.Samples(addr) reaches threshold rounded to tick cadence:
-      jitCompiler.Compile(instrs[addr])
+   └─ if JIT enabled and solo prof.Samples(addr), or pool cache samples(addr), reach threshold rounded to tick cadence:
+      jitCompiler.Compile(instrs[addr]) privately, or publish one shared Cache module
       └─ heat-sorted single-compile JIT trace pipeline:
          ├─ hot/forced basic blocks → natural-fallthrough traces
          ├─ each trace compiles once and exits through scratch SP/IP

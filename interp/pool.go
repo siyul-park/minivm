@@ -6,16 +6,19 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 )
 
 // Pool hands out Interpreter instances bound to a shared Program for use across
-// goroutines. Each Interpreter owns its runtime state and JIT buffer; callers
-// must borrow one per goroutine via Get/Put or Run.
+// goroutines. Each Interpreter owns its runtime state; callers must borrow one
+// per goroutine via Get/Put or Run. JIT code and aggregate profile data are
+// shared through the pool cache.
 type Pool struct {
-	prog *program.Program
-	opts []func(*option)
-	size int
+	prog  *program.Program
+	cache *Cache
+	opts  []func(*option)
+	size  int
 
 	idle chan *Interpreter
 	live atomic.Int64
@@ -33,14 +36,17 @@ func NewPool(prog *program.Program, size int, opts ...func(*option)) *Pool {
 	if size <= 0 {
 		size = 1
 	}
-	shared := make([]func(*option), 0, len(opts)+1)
-	shared = append(shared, WithMarshaler(&codec{}))
-	shared = append(shared, opts...)
+	cache := NewCache(prog)
+	all := make([]func(*option), 0, len(opts)+2)
+	all = append(all, WithMarshaler(&codec{}))
+	all = append(all, opts...)
+	all = append(all, WithCache(cache))
 	return &Pool{
-		prog: prog,
-		opts: shared,
-		size: size,
-		idle: make(chan *Interpreter, size),
+		prog:  prog,
+		cache: cache,
+		opts:  all,
+		size:  size,
+		idle:  make(chan *Interpreter, size),
 	}
 }
 
@@ -71,6 +77,7 @@ func (p *Pool) Put(i *Interpreter) {
 	if i == nil {
 		return
 	}
+	i.flush()
 	i.Reset()
 
 	p.mu.RLock()
@@ -103,12 +110,20 @@ func (p *Pool) Close() error {
 
 	var errs []error
 	for i := range p.idle {
+		i.flush()
 		if err := i.Close(); err != nil {
 			errs = append(errs, err)
 		}
 		p.live.Add(-1)
 	}
+	if err := p.cache.Close(); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
+}
+
+func (p *Pool) Profile() prof.Snapshot {
+	return p.cache.Profile()
 }
 
 func (p *Pool) dead() bool {
@@ -158,6 +173,7 @@ func (p *Pool) wait(ctx context.Context) (*Interpreter, error) {
 }
 
 func (p *Pool) drop(i *Interpreter) {
+	i.flush()
 	_ = i.Close()
 	p.live.Add(-1)
 }

@@ -36,6 +36,11 @@ if err := vm.Run(ctx); err != nil {
 snap := p.Snapshot()
 ```
 
+For pooled execution, prefer `pool.Profile()` over passing one `*prof.Stats`
+through `WithProfile` to `NewPool`: `prof.Stats` is not synchronized for
+concurrent `Add` calls. `Pool.Profile()` returns the cache aggregate as of the
+last `Put`/`Close`, plus shared JIT counters recorded at publication time.
+
 Hot-path allocation-free counters:
 
 | Method | Use |
@@ -51,6 +56,8 @@ Reporting helpers outside hot paths:
 | `Func(fn)` | copy one function profile |
 | `IP(fn,ip)` | copy one instruction profile |
 | `Snapshot()` | immutable deep copy of all profile data |
+| `Merge(snapshot)` | add a snapshot into this profile on a cold path |
+| `Reset()` | clear all profile data after a cold-path flush |
 
 `Snapshot` includes total samples, function/IP/opcode samples, and JIT counters. Function percent relative to total samples, IP percent to its function, opcode percent to total samples.
 
@@ -69,7 +76,7 @@ Reporting helpers outside hot paths:
 
 ## Profile-Guided JIT
 
-JIT activates when `Samples(fn)` reaches configured threshold rounded up to tick cadence. Default: `4096 / 128 = 32` samples. `WithThreshold(0)` activates on first sample; negative thresholds disable JIT.
+JIT activates when `Samples(fn)` reaches configured threshold rounded up to tick cadence. Default: `4096 / 128 = 32` samples. `WithThreshold(0)` activates on first sample; negative thresholds disable JIT. Pool members use the same rounded threshold, but the trigger count is aggregated across the shared cache so only one member wins compilation for each function.
 
 At compile time, profile data used to:
 

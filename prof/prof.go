@@ -152,6 +152,43 @@ func (p *Stats) Snapshot() Snapshot {
 	}
 }
 
+// Merge adds snapshot data into p.
+func (p *Stats) Merge(s Snapshot) {
+	for _, fn := range s.Funcs {
+		if fn.Index < 0 || fn.Samples == 0 {
+			continue
+		}
+		for len(p.funcs) <= fn.Index {
+			p.funcs = append(p.funcs, funcData{})
+		}
+		p.samples += fn.Samples
+		p.funcs[fn.Index].samples += fn.Samples
+		for _, ip := range fn.IPs {
+			if ip.Offset < 0 || ip.Samples == 0 {
+				continue
+			}
+			if len(p.funcs[fn.Index].ips) <= ip.Offset {
+				ips := make([]uint64, ip.Offset+1)
+				copy(ips, p.funcs[fn.Index].ips)
+				p.funcs[fn.Index].ips = ips
+			}
+			p.funcs[fn.Index].ips[ip.Offset] += ip.Samples
+		}
+	}
+	for _, op := range s.Opcodes {
+		p.opcodes[op.Code] += op.Samples
+	}
+	p.JITAdd(s.JIT)
+}
+
+// Reset clears all collected profile data.
+func (p *Stats) Reset() {
+	p.samples = 0
+	p.funcs = nil
+	clear(p.opcodes[:])
+	p.jit = JIT{}
+}
+
 // JITAdd merges d into the aggregate JIT counters.
 func (p *Stats) JITAdd(d JIT) {
 	p.jit.Attempts += d.Attempts

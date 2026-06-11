@@ -7,6 +7,7 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
+	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -240,5 +241,109 @@ func TestPool_Close(t *testing.T) {
 		require.NoError(t, p.Close())
 		p.Put(i)
 		require.Equal(t, int64(0), p.live.Load())
+	})
+}
+
+func TestPool_Profile(t *testing.T) {
+	t.Run("aggregates profiles on put", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.DROP),
+		})
+		p := NewPool(prog, 2, WithTick(1), WithThreshold(-1))
+		defer p.Close()
+
+		for range 2 {
+			i, err := p.Get(context.Background())
+			require.NoError(t, err)
+			require.NoError(t, i.Run(context.Background()))
+			p.Put(i)
+		}
+
+		snap := p.Profile()
+		require.Equal(t, uint64(4), snap.Samples)
+		require.Equal(t, uint64(4), snap.Funcs[0].Samples)
+		require.Equal(t, uint64(2), snap.Funcs[0].IPs[0].Samples)
+		require.Equal(t, 5, snap.Funcs[0].IPs[1].Offset)
+		require.Equal(t, uint64(2), snap.Funcs[0].IPs[1].Samples)
+	})
+
+	t.Run("does not double count repeated put cycles", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+		})
+		p := NewPool(prog, 1, WithTick(1), WithThreshold(-1))
+		defer p.Close()
+
+		i, err := p.Get(context.Background())
+		require.NoError(t, err)
+		require.NoError(t, i.Run(context.Background()))
+		p.Put(i)
+		require.Equal(t, uint64(1), p.Profile().Samples)
+
+		i, err = p.Get(context.Background())
+		require.NoError(t, err)
+		p.Put(i)
+		require.Equal(t, uint64(1), p.Profile().Samples)
+	})
+
+	t.Run("shares one jit attempt across pool", func(t *testing.T) {
+		requireJIT(t)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+		})
+		p := NewPool(prog, 2, WithTick(1), WithCutoff(1), WithThreshold(5))
+		defer p.Close()
+
+		first, err := p.Get(context.Background())
+		require.NoError(t, err)
+		second, err := p.Get(context.Background())
+		require.NoError(t, err)
+
+		require.NoError(t, first.Run(context.Background()))
+		value, err := first.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(3), value)
+		require.NoError(t, second.Run(context.Background()))
+		value, err = second.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(3), value)
+
+		p.Put(first)
+		p.Put(second)
+
+		jit := p.Profile().JIT
+		require.Equal(t, uint64(1), jit.Attempts)
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+		require.NotZero(t, jit.Bytes)
+	})
+
+	t.Run("late borrower installs published jit without compiling", func(t *testing.T) {
+		requireJIT(t)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+		})
+		p := NewPool(prog, 2, WithTick(1), WithCutoff(1), WithThreshold(1))
+		defer p.Close()
+
+		first, err := p.Get(context.Background())
+		require.NoError(t, err)
+		require.NoError(t, first.Run(context.Background()))
+		require.Equal(t, uint64(1), p.Profile().JIT.Attempts)
+
+		second, err := p.Get(context.Background())
+		require.NoError(t, err)
+		require.NoError(t, second.Run(context.Background()))
+		value, err := second.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(3), value)
+		p.Put(first)
+		p.Put(second)
+		require.Equal(t, uint64(1), p.Profile().JIT.Attempts)
 	})
 }

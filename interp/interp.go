@@ -22,6 +22,7 @@ type Interpreter struct {
 	marshaler Marshaler
 
 	compiler  *jitCompiler
+	cache     *Cache
 	fallbacks map[int]func(*Interpreter)
 	argv      [scratchCount]uint64
 	journal   []uint64
@@ -43,6 +44,7 @@ type Interpreter struct {
 
 	fp  int
 	sp  int
+	gen int
 	gas int64
 
 	threshold int64
@@ -82,6 +84,7 @@ type option struct {
 	profile   *prof.Stats
 	hook      func(*Interpreter) error
 	marshaler Marshaler
+	cache     *Cache
 	threshold int
 	cutoff    int
 
@@ -119,6 +122,10 @@ func WithHook(fn func(*Interpreter) error) func(*option) {
 
 func WithMarshaler(m Marshaler) func(*option) {
 	return func(o *option) { o.marshaler = m }
+}
+
+func WithCache(c *Cache) func(*option) {
+	return func(o *option) { o.cache = c }
 }
 
 func WithFrame(val int) func(*option) {
@@ -203,6 +210,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		prof:      p,
 		hook:      opt.hook,
 		marshaler: m,
+		cache:     opt.cache,
 		threshold: threshold,
 		cutoff:    opt.cutoff,
 		types:     prog.Types,
@@ -268,6 +276,9 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	i.fp = 1
 	i.fr = &i.frames[0]
 	i.retain(0)
+	if i.cache != nil && !i.cache.attach() {
+		i.cache = nil
+	}
 
 	return i
 }
@@ -514,13 +525,16 @@ func (i *Interpreter) Len() int {
 
 func (i *Interpreter) Close() error {
 	i.Reset()
+	var err error
 	if i.compiler != nil {
-		if err := i.compiler.Close(); err != nil {
-			return err
-		}
+		err = errors.Join(err, i.compiler.Close())
 		i.compiler = nil
 	}
-	return nil
+	if i.cache != nil {
+		err = errors.Join(err, i.cache.detach())
+		i.cache = nil
+	}
+	return err
 }
 
 func (i *Interpreter) Reset() {
@@ -561,6 +575,9 @@ func (i *Interpreter) Reset() {
 // installs the result into the dispatch table. Triggered once per function from
 // the Run-loop safepoint when its sample count crosses the threshold.
 func (i *Interpreter) jit(addr int) error {
+	if i.cache != nil {
+		return i.shared(addr)
+	}
 	if err := i.ensure(); err != nil {
 		return err
 	}
@@ -581,7 +598,49 @@ func (i *Interpreter) jit(addr int) error {
 	if mod == nil {
 		return nil
 	}
-	i.install(mod)
+	i.install(mod, true)
+	return nil
+}
+
+func (i *Interpreter) shared(addr int) error {
+	fn, ok := i.function(addr)
+	if !ok {
+		i.cache.fail(addr)
+		return nil
+	}
+
+	i.cache.mu.Lock()
+	defer i.cache.mu.Unlock()
+
+	compiler, err := newJITCompiler(i.cutoff)
+	if err != nil {
+		i.cache.stats.JITAdd(prof.JIT{Errors: 1})
+		i.cache.done(addr)
+		return err
+	}
+	if compiler == nil {
+		i.cache.done(addr)
+		return nil
+	}
+	i.cache.stats.JITAdd(prof.JIT{Attempts: 1})
+
+	mod, err := compiler.Compile(i, addr, fn)
+	if err != nil {
+		_ = compiler.Close()
+		i.cache.stats.JITAdd(prof.JIT{Errors: 1})
+		i.cache.done(addr)
+		return err
+	}
+	if mod == nil {
+		mod = &jitModule{}
+	}
+	var buf *asm.Buffer
+	if mod.emits > 0 {
+		buf = compiler.buffer
+	} else {
+		_ = compiler.Close()
+	}
+	i.cache.publish(addr, mod, buf)
 	return nil
 }
 
@@ -602,15 +661,20 @@ func (i *Interpreter) ensure() error {
 // install accounts a successful Compile and rewires the dispatch table:
 // the whole-function Entry replaces the first opcode handler, every
 // emitted segment replaces its corresponding handler.
-func (i *Interpreter) install(mod *jitModule) {
-	i.prof.JITAdd(prof.JIT{
-		Emits: uint64(mod.emits),
-		Links: uint64(mod.links),
-		Skips: uint64(mod.skips),
-		Bytes: uint64(mod.bytes),
-	})
+func (i *Interpreter) install(mod *jitModule, account bool) {
+	if account {
+		i.prof.JITAdd(prof.JIT{
+			Emits: uint64(mod.emits),
+			Links: uint64(mod.links),
+			Skips: uint64(mod.skips),
+			Bytes: uint64(mod.bytes),
+		})
+	}
 	for addr, callable := range mod.entries {
 		if addr <= 0 || addr >= len(i.code) || len(i.code[addr]) == 0 || callable == nil {
+			continue
+		}
+		if i.fallbacks[addr] != nil {
 			continue
 		}
 		i.fallbacks[addr] = i.code[addr][0]
@@ -621,10 +685,30 @@ func (i *Interpreter) install(mod *jitModule) {
 			continue
 		}
 		fallback := i.code[seg.addr][seg.ip]
-		i.code[seg.addr][seg.ip] = i.segment(seg.addr, seg.callable, seg.stack, fallback)
 		if seg.ip == 0 && seg.addr > 0 && i.fallbacks[seg.addr] == nil {
-			i.fallbacks[seg.addr] = i.code[seg.addr][0]
+			i.fallbacks[seg.addr] = fallback
 		}
+		i.code[seg.addr][seg.ip] = i.segment(seg.addr, seg.callable, seg.stack, fallback)
+	}
+}
+
+func (i *Interpreter) sync() {
+	if i.cache == nil {
+		return
+	}
+	mods := i.cache.mods.Load()
+	if mods == nil {
+		return
+	}
+	for i.gen < len(*mods) {
+		i.install((*mods)[i.gen], false)
+		i.gen++
+	}
+}
+
+func (i *Interpreter) flush() {
+	if i.cache != nil {
+		i.cache.flush(i.prof)
 	}
 }
 
@@ -681,6 +765,15 @@ func (i *Interpreter) safepoint() error {
 	}
 
 	i.prof.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
+	if i.cache != nil {
+		if i.cache.due(f.addr, i.threshold) {
+			if err := i.jit(f.addr); err != nil {
+				return err
+			}
+		}
+		i.sync()
+		return nil
+	}
 	if i.threshold >= 0 && i.prof.Samples(f.addr) == uint64(i.threshold) {
 		if err := i.jit(f.addr); err != nil {
 			return err

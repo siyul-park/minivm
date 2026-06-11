@@ -174,6 +174,52 @@ func TestStats_Snapshot(t *testing.T) {
 	})
 }
 
+func TestStats_Merge(t *testing.T) {
+	t.Run("adds snapshot data", func(t *testing.T) {
+		dst := New()
+		src := New()
+		src.Add(0, 1, 10)
+		src.Add(0, 1, 10)
+		src.Add(2, 3, 11)
+		src.JITAdd(JIT{Attempts: 1, Emits: 2, Links: 3, Skips: 4, Errors: 5, Bytes: 6})
+
+		dst.Add(0, 2, 12)
+		dst.Merge(src.Snapshot())
+
+		snap := dst.Snapshot()
+		require.Equal(t, uint64(4), snap.Samples)
+		require.Equal(t, uint64(3), snap.Funcs[0].Samples)
+		require.Equal(t, uint64(2), dst.IP(0, 1).Samples)
+		require.Equal(t, uint64(1), dst.IP(0, 2).Samples)
+		require.Equal(t, uint64(1), dst.IP(2, 3).Samples)
+		require.Equal(t, JIT{Attempts: 1, Emits: 2, Links: 3, Skips: 4, Errors: 5, Bytes: 6}, snap.JIT)
+	})
+
+	t.Run("ignores zero samples", func(t *testing.T) {
+		dst := New()
+		dst.Merge(Snapshot{
+			Funcs: []Func{{Index: -1, Samples: 10, IPs: []IP{{Offset: 0, Samples: 10}}}},
+		})
+
+		require.Zero(t, dst.Snapshot().Samples)
+	})
+}
+
+func TestStats_Reset(t *testing.T) {
+	p := New()
+	p.Add(0, 1, 10)
+	p.Add(1, 2, 11)
+	p.JITAdd(JIT{Attempts: 1, Bytes: 64})
+
+	p.Reset()
+
+	snap := p.Snapshot()
+	require.Zero(t, snap.Samples)
+	require.Empty(t, snap.Funcs)
+	require.Empty(t, snap.Opcodes)
+	require.Zero(t, snap.JIT)
+}
+
 func TestStats_JITAdd(t *testing.T) {
 	p := New()
 	p.JITAdd(JIT{Attempts: 1, Errors: 1})
