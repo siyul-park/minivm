@@ -25,21 +25,21 @@ Recursive `fib(35)` (= 9,227,465), 29.8M recursive calls. End-to-end per call, n
 
 | Runtime | ns/op | B/op | allocs/op | vs native Go | execution model |
 |---|---|---|---|---|---|
-| native Go | 18,912,368 | 0 | 0 | 1× | compiled |
-| wazero | 42,690,476 | 16 | 2 | 2.3× | WASM → native JIT (AOT at load) |
-| **minivm (JIT)** | **71,776,495** | **1,727** | **21** | **3.8×** | **threaded interpreter + ARM64 JIT** |
-| minivm (interp) | 750,025,292 | 139 | 0 | 40× | threaded interpreter |
-| tengo | 1,142,455,492 | 312,798,644 | 39,088,178 | 60× | bytecode VM |
-| gopher-lua | 1,422,659,979 | 971,072 | 3,793 | 75× | register VM |
-| goja | 2,032,321,458 | 379,440 | 46,376 | 107× | bytecode VM |
+| native Go | 18,912,214 | 0 | 0 | 1× | compiled |
+| wazero | 43,831,659 | 16 | 2 | 2.3× | WASM → native JIT (AOT at load) |
+| **minivm (JIT)** | **48,918,873** | **1,043** | **11** | **2.6×** | **threaded interpreter + ARM64 JIT** |
+| minivm (interp) | 721,621,149 | 139 | 0 | 38× | threaded interpreter |
+| tengo | 1,103,929,542 | 312,797,814 | 39,088,179 | 58× | bytecode VM |
+| gopher-lua | 1,430,074,084 | 971,072 | 3,793 | 76× | register VM |
+| goja | 2,058,601,792 | 379,445 | 46,376 | 109× | bytecode VM |
 
-The JIT is worth **10× on this workload** — it cuts minivm from 750 ms to 72 ms per call by replacing threaded dispatch over the hot numeric segment with native code.
+The JIT is worth **15× on this workload** — it cuts minivm from about 722 ms to 49 ms per call by replacing threaded dispatch over the hot numeric segment with native code.
 
-Among pure interpreters, minivm (interp) leads and is effectively allocation-free: **1.5× faster than tengo, 1.9× than gopher-lua, 2.7× than goja**, at 0 allocs/op where tengo reaches 312 MB and 39M allocs at fib(35). With the JIT on, minivm joins wazero as the only runtimes that reach native code, pulling **16× ahead of tengo, 20× of gopher-lua, 28× of goja**.
+Among pure interpreters, minivm (interp) leads and is effectively allocation-free: **1.5× faster than tengo, 2.0× than gopher-lua, 2.9× than goja**, while tengo reaches 312 MB and 39M allocs at fib(35). With the JIT on, minivm joins wazero as the only runtimes that reach native code, pulling **23× ahead of tengo, 29× of gopher-lua, 42× of goja**.
 
 The JIT compiles whole functions, not just straight-line numeric segments: a static `const.get; call` (how fib recurses) is fused into a native branch-and-link to the callee's framed entry, and `return` lowers to a native return, so the entire recursion runs in native code. Only indirect calls, host calls, and ref-holding globals stay threaded.
 
-minivm (JIT) still trails wazero by 1.7×, but not because of threaded calls — it is the bookkeeping wazero does without. minivm keeps the interpreter's NaN-boxed value representation (tag/mask per op) instead of raw native integers, and every fused call guards a frame-budget check and records a deopt-journal entry so a trap can rebuild interpreter frames. wazero AOT-compiles to unboxed native code with no fallback path. That per-run JIT bookkeeping is also why the JIT path allocates a small fixed amount (21 allocs/op) where the pure interpreter does not — the cost is per run, not per call.
+minivm (JIT) now trails wazero by about 1.1×. The remaining gap is mostly value representation and deopt safety: minivm keeps the interpreter's NaN-boxed values (tag/mask per op) instead of raw native integers, and fused calls still guard frame budget and maintain trap-time recovery state so a fallback can rebuild interpreter frames. wazero AOT-compiles to unboxed native code with no fallback path. The JIT path allocates a small fixed amount for compilation and linking; the cost is per run, not per recursive call.
 
 ---
 
@@ -207,7 +207,7 @@ For the deep-recursion comparison at `fib(35)` with the JIT active, see the [Cro
 
 ## JIT on ARM64
 
-On ARM64, JIT compiles hot numeric segments to native code, eliminating threaded dispatch overhead for compute-heavy loops. Threshold defaults to 4096 executed instructions (~32 samples at tick=128); nothing to configure. The [Cross-Runtime Comparison](#cross-runtime-comparison--fib35) isolates its effect — the `minivm (interp)` and `minivm (JIT)` rows run the same program with the JIT off and on, a 10× gap on fib(35).
+On ARM64, JIT compiles hot numeric segments to native code, eliminating threaded dispatch overhead for compute-heavy loops. Threshold defaults to 4096 executed instructions (~32 samples at tick=128); nothing to configure. The [Cross-Runtime Comparison](#cross-runtime-comparison--fib35) isolates its effect — the `minivm (interp)` and `minivm (JIT)` rows run the same program with the JIT off and on, a 15× gap on fib(35).
 
 On x86-64, JIT is not yet implemented. Running with `WithTick(1)` + `WithThreshold(1)` falls back to threaded execution with per-instruction polling — roughly 2× the default-threaded cost for simple dispatch benchmarks.
 

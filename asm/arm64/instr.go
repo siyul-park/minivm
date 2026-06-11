@@ -378,7 +378,7 @@ func MOVZ(dst asm.Reg, val uint16, shift uint8) asm.Instruction {
 
 // MOVK dst, #imm, LSL #shift  — keep other bits
 func MOVK(dst asm.Reg, val uint16, shift uint8) asm.Instruction {
-	return newInst(OpMOVK, regOperand(dst), imm(int64(val)), imm(int64(shift)))
+	return newInst(OpMOVK, regOperand(dst), imm(int64(val)), imm(int64(shift)), regOperand(dst))
 }
 
 // MOVN dst, #imm, LSL #shift  — invert bits after shift
@@ -605,28 +605,23 @@ func CBNZLabel(reg asm.Reg, id asm.Label) asm.Instruction {
 
 // Each instruction must be passed to Emit separately.
 func LDI(dst asm.Reg, val uint64) []asm.Instruction {
-	switch {
-	case val <= 0xFFFF:
-		return []asm.Instruction{MOVZ(dst, uint16(val), 0)}
-	case val <= 0xFFFFFFFF:
-		return []asm.Instruction{
-			MOVZ(dst, uint16(val), 0),
-			MOVK(dst, uint16(val>>16), 16),
-		}
-	case val <= 0xFFFFFFFFFFFF:
-		return []asm.Instruction{
-			MOVZ(dst, uint16(val), 0),
-			MOVK(dst, uint16(val>>16), 16),
-			MOVK(dst, uint16(val>>32), 32),
-		}
-	default:
-		return []asm.Instruction{
-			MOVZ(dst, uint16(val), 0),
-			MOVK(dst, uint16(val>>16), 16),
-			MOVK(dst, uint16(val>>32), 32),
-			MOVK(dst, uint16(val>>48), 48),
-		}
+	if val == 0 {
+		return []asm.Instruction{MOVZ(dst, 0, 0)}
 	}
+
+	insts := make([]asm.Instruction, 0, 4)
+	for shift := uint8(0); shift <= 48; shift += 16 {
+		part := uint16(val >> shift)
+		if part == 0 {
+			continue
+		}
+		if len(insts) == 0 {
+			insts = append(insts, MOVZ(dst, part, shift))
+			continue
+		}
+		insts = append(insts, MOVK(dst, part, shift))
+	}
+	return insts
 }
 
 // ---------------------------------------------------------------------------

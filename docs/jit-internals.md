@@ -100,12 +100,13 @@ Header cells precede a stack of fixed-stride records:
 
 | Cell | Purpose |
 | --- | --- |
-| `journalDepth` (0) | native frames recorded; native read/write |
+| `journalDepth` (0) | trap-time frame records written; native read/write |
 | `journalCap` (1) | frame budget `len(i.frames)-i.fp`; read-only |
 | `journalTrap` (2) | exit kind out: `trapNone` \| `trapFallback` \| `trapOverflow` \| `trapYield` |
 | `journalNextIP` (3) | resume/fallback IP out for the single-frame path |
 | `journalBudget` (4) | back-edges left before the next loop safepoint; native read/write |
-| `journalHead` (5)… | records of `{addr, bp, ip, returns}`, stride 4 |
+| `journalActive` (5) | active native call depth for frame-budget checks; X15 mirrors it on native entry |
+| `journalHead` (6)… | trap-time records of `{addr, bp, ip, returns}`, stride 4 |
 
 Guard fallbacks set `journalTrap = trapFallback` and the resume IP. The segment
 wrapper restores `fr.ip` and runs the original threaded handler for that opcode
@@ -125,24 +126,25 @@ same direct-call closure. This includes recursive and mutually recursive SCCs.
 Closure calls, host calls, ref-typed signatures, and unsupported callees stay
 threaded through segment fallback.
 
-Native direct calls are **frame-aware**: before each `BL`, `call` records the
-caller's VM frame `{addr, bp, resume-ip, returns}` in the journal and bumps
-`journalDepth`; a normal return pops it. The journal slot is the recoverable VM
-frame the invariant requires — *every native call that may fall back has a
-recoverable VM frame* — so a callee can be entered natively even when it is only
-partially compiled (its body contains a guard that may deopt). Caller bp/sp are
-saved on the host stack across the `BL` and restored on return; the journal
-pointer (X14) is never written by native code, so it survives the call unsaved.
+Native direct calls are **frame-aware**: `call` checks the frame budget against
+the pinned native-depth register X15, increments X15 and `journalActive`, saves
+caller bp/sp on the host stack, and enters the callee with `BL`. A normal return
+restores bp/sp, decrements X15/`journalActive`, and receives up to two return
+values through X0/X1 while still preserving memory return slots for top-level
+entry calls. Parameters stay stack-resident because callee locals are memory
+resident and caller materialization is required for deopt safety.
 
 On a **deopt** inside a nested callee, the innermost frame self-records its
 fallback frame, sets `journalTrap`, materializes its operands above its locals
-(`bp+nlocals`), and returns up the host call chain — each caller unwinds without
-touching the journal so the records stay intact. The Go wrapper then rebuilds the
-chain: `record[0]` reconciles the live outermost frame's IP; deeper records
-become new frames (ref retained, `code`/`upvals` restored via `restore`), `i.fp`
-advances, and threaded execution resumes at the innermost fallback IP.
+(`bp+nlocals`), and returns up the host call chain. Each native caller restores
+only its saved bp, appends its own recoverable frame, and returns again. The
+journal records therefore accumulate inner-to-outer. The Go wrapper rebuilds the
+chain in reverse: the last record reconciles the live outermost frame's IP;
+earlier records become new deeper frames (ref unretained, `code`/`upvals` restored
+via `restore`), `i.fp` advances, and threaded execution resumes at the innermost
+fallback IP.
 
-Frame overflow is reported when `journalDepth >= journalCap` at a call site:
+Frame overflow is reported when X15/`journalActive >= journalCap` at a call site:
 native materializes the current stack, sets `journalTrap = trapOverflow`, unwinds
 to the Go wrapper, and the wrapper panics with `ErrFrameOverflow` (never host
 stack overflow).

@@ -715,10 +715,11 @@ func (i *Interpreter) entry(addr int, callable asm.Callable) func(*Interpreter) 
 	}
 }
 
-// deopt rebuilds VM frames from the native journal after a trap. record[0] is
-// the outermost native frame — already live at i.frames[i.fp-1], so only its IP
-// and code are reconciled; each deeper record becomes a fresh frame, matching
-// the fused direct call in fuse.go (ref unretained, code/upvals restored).
+// deopt rebuilds VM frames from the native journal after a trap. Native frames
+// record themselves while unwinding, so record[depth-1] is the outermost native
+// frame — already live at i.frames[i.fp-1]. Earlier records become deeper VM
+// frames in reverse order, matching the fused direct call in fuse.go (ref
+// unretained, code/upvals restored).
 func (i *Interpreter) deopt(addr int) {
 	depth := int(i.journal[journalDepth])
 	if depth == 0 {
@@ -726,17 +727,20 @@ func (i *Interpreter) deopt(addr int) {
 	}
 	base := i.fp - 1
 
-	// record[0] is the live outermost frame; only its resume IP and code change.
+	// The last record is the live outermost frame; reconcile its resume state.
+	outerRec := journalHead + (depth-1)*journalStride
 	outer := &i.frames[base]
-	outer.ip = int(i.journal[journalHead+recordIP])
-	i.restore(outer, addr)
+	outer.bp = int(i.journal[outerRec+recordBP])
+	outer.ip = int(i.journal[outerRec+recordIP])
+	i.restore(outer, int(i.journal[outerRec+recordAddr]))
 
-	// Deeper records become fresh frames. Like the fused direct call in fuse.go,
-	// the callee ref was never pushed or retained, so release stays false.
-	for k := 1; k < depth; k++ {
-		rec := journalHead + k*journalStride
+	// Earlier records become fresh frames from outer to inner. Like the fused
+	// direct call in fuse.go, the callee ref was never pushed or retained, so
+	// release stays false.
+	for n := 1; n < depth; n++ {
+		rec := journalHead + (depth-1-n)*journalStride
 		fn := int(i.journal[rec+recordAddr])
-		f := &i.frames[base+k]
+		f := &i.frames[base+n]
 		f.addr = fn
 		f.ref = fn
 		f.release = false
@@ -789,6 +793,7 @@ func (i *Interpreter) scratch() []uint64 {
 	i.journal[journalCap] = uint64(len(i.frames) - i.fp)
 	i.journal[journalTrap] = trapNone
 	i.journal[journalBudget] = uint64(i.tick)
+	i.journal[journalActive] = 0
 	return i.argv[:]
 }
 

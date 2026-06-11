@@ -289,7 +289,10 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 }
 
 func (arm64JIT) enter(ctx *jitContext) {
+	vCtrl := ctx.pin(scratchCtrl)
+	active := ctx.pinTo(arm64.X15)
 	ctx.assembler.Emit(
+		arm64.LDR(active, vCtrl, int16(journalActive*8)),
 		arm64.SUBI(arm64.SP, arm64.SP, 16),
 		arm64.STR(arm64.LR, arm64.SP, 0),
 	)
@@ -347,17 +350,25 @@ func (arm64JIT) report(ctx *jitContext, vCtrl asm.VReg, trap, nextIP int) {
 func (l arm64JIT) record(ctx *jitContext, vCtrl asm.VReg, ip int) {
 	depth := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(depth, vCtrl, int16(journalDepth*8)))
+	l.recordAt(ctx, vCtrl, depth, ip)
+}
 
+func (l arm64JIT) recordAt(ctx *jitContext, vCtrl, depth asm.VReg, ip int) {
 	off := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LSLI(off, depth, 5)) // depth * journalStride * 8
 	base := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.ADD(base, vCtrl, off))
 
-	l.put(ctx, base, recordAddr, uint64(ctx.addr))
+	vAddr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(vAddr, uint64(ctx.addr))...)
 	vBP := ctx.pin(scratchBP)
-	ctx.assembler.Emit(arm64.STR(vBP, base, int16((journalHead+recordBP)*8)))
-	l.put(ctx, base, recordIP, uint64(ip))
-	l.put(ctx, base, recordReturns, uint64(ctx.returns))
+	ctx.assembler.Emit(arm64.STP(vAddr, vBP, base, int16((journalHead+recordAddr)*8)))
+
+	vIP := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(vIP, uint64(ip))...)
+	vReturns := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(vReturns, uint64(ctx.returns))...)
+	ctx.assembler.Emit(arm64.STP(vIP, vReturns, base, int16((journalHead+recordIP)*8)))
 
 	ctx.assembler.Emit(arm64.ADDI(depth, depth, 1))
 	ctx.assembler.Emit(arm64.STR(depth, vCtrl, int16(journalDepth*8)))
@@ -405,36 +416,28 @@ func (l arm64JIT) materializeSP(ctx *jitContext) asm.VReg {
 // flush stores the shadow stack to consecutive slots starting at base and
 // returns the resulting stack pointer (base + len(stack)).
 func (l arm64JIT) flush(ctx *jitContext, vStack, base asm.VReg) asm.VReg {
+	if len(ctx.stack) == 0 {
+		return base
+	}
+
+	off := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LSLI(off, base, 3))
+	addr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ADD(addr, vStack, off))
 	for idx, v := range ctx.stack {
-		slot := base
-		if idx > 0 {
-			slot = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-			ctx.assembler.Emit(arm64.ADDI(slot, base, uint16(idx)))
-		}
-		l.store(ctx, v, vStack, slot)
+		ctx.assembler.Emit(arm64.STR(v, addr, int16(idx*8)))
 	}
-	nextSP := base
-	if len(ctx.stack) > 0 {
-		nextSP = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		ctx.assembler.Emit(arm64.ADDI(nextSP, base, uint16(len(ctx.stack))))
-	}
+	nextSP := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ADDI(nextSP, base, uint16(len(ctx.stack))))
 	return nextSP
 }
 
 func (arm64JIT) load(ctx *jitContext, dst asm.VReg, base, slot asm.Reg) {
-	addr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	off := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LSLI(off, slot, 3))
-	ctx.assembler.Emit(arm64.ADD(addr, base, off))
-	ctx.assembler.Emit(arm64.LDR(dst, addr, 0))
+	ctx.assembler.Emit(arm64.LDRR(dst, base, slot))
 }
 
 func (arm64JIT) store(ctx *jitContext, src asm.VReg, base, slot asm.Reg) {
-	addr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	off := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LSLI(off, slot, 3))
-	ctx.assembler.Emit(arm64.ADD(addr, base, off))
-	ctx.assembler.Emit(arm64.STR(src, addr, 0))
+	ctx.assembler.Emit(arm64.STRR(src, base, slot))
 }
 
 func (l arm64JIT) drop(ctx *jitContext) bool {
@@ -548,27 +551,29 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 	}
 
 	vCtrl := ctx.pin(scratchCtrl)
-	depth := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDR(depth, vCtrl, int16(journalDepth*8)))
+	active := ctx.pinTo(arm64.X15)
 	budget := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(budget, vCtrl, int16(journalCap*8)))
-	ctx.assembler.Emit(arm64.CMP(depth, budget))
+	ctx.assembler.Emit(arm64.CMP(active, budget))
 	hasFrame := ctx.assembler.Label()
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBCC, hasFrame)) // depth < budget
 	l.exit(ctx, trapOverflow, ctx.ip)
 	ctx.assembler.Bind(hasFrame)
 
-	// Record the caller frame (resuming just past this call) before descending,
-	// so a deopt deeper in the chain can rebuild it.
-	l.record(ctx, vCtrl, ctx.ip+4)
+	ctx.assembler.Emit(
+		arm64.ADDI(active, active, 1),
+		arm64.STR(active, vCtrl, int16(journalActive*8)),
+	)
 
+	// Params remain stack-resident. Callee local access reads from VM stack
+	// slots, and caller-side materialization is still required for deopt safety;
+	// register passing would add stores back in the callee for little gain.
 	nextSP := l.materializeSP(ctx)
 	oldBP := ctx.scratch[scratchBP]
 	oldSP := ctx.scratch[scratchSP]
 	ctx.assembler.Emit(
 		arm64.SUBI(arm64.SP, arm64.SP, 16),
-		arm64.STR(oldBP, arm64.SP, 0),
-		arm64.STR(oldSP, arm64.SP, 8),
+		arm64.STP(oldBP, oldSP, arm64.SP, 0),
 	)
 
 	calleeBP := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -586,15 +591,19 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 
 	ctx.assembler.Emit(arm64.BLLabel(target.label))
 
-	// A trapped callee leaves the journal populated. Unwind this frame to its own
-	// caller — restoring the link register enter saved — without touching the
-	// journal, so the trap propagates to the Go wrapper with the chain intact.
+	// A trapped callee records itself before returning. Restore this caller's
+	// VM BP/SP from the host stack, append this caller's frame, then unwind to
+	// the next native caller so the journal ends up inner-to-outer.
 	vCtrl = ctx.pin(scratchCtrl)
 	trap := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(trap, vCtrl, int16(journalTrap*8)))
 	normal := ctx.assembler.Label()
 	ctx.assembler.Emit(
 		arm64.CBZLabel(trap, normal),
+		arm64.LDR(oldBP, arm64.SP, 0),
+	)
+	l.record(ctx, vCtrl, ctx.ip+4)
+	ctx.assembler.Emit(
 		arm64.ADDI(arm64.SP, arm64.SP, 16),
 		arm64.LDR(arm64.LR, arm64.SP, 0),
 		arm64.ADDI(arm64.SP, arm64.SP, 16),
@@ -602,32 +611,42 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 	)
 	ctx.assembler.Bind(normal)
 
-	// Normal return: pop the caller frame record and restore caller bp/sp.
-	depth = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDR(depth, vCtrl, int16(journalDepth*8)))
-	ctx.assembler.Emit(arm64.SUBI(depth, depth, 1))
-	ctx.assembler.Emit(arm64.STR(depth, vCtrl, int16(journalDepth*8)))
+	// Normal return: pop the active native-depth counter and restore caller bp/sp.
+	active = ctx.pinTo(arm64.X15)
+	ctx.assembler.Emit(arm64.SUBI(active, active, 1))
+	ctx.assembler.Emit(arm64.STR(active, vCtrl, int16(journalActive*8)))
 	ctx.assembler.Emit(
-		arm64.LDR(oldBP, arm64.SP, 0),
-		arm64.LDR(oldSP, arm64.SP, 8),
+		arm64.LDP(oldBP, oldSP, arm64.SP, 0),
 		arm64.ADDI(arm64.SP, arm64.SP, 16),
 	)
 
 	vStack := ctx.pin(scratchStack)
+	off := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LSLI(off, oldSP, 3))
 	base := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.MOV(base, oldSP))
+	ctx.assembler.Emit(arm64.ADD(base, vStack, off))
 
 	next := len(ctx.stack) - params + returns
+	reload := next
+	if returns <= len(arm64.IntArgs[:2]) {
+		reload -= returns
+	}
 	stack := make([]asm.VReg, next)
-	for i := 0; i < next; i++ {
-		slot := base
-		if i > 0 {
-			slot = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-			ctx.assembler.Emit(arm64.ADDI(slot, base, uint16(i)))
-		}
+	for i := 0; i < reload; i++ {
 		v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		l.load(ctx, v, vStack, slot)
+		ctx.assembler.Emit(arm64.LDR(v, base, int16(i*8)))
 		stack[i] = v
+	}
+	if returns <= len(arm64.IntArgs[:2]) {
+		for i := 0; i < returns; i++ {
+			stack[reload+i] = ctx.pinTo(arm64.IntArgs[i])
+		}
+	} else {
+		for i := reload; i < next; i++ {
+			v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+			ctx.assembler.Emit(arm64.LDR(v, base, int16(i*8)))
+			stack[i] = v
+		}
 	}
 	ctx.stack = stack
 	ctx.ip += 4
@@ -743,12 +762,9 @@ func (l arm64JIT) localGet(ctx *jitContext) bool {
 		return false
 	}
 
-	addr, ok := l.localAddr(ctx, idx)
-	if !ok {
-		return false
-	}
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDR(dst, addr, 0))
+	slot := l.localSlot(ctx, idx)
+	l.load(ctx, dst, ctx.pin(scratchStack), slot)
 	if ctx.locals[idx] == types.KindI64 {
 		l.guardI64(ctx, dst)
 	}
@@ -771,16 +787,14 @@ func (l arm64JIT) localPut(ctx *jitContext, pop bool) bool {
 	}
 
 	src := ctx.stack[len(ctx.stack)-1]
-	addr, ok := l.localAddr(ctx, idx)
-	if !ok {
-		return false
-	}
+	slot := l.localSlot(ctx, idx)
+	vStack := ctx.pin(scratchStack)
 	if ctx.locals[idx] == types.KindI64 {
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		ctx.assembler.Emit(arm64.LDR(old, addr, 0))
+		l.load(ctx, old, vStack, slot)
 		l.guardI64(ctx, old)
 	}
-	ctx.assembler.Emit(arm64.STR(src, addr, 0))
+	l.store(ctx, src, vStack, slot)
 
 	if pop {
 		ctx.stack = ctx.stack[:len(ctx.stack)-1]
@@ -788,26 +802,16 @@ func (l arm64JIT) localPut(ctx *jitContext, pop bool) bool {
 	return true
 }
 
-// localAddr returns a VReg whose value is the byte address of
-// stack[bp+idx]. The arithmetic is: rStack + (rBP + idx) * 8. The
-// final +idx*8 displacement is folded into the LDR/STR offset, so this
-// helper materializes only rStack + rBP*8 into the VReg.
-func (arm64JIT) localAddr(ctx *jitContext, idx int) (asm.VReg, bool) {
-	vStack := ctx.pin(scratchStack)
+// localSlot returns the stack slot index for local idx: bp+idx. The caller uses
+// LDRR/STRR so the base+slot*8 address computation stays in one instruction.
+func (arm64JIT) localSlot(ctx *jitContext, idx int) asm.VReg {
 	vBP := ctx.pin(scratchBP)
-
-	vShift := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	vBase := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LSLI(vShift, vBP, 3))
-	ctx.assembler.Emit(arm64.ADD(vBase, vStack, vShift))
-
-	// Caller emits LDR/STR with a #idx*8 immediate displacement off vBase.
-	if idx != 0 {
-		offset := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		ctx.assembler.Emit(arm64.ADDI(offset, vBase, uint16(idx*8)))
-		return offset, true
+	if idx == 0 {
+		return vBP
 	}
-	return vBase, true
+	slot := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ADDI(slot, vBP, uint16(idx)))
+	return slot
 }
 
 // guardI64 guards an i64 slot value against heap promotion. An i64
@@ -905,11 +909,7 @@ func (l arm64JIT) i32Xor(ctx *jitContext) bool {
 
 	xord := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.EOR(xord, a, b))
-
-	tag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDI(tag, tagI32)...)
-	boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ORR(boxed, xord, tag))
+	boxed := l.boxCleanI32(ctx, xord)
 
 	ctx.stack = append(ctx.stack[:len(ctx.stack)-2], boxed)
 	return true
@@ -973,11 +973,10 @@ func (l arm64JIT) i32Shift(
 	return true
 }
 
-// i32Cmp pops two boxed i32 values, optionally preps each (sign- or
-// zero-extending to 64 bits for signed/unsigned compares), runs CMP on
-// the prepared operands, and pushes a boxed 0/1 from the chosen
-// condition code. prep is nil for EQ/NE because the boxed tag is
-// identical across both operands, so a raw 64-bit compare is correct.
+// i32Cmp pops two boxed i32 values, compares their low 32-bit lanes, and pushes
+// a boxed 0/1 from the chosen condition code. EQ/NE compare the full boxed word
+// because both operands carry the same tag; ordered comparisons use W-register
+// views so the flags come from a 32-bit subtraction without SXTW/ANDI prep.
 func (l arm64JIT) i32Cmp(
 	ctx *jitContext,
 	prep func(*jitContext, asm.VReg) asm.VReg,
@@ -990,8 +989,8 @@ func (l arm64JIT) i32Cmp(
 	a := ctx.stack[len(ctx.stack)-2]
 
 	if prep != nil {
-		a = prep(ctx, a)
-		b = prep(ctx, b)
+		a = l.narrow32(a)
+		b = l.narrow32(b)
 	}
 	ctx.assembler.Emit(arm64.CMP(a, b))
 
@@ -1014,6 +1013,10 @@ func (arm64JIT) zero32(ctx *jitContext, v asm.VReg) asm.VReg {
 	out := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.ANDI(out, v, maskI32))
 	return out
+}
+
+func (arm64JIT) narrow32(v asm.VReg) asm.VReg {
+	return asm.NewVReg(v.ID(), v.Type(), asm.Width32)
 }
 
 // l.sign64 sign-extends bit 48 of v's value lane into bits 49..63.
@@ -1216,16 +1219,15 @@ func (arm64JIT) boxI64(ctx *jitContext, val asm.VReg) asm.VReg {
 // integer and whose upper 32 bits are zero (any ARM64 32-bit op or an
 // ANDI mask of 0xFFFFFFFF gives this shape), and produces a fresh
 // vreg holding the NaN-boxed Boxed.
-func (arm64JIT) boxI32(ctx *jitContext, val asm.VReg) asm.VReg {
+func (l arm64JIT) boxI32(ctx *jitContext, val asm.VReg) asm.VReg {
 	lo := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.ANDI(lo, val, maskI32))
+	return l.boxCleanI32(ctx, lo)
+}
 
-	tag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDI(tag, tagI32)...)
-
-	boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ORR(boxed, lo, tag))
-	return boxed
+func (arm64JIT) boxCleanI32(ctx *jitContext, val asm.VReg) asm.VReg {
+	ctx.assembler.Emit(arm64.MOVK(val, uint16(tagI32>>48), 48))
+	return val
 }
 
 // setBool replaces the top pop operands with a boxed i32 0/1 materialized from
@@ -1233,7 +1235,7 @@ func (arm64JIT) boxI32(ctx *jitContext, val asm.VReg) asm.VReg {
 func (l arm64JIT) setBool(ctx *jitContext, cond uint8, pop int) {
 	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.CSET(flag, cond))
-	boxed := l.boxI32(ctx, flag)
+	boxed := l.boxCleanI32(ctx, flag)
 	keep := len(ctx.stack) - pop
 	ctx.stack = append(ctx.stack[:keep], boxed)
 }
@@ -1284,7 +1286,7 @@ func (l arm64JIT) i64ToI32(ctx *jitContext) bool {
 	// Mask to 32-bit value lane from the boxed i64 (49-bit value lane contains i64).
 	lo := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.ANDI(lo, a, maskI32))
-	boxed := l.boxI32(ctx, lo)
+	boxed := l.boxCleanI32(ctx, lo)
 	ctx.stack[len(ctx.stack)-1] = boxed
 	return true
 }
@@ -1299,14 +1301,18 @@ func (l arm64JIT) ret(ctx *jitContext) bool {
 		}
 		vStack := ctx.pin(scratchStack)
 		vBP := ctx.pin(scratchBP)
+		off := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LSLI(off, vBP, 3))
+		addr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.ADD(addr, vStack, off))
 		for idx := 0; idx < ctx.returns; idx++ {
 			src := ctx.stack[len(ctx.stack)-ctx.returns+idx]
-			slot := vBP
-			if idx > 0 {
-				slot = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-				ctx.assembler.Emit(arm64.ADDI(slot, vBP, uint16(idx)))
-			}
-			l.store(ctx, src, vStack, slot)
+			ctx.assembler.Emit(arm64.STR(src, addr, int16(idx*8)))
+		}
+		for idx := 0; idx < ctx.returns && idx < len(arm64.IntArgs[:2]); idx++ {
+			src := ctx.stack[len(ctx.stack)-ctx.returns+idx]
+			ret := ctx.pinTo(arm64.IntArgs[idx])
+			ctx.assembler.Emit(arm64.MOV(ret, src))
 		}
 		ctx.assembler.Emit(
 			arm64.LDR(arm64.LR, arm64.SP, 0),
@@ -1407,9 +1413,7 @@ func (l arm64JIT) brIf(ctx *jitContext) bool {
 	cond := ctx.stack[len(ctx.stack)-1]
 	ctx.stack = ctx.stack[:len(ctx.stack)-1]
 
-	// Extract i32 value lane from the boxed condition.
-	condI32 := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ANDI(condI32, cond, maskI32))
+	condI32 := l.narrow32(cond)
 
 	if ctx.labels != nil {
 		// Blocks mode: emit intra-function conditional branch. Both targets

@@ -101,16 +101,17 @@ const (
 )
 
 // Frame-journal layout. scratchCtrl carries &journal[0] — an Interpreter-owned
-// []uint64 that lets native code push a recoverable VM frame per direct call and
-// report deopt state back to the Go wrapper. Header cells precede a stack of
+// []uint64 that lets native code report trap state and, only while unwinding a
+// trap, append recoverable VM frames. Header cells precede a stack of
 // fixed-stride frame records; each record mirrors the int fields the threaded
 // interpreter needs to resume a frame.
 const (
-	journalDepth  = iota // native frames recorded; native read/write
+	journalDepth  = iota // trap-time frame records written; native read/write
 	journalCap           // frame budget len(i.frames)-i.fp; read-only
 	journalTrap          // exit kind out: trapNone | trapFallback | trapOverflow | trapYield
 	journalNextIP        // resume/fallback IP out for the single-frame path
 	journalBudget        // back-edges remaining before the next safepoint; native read/write
+	journalActive        // active native call depth for frame-budget checks
 	journalHead          // first frame record cell
 )
 

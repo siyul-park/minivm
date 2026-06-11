@@ -647,7 +647,7 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		return enc(0xF8606800 | reg(m)<<16 | reg(base)<<5 | reg(d)), nil
+		return enc(0xF8607800 | reg(m)<<16 | reg(base)<<5 | reg(d)), nil
 
 	case OpSTRR:
 		// STR Xt, [Xbase, Xm, LSL #3]
@@ -656,7 +656,7 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		return enc(0xF8206800 | reg(m)<<16 | reg(d)<<5 | reg(n)), nil
+		return enc(0xF8207800 | reg(m)<<16 | reg(d)<<5 | reg(n)), nil
 
 	// -----------------------------------------------------------------------
 	// Load / Store pair

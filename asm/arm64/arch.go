@@ -27,7 +27,11 @@ func New() asm.Arch {
 			nil,
 			// X10–X14: caller-saved scratch registers preserved across
 			// the invoke trampoline.
-			[]uint8{10, 11, 12, 13, 14},
+			// X0–X1: internal native return registers. X15: pinned
+			// native call-depth register. They are not trampoline scratch
+			// slots, but the JIT pins them, so the allocator must not
+			// choose them opportunistically for unrelated live values.
+			[]uint8{0, 1, 10, 11, 12, 13, 14, 15},
 		),
 		encoder: NewEncoder(),
 		abi:     abi{},
