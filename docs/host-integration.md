@@ -87,6 +87,15 @@ err = vm.Release(addr)        // decrements RC; free when 0
 
 Always `Release` what you `Retain`; leaked refs prevent GC collection.
 
+### Resource limits
+
+`WithHeap(n)` controls initial heap capacity. `WithMaxHeap(n)` sets a hard heap
+entry limit; `n <= 0` means unlimited. Allocation first tries free-list reuse
+and GC, then returns `ErrHeapExhausted` when live refs still fill the limit.
+
+`Alloc`, `Push`, and `Marshal` surface heap exhaustion as returned errors. Guest
+execution returns a `RuntimeError` that unwraps to `ErrHeapExhausted`.
+
 ---
 
 ## Reflect Layer
@@ -288,8 +297,15 @@ vm := interp.New(prog, interp.WithMarshaler(&myMarshaler{}))
 
 | Error | When |
 |---|---|
+| `RuntimeError` | guest execution failed; unwraps to the cause and carries innermost-first `Frames` |
+| `ErrHeapExhausted` | heap allocation cannot stay within `WithMaxHeap` |
 | `ErrMarshalCycle` | pointer graph contains a cycle |
 | `ErrUnsupportedMarshalType` | Go type cannot be converted (e.g. `chan`, `complex`) |
 | `ErrInvalidUnmarshalTarget` | destination is not a non-nil pointer |
 | `ErrValueOverflow` | numeric value doesn't fit destination type |
 | `ErrTypeMismatch` | source and destination kinds are incompatible |
+
+Use `errors.Is(err, interp.ErrDivideByZero)` or `errors.Is(err,
+interp.ErrHeapExhausted)` for categories. Use `errors.As(err, &runtimeErr)` to
+read `RuntimeError.Frames`; each frame reports the function index and IP at the
+failure point.

@@ -571,7 +571,10 @@ func (s *marshalState) boxRef(val types.Value) types.Boxed {
 }
 
 func (s *marshalState) alloc(val types.Value) int {
-	addr, _ := s.i.Alloc(val)
+	addr, err := s.i.Alloc(val)
+	if err != nil {
+		panic(err)
+	}
 	s.root += s.i.root(types.BoxRef(addr))
 	return addr
 }

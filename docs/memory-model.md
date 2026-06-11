@@ -58,10 +58,19 @@ Keep this property when adding new `Traceable` implementations.
 `alloc(val types.Value) int`:
 
 1. reuse from `free` if available
-2. append if heap has capacity, with `rc[addr] = 1`
-3. if full, run `gc()`
-4. if GC freed slots, reuse one
-5. otherwise double `heap`/`rc` capacity and append
+2. if `WithMaxHeap(n)` is set and `len(heap) >= n`, run `gc()`
+3. if GC freed slots, reuse one
+4. if still at the max-heap limit, panic `ErrHeapExhausted`
+5. append if heap has capacity, with `rc[addr] = 1`
+6. if full, run `gc()`
+7. if GC freed slots, reuse one
+8. otherwise double `heap`/`rc` capacity and append
+
+`WithHeap(n)` sets initial heap capacity only. `WithMaxHeap(n)` sets a hard
+entry count limit; `n <= 0` leaves heap growth unlimited. The limit is checked
+after reuse and GC, so collectable objects do not count against future
+allocations. Public host APIs that allocate (`Alloc`, `Push`, `Marshal`) return
+`ErrHeapExhausted` instead of leaking the allocator panic.
 
 ## GC Algorithm: Mark-and-Sweep via Sign Flip
 

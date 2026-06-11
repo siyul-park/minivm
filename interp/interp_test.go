@@ -2515,6 +2515,13 @@ func TestInterpreter_Push(t *testing.T) {
 		require.NoError(t, i.Push(types.I32(1)))
 		require.ErrorIs(t, i.Push(types.I32(2)), ErrStackOverflow)
 	})
+
+	t.Run("returns heap exhaustion", func(t *testing.T) {
+		i := New(program.New(nil), WithMaxHeap(1))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Push(types.String("blocked")), ErrHeapExhausted)
+	})
 }
 
 func TestInterpreter_Pop(t *testing.T) {
@@ -2626,6 +2633,14 @@ func TestInterpreter_Alloc(t *testing.T) {
 		_, err = i.Load(addr)
 		require.ErrorIs(t, err, ErrSegmentationFault)
 	})
+
+	t.Run("returns heap exhaustion", func(t *testing.T) {
+		i := New(program.New(nil), WithMaxHeap(1))
+		defer i.Close()
+
+		_, err := i.Alloc(types.NewArray(types.NewArrayType(types.TypeI32)))
+		require.ErrorIs(t, err, ErrHeapExhausted)
+	})
 }
 
 func TestInterpreter_Load(t *testing.T) {
@@ -2692,6 +2707,15 @@ func TestInterpreter_Store(t *testing.T) {
 		for _, addr := range []int{-1, 9999} {
 			require.ErrorIs(t, i.Store(addr, types.I32(1)), ErrSegmentationFault)
 		}
+	})
+	t.Run("boxed ref segfault", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.I32(0))
+		require.NoError(t, err)
+
+		require.ErrorIs(t, i.Store(addr, types.BoxRef(9999)), ErrSegmentationFault)
 	})
 }
 
@@ -3007,6 +3031,85 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 		require.ErrorIs(t, i.Run(ctx), context.Canceled)
 		require.Equal(t, 5000, calls)
+	})
+
+	t.Run("heap exhaustion includes runtime frames", func(t *testing.T) {
+		prog := program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_NEW, 0),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_NEW, 0),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI32)),
+		)
+		i := New(prog, WithMaxHeap(2), WithThreshold(-1))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.ErrorIs(t, err, ErrHeapExhausted)
+		var runtimeErr *RuntimeError
+		require.ErrorAs(t, err, &runtimeErr)
+		require.Equal(t, []FrameInfo{{Func: 0, IP: 23}}, runtimeErr.Frames)
+		require.Contains(t, runtimeErr.Error(), "fn=0 ip=23")
+	})
+
+	t.Run("heap limit allows reuse after release", func(t *testing.T) {
+		prog := program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_NEW, 0),
+				instr.New(instr.DROP),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_NEW, 0),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI32)),
+		)
+		i := New(prog, WithMaxHeap(2), WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.TypedArray[int32]{2}, got)
+	})
+
+	t.Run("runtime error includes nested frames", func(t *testing.T) {
+		inner := types.NewFunctionBuilder(&types.FunctionType{}).Emit(
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_DIV_S),
+			instr.New(instr.RETURN),
+		).Build()
+		outer := types.NewFunctionBuilder(&types.FunctionType{}).Emit(
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CALL),
+			instr.New(instr.RETURN),
+		).Build()
+		prog := program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(outer, inner),
+		)
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		err := i.Run(context.Background())
+		require.ErrorIs(t, err, ErrDivideByZero)
+		var runtimeErr *RuntimeError
+		require.ErrorAs(t, err, &runtimeErr)
+		require.Equal(t, []FrameInfo{
+			{Func: 2, IP: 5},
+			{Func: 1, IP: 4},
+			{Func: 0, IP: 4},
+		}, runtimeErr.Frames)
+		require.Contains(t, runtimeErr.Error(), "fn=2 ip=5")
 	})
 
 	t.Run("jit main loop reenters natively", func(t *testing.T) {
@@ -5086,6 +5189,14 @@ func TestInterpreter_Marshal(t *testing.T) {
 		got, err := i.Marshal(hostUserID(41))
 		require.NoError(t, err)
 		require.Equal(t, types.I64(41), got)
+	})
+
+	t.Run("returns heap exhaustion", func(t *testing.T) {
+		i := New(program.New(nil), WithMaxHeap(1))
+		defer i.Close()
+
+		_, err := i.Marshal([]string{"blocked"})
+		require.ErrorIs(t, err, ErrHeapExhausted)
 	})
 
 	t.Run("defined primitive with methods uses primitive opcodes", func(t *testing.T) {

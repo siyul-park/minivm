@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/asm"
@@ -48,6 +49,19 @@ type Interpreter struct {
 	cutoff    int
 	tick      int
 	fuel      int64
+	limit     int
+}
+
+// RuntimeError wraps a guest execution failure with the VM call stack at the
+// point of failure. Frames are innermost first.
+type RuntimeError struct {
+	Err    error
+	Frames []FrameInfo
+}
+
+type FrameInfo struct {
+	Func int
+	IP   int
 }
 
 type frame struct {
@@ -75,6 +89,7 @@ type option struct {
 	globals int
 	stack   int
 	heap    int
+	maxHeap int
 	tick    int
 	fuel    uint64
 }
@@ -91,6 +106,7 @@ var (
 	ErrDivideByZero        = errors.New("divide by zero")
 	ErrIndexOutOfRange     = errors.New("index out of range")
 	ErrFuelExhausted       = errors.New("fuel exhausted")
+	ErrHeapExhausted       = errors.New("heap exhausted")
 )
 
 func WithProfile(p *prof.Stats) func(*option) {
@@ -119,6 +135,10 @@ func WithStack(val int) func(*option) {
 
 func WithHeap(val int) func(*option) {
 	return func(o *option) { o.heap = val }
+}
+
+func WithMaxHeap(val int) func(*option) {
+	return func(o *option) { o.maxHeap = val }
 }
 
 func WithTick(val int) func(*option) {
@@ -201,6 +221,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		tick:      opt.tick,
 		fuel:      fuel,
 		gas:       fuel,
+		limit:     opt.maxHeap,
 	}
 
 	i.alloc(types.Null)
@@ -251,12 +272,43 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	return i
 }
 
+func (e *RuntimeError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	msg := "<nil>"
+	if e.Err != nil {
+		msg = e.Err.Error()
+	}
+	if len(e.Frames) == 0 {
+		return msg
+	}
+
+	var b strings.Builder
+	b.WriteString(msg)
+	for idx, f := range e.Frames {
+		if idx == 0 {
+			fmt.Fprintf(&b, ": fn=%d ip=%d", f.Func, f.IP)
+			continue
+		}
+		fmt.Fprintf(&b, " <- fn=%d ip=%d", f.Func, f.IP)
+	}
+	return b.String()
+}
+
+func (e *RuntimeError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 func (i *Interpreter) Run(ctx context.Context) (err error) {
 	i.ctx = ctx
 	defer func() {
 		i.ctx = nil
 		if r := recover(); r != nil {
-			err = i.error(r)
+			err = i.runtimeError(r)
 		}
 	}()
 
@@ -281,7 +333,8 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 	return nil
 }
 
-func (i *Interpreter) Marshal(v any) (types.Value, error) {
+func (i *Interpreter) Marshal(v any) (val types.Value, err error) {
+	defer i.guard(&err)
 	return i.marshaler.Marshal(i, v)
 }
 
@@ -378,13 +431,18 @@ func (i *Interpreter) Load(addr int) (types.Value, error) {
 	return i.heap[addr], nil
 }
 
-func (i *Interpreter) Store(addr int, val types.Value) error {
+func (i *Interpreter) Store(addr int, val types.Value) (err error) {
+	defer i.guard(&err)
 	if addr < 0 || addr >= len(i.heap) || i.rc[addr] <= 0 {
 		return ErrSegmentationFault
 	}
 	if v, ok := val.(types.Boxed); ok {
 		if v.Kind() == types.KindRef {
-			val = i.heap[v.Ref()]
+			ref := v.Ref()
+			if ref < 0 || ref >= len(i.heap) || i.rc[ref] <= 0 {
+				return ErrSegmentationFault
+			}
+			val = i.heap[ref]
 		} else {
 			val = types.Unbox(v)
 		}
@@ -393,7 +451,8 @@ func (i *Interpreter) Store(addr int, val types.Value) error {
 	return nil
 }
 
-func (i *Interpreter) Alloc(val types.Value) (int, error) {
+func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
+	defer i.guard(&err)
 	if v, ok := val.(types.Boxed); ok {
 		if v.Kind() == types.KindRef {
 			return v.Ref(), nil
@@ -422,7 +481,8 @@ func (i *Interpreter) Release(addr int) error {
 	return nil
 }
 
-func (i *Interpreter) Push(val types.Value) error {
+func (i *Interpreter) Push(val types.Value) (err error) {
+	defer i.guard(&err)
 	if i.sp == len(i.stack) {
 		return ErrStackOverflow
 	}
@@ -799,14 +859,38 @@ func (i *Interpreter) scratch() []uint64 {
 	return i.argv[:]
 }
 
-func (i *Interpreter) error(r any) error {
-	ip := i.fr.ip
+func (i *Interpreter) runtimeError(r any) error {
+	return &RuntimeError{
+		Err:    i.cause(r),
+		Frames: i.framesInfo(),
+	}
+}
+
+func (i *Interpreter) guard(err *error) {
+	if r := recover(); r != nil {
+		*err = i.cause(r)
+	}
+}
+
+func (i *Interpreter) cause(r any) error {
 	switch e := r.(type) {
 	case error:
-		return fmt.Errorf("%w: at=%d", e, ip)
+		return e
 	default:
-		return fmt.Errorf("%v: at=%d", r, ip)
+		return fmt.Errorf("%v", r)
 	}
+}
+
+func (i *Interpreter) framesInfo() []FrameInfo {
+	if i.fp <= 0 {
+		return nil
+	}
+	frames := make([]FrameInfo, 0, i.fp)
+	for idx := i.fp - 1; idx >= 0; idx-- {
+		f := i.frames[idx]
+		frames = append(frames, FrameInfo{Func: f.addr, IP: f.ip})
+	}
+	return frames
 }
 
 func (i *Interpreter) boxI64(val int64) types.Boxed {
@@ -876,10 +960,21 @@ func (i *Interpreter) alloc(val types.Value) int {
 		return addr
 	}
 
+	if i.limit > 0 && len(i.heap) >= i.limit {
+		i.gc()
+		if addr, ok := i.reuse(val); ok {
+			return addr
+		}
+		panic(ErrHeapExhausted)
+	}
+
 	if len(i.heap) == cap(i.heap) {
 		i.gc()
 		if addr, ok := i.reuse(val); ok {
 			return addr
+		}
+		if i.limit > 0 && len(i.heap) >= i.limit {
+			panic(ErrHeapExhausted)
 		}
 
 		c := 2 * cap(i.heap)
