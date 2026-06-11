@@ -2,7 +2,6 @@ package prof
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -175,25 +174,17 @@ func TestStats_Snapshot(t *testing.T) {
 	})
 }
 
-func TestStats_JIT(t *testing.T) {
+func TestStats_JITAdd(t *testing.T) {
 	p := New()
-	p.JITAttempt()
-	p.JITEmit(12)
-	p.JITEmit(-1)
-	p.JITLink()
-	p.JITSkip()
-	p.JITAbort()
-	p.JITError()
-	p.JITTime(3 * time.Millisecond)
+	p.JITAdd(JIT{Attempts: 1, Errors: 1})
+	p.JITAdd(JIT{Emits: 2, Links: 1, Skips: 1, Bytes: 12})
 
 	require.Equal(t, JIT{
 		Attempts: 1,
 		Emits:    2,
 		Links:    1,
 		Skips:    1,
-		Aborts:   1,
 		Errors:   1,
 		Bytes:    12,
-		Time:     3 * time.Millisecond,
 	}, p.Snapshot().JIT)
 }

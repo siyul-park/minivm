@@ -75,41 +75,147 @@ var floatUnaryOpcodes = map[Op]struct{ single, double uint32 }{
 	OpFRINTZ: {0x1E25C000, 0x1E65C000}, // round toward zero
 }
 
+// reg3Opcodes maps each uniform 3-register opcode (Rm<<16 | Rn<<5 | Rd) to its
+// 64-bit base word. MUL/MNEG encode as MADD/MSUB with Ra=XZR; LSL/LSR/ASR/ROR
+// are the register-shift variants (LSLV-family).
+var reg3Opcodes = map[Op]uint32{
+	OpADD:  0x8B000000,
+	OpADDS: 0xAB000000,
+	OpSUB:  0xCB000000,
+	OpSUBS: 0xEB000000,
+	OpMUL:  0x9B007C00,
+	OpMNEG: 0x9B00FC00,
+	OpSDIV: 0x9AC00C00,
+	OpUDIV: 0x9AC00800,
+	OpADC:  0x9A000000,
+	OpADCS: 0xBA000000,
+	OpSBC:  0xDA000000,
+	OpSBCS: 0xFA000000,
+	OpAND:  0x8A000000,
+	OpANDS: 0xEA000000,
+	OpORR:  0xAA000000,
+	OpEOR:  0xCA000000,
+	OpBIC:  0x8A200000,
+	OpBICS: 0xEA200000,
+	OpEON:  0xCA200000,
+	OpORN:  0xAA200000,
+	OpLSL:  0x9AC02000,
+	OpLSR:  0x9AC02400,
+	OpASR:  0x9AC02800,
+	OpROR:  0x9AC02C00,
+}
+
+// arithImmOpcodes maps each arithmetic-immediate opcode (imm12) to its base word.
+var arithImmOpcodes = map[Op]uint32{
+	OpADDI:  0x91000000,
+	OpADDSI: 0xB1000000,
+	OpSUBI:  0xD1000000,
+	OpSUBSI: 0xF1000000,
+}
+
+// logicalImmOpcodes maps each logical-immediate opcode to its base word.
+var logicalImmOpcodes = map[Op]uint32{
+	OpANDI:  0x92000000,
+	OpANDSI: 0xF2000000,
+	OpORRI:  0xB2000000,
+	OpEORI:  0xD2000000,
+}
+
+// reg2Opcodes maps each uniform 2-register opcode (Rn<<5 | Rd) to its base word.
+var reg2Opcodes = map[Op]uint32{
+	OpCLZ:   0xDAC01000,
+	OpRBIT:  0xDAC00000,
+	OpREV16: 0xDAC00400,
+	OpREV32: 0xDAC00800,
+}
+
+// selectOpcodes maps each conditional-select opcode to its base word.
+var selectOpcodes = map[Op]uint32{
+	OpCSEL:  0x9A800000,
+	OpCSINC: 0x9A800400,
+	OpCSINV: 0xDA800000,
+	OpCSNEG: 0xDA800400,
+}
+
+// moveOpcodes maps each wide-immediate move opcode to its 32- and 64-bit base words.
+var moveOpcodes = map[Op]struct{ op32, op64 uint32 }{
+	OpMOVZ: {0x52800000, 0xD2800000},
+	OpMOVK: {0x72800000, 0xF2800000},
+	OpMOVN: {0x12800000, 0x92800000},
+}
+
+// loadOpcodes maps each unsigned-offset load opcode to its base word and the
+// access size that scales the byte offset.
+var loadOpcodes = map[Op]struct {
+	base  uint32
+	scale int64
+}{
+	OpLDR:   {0xF9400000, 8},
+	OpLDRB:  {0x39400000, 1},
+	OpLDRSB: {0x39800000, 1},
+	OpLDRH:  {0x79400000, 2},
+	OpLDRSH: {0x79800000, 2},
+	OpLDRSW: {0xB9800000, 4},
+}
+
+// storeOpcodes maps each unsigned-offset store opcode to its base word and the
+// access size that scales the byte offset.
+var storeOpcodes = map[Op]struct {
+	base  uint32
+	scale int64
+}{
+	OpSTR:  {0xF9000000, 8},
+	OpSTRB: {0x39000000, 1},
+	OpSTRH: {0x79000000, 2},
+}
+
+// cvtOpcodes maps each int↔float convert opcode to its base word and whether
+// the integer register is the destination. The final word sets bit 31 for a
+// 64-bit integer register and bit 22 for a double-precision float register.
+var cvtOpcodes = map[Op]struct {
+	base  uint32
+	toInt bool
+}{
+	OpSCVTF:  {0x1E220000, false},
+	OpUCVTF:  {0x1E230000, false},
+	OpFCVTZS: {0x1E380000, true},
+	OpFCVTZU: {0x1E390000, true},
+}
+
+// floatBinaryOpcodes maps each 3-register scalar float opcode to its single-
+// and double-precision base words.
+var floatBinaryOpcodes = map[Op]struct{ single, double uint32 }{
+	OpFADD: {0x1E202800, 0x1E602800},
+	OpFSUB: {0x1E203800, 0x1E603800},
+	OpFMUL: {0x1E200800, 0x1E600800},
+	OpFDIV: {0x1E201800, 0x1E601800},
+}
+
+// floatTernaryOpcodes maps each 4-register scalar float opcode (FMADD-family)
+// to its single- and double-precision base words.
+var floatTernaryOpcodes = map[Op]struct{ single, double uint32 }{
+	OpFMADD:  {0x1F000000, 0x1F400000},
+	OpFMSUB:  {0x1F008000, 0x1F408000},
+	OpFNMADD: {0x1F200000, 0x1F600000},
+	OpFNMSUB: {0x1F208000, 0x1F608000},
+}
+
 func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 	op := Op(inst.Op)
 	switch op {
 
 	// -----------------------------------------------------------------------
-	// Arithmetic — register
+	// Arithmetic / bitwise / shift — register
 	// -----------------------------------------------------------------------
 
-	case OpADD:
+	case OpADD, OpADDS, OpSUB, OpSUBS, OpMUL, OpMNEG, OpSDIV, OpUDIV,
+		OpADC, OpADCS, OpSBC, OpSBCS, OpAND, OpANDS, OpORR, OpEOR,
+		OpBIC, OpBICS, OpEON, OpORN, OpLSL, OpLSR, OpASR, OpROR:
 		d, n, m, err := e.decodeReg3(inst)
 		if err != nil {
 			return nil, err
 		}
-		return encR3(0x8B000000, d, n, m)
-
-	case OpADDS:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0xAB000000, d, n, m)
-
-	case OpSUB:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0xCB000000, d, n, m)
-
-	case OpSUBS:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0xEB000000, d, n, m)
+		return encR3(reg3Opcodes[op], d, n, m)
 
 	case OpNEG: // NEG Xd, Xm  →  SUB Xd, XZR, Xm
 		d, m, err := e.decodeReg2(inst)
@@ -133,20 +239,6 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return enc(base | reg(m)<<16 | 0x1F<<5 | reg(d)), nil
 
-	case OpMUL: // MUL  →  MADD Ra=XZR
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0x9B007C00, d, n, m)
-
-	case OpMNEG: // MNEG  →  MSUB Ra=XZR
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0x9B00FC00, d, n, m)
-
 	case OpMADD:
 		d, n, m, a, err := e.decodeReg4(inst)
 		if err != nil {
@@ -161,139 +253,16 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return encR4(0x9B008000, d, n, m, a)
 
-	case OpSDIV:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0x9AC00C00, d, n, m)
-
-	case OpUDIV:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0x9AC00800, d, n, m)
-
-	case OpADC:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0x9A000000, d, n, m)
-
-	case OpADCS:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0xBA000000, d, n, m)
-
-	case OpSBC:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0xDA000000, d, n, m)
-
-	case OpSBCS:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0xFA000000, d, n, m)
-
 	// -----------------------------------------------------------------------
 	// Arithmetic — immediate
 	// -----------------------------------------------------------------------
 
-	case OpADDI:
+	case OpADDI, OpADDSI, OpSUBI, OpSUBSI:
 		d, n, imm, err := e.decodeRegImm(inst)
 		if err != nil {
 			return nil, err
 		}
-		return encRImm12(0x91000000, d, n, imm)
-
-	case OpADDSI:
-		d, n, imm, err := e.decodeRegImm(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encRImm12(0xB1000000, d, n, imm)
-
-	case OpSUBI:
-		d, n, imm, err := e.decodeRegImm(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encRImm12(0xD1000000, d, n, imm)
-
-	case OpSUBSI:
-		d, n, imm, err := e.decodeRegImm(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encRImm12(0xF1000000, d, n, imm)
-
-	// -----------------------------------------------------------------------
-	// Bitwise — register
-	// -----------------------------------------------------------------------
-
-	case OpAND:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0x8A000000, d, n, m)
-
-	case OpANDS:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0xEA000000, d, n, m)
-
-	case OpORR:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0xAA000000, d, n, m)
-
-	case OpEOR:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0xCA000000, d, n, m)
-
-	case OpBIC:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0x8A200000, d, n, m)
-
-	case OpBICS:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0xEA200000, d, n, m)
-
-	case OpEON:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0xCA200000, d, n, m)
-
-	case OpORN:
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0xAA200000, d, n, m)
+		return encRImm12(arithImmOpcodes[op], d, n, imm)
 
 	case OpMVN: // MVN Xd, Xm  →  ORN Xd, XZR, Xm
 		d, m, err := e.decodeReg2(inst)
@@ -310,81 +279,16 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 	// Bitwise — immediate  (logical immediate encoding, N=1 for 64-bit)
 	// -----------------------------------------------------------------------
 
-	case OpANDI:
+	case OpANDI, OpANDSI, OpORRI, OpEORI:
 		d, n, imm, err := e.decodeRegImm(inst)
 		if err != nil {
 			return nil, err
 		}
-		word, err := logicalImmediate(0x92000000, d, n, imm)
+		word, err := logicalImmediate(logicalImmOpcodes[op], d, n, imm)
 		if err != nil {
 			return nil, err
 		}
 		return enc(word), nil
-
-	case OpANDSI:
-		d, n, imm, err := e.decodeRegImm(inst)
-		if err != nil {
-			return nil, err
-		}
-		word, err := logicalImmediate(0xF2000000, d, n, imm)
-		if err != nil {
-			return nil, err
-		}
-		return enc(word), nil
-
-	case OpORRI:
-		d, n, imm, err := e.decodeRegImm(inst)
-		if err != nil {
-			return nil, err
-		}
-		word, err := logicalImmediate(0xB2000000, d, n, imm)
-		if err != nil {
-			return nil, err
-		}
-		return enc(word), nil
-
-	case OpEORI:
-		d, n, imm, err := e.decodeRegImm(inst)
-		if err != nil {
-			return nil, err
-		}
-		word, err := logicalImmediate(0xD2000000, d, n, imm)
-		if err != nil {
-			return nil, err
-		}
-		return enc(word), nil
-
-	// -----------------------------------------------------------------------
-	// Shift — register
-	// -----------------------------------------------------------------------
-
-	case OpLSL: // LSLV
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0x9AC02000, d, n, m)
-
-	case OpLSR: // LSRV
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0x9AC02400, d, n, m)
-
-	case OpASR: // ASRV
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0x9AC02800, d, n, m)
-
-	case OpROR: // RORV
-		d, n, m, err := e.decodeReg3(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR3(0x9AC02C00, d, n, m)
 
 	// -----------------------------------------------------------------------
 	// Shift — immediate  (encoded as UBFM / SBFM / EXTR)
@@ -442,19 +346,12 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 	// Bit manipulation
 	// -----------------------------------------------------------------------
 
-	case OpCLZ:
+	case OpCLZ, OpRBIT, OpREV16, OpREV32:
 		d, n, err := e.decodeReg2(inst)
 		if err != nil {
 			return nil, err
 		}
-		return encR2(0xDAC01000, d, n)
-
-	case OpRBIT:
-		d, n, err := e.decodeReg2(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR2(0xDAC00000, d, n)
+		return encR2(reg2Opcodes[op], d, n)
 
 	case OpREV:
 		d, n, err := e.decodeReg2(inst)
@@ -469,20 +366,6 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 			base = 0x5AC00800
 		}
 		return enc(base | reg(n)<<5 | reg(d)), nil
-
-	case OpREV16:
-		d, n, err := e.decodeReg2(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR2(0xDAC00400, d, n)
-
-	case OpREV32:
-		d, n, err := e.decodeReg2(inst)
-		if err != nil {
-			return nil, err
-		}
-		return encR2(0xDAC00800, d, n)
 
 	case OpSXTB, OpSXTH, OpSXTW, OpUXTB, OpUXTH, OpUXTW:
 		d, n, err := e.decodeReg2(inst)
@@ -585,57 +468,21 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		return enc(0xD2800000 | (uint32(u)&0xFFFF)<<5 | reg(d)), nil
 
-	case OpMOVZ:
-		return e.encodeMovImmediate(0x52800000, 0xD2800000, inst)
-
-	case OpMOVK:
-		return e.encodeMovImmediate(0x72800000, 0xF2800000, inst)
-
-	case OpMOVN:
-		return e.encodeMovImmediate(0x12800000, 0x92800000, inst)
+	case OpMOVZ, OpMOVK, OpMOVN:
+		mv := moveOpcodes[op]
+		return e.encodeMovImmediate(mv.op32, mv.op64, inst)
 
 	// -----------------------------------------------------------------------
-	// Load / Store  64-bit
+	// Load / Store  unsigned offset
 	// -----------------------------------------------------------------------
 
-	case OpLDR: // LDR Xt, [Xn, #pimm*8]  — unsigned offset
-		return e.encodeLoad(0xF9400000, 8, inst)
+	case OpLDR, OpLDRB, OpLDRSB, OpLDRH, OpLDRSH, OpLDRSW:
+		ld := loadOpcodes[op]
+		return e.encodeLoad(ld.base, ld.scale, inst)
 
-	case OpSTR:
-		return e.encodeStore(0xF9000000, 8, inst)
-
-	// -----------------------------------------------------------------------
-	// Load / Store  8-bit
-	// -----------------------------------------------------------------------
-
-	case OpLDRB:
-		return e.encodeLoad(0x39400000, 1, inst)
-
-	case OpLDRSB: // sign-extends to 64-bit
-		return e.encodeLoad(0x39800000, 1, inst)
-
-	case OpSTRB:
-		return e.encodeStore(0x39000000, 1, inst)
-
-	// -----------------------------------------------------------------------
-	// Load / Store  16-bit
-	// -----------------------------------------------------------------------
-
-	case OpLDRH:
-		return e.encodeLoad(0x79400000, 2, inst)
-
-	case OpLDRSH: // sign-extends to 64-bit
-		return e.encodeLoad(0x79800000, 2, inst)
-
-	case OpSTRH:
-		return e.encodeStore(0x79000000, 2, inst)
-
-	// -----------------------------------------------------------------------
-	// Load / Store  32-bit sign-extended
-	// -----------------------------------------------------------------------
-
-	case OpLDRSW:
-		return e.encodeLoad(0xB9800000, 4, inst)
+	case OpSTR, OpSTRB, OpSTRH:
+		st := storeOpcodes[op]
+		return e.encodeStore(st.base, st.scale, inst)
 
 	// -----------------------------------------------------------------------
 	// Load / Store  register-offset  [Xbase, Xoffset]
@@ -694,89 +541,29 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 	// Float — convert
 	// -----------------------------------------------------------------------
 
-	case OpSCVTF: // SCVTF Dd, Xn  (integer → double)
+	case OpSCVTF, OpUCVTF, OpFCVTZS, OpFCVTZU:
 		d, n, err := e.decodeReg2(inst)
 		if err != nil {
 			return nil, err
 		}
-		if d.Type() != asm.RegTypeFloat || n.Type() != asm.RegTypeInt {
+		cv := cvtOpcodes[op]
+		intReg, floatReg := d, n
+		if !cv.toInt {
+			intReg, floatReg = n, d
+		}
+		if intReg.Type() != asm.RegTypeInt || floatReg.Type() != asm.RegTypeFloat ||
+			(intReg.Width() != asm.Width32 && intReg.Width() != asm.Width64) ||
+			(floatReg.Width() != asm.Width32 && floatReg.Width() != asm.Width64) {
 			return nil, asm.ErrInvalidOperand
 		}
-		switch {
-		case d.Width() == asm.Width32 && n.Width() == asm.Width32:
-			return enc(0x1E220000 | reg(n)<<5 | reg(d)), nil // SCVTF Sd, Wn
-		case d.Width() == asm.Width32 && n.Width() == asm.Width64:
-			return enc(0x9E220000 | reg(n)<<5 | reg(d)), nil // SCVTF Sd, Xn
-		case d.Width() == asm.Width64 && n.Width() == asm.Width32:
-			return enc(0x1E620000 | reg(n)<<5 | reg(d)), nil // SCVTF Dd, Wn
-		case d.Width() == asm.Width64 && n.Width() == asm.Width64:
-			return enc(0x9E620000 | reg(n)<<5 | reg(d)), nil // SCVTF Dd, Xn
-		default:
-			return nil, asm.ErrInvalidOperand
+		word := cv.base
+		if intReg.Width() == asm.Width64 {
+			word |= 1 << 31 // sf: 64-bit integer register
 		}
-
-	case OpUCVTF: // UCVTF Dd, Xn  (unsigned integer → double)
-		d, n, err := e.decodeReg2(inst)
-		if err != nil {
-			return nil, err
+		if floatReg.Width() == asm.Width64 {
+			word |= 1 << 22 // ftype: double precision
 		}
-		if d.Type() != asm.RegTypeFloat || n.Type() != asm.RegTypeInt {
-			return nil, asm.ErrInvalidOperand
-		}
-		switch {
-		case d.Width() == asm.Width32 && n.Width() == asm.Width32:
-			return enc(0x1E230000 | reg(n)<<5 | reg(d)), nil // UCVTF Sd, Wn
-		case d.Width() == asm.Width32 && n.Width() == asm.Width64:
-			return enc(0x9E230000 | reg(n)<<5 | reg(d)), nil // UCVTF Sd, Xn
-		case d.Width() == asm.Width64 && n.Width() == asm.Width32:
-			return enc(0x1E630000 | reg(n)<<5 | reg(d)), nil // UCVTF Dd, Wn
-		case d.Width() == asm.Width64 && n.Width() == asm.Width64:
-			return enc(0x9E630000 | reg(n)<<5 | reg(d)), nil // UCVTF Dd, Xn
-		default:
-			return nil, asm.ErrInvalidOperand
-		}
-
-	case OpFCVTZS:
-		d, n, err := e.decodeReg2(inst)
-		if err != nil {
-			return nil, err
-		}
-		if d.Type() != asm.RegTypeInt || n.Type() != asm.RegTypeFloat {
-			return nil, asm.ErrInvalidOperand
-		}
-		switch {
-		case d.Width() == asm.Width32 && n.Width() == asm.Width32:
-			return enc(0x1E380000 | reg(n)<<5 | reg(d)), nil // FCVTZS Wd, Sn
-		case d.Width() == asm.Width32 && n.Width() == asm.Width64:
-			return enc(0x1E780000 | reg(n)<<5 | reg(d)), nil // FCVTZS Wd, Dn
-		case d.Width() == asm.Width64 && n.Width() == asm.Width32:
-			return enc(0x9E380000 | reg(n)<<5 | reg(d)), nil // FCVTZS Xd, Sn
-		case d.Width() == asm.Width64 && n.Width() == asm.Width64:
-			return enc(0x9E780000 | reg(n)<<5 | reg(d)), nil // FCVTZS Xd, Dn
-		default:
-			return nil, asm.ErrInvalidOperand
-		}
-
-	case OpFCVTZU:
-		d, n, err := e.decodeReg2(inst)
-		if err != nil {
-			return nil, err
-		}
-		if d.Type() != asm.RegTypeInt || n.Type() != asm.RegTypeFloat {
-			return nil, asm.ErrInvalidOperand
-		}
-		switch {
-		case d.Width() == asm.Width32 && n.Width() == asm.Width32:
-			return enc(0x1E390000 | reg(n)<<5 | reg(d)), nil // FCVTZU Wd, Sn
-		case d.Width() == asm.Width32 && n.Width() == asm.Width64:
-			return enc(0x1E790000 | reg(n)<<5 | reg(d)), nil // FCVTZU Wd, Dn
-		case d.Width() == asm.Width64 && n.Width() == asm.Width32:
-			return enc(0x9E390000 | reg(n)<<5 | reg(d)), nil // FCVTZU Xd, Sn
-		case d.Width() == asm.Width64 && n.Width() == asm.Width64:
-			return enc(0x9E790000 | reg(n)<<5 | reg(d)), nil // FCVTZU Xd, Dn
-		default:
-			return nil, asm.ErrInvalidOperand
-		}
+		return enc(word | reg(n)<<5 | reg(d)), nil
 
 	case OpFCVT:
 		d, n, err := e.decodeReg2(inst)
@@ -798,29 +585,13 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		// Float — arithmetic (double precision)
 		// -----------------------------------------------------------------------
 
-	case OpFADD:
-		return e.encodeFloatBinary(0x1E202800, 0x1E602800, inst)
+	case OpFADD, OpFSUB, OpFMUL, OpFDIV:
+		fb := floatBinaryOpcodes[op]
+		return e.encodeFloatBinary(fb.single, fb.double, inst)
 
-	case OpFSUB:
-		return e.encodeFloatBinary(0x1E203800, 0x1E603800, inst)
-
-	case OpFMUL:
-		return e.encodeFloatBinary(0x1E200800, 0x1E600800, inst)
-
-	case OpFDIV:
-		return e.encodeFloatBinary(0x1E201800, 0x1E601800, inst)
-
-	case OpFMADD:
-		return e.encodeFloatTernary(0x1F000000, 0x1F400000, inst)
-
-	case OpFMSUB:
-		return e.encodeFloatTernary(0x1F008000, 0x1F408000, inst)
-
-	case OpFNMADD:
-		return e.encodeFloatTernary(0x1F200000, 0x1F600000, inst)
-
-	case OpFNMSUB:
-		return e.encodeFloatTernary(0x1F208000, 0x1F608000, inst)
+	case OpFMADD, OpFMSUB, OpFNMADD, OpFNMSUB:
+		ft := floatTernaryOpcodes[op]
+		return e.encodeFloatTernary(ft.single, ft.double, inst)
 
 	// -----------------------------------------------------------------------
 	// Float — unary
@@ -922,69 +693,28 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 	// Conditional select
 	// -----------------------------------------------------------------------
 
-	case OpCSEL: // CSEL Xd, Xn, Xm, cond
+	case OpCSEL, OpCSINC, OpCSINV, OpCSNEG: // CSxx Xd, Xn, Xm, cond
 		d, n, m, cond, err := e.decodeSelect(inst)
 		if err != nil {
 			return nil, err
 		}
-		base, err := intBase(0x9A800000, d, n, m)
+		base, err := intBase(selectOpcodes[op], d, n, m)
 		if err != nil {
 			return nil, err
 		}
 		return enc(base | reg(m)<<16 | cond<<12 | reg(n)<<5 | reg(d)), nil
 
-	case OpCSINC: // CSINC Xd, Xn, Xm, cond
-		d, n, m, cond, err := e.decodeSelect(inst)
-		if err != nil {
-			return nil, err
-		}
-		base, err := intBase(0x9A800400, d, n, m)
-		if err != nil {
-			return nil, err
-		}
-		return enc(base | reg(m)<<16 | cond<<12 | reg(n)<<5 | reg(d)), nil
-
-	case OpCSINV:
-		d, n, m, cond, err := e.decodeSelect(inst)
-		if err != nil {
-			return nil, err
-		}
-		base, err := intBase(0xDA800000, d, n, m)
-		if err != nil {
-			return nil, err
-		}
-		return enc(base | reg(m)<<16 | cond<<12 | reg(n)<<5 | reg(d)), nil
-
-	case OpCSNEG:
-		d, n, m, cond, err := e.decodeSelect(inst)
-		if err != nil {
-			return nil, err
-		}
-		base, err := intBase(0xDA800400, d, n, m)
-		if err != nil {
-			return nil, err
-		}
-		return enc(base | reg(m)<<16 | cond<<12 | reg(n)<<5 | reg(d)), nil
-
-	case OpCSET: // CSET Xd, cond  →  CSINC Xd, XZR, XZR, !cond
+	case OpCSET, OpCSETM: // CSET(M) Xd, cond  →  CSINC/CSINV Xd, XZR, XZR, !cond
 		d, condImm, err := e.decodeDstImm(inst)
 		if err != nil {
 			return nil, err
 		}
 		cond := uint32(condImm)&0xF ^ 1 // invert lsb to negate condition
-		base, err := intBase(0x9A9F07E0, d)
-		if err != nil {
-			return nil, err
+		word := uint32(0x9A9F07E0)
+		if op == OpCSETM {
+			word = 0xDA9F03E0
 		}
-		return enc(base | cond<<12 | reg(d)), nil
-
-	case OpCSETM: // CSETM Xd, cond  →  CSINV Xd, XZR, XZR, !cond
-		d, condImm, err := e.decodeDstImm(inst)
-		if err != nil {
-			return nil, err
-		}
-		cond := uint32(condImm)&0xF ^ 1
-		base, err := intBase(0xDA9F03E0, d)
+		base, err := intBase(word, d)
 		if err != nil {
 			return nil, err
 		}

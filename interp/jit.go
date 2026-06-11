@@ -37,9 +37,10 @@ type jitCompiler struct {
 type jitModule struct {
 	entries  map[int]asm.Callable
 	segments []jitSegment
-	bytes    []int
+	emits    int
 	links    int
 	skips    int
+	bytes    int
 }
 
 type jitSegment struct {
@@ -190,7 +191,8 @@ func (c *jitCompiler) linkEntry(mod *jitModule, addr int, seg segment) error {
 		return err
 	}
 	mod.entries[addr] = linked[0].Callable
-	mod.bytes = append(mod.bytes, len(seg.code.Bytes))
+	mod.emits++
+	mod.bytes += len(seg.code.Bytes)
 	mod.links = 1
 	return nil
 }
@@ -240,7 +242,8 @@ func (c *jitCompiler) complete(i *Interpreter, addr int, fn *types.Function, mod
 	if err != nil {
 		return false, err
 	}
-	mod.bytes = append(mod.bytes, len(code.Bytes))
+	mod.emits++
+	mod.bytes += len(code.Bytes)
 	mod.links = len(targets)
 	for targetAddr, target := range targets {
 		callable, ok := linked[0].Entries[target.label]
@@ -547,7 +550,8 @@ func (c *jitCompiler) link(mod *jitModule, segs []segment) error {
 	codes := make([]*asm.Code, len(segs))
 	for i, seg := range segs {
 		codes[i] = seg.code
-		mod.bytes = append(mod.bytes, len(seg.code.Bytes))
+		mod.emits++
+		mod.bytes += len(seg.code.Bytes)
 	}
 	linked, err := asm.Link(c.buffer, c.arch, codes, nil)
 	if err != nil {

@@ -1,7 +1,5 @@
 package prof
 
-import "time"
-
 // Snapshot is an immutable copy of collected profile data.
 type Snapshot struct {
 	Samples uint64
@@ -38,10 +36,8 @@ type JIT struct {
 	Emits    uint64
 	Links    uint64
 	Skips    uint64
-	Aborts   uint64
 	Errors   uint64
 	Bytes    uint64
-	Time     time.Duration
 }
 
 // Stats records execution-frequency data during bytecode interpretation.
@@ -156,44 +152,14 @@ func (p *Stats) Snapshot() Snapshot {
 	}
 }
 
-// JITAttempt records one JIT compilation attempt.
-func (p *Stats) JITAttempt() {
-	p.jit.Attempts++
-}
-
-// JITEmit records one emitted JIT segment and its native code size in bytes.
-func (p *Stats) JITEmit(bytes int) {
-	p.jit.Emits++
-	if bytes > 0 {
-		p.jit.Bytes += uint64(bytes)
-	}
-}
-
-// JITLink records one linked native entry.
-func (p *Stats) JITLink() {
-	p.jit.Links++
-}
-
-// JITSkip records one cold JIT segment skipped by profile-guided selection.
-func (p *Stats) JITSkip() {
-	p.jit.Skips++
-}
-
-// JITAbort records one aborted JIT segment.
-func (p *Stats) JITAbort() {
-	p.jit.Aborts++
-}
-
-// JITError records one JIT compilation error.
-func (p *Stats) JITError() {
-	p.jit.Errors++
-}
-
-// JITTime records time spent in JIT compilation.
-func (p *Stats) JITTime(d time.Duration) {
-	if d > 0 {
-		p.jit.Time += d
-	}
+// JITAdd merges d into the aggregate JIT counters.
+func (p *Stats) JITAdd(d JIT) {
+	p.jit.Attempts += d.Attempts
+	p.jit.Emits += d.Emits
+	p.jit.Links += d.Links
+	p.jit.Skips += d.Skips
+	p.jit.Errors += d.Errors
+	p.jit.Bytes += d.Bytes
 }
 
 func (p *Stats) funcData(fn int, total uint64) Func {

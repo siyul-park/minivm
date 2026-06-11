@@ -4584,7 +4584,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		i.fp = 2
 		i.fr = &i.frames[1]
 
-		wrapped := i.entry(addr, callableFunc(func(argv []uint64) error {
+		wrapped := i.entry(callableFunc(func(argv []uint64) error {
 			argv[scratchSP] = 0
 			i.journal[journalDepth] = 1
 			i.journal[journalHead+recordIP] = 0

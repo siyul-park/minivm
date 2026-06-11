@@ -507,7 +507,7 @@ func (i *Interpreter) jit(addr int) error {
 	if i.compiler == nil {
 		return nil
 	}
-	i.prof.JITAttempt()
+	i.prof.JITAdd(prof.JIT{Attempts: 1})
 
 	fn, ok := i.function(addr)
 	if !ok {
@@ -515,7 +515,7 @@ func (i *Interpreter) jit(addr int) error {
 	}
 	mod, err := i.compiler.Compile(i, addr, fn)
 	if err != nil {
-		i.prof.JITError()
+		i.prof.JITAdd(prof.JIT{Errors: 1})
 		return err
 	}
 	if mod == nil {
@@ -531,7 +531,7 @@ func (i *Interpreter) ensure() error {
 	if i.compiler == nil {
 		compiler, err := newJITCompiler(i.cutoff)
 		if err != nil {
-			i.prof.JITError()
+			i.prof.JITAdd(prof.JIT{Errors: 1})
 			return err
 		}
 		i.compiler = compiler
@@ -543,21 +543,18 @@ func (i *Interpreter) ensure() error {
 // the whole-function Entry replaces the first opcode handler, every
 // emitted segment replaces its corresponding handler.
 func (i *Interpreter) install(mod *jitModule) {
-	for _, n := range mod.bytes {
-		i.prof.JITEmit(n)
-	}
-	for range mod.links {
-		i.prof.JITLink()
-	}
-	for range mod.skips {
-		i.prof.JITSkip()
-	}
+	i.prof.JITAdd(prof.JIT{
+		Emits: uint64(mod.emits),
+		Links: uint64(mod.links),
+		Skips: uint64(mod.skips),
+		Bytes: uint64(mod.bytes),
+	})
 	for addr, callable := range mod.entries {
 		if addr <= 0 || addr >= len(i.code) || len(i.code[addr]) == 0 || callable == nil {
 			continue
 		}
 		i.fallbacks[addr] = i.code[addr][0]
-		i.code[addr][0] = i.entry(addr, callable)
+		i.code[addr][0] = i.entry(callable)
 	}
 	for _, seg := range mod.segments {
 		if seg.addr < 0 || seg.addr >= len(i.code) || seg.ip < 0 || seg.ip >= len(i.code[seg.addr]) || seg.callable == nil {
@@ -667,7 +664,7 @@ func (i *Interpreter) segment(addr int, callable asm.Callable, argc int, fallbac
 // this closure performs the frame teardown that RETURN would do in the threaded
 // interpreter, and on a trap it rebuilds the native call chain into real VM
 // frames before resuming threaded execution at the fallback IP.
-func (i *Interpreter) entry(addr int, callable asm.Callable) func(*Interpreter) {
+func (i *Interpreter) entry(callable asm.Callable) func(*Interpreter) {
 	return func(i *Interpreter) {
 		i.fr.code = nil
 		i.fr.upvals = nil
@@ -693,7 +690,7 @@ func (i *Interpreter) entry(addr int, callable asm.Callable) func(*Interpreter) 
 		// innermost in the interpreter, surface a frame overflow, or service a
 		// loop safepoint.
 		i.sp = int(scratch[scratchSP])
-		i.deopt(addr)
+		i.deopt()
 		switch i.journal[journalTrap] {
 		case trapOverflow:
 			panic(ErrFrameOverflow)
@@ -720,7 +717,7 @@ func (i *Interpreter) entry(addr int, callable asm.Callable) func(*Interpreter) 
 // frame — already live at i.frames[i.fp-1]. Earlier records become deeper VM
 // frames in reverse order, matching the fused direct call in fuse.go (ref
 // unretained, code/upvals restored).
-func (i *Interpreter) deopt(addr int) {
+func (i *Interpreter) deopt() {
 	depth := int(i.journal[journalDepth])
 	if depth == 0 {
 		return
@@ -728,29 +725,34 @@ func (i *Interpreter) deopt(addr int) {
 	base := i.fp - 1
 
 	// The last record is the live outermost frame; reconcile its resume state.
-	outerRec := journalHead + (depth-1)*journalStride
+	fn, bp, ip, _ := i.record(depth - 1)
 	outer := &i.frames[base]
-	outer.bp = int(i.journal[outerRec+recordBP])
-	outer.ip = int(i.journal[outerRec+recordIP])
-	i.restore(outer, int(i.journal[outerRec+recordAddr]))
+	outer.bp = bp
+	outer.ip = ip
+	i.restore(outer, fn)
 
 	// Earlier records become fresh frames from outer to inner. Like the fused
 	// direct call in fuse.go, the callee ref was never pushed or retained, so
 	// release stays false.
 	for n := 1; n < depth; n++ {
-		rec := journalHead + (depth-1-n)*journalStride
-		fn := int(i.journal[rec+recordAddr])
+		fn, bp, ip, returns := i.record(depth - 1 - n)
 		f := &i.frames[base+n]
 		f.addr = fn
 		f.ref = fn
 		f.release = false
-		f.bp = int(i.journal[rec+recordBP])
-		f.ip = int(i.journal[rec+recordIP])
-		f.returns = int(i.journal[rec+recordReturns])
+		f.bp = bp
+		f.ip = ip
+		f.returns = returns
 		i.restore(f, fn)
 	}
 	i.fp += depth - 1
 	i.fr = &i.frames[i.fp-1]
+}
+
+// record unpacks frame record n from the native journal.
+func (i *Interpreter) record(n int) (addr, bp, ip, returns int) {
+	rec := i.journal[journalHead+n*journalStride:]
+	return int(rec[recordAddr]), int(rec[recordBP]), int(rec[recordIP]), int(rec[recordReturns])
 }
 
 func (i *Interpreter) restore(f *frame, addr int) {

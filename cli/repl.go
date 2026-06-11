@@ -669,9 +669,9 @@ func printProfile(out io.Writer, snap prof.Snapshot) {
 	if snap.JIT != (prof.JIT{}) {
 		jit := snap.JIT
 		fmt.Fprintln(out, "jit:")
-		fmt.Fprintln(out, "attempts\temits\tlinks\tskips\taborts\terrors\tbytes\ttime")
-		fmt.Fprintf(out, "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
-			jit.Attempts, jit.Emits, jit.Links, jit.Skips, jit.Aborts, jit.Errors, jit.Bytes, jit.Time)
+		fmt.Fprintln(out, "attempts\temits\tlinks\tskips\terrors\tbytes")
+		fmt.Fprintf(out, "%d\t%d\t%d\t%d\t%d\t%d\n",
+			jit.Attempts, jit.Emits, jit.Links, jit.Skips, jit.Errors, jit.Bytes)
 	}
 }
 

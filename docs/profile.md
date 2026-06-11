@@ -64,12 +64,8 @@ Reporting helpers outside hot paths:
 | `Emits` | native objects emitted; a merged fallthrough trace counts once |
 | `Links` | callable entry IPs installed; one object may install multiple entries |
 | `Skips` | cold segments skipped by profile policy |
-| `Aborts` | candidates discarded as too short or ineligible |
 | `Errors` | buffer, compile, or link errors |
 | `Bytes` | total emitted native code bytes |
-| `Time` | total JIT compile/link time |
-
-`Skips` are profile policy decisions; `Aborts` are compilation eligibility decisions. Tune separately.
 
 ## Profile-Guided JIT
 

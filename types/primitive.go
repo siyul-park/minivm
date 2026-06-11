@@ -94,7 +94,7 @@ func (f F64) Kind() Kind {
 }
 
 func (f F64) Type() Type {
-	return f64Type{}
+	return TypeF64
 }
 
 func (f F64) String() string {
