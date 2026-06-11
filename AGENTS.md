@@ -5,14 +5,16 @@ Agent guide for this repo (`Claude Code`, `Codex`, `Cursor`, etc.).
 ## Quick Commands
 
 ```bash
+make init          # install goimports/godoc and go install ./...
 make test          # go test -race ./...
-make benchmark     # go test -run="-" -bench=".*" -benchmem ./...
+make benchmark     # package benches + ./benchmarks module benches
 make lint          # goimports -w . && go vet ./...
-make coverage      # generate coverage.out
+make coverage      # CI-style full test run with coverage.out
 make build         # build ./dist/minivm
 
 go test -race ./...
 go test -race -run TestFoo ./interp/...
+go test -race -run 'TestInterpreter_WithDebugger|TestDebugger_Breakpoints' ./interp
 
 ./dist/minivm      # interactive assembly REPL
 ```
@@ -25,8 +27,11 @@ go test -race -run TestFoo ./interp/...
 4. **Before modifying code, read `docs/coding-patterns.md` and follow relevant sections.**
 5. Mirror nearby tests; follow Test Conventions (one func per exported symbol, sub-cases as `t.Run`).
 6. Update docs when behavior, invariants, commands, or pitfalls change.
-7. Run narrow tests first, then `go test ./...` or `make test` for broad coverage.
-8. Before reporting done, re-read every new/modified file against the pre-finish checklist in `.claude/CLAUDE.md` (or the equivalent in your agent's instruction file).
+7. On a fresh environment or CI-like run, start with `make init`; CI does this before lint/coverage.
+8. Run narrow tests first, then `go test ./...`; use `make coverage` when you want the same broad validation CI runs.
+9. `make benchmark` also runs the separate `benchmarks/` Go module. Use `make benchmark test-options="-count=2"` to match CI's comparison workflow.
+10. For debugger, stepping, or breakpoint work, read `docs/debugging.md` and verify in `./interp`; `interp.WithDebugger` forces `WithTick(1)` and disables JIT.
+11. Before reporting done, re-read every new/modified file against the pre-finish checklist in `.claude/CLAUDE.md` (or the equivalent in your agent's instruction file).
 
 ## Code Exploration
 
@@ -61,6 +66,7 @@ If `codegraph` reports the index is stale or not initialized, fall back to grep/
 | JIT/ARM64 backend | `docs/jit-internals.md`, `docs/value-representation.md` | `interp/jit*.go`, `asm/`, `asm/arm64/` | `go test ./asm/... ./interp` |
 | Optimizer/pass | `docs/pass-system.md` | `analysis/`, `transform/`, `optimize/`, `pass/` | `go test ./analysis ./transform ./optimize ./pass` |
 | REPL/CLI | `docs/guides/repl.md` | `cli/`, `cmd/minivm/`, `instr/parse.go` | `go test ./cli/... ./cmd/minivm ./instr` |
+| Debugger / stepping | `docs/debugging.md`, `docs/profile.md` | `interp/debugger.go`, `cli/repl.go` | `go test -race -run 'TestInterpreter_WithDebugger|TestDebugger_Breakpoints' ./interp` |
 | Style-only change | `docs/coding-patterns.md` | touched package | package tests |
 | Concurrent VM use | `docs/architecture.md` (`interp/`) | `interp/pool.go` | `go test -race ./interp` |
 
@@ -84,6 +90,7 @@ Read only relevant docs.
 | `docs/compatibility.md` | Go version, platform support, CGO, build tags |
 | `docs/host-integration.md` | Marshal/Unmarshal, HostFunction, Go↔VM value conversion |
 | `docs/benchmarks.md` | measured performance, cross-runtime comparison, JIT notes |
+| `docs/debugging.md` | debugger hooks, stepping semantics, breakpoint behavior |
 
 ## Architecture Overview
 
