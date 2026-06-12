@@ -2958,6 +2958,45 @@ func TestInterpreter_Run(t *testing.T) {
 		})
 	}
 
+	t.Run("local.get const binop superinstruction", func(t *testing.T) {
+		// The loop body fuses `local.get 0; i32.const 1; i32.sub` into one
+		// dispatch; run it in pure threaded mode and assert the exact sum so a
+		// miscompiled superinstruction is caught. sum(1..200) = 20100.
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).WithLocals(types.TypeI32).Emit(
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 0), // IP 7 header
+			instr.New(instr.I32_EQZ),
+			instr.New(instr.BR_IF, 20), // -> exit
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.BR, 0xFFE6), // -26 -> header
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.RETURN),
+		).Build()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 200),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(20100), got)
+	})
+
 	t.Run("jit loop matches threaded", func(t *testing.T) {
 		requireJIT(t)
 

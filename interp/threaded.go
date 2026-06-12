@@ -393,6 +393,51 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				return fused
 			}
 		}
+		// Superinstruction: LOCAL_GET idx (i32); I32_CONST c; <i32 binop>.
+		// Push the local as the lhs, then run the existing const+binop fused
+		// closure in the same dispatch, saving a central-loop round-trip. c.ip
+		// is restored so the compile loop still emits standalone handlers for
+		// the absorbed I32_CONST and its binop, keeping branch targets valid.
+		if !c.precise && c.locals[idx] == types.KindI32 &&
+			c.ip+5 < len(c.code) && instr.Opcode(c.code[c.ip]) == instr.I32_CONST {
+			cst := *(*int32)(unsafe.Pointer(&c.code[c.ip+1]))
+			save := c.ip
+			c.ip += 5
+			inner := c.fuseI32Imm(cst, 5)
+			c.ip = save
+			if inner != nil {
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					addr := i.fr.bp + idx
+					if addr > i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[i.sp] = i.stack[addr]
+					i.sp++
+					i.fr.ip += 2
+					inner(i)
+				}
+			}
+		}
+		// I32/F32/F64 locals never hold a heap ref, so retain is a no-op; skip
+		// it and the Kind branch. I64 may box to a ref, so it keeps retainBox.
+		switch c.locals[idx] {
+		case types.KindI32, types.KindF32, types.KindF64:
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				i.stack[i.sp] = i.stack[addr]
+				i.sp++
+				i.fr.ip += 2
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
@@ -414,6 +459,25 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		if idx < 0 {
 			return func(i *Interpreter) {
 				panic(ErrSegmentationFault)
+			}
+		}
+		// I32/F32/F64 locals never hold a heap ref, so the old value can never
+		// be a ref; skip the release. I64 may box to a ref, so it keeps it.
+		if idx < len(c.locals) {
+			switch c.locals[idx] {
+			case types.KindI32, types.KindF32, types.KindF64:
+				return func(i *Interpreter) {
+					if i.sp == 0 {
+						panic(ErrStackUnderflow)
+					}
+					addr := i.fr.bp + idx
+					if addr > i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = i.stack[i.sp-1]
+					i.sp--
+					i.fr.ip += 2
+				}
 			}
 		}
 		return func(i *Interpreter) {
@@ -440,6 +504,24 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		if idx < 0 {
 			return func(i *Interpreter) {
 				panic(ErrSegmentationFault)
+			}
+		}
+		// I32/F32/F64 locals never hold a heap ref, so the old value can never
+		// be a ref; skip the release. I64 may box to a ref, so it keeps it.
+		if idx < len(c.locals) {
+			switch c.locals[idx] {
+			case types.KindI32, types.KindF32, types.KindF64:
+				return func(i *Interpreter) {
+					if i.sp == 0 {
+						panic(ErrStackUnderflow)
+					}
+					addr := i.fr.bp + idx
+					if addr > i.sp {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[addr] = i.stack[i.sp-1]
+					i.fr.ip += 2
+				}
 			}
 		}
 		return func(i *Interpreter) {
