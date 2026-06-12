@@ -113,7 +113,10 @@ Header cells precede a stack of fixed-stride records:
 | `journalNextIP` (3) | resume/fallback IP out for the single-frame path |
 | `journalBudget` (4) | back-edges left before the next loop safepoint; native read/write |
 | `journalActive` (5) | active native call depth for frame-budget checks; X15 mirrors it on native entry |
-| `journalHead` (6)… | trap-time records of `{addr, bp, ip, returns}`, stride 4 |
+| `journalRC` (6) | `&i.rc[0]`; native refcount fast paths read/write guarded counts |
+| `journalUpvals` (7) | `&i.fr.upvals[0]` or `0`; closure-body `UPVAL_*` fast paths |
+| `journalHeap` (8) | `&i.heap[0]`; read-only for heap object fast paths |
+| `journalHead` (9)… | trap-time records of `{addr, bp, ip, returns}`, stride 4 |
 
 Guard fallbacks set `journalTrap = trapFallback` and the resume IP. The segment
 wrapper restores `fr.ip` and runs the original threaded handler for that opcode
@@ -130,8 +133,11 @@ JIT i64 ops require inline 49-bit operands — they read the value lane directly
 Direct `CONST_GET function; CALL` sites lower to native `BL` only in complete
 whole-component JIT, when the target is a JIT-eligible `*types.Function` in the
 same direct-call closure. This includes recursive and mutually recursive SCCs.
-Closure calls, host calls, ref-typed signatures, and unsupported callees stay
-threaded through segment fallback.
+Indirect `CALL` lowers in framed code when the function body's compile-time
+function-value candidates have the same arity; native emits a bounded compare
+chain against boxed function refs and falls back on a miss. Closure calls, host
+calls, capture-bearing direct targets, and unsupported callees stay threaded
+through segment fallback.
 
 Native direct calls are **frame-aware**: `call` checks the frame budget against
 the pinned native-depth register X15, increments X15 and `journalActive`, saves
@@ -155,6 +161,12 @@ Frame overflow is reported when X15/`journalActive >= journalCap` at a call site
 native materializes the current stack, sets `journalTrap = trapOverflow`, unwinds
 to the Go wrapper, and the wrapper panics with `ErrFrameOverflow` (never host
 stack overflow).
+
+Indirect-call hits release the callee stack ref after the frame-budget guard and
+before active-depth increment. If releasing might free (`rc == 1`), native falls
+back and the threaded `CALL` owns the frame setup/release path. Native records
+deopt frames with `release=false`, because a hit has already consumed the callee
+stack ownership before entering the callee.
 
 Complete-JIT now **keeps** reachable guard fallbacks: a guard deopts safely
 through the journal, so a guard-bearing function (e.g. an i64 kernel that may
@@ -193,13 +205,50 @@ empty there (loop state lives in locals); otherwise block mode rejects to segmen
 compilation, where every back-edge already exits to the interpreter. This keeps the
 yield/re-entry path free of operand marshaling.
 
-## Globals
+## Refs, Globals, Locals, And Upvals
 
-`GLOBAL_GET`/`GLOBAL_SET`/`GLOBAL_TEE` lower only for in-range globals whose
-compile-time value is non-ref and whose slot offset fits the ARM64 unsigned
-LDR/STR immediate. Native code also checks the runtime old/value slot and the
-stored value; if either is a ref, it takes the guard fallback so retain/release
-ownership stays in the interpreter.
+`GLOBAL_GET`/`GLOBAL_SET`/`GLOBAL_TEE` lower for in-range globals whose slot
+offset fits the ARM64 unsigned LDR/STR immediate. `LOCAL_*` and `UPVAL_*` lower
+for in-range static slots. Runtime values are still tested by boxed tag: scalar
+values skip RC work, refs use `journalRC`.
+
+`CONST_GET` still rejects ordinary heap refs such as strings so interpreted
+container constructors keep their existing ownership-transfer behavior. Function
+refs that belong to the current complete-JIT component can lower, because they
+are rooted constants and are needed for indirect-call candidates.
+
+Native `retain` increments `i.rc[addr]` inline. Native `release` first guards
+`rc > 1`; if the value might free (`rc == 1`), native restores the pre-op shadow
+stack and falls back so threaded `release()` performs tracing, closing, and free
+list updates. This keeps native code free of allocation and object graph walks.
+
+Closure bodies can compile as native entries. The threaded closure call still
+creates the frame and supplies `fr.upvals`; `scratch()` captures the upval slice
+base in `journalUpvals` before the entry wrapper clears frame code/upvals for
+native execution. Native direct calls intentionally skip capture-bearing targets
+because their upval base would be stale inside a single native dwell.
+
+## Heap Objects
+
+Native heap-object reads use `journalHeap` to inspect `types.Value` interface
+cells and compare concrete itabs captured at compile time. They never allocate
+and never write Go interface cells.
+
+Fast paths:
+
+- `REF_GET` reads scalar `i32`, `f32`, and `f64` cells. `i64` cells fall back
+  because large values may need heap boxing.
+- `ARRAY_LEN` reads typed arrays and generic `*types.Array`.
+- `ARRAY_GET` reads `i8`, `i32`, `f32`, `f64`, and generic boxed arrays. `i64`
+  typed arrays fall back for the same boxability reason as `REF_GET`.
+- `STRUCT_GET` reads VM-native `*types.Struct` fields for `i32`, `f32`, `f64`,
+  and `ref`; `i64` fields and `HostObject` fields fall back.
+
+Allocation and mutating object ops (`REF_NEW/SET`, `ARRAY_*` writes, `STRUCT_*`
+writes, `MAP_*`, `CLOSURE_NEW`) lower only in framed complete-JIT code as guard
+fallback boundaries. This keeps the function entry compiled while the threaded
+interpreter handles allocation, interface stores, map semantics, and release-to-
+zero behavior.
 
 ## Phase A Opcode Coverage
 
@@ -218,12 +267,20 @@ Fully lowered on ARM64:
 
 Fast paths implemented on ARM64:
 
-- `REF_NULL`: push `BoxedNull` constant.
+- `REF_NULL`: push `BoxedNull` constant and retain heap slot 0.
 - `REF_IS_NULL`: pop ref, compare full boxed word against `BoxedNull`, push BoxI32 result.
 - `REF_EQ`: pop two boxed values, compare at 64-bit level, push BoxI32 result.
 - `REF_NE`: pop two boxed values, compare at 64-bit level, push BoxI32 result.
+- `UPVAL_GET`/`UPVAL_SET`: closure-body fast paths with the same guarded RC
+  protocol as locals/globals.
+- Indirect `CALL`: monomorphic/polymorphic function-value compare chain in
+  framed native code, with fallback for host functions, closures, and misses.
+- Heap reads: `REF_GET`, `ARRAY_LEN`, selected `ARRAY_GET`, selected
+  `STRUCT_GET`.
+- Framed heap boundaries: allocation, mutation, map, and closure-new opcodes
+  deopt locally instead of rejecting the whole entry.
 
-All other `REF_*` and `UPVAL_*` fall back to threaded.
+All other `REF_*` and heap object operations fall back to threaded.
 
 ## Value Boxing
 

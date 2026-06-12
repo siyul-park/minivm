@@ -187,8 +187,9 @@ Constraints:
   tag and cannot hold `any`.
 - A generic `*Map` keys primitives by value (`MapKey{Kind, Bits}`) and heap refs
   by identity, so primitive `any` keys compare correctly.
-- The JIT has no static type fact for a `ref` slot, so hot segments touching one
-  fall back to threaded execution.
+- The ARM64 JIT can move `ref` slots through locals, globals, and upvalues with
+  runtime kind checks and ref-count updates. Unsupported heap shapes still exit
+  to threaded execution.
 
 Go `interface{}` bridges to `ref` through the marshaler — see
 [host-integration.md](host-integration.md#dynamic-interface-values).

@@ -60,6 +60,7 @@ type segment struct {
 }
 
 type jitTarget struct {
+	addr    int
 	label   asm.Label
 	fn      *types.Function
 	blocks  []*analysis.BasicBlock
@@ -68,17 +69,19 @@ type jitTarget struct {
 }
 
 type jitContext struct {
-	assembler *asm.Assembler
-	code      []byte
-	constants []types.Boxed
-	globals   []types.Boxed
-	locals    []types.Kind
-	scratch   []asm.PReg
-	entry     asm.Label
-	labels    map[int]asm.Label
-	targets   map[int]jitTarget
-	stack     []asm.VReg
-	inputs    []asm.VReg
+	assembler      *asm.Assembler
+	code           []byte
+	constants      []types.Boxed
+	globals        []types.Boxed
+	locals         []types.Kind
+	captures       []types.Kind
+	scratch        []asm.PReg
+	entry          asm.Label
+	labels         map[int]asm.Label
+	targets        map[int]jitTarget
+	functionValues []int
+	stack          []asm.VReg
+	inputs         []asm.VReg
 
 	ip        int
 	end       int
@@ -113,6 +116,9 @@ const (
 	journalNextIP        // resume/fallback IP out for the single-frame path
 	journalBudget        // back-edges remaining before the next safepoint; native read/write
 	journalActive        // active native call depth for frame-budget checks
+	journalRC            // &i.rc[0]; read/write for guarded native refcount fast paths
+	journalUpvals        // &i.fr.upvals[0] or 0; read/write for closure body fast paths
+	journalHeap          // &i.heap[0]; read-only for heap object fast paths
 	journalHead          // first frame record cell
 )
 
@@ -278,6 +284,7 @@ func (c *jitCompiler) targets(funcs map[int]*types.Function) (map[int]jitTarget,
 			returns = len(fn.Typ.Returns)
 		}
 		out[addr] = jitTarget{
+			addr:    addr,
 			fn:      fn,
 			blocks:  blocks,
 			returns: returns,
@@ -288,24 +295,6 @@ func (c *jitCompiler) targets(funcs map[int]*types.Function) (map[int]jitTarget,
 
 func (c *jitCompiler) eligible(fn *types.Function) bool {
 	if fn == nil || fn.Typ == nil {
-		return false
-	}
-	for _, typ := range fn.Typ.Params {
-		if typ.Kind() == types.KindRef {
-			return false
-		}
-	}
-	for _, typ := range fn.Typ.Returns {
-		if typ.Kind() == types.KindRef {
-			return false
-		}
-	}
-	for _, typ := range fn.Locals {
-		if typ.Kind() == types.KindRef {
-			return false
-		}
-	}
-	if len(fn.Captures) > 0 {
 		return false
 	}
 	return true
@@ -614,7 +603,7 @@ func (c *jitCompiler) component(i *Interpreter, addr int, fn *types.Function) ma
 	funcs := map[int]*types.Function{addr: fn}
 	var visit func(*types.Function)
 	visit = func(current *types.Function) {
-		for _, dst := range c.calls(i, current) {
+		for _, dst := range append(c.calls(i, current), c.functionValues(i, current)...) {
 			target, ok := i.function(dst)
 			if !ok {
 				continue
@@ -629,13 +618,30 @@ func (c *jitCompiler) component(i *Interpreter, addr int, fn *types.Function) ma
 	return funcs
 }
 
+func (c *jitCompiler) functionValues(i *Interpreter, fn *types.Function) []int {
+	var out []int
+	for ip := 0; ip < len(fn.Code); {
+		next := ip + instr.Instruction(fn.Code[ip:]).Width()
+		if instr.Opcode(fn.Code[ip]) == instr.CONST_GET && !c.directCall(fn, ip) {
+			idx := int(uint16(fn.Code[ip+1]) | uint16(fn.Code[ip+2])<<8)
+			if idx < len(i.constants) && i.constants[idx].Kind() == types.KindRef {
+				if _, ok := i.function(i.constants[idx].Ref()); ok {
+					out = append(out, i.constants[idx].Ref())
+				}
+			}
+		}
+		ip = next
+	}
+	return out
+}
+
 func (c *jitCompiler) calls(i *Interpreter, fn *types.Function) []int {
 	var out []int
 	for ip := 0; ip < len(fn.Code); {
 		next := ip + instr.Instruction(fn.Code[ip:]).Width()
 		if c.directCall(fn, ip) {
 			idx := int(uint16(fn.Code[ip+1]) | uint16(fn.Code[ip+2])<<8)
-			if idx >= 0 && idx < len(i.constants) && i.constants[idx].Kind() == types.KindRef {
+			if idx < len(i.constants) && i.constants[idx].Kind() == types.KindRef {
 				if _, ok := i.function(i.constants[idx].Ref()); ok {
 					out = append(out, i.constants[idx].Ref())
 				}
@@ -660,16 +666,18 @@ func (c *jitCompiler) valid(ctx *jitContext, returns int) bool {
 
 func (c *jitCompiler) newContext(a *asm.Assembler, i *Interpreter, fn *types.Function, locals []types.Kind, startIP int, scratch []asm.PReg) *jitContext {
 	return &jitContext{
-		assembler: a,
-		code:      fn.Code,
-		constants: i.constants,
-		globals:   i.globals,
-		locals:    locals,
-		scratch:   scratch,
-		entry:     a.Label(),
-		ip:        startIP,
-		end:       len(fn.Code),
-		successor: -1,
+		assembler:      a,
+		code:           fn.Code,
+		constants:      i.constants,
+		globals:        i.globals,
+		locals:         locals,
+		captures:       types.Kinds(fn.Captures),
+		scratch:        scratch,
+		entry:          a.Label(),
+		functionValues: c.functionValues(i, fn),
+		ip:             startIP,
+		end:            len(fn.Code),
+		successor:      -1,
 	}
 }
 

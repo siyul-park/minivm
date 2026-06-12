@@ -4430,7 +4430,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.ErrorIs(t, i.Run(context.Background()), ErrFrameUnderflow)
 	})
 
-	t.Run("keeps return in threaded frame teardown for partial segments", func(t *testing.T) {
+	t.Run("keeps frame teardown after framed heap fallback", func(t *testing.T) {
 		requireJIT(t)
 		fn := types.NewFunctionBuilder(nil).WithReturns(types.TypeI32).Emit(
 			instr.New(instr.I32_CONST, 0),
@@ -4463,7 +4463,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		value, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(42), value)
-		require.Zero(t, p.Snapshot().JIT.Emits)
+		require.NotZero(t, p.Snapshot().JIT.Emits)
 	})
 
 	t.Run("updates entry slot for direct call", func(t *testing.T) {
@@ -4842,7 +4842,86 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.Equal(t, upvals, f.upvals)
 	})
 
-	t.Run("skips ref globals", func(t *testing.T) {
+	t.Run("compiles closure body upvals", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Returns: []types.Type{types.TypeI32},
+		}).WithCaptures(types.TypeI32).Emit(
+			instr.New(instr.UPVAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.UPVAL_SET, 0),
+			instr.New(instr.UPVAL_GET, 0),
+			instr.New(instr.RETURN),
+		).Build()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CLOSURE_NEW),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fn),
+		), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		addr := i.constants[0].Ref()
+		p.Add(addr, 0, byte(instr.UPVAL_GET))
+
+		require.NoError(t, i.jit(addr))
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1), v)
+		jit := p.Snapshot().JIT
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
+	t.Run("compiles indirect function call", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		add := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+		).Build()
+		caller := types.NewFunctionBuilder(&types.FunctionType{
+			Returns: []types.Type{types.TypeI32},
+		}).WithLocals(types.TypeRef).Emit(
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.I32_CONST, 41),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.RETURN),
+		).Build()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(add, caller),
+		), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		addr := i.constants[1].Ref()
+		p.Add(addr, 0, byte(instr.CONST_GET))
+
+		require.NoError(t, i.jit(addr))
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(42), v)
+		jit := p.Snapshot().JIT
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
+	t.Run("compiles ref global get", func(t *testing.T) {
 		requireJIT(t)
 		p := prof.New()
 		i := New(program.New([]instr.Instruction{
@@ -4858,8 +4937,88 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.Equal(t, types.Null, v)
 		jit := p.Snapshot().JIT
 		require.Equal(t, uint64(1), jit.Attempts)
-		require.Zero(t, jit.Emits)
-		require.Zero(t, jit.Links)
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
+	t.Run("compiles ref get for scalar cell", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.REF_GET),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.REF_GET))
+		addr, err := i.Alloc(types.I32(7))
+		require.NoError(t, err)
+		require.NoError(t, i.Push(types.Ref(addr)))
+
+		require.NoError(t, i.jit(0))
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(7), v)
+		jit := p.Snapshot().JIT
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
+	t.Run("compiles array len and get", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.DUP),
+			instr.New(instr.ARRAY_LEN),
+			instr.New(instr.SWAP),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.ARRAY_GET),
+			instr.New(instr.I32_ADD),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.DUP))
+		addr, err := i.Alloc(types.TypedArray[int32]{4, 7})
+		require.NoError(t, err)
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Push(types.Ref(addr)))
+
+		require.NoError(t, i.jit(0))
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(9), v)
+		jit := p.Snapshot().JIT
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
+	t.Run("compiles struct get", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.STRUCT_GET),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.I32_CONST))
+		typ := types.NewStructType(
+			types.NewStructField(types.TypeI32),
+			types.NewStructField(types.TypeF64),
+		)
+		addr, err := i.Alloc(types.NewStruct(typ, types.BoxI32(4), types.BoxF64(8)))
+		require.NoError(t, err)
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Push(types.Ref(addr)))
+
+		require.NoError(t, i.jit(0))
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.F64(8), v)
+		jit := p.Snapshot().JIT
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
 	})
 
 	t.Run("executes compiled prefix before unsupported opcode", func(t *testing.T) {

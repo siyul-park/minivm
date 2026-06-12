@@ -30,7 +30,7 @@ Unless noted:
 | Status | Meaning |
 |---|---|
 | ✅ | native ARM64 |
-| ◐ | partially JIT compiled |
+| ◐ | partially JIT compiled, guarded, or kept as a framed fallback boundary |
 | ⬜ | threaded-only |
 
 ## Operand Width Notation
@@ -72,34 +72,34 @@ Offsets are signed 16-bit values encoded little-endian. `BR 5` skips 5 bytes pas
 | `BR` | `{2}` | `→` | ◐ | Unconditional relative jump. JIT only when current segment has no pending return values. |
 | `BR_IF` | `{2}` | `cond →` | ◐ | Jump if `cond ≠ 0`, else fall through. JIT only for simple stack shapes. |
 | `BR_TABLE` | `{-2, 2}` | `index →` | ◐ | Jump table; negative or out-of-range index uses default target. JIT only for simple stack shapes. |
-| `CALL` | `{}` | `fn →` | ◐ | Call `*Function`, `*HostFunction`, or `*Closure`; complete JIT lowers eligible direct function calls to native `BL`. |
+| `CALL` | `{}` | `fn →` | ◐ | Call `*Function`, `*HostFunction`, or `*Closure`; complete JIT lowers eligible direct calls and small same-arity function-value indirect dispatches to native `BL`. Host calls, closure call sites, and misses fall back. |
 | `RETURN` | `{}` | `→` | ◐ | Return from current frame; complete JIT lowers native entry returns. |
 
 ## Variables
 
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|
-| `GLOBAL_GET` | `{2}` | `→ x` | ◐ | Push global at u16 index. JIT supports same-segment proven numeric globals. |
-| `GLOBAL_SET` | `{2}` | `x →` | ◐ | Store global at u16 index. JIT supports numeric globals. |
-| `GLOBAL_TEE` | `{2}` | `x → x` | ◐ | Store global and keep value. JIT supports numeric globals. |
-| `LOCAL_GET` | `{1}` | `→ x` | ◐ | Push u8 local relative to frame base. JIT supports numeric params/locals. |
-| `LOCAL_SET` | `{1}` | `x →` | ◐ | Store u8 local. JIT supports numeric params/locals. |
-| `LOCAL_TEE` | `{1}` | `x → x` | ◐ | Store local and keep value. JIT supports numeric params/locals. |
-| `CONST_GET` | `{2}` | `→ x` | ◐ | Push u16 constant. JIT supports boxed numeric constants. |
+| `GLOBAL_GET` | `{2}` | `→ x` | ◐ | Push global at u16 index. JIT supports in-range numeric, dynamic `ref`, and guarded ref-counted heap values; heap-promoted `i64` exits to threaded execution. |
+| `GLOBAL_SET` | `{2}` | `x →` | ◐ | Store global at u16 index. JIT supports numeric, dynamic `ref`, and guarded ref-counted heap values. |
+| `GLOBAL_TEE` | `{2}` | `x → x` | ◐ | Store global and keep value. JIT supports the same guarded paths as `GLOBAL_SET`. |
+| `LOCAL_GET` | `{1}` | `→ x` | ◐ | Push u8 local relative to frame base. JIT supports params/locals including dynamic `ref` slots; heap-promoted `i64` exits to threaded execution. |
+| `LOCAL_SET` | `{1}` | `x →` | ◐ | Store u8 local. JIT supports numeric, dynamic `ref`, and guarded ref-counted heap values. |
+| `LOCAL_TEE` | `{1}` | `x → x` | ◐ | Store local and keep value. JIT supports the same guarded paths as `LOCAL_SET`. |
+| `CONST_GET` | `{2}` | `→ x` | ◐ | Push u16 constant. JIT supports boxed numeric constants and function constants used by direct/indirect calls; ordinary heap ref constants stay threaded. |
 
 ## References
 
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|
-| `REF_NULL` | `{}` | `→ ref` | ⬜ | Push `BoxedNull`, heap index `0`. |
-| `REF_IS_NULL` | `{}` | `ref → i32` | ⬜ | Push `I32(1)` if null, else `I32(0)`. |
-| `REF_EQ` | `{}` | `a b → i32` | ⬜ | Push `I32(1)` if refs point to same heap index. |
-| `REF_NE` | `{}` | `a b → i32` | ⬜ | Push `I32(1)` if refs differ. |
+| `REF_NULL` | `{}` | `→ ref` | ✅ | Push `BoxedNull`, heap index `0`. |
+| `REF_IS_NULL` | `{}` | `ref → i32` | ✅ | Push `I32(1)` if null, else `I32(0)`. |
+| `REF_EQ` | `{}` | `a b → i32` | ✅ | Push `I32(1)` if refs point to same heap index. |
+| `REF_NE` | `{}` | `a b → i32` | ✅ | Push `I32(1)` if refs differ. |
 | `REF_TEST` | `{2}` | `any → i32` | ⬜ | Push `I32(1)` if the value matches the type at u16 index. Accepts any operand: a `KindRef` is matched against the heap object's `Type()`; a primitive is matched against its own kind. |
 | `REF_CAST` | `{2}` | `any → any` | ⬜ | Trap with `ErrTypeMismatch` if the value does not cast to the type at u16 index. Accepts both `KindRef` and primitive operands (primitives use `Boxed.Type()`). |
-| `REF_NEW` | `{}` | `x → ref` | ⬜ | Box a non-ref scalar (`I32/I64/F32/F64`) onto the heap as a mutable cell; trap `ErrTypeMismatch` on a ref operand. Reuses the scalar heap rows. |
-| `REF_GET` | `{}` | `ref → x` | ⬜ | Load the scalar held by a cell; trap `ErrTypeMismatch` if the target is not a scalar. Consumes (releases) the ref. |
-| `REF_SET` | `{}` | `ref x →` | ⬜ | Overwrite a cell's scalar; trap `ErrTypeMismatch` if `x` is a ref. Consumes (releases) the ref. |
+| `REF_NEW` | `{}` | `x → ref` | ◐ | Box a non-ref scalar (`I32/I64/F32/F64`) onto the heap as a mutable cell; trap `ErrTypeMismatch` on a ref operand. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `REF_GET` | `{}` | `ref → x` | ◐ | Load the scalar held by a cell; trap `ErrTypeMismatch` if the target is not a scalar. Consumes (releases) the ref. JIT has native fast paths for `I32`, `F32`, and `F64`; `I64` cells fall back. |
+| `REF_SET` | `{}` | `ref x →` | ◐ | Overwrite a cell's scalar; trap `ErrTypeMismatch` if `x` is a ref. Consumes (releases) the ref. JIT keeps framed entries by exiting locally to the threaded handler. |
 
 A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an inline primitive or a `KindRef` — and `REF_TEST`/`REF_CAST` recover the runtime type. See [value-representation.md](value-representation.md#dynamic-any-values).
 
@@ -107,9 +107,9 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|
-| `CLOSURE_NEW` | `{}` | `upval1 … upvalN fn → closure` | ⬜ | Pop the `*Function` template (top of stack, like `call`), read `N = len(fn.Captures)`, pop N upvalues below it, and push a `*Closure` capturing them. Ownership of `fn` and the upvalues transfers into the closure. |
-| `UPVAL_GET` | `{1}` | `→ x` | ⬜ | Push the closure upvalue at u8 index; traps `ErrSegmentationFault` outside a closure frame or out of range. |
-| `UPVAL_SET` | `{1}` | `x →` | ⬜ | Store into the closure upvalue at u8 index (persists across calls to the same closure); same trap conditions as `UPVAL_GET`. |
+| `CLOSURE_NEW` | `{}` | `upval1 … upvalN fn → closure` | ◐ | Pop the `*Function` template (top of stack, like `call`), read `N = len(fn.Captures)`, pop N upvalues below it, and push a `*Closure` capturing them. Ownership of `fn` and the upvalues transfers into the closure. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `UPVAL_GET` | `{1}` | `→ x` | ◐ | Push the closure upvalue at u8 index; traps `ErrSegmentationFault` outside a closure frame or out of range. Closure-body JIT supports guarded upvalue loads. |
+| `UPVAL_SET` | `{1}` | `x →` | ◐ | Store into the closure upvalue at u8 index (persists across calls to the same closure); same trap conditions as `UPVAL_GET`. Closure-body JIT supports guarded ref-counted stores. |
 
 ## i32 Operations
 
@@ -216,13 +216,13 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|
-| `ARRAY_NEW` | `{2}` | `value count → array` | ⬜ | Create typed array filled with `value`. |
-| `ARRAY_NEW_DEFAULT` | `{2}` | `count → array` | ⬜ | Create zero-initialized typed array. |
-| `ARRAY_LEN` | `{}` | `array → i32` | ⬜ | Push element count. |
-| `ARRAY_GET` | `{}` | `array index → value` | ⬜ | Load element; trap `ErrIndexOutOfRange` on invalid index. |
-| `ARRAY_SET` | `{}` | `array index value →` | ⬜ | Store element. |
-| `ARRAY_FILL` | `{}` | `array offset count value →` | ⬜ | Fill range with repeated value. |
-| `ARRAY_COPY` | `{}` | `dst dstOffset src srcOffset count →` | ⬜ | Copy elements between arrays. |
+| `ARRAY_NEW` | `{2}` | `value count → array` | ◐ | Create typed array filled with `value`. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `ARRAY_NEW_DEFAULT` | `{2}` | `count → array` | ◐ | Create zero-initialized typed array. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `ARRAY_LEN` | `{}` | `array → i32` | ◐ | Push element count. JIT has native fast paths for VM arrays. |
+| `ARRAY_GET` | `{}` | `array index → value` | ◐ | Load element; trap `ErrIndexOutOfRange` on invalid index. JIT has native fast paths for `[]i8`, `[]i32`, `[]f32`, `[]f64`, and generic `[]ref`; `[]i64` falls back when boxing would be needed. |
+| `ARRAY_SET` | `{}` | `array index value →` | ◐ | Store element. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `ARRAY_FILL` | `{}` | `array offset count value →` | ◐ | Fill range with repeated value. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `ARRAY_COPY` | `{}` | `dst dstOffset src srcOffset count →` | ◐ | Copy elements between arrays. JIT keeps framed entries by exiting locally to the threaded handler. |
 
 `[]i8` arrays (binary blobs) share these opcodes. Stack values are `i32`; `ARRAY_GET` zero-extends a byte to `BoxI32(0..255)`, and `ARRAY_SET`/`ARRAY_FILL` narrow via low-byte truncation (`int8(val.I32())`). No overflow trap on narrowing — the storage cell holds raw bits.
 
@@ -230,10 +230,10 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|
-| `STRUCT_NEW` | `{2}` | `fields → struct` | ⬜ | Create struct from field values. |
-| `STRUCT_NEW_DEFAULT` | `{2}` | `→ struct` | ⬜ | Create zero-initialized struct. |
-| `STRUCT_GET` | `{}` | `struct index → value` | ⬜ | Load struct field. |
-| `STRUCT_SET` | `{}` | `struct index value →` | ⬜ | Store struct field. |
+| `STRUCT_NEW` | `{2}` | `fields → struct` | ◐ | Create struct from field values. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `STRUCT_NEW_DEFAULT` | `{2}` | `→ struct` | ◐ | Create zero-initialized struct. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `STRUCT_GET` | `{}` | `struct index → value` | ◐ | Load struct field. JIT has native fast paths for VM `*types.Struct` fields that are `i32`, `f32`, `f64`, or `ref`; `i64` boxing and `HostObject` fall back. |
+| `STRUCT_SET` | `{}` | `struct index value →` | ◐ | Store struct field. JIT keeps framed entries by exiting locally to the threaded handler. |
 
 ## Map Operations
 
@@ -241,11 +241,11 @@ Map keys use primitive value identity for `i32`, `i64`, `f32`, and `f64`; all re
 
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|
-| `MAP_NEW` | `{2}` | `k1 v1 ... kn vn count → map` | ⬜ | Create typed map from key/value pairs; later duplicate keys overwrite earlier values. |
-| `MAP_NEW_DEFAULT` | `{2}` | `capacity → map` | ⬜ | Create empty typed map with capacity hint. |
-| `MAP_LEN` | `{}` | `map → i32` | ⬜ | Push entry count. |
-| `MAP_GET` | `{}` | `map key → value` | ⬜ | Load value or element zero value when key is missing. |
-| `MAP_LOOKUP` | `{}` | `map key → value ok` | ⬜ | Load value plus presence flag. |
-| `MAP_SET` | `{}` | `map key value →` | ⬜ | Insert or replace entry. |
-| `MAP_DELETE` | `{}` | `map key →` | ⬜ | Delete entry; missing key is a no-op. |
-| `MAP_CLEAR` | `{}` | `map →` | ⬜ | Delete all entries. |
+| `MAP_NEW` | `{2}` | `k1 v1 ... kn vn count → map` | ◐ | Create typed map from key/value pairs; later duplicate keys overwrite earlier values. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `MAP_NEW_DEFAULT` | `{2}` | `capacity → map` | ◐ | Create empty typed map with capacity hint. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `MAP_LEN` | `{}` | `map → i32` | ◐ | Push entry count. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `MAP_GET` | `{}` | `map key → value` | ◐ | Load value or element zero value when key is missing. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `MAP_LOOKUP` | `{}` | `map key → value ok` | ◐ | Load value plus presence flag. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `MAP_SET` | `{}` | `map key value →` | ◐ | Insert or replace entry. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `MAP_DELETE` | `{}` | `map key →` | ◐ | Delete entry; missing key is a no-op. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `MAP_CLEAR` | `{}` | `map →` | ◐ | Delete all entries. JIT keeps framed entries by exiting locally to the threaded handler. |

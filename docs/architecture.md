@@ -221,7 +221,7 @@ Thin entrypoint around `cli.Root().Execute()`.
 
 | Area | Direction |
 |---|---|
-| JIT coverage | numeric segments plus direct static calls and returns compile to native code; indirect/host calls, refs, heap objects stay threaded until benchmarks justify |
+| JIT coverage | numeric segments, direct calls, small function-value indirect dispatches, guarded ref slots/upvalues, and selected heap reads compile to native code; host calls, closure call sites, heap allocation/mutation, maps, and unsupported heap shapes fall back |
 | Architecture support | ARM64 optimized; x86-64 can follow once users + benchmarks clear |
 | Benchmarks | broaden numeric loops, host calls, heap-object workloads |
 | Program format | keep `instr`/`program` as compact Go-native bytecode surface |

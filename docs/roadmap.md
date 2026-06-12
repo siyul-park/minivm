@@ -15,6 +15,7 @@ minivm: Go-native programmable runtime for scripting, rules, DSLs, and plugin-st
 - Added `WithMaxHeap`, `ErrHeapExhausted`, and heap-limit tests for safer embedded execution.
 - Added `RuntimeError` with VM call frames while preserving `errors.Is` / `errors.As` cause checks.
 - Added shared JIT code cache and aggregate profiling for `interp.Pool`.
+- Expanded ARM64 JIT coverage for direct and indirect bytecode calls, guarded ref-bearing slots, closure-body upvalues, and selected heap reads.
 
 ## Near-Term Work
 
@@ -28,5 +29,5 @@ minivm: Go-native programmable runtime for scripting, rules, DSLs, and plugin-st
 ## Future Expansion
 
 - Add adapter example pairing minivm with external Wasm runtime for teams needing standard `.wasm`, WASI, or component-model workflows.
-- Expand ARM64 JIT coverage for calls, globals, refs, and selected heap operations only when benchmarks justify.
+- Extend ARM64 JIT coverage only with matching correctness tests and benchmark scenarios for the new workload shape.
 - Add architecture-specific backends only when target users and benchmark coverage are clear.

@@ -3,6 +3,7 @@ package interp
 import (
 	"encoding/binary"
 	"math"
+	"unsafe"
 
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/asm/arm64"
@@ -12,6 +13,11 @@ import (
 
 // arm64JIT is the AArch64 opcode emitter.
 type arm64JIT struct{}
+
+type valueWords struct {
+	itab uintptr
+	data uintptr
+}
 
 // Boxing masks and tags used by scalar lowering.
 const (
@@ -28,7 +34,31 @@ const (
 	signI64 = uint8(15)
 )
 
-var _ lowerer = arm64JIT{}
+const (
+	sliceData   = 0
+	sliceLen    = 8
+	arrayElems  = int(unsafe.Offsetof(types.Array{}.Elems))
+	structTyp   = int(unsafe.Offsetof(types.Struct{}.Typ))
+	structData  = int(unsafe.Offsetof(types.Struct{}.Data))
+	fieldsSlice = int(unsafe.Offsetof(types.StructType{}.Fields))
+	fieldKind   = int(unsafe.Offsetof(types.StructField{}.Kind))
+	fieldSize   = int(unsafe.Sizeof(types.StructField{}))
+)
+
+var (
+	_ lowerer = arm64JIT{}
+
+	heapI32      = valueItab(types.I32(0))
+	heapF32      = valueItab(types.F32(0))
+	heapF64      = valueItab(types.F64(0))
+	heapArrayI8  = valueItab(types.TypedArray[int8](nil))
+	heapArrayI32 = valueItab(types.TypedArray[int32](nil))
+	heapArrayI64 = valueItab(types.TypedArray[int64](nil))
+	heapArrayF32 = valueItab(types.TypedArray[float32](nil))
+	heapArrayF64 = valueItab(types.TypedArray[float64](nil))
+	heapArrayRef = valueItab((*types.Array)(nil))
+	heapStruct   = valueItab((*types.Struct)(nil))
+)
 
 func newJITCompiler(cutoff int) (*jitCompiler, error) {
 	buffer, err := asm.NewBuffer(4096)
@@ -88,6 +118,10 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 		return l.localGet(ctx)
 	case instr.LOCAL_SET:
 		return l.localPut(ctx, true)
+	case instr.UPVAL_GET:
+		return l.upvalGet(ctx)
+	case instr.UPVAL_SET:
+		return l.upvalPut(ctx)
 	case instr.I32_ADD:
 		return l.i32Binary(ctx, arm64.ADD)
 	case instr.I32_SUB:
@@ -275,7 +309,35 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 	case instr.RETURN:
 		return l.ret(ctx)
 	case instr.CALL:
-		return false
+		return ctx.framed && l.callIndirect(ctx)
+	case instr.ARRAY_GET:
+		return l.arrayGet(ctx)
+	case instr.ARRAY_LEN:
+		return l.arrayLen(ctx)
+	case instr.REF_GET:
+		return l.refGet(ctx)
+	case instr.STRUCT_GET:
+		return l.structGet(ctx)
+	case instr.REF_NEW,
+		instr.REF_SET,
+		instr.ARRAY_NEW,
+		instr.ARRAY_NEW_DEFAULT,
+		instr.ARRAY_SET,
+		instr.ARRAY_FILL,
+		instr.ARRAY_COPY,
+		instr.STRUCT_NEW,
+		instr.STRUCT_NEW_DEFAULT,
+		instr.STRUCT_SET,
+		instr.MAP_NEW,
+		instr.MAP_NEW_DEFAULT,
+		instr.MAP_LEN,
+		instr.MAP_GET,
+		instr.MAP_LOOKUP,
+		instr.MAP_SET,
+		instr.MAP_DELETE,
+		instr.MAP_CLEAR,
+		instr.CLOSURE_NEW:
+		return ctx.framed && l.bail(ctx)
 	case instr.REF_NULL:
 		return l.refNull(ctx)
 	case instr.REF_IS_NULL:
@@ -444,6 +506,8 @@ func (l arm64JIT) drop(ctx *jitContext) bool {
 	if !l.need(ctx, 1) {
 		return false
 	}
+	pre := append([]asm.VReg(nil), ctx.stack...)
+	l.releaseBox(ctx, ctx.stack[len(ctx.stack)-1], pre)
 	ctx.stack = ctx.stack[:len(ctx.stack)-1]
 	return true
 }
@@ -455,11 +519,19 @@ func (l arm64JIT) unreachable(ctx *jitContext) bool {
 	return true
 }
 
+func (l arm64JIT) bail(ctx *jitContext) bool {
+	l.exitFallback(ctx, ctx.ip)
+	ctx.stop = true
+	ctx.closed = true
+	return true
+}
+
 func (l arm64JIT) dup(ctx *jitContext) bool {
 	if !l.need(ctx, 1) {
 		return false
 	}
 	top := ctx.stack[len(ctx.stack)-1]
+	l.retainBox(ctx, top)
 	dst := ctx.assembler.Reg(top.Type(), top.Width())
 	ctx.assembler.Emit(arm64.MOV(dst, top))
 	ctx.stack = append(ctx.stack, dst)
@@ -521,9 +593,17 @@ func (l arm64JIT) constGet(ctx *jitContext) bool {
 	}
 	v := ctx.constants[idx]
 	if v.Kind() == types.KindRef {
+		if _, ok := ctx.targets[v.Ref()]; !ok {
+			return false
+		}
+	}
+	if !l.imm(ctx, uint64(v)) {
 		return false
 	}
-	return l.imm(ctx, uint64(v))
+	if v.Kind() == types.KindRef {
+		l.retainBox(ctx, ctx.stack[len(ctx.stack)-1])
+	}
+	return true
 }
 
 // call fuses a CONST_GET+CALL into a native BL to the callee's framed entry. It
@@ -536,7 +616,7 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 		return false
 	}
 	idx := int(uint16(ctx.code[ctx.ip+1]) | uint16(ctx.code[ctx.ip+2])<<8)
-	if idx < 0 || idx >= len(ctx.constants) || ctx.constants[idx].Kind() != types.KindRef {
+	if idx >= len(ctx.constants) || ctx.constants[idx].Kind() != types.KindRef {
 		return false
 	}
 	target, ok := ctx.targets[ctx.constants[idx].Ref()]
@@ -544,11 +624,95 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 		return false
 	}
 	params := len(target.fn.Typ.Params)
-	returns := len(target.fn.Typ.Returns)
-	locals := len(target.fn.Locals)
-	if !l.need(ctx, params) {
+	if len(target.fn.Captures) > 0 || !l.need(ctx, params) {
 		return false
 	}
+	return l.descend(ctx, target, params, ctx.ip+4, asm.VReg{}, nil)
+}
+
+func (l arm64JIT) callIndirect(ctx *jitContext) bool {
+	candidates := l.indirectTargets(ctx)
+	if len(candidates) == 0 {
+		return false
+	}
+	params := len(candidates[0].fn.Typ.Params)
+	returns := len(candidates[0].fn.Typ.Returns)
+	for _, target := range candidates[1:] {
+		if len(target.fn.Typ.Params) != params || len(target.fn.Typ.Returns) != returns {
+			return false
+		}
+	}
+	if !l.need(ctx, params+1) {
+		return false
+	}
+
+	callIP := ctx.ip
+	resume := ctx.ip + 1
+	pre := append([]asm.VReg(nil), ctx.stack...)
+	callee := ctx.stack[len(ctx.stack)-1]
+
+	hits := make([]asm.Label, len(candidates))
+	for idx, target := range candidates {
+		hits[idx] = ctx.assembler.Label()
+		want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDI(want, uint64(types.BoxRef(target.addr)))...)
+		ctx.assembler.Emit(arm64.CMP(callee, want))
+		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, hits[idx]))
+	}
+	ctx.stack = append(ctx.stack[:0], pre...)
+	l.exitFallback(ctx, callIP)
+
+	done := ctx.assembler.Label()
+	var next []asm.VReg
+	for idx, target := range candidates {
+		ctx.assembler.Bind(hits[idx])
+		ctx.ip = callIP
+		ctx.stack = append(ctx.stack[:0], pre...)
+		if !l.descend(ctx, target, params+1, resume, callee, pre) {
+			return false
+		}
+		if idx == 0 {
+			next = append([]asm.VReg(nil), ctx.stack...)
+		}
+		ctx.assembler.Emit(arm64.BLabel(done))
+	}
+
+	ctx.assembler.Bind(done)
+	ctx.ip = resume
+	ctx.stack = next
+	return true
+}
+
+func (arm64JIT) indirectTargets(ctx *jitContext) []jitTarget {
+	var out []jitTarget
+	seen := map[int]bool{}
+	for _, addr := range ctx.functionValues {
+		if seen[addr] {
+			continue
+		}
+		seen[addr] = true
+		target, ok := ctx.targets[addr]
+		if !ok || target.fn == nil || target.fn.Typ == nil || len(target.fn.Captures) > 0 {
+			continue
+		}
+		out = append(out, target)
+	}
+	if len(out) > 4 {
+		return nil
+	}
+	return out
+}
+
+func (l arm64JIT) descend(
+	ctx *jitContext,
+	target jitTarget,
+	consumed, resume int,
+	release asm.VReg,
+	releasePre []asm.VReg,
+) bool {
+	params := len(target.fn.Typ.Params)
+	returns := len(target.fn.Typ.Returns)
+	locals := len(target.fn.Locals)
 
 	vCtrl := ctx.pin(scratchCtrl)
 	active := ctx.pinTo(arm64.X15)
@@ -559,6 +723,10 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBCC, hasFrame)) // depth < budget
 	l.exit(ctx, trapOverflow, ctx.ip)
 	ctx.assembler.Bind(hasFrame)
+
+	if releasePre != nil {
+		l.releaseBox(ctx, release, releasePre)
+	}
 
 	ctx.assembler.Emit(
 		arm64.ADDI(active, active, 1),
@@ -577,7 +745,7 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 	)
 
 	calleeBP := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.SUBI(calleeBP, nextSP, uint16(params)))
+	ctx.assembler.Emit(arm64.SUBI(calleeBP, nextSP, uint16(consumed)))
 	vBP := ctx.pinTo(oldBP)
 	ctx.assembler.Emit(arm64.MOV(vBP, calleeBP))
 
@@ -602,7 +770,7 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 		arm64.CBZLabel(trap, normal),
 		arm64.LDR(oldBP, arm64.SP, 0),
 	)
-	l.record(ctx, vCtrl, ctx.ip+4)
+	l.record(ctx, vCtrl, resume)
 	ctx.assembler.Emit(
 		arm64.ADDI(arm64.SP, arm64.SP, 16),
 		arm64.LDR(arm64.LR, arm64.SP, 0),
@@ -626,7 +794,7 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 	base := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.ADD(base, vStack, off))
 
-	next := len(ctx.stack) - params + returns
+	next := len(ctx.stack) - consumed + returns
 	reload := next
 	if returns <= len(arm64.IntArgs[:2]) {
 		reload -= returns
@@ -649,7 +817,7 @@ func (l arm64JIT) call(ctx *jitContext) bool {
 		}
 	}
 	ctx.stack = stack
-	ctx.ip += 4
+	ctx.ip = resume
 	return true
 }
 
@@ -699,18 +867,16 @@ func (l arm64JIT) yield(ctx *jitContext, header int) {
 }
 
 // globalGet pushes globals[idx] onto the segment stack via a direct
-// LDR from the globals base. Rejects when globals[idx] is a ref because
-// the JIT does not model the runtime retain.
+// LDR from the globals base and mirrors the threaded retain for runtime refs.
 func (l arm64JIT) globalGet(ctx *jitContext) bool {
 	idx, ok := l.global(ctx)
 	if !ok {
 		return false
 	}
-	pre := append([]asm.VReg(nil), ctx.stack...)
 	vGlobal := ctx.pin(scratchGlobals)
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(dst, vGlobal, int16(idx*8)))
-	l.guardRef(ctx, dst, pre)
+	l.retainBox(ctx, dst)
 	if ctx.globals[idx].Kind() == types.KindI64 {
 		l.guardI64(ctx, dst)
 	}
@@ -719,9 +885,8 @@ func (l arm64JIT) globalGet(ctx *jitContext) bool {
 }
 
 // globalPut stores the segment stack top to globals[idx]; pop consumes it
-// (GLOBAL_SET) or leaves it on the stack (GLOBAL_TEE). The same ref-handling
-// restriction as globalGet applies; in addition, overwriting a previously
-// held ref would leak it, so a current ref in globals[idx] also rejects.
+// (GLOBAL_SET) or leaves it on the stack (GLOBAL_TEE). It mirrors the threaded
+// release of the overwritten runtime ref before the store.
 func (l arm64JIT) globalPut(ctx *jitContext, pop bool) bool {
 	idx, ok := l.global(ctx)
 	if !ok {
@@ -737,8 +902,7 @@ func (l arm64JIT) globalPut(ctx *jitContext, pop bool) bool {
 	vGlobal := ctx.pin(scratchGlobals)
 	old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(old, vGlobal, int16(idx*8)))
-	l.guardRef(ctx, old, pre)
-	l.guardRef(ctx, src, pre)
+	l.releaseBoxUnlessEqual(ctx, old, src, pre)
 	if ctx.globals[idx].Kind() == types.KindI64 {
 		l.guardI64(ctx, old)
 	}
@@ -751,20 +915,17 @@ func (l arm64JIT) globalPut(ctx *jitContext, pop bool) bool {
 }
 
 // localGet pushes stack[bp+idx] (a previously stored local) onto the
-// segment stack via LDR. Ref locals reject for the same reason GLOBAL_GET
-// rejects ref globals.
+// segment stack via LDR and mirrors the threaded retain for runtime refs.
 func (l arm64JIT) localGet(ctx *jitContext) bool {
 	idx := int(ctx.code[ctx.ip+1])
 	if idx >= len(ctx.locals) {
-		return false
-	}
-	if ctx.locals[idx] == types.KindRef {
 		return false
 	}
 
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	slot := l.localSlot(ctx, idx)
 	l.load(ctx, dst, ctx.pin(scratchStack), slot)
+	l.retainBox(ctx, dst)
 	if ctx.locals[idx] == types.KindI64 {
 		l.guardI64(ctx, dst)
 	}
@@ -779,19 +940,18 @@ func (l arm64JIT) localPut(ctx *jitContext, pop bool) bool {
 	if idx >= len(ctx.locals) {
 		return false
 	}
-	if ctx.locals[idx] == types.KindRef {
-		return false
-	}
 	if !l.need(ctx, 1) {
 		return false
 	}
 
+	pre := append([]asm.VReg(nil), ctx.stack...)
 	src := ctx.stack[len(ctx.stack)-1]
 	slot := l.localSlot(ctx, idx)
 	vStack := ctx.pin(scratchStack)
+	old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	l.load(ctx, old, vStack, slot)
+	l.releaseBoxUnlessEqual(ctx, old, src, pre)
 	if ctx.locals[idx] == types.KindI64 {
-		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		l.load(ctx, old, vStack, slot)
 		l.guardI64(ctx, old)
 	}
 	l.store(ctx, src, vStack, slot)
@@ -1330,9 +1490,324 @@ func (l arm64JIT) ret(ctx *jitContext) bool {
 	return true
 }
 
+func (l arm64JIT) refGet(ctx *jitContext) bool {
+	if !l.need(ctx, 1) {
+		return false
+	}
+	pre := append([]asm.VReg(nil), ctx.stack...)
+	ref := ctx.stack[len(ctx.stack)-1]
+	addr, itab, data := l.heapValue(ctx, ref, pre)
+
+	hitI32 := ctx.assembler.Label()
+	hitF32 := ctx.assembler.Label()
+	hitF64 := ctx.assembler.Label()
+	l.matchItab(ctx, itab, heapI32, hitI32)
+	l.matchItab(ctx, itab, heapF32, hitF32)
+	l.matchItab(ctx, itab, heapF64, hitF64)
+	ctx.stack = append(ctx.stack[:0], pre...)
+	l.exitFallback(ctx, ctx.ip)
+
+	result := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	done := ctx.assembler.Label()
+	ctx.assembler.Bind(hitI32)
+	rawI32 := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDRSW(rawI32, data, 0))
+	boxedI32 := l.boxI32(ctx, rawI32)
+	ctx.assembler.Emit(arm64.MOV(result, boxedI32))
+	l.releaseRef(ctx, addr, pre)
+	ctx.assembler.Emit(arm64.BLabel(done))
+
+	ctx.assembler.Bind(hitF32)
+	rawF32 := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDRSW(rawF32, data, 0))
+	boxedF32 := l.boxF32Bits(ctx, rawF32)
+	ctx.assembler.Emit(arm64.MOV(result, boxedF32))
+	l.releaseRef(ctx, addr, pre)
+	ctx.assembler.Emit(arm64.BLabel(done))
+
+	ctx.assembler.Bind(hitF64)
+	ctx.assembler.Emit(arm64.LDR(result, data, 0))
+	l.releaseRef(ctx, addr, pre)
+
+	ctx.assembler.Bind(done)
+	ctx.stack = append(pre[:len(pre)-1:len(pre)-1], result)
+	return true
+}
+
+func (l arm64JIT) arrayLen(ctx *jitContext) bool {
+	if !l.need(ctx, 1) {
+		return false
+	}
+	pre := append([]asm.VReg(nil), ctx.stack...)
+	ref := ctx.stack[len(ctx.stack)-1]
+	addr, itab, data := l.heapValue(ctx, ref, pre)
+
+	typed := ctx.assembler.Label()
+	generic := ctx.assembler.Label()
+	l.matchItab(ctx, itab, heapArrayI8, typed)
+	l.matchItab(ctx, itab, heapArrayI32, typed)
+	l.matchItab(ctx, itab, heapArrayI64, typed)
+	l.matchItab(ctx, itab, heapArrayF32, typed)
+	l.matchItab(ctx, itab, heapArrayF64, typed)
+	l.matchItab(ctx, itab, heapArrayRef, generic)
+	ctx.stack = append(ctx.stack[:0], pre...)
+	l.exitFallback(ctx, ctx.ip)
+
+	result := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	done := ctx.assembler.Label()
+	ctx.assembler.Bind(typed)
+	n := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDR(n, data, sliceLen))
+	boxed := l.boxI32(ctx, n)
+	ctx.assembler.Emit(arm64.MOV(result, boxed))
+	l.releaseRef(ctx, addr, pre)
+	ctx.assembler.Emit(arm64.BLabel(done))
+
+	ctx.assembler.Bind(generic)
+	ctx.assembler.Emit(arm64.LDR(n, data, int16(arrayElems+sliceLen)))
+	boxed = l.boxI32(ctx, n)
+	ctx.assembler.Emit(arm64.MOV(result, boxed))
+	l.releaseRef(ctx, addr, pre)
+
+	ctx.assembler.Bind(done)
+	ctx.stack = append(pre[:len(pre)-1:len(pre)-1], result)
+	return true
+}
+
+func (l arm64JIT) arrayGet(ctx *jitContext) bool {
+	if !l.need(ctx, 2) {
+		return false
+	}
+	pre := append([]asm.VReg(nil), ctx.stack...)
+	idx := l.sign32(ctx, ctx.stack[len(ctx.stack)-1])
+	ref := ctx.stack[len(ctx.stack)-2]
+	addr, itab, data := l.heapValue(ctx, ref, pre)
+
+	hitI8 := ctx.assembler.Label()
+	hitI32 := ctx.assembler.Label()
+	hitF32 := ctx.assembler.Label()
+	hitF64 := ctx.assembler.Label()
+	hitRef := ctx.assembler.Label()
+	l.matchItab(ctx, itab, heapArrayI8, hitI8)
+	l.matchItab(ctx, itab, heapArrayI32, hitI32)
+	l.matchItab(ctx, itab, heapArrayF32, hitF32)
+	l.matchItab(ctx, itab, heapArrayF64, hitF64)
+	l.matchItab(ctx, itab, heapArrayRef, hitRef)
+	ctx.stack = append(ctx.stack[:0], pre...)
+	l.exitFallback(ctx, ctx.ip)
+
+	result := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	done := ctx.assembler.Label()
+
+	ctx.assembler.Bind(hitI8)
+	dataPtr, n := l.sliceHeader(ctx, data, 0)
+	l.guardIndex(ctx, idx, n, pre)
+	elemI8 := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	elemAddr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ADD(elemAddr, dataPtr, idx))
+	ctx.assembler.Emit(arm64.LDRB(elemI8, elemAddr, 0))
+	boxedI8 := l.boxI32(ctx, elemI8)
+	ctx.assembler.Emit(arm64.MOV(result, boxedI8))
+	l.releaseRef(ctx, addr, pre)
+	ctx.assembler.Emit(arm64.BLabel(done))
+
+	ctx.assembler.Bind(hitI32)
+	dataPtr, n = l.sliceHeader(ctx, data, 0)
+	l.guardIndex(ctx, idx, n, pre)
+	elemI32 := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	elemAddr = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	idx4 := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LSLI(idx4, idx, 2))
+	ctx.assembler.Emit(arm64.ADD(elemAddr, dataPtr, idx4))
+	ctx.assembler.Emit(arm64.LDRSW(elemI32, elemAddr, 0))
+	boxedI32 := l.boxI32(ctx, elemI32)
+	ctx.assembler.Emit(arm64.MOV(result, boxedI32))
+	l.releaseRef(ctx, addr, pre)
+	ctx.assembler.Emit(arm64.BLabel(done))
+
+	ctx.assembler.Bind(hitF32)
+	dataPtr, n = l.sliceHeader(ctx, data, 0)
+	l.guardIndex(ctx, idx, n, pre)
+	elemF32 := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	elemAddr = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	idx4 = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LSLI(idx4, idx, 2))
+	ctx.assembler.Emit(arm64.ADD(elemAddr, dataPtr, idx4))
+	ctx.assembler.Emit(arm64.LDRSW(elemF32, elemAddr, 0))
+	boxedF32 := l.boxF32Bits(ctx, elemF32)
+	ctx.assembler.Emit(arm64.MOV(result, boxedF32))
+	l.releaseRef(ctx, addr, pre)
+	ctx.assembler.Emit(arm64.BLabel(done))
+
+	ctx.assembler.Bind(hitF64)
+	dataPtr, n = l.sliceHeader(ctx, data, 0)
+	l.guardIndex(ctx, idx, n, pre)
+	ctx.assembler.Emit(arm64.LDRR(result, dataPtr, idx))
+	l.releaseRef(ctx, addr, pre)
+	ctx.assembler.Emit(arm64.BLabel(done))
+
+	ctx.assembler.Bind(hitRef)
+	dataPtr, n = l.sliceHeader(ctx, data, int16(arrayElems))
+	l.guardIndex(ctx, idx, n, pre)
+	ctx.assembler.Emit(arm64.LDRR(result, dataPtr, idx))
+	l.releaseRef(ctx, addr, pre)
+	l.retainBox(ctx, result)
+
+	ctx.assembler.Bind(done)
+	ctx.stack = append(pre[:len(pre)-2:len(pre)-2], result)
+	return true
+}
+
+func (l arm64JIT) structGet(ctx *jitContext) bool {
+	if !l.need(ctx, 2) {
+		return false
+	}
+	pre := append([]asm.VReg(nil), ctx.stack...)
+	idx := l.sign32(ctx, ctx.stack[len(ctx.stack)-1])
+	ref := ctx.stack[len(ctx.stack)-2]
+	addr, itab, data := l.heapValue(ctx, ref, pre)
+
+	hit := ctx.assembler.Label()
+	l.matchItab(ctx, itab, heapStruct, hit)
+	ctx.stack = append(ctx.stack[:0], pre...)
+	l.exitFallback(ctx, ctx.ip)
+	ctx.assembler.Bind(hit)
+
+	typ := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDR(typ, data, int16(structTyp)))
+	fields, n := l.sliceHeader(ctx, typ, int16(fieldsSlice))
+	l.guardIndex(ctx, idx, n, pre)
+
+	fieldOff := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(fieldOff, uint64(fieldSize))...)
+	ctx.assembler.Emit(arm64.MUL(fieldOff, idx, fieldOff))
+	field := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ADD(field, fields, fieldOff))
+	kind := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDRB(kind, field, int16(fieldKind)))
+
+	dataPtr, _ := l.sliceHeader(ctx, data, int16(structData))
+	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDRR(raw, dataPtr, idx))
+
+	hitI32 := ctx.assembler.Label()
+	hitF32 := ctx.assembler.Label()
+	hitF64 := ctx.assembler.Label()
+	hitRef := ctx.assembler.Label()
+	l.matchKind(ctx, kind, types.KindI32, hitI32)
+	l.matchKind(ctx, kind, types.KindF32, hitF32)
+	l.matchKind(ctx, kind, types.KindF64, hitF64)
+	l.matchKind(ctx, kind, types.KindRef, hitRef)
+	ctx.stack = append(ctx.stack[:0], pre...)
+	l.exitFallback(ctx, ctx.ip)
+
+	result := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	done := ctx.assembler.Label()
+	ctx.assembler.Bind(hitI32)
+	boxedI32 := l.boxI32(ctx, raw)
+	ctx.assembler.Emit(arm64.MOV(result, boxedI32))
+	l.releaseRef(ctx, addr, pre)
+	ctx.assembler.Emit(arm64.BLabel(done))
+
+	ctx.assembler.Bind(hitF32)
+	boxedF32 := l.boxF32Bits(ctx, raw)
+	ctx.assembler.Emit(arm64.MOV(result, boxedF32))
+	l.releaseRef(ctx, addr, pre)
+	ctx.assembler.Emit(arm64.BLabel(done))
+
+	ctx.assembler.Bind(hitF64)
+	ctx.assembler.Emit(arm64.MOV(result, raw))
+	l.releaseRef(ctx, addr, pre)
+	ctx.assembler.Emit(arm64.BLabel(done))
+
+	ctx.assembler.Bind(hitRef)
+	ctx.assembler.Emit(arm64.MOV(result, raw))
+	l.releaseRef(ctx, addr, pre)
+	l.retainBox(ctx, result)
+
+	ctx.assembler.Bind(done)
+	ctx.stack = append(pre[:len(pre)-2:len(pre)-2], result)
+	return true
+}
+
+func (l arm64JIT) heapValue(ctx *jitContext, ref asm.VReg, pre []asm.VReg) (asm.VReg, asm.VReg, asm.VReg) {
+	l.guardTag(ctx, ref, tagRef, arm64.OpBEQ, pre)
+
+	addr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ANDI(addr, ref, maskI32))
+
+	base := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDR(base, ctx.pin(scratchCtrl), int16(journalHeap*8)))
+	off := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LSLI(off, addr, 4))
+	cell := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ADD(cell, base, off))
+
+	itab := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	data := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(
+		arm64.LDR(itab, cell, 0),
+		arm64.LDR(data, cell, 8),
+	)
+	return addr, itab, data
+}
+
+func (arm64JIT) sliceHeader(ctx *jitContext, data asm.VReg, base int16) (asm.VReg, asm.VReg) {
+	ptr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	n := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(
+		arm64.LDR(ptr, data, base+sliceData),
+		arm64.LDR(n, data, base+sliceLen),
+	)
+	return ptr, n
+}
+
+func (l arm64JIT) guardIndex(ctx *jitContext, idx, n asm.VReg, pre []asm.VReg) {
+	nonNegative := ctx.assembler.Label()
+	ctx.assembler.Emit(arm64.CMPI(idx, 0))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBGE, nonNegative))
+	ctx.stack = append(ctx.stack[:0], pre...)
+	l.exitFallback(ctx, ctx.ip)
+	ctx.assembler.Bind(nonNegative)
+
+	inRange := ctx.assembler.Label()
+	ctx.assembler.Emit(arm64.CMP(idx, n))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBLT, inRange))
+	ctx.stack = append(ctx.stack[:0], pre...)
+	l.exitFallback(ctx, ctx.ip)
+	ctx.assembler.Bind(inRange)
+	ctx.stack = append(ctx.stack[:0], pre...)
+}
+
+func (arm64JIT) matchItab(ctx *jitContext, got asm.VReg, want uintptr, hit asm.Label) {
+	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(v, uint64(want))...)
+	ctx.assembler.Emit(arm64.CMP(got, v))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, hit))
+}
+
+func (arm64JIT) matchKind(ctx *jitContext, got asm.VReg, want types.Kind, hit asm.Label) {
+	ctx.assembler.Emit(arm64.CMPI(got, uint16(want)))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, hit))
+}
+
+func (arm64JIT) boxF32Bits(ctx *jitContext, bits asm.VReg) asm.VReg {
+	lo := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ANDI(lo, bits, maskI32))
+	tag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(tag, tagF32)...)
+	boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ORR(boxed, lo, tag))
+	return boxed
+}
+
 // refNull pushes the null reference constant (BoxedNull) onto the shadow stack.
 func (l arm64JIT) refNull(ctx *jitContext) bool {
-	return l.imm(ctx, uint64(types.BoxedNull))
+	if !l.imm(ctx, uint64(types.BoxedNull)) {
+		return false
+	}
+	l.retainBox(ctx, ctx.stack[len(ctx.stack)-1])
+	return true
 }
 
 // refIsNull pops a boxed ref and pushes BoxI32(1) if it is null (addr == 0),
@@ -1796,9 +2271,6 @@ func (arm64JIT) global(ctx *jitContext) (int, bool) {
 	if idx >= len(ctx.globals) {
 		return 0, false
 	}
-	if ctx.globals[idx].Kind() == types.KindRef {
-		return 0, false
-	}
 	// LDR/STR unsigned-offset encodes at most 12 bits (0..4095 slots x 8 bytes).
 	if idx > 4095 {
 		return 0, false
@@ -1845,4 +2317,8 @@ func (l arm64JIT) guardNonZero(ctx *jitContext, v asm.VReg, pre []asm.VReg) {
 	l.exitFallback(ctx, ctx.ip)
 	ctx.assembler.Bind(ok)
 	ctx.stack = append(ctx.stack[:0], pre...)
+}
+
+func valueItab(v types.Value) uintptr {
+	return (*valueWords)(unsafe.Pointer(&v)).itab
 }

@@ -819,9 +819,9 @@ func (i *Interpreter) segment(addr int, callable asm.Callable, argc int, fallbac
 // frames before resuming threaded execution at the fallback IP.
 func (i *Interpreter) entry(callable asm.Callable) func(*Interpreter) {
 	return func(i *Interpreter) {
+		scratch := i.scratch()
 		i.fr.code = nil
 		i.fr.upvals = nil
-		scratch := i.scratch()
 		if err := callable.Call(scratch); err != nil {
 			panic(err)
 		}
@@ -942,6 +942,15 @@ func (i *Interpreter) scratch() []uint64 {
 	}
 	if len(i.globals) > 0 {
 		i.argv[scratchGlobals] = uint64(uintptr(unsafe.Pointer(&i.globals[0])))
+	}
+	if len(i.rc) > 0 {
+		i.journal[journalRC] = uint64(uintptr(unsafe.Pointer(&i.rc[0])))
+	}
+	if len(i.fr.upvals) > 0 {
+		i.journal[journalUpvals] = uint64(uintptr(unsafe.Pointer(&i.fr.upvals[0])))
+	}
+	if len(i.heap) > 0 {
+		i.journal[journalHeap] = uint64(uintptr(unsafe.Pointer(&i.heap[0])))
 	}
 
 	i.journal[journalDepth] = 0
