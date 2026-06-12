@@ -201,17 +201,17 @@ func (l Lowerer) cmp(c *Context) bool { return l.compare(c, sign32) }
 
 ```go
 // ✗ method with unused receiver, used only once at construction
-func (*caller) validateScratch(sig Signature) error { /* 20 lines validation */ }
-func newCaller(...) (*caller, error) {
+func (*caller) validateOptions(opts options) error { /* 20 lines validation */ }
+func newCaller(opts options) (*caller, error) {
     c := &caller{...}
-    return c, c.validateScratch(sig)
+    return c, c.validateOptions(opts)
 }
 
 // ✓ inline at the single call site
-func newCaller(...) (*caller, error) {
-    if len(sig.Scratch) > maxScratch { ... }
-    for i, p := range sig.Scratch { ... }
-    return &caller{addr: addr, nScratch: len(sig.Scratch)}, nil
+func newCaller(opts options) (*caller, error) {
+    if opts.limit < 0 { ... }
+    for _, rule := range opts.rules { ... }
+    return &caller{limit: opts.limit, rules: opts.rules}, nil
 }
 ```
 
@@ -382,7 +382,7 @@ Constructors use `New<Type>`.
 ```go
 func NewOptimizer(level Level) *Optimizer
 func NewBasicBlocksPass() pass.Pass[[]*BasicBlock]
-func NewCaller(sig *Signature, chunk *Chunk) (Caller, error)
+func NewCaller(chunk *Chunk) (Caller, error)
 ```
 
 ### 3.2 Parser naming

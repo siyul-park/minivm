@@ -24,7 +24,6 @@ type Interpreter struct {
 	compiler  *jitCompiler
 	cache     *Cache
 	fallbacks map[int]func(*Interpreter)
-	argv      [scratchCount]uint64
 	journal   []uint64
 
 	types     []types.Type
@@ -783,18 +782,17 @@ func (i *Interpreter) safepoint() error {
 }
 
 // segment wraps a native segment Callable in a threaded-style closure. Native
-// code reads and writes the VM stack directly through scratch argv.
+// code reads and writes the VM stack directly through the context journal.
 func (i *Interpreter) segment(addr int, callable asm.Callable, argc int, fallback func(*Interpreter)) func(*Interpreter) {
 	return func(i *Interpreter) {
 		if i.sp < argc {
 			panic(ErrStackUnderflow)
 		}
-		scratch := i.scratch()
-		if err := callable.Call(scratch); err != nil {
+		if err := callable.Call(i.context()); err != nil {
 			panic(err)
 		}
 
-		i.sp = int(scratch[scratchSP])
+		i.sp = int(i.journal[journalSP])
 		i.fr.ip = int(i.journal[journalNextIP])
 		switch i.journal[journalTrap] {
 		case trapFallback:
@@ -819,10 +817,10 @@ func (i *Interpreter) segment(addr int, callable asm.Callable, argc int, fallbac
 // frames before resuming threaded execution at the fallback IP.
 func (i *Interpreter) entry(callable asm.Callable) func(*Interpreter) {
 	return func(i *Interpreter) {
-		scratch := i.scratch()
+		ctx := i.context()
 		i.fr.code = nil
 		i.fr.upvals = nil
-		if err := callable.Call(scratch); err != nil {
+		if err := callable.Call(ctx); err != nil {
 			panic(err)
 		}
 
@@ -842,7 +840,7 @@ func (i *Interpreter) entry(callable asm.Callable) func(*Interpreter) {
 		// A trap rebuilt the native call chain into real VM frames; resume the
 		// innermost in the interpreter, surface a frame overflow, or service a
 		// loop safepoint.
-		i.sp = int(scratch[scratchSP])
+		i.sp = int(i.journal[journalSP])
 		i.deopt()
 		switch i.journal[journalTrap] {
 		case trapOverflow:
@@ -929,26 +927,30 @@ func (i *Interpreter) restore(f *frame, addr int) {
 	f.upvals = nil
 }
 
-// scratch resets and fills the argv/journal handed to native code: stack and
-// global base pointers, the current frame's BP/SP, the journal pointer, and the
-// per-call frame budget. Returns the argv slice the Callable reads and writes.
-func (i *Interpreter) scratch() []uint64 {
-	clear(i.argv[:])
-	i.argv[scratchBP] = uint64(i.fr.bp)
-	i.argv[scratchSP] = uint64(i.sp)
-	i.argv[scratchCtrl] = uint64(uintptr(unsafe.Pointer(&i.journal[0])))
+// context resets and fills the journal handed to native code: stack/global base
+// pointers, current frame BP/SP, pointer cells for native fast paths, and the
+// per-call frame budget. It returns &journal[0], passed to native code in X0.
+func (i *Interpreter) context() uintptr {
+	i.journal[journalStack] = 0
 	if len(i.stack) > 0 {
-		i.argv[scratchStack] = uint64(uintptr(unsafe.Pointer(&i.stack[0])))
+		i.journal[journalStack] = uint64(uintptr(unsafe.Pointer(&i.stack[0])))
 	}
+	i.journal[journalGlobals] = 0
 	if len(i.globals) > 0 {
-		i.argv[scratchGlobals] = uint64(uintptr(unsafe.Pointer(&i.globals[0])))
+		i.journal[journalGlobals] = uint64(uintptr(unsafe.Pointer(&i.globals[0])))
 	}
+	i.journal[journalBP] = uint64(i.fr.bp)
+	i.journal[journalSP] = uint64(i.sp)
+
+	i.journal[journalRC] = 0
 	if len(i.rc) > 0 {
 		i.journal[journalRC] = uint64(uintptr(unsafe.Pointer(&i.rc[0])))
 	}
+	i.journal[journalUpvals] = 0
 	if len(i.fr.upvals) > 0 {
 		i.journal[journalUpvals] = uint64(uintptr(unsafe.Pointer(&i.fr.upvals[0])))
 	}
+	i.journal[journalHeap] = 0
 	if len(i.heap) > 0 {
 		i.journal[journalHeap] = uint64(uintptr(unsafe.Pointer(&i.heap[0])))
 	}
@@ -958,7 +960,7 @@ func (i *Interpreter) scratch() []uint64 {
 	i.journal[journalTrap] = trapNone
 	i.journal[journalBudget] = uint64(i.tick)
 	i.journal[journalActive] = 0
-	return i.argv[:]
+	return uintptr(unsafe.Pointer(&i.journal[0]))
 }
 
 func (i *Interpreter) runtimeError(r any) error {

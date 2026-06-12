@@ -19,18 +19,17 @@ func New() asm.Arch {
 			31, 32,
 			// Registers the Go ARM64 runtime owns and the native body must
 			// never clobber: X18 (platform), X27 (REGTMP), X28 (g), X29
-			// (FP), X30 (LR). The invoke trampoline is NOSPLIT and saves no
-			// callee-state, so allocating any of these corrupts the caller.
-			// The remaining low registers are volatile under Go's internal
-			// ABI and free to use.
+			// (FP), X30 (LR). X19-X26 are callee-saved under AAPCS64 and
+			// preserved by the invoke trampoline, so the allocator may use
+			// them under pressure.
 			[]uint8{18, 27, 28, 29, 30},
-			nil,
-			// X10–X14: caller-saved scratch registers preserved across
-			// the invoke trampoline.
-			// X0–X1: internal native return registers. X15: pinned
-			// native call-depth register. They are not trampoline scratch
-			// slots, but the JIT pins them, so the allocator must not
-			// choose them opportunistically for unrelated live values.
+			// D8-D15 are callee-saved under AAPCS64; native code does not
+			// save them, so keep them out of the float pool.
+			[]uint8{8, 9, 10, 11, 12, 13, 14, 15},
+			// X10-X14: pinned VM context registers. X0-X1: internal
+			// native return registers. X15: pinned native call-depth
+			// register. Pinning can claim them explicitly; auto-allocation
+			// cannot.
 			[]uint8{0, 1, 10, 11, 12, 13, 14, 15},
 		),
 		encoder: NewEncoder(),

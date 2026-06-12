@@ -55,7 +55,7 @@ The interface is four operations:
 - `prologue` loads declared live-ins from the VM stack into the shadow stack's initial VRegs.
 - `enter` emits the function entry sequence (frame/link save) for a whole-function target reached as its own callable.
 - `lower` dispatches one opcode. It returns `false` to reject and fall back to threaded execution.
-- `exitIP` materializes shadow stack values into `i.stack`, writes `scratchSP` and the journal (trap kind + resume IP), and emits `RET`.
+- `exitIP` materializes shadow stack values into `i.stack`, writes `journalSP` and trap state, and emits `RET`.
 
 ## jitContext
 
@@ -87,36 +87,42 @@ type jitContext struct {
 
 ## Segment ABI
 
-Scratch registers carry VM context through the single `argv []uint64` callable ABI. `Callable.Call(argv)` loads `argv[0..4]` into X10..X14, calls native code, stores X10..X14 back into the same slots, and reports caller-side argument errors.
+Native callables use a standard AAPCS64-shaped entry: `Callable.Call(ctx)` passes
+`&i.journal[0]` in X0. External native entries copy the first journal cells into
+pinned context registers with two `LDP`s; internal native calls branch to labels
+after this reload and keep the registers live.
 
 | Constant | ARM64 | Purpose |
 | --- | --- | --- |
 | `scratchStack` (0) | X10 | `&i.stack[0]` input |
 | `scratchGlobals` (1) | X11 | `&i.globals[0]` input |
 | `scratchBP` (2) | X12 | current frame `bp` input |
-| `scratchSP` (3) | X13 | interpreter `sp` in/out |
-| `scratchCtrl` (4) | X14 | `&i.journal[0]` input — frame journal pointer |
+| `scratchSP` (3) | X13 | interpreter `sp` input |
+| `scratchCtrl` (4) | X14 | `&i.journal[0]` context pointer |
 
-Native code loads stack inputs from `scratchStack`/`scratchSP`, keeps operands in registers, and writes stack results back only on exit or fallback. The `interp` adapter does not marshal params or returns; it calls `Callable.Call(argv)`, copies back `scratchSP`, and reads the trap/IP outputs from the journal.
+Native code loads stack inputs from `scratchStack`/`scratchSP`, keeps operands in registers, and writes stack results back only on exit or fallback. The `interp` adapter does not marshal params or returns; it calls `Callable.Call(ctx)` and reads `journalSP`, trap kind, and resume IP from the journal.
 
 ### Frame journal
 
-The fifth scratch slot carries a pointer to `i.journal`, an Interpreter-owned
-`[]uint64` that both reports deopt state and records recoverable VM frames.
-Header cells precede a stack of fixed-stride records:
+`i.journal` is an Interpreter-owned `[]uint64` that both supplies entry context
+and reports deopt state. Header cells precede a stack of fixed-stride records:
 
 | Cell | Purpose |
 | --- | --- |
-| `journalDepth` (0) | trap-time frame records written; native read/write |
-| `journalCap` (1) | frame budget `len(i.frames)-i.fp`; read-only |
-| `journalTrap` (2) | exit kind out: `trapNone` \| `trapFallback` \| `trapOverflow` \| `trapYield` |
-| `journalNextIP` (3) | resume/fallback IP out for the single-frame path |
-| `journalBudget` (4) | back-edges left before the next loop safepoint; native read/write |
-| `journalActive` (5) | active native call depth for frame-budget checks; X15 mirrors it on native entry |
-| `journalRC` (6) | `&i.rc[0]`; native refcount fast paths read/write guarded counts |
-| `journalUpvals` (7) | `&i.fr.upvals[0]` or `0`; closure-body `UPVAL_*` fast paths |
-| `journalHeap` (8) | `&i.heap[0]`; read-only for heap object fast paths |
-| `journalHead` (9)… | trap-time records of `{addr, bp, ip, returns}`, stride 4 |
+| `journalStack` (0) | `&i.stack[0]` or `0`; external entry in |
+| `journalGlobals` (1) | `&i.globals[0]` or `0`; external entry in |
+| `journalBP` (2) | current frame `bp`; external entry in |
+| `journalSP` (3) | interpreter `sp`; external entry in/out |
+| `journalDepth` (4) | trap-time frame records written; native read/write |
+| `journalCap` (5) | frame budget `len(i.frames)-i.fp`; read-only |
+| `journalTrap` (6) | exit kind out: `trapNone` \| `trapFallback` \| `trapOverflow` \| `trapYield` |
+| `journalNextIP` (7) | resume/fallback IP out for the single-frame path |
+| `journalBudget` (8) | back-edges left before the next loop safepoint; native read/write |
+| `journalActive` (9) | active native call depth for frame-budget checks; X15 mirrors it on native entry |
+| `journalRC` (10) | `&i.rc[0]` or `0`; native refcount fast paths read/write guarded counts |
+| `journalUpvals` (11) | `&i.fr.upvals[0]` or `0`; closure-body `UPVAL_*` fast paths |
+| `journalHeap` (12) | `&i.heap[0]` or `0`; read-only for heap object fast paths |
+| `journalHead` (13)… | trap-time records of `{addr, bp, ip, returns}`, stride 4 |
 
 Guard fallbacks set `journalTrap = trapFallback` and the resume IP. The segment
 wrapper restores `fr.ip` and runs the original threaded handler for that opcode
@@ -177,7 +183,7 @@ because terminating a block early would leave native branch targets unbound.
 
 ## Branches
 
-`BR` and `BR_IF` terminate traces. Branch offsets are signed int16 relative to instruction end. `BR` records its target as a forced successor and exits with the successor IP in `scratchNext`. `BR_IF` emits both exit paths inline; it marks the context closed so `Exit` is not appended.
+`BR` and `BR_IF` terminate traces. Branch offsets are signed int16 relative to instruction end. `BR` records its target as a forced successor and exits with the successor IP in `journalNextIP`. `BR_IF` emits both exit paths inline; it marks the context closed so `Exit` is not appended.
 
 `BR` targets are forced successors unless the target is a `NOP` or outside the function. Rejected ops force only safe structural successors (`NOP` or `BR` following the rejected opcode). A rejected direct `CONST_GET function; CALL` queues the post-call successor so supported work after the call remains eligible for JIT.
 
@@ -223,7 +229,7 @@ stack and falls back so threaded `release()` performs tracing, closing, and free
 list updates. This keeps native code free of allocation and object graph walks.
 
 Closure bodies can compile as native entries. The threaded closure call still
-creates the frame and supplies `fr.upvals`; `scratch()` captures the upval slice
+creates the frame and supplies `fr.upvals`; `context()` captures the upval slice
 base in `journalUpvals` before the entry wrapper clears frame code/upvals for
 native execution. Native direct calls intentionally skip capture-bearing targets
 because their upval base would be stale inside a single native dwell.
@@ -315,7 +321,7 @@ asm.New(arch)             allocate Assembler
   Pin(vreg, preg)         bind to physical register
   Emit(instruction)       append to IR list
   Label() / Bind(label)   create/place branch targets
-  Build(sig) → *Code      regalloc + encode + intra-Code reloc resolution
+  Build() → *Code         regalloc + encode + intra-Code reloc resolution
 asm.Link(buf, arch, []*Code, resolve) → []Linked
   patches external relocations, writes to Buffer, flushes icache
 ```
@@ -335,6 +341,7 @@ buffer until its owner and every attached interpreter have closed.
 
 ## ARM64 ABI Summary
 
-AAPCS64: native VM callables use only scratch `X10–X14` (`scratchStack` through `scratchCtrl`) across the Go trampoline.
-
-The `abi_arm64.s` trampoline loads `argv[0..4]` into X10..X14, calls the native chunk, and stores X10..X14 back into `argv[0..4]`.
+AAPCS64: native VM callables receive one context pointer in X0. External entries
+load `scratchStack` through `scratchCtrl` from the journal. The trampoline saves
+and restores X19-X26 because the allocator may use those callee-saved registers;
+D8-D15 stay out of the float pool.

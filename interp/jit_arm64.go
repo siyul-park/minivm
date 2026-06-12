@@ -65,11 +65,18 @@ func newJITCompiler(cutoff int) (*jitCompiler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &jitCompiler{lowerer: arm64JIT{}, arch: arm64.New(), buffer: buffer, cutoff: cutoff}, nil
+	return &jitCompiler{
+		lowerer:     arm64JIT{},
+		arch:        arm64.New(),
+		buffer:      buffer,
+		scratchRegs: []asm.PReg{arm64.X10, arm64.X11, arm64.X12, arm64.X13, arm64.X14},
+		cutoff:      cutoff,
+	}, nil
 }
 
 // Prologue loads declared live-ins from the VM stack.
 func (l arm64JIT) prologue(ctx *jitContext, _ *types.Function) {
+	l.loadContext(ctx)
 	if len(ctx.inputs) == 0 {
 		return
 	}
@@ -81,6 +88,28 @@ func (l arm64JIT) prologue(ctx *jitContext, _ *types.Function) {
 		ctx.assembler.Emit(arm64.SUBI(idx, vSP, uint16(back)))
 		l.load(ctx, v, vStack, idx)
 	}
+}
+
+func (l arm64JIT) enter(ctx *jitContext) {
+	l.loadContext(ctx)
+	vCtrl := ctx.pin(scratchCtrl)
+	active := ctx.pinTo(arm64.X15)
+	ctx.assembler.Emit(
+		arm64.LDR(active, vCtrl, int16(journalActive*8)),
+	)
+	ctx.assembler.Bind(ctx.labels[0])
+	ctx.assembler.Emit(
+		arm64.SUBI(arm64.SP, arm64.SP, 16),
+		arm64.STR(arm64.LR, arm64.SP, 0),
+	)
+}
+
+func (arm64JIT) loadContext(ctx *jitContext) {
+	ctx.assembler.Emit(
+		arm64.MOV(ctx.scratch[scratchCtrl], arm64.X0),
+		arm64.LDP(ctx.scratch[scratchStack], ctx.scratch[scratchGlobals], ctx.scratch[scratchCtrl], int16(journalStack*8)),
+		arm64.LDP(ctx.scratch[scratchBP], ctx.scratch[scratchSP], ctx.scratch[scratchCtrl], int16(journalBP*8)),
+	)
 }
 
 // Lower dispatches one opcode. Returns false (leaving jitContext untouched)
@@ -350,18 +379,8 @@ func (l arm64JIT) lower(ctx *jitContext, op instr.Opcode) bool {
 	return false
 }
 
-func (arm64JIT) enter(ctx *jitContext) {
-	vCtrl := ctx.pin(scratchCtrl)
-	active := ctx.pinTo(arm64.X15)
-	ctx.assembler.Emit(
-		arm64.LDR(active, vCtrl, int16(journalActive*8)),
-		arm64.SUBI(arm64.SP, arm64.SP, 16),
-		arm64.STR(arm64.LR, arm64.SP, 0),
-	)
-}
-
 // Exit materializes the shadow stack back into the interpreter stack, writes
-// the next interpreter IP, and returns through the scratch-only trampoline.
+// the next interpreter IP, and returns through the context-pointer trampoline.
 func (l arm64JIT) exitIP(ctx *jitContext, nextIP int) {
 	l.exit(ctx, trapNone, nextIP)
 }
@@ -371,16 +390,14 @@ func (l arm64JIT) exitFallback(ctx *jitContext, nextIP int) {
 }
 
 // exit materializes the shadow stack, reports the trap kind and resume IP
-// through the journal, and returns through the scratch-only trampoline. A framed
-// deopt also records its own VM frame so the Go wrapper can rebuild the native
-// call chain, and restores the link register saved by enter.
+// through the journal, and returns through the context-pointer trampoline. A
+// framed deopt also records its own VM frame so the Go wrapper can rebuild the
+// native call chain, and restores the link register saved by enter.
 func (l arm64JIT) exit(ctx *jitContext, trap, nextIP int) {
 	nextSP := l.materialize(ctx)
 
-	vSP := ctx.pin(scratchSP)
-	ctx.assembler.Emit(arm64.MOV(vSP, nextSP))
-
 	vCtrl := ctx.pin(scratchCtrl)
+	ctx.assembler.Emit(arm64.STR(nextSP, vCtrl, int16(journalSP*8)))
 	if ctx.framed && trap != trapNone {
 		l.record(ctx, vCtrl, nextIP)
 	}
@@ -796,7 +813,7 @@ func (l arm64JIT) descend(
 
 	next := len(ctx.stack) - consumed + returns
 	reload := next
-	if returns <= len(arm64.IntArgs[:2]) {
+	if returns <= len(arm64.IntRets) {
 		reload -= returns
 	}
 	stack := make([]asm.VReg, next)
@@ -805,9 +822,9 @@ func (l arm64JIT) descend(
 		ctx.assembler.Emit(arm64.LDR(v, base, int16(i*8)))
 		stack[i] = v
 	}
-	if returns <= len(arm64.IntArgs[:2]) {
+	if returns <= len(arm64.IntRets) {
 		for i := 0; i < returns; i++ {
-			stack[reload+i] = ctx.pinTo(arm64.IntArgs[i])
+			stack[reload+i] = ctx.pinTo(arm64.IntRets[i])
 		}
 	} else {
 		for i := reload; i < next; i++ {
@@ -843,7 +860,7 @@ func (l arm64JIT) poll(ctx *jitContext, header int) {
 // yield exits a fully-compiled loop at an empty-stack back-edge. It resets sp to
 // the frame's operand base, records the frame so the Go wrapper can deopt to it,
 // reports the resume IP, restores the saved link register on a framed entry, and
-// returns through the trampoline.
+// returns through the context-pointer trampoline.
 func (l arm64JIT) yield(ctx *jitContext, header int) {
 	vBP := ctx.pin(scratchBP)
 	vSP := ctx.pin(scratchSP)
@@ -854,6 +871,7 @@ func (l arm64JIT) yield(ctx *jitContext, header int) {
 	}
 
 	vCtrl := ctx.pin(scratchCtrl)
+	ctx.assembler.Emit(arm64.STR(vSP, vCtrl, int16(journalSP*8)))
 	l.record(ctx, vCtrl, header)
 	l.report(ctx, vCtrl, trapYield, header)
 
@@ -1469,9 +1487,9 @@ func (l arm64JIT) ret(ctx *jitContext) bool {
 			src := ctx.stack[len(ctx.stack)-ctx.returns+idx]
 			ctx.assembler.Emit(arm64.STR(src, addr, int16(idx*8)))
 		}
-		for idx := 0; idx < ctx.returns && idx < len(arm64.IntArgs[:2]); idx++ {
+		for idx := 0; idx < ctx.returns && idx < len(arm64.IntRets); idx++ {
 			src := ctx.stack[len(ctx.stack)-ctx.returns+idx]
-			ret := ctx.pinTo(arm64.IntArgs[idx])
+			ret := ctx.pinTo(arm64.IntRets[idx])
 			ctx.assembler.Emit(arm64.MOV(ret, src))
 		}
 		ctx.assembler.Emit(
@@ -1920,19 +1938,19 @@ func (l arm64JIT) brIf(ctx *jitContext) bool {
 
 	// Segment mode: materialize remaining stack once; both exits share it.
 	nextSP := l.materialize(ctx)
-	vSP := ctx.pin(scratchSP)
-	ctx.assembler.Emit(arm64.MOV(vSP, nextSP))
+	vCtrl := ctx.pin(scratchCtrl)
+	ctx.assembler.Emit(arm64.STR(nextSP, vCtrl, int16(journalSP*8)))
 
 	takenLbl := ctx.assembler.Label()
 	ctx.assembler.Emit(arm64.CBNZLabel(condI32, takenLbl))
 
 	// Fall-through path: condition was zero.
-	l.report(ctx, ctx.pin(scratchCtrl), trapNone, falseTarget)
+	l.report(ctx, vCtrl, trapNone, falseTarget)
 	ctx.assembler.Emit(arm64.RET())
 
 	// Taken path: condition was non-zero.
 	ctx.assembler.Bind(takenLbl)
-	l.report(ctx, ctx.pin(scratchCtrl), trapNone, takenTarget)
+	l.report(ctx, vCtrl, trapNone, takenTarget)
 	ctx.assembler.Emit(arm64.RET())
 
 	// Chain the fall-through as the proactive successor, mirroring br. The
@@ -1949,7 +1967,7 @@ func (l arm64JIT) brIf(ctx *jitContext) bool {
 // [0..count], and emits a linear scan of CMPI+B.EQ pairs — one per case — that
 // each jump to an inline exit path. The default exit falls through below the
 // scan. Every exit materializes the remaining shadow stack, writes SP and the
-// compile-time target IP through scratch, and RETs.
+// compile-time target IP through the journal, and RETs.
 //
 // In blocks mode (ctx.labels != nil) label-based dispatch is unsupported, so
 // brTable rejects and blocks() falls back to segments().
@@ -1981,8 +1999,8 @@ func (l arm64JIT) brTable(ctx *jitContext) bool {
 
 	// Materialize remaining shadow stack once — all exit paths share it.
 	nextSP := l.materialize(ctx)
-	vSP := ctx.pin(scratchSP)
-	ctx.assembler.Emit(arm64.MOV(vSP, nextSP))
+	vCtrl := ctx.pin(scratchCtrl)
+	ctx.assembler.Emit(arm64.STR(nextSP, vCtrl, int16(journalSP*8)))
 
 	// Emit one CMPI+B.EQ per case.
 	labels := make([]asm.Label, count)
@@ -1993,13 +2011,13 @@ func (l arm64JIT) brTable(ctx *jitContext) bool {
 	}
 
 	// Default exit (fall-through when no case matched).
-	l.report(ctx, ctx.pin(scratchCtrl), trapNone, targets[count])
+	l.report(ctx, vCtrl, trapNone, targets[count])
 	ctx.assembler.Emit(arm64.RET())
 
 	// Per-case exits.
 	for i := 0; i < count; i++ {
 		ctx.assembler.Bind(labels[i])
-		l.report(ctx, ctx.pin(scratchCtrl), trapNone, targets[i])
+		l.report(ctx, vCtrl, trapNone, targets[i])
 		ctx.assembler.Emit(arm64.RET())
 	}
 

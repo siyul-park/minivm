@@ -3,6 +3,7 @@ package asm_test
 import (
 	"runtime"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
@@ -18,24 +19,24 @@ func TestAssembler_Build(t *testing.T) {
 		t.Skipf("native invoke requires arm64, got %s", runtime.GOARCH)
 	}
 
-	t.Run("scratch argv round trip", func(t *testing.T) {
+	t.Run("context pointer round trip", func(t *testing.T) {
 		arch := arm64.New()
-		ab := arch.ABI()
-		scratch := ab.Scratch()
 
 		a := asm.New(arch)
+		ctx := a.Reg(asm.RegTypeInt, asm.Width64)
 		va := a.Reg(asm.RegTypeInt, asm.Width64)
 		vb := a.Reg(asm.RegTypeInt, asm.Width64)
 		vr := a.Reg(asm.RegTypeInt, asm.Width64)
 
-		require.NoError(t, a.Pin(va, scratch[0]))
-		require.NoError(t, a.Pin(vb, scratch[1]))
-		require.NoError(t, a.Pin(vr, scratch[2]))
+		require.NoError(t, a.Pin(ctx, arm64.X0))
 
+		a.Emit(arm64.LDR(va, ctx, 0))
+		a.Emit(arm64.LDR(vb, ctx, 8))
 		a.Emit(arm64.ADD(vr, va, vb))
+		a.Emit(arm64.STR(vr, ctx, 16))
 		a.Emit(arm64.RET())
 
-		code, err := a.Build(asm.Signature{Scratch: scratch[:3]})
+		code, err := a.Build()
 		require.NoError(t, err)
 		require.NotEmpty(t, code.Bytes)
 		require.Empty(t, code.Relocs)
@@ -48,16 +49,17 @@ func TestAssembler_Build(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, linked, 1)
 
-		argv := []uint64{3, 4, 0, 0, 0}
-		require.NoError(t, linked[0].Callable.Call(argv))
-		require.Equal(t, []uint64{3, 4, 7, 0, 0}, argv)
+		ctxBuf := []uint64{3, 4, 0}
+		require.NoError(t, linked[0].Callable.Call(uintptr(unsafe.Pointer(&ctxBuf[0]))))
+		require.Equal(t, []uint64{3, 4, 7}, ctxBuf)
 	})
 
 	t.Run("spills under register pressure", func(t *testing.T) {
 		arch := arm64.New()
-		scratch := arch.ABI().Scratch()
 
 		a := asm.New(arch)
+		ctx := a.Reg(asm.RegTypeInt, asm.Width64)
+		require.NoError(t, a.Pin(ctx, arm64.X0))
 
 		// Hold far more values live at once than the integer bank has
 		// allocatable registers, forcing the allocator to spill. Every
@@ -82,12 +84,10 @@ func TestAssembler_Build(t *testing.T) {
 			acc = next
 		}
 
-		out := a.Reg(asm.RegTypeInt, asm.Width64)
-		require.NoError(t, a.Pin(out, scratch[0]))
-		a.Emit(arm64.MOV(out, acc))
+		a.Emit(arm64.STR(acc, ctx, 0))
 		a.Emit(arm64.RET())
 
-		code, err := a.Build(asm.Signature{Scratch: scratch[:1]})
+		code, err := a.Build()
 		require.NoError(t, err)
 		require.NotEmpty(t, code.Bytes)
 
@@ -98,55 +98,23 @@ func TestAssembler_Build(t *testing.T) {
 		linked, err := asm.Link(buf, arch, []*asm.Code{code}, nil)
 		require.NoError(t, err)
 
-		argv := []uint64{0, 0, 0, 0, 0}
-		require.NoError(t, linked[0].Callable.Call(argv))
-		require.Equal(t, want, argv[0])
-	})
-
-	t.Run("variable scratch count", func(t *testing.T) {
-		arch := arm64.New()
-		scratch := arch.ABI().Scratch()
-
-		a := asm.New(arch)
-		v := a.Reg(asm.RegTypeInt, asm.Width64)
-		require.NoError(t, a.Pin(v, scratch[0]))
-		a.Emit(arm64.ADDI(v, v, 1))
-		a.Emit(arm64.RET())
-
-		code, err := a.Build(asm.Signature{Scratch: scratch[:1]})
-		require.NoError(t, err)
-
-		buf, err := asm.NewBuffer(4096)
-		require.NoError(t, err)
-		defer buf.Free()
-
-		linked, err := asm.Link(buf, arch, []*asm.Code{code}, nil)
-		require.NoError(t, err)
-
-		// A single-scratch callable accepts an argv sized to its own
-		// scratch count — no padding to the trampoline maximum.
-		argv := []uint64{41}
-		require.NoError(t, linked[0].Callable.Call(argv))
-		require.Equal(t, []uint64{42}, argv)
-
-		require.ErrorIs(t, linked[0].Callable.Call(nil), asm.ErrInvalidArgs)
+		ctxBuf := []uint64{0}
+		require.NoError(t, linked[0].Callable.Call(uintptr(unsafe.Pointer(&ctxBuf[0]))))
+		require.Equal(t, want, ctxBuf[0])
 	})
 }
 
 func TestAssembler_Pin(t *testing.T) {
 	arch := arm64.New()
-	ab := arch.ABI()
-	x0 := ab.Scratch()[0]
-	x1 := ab.Scratch()[1]
 
 	a := asm.New(arch)
 	v := a.Reg(asm.RegTypeInt, asm.Width64)
 
-	require.NoError(t, a.Pin(v, x0))
-	require.NoError(t, a.Pin(v, x0))
-	require.ErrorIs(t, a.Pin(v, x1), asm.ErrConflictingPin)
+	require.NoError(t, a.Pin(v, arm64.X0))
+	require.NoError(t, a.Pin(v, arm64.X0))
+	require.ErrorIs(t, a.Pin(v, arm64.X1), asm.ErrConflictingPin)
 
-	_, err := a.Build(asm.Signature{})
+	_, err := a.Build()
 	require.ErrorIs(t, err, asm.ErrConflictingPin)
 }
 
@@ -162,21 +130,23 @@ func TestLink(t *testing.T) {
 
 	t.Run("exposes internal entry", func(t *testing.T) {
 		arch := arm64.New()
-		ab := arch.ABI()
-		scratch := ab.Scratch()
 
 		a := asm.New(arch)
+		ctx := a.Reg(asm.RegTypeInt, asm.Width64)
 		v := a.Reg(asm.RegTypeInt, asm.Width64)
-		require.NoError(t, a.Pin(v, scratch[0]))
+		require.NoError(t, a.Pin(ctx, arm64.X0))
 
 		entry := a.Label()
 		a.Emit(arm64.LDI(v, 3)...)
+		a.Emit(arm64.STR(v, ctx, 0))
 		a.Emit(arm64.RET())
-		a.Entry(entry, asm.Signature{Scratch: scratch[:1]})
+		a.Entry(entry)
+		a.Emit(arm64.LDR(v, ctx, 0))
 		a.Emit(arm64.ADDI(v, v, 1))
+		a.Emit(arm64.STR(v, ctx, 0))
 		a.Emit(arm64.RET())
 
-		code, err := a.Build(asm.Signature{Scratch: scratch[:1]})
+		code, err := a.Build()
 		require.NoError(t, err)
 
 		buf, err := asm.NewBuffer(4096)
@@ -188,12 +158,12 @@ func TestLink(t *testing.T) {
 		require.Len(t, linked, 1)
 		require.Contains(t, linked[0].Entries, entry)
 
-		argv := []uint64{0, 0, 0, 0, 0}
-		require.NoError(t, linked[0].Callable.Call(argv))
-		require.Equal(t, uint64(3), argv[0])
+		ctxBuf := []uint64{0}
+		require.NoError(t, linked[0].Callable.Call(uintptr(unsafe.Pointer(&ctxBuf[0]))))
+		require.Equal(t, uint64(3), ctxBuf[0])
 
-		argv[0] = 41
-		require.NoError(t, linked[0].Entries[entry].Call(argv))
-		require.Equal(t, uint64(42), argv[0])
+		ctxBuf[0] = 41
+		require.NoError(t, linked[0].Entries[entry].Call(uintptr(unsafe.Pointer(&ctxBuf[0]))))
+		require.Equal(t, uint64(42), ctxBuf[0])
 	})
 }

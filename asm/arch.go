@@ -21,19 +21,12 @@ type Encoder interface {
 	Encode(inst Instruction) ([]byte, error)
 }
 
-// ABI describes a target architecture's call boundary policy: which scratch
-// registers survive the trampoline and what binds a Code to a Callable.
-// ABI is pure-policy — it does not own any executable memory.
+// ABI describes a target architecture's call boundary policy. ABI is pure-policy
+// — it does not own any executable memory.
 type ABI interface {
-	// Scratch returns the set of physical registers reserved for
-	// pass-through context across the trampoline boundary (X10..X14 on
-	// arm64). Order is stable.
-	Scratch() []PReg
-
-	// NewCallable binds the raw native entry at addr to sig, returning a
-	// Callable. addr must point at executable memory whose lifetime
-	// outlives every Call.
-	NewCallable(sig Signature, addr unsafe.Pointer) (Callable, error)
+	// NewCallable binds the raw native entry at addr, returning a Callable.
+	// addr must point at executable memory whose lifetime outlives every Call.
+	NewCallable(addr unsafe.Pointer) (Callable, error)
 }
 
 // Frame is an optional Arch capability that supplies the instructions a
@@ -68,15 +61,7 @@ type Frame interface {
 // buffer. Implementations are produced by ABI.NewCallable and returned from
 // Link.
 type Callable interface {
-	Call(argv []uint64) error
-}
-
-// Signature describes the scratch registers carried across a callable entry.
-//
-// Signature is pure data. Multi-exit semantics, VM-stack mapping, and other
-// caller-side concerns live above this package.
-type Signature struct {
-	Scratch []PReg
+	Call(ctx uintptr) error
 }
 
 var (

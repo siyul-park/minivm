@@ -1,60 +1,21 @@
 #include "textflag.h"
 
-// func invoke(addr uintptr, argv uintptr)
+// func invoke(addr uintptr, ctx uintptr)
 //
-// argv layout (header-prefixed; the header is set by caller.Call, never by
-// external callers):
-//   argv[0]     : N, the scratch count in 0..5
-//   argv[1..N]  : scratch slots, loaded into X10..X(9+N) on the way in and
-//                 written back on the way out
-//
-// The count is read from the header so the trampoline carries a variable
-// number of scratch registers without a fixed width. ARM64 cannot index
-// registers at run time, so the load/store sequences are unrolled with an
-// early exit once N registers have been moved.
-//
+// ctx is passed to native code in R0. R19-R26 are callee-saved under AAPCS64
+// and used by the JIT allocator, so the Go trampoline preserves them.
 // Note: R18 is reserved by the Go toolchain; never use it.
 
-TEXT ·invoke(SB), NOSPLIT, $0-16
-    MOVD argv+8(FP), R8
-    MOVD 0(R8), R0          // R0 = N
-
-    CBZ  R0, call
-    MOVD  8(R8), R10
-    CMP  $1, R0
-    BEQ  call
-    MOVD 16(R8), R11
-    CMP  $2, R0
-    BEQ  call
-    MOVD 24(R8), R12
-    CMP  $3, R0
-    BEQ  call
-    MOVD 32(R8), R13
-    CMP  $4, R0
-    BEQ  call
-    MOVD 40(R8), R14
-
-call:
+TEXT ·invoke(SB), NOSPLIT, $80-16
+    STP  (R19, R20),  8(RSP)
+    STP  (R21, R22), 24(RSP)
+    STP  (R23, R24), 40(RSP)
+    STP  (R25, R26), 56(RSP)
     MOVD addr+0(FP), R9
+    MOVD ctx+8(FP), R0
     BL   (R9)
-
-    MOVD argv+8(FP), R8
-    MOVD 0(R8), R0          // R0 = N (reloaded; the body may clobber R0)
-
-    CBZ  R0, done
-    MOVD R10,  8(R8)
-    CMP  $1, R0
-    BEQ  done
-    MOVD R11, 16(R8)
-    CMP  $2, R0
-    BEQ  done
-    MOVD R12, 24(R8)
-    CMP  $3, R0
-    BEQ  done
-    MOVD R13, 32(R8)
-    CMP  $4, R0
-    BEQ  done
-    MOVD R14, 40(R8)
-
-done:
+    LDP   8(RSP), (R19, R20)
+    LDP  24(RSP), (R21, R22)
+    LDP  40(RSP), (R23, R24)
+    LDP  56(RSP), (R25, R26)
     RET

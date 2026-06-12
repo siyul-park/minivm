@@ -38,17 +38,17 @@ Recursive `fib(35)` — darwin/arm64, Apple M4 Pro, Go 1.26.2. minivm is measure
 
 | Runtime | ns/op | B/op | allocs/op | vs native Go | execution model |
 |---|---|---|---|---|---|
-| native Go | 18,912,368 | 0 | 0 | 1× | compiled |
-| wazero | 42,690,476 | 16 | 2 | 2.3× | WASM → native JIT |
-| **minivm (JIT)** | **71,776,495** | **1,727** | **21** | **3.8×** | **threaded interpreter + ARM64 JIT** |
-| minivm (interp) | 750,025,292 | 139 | 0 | 40× | threaded interpreter |
-| tengo | 1,142,455,492 | 312,798,644 | 39,088,178 | 60× | bytecode VM |
-| gopher-lua | 1,422,659,979 | 971,072 | 3,793 | 75× | register VM |
-| goja | 2,032,321,458 | 379,440 | 46,376 | 107× | bytecode VM |
+| native Go | 20,120,613 | 0 | 0 | 1× | compiled |
+| wazero | 44,474,194 | 16 | 2 | 2.2× | WASM → native JIT |
+| **minivm (JIT)** | **62,877,686** | **3,589** | **47** | **3.1×** | **threaded interpreter + ARM64 JIT** |
+| minivm (interp) | 670,005,945 | 288 | 2 | 33× | threaded interpreter |
+| tengo | 1,139,041,250 | 312,797,912 | 39,088,180 | 57× | bytecode VM |
+| gopher-lua | 1,428,272,792 | 971,008 | 3,793 | 71× | register VM |
+| goja | 2,022,279,709 | 383,488 | 46,384 | 100× | bytecode VM |
 
-The JIT is worth **10× on this workload** (750 ms → 72 ms per call). Among pure interpreters, minivm (interp) leads and is effectively allocation-free: **1.5× faster than tengo, 1.9× gopher-lua, 2.7× goja**, at 0 allocs/op where tengo reaches 312 MB. With the JIT on, minivm joins wazero as the only runtimes reaching native code, pulling **16–28× ahead** of the script VMs.
+The JIT is worth **10.7× on this workload** (670 ms → 63 ms per call). Among pure interpreters, minivm (interp) leads and is effectively allocation-light: **1.7× faster than tengo, 2.1× gopher-lua, 3.0× goja**, while tengo reaches 312 MB and 39M allocs. With the JIT on, minivm joins wazero as the only runtimes reaching native code, pulling **18–32× ahead** of the script VMs.
 
-minivm's JIT compiles whole functions, not just numeric segments: fib's recursive `const.get; call` fuses into a native branch-and-link to the callee, so the recursion runs entirely in native code. It still trails wazero by 1.7× because of bookkeeping wazero skips — minivm keeps values NaN-boxed and guards each call with a frame-budget check and a deopt-journal record, while wazero AOT-compiles to unboxed native code with no fallback path.
+minivm's JIT compiles whole functions, not just numeric segments: fib's recursive `const.get; call` fuses into a native branch-and-link to the callee, so the recursion runs entirely in native code. It still trails wazero by 1.4× because of bookkeeping wazero skips — minivm keeps values NaN-boxed and guards each call with a frame-budget check and a deopt-journal record, while wazero AOT-compiles to unboxed native code with no fallback path.
 
 Single-instruction throughput (threaded interpreter, JIT disabled):
 

@@ -27,9 +27,10 @@ type lowerer interface {
 }
 
 type jitCompiler struct {
-	lowerer lowerer
-	arch    asm.Arch
-	buffer  *asm.Buffer
+	lowerer     lowerer
+	arch        asm.Arch
+	buffer      *asm.Buffer
+	scratchRegs []asm.PReg
 
 	cutoff int
 }
@@ -61,6 +62,7 @@ type segment struct {
 
 type jitTarget struct {
 	addr    int
+	entry   asm.Label
 	label   asm.Label
 	fn      *types.Function
 	blocks  []*analysis.BasicBlock
@@ -104,22 +106,25 @@ const (
 	scratchCount
 )
 
-// Frame-journal layout. scratchCtrl carries &journal[0] — an Interpreter-owned
-// []uint64 that lets native code report trap state and, only while unwinding a
-// trap, append recoverable VM frames. Header cells precede a stack of
-// fixed-stride frame records; each record mirrors the int fields the threaded
-// interpreter needs to resume a frame.
+// Frame-journal layout. X0 carries &journal[0] to native code, which mirrors the
+// first cells into pinned scratch registers (X10-X14) on external entry. Header
+// cells precede a stack of fixed-stride frame records; each record mirrors the
+// int fields the threaded interpreter needs to resume a frame.
 const (
-	journalDepth  = iota // trap-time frame records written; native read/write
-	journalCap           // frame budget len(i.frames)-i.fp; read-only
-	journalTrap          // exit kind out: trapNone | trapFallback | trapOverflow | trapYield
-	journalNextIP        // resume/fallback IP out for the single-frame path
-	journalBudget        // back-edges remaining before the next safepoint; native read/write
-	journalActive        // active native call depth for frame-budget checks
-	journalRC            // &i.rc[0]; read/write for guarded native refcount fast paths
-	journalUpvals        // &i.fr.upvals[0] or 0; read/write for closure body fast paths
-	journalHeap          // &i.heap[0]; read-only for heap object fast paths
-	journalHead          // first frame record cell
+	journalStack   = iota // &i.stack[0]; external entry in
+	journalGlobals        // &i.globals[0]; external entry in
+	journalBP             // current frame bp; external entry in
+	journalSP             // interpreter sp; external entry in/out
+	journalDepth          // trap-time frame records written; native read/write
+	journalCap            // frame budget len(i.frames)-i.fp; read-only
+	journalTrap           // exit kind out: trapNone | trapFallback | trapOverflow | trapYield
+	journalNextIP         // resume/fallback IP out for the single-frame path
+	journalBudget         // back-edges remaining before the next safepoint; native read/write
+	journalActive         // active native call depth for frame-budget checks
+	journalRC             // &i.rc[0]; read/write for guarded native refcount fast paths
+	journalUpvals         // &i.fr.upvals[0] or 0; read/write for closure body fast paths
+	journalHeap           // &i.heap[0]; read-only for heap object fast paths
+	journalHead           // first frame record cell
 )
 
 const journalStride = 4
@@ -217,6 +222,7 @@ func (c *jitCompiler) complete(i *Interpreter, addr int, fn *types.Function, mod
 	a := asm.New(c.arch)
 	for targetAddr, target := range targets {
 		target.labels = c.allocLabels(a, target.blocks)
+		target.entry = a.Label()
 		target.label = target.labels[0]
 		targets[targetAddr] = target
 	}
@@ -232,6 +238,7 @@ func (c *jitCompiler) complete(i *Interpreter, addr int, fn *types.Function, mod
 		ctx.whole = true
 		ctx.framed = true
 		ctx.addr = targetAddr
+		ctx.entry = target.entry
 		ctx.labels = target.labels
 		ctx.targets = targets
 		ctx.returns = target.returns
@@ -240,7 +247,7 @@ func (c *jitCompiler) complete(i *Interpreter, addr int, fn *types.Function, mod
 		}
 	}
 
-	code, err := a.Build(asm.Signature{Scratch: scratch})
+	code, err := a.Build()
 	if err != nil {
 		return false, err
 	}
@@ -252,12 +259,9 @@ func (c *jitCompiler) complete(i *Interpreter, addr int, fn *types.Function, mod
 	mod.bytes += len(code.Bytes)
 	mod.links = len(targets)
 	for targetAddr, target := range targets {
-		callable, ok := linked[0].Entries[target.label]
+		callable, ok := linked[0].Entries[target.entry]
 		if !ok {
-			if targetAddr != addr {
-				return false, asm.ErrUnresolvedLabel
-			}
-			callable = linked[0].Callable
+			return false, asm.ErrUnresolvedLabel
 		}
 		mod.entries[targetAddr] = callable
 	}
@@ -346,7 +350,7 @@ func (c *jitCompiler) function(i *Interpreter, fn *types.Function, locals []type
 		return segment{}, false, nil
 	}
 
-	code, err := ctx.assembler.Build(asm.Signature{Scratch: scratch})
+	code, err := ctx.assembler.Build()
 	if err != nil {
 		return segment{}, false, err
 	}
@@ -405,7 +409,7 @@ func (c *jitCompiler) walkBlocks(ctx *jitContext, fn *types.Function, blks []*an
 		}
 		switch {
 		case ctx.framed && blk.Start == 0:
-			ctx.assembler.Entry(ctx.labels[0], asm.Signature{Scratch: ctx.scratch})
+			ctx.assembler.Entry(ctx.entry)
 			c.lowerer.enter(ctx)
 		case ctx.labels != nil:
 			ctx.assembler.Bind(ctx.labels[blk.Start])
@@ -522,7 +526,7 @@ func (c *jitCompiler) segment(i *Interpreter, fn *types.Function, locals []types
 		c.lowerer.exitIP(ctx, ctx.ip)
 	}
 
-	code, err := a.Build(asm.Signature{Scratch: scratch})
+	code, err := a.Build()
 	if err != nil {
 		return segment{}, false, err
 	}
@@ -653,11 +657,10 @@ func (c *jitCompiler) calls(i *Interpreter, fn *types.Function) []int {
 }
 
 func (c *jitCompiler) scratch() ([]asm.PReg, bool) {
-	scratch := c.arch.ABI().Scratch()
-	if len(scratch) < scratchCount {
+	if len(c.scratchRegs) < scratchCount {
 		return nil, false
 	}
-	return scratch[:scratchCount], true
+	return c.scratchRegs[:scratchCount], true
 }
 
 func (c *jitCompiler) valid(ctx *jitContext, returns int) bool {

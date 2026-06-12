@@ -36,7 +36,6 @@ func newRewriter(arch Arch, insts []Instruction, pins map[int32]PReg) *rewriter 
 	for i := uint8(0); i < 64; i++ {
 		if info.Scratch.Contains(i) {
 			pool.exclude(NewPReg(i, RegTypeInt, Width64))
-			pool.exclude(NewPReg(i, RegTypeFloat, Width64))
 		}
 	}
 	r := &rewriter{

@@ -23,7 +23,7 @@ type Assembler struct {
 	insts    []Instruction
 	pins     map[int32]PReg
 	labels   map[Label]int
-	entries  map[Label]Signature
+	entries  []Label
 	nextVReg int32
 	nextLbl  Label
 	err      error
@@ -59,15 +59,12 @@ func (a *Assembler) Bind(id Label) {
 	a.labels[id] = len(a.insts)
 }
 
-// Entry marks the current position as a named callable entry with its own
-// signature. The label is bound to the current instruction index. Multiple
-// entries allow one Code to expose several callables at distinct offsets.
-func (a *Assembler) Entry(id Label, sig Signature) {
+// Entry marks the current position as a named callable entry. The label is bound
+// to the current instruction index. Multiple entries allow one Code to expose
+// several callables at distinct offsets.
+func (a *Assembler) Entry(id Label) {
 	a.Bind(id)
-	if a.entries == nil {
-		a.entries = make(map[Label]Signature)
-	}
-	a.entries[id] = sig
+	a.entries = append(a.entries, id)
 }
 
 // Pin forces v to occupy preg. A vreg can be pinned to only one preg; a
@@ -94,7 +91,7 @@ func (a *Assembler) Emit(insts ...Instruction) {
 // from virtual to physical registers, encodes every instruction, and
 // resolves intra-Code label references. External label references survive
 // in Code.Relocs for Link to patch.
-func (a *Assembler) Build(sig Signature) (*Code, error) {
+func (a *Assembler) Build() (*Code, error) {
 	if a.err != nil {
 		return nil, a.err
 	}
@@ -111,16 +108,12 @@ func (a *Assembler) Build(sig Signature) (*Code, error) {
 	}
 
 	code := &Code{
-		Bytes:     bytes,
-		Labels:    labels,
-		Relocs:    relocs,
-		Signature: sig,
+		Bytes:  bytes,
+		Labels: labels,
+		Relocs: relocs,
 	}
 	if len(a.entries) > 0 {
-		code.Entries = make(map[Label]Signature, len(a.entries))
-		for k, v := range a.entries {
-			code.Entries[k] = v
-		}
+		code.Entries = append([]Label(nil), a.entries...)
 	}
 	return code, nil
 }

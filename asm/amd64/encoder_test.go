@@ -23,7 +23,7 @@ func TestArch(t *testing.T) {
 
 	t.Run("ABI.NewCallable reports not implemented", func(t *testing.T) {
 		arch := amd64.New()
-		_, err := arch.ABI().NewCallable(asm.Signature{}, nil)
+		_, err := arch.ABI().NewCallable(nil)
 		require.ErrorIs(t, err, asm.ErrNotImplemented)
 	})
 
@@ -31,10 +31,4 @@ func TestArch(t *testing.T) {
 		arch := amd64.New()
 		require.Nil(t, arch.Frame())
 	})
-}
-
-func TestABI(t *testing.T) {
-	ab := amd64.New().ABI()
-
-	require.Empty(t, ab.Scratch())
 }

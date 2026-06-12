@@ -143,8 +143,5 @@ var (
 	S30 = asm.NewPReg(30, asm.RegTypeFloat, asm.Width32)
 	S31 = asm.NewPReg(31, asm.RegTypeFloat, asm.Width32)
 
-	IntArgs    = []asm.PReg{X0, X1, X2, X3, X4, X5, X6, X7}
-	FloatArgs  = []asm.PReg{D0, D1, D2, D3, D4, D5, D6, D7}
-	IntTemps   = []asm.PReg{X9, X10, X11, X12, X13, X14, X15}
-	FloatTemps = []asm.PReg{D16, D17, D18, D19, D20, D21, D22, D23, D24, D25, D26, D27, D28, D29, D30, D31}
+	IntRets = []asm.PReg{X0, X1}
 )

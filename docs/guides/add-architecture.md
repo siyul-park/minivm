@@ -20,14 +20,14 @@ Read `docs/jit-internals.md`, especially Segment ABI and Assembler Pipeline. Use
 
 Mirror `asm/arm64/`: implement `asm.Arch`, `asm.Encoder`, `asm.ABI`, optional `asm.Frame`, and the native callable trampoline.
 
-`asm.ABI` exposes only scratch registers plus `NewCallable`. The trampoline contract is:
+`asm.ABI` exposes `NewCallable`. The trampoline contract is:
 
-1. `Callable.Call(argv []uint64) error` receives at least the entry's declared scratch count.
-2. The trampoline loads `argv[0..4]` into the backend scratch registers.
-3. It calls the native chunk.
-4. It stores those scratch registers back into `argv[0..4]`.
+1. `Callable.Call(ctx uintptr) error` receives `&i.journal[0]`.
+2. The trampoline passes `ctx` in the architecture's first integer argument register.
+3. It preserves any callee-saved registers the backend allocator may use.
+4. It calls the native chunk.
 
-`Signature{Scratch}` declares the scratch registers used by the entry. There is no param/return ABI, no `asm.Value`, and no header packing.
+There is no param/return ABI, no `asm.Value`, and no header packing.
 
 Return nil from `Arch.Frame()` when the backend has no spill-frame support. Backends that support spilling should keep the frame implementation as a separate private type rather than adding frame methods to `arch`.
 
@@ -42,8 +42,8 @@ type archJIT struct{}
 Handler rules:
 
 - `lower` returns `false` without mutating `jitContext` to reject an opcode.
-- `prologue` loads declared live-ins from the VM stack.
-- `exitIP` materializes shadow stack values into `i.stack`, writes `scratchSP` and `scratchNext`, then returns.
+- `prologue` loads the context journal into pinned registers, then loads declared live-ins from the VM stack.
+- `exitIP` materializes shadow stack values into `i.stack`, writes `journalSP` and `journalNextIP`, then returns.
 - `RETURN` must check `c.whole`; partial segments leave frame teardown to threaded code.
 - `CALL` stays threaded unless a future design preserves frame setup, refs, host functions, stack bounds, and Go write barriers safely.
 
@@ -54,8 +54,8 @@ Scratch slot order is fixed:
 | `scratchStack` | `&i.stack[0]` |
 | `scratchGlobals` | `&i.globals[0]` |
 | `scratchBP` | current frame base pointer |
-| `scratchSP` | interpreter stack pointer in/out |
-| `scratchNext` | next interpreter IP |
+| `scratchSP` | interpreter stack pointer input |
+| `scratchCtrl` | `&i.journal[0]` |
 
 ## Step 3 - Verify
 

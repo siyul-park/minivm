@@ -46,7 +46,7 @@ func Link(buf *Buffer, arch Arch, codes []*Code, resolve Resolver) ([]Linked, er
 
 	linked := make([]Linked, len(codes))
 	for i, c := range codes {
-		callable, err := arch.ABI().NewCallable(c.Signature, bases[i])
+		callable, err := arch.ABI().NewCallable(bases[i])
 		if err != nil {
 			return nil, err
 		}
@@ -56,12 +56,12 @@ func Link(buf *Buffer, arch Arch, codes []*Code, resolve Resolver) ([]Linked, er
 			continue
 		}
 		linked[i].Entries = make(map[Label]Callable, len(c.Entries))
-		for id, sig := range c.Entries {
+		for _, id := range c.Entries {
 			off, ok := c.Labels[id]
 			if !ok {
 				return nil, fmt.Errorf("%w: entry label %d", ErrUnresolvedLabel, id)
 			}
-			entry, err := arch.ABI().NewCallable(sig, unsafe.Add(bases[i], off))
+			entry, err := arch.ABI().NewCallable(unsafe.Add(bases[i], off))
 			if err != nil {
 				return nil, err
 			}

@@ -2,6 +2,6 @@
 
 package arm64
 
-func invoke(addr uintptr, argv uintptr) {
+func invoke(addr uintptr, ctx uintptr) {
 	panic("not implemented")
 }

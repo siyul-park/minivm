@@ -24,10 +24,10 @@ type test struct {
 	after   func(*testing.T, *Interpreter)
 }
 
-type callableFunc func([]uint64) error
+type callableFunc func(uintptr) error
 
-func (fn callableFunc) Call(argv []uint64) error {
-	return fn(argv)
+func (fn callableFunc) Call(ctx uintptr) error {
+	return fn(ctx)
 }
 
 var tests = []test{
@@ -4805,8 +4805,8 @@ func TestInterpreter_JIT(t *testing.T) {
 		i.fp = 2
 		i.fr = &i.frames[1]
 
-		wrapped := i.entry(callableFunc(func(argv []uint64) error {
-			argv[scratchSP] = 0
+		wrapped := i.entry(callableFunc(func(ctx uintptr) error {
+			i.journal[journalSP] = 0
 			i.journal[journalDepth] = 1
 			i.journal[journalHead+recordIP] = 0
 			i.journal[journalTrap] = trapFallback
