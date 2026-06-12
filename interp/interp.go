@@ -1126,6 +1126,13 @@ func (i *Interpreter) retains(addr int, n int) {
 }
 
 func (i *Interpreter) release(addr int) {
+	// Fast path: a shared object just loses one of several references and stays
+	// live. This is the common case for ref-heavy code and avoids the worklist.
+	if i.rc[addr] > 1 {
+		i.rc[addr]--
+		return
+	}
+
 	stack := []int{addr}
 	for len(stack) > 0 {
 		addr := stack[len(stack)-1]
