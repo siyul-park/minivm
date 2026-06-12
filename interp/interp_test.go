@@ -2997,6 +2997,85 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, types.I32(20100), got)
 	})
 
+	t.Run("local.get i64 const binop superinstruction", func(t *testing.T) {
+		// local.get 0 (i64); i64.const 3; i64.mul fuses into one dispatch. A
+		// non-boxable arg forces the local into a heap-promoted KindRef box,
+		// exercising the retain that keeps the i64 folder's unbox/release
+		// balanced; a missing retain would over-release and corrupt the heap.
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI64},
+			Returns: []types.Type{types.TypeI64},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I64_CONST, 3),
+			instr.New(instr.I64_MUL),
+			instr.New(instr.RETURN),
+		).Build()
+		const big = int64(1) << 50
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I64_CONST, uint64(big)),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64(big*3), got)
+	})
+
+	t.Run("local.get f32 const binop superinstruction", func(t *testing.T) {
+		// local.get 0 (f32); f32.const 1.5; f32.sub fuses into one dispatch.
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeF32},
+			Returns: []types.Type{types.TypeF32},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))),
+			instr.New(instr.F32_SUB),
+			instr.New(instr.RETURN),
+		).Build()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(10.5))),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.F32(9.0), got)
+	})
+
+	t.Run("local.get f64 const binop superinstruction", func(t *testing.T) {
+		// local.get 0 (f64); f64.const 2.5; f64.add fuses into one dispatch.
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeF64},
+			Returns: []types.Type{types.TypeF64},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.F64_CONST, math.Float64bits(2.5)),
+			instr.New(instr.F64_ADD),
+			instr.New(instr.RETURN),
+		).Build()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.F64_CONST, math.Float64bits(39.5)),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.F64(42.0), got)
+	})
+
 	t.Run("jit loop matches threaded", func(t *testing.T) {
 		requireJIT(t)
 

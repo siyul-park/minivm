@@ -1,6 +1,8 @@
 package interp
 
 import (
+	"unsafe"
+
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/types"
 )
@@ -179,6 +181,103 @@ func (c *threadedCompiler) fuseHostFunction(fn *HostFunction, size int) func(*In
 		}
 	}
 	return nil
+}
+
+// fuseLocalConst folds LOCAL_GET idx; <kind>.CONST c; <kind binop> into one
+// dispatch: it pushes the typed local as the lhs, then runs the existing
+// const+binop fused closure (fuse*Imm) in the same dispatch, saving a
+// central-loop round-trip. The local kind selects the matching CONST opcode,
+// immediate width, and folder so all four numeric kinds are handled the same
+// way. Returns nil when no pattern applies.
+//
+// c.ip is restored after probing the folder so the compile loop still emits
+// standalone handlers for the absorbed CONST and binop, keeping branch targets
+// valid. I64 locals may hold a heap-promoted KindRef, and the i64 folder
+// unboxes (and releases) the lhs, so the pushed local is retained to stay
+// balanced; I32/F32/F64 never box to a ref and skip the retain (and its Kind
+// branch), matching the plain LOCAL_GET fast path.
+func (c *threadedCompiler) fuseLocalConst(idx int) func(*Interpreter) {
+	if c.precise || idx >= len(c.locals) {
+		return nil
+	}
+
+	var inner func(*Interpreter)
+	retain := false
+	switch c.locals[idx] {
+	case types.KindI32:
+		if c.ip+5 >= len(c.code) || instr.Opcode(c.code[c.ip]) != instr.I32_CONST {
+			return nil
+		}
+		cst := *(*int32)(unsafe.Pointer(&c.code[c.ip+1]))
+		save := c.ip
+		c.ip += 5
+		inner = c.fuseI32Imm(cst, 5)
+		c.ip = save
+	case types.KindI64:
+		if c.ip+9 >= len(c.code) || instr.Opcode(c.code[c.ip]) != instr.I64_CONST {
+			return nil
+		}
+		cst := int64(*(*uint64)(unsafe.Pointer(&c.code[c.ip+1])))
+		save := c.ip
+		c.ip += 9
+		inner = c.fuseI64Imm(cst, 9)
+		c.ip = save
+		retain = true
+	case types.KindF32:
+		if c.ip+5 >= len(c.code) || instr.Opcode(c.code[c.ip]) != instr.F32_CONST {
+			return nil
+		}
+		cst := *(*float32)(unsafe.Pointer(&c.code[c.ip+1]))
+		save := c.ip
+		c.ip += 5
+		inner = c.fuseF32Imm(cst, 5)
+		c.ip = save
+	case types.KindF64:
+		if c.ip+9 >= len(c.code) || instr.Opcode(c.code[c.ip]) != instr.F64_CONST {
+			return nil
+		}
+		cst := *(*float64)(unsafe.Pointer(&c.code[c.ip+1]))
+		save := c.ip
+		c.ip += 9
+		inner = c.fuseF64Imm(cst, 9)
+		c.ip = save
+	default:
+		return nil
+	}
+	if inner == nil {
+		return nil
+	}
+
+	if retain {
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			i.stack[i.sp] = val
+			i.sp++
+			i.fr.ip += 2
+			inner(i)
+		}
+	}
+	return func(i *Interpreter) {
+		if i.sp == len(i.stack) {
+			panic(ErrStackOverflow)
+		}
+		addr := i.fr.bp + idx
+		if addr > i.sp {
+			panic(ErrSegmentationFault)
+		}
+		i.stack[i.sp] = i.stack[addr]
+		i.sp++
+		i.fr.ip += 2
+		inner(i)
+	}
 }
 
 func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(*Interpreter) {
