@@ -10,7 +10,7 @@ Read when a change crosses package boundaries or depends on state ownership.
 |---|---|
 | `interp/` runtime state, frames, globals | `memory-model.md`, `value-representation.md` |
 | `interp/` debugger API or bytecode stepping | `debugging.md`, `profile.md` |
-| `prof/` or profile options | `profile.md` |
+| `interp.Tracer` or profile options | `profile.md` |
 | `interp/threaded.go` or `interp/jit*.go` | `jit-internals.md`, `instruction-set.md` |
 | `analysis/`, `transform/`, `optimize/`, `pass/` | `pass-system.md` |
 | `cli/` or `cmd/minivm/` | `guides/repl.md` |
@@ -23,12 +23,12 @@ Import direction: `A → B` means `A` imports `B`.
 
 ```text
 program → instr
-interp  → program, instr, types, asm, prof, pass, analysis
+interp  → program, instr, types, asm, pass, analysis
 asm/arm64 → asm
 analysis → pass, types, instr
 transform → analysis, pass, types, instr, program
 optimize → transform, analysis, pass, program
-cli → instr, interp, prof, program, types, cobra
+cli → instr, interp, program, types, cobra
 cmd/minivm → cli
 ```
 
@@ -87,19 +87,22 @@ Two layers:
 |---|---|
 | `instrs [][]byte` | raw bytecode per function slot |
 | `code [][]func(*Interpreter)` | threaded closures per function slot |
-| `prof *prof.Stats` | aggregate function, IP, opcode, JIT samples |
+| `tracer *Tracer` | shared trace/profile front-end and aggregate profile |
+| `local *stats` | interpreter-local function, IP, opcode, JIT samples |
 | `frames []frame` | call stack: `addr`, `ip`, `bp` |
 | `stack []Boxed` | value stack |
 | `heap []Value` | flat heap |
 | `rc []int` | ref counts parallel to heap |
 | `free []int` | free heap indices |
 | `globals []Boxed` | globals |
-| `compiler *jitCompiler` | private JIT compiler and executable buffer for solo interpreters |
-| `cache *Cache` | shared JIT module/profile cache when owned by an `interp.Pool` |
+| `compiler *compiler` | private JIT compiler and executable buffer for solo interpreters |
+| `cache *Cache` | shared compiled native modules when owned by an `interp.Pool` |
 
 `threadedCompiler` (`threaded.go`): `[256]func` table populated in `init()`. Each compile-time entry reads operands, advances `c.ip`, and returns a runtime closure that captures constants and advances `f.ip` by instruction width.
 
-`jitCompiler` (`jit.go`, `jit_arm64.go`): ARM64 JIT kept private inside `interp`. Its opcode walk intentionally mirrors `threadedCompiler`: decode opcode, lower through a switch, advance IP unless the opcode terminates the segment. Native code uses a single context pointer in X0, loads VM stack inputs directly from journal-provided scratch registers, keeps operands in registers, and materializes `i.stack`, `sp`, and `ip` only on exits. Complete numeric direct-call closures, including recursive SCCs, lower `CONST_GET function; CALL` to native `BL`; native calls consume a journal-carried frame budget and trap back to `ErrFrameOverflow` when exhausted. Incomplete functions still compile supported partial segments around threaded calls. JIT does not recompile or tier-up.
+`Tracer` (`trace.go`): samples execution, records entry traces, loop-header traces, and hot side exits, and aggregates pool profile data.
+
+`compiler` (`jit.go`, `jit_arm64.go`): ARM64 JIT kept private inside `interp`. A hot attempt records the current threaded execution path, then lowers each usable root — the function entry and any hot loop header — through a typed switch. Native code uses a single context pointer in X0, loads VM stack inputs directly from journal-provided scratch registers, keeps operands in registers, and materializes `i.stack`, `sp`, and `ip` only on returns, guards, yields, or deopt exits. Recorded direct calls, recursive calls, guarded indirect function-value calls, closure-body upvalues, scalar globals/locals, selected read-only heap paths, and loops (native back-edge with a safepoint poll) can run natively. Unsupported paths stay threaded through guard fallback; the JIT does not tier beyond the ARM64 trace backend.
 
 `HostFunction` (`host.go`): wraps `func(i *Interpreter, params []Boxed) ([]Boxed, error)` as `types.Value`. Lives in constants, called by `CONST_GET` + `CALL`. Use `Interpreter.Marshal`/`Unmarshal` to convert Go values; the default converter caches per-type reflection plans, while arbitrary Go function calls still use `reflect.Call`. Go `func` marshals to `HostFunction`, final `error` return propagated as host-call error. `WithMarshaler` replaces the default converter.
 
@@ -201,11 +204,9 @@ Thin entrypoint around `cli.Root().Execute()`.
 4. interp.Run(ctx)
    ├─ main loop: code[f.ip](i)
    ├─ every 128 instructions:
-   │  check ctx, consume fuel, call hook, prof.Add(addr, ip, opcode)
-   └─ if JIT enabled and solo prof.Samples(addr), or pool cache samples(addr), reach threshold rounded to tick cadence:
-      jitCompiler.Compile(instrs[addr]) privately, or publish one shared Cache module
-      └─ heat-sorted single-compile JIT trace pipeline:
-         ├─ hot/forced basic blocks → natural-fallthrough traces
+   │  check ctx, consume fuel, call hook, local.Add(addr, ip, opcode)
+   └─ if JIT enabled and solo local.Samples(addr), or pool cache trigger count, reaches threshold rounded to tick cadence:
+      Tracer records entry trace, then compiler.Compile lowers it privately or publishes one shared Cache module
          ├─ each trace compiles once and exits through journal SP/IP
          ├─ branches either stay in native code or exit to threaded successors
          ├─ assembler.Link → primary/internal context-pointer Callables
@@ -221,7 +222,7 @@ Thin entrypoint around `cli.Root().Execute()`.
 
 | Area | Direction |
 |---|---|
-| JIT coverage | numeric segments, direct calls, small function-value indirect dispatches, guarded ref slots/upvalues, and selected heap reads compile to native code; host calls, closure call sites, heap allocation/mutation, maps, and unsupported heap shapes fall back |
+| JIT coverage | recorded numeric traces, direct calls, small function-value indirect dispatches, closure-body upvalues, guarded ref slots/upvalues, and selected heap reads compile to native code; host calls, heap allocation/mutation, maps, and unsupported heap shapes fall back |
 | Architecture support | ARM64 optimized; x86-64 can follow once users + benchmarks clear |
 | Benchmarks | broaden numeric loops, host calls, heap-object workloads |
 | Program format | keep `instr`/`program` as compact Go-native bytecode surface |

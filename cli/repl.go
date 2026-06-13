@@ -11,7 +11,6 @@ import (
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/interp"
-	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
@@ -356,14 +355,13 @@ func (r *REPL) profile(ctx context.Context) error {
 		return nil
 	}
 
-	p := prof.New()
-	vm := interp.New(r.build(), interp.WithProfile(p), interp.WithTick(1))
+	vm := interp.New(r.build(), interp.WithTick(1))
 	defer vm.Close()
 	if err := vm.Run(ctx); err != nil {
 		return err
 	}
 
-	printProfile(r.out, p.Snapshot())
+	printProfile(r.out, vm.Profile())
 	return nil
 }
 
@@ -637,7 +635,7 @@ func printFrames(out io.Writer, vm *interp.Interpreter) {
 	}
 }
 
-func printProfile(out io.Writer, snap prof.Snapshot) {
+func printProfile(out io.Writer, snap interp.Snapshot) {
 	fmt.Fprintf(out, "profile samples: %d\n", snap.Samples)
 	if len(snap.Funcs) > 0 {
 		fmt.Fprintln(out, "functions:")
@@ -666,7 +664,7 @@ func printProfile(out io.Writer, snap prof.Snapshot) {
 			fmt.Fprintf(out, "%s\t%d\t%s\n", opcodeLabel(op.Code), op.Samples, formatPercent(op.Percent))
 		}
 	}
-	if snap.JIT != (prof.JIT{}) {
+	if snap.JIT != (interp.JIT{}) {
 		jit := snap.JIT
 		fmt.Fprintln(out, "jit:")
 		fmt.Fprintln(out, "attempts\temits\tlinks\tskips\terrors\tbytes")

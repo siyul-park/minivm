@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/stretchr/testify/require"
 )
@@ -23,20 +22,30 @@ func TestNewCache(t *testing.T) {
 	require.Same(t, cache, i.cache)
 }
 
-func TestCache_Profile(t *testing.T) {
-	cache := NewCache(program.New(nil))
+func TestCache_Due(t *testing.T) {
+	cache := NewCache(program.New([]instr.Instruction{
+		instr.New(instr.NOP),
+	}))
 	defer cache.Close()
 
-	stats := prof.New()
-	stats.Add(0, 0, byte(instr.NOP))
-	stats.JITAdd(prof.JIT{Attempts: 1})
-	cache.flush(stats)
+	require.False(t, cache.due(0, 2))
+	require.True(t, cache.due(0, 2))
+	require.False(t, cache.due(0, 2))
+}
 
-	snap := cache.Profile()
-	require.Equal(t, uint64(1), snap.Samples)
-	require.Equal(t, uint64(1), snap.JIT.Attempts)
-	require.Zero(t, stats.Snapshot().Samples)
-	require.Zero(t, stats.Snapshot().JIT.Attempts)
+func TestCache_Rearm(t *testing.T) {
+	cache := NewCache(program.New([]instr.Instruction{
+		instr.New(instr.NOP),
+	}))
+	defer cache.Close()
+
+	require.True(t, cache.due(0, 1))
+	cache.ready(0)
+	require.True(t, cache.rearm(0))
+	require.False(t, cache.due(0, 1))
+	cache.ready(0)
+	require.True(t, cache.rearm(0))
+	require.False(t, cache.rearm(2))
 }
 
 func TestCache_Close(t *testing.T) {

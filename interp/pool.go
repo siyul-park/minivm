@@ -6,7 +6,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 )
 
@@ -15,10 +14,11 @@ import (
 // per goroutine via Get/Put or Run. JIT code and aggregate profile data are
 // shared through the pool cache.
 type Pool struct {
-	prog  *program.Program
-	cache *Cache
-	opts  []func(*option)
-	size  int
+	prog   *program.Program
+	cache  *Cache
+	tracer *Tracer
+	opts   []func(*option)
+	size   int
 
 	idle chan *Interpreter
 	live atomic.Int64
@@ -37,16 +37,18 @@ func NewPool(prog *program.Program, size int, opts ...func(*option)) *Pool {
 		size = 1
 	}
 	cache := NewCache(prog)
-	all := make([]func(*option), 0, len(opts)+2)
+	tracer := NewTracer()
+	all := make([]func(*option), 0, len(opts)+3)
 	all = append(all, WithMarshaler(&codec{}))
 	all = append(all, opts...)
-	all = append(all, WithCache(cache))
+	all = append(all, WithCache(cache), WithTracer(tracer))
 	return &Pool{
-		prog:  prog,
-		cache: cache,
-		opts:  all,
-		size:  size,
-		idle:  make(chan *Interpreter, size),
+		prog:   prog,
+		cache:  cache,
+		tracer: tracer,
+		opts:   all,
+		size:   size,
+		idle:   make(chan *Interpreter, size),
 	}
 }
 
@@ -122,8 +124,8 @@ func (p *Pool) Close() error {
 	return errors.Join(errs...)
 }
 
-func (p *Pool) Profile() prof.Snapshot {
-	return p.cache.Profile()
+func (p *Pool) Profile() Snapshot {
+	return p.tracer.Profile()
 }
 
 func (p *Pool) dead() bool {

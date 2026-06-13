@@ -4,7 +4,7 @@ minivm uses low-overhead sampling profiles for observability and JIT guidance. P
 
 ## When to Read
 
-Read when exposing execution metrics, changing `prof.Stats` or `interp.WithProfile`, changing `WithTick`, `WithThreshold`, or JIT segment selection, or interpreting REPL `.profile` output.
+Read when exposing execution metrics, changing `interp.Tracer` or profile snapshots, changing `WithTick`, `WithThreshold`, or JIT trace triggering, or interpreting REPL `.profile` output.
 
 ## Sampling Model
 
@@ -25,23 +25,23 @@ A fully JIT-compiled loop runs in native code and bypasses this tick, so it carr
 ## Library API
 
 ```go
-p := prof.New()
-vm := interp.New(prog, interp.WithProfile(p))
+tracer := interp.NewTracer()
+vm := interp.New(prog, interp.WithTracer(tracer))
 defer vm.Close()
 
 if err := vm.Run(ctx); err != nil {
     return err
 }
 
-snap := p.Snapshot()
+snap := vm.Profile()
+shared := tracer.Profile()
 ```
 
-For pooled execution, prefer `pool.Profile()` over passing one `*prof.Stats`
-through `WithProfile` to `NewPool`: `prof.Stats` is not synchronized for
-concurrent `Add` calls. `Pool.Profile()` returns the cache aggregate as of the
-last `Put`/`Close`, plus shared JIT counters recorded at publication time.
+For pooled execution, use `pool.Profile()`. `NewPool` creates one shared
+`Tracer` for all members; `Put`/`Close` flush member-local samples into it, and
+shared JIT counters are recorded when compilation is published.
 
-Hot-path allocation-free counters:
+Internal hot-path counters:
 
 | Method | Use |
 |---|---|
@@ -49,17 +49,15 @@ Hot-path allocation-free counters:
 | `Samples(fn)` | function sample count; used by JIT threshold checks |
 | `Range(fn,start,end)` | sample count for byte range `[start,end)` |
 
-Reporting helpers outside hot paths:
+Public reporting APIs:
 
 | Method | Use |
 |---|---|
-| `Func(fn)` | copy one function profile |
-| `IP(fn,ip)` | copy one instruction profile |
-| `Snapshot()` | immutable deep copy of all profile data |
-| `Merge(snapshot)` | add a snapshot into this profile on a cold path |
-| `Reset()` | clear all profile data after a cold-path flush |
+| `Interpreter.Profile()` | aggregate plus the interpreter's unflushed local samples |
+| `Pool.Profile()` | shared aggregate for all flushed pool members |
+| `Tracer.Profile()` | shared aggregate for a manually shared tracer |
 
-`Snapshot` includes total samples, function/IP/opcode samples, and JIT counters. Function percent relative to total samples, IP percent to its function, opcode percent to total samples.
+`Snapshot` includes total samples, function/IP/opcode samples, and JIT counters. Function percent relative to total samples, IP percent to its function, opcode percent to total samples. `Interpreter.Profile()` merges the current interpreter's unflushed local samples with its shared `Tracer`; `Tracer.Profile()` reports only the shared aggregate.
 
 ## JIT Counters
 
@@ -67,23 +65,28 @@ Reporting helpers outside hot paths:
 
 | Counter | Meaning |
 |---|---|
-| `Attempts` | function-level JIT compilation attempts |
-| `Emits` | native objects emitted; a merged fallthrough trace counts once |
-| `Links` | callable entry IPs installed; one object may install multiple entries |
-| `Skips` | cold segments skipped by profile policy |
+| `Attempts` | function-level tracing/native compilation attempts |
+| `Emits` | native trace objects emitted |
+| `Links` | callable function entries installed |
+| `Skips` | reserved; trace-only JIT leaves this at zero |
 | `Errors` | buffer, compile, or link errors |
 | `Bytes` | total emitted native code bytes |
 
 ## Profile-Guided JIT
 
-JIT activates when `Samples(fn)` reaches configured threshold rounded up to tick cadence. Default: `4096 / 128 = 32` samples. `WithThreshold(0)` activates on first sample; negative thresholds disable JIT. Pool members use the same rounded threshold, but the trigger count is aggregated across the shared cache so only one member wins compilation for each function.
+JIT activates when `Samples(fn)` reaches configured threshold rounded up to tick
+cadence. Default: `4096 / 128 = 32` samples. `WithThreshold(0)` activates on
+first sample; negative thresholds disable JIT. Each hot attempt records a runtime
+trace before native compilation. Pool members use the same rounded threshold;
+when a shared `Cache` is supplied, the trigger count is aggregated there so only
+one member wins native compilation for each function. Trace trees themselves are
+currently interpreter-local.
 
-At compile time, profile data used to:
+At compile time, the `Tracer` supplies the entry trace tree for the hot function.
+Profile samples still drive when a function becomes due, while recorded branch
+exits can request a later recompile after the exit counter reaches its threshold.
 
-1. rank basic blocks by `Range(fn, block.Start, block.End)`; hotter blocks compile first, direct successors of hot blocks included for branch linking
-2. emit candidate native segments only when byte range has at least one sample; cold segments inside hot blocks skipped
-
-JIT does not currently recompile or tier-up after first function-level compilation attempt.
+JIT does not currently tier-up beyond the ARM64 trace backend.
 
 ## REPL Reporting
 

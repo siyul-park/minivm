@@ -1,11 +1,11 @@
 # Benchmarks
 
 Unless a section names another environment: `darwin/arm64`, Apple M4 Pro (12 cores), Go 1.26.2.
-minivm JIT targets ARM64 only. On this machine a default `interp.New` interpreter promotes hot
-eligible segments to native code: numeric loops, complete direct-call functions, small function-value
-indirect dispatches, guarded ref locals/globals/upvalues, and selected heap reads. The
-instruction-throughput tables force the JIT off with `WithThreshold(-1)`, so they reflect the pure
-threaded interpreter.
+minivm JIT targets ARM64 only. On this machine a default `interp.New` interpreter compiles hot
+recorded traces — function entries and loop headers — to native code: numeric recursion and loops,
+direct calls, small function-value indirect dispatches, closure-body upvalues, guarded ref
+locals/globals/upvalues, and selected heap reads. The instruction-throughput tables force the JIT
+off with `WithThreshold(-1)`, so they reflect the pure threaded interpreter.
 
 ```bash
 # Full suite (interpreter + cross-runtime)
@@ -25,31 +25,29 @@ cd benchmarks && go test -run="^$" -bench="BenchmarkJITIssue60" -benchmem -bench
 
 ## Cross-Runtime Comparison — fib(35)
 
-Recursive `fib(35)` (= 9,227,465), 29.8M recursive calls. End-to-end per call, no memoization. Source: `benchmarks/fib_test.go` (`-benchtime=2s`). minivm is measured twice from the same program: **interp** is the pure threaded interpreter (`WithThreshold(-1)`), **JIT** is the default `interp.New`, which on ARM64 promotes the hot recursive segment to native code.
+Recursive `fib(35)` (= 9,227,465), 29.8M recursive calls. End-to-end per call, no memoization. Source: `benchmarks/fib_test.go` (`-benchtime=2s`). minivm is measured twice from the same program: **interp** is the pure threaded interpreter (`WithThreshold(-1)`), **JIT** is the default `interp.New`, which on ARM64 records the hot recursive entry trace and compiles it to native code.
 
 | Runtime | ns/op | B/op | allocs/op | vs native Go | execution model |
 |---|---|---|---|---|---|
-| native Go | 20,120,613 | 0 | 0 | 1× | compiled |
-| wazero | 44,474,194 | 16 | 2 | 2.2× | WASM → native JIT (AOT at load) |
-| **minivm (JIT)** | **62,877,686** | **3,589** | **47** | **3.1×** | **threaded interpreter + ARM64 JIT** |
-| minivm (interp) | 670,005,945 | 288 | 2 | 33× | threaded interpreter |
-| tengo | 1,139,041,250 | 312,797,912 | 39,088,180 | 57× | bytecode VM |
-| gopher-lua | 1,428,272,792 | 971,008 | 3,793 | 71× | register VM |
-| goja | 2,022,279,709 | 383,488 | 46,384 | 100× | bytecode VM |
+| native Go | 19,324,275 | 0 | 0 | 1× | compiled |
+| wazero | 44,409,757 | 16 | 2 | 2.3× | WASM → native JIT (AOT at load) |
+| **minivm (JIT)** | **51,911,961** | **4,918** | **45** | **2.7×** | **threaded interpreter + tracing ARM64 JIT** |
+| minivm (interp) | 669,343,195 | 288 | 2 | 35× | threaded interpreter |
+| tengo | 1,138,199,604 | 312,799,988 | 39,088,179 | 59× | bytecode VM |
+| gopher-lua | 1,462,044,917 | 971,008 | 3,793 | 76× | register VM |
+| goja | 2,052,722,000 | 383,488 | 46,384 | 106× | bytecode VM |
 
-The JIT is worth **10.7× on this workload** — it cuts minivm from about 670 ms to 63 ms per call by replacing threaded dispatch over the hot recursive function body with native code.
+The JIT is worth **13×** on this workload (669 ms → 52 ms per call), reaching native code alongside wazero and pulling **22–40× ahead** of the script VMs. Among pure interpreters, minivm (interp) still leads and stays allocation-light: **1.7× faster than tengo, 2.2× than gopher-lua, 3.1× than goja**, while tengo reaches 312 MB and 39M allocs at fib(35).
 
-Among pure interpreters, minivm (interp) leads and stays allocation-light: **1.7× faster than tengo, 2.1× than gopher-lua, 3.0× than goja**, while tengo reaches 312 MB and 39M allocs at fib(35). With the JIT on, minivm joins wazero as the only runtimes that reach native code, pulling **18× ahead of tengo, 23× of gopher-lua, 32× of goja**.
+The JIT records a runtime trace at each hot attempt, then compiles each usable root — the function entry and any hot loop header — into native code with deopt guards. fib's static `const.get; call` fuses into a native branch-and-link to the callee's framed entry and `return` lowers to a native return, so the recorded recursion runs entirely in native code. ARM64 coverage also includes same-arity function-value indirect dispatch, guarded ref-bearing slots, closure-body upvalues, selected heap reads, and loops (native back-edge with a safepoint poll). Host calls, ordinary heap ref constants, heap-promoted `i64` values, and mutating or allocating heap operations end a trace and fall back to threaded paths.
 
-The JIT compiles whole functions, not just straight-line numeric segments: a static `const.get; call` (how fib recurses) is fused into a native branch-and-link to the callee's framed entry, and `return` lowers to a native return, so the entire recursion runs in native code. Current ARM64 coverage also includes small same-arity function-value indirect dispatches, guarded ref-bearing slots, closure-body upvalues, and selected heap reads. Host calls, closure call sites, ordinary heap ref constants, heap-promoted `i64` values, and mutating or allocating heap operations fall back through threaded paths.
-
-minivm (JIT) trails wazero by about 1.4×. The remaining gap is mostly value representation and deopt safety: minivm keeps the interpreter's NaN-boxed values (tag/mask per op) instead of raw native integers, and fused calls still guard frame budget and maintain trap-time recovery state so a fallback can rebuild interpreter frames. wazero AOT-compiles to unboxed native code with no fallback path. The JIT path allocates a small fixed amount for compilation and linking; the cost is per run, not per recursive call.
+minivm (JIT) trails wazero by about 1.2×: value representation and deopt safety add overhead because minivm keeps NaN-boxed values and trap-time recovery state, while wazero AOT-compiles to unboxed native code with no fallback path.
 
 ---
 
 ## Threaded Interpreter — Instruction Throughput
 
-Each row is one complete `Interpreter.Run` + `Reset` cycle. Setup instructions are included, so numbers reflect real dispatch overhead, not isolated opcode cost. Benchmarked via `BenchmarkInterpreter_Run/threaded` (`-benchtime=1s`). The `/threaded` benchmark reuses the existing test-program corpus with `WithThreshold(-1)`, so no hot segment is promoted to JIT code during measurement.
+Each row is one complete `Interpreter.Run` + `Reset` cycle. Setup instructions are included, so numbers reflect real dispatch overhead, not isolated opcode cost. Benchmarked via `BenchmarkInterpreter_Run/threaded` (`-benchtime=1s`). The `/threaded` benchmark reuses the existing test-program corpus with `WithThreshold(-1)`, so no hot trace is promoted to JIT code during measurement.
 
 ### Scalar operations
 
@@ -211,17 +209,21 @@ For the deep-recursion comparison at `fib(35)` with the JIT active, see the [Cro
 
 ## JIT on ARM64
 
-On ARM64, JIT compiles hot eligible segments to native code, eliminating threaded dispatch overhead for compute-heavy loops and complete recursive function bodies. Coverage includes numeric opcodes, direct calls, small guarded indirect function dispatch, ref-counted locals/globals/upvalues, and read-only fast paths for `ref.get`, `array.len`, selected `array.get`, and selected `struct.get`. Allocation, mutation, maps, host calls, closure call sites, heap-promoted `i64`, and unsupported heap shapes deopt or stay threaded. Threshold defaults to 4096 executed instructions (~32 samples at tick=128); nothing to configure. The [Cross-Runtime Comparison](#cross-runtime-comparison--fib35) isolates its effect — the `minivm (interp)` and `minivm (JIT)` rows run the same program with the JIT off and on, a 10.7× gap on fib(35).
+On ARM64, JIT compiles hot recorded traces — function entries and loop headers — to native code. Coverage includes numeric opcodes, direct calls, small guarded indirect function dispatch, ref-counted locals/globals/upvalues, read-only fast paths for `ref.get`, `array.len`, selected `array.get`, and selected `struct.get`, and loops (native back-edge with a safepoint poll). Allocation, mutation, maps, host calls, heap-promoted `i64`, and unsupported heap shapes deopt or stay threaded. Threshold defaults to 4096 executed instructions (~32 samples at tick=128); nothing to configure. The [Cross-Runtime Comparison](#cross-runtime-comparison--fib35) shows the JIT reaching native code alongside wazero and beating the script VMs by 22–40×.
 
 `BenchmarkJITIssue60` tracks the expanded coverage directly: `indirect_call_fib_via_local` flows recursive function refs through locals, `closure_counter_loop` exercises closure-body upvalue reads/writes, and `typed_array_sum` exercises `array.len` plus typed `array.get`. Each sub-benchmark has `interp` and `jit` rows from the same bytecode program.
 
 | Workload | interp ns/op | JIT ns/op | Effect |
 |---|---:|---:|---:|
-| `indirect_call_fib_via_local` | 782,674 | 1,919,189 | 0.4× |
-| `closure_counter_loop` | 17,329 | 13,448 | 1.3× |
-| `typed_array_sum` | 32,977 | 29,529 | 1.1× |
+| `indirect_call_fib_via_local` | 810,879 | 57,000 | 14× |
+| `closure_counter_loop` | 17,983 | 1,059 | 17× |
+| `typed_array_sum` | 34,059 | 2,780 | 12× |
 
-The indirect recursive local-call case currently stays slower under JIT because guarded function-value dispatch adds native compare/deopt machinery around a workload that is already call-heavy. Closure-body upvalues and typed array reads benefit from the new fast paths.
+With loop-anchored trace compilation the trace-only backend now beats threaded
+dispatch across these issue #60 workloads, and beats the deleted method JIT
+baseline on every one (the method JIT measured ~2.05M, ~13.6k, and ~29.3k ns/op
+respectively). Recursive ref-via-local calls inline natively, and hot loops run
+their bodies in registers between safepoints rather than deopting per iteration.
 
 On x86-64, JIT is not yet implemented. Running with `WithTick(1)` + `WithThreshold(1)` falls back to threaded execution with per-instruction polling — roughly 2× the default-threaded cost for simple dispatch benchmarks.
 
@@ -230,7 +232,7 @@ On x86-64, JIT is not yet implemented. Running with `WithTick(1)` + `WithThresho
 ## Methodology
 
 - `-benchtime=1s` for the threaded-interpreter, lifecycle, Marshal, and `Map_Refs` suites; `-benchtime=2s` for the cross-runtime and JIT coverage suites.
-- `BenchmarkInterpreter_Run/threaded` runs with `WithThreshold(-1)` on every architecture, so it measures the pure threaded interpreter — the same configuration as the cross-runtime `minivm (interp)` row. The `minivm (JIT)` row uses a default `New`, which promotes hot eligible segments to native code on ARM64.
+- `BenchmarkInterpreter_Run/threaded` runs with `WithThreshold(-1)` on every architecture, so it measures the pure threaded interpreter — the same configuration as the cross-runtime `minivm (interp)` row. The `minivm (JIT)` row uses a default `New`, which promotes hot recorded traces to native code on ARM64.
 - `Interpreter.Reset()` called between iterations; `New()` called once outside the timed loop.
 - Cross-runtime benchmark code lives in `benchmarks/` (a separate Go module with its own `go.mod`). Run `make benchmark` to execute both suites, or `cd benchmarks && go test ...` for the cross-runtime suite alone.
 - wazero uses its default compiler runtime (JIT); module instantiation excluded from timing.

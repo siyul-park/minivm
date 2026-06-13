@@ -142,6 +142,13 @@ func TestStructType_FieldByName(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestStructType_FieldIndex(t *testing.T) {
+	typ := NewStructType(NewStructField(TypeI32, FieldWithName("foo")))
+
+	require.Equal(t, 0, typ.FieldIndex("foo"))
+	require.Equal(t, -1, typ.FieldIndex("missing"))
+}
+
 func TestStructType_Cast(t *testing.T) {
 	typ := NewStructType(NewStructField(TypeI32))
 

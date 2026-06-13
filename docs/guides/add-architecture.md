@@ -7,14 +7,14 @@ Checklist for adding a native backend for a new CPU architecture.
 Adding an architecture is cross-cutting. Keep edits explicit:
 
 - `asm/<arch>/`: physical register IDs, encoder, ABI, trampoline/caller.
-- `interp/jit_<arch>.go`: opcode handlers, wired directly from `jit.go`.
+- `interp/jit_<arch>.go`: backend constants, `newCompiler`, and recorded-trace opcode handlers.
 - docs: this guide plus `jit-internals.md` if backend contracts change.
 
 Do not change ARM64 behavior unless a shared `asm/` contract requires it.
 
 ## Before You Start
 
-Read `docs/jit-internals.md`, especially Segment ABI and Assembler Pipeline. Use `asm/arm64/` and `interp/jit_arm64.go` as reference implementations.
+Read `docs/jit-internals.md`, especially Trace ABI and Frame Journal. Use `asm/arm64/` and `interp/jit_arm64.go` as reference implementations.
 
 ## Step 1 - Create `asm/<arch>/`
 
@@ -33,7 +33,7 @@ Return nil from `Arch.Frame()` when the backend has no spill-frame support. Back
 
 ## Step 2 - Add `interp/jit_<arch>.go`
 
-Add a concrete `lowerer` in package `interp`, then provide a build-tagged `newJITCompiler` implementation for the architecture.
+Add a concrete `lowerer` in package `interp`, then provide a build-tagged `newCompiler` implementation for the architecture.
 
 ```go
 type archJIT struct{}
@@ -41,11 +41,11 @@ type archJIT struct{}
 
 Handler rules:
 
-- `lower` returns `false` without mutating `jitContext` to reject an opcode.
-- `prologue` loads the context journal into pinned registers, then loads declared live-ins from the VM stack.
-- `exitIP` materializes shadow stack values into `i.stack`, writes `journalSP` and `journalNextIP`, then returns.
-- `RETURN` must check `c.whole`; partial segments leave frame teardown to threaded code.
-- `CALL` stays threaded unless a future design preserves frame setup, refs, host functions, stack bounds, and Go write barriers safely.
+- `trace` returns `false` without mutating published state when an opcode, kind, or observed shape is unsupported.
+- External entry loads the context journal into pinned registers before entering the trace head.
+- Guard exits materialize live symbolic state into `i.stack`, write `journalSP` and `journalNextIP`, append frame records, then return.
+- Entry-frame `RETURN` writes boxed returns and returns with `trapNone`; inlined callee returns stitch values into the caller's symbolic stack.
+- `CALL` may lower only when the recorded target, frame budget, refs, host functions, stack bounds, and Go write-barrier rules remain safe.
 
 Scratch slot order is fixed:
 
@@ -64,7 +64,7 @@ go test ./asm/<arch>/... ./interp/...
 GOOS=linux GOARCH=<arch> go build ./...
 ```
 
-A compiled segment counter (`p.Snapshot().JIT.Emits > 0`) after running a hot arithmetic loop confirms end-to-end emission.
+A nonzero trace counter (`p.Snapshot().JIT.Emits > 0`) after running a hot arithmetic function confirms end-to-end emission.
 
 ## Opcode Priority
 
@@ -76,5 +76,5 @@ Implement in this order to get meaningful benchmark gains early:
 4. Conversions
 5. `LOCAL_GET/SET/TEE`, `GLOBAL_GET/SET/TEE`
 6. `BR`, `BR_IF`, `BR_TABLE`
-7. `RETURN` for whole-function Entry
+7. `RETURN` for entry traces
 8. RC-neutral refs: `REF_NULL`, `REF_IS_NULL`, `REF_EQ`

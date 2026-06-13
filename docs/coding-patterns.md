@@ -41,7 +41,7 @@ Prefer:
 - localized complexity over distributed state
 - predictable structure over clever abstraction
 
-Avoid spreading complexity across layers. Difficult operation → one difficult implementation, not many partially difficult call sites.
+Avoid spreading complexity across layers. Difficult step → one difficult implementation, not many partially difficult call sites.
 
 ### 0.2 Top-down readability
 
@@ -59,7 +59,7 @@ Interpreter and JIT paths stay structurally similar when possible. Symmetry matt
 
 Minimize file count, type count, function count, method count, and argument count while keeping behavior explicit. Avoid splitting code merely because it can be split.
 
-Every file, type, function, method, and argument has design and maintenance cost. Prefer inline logic when a helper is used once and does not name a distinct domain operation. Extract only when it removes real duplication, isolates real complexity, or gives a behavior-level name callers need.
+Every file, type, function, method, and argument has design and maintenance cost. Prefer inline logic when a helper is used once and does not name a distinct domain step. Extract only when it removes real duplication, isolates real complexity, or gives a behavior-level name callers need.
 
 Keep logically related code close together: shared state, validation, mutation, and cleanup for one behavior should be easy to see in one local area. Keep unrelated code apart so each file, type, function, and method has one cohesive reason to exist.
 
@@ -131,6 +131,14 @@ Public names follow the same rule: keep them concise and role-based, but still c
 
 Avoid one-letter abbreviations for types, fields, functions, and methods. Avoid other abbreviations unless they are standard in the domain or broadly recognized (`ID`, `IP`, `ABI`, `JIT`, `VM`, `CPU`). Prefer one short word over private shorthand.
 
+Do not prefix private names with their package, file, subsystem, or neighboring
+type when that context is already obvious. Prefer a role word over a location
+word: `lowering`, `activation`, `value`, `step`, `compiler`, `module`. Use a
+subsystem prefix only when two same-scope concepts would otherwise collide and a
+better role word does not exist. JIT internals are already in `jit.go` or behind
+an `arm64Lowerer` receiver; names like `jitContext`, `jitFrame`, `jitOperand`,
+and `traceOperation` repeat the address label instead of naming the role.
+
 | ✗ Mechanism | ✓ Intent |
 |---|---|
 | `rewriteBranchAbsolute` | `normalize` |
@@ -138,6 +146,10 @@ Avoid one-letter abbreviations for types, fields, functions, and methods. Avoid 
 | `nilOutFieldsAndPrint` | `reset` |
 | `checkEmptyAndFormatProg` | `show` |
 | `appendInstrAndUpdateLen` | `commit` |
+| `jitContext` | `lowering` |
+| `jitFrame` | `activation` |
+| `jitOperand` | `value` |
+| `traceOperation` | `step` |
 
 Receiver context counts: `r.show()`, `r.commit()` clear on `*REPL`.
 
@@ -220,7 +232,7 @@ func newCaller(opts options) (*caller, error) {
 ```go
 func newRewriter(info RegInfo, insts []Instruction, pins map[int32]PReg) *rewriter {
     r := &rewriter{pool: ..., pins: pins, assigned: ..., widths: ...}
-    r.last = r.scanLastUses(insts)   // extracted because the scan loop names a real operation
+    r.last = r.scanLastUses(insts)   // extracted because the scan loop names a real step
     return r
 }
 ```
@@ -250,7 +262,7 @@ b.grow(end, sealRegion)
 
 **A file's methods belong to one type.** Split a large type across several files by concern, but every one of those files still holds that one type's methods — never another type's. `*Interpreter` is spread over `interp.go`, `threaded.go`, `fuse.go`, `host.go`, `marshal.go`, `pool.go`; each holds only `*Interpreter` methods. Do not move a type's methods into a *different* type's file to chase "locality": code that operates on type A's state is a method on A, declared in A's file, even when it integrates with subsystem B. If the behavior truly operates on B's state instead, make it a method on a B type — passing the other type in as an argument is the smell that you picked the wrong owner (see §0.5 cross-boundary structs).
 
-For JIT this means: `interp/jit.go` owns the `jitCompiler` / `jitContext` pipeline (arch-neutral block planning, segment selection, linking) and their methods; `interp/jit_arm64.go` owns the `lowerer` (`arm64JIT`) — opcode handlers and ISA-specific helpers. The `Interpreter`'s own JIT bridge (`jit`, `install`, `entry`, `segment`, `deopt`, `scratch`, `hot`, `function`) is `*Interpreter` behavior, so it stays in `interp.go` with the rest of the type — not in `jit.go`.
+For JIT this means: `interp/jit.go` owns `compiler`, `module`, journal constants, `lowering`, and architecture-neutral trace orchestration; `interp/jit_arm64.go` owns ARM64 construction/constants plus the `lowerer` (`arm64Lowerer`) trace opcode handlers. The `Interpreter`'s own JIT bridge (`compile`, `install`, `entry`, `deopt`, `hot`, `function`) is `*Interpreter` behavior, so it stays in `interp.go` with the rest of the type — not in `jit.go`.
 
 ## 2. Type & Interface Design
 
@@ -301,12 +313,16 @@ Every `.go` file declares symbols in this fixed order:
 4. private const
 5. public value (`var`)
 6. private value (`var`) — includes interface compliance assertions
-7. public function
-8. public method
-9. private method
-10. private function
+7. constructor function (public `NewFoo` and private `newFoo`)
+8. public function
+9. public method
+10. private method
+11. private function
 
-Constructors (`NewFoo`) are public functions (slot 7). Within each slot, follow §1.3 (callers above callees) and §4.1 (group sentinel errors in a single `var (...)` block).
+Constructors are declared before methods even when private. `NewFoo` and
+`newFoo` both live in slot 7 because construction is top-level orchestration, not
+a low-level helper. Within each slot, follow §1.3 (callers above callees) and
+§4.1 (group sentinel errors in a single `var (...)` block).
 
 ### 2.5 Struct field ordering
 
@@ -325,7 +341,7 @@ Struct layout mirrors human reasoning: what the type IS and DOES before how it w
 Key rules:
 
 - **Behavioral objects vs plain integers**: Rich objects (interfaces, callbacks, object pointers) are lifecycle/policy even when set once at construction. Plain numeric parameters (`int`, `int64`) are read-only config, not lifecycle/policy — they go near the bottom.
-- **Mutable counters above read-only config**: `fp`/`sp` are written every operation, so they sit above threshold/cutoff/tick/fuel which are set once and only read.
+- **Mutable counters above read-only config**: `fp`/`sp` are written every step, so they sit above threshold/cutoff/tick/fuel which are set once and only read.
 - **`sync.Mutex` always last**: It is a concurrency mechanic, not a semantic field.
 - **Separate layers with a blank line.**
 
@@ -335,7 +351,7 @@ type Interpreter struct {
     ctx       context.Context
     threshold int64
     cutoff    int
-    compiler  *jitCompiler
+    compiler  *compiler
     frames    []frame
     fp        int
     tick      int
@@ -344,11 +360,12 @@ type Interpreter struct {
 // ✓ layered correctly
 type Interpreter struct {
     ctx       context.Context         // lifecycle: behavioral objects
-    prof      *prof.Stats
+    tracer    *Tracer
     hook      func(*Interpreter) error
     marshaler Marshaler
 
-    compiler *jitCompiler             // infrastructure
+    compiler *compiler             // infrastructure
+    cache    *Cache
 
     types     []types.Type            // program data
     constants []types.Boxed
@@ -639,6 +656,12 @@ No test helpers. Tests stay self-contained; don't hide setup, assertions, or exe
 Test-only helpers that return fixtures, programs, contexts, or configured
 objects are not allowed. Inline setup in the `t.Run` body or use a table when
 all cases share one assertion shape.
+
+Before adding a new helper, check whether the logic belongs to the type it
+operates on. If so, refine it into a method/function on that type (following
+the existing method-design conventions for the package, e.g. naming and
+return shape of sibling methods) instead of a test-only helper, and call the
+new method directly from the test.
 
 ## 7. Git & PR Workflow
 
