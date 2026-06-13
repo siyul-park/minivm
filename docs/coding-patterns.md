@@ -657,6 +657,12 @@ Test-only helpers that return fixtures, programs, contexts, or configured
 objects are not allowed. Inline setup in the `t.Run` body or use a table when
 all cases share one assertion shape.
 
+Before adding a new helper, check whether the logic belongs to the type it
+operates on. If so, refine it into a method/function on that type (following
+the existing method-design conventions for the package, e.g. naming and
+return shape of sibling methods) instead of a test-only helper, and call the
+new method directly from the test.
+
 ## 7. Git & PR Workflow
 
 ### 7.1 Branch & commit types

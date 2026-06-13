@@ -2455,39 +2455,6 @@ func requireJIT(t *testing.T) {
 	}
 }
 
-func requireTraceEntry(t *testing.T, i *Interpreter, addr int) {
-	t.Helper()
-	compiler, err := newCompiler(i.cutoff)
-	require.NoError(t, err)
-	require.NotNil(t, compiler)
-	defer compiler.Close()
-
-	fn, ok := i.function(addr)
-	require.True(t, ok)
-	mod := &module{entries: map[anchor]asm.Callable{}, loops: map[anchor]bool{}}
-	ok, err = compiler.emit(i, addr, fn, mod)
-	require.NoError(t, err)
-	if !ok {
-		if tree := i.tracer.trees[anchor{addr: addr, ip: 0}]; tree != nil && tree.root != nil {
-			for idx, op := range tree.root.ops {
-				t.Logf("trace op %d: op=%v ip=%d fn=%d depth=%d seen=%v target=%d taken=%v callee=%d", idx, op.op, op.ip, op.fn, op.depth, op.seen, op.target, op.taken, op.callee)
-			}
-		}
-	}
-	require.True(t, ok)
-	require.NotNil(t, mod.entries[anchor{addr: addr, ip: 0}])
-}
-
-func captureEntryTrace(target *int) func(*Interpreter) error {
-	return func(i *Interpreter) error {
-		if target == nil || *target == 0 || i.Func() != *target || i.IP() != 0 {
-			return nil
-		}
-		_, err := i.tracer.capture(i, anchor{addr: *target, ip: 0})
-		return err
-	}
-}
-
 func TestInterpreter_Context(t *testing.T) {
 	t.Run("propagates value", func(t *testing.T) {
 		i := New(program.New(nil))
@@ -3791,7 +3758,13 @@ func TestInterpreter_withLocal(t *testing.T) {
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
-		}, program.WithConstants(fn)), withLocal(p), WithTick(1), WithThreshold(3), WithCutoff(1), WithHook(captureEntryTrace(&addr)))
+		}, program.WithConstants(fn)), withLocal(p), WithTick(1), WithThreshold(3), WithCutoff(1), WithHook(func(i *Interpreter) error {
+			if addr == 0 || i.Func() != addr || i.IP() != 0 {
+				return nil
+			}
+			_, err := i.tracer.capture(i, anchor{addr: addr, ip: 0})
+			return err
+		}))
 		defer i.Close()
 		addr = i.constants[0].Ref()
 		require.NoError(t, i.Run(context.Background()))
@@ -4485,7 +4458,13 @@ func TestInterpreter_JIT(t *testing.T) {
 					instr.New(instr.CALL),
 				},
 				program.WithConstants(body, closure, caller),
-			), WithTick(1), WithThreshold(-1), WithCutoff(1), WithHook(captureEntryTrace(&addr)))
+			), WithTick(1), WithThreshold(-1), WithCutoff(1), WithHook(func(i *Interpreter) error {
+				if addr == 0 || i.Func() != addr || i.IP() != 0 {
+					return nil
+				}
+				_, err := i.tracer.capture(i, anchor{addr: addr, ip: 0})
+				return err
+			}))
 			defer i.Close()
 			addr = i.constants[2].Ref()
 
@@ -4493,7 +4472,18 @@ func TestInterpreter_JIT(t *testing.T) {
 			v, err := i.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), v)
-			requireTraceEntry(t, i, addr)
+
+			compiler, err := newCompiler(i.cutoff)
+			require.NoError(t, err)
+			require.NotNil(t, compiler)
+			defer compiler.Close()
+			def, ok := i.function(addr)
+			require.True(t, ok)
+			mod := &module{entries: map[anchor]asm.Callable{}, loops: map[anchor]bool{}}
+			ok, err = compiler.emit(i, addr, def, mod)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.NotNil(t, mod.entries[anchor{addr: addr, ip: 0}])
 		})
 
 		t.Run("indirect function call", func(t *testing.T) {
@@ -4523,7 +4513,13 @@ func TestInterpreter_JIT(t *testing.T) {
 					instr.New(instr.CALL),
 				},
 				program.WithConstants(add, caller),
-			), WithTick(1), WithThreshold(-1), WithCutoff(1), WithHook(captureEntryTrace(&addr)))
+			), WithTick(1), WithThreshold(-1), WithCutoff(1), WithHook(func(i *Interpreter) error {
+				if addr == 0 || i.Func() != addr || i.IP() != 0 {
+					return nil
+				}
+				_, err := i.tracer.capture(i, anchor{addr: addr, ip: 0})
+				return err
+			}))
 			defer i.Close()
 			addr = i.constants[1].Ref()
 
@@ -4531,7 +4527,18 @@ func TestInterpreter_JIT(t *testing.T) {
 			v, err := i.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), v)
-			requireTraceEntry(t, i, addr)
+
+			compiler, err := newCompiler(i.cutoff)
+			require.NoError(t, err)
+			require.NotNil(t, compiler)
+			defer compiler.Close()
+			def, ok := i.function(addr)
+			require.True(t, ok)
+			mod := &module{entries: map[anchor]asm.Callable{}, loops: map[anchor]bool{}}
+			ok, err = compiler.emit(i, addr, def, mod)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.NotNil(t, mod.entries[anchor{addr: addr, ip: 0}])
 		})
 
 		t.Run("heap reads", func(t *testing.T) {
@@ -4564,7 +4571,13 @@ func TestInterpreter_JIT(t *testing.T) {
 					instr.New(instr.CALL),
 				},
 				program.WithConstants(fn),
-			), WithTick(1), WithThreshold(-1), WithCutoff(1), WithHook(captureEntryTrace(&addr)))
+			), WithTick(1), WithThreshold(-1), WithCutoff(1), WithHook(func(i *Interpreter) error {
+				if addr == 0 || i.Func() != addr || i.IP() != 0 {
+					return nil
+				}
+				_, err := i.tracer.capture(i, anchor{addr: addr, ip: 0})
+				return err
+			}))
 			defer i.Close()
 			addr = i.constants[0].Ref()
 			cell, err := i.Alloc(types.I32(5))
@@ -4579,7 +4592,18 @@ func TestInterpreter_JIT(t *testing.T) {
 			v, err := i.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), v)
-			requireTraceEntry(t, i, addr)
+
+			compiler, err := newCompiler(i.cutoff)
+			require.NoError(t, err)
+			require.NotNil(t, compiler)
+			defer compiler.Close()
+			def, ok := i.function(addr)
+			require.True(t, ok)
+			mod := &module{entries: map[anchor]asm.Callable{}, loops: map[anchor]bool{}}
+			ok, err = compiler.emit(i, addr, def, mod)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.NotNil(t, mod.entries[anchor{addr: addr, ip: 0}])
 		})
 
 		t.Run("br table", func(t *testing.T) {
@@ -4604,7 +4628,13 @@ func TestInterpreter_JIT(t *testing.T) {
 					instr.New(instr.CALL),
 				},
 				program.WithConstants(fn),
-			), WithTick(1), WithThreshold(-1), WithCutoff(1), WithHook(captureEntryTrace(&addr)))
+			), WithTick(1), WithThreshold(-1), WithCutoff(1), WithHook(func(i *Interpreter) error {
+				if addr == 0 || i.Func() != addr || i.IP() != 0 {
+					return nil
+				}
+				_, err := i.tracer.capture(i, anchor{addr: addr, ip: 0})
+				return err
+			}))
 			defer i.Close()
 			addr = i.constants[0].Ref()
 
@@ -4612,7 +4642,18 @@ func TestInterpreter_JIT(t *testing.T) {
 			v, err := i.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), v)
-			requireTraceEntry(t, i, addr)
+
+			compiler, err := newCompiler(i.cutoff)
+			require.NoError(t, err)
+			require.NotNil(t, compiler)
+			defer compiler.Close()
+			def, ok := i.function(addr)
+			require.True(t, ok)
+			mod := &module{entries: map[anchor]asm.Callable{}, loops: map[anchor]bool{}}
+			ok, err = compiler.emit(i, addr, def, mod)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.NotNil(t, mod.entries[anchor{addr: addr, ip: 0}])
 		})
 	})
 

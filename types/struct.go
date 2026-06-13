@@ -159,6 +159,17 @@ func (t *StructType) FieldByName(name string) (StructField, bool) {
 	return StructField{}, false
 }
 
+// FieldIndex returns the index of the field named name, or -1 if no such
+// field exists.
+func (t *StructType) FieldIndex(name string) int {
+	for i, field := range t.Fields {
+		if field.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
 func (t *StructType) Kind() Kind {
 	return KindRef
 }

@@ -302,7 +302,13 @@ func TestPool_Profile(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 		var addr int
-		p := NewPool(prog, 2, WithTick(1), WithCutoff(1), WithThreshold(5), WithHook(captureEntryTrace(&addr)))
+		p := NewPool(prog, 2, WithTick(1), WithCutoff(1), WithThreshold(5), WithHook(func(i *Interpreter) error {
+			if addr == 0 || i.Func() != addr || i.IP() != 0 {
+				return nil
+			}
+			_, err := i.tracer.capture(i, anchor{addr: addr, ip: 0})
+			return err
+		}))
 		defer p.Close()
 
 		first, err := p.Get(context.Background())
@@ -345,7 +351,13 @@ func TestPool_Profile(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 		var addr int
-		p := NewPool(prog, 2, WithTick(1), WithCutoff(1), WithThreshold(5), WithHook(captureEntryTrace(&addr)))
+		p := NewPool(prog, 2, WithTick(1), WithCutoff(1), WithThreshold(5), WithHook(func(i *Interpreter) error {
+			if addr == 0 || i.Func() != addr || i.IP() != 0 {
+				return nil
+			}
+			_, err := i.tracer.capture(i, anchor{addr: addr, ip: 0})
+			return err
+		}))
 		defer p.Close()
 
 		first, err := p.Get(context.Background())
