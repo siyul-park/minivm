@@ -100,7 +100,6 @@ type trace struct {
 	anchor anchor
 	ops    []step
 	kind   outcome
-	reason string
 }
 
 type tree struct {
@@ -236,7 +235,6 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		f := clone.fr
 		if f.addr < 0 || f.addr >= len(clone.instrs) || f.ip < 0 || f.ip >= len(clone.instrs[f.addr]) {
 			t.kind = aborted
-			t.reason = "instruction pointer out of range"
 			break
 		}
 
@@ -244,7 +242,6 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		op := instr.Opcode(code[f.ip])
 		if r.unrecordable(&clone, op) {
 			t.kind = aborted
-			t.reason = fmt.Sprintf("unrecordable opcode %v", op)
 			break
 		}
 
@@ -257,7 +254,6 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		}
 		if err := r.step(&clone, f.addr, f.ip); err != nil {
 			t.kind = aborted
-			t.reason = err.Error()
 			break
 		}
 
@@ -284,7 +280,6 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 	}
 	if len(t.ops) >= opLimit {
 		t.kind = aborted
-		t.reason = "trace op limit reached"
 	}
 	r.store(a, t)
 	return t, nil
