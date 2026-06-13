@@ -189,13 +189,6 @@ func (c *compiler) Compile(i *Interpreter, addr int, fn *types.Function) (*modul
 	return mod, err
 }
 
-func (c *compiler) scratch() ([]asm.PReg, bool) {
-	if len(c.scratchRegs) < scratchCount {
-		return nil, false
-	}
-	return c.scratchRegs[:scratchCount], true
-}
-
 // emit lowers every non-aborted trace root recorded for addr — the function
 // entry plus any hot loop headers — into framed native callables, one per
 // anchor. It returns false (emitting nothing) when no usable trace exists or
@@ -277,6 +270,13 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 	return true, nil
 }
 
+func (c *compiler) scratch() ([]asm.PReg, bool) {
+	if len(c.scratchRegs) < scratchCount {
+		return nil, false
+	}
+	return c.scratchRegs[:scratchCount], true
+}
+
 // funcs maps every function address to its *types.Function so the trace
 // compiler can inline observed call targets.
 func (c *compiler) funcs(i *Interpreter) map[int]*types.Function {
@@ -290,32 +290,32 @@ func (c *compiler) funcs(i *Interpreter) map[int]*types.Function {
 }
 
 // frame returns the innermost (currently executing) frame.
-func (c *lowering) frame() *activation {
-	return &c.frames[len(c.frames)-1]
+func (ctx *lowering) frame() *activation {
+	return &ctx.frames[len(ctx.frames)-1]
 }
 
 // push appends one operand to the symbolic stack.
-func (c *lowering) push(v value) {
-	c.values = append(c.values, v)
+func (ctx *lowering) push(v value) {
+	ctx.values = append(ctx.values, v)
 }
 
 // pop removes and returns the top operand.
-func (c *lowering) pop() value {
-	v := c.values[len(c.values)-1]
-	c.values = c.values[:len(c.values)-1]
+func (ctx *lowering) pop() value {
+	v := ctx.values[len(ctx.values)-1]
+	ctx.values = ctx.values[:len(ctx.values)-1]
 	return v
 }
 
 // count reports how many operands the innermost frame owns.
-func (c *lowering) count() int {
-	return len(c.values) - c.frame().opBase
+func (ctx *lowering) count() int {
+	return len(ctx.values) - ctx.frame().opBase
 }
 
 // slot returns the VM stack slot of values[idx] as a delta from the entry
 // frame's bp: the owning frame's locals floor plus the operand's position.
-func (c *lowering) slot(idx int) int {
-	for k := len(c.frames) - 1; k >= 0; k-- {
-		f := &c.frames[k]
+func (ctx *lowering) slot(idx int) int {
+	for k := len(ctx.frames) - 1; k >= 0; k-- {
+		f := &ctx.frames[k]
 		if f.opBase <= idx {
 			return f.base + len(f.kinds) + (idx - f.opBase)
 		}
@@ -324,21 +324,21 @@ func (c *lowering) slot(idx int) int {
 }
 
 // sp returns the interpreter stack pointer as a delta from the entry bp.
-func (c *lowering) sp() int {
-	f := c.frame()
-	return f.base + len(f.kinds) + (len(c.values) - f.opBase)
+func (ctx *lowering) sp() int {
+	f := ctx.frame()
+	return f.base + len(f.kinds) + (len(ctx.values) - f.opBase)
 }
 
 // snapshot deep-copies the operand and frame state for a pending branch:
 // registers are dropped because the guard flushed everything to the VM stack,
 // so the branch body reloads on demand.
-func (c *lowering) snapshot() ([]value, []activation) {
-	values := make([]value, len(c.values))
-	for i, v := range c.values {
+func (ctx *lowering) snapshot() ([]value, []activation) {
+	values := make([]value, len(ctx.values))
+	for i, v := range ctx.values {
 		values[i] = value{kind: v.kind, raw: v.raw, fn: v.fn, ref: v.ref}
 	}
-	frames := make([]activation, len(c.frames))
-	for i, f := range c.frames {
+	frames := make([]activation, len(ctx.frames))
+	for i, f := range ctx.frames {
 		frames[i] = f
 		frames[i].locals = make([]value, len(f.locals))
 		frames[i].loaded = make([]bool, len(f.loaded))
@@ -348,15 +348,15 @@ func (c *lowering) snapshot() ([]value, []activation) {
 }
 
 // pin returns a fresh Width64 int vreg bound to the scratch register at idx.
-func (c *lowering) pin(idx int) asm.VReg {
-	v := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = c.assembler.Pin(v, c.scratch[idx])
+func (ctx *lowering) pin(idx int) asm.VReg {
+	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	_ = ctx.assembler.Pin(v, ctx.scratch[idx])
 	return v
 }
 
 // pinTo returns a fresh Width64 int vreg bound to the physical register pr.
-func (c *lowering) pinTo(pr asm.PReg) asm.VReg {
-	v := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	_ = c.assembler.Pin(v, pr)
+func (ctx *lowering) pinTo(pr asm.PReg) asm.VReg {
+	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	_ = ctx.assembler.Pin(v, pr)
 	return v
 }

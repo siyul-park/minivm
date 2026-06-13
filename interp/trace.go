@@ -174,6 +174,28 @@ func (r *Tracer) snapshot(local *stats) Snapshot {
 	return merged.Snapshot()
 }
 
+func (r *Tracer) exit(i *Interpreter, root anchor, ip int) (int64, error) {
+	r.mu.Lock()
+	tree := r.tree(root)
+	id := r.exitIndex(tree, ip)
+	tree.hits[id]++
+	hits := tree.hits[id]
+	if tree.branches[id] != nil {
+		r.mu.Unlock()
+		return hits, nil
+	}
+	r.mu.Unlock()
+
+	t, err := r.capture(i, anchor{addr: i.fr.addr, ip: ip})
+	if err != nil {
+		return hits, err
+	}
+	r.mu.Lock()
+	tree.branches[id] = t
+	r.mu.Unlock()
+	return hits, nil
+}
+
 func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 	r.mu.Lock()
 	if r.blacklist[a] {
@@ -266,28 +288,6 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 	}
 	r.store(a, t)
 	return t, nil
-}
-
-func (r *Tracer) exit(i *Interpreter, root anchor, ip int) (int64, error) {
-	r.mu.Lock()
-	tree := r.tree(root)
-	id := r.exitIndex(tree, ip)
-	tree.hits[id]++
-	hits := tree.hits[id]
-	if tree.branches[id] != nil {
-		r.mu.Unlock()
-		return hits, nil
-	}
-	r.mu.Unlock()
-
-	t, err := r.capture(i, anchor{addr: i.fr.addr, ip: ip})
-	if err != nil {
-		return hits, err
-	}
-	r.mu.Lock()
-	tree.branches[id] = t
-	r.mu.Unlock()
-	return hits, nil
 }
 
 func (r *Tracer) clone(i *Interpreter) Interpreter {
