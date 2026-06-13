@@ -1,347 +1,205 @@
 # JIT Internals
 
-Contracts for native JIT files in `interp/` and their interaction with `asm/`. Read before editing `interp/jit.go`, `interp/jit_arm64.go`, or asm callable ABI code.
+Contracts for native JIT files in `interp/` and their interaction with `asm/`.
+Read before editing `interp/jit.go`, `interp/jit_arm64.go`, `interp/trace.go`, or asm callable ABI code.
 
 ## Checklist
 
-Before editing: check opcode width in `instr/type.go`; preserve threaded/JIT parity; keep threaded fallback correct; read `profile.md` for ticks, thresholds, and hot-block choice; read `value-representation.md` for boxing/unboxing; read `memory-model.md` for refs and heap objects.
+Before editing: check opcode width in `instr/type.go`; preserve threaded/JIT
+parity; keep threaded fallback correct; read `profile.md` for ticks and
+thresholds; read `value-representation.md` for boxing/unboxing; read
+`memory-model.md` for refs and heap objects.
 
-After editing: add or update tests in `asm/assembler_test.go` for callable ABI changes and `interp/interp_test.go` for native lowering/wiring changes; run `go test ./asm/... ./interp/...`.
+After editing: add or update tests in `asm/assembler_test.go` for callable ABI
+changes and `interp/interp_test.go` for trace recording, native lowering, and
+wiring changes; run `go test ./asm/... ./interp/...`.
 
 ## Execution Model
 
 ```text
 program.Program
   -> threadedCompiler -> []func(*Interpreter)    always, portable fallback
-  -> jitCompiler      -> *jitModule              lazy, ARM64-gated
+  -> Tracer            -> trace tree snapshots     lazy runtime front-end
+  -> compiler      -> *module               lazy ARM64 trace backend
 ```
 
-Both compilers read the same bytecode. `i.code[addr][ip]` is the primary dispatch table. JIT replaces selected entries after compilation. Rejected segments fall back cleanly to threaded code.
+The threaded compiler and native backend read the same bytecode. `i.code[addr][ip]`
+is the primary dispatch table. A hot JIT attempt first records a runtime trace
+from the current interpreter state, then the ARM64 backend publishes a native
+callable for each usable root: the function entry (`ip == 0`) and any hot loop
+header (`ip > 0`). The entry callable installs at `i.code[addr][0]` and tears the
+frame down on return; a loop callable installs at `i.code[addr][header]` and
+re-enters the live frame without unwinding it. Rejected traces emit nothing and
+threaded dispatch remains installed.
 
-Solo interpreters compile into a private `jitCompiler` and private `asm.Buffer`.
-Pool interpreters use a shared `Cache`: member-local profiles stay uncontended on
-the hot path, aggregate trigger counts live in atomics, and the winning member
-compiles with a throwaway compiler. Published modules share only immutable
-`asm.Callable`s; each interpreter still binds those callables into its own
-threaded closure table at a safepoint.
+Solo interpreters compile into a private `compiler` and private `asm.Buffer`.
+Pool interpreters use a shared `Cache`: trigger counts live in atomics, the
+winning member compiles with a throwaway compiler, and published modules share
+immutable `asm.Callable`s. Each interpreter still binds those callables into its
+own threaded closure table at a safepoint.
 
-## jitCompiler
+## compiler
 
-`jitCompiler` is private to `interp` and lives in `jit.go`. `Compile(i, addr, fn)` reads the current interpreter state directly and attempts two strategies in order:
+`compiler` is private to `interp` and lives in `jit.go`. `Compile(i, addr, fn)`
+is trace-only and emits every usable root anchored at `addr` (`emitRoot` per
+anchor):
 
-1. **Whole-function Entry** (`compiler.whole`): all opcodes lower without rejection. On success, an `asm.Callable` is stored in `jitModule.entries[addr]`. The `interp` side wraps that callable in a Go closure that handles frame teardown after the native call returns.
+1. find the `Tracer` trace tree for each `(addr, ip)` anchor — entry plus loop
+   headers — skipping aborted roots, side-exit branches, and entry-anchored loops
+2. build a `lowering` with typed symbolic operands, frames, constants,
+   globals, heap view, and scratch registers (`loop` set for loop roots)
+3. ask the architecture `lowerer` to emit the trace
+4. link one callable into `module.entries[anchor]`, recording `module.loops[anchor]`
+   so `install` chooses the entry vs loop wrapper
 
-2. **Segment compilation** (`compiler.segments`): processes hot IPs from the interpreter profiler. Each hot IP seeds a segment; successors are queued when forced by `BR` or by a rejected op with a safe structural successor. Each accepted segment is appended to `jitModule.segments` as a `jitSegment{addr, ip, stack, callable}`.
+There is no static method pipeline, block planner, segment selection, or
+boxed-shadow fallback lowerer. Runtime deoptimization still exists: guards
+materialize VM state into the journal, return to the Go wrapper, and resume the
+threaded interpreter at the reported fallback IP.
 
-Compilation is one-shot per function — there is no re-tiering. Runtime
-deoptimization does exist: a guard or unsupported boundary returns to the
-threaded interpreter, rebuilding VM frames from the journal (see CALL Boundaries).
+## Tracer
 
-## Emitter (`lowerer`)
+Trace recording and profile aggregation live in `interp/trace.go`; trace
+compilation state lives in `interp/jit.go`. Recording clones the current
+interpreter, points the clone at the requested `(addr, ip)` anchor, and executes
+threaded closures until it reaches a return, loop, branch exit, unsupported
+step, or trace limit. The live interpreter state is not mutated during
+recording.
 
-`jit.go` is architecture-neutral. It depends on the `lowerer` interface — the
-architecture-specific opcode emitter — and never names a concrete backend.
-`jitCompiler` holds a `lowerer` field, set by the arch-specific
-`newJITCompiler`; every native-code emission in the pipeline goes through it.
+Each recorded instruction stores:
 
-`jit_arm64.go` provides the only concrete `lowerer` today (`arm64JIT`), wired
-on arm64. On other architectures `jit_stub.go` returns a nil `jitCompiler`
-(JIT unavailable), so no `lowerer` is constructed. A second ISA is added by
-implementing `lowerer` in a new arch file and wiring it in that file's
-`newJITCompiler` — `jit.go` needs no change.
+- opcode, function, IP, and inline depth
+- observed call target box and callee address
+- explicit branch target and branch-taken metadata
+- selected observed heap values for guarded read-only heap fast paths
 
-The interface is four operations:
+The `Tracer` aborts before host calls, allocation, and mutating heap operations.
+Those operations remain interpreter-owned. Native guard fallbacks report their
+live deopt state back to the local trace tree; after an exit counter reaches the
+threshold, a solo interpreter recompiles the entry trace with the new branch
+continuation.
 
-- `prologue` loads declared live-ins from the VM stack into the shadow stack's initial VRegs.
-- `enter` emits the function entry sequence (frame/link save) for a whole-function target reached as its own callable.
-- `lower` dispatches one opcode. It returns `false` to reject and fall back to threaded execution.
-- `exitIP` materializes shadow stack values into `i.stack`, writes `journalSP` and trap state, and emits `RET`.
+## JIT Lowerer (`lowerer`)
 
-## jitContext
+`jit.go` is architecture-neutral. Its `lowerer` interface has one operation:
 
 ```go
-type jitContext struct {
-    assembler *asm.Assembler
-    code      []byte
-    constants []types.Boxed
-    globals   []types.Boxed
-    locals    []types.Kind
-    scratch   []asm.PReg
-    stack     []asm.VReg   // shadow stack of live boxed values
-    inputs    []asm.VReg   // live-in VRegs loaded from VM stack
-    ip        int
-    start     int
-    end       int
-    successor int
-    whole     bool
-    stop      bool
-    closed    bool
+type lowerer interface {
+    lower(ctx *lowering) bool
 }
 ```
 
-`stack` is the segment-local shadow stack of boxed VRegs. `inputs` are the live-in VRegs loaded from `i.stack` at segment entry. Whole-function Entry compilation must finish with no `inputs`; Entry receives function params through VM stack/local loads. `whole` is true only during whole-function Entry compilation; `RETURN` must check this flag.
+`jit_arm64.go` provides ARM64 construction, constants, offsets, and the concrete
+`arm64Lowerer.lower` implementation. On other architectures `jit_stub.go` returns a
+nil `compiler`, so JIT is unavailable.
 
-## RETURN Lowering Contract
-
-`RETURN` lowers only when `c.whole == true`. In segment mode it returns `false`, forcing threaded execution to handle frame teardown via the Go-side `entry()` wrapper. Violating this causes double frame teardown.
-
-## Segment ABI
+## Trace ABI
 
 Native callables use a standard AAPCS64-shaped entry: `Callable.Call(ctx)` passes
-`&i.journal[0]` in X0. External native entries copy the first journal cells into
-pinned context registers with two `LDP`s; internal native calls branch to labels
-after this reload and keep the registers live.
+`&i.journal[0]` in X0. External entries copy journal cells into pinned scratch
+registers; recursive trace calls branch to an internal label after that reload
+and keep the registers live.
 
 | Constant | ARM64 | Purpose |
 | --- | --- | --- |
-| `scratchStack` (0) | X10 | `&i.stack[0]` input |
-| `scratchGlobals` (1) | X11 | `&i.globals[0]` input |
-| `scratchBP` (2) | X12 | current frame `bp` input |
-| `scratchSP` (3) | X13 | interpreter `sp` input |
-| `scratchCtrl` (4) | X14 | `&i.journal[0]` context pointer |
+| `scratchStack` | X10 | `&i.stack[0]` input |
+| `scratchGlobals` | X11 | `&i.globals[0]` input |
+| `scratchBP` | X12 | current frame `bp` input |
+| `scratchSP` | X13 | interpreter `sp` input |
+| `scratchCtrl` | X14 | `&i.journal[0]` context pointer |
 
-Native code loads stack inputs from `scratchStack`/`scratchSP`, keeps operands in registers, and writes stack results back only on exit or fallback. The `interp` adapter does not marshal params or returns; it calls `Callable.Call(ctx)` and reads `journalSP`, trap kind, and resume IP from the journal.
+Native code loads locals and operands from `scratchStack`, keeps scalars in
+registers, and writes stack results back on return or deopt. The `interp` entry
+wrapper does not marshal params or returns; it calls `Callable.Call(ctx)` and
+reads trap state from the journal.
 
-### Frame journal
+## Frame Journal
 
 `i.journal` is an Interpreter-owned `[]uint64` that both supplies entry context
-and reports deopt state. Header cells precede a stack of fixed-stride records:
+and reports deopt state. Header cells precede fixed-stride frame records:
 
 | Cell | Purpose |
 | --- | --- |
-| `journalStack` (0) | `&i.stack[0]` or `0`; external entry in |
-| `journalGlobals` (1) | `&i.globals[0]` or `0`; external entry in |
-| `journalBP` (2) | current frame `bp`; external entry in |
-| `journalSP` (3) | interpreter `sp`; external entry in/out |
-| `journalDepth` (4) | trap-time frame records written; native read/write |
-| `journalCap` (5) | frame budget `len(i.frames)-i.fp`; read-only |
-| `journalTrap` (6) | exit kind out: `trapNone` \| `trapFallback` \| `trapOverflow` \| `trapYield` |
-| `journalNextIP` (7) | resume/fallback IP out for the single-frame path |
-| `journalBudget` (8) | back-edges left before the next loop safepoint; native read/write |
-| `journalActive` (9) | active native call depth for frame-budget checks; X15 mirrors it on native entry |
-| `journalRC` (10) | `&i.rc[0]` or `0`; native refcount fast paths read/write guarded counts |
-| `journalUpvals` (11) | `&i.fr.upvals[0]` or `0`; closure-body `UPVAL_*` fast paths |
-| `journalHeap` (12) | `&i.heap[0]` or `0`; read-only for heap object fast paths |
-| `journalHead` (13)… | trap-time records of `{addr, bp, ip, returns}`, stride 4 |
+| `journalStack` | `&i.stack[0]` or `0`; external entry in |
+| `journalGlobals` | `&i.globals[0]` or `0`; external entry in |
+| `journalBP` | current frame `bp`; external entry in |
+| `journalSP` | interpreter `sp`; external entry in/out |
+| `journalDepth` | trap-time frame records written; native read/write |
+| `journalCap` | frame budget `len(i.frames)-i.fp`; read-only |
+| `journalTrap` | `trapNone`, `trapFallback`, `trapOverflow`, or `trapYield` |
+| `journalNextIP` | resume/fallback IP |
+| `journalBudget` | back-edges left before the next safepoint |
+| `journalActive` | active native call depth; X15 mirrors it |
+| `journalRC` | `&i.rc[0]` or `0`; guarded refcount fast paths |
+| `journalUpvals` | `&i.fr.upvals[0]` or `0`; closure-body upvalue fast paths |
+| `journalHeap` | `&i.heap[0]` or `0`; read-only heap fast paths |
+| `journalHead`... | records of `{addr, bp, ip, returns}`, stride 4 |
 
-Guard fallbacks set `journalTrap = trapFallback` and the resume IP. The segment
-wrapper restores `fr.ip` and runs the original threaded handler for that opcode
-once, avoiding native re-entry loops at the segment start. A framed deopt also
-self-records its VM frame so the Go wrapper can rebuild the call chain (see CALL
-Boundaries).
+Guard fallbacks set `journalTrap = trapFallback`, write `journalSP`, append live
+frame records, and return. The Go wrapper deopts from the journal, restores frame
+metadata, and if the fallback IP is 0 runs the shadowed threaded entry handler
+once to avoid immediate native re-entry.
 
-`i64.add` lowers only the boxable fast path. If the result is outside the 49-bit boxed i64 range, native materializes the pre-op stack and uses the guard fallback path so threaded execution can allocate the heap-spilled `types.I64`.
+## Calls And Returns
 
-JIT i64 ops require inline 49-bit operands — they read the value lane directly and skip the retain/release the threaded path does. An i64 local or global can still hold a heap-promoted `KindRef` at runtime (typed i64, but out of range). So every i64 slot **load** (`LOCAL_GET`, `GLOBAL_GET`) and **store** (`LOCAL_SET`, `GLOBAL_SET`, `LOCAL_TEE`, `GLOBAL_TEE`) emits a `requireInlineI64` tag check: a load tests the loaded value, a store tests the old slot value (the one a `*_SET` would `releaseBox`); if it is not the inline `KindI64` tag, native takes the guard fallback at the current IP so the interpreter — which owns heap i64 and refcounting — handles it. The check is emitted only for slots statically typed i64.
+Recorded `CONST_GET function; CALL` and guarded function-value `CALL` sites can
+lower to native `BL` when the observed target is a JIT-eligible `*types.Function`
+with matching arity. Closure body calls can lower when the `Tracer` observed the
+closure and the trace can recover its upvalue base. Host calls, allocation, heap
+mutation, maps, and unsupported targets stay threaded through deopt.
 
-## CALL Boundaries
+Native calls are frame-aware. The call lowering checks frame budget against
+`journalActive`, increments native depth, saves caller bp/sp on the host stack,
+and enters the callee trace. Normal return restores bp/sp and receives return
+values through the ABI registers and memory return slots. On deopt, each native
+callee/caller appends enough frame state for the Go wrapper to rebuild the VM
+call chain before threaded resume. Frame overflow reports `trapOverflow`, and the
+wrapper panics with `ErrFrameOverflow`.
 
-Direct `CONST_GET function; CALL` sites lower to native `BL` only in complete
-whole-component JIT, when the target is a JIT-eligible `*types.Function` in the
-same direct-call closure. This includes recursive and mutually recursive SCCs.
-Indirect `CALL` lowers in framed code when the function body's compile-time
-function-value candidates have the same arity; native emits a bounded compare
-chain against boxed function refs and falls back on a miss. Closure calls, host
-calls, capture-bearing direct targets, and unsupported callees stay threaded
-through segment fallback.
+`RETURN` closes the entry trace only when it returns from the outer recorded
+frame. Inlined callee returns stitch values back into the caller's symbolic stack.
 
-Native direct calls are **frame-aware**: `call` checks the frame budget against
-the pinned native-depth register X15, increments X15 and `journalActive`, saves
-caller bp/sp on the host stack, and enters the callee with `BL`. A normal return
-restores bp/sp, decrements X15/`journalActive`, and receives up to two return
-values through X0/X1 while still preserving memory return slots for top-level
-entry calls. Parameters stay stack-resident because callee locals are memory
-resident and caller materialization is required for deopt safety.
+## Branches And Loops
 
-On a **deopt** inside a nested callee, the innermost frame self-records its
-fallback frame, sets `journalTrap`, materializes its operands above its locals
-(`bp+nlocals`), and returns up the host call chain. Each native caller restores
-only its saved bp, appends its own recoverable frame, and returns again. The
-journal records therefore accumulate inner-to-outer. The Go wrapper rebuilds the
-chain in reverse: the last record reconciles the live outermost frame's IP;
-earlier records become new deeper frames (ref unretained, `code`/`upvals` restored
-via `restore`), `i.fp` advances, and threaded execution resumes at the innermost
-fallback IP.
+Recorded forward branches become guarded exits or pending branch continuations.
+`BR_IF` emits the recorded path and deopts on the unrecorded path unless a branch
+trace has been learned. `BR_TABLE` emits the observed target and deopts on other
+targets.
 
-Frame overflow is reported when X15/`journalActive >= journalCap` at a call site:
-native materializes the current stack, sets `journalTrap = trapOverflow`, unwinds
-to the Go wrapper, and the wrapper panics with `ErrFrameOverflow` (never host
-stack overflow).
+A loop is anchored at its header — the target of a backward `BR`/`BR_IF`. The
+safepoint discovers headers statically (`Tracer.headers` scans for back-edge
+targets) and, once the function is hot, records one iteration from the live state
+at the header (a stack-consistent point); the recorded trace's kind is `loop`.
+`emitRoot` lowers it with `loop` set: after the prologue it binds a back-edge
+label, walks the body, and at the recorded back-edge commits loop-carried locals
+to the VM stack, decrements `journalBudget`, and branches back while budget
+remains. The loop-exit edge (a `BR_IF` falling through, or any guard) is a normal
+side exit. Loop-carried locals round-trip through the VM stack each iteration —
+the body reloads them at the header — so no cross-back-edge register fixpoint is
+needed. Loops whose header is the function entry (`ip == 0`) are left to threaded
+dispatch.
 
-Indirect-call hits release the callee stack ref after the frame-budget guard and
-before active-depth increment. If releasing might free (`rc == 1`), native falls
-back and the threaded `CALL` owns the frame setup/release path. Native records
-deopt frames with `release=false`, because a hit has already consumed the callee
-stack ownership before entering the callee.
+A loop callable installs at `i.code[addr][header]` behind the `i.loop` wrapper,
+which (unlike `i.entry`) never tears the frame down: the header is reached
+mid-function with the frame live. `i.loop` seeds `journalBudget` with `loopBudget`
+(decoupled from `tick`, so a native iteration is not drowned in per-iteration
+yields), runs the native loop, then on `trapYield` deopts to the header and runs
+one safepoint before the Run loop re-dispatches the header callable; on a
+`trapFallback` side exit it deopts to the resume IP for threaded dispatch.
 
-Complete-JIT now **keeps** reachable guard fallbacks: a guard deopts safely
-through the journal, so a guard-bearing function (e.g. an i64 kernel that may
-heap-promote) compiles as a complete native entry and stays native until a guard
-actually fires at runtime. A *hard* reject (an opcode the backend cannot lower,
-or a non-`BL` CALL target) still drops the whole component to segment mode,
-because terminating a block early would leave native branch targets unbound.
+## Values, Refs, And Heap Reads
 
-## Branches
+Scalars stay unboxed between trace opcodes. `i32` values use low 32 bits, `f32`
+and `f64` use IEEE bits, and inline `i64` values use the full signed register
+value while guards enforce the boxed 49-bit range before materialization. Heap
+promoted `i64` values deopt on load.
 
-`BR` and `BR_IF` terminate traces. Branch offsets are signed int16 relative to instruction end. `BR` records its target as a forced successor and exits with the successor IP in `journalNextIP`. `BR_IF` emits both exit paths inline; it marks the context closed so `Exit` is not appended.
+`GLOBAL_*`, `LOCAL_*`, and `UPVAL_*` lower for in-range static slots. Scalar
+slots load/store raw values directly; ref-bearing slots use `journalRC` guarded
+retain/release. If a release might free (`rc == 1`), native deopts so the
+interpreter owns recursive release.
 
-`BR` targets are forced successors unless the target is a `NOP` or outside the function. Rejected ops force only safe structural successors (`NOP` or `BR` following the rejected opcode). A rejected direct `CONST_GET function; CALL` queues the post-call successor so supported work after the call remains eligible for JIT.
-
-Whole-function block mode carries shadow-stack values across block boundaries when every reachable predecessor agrees on the same VReg stack shape. If predecessors need a merge/phi, block mode rejects and falls back to segment compilation.
-
-## Loop Safepoints
-
-A native loop runs entirely in native code, so the threaded `Run` loop's per-tick
-coordination — `ctx` cancellation, fuel, hook, profiling — is skipped while it
-spins. Each native loop back-edge (a backward `BR`/`BR_IF` in block mode) is guarded
-by a `poll`: it decrements `journalBudget` and, on reaching zero, `yield`s. A yield
-resets `sp` to the frame's operand base, records the frame, reports `trapYield` with
-the loop-header IP, and returns; the Go wrapper deopts to that frame and runs
-`Interpreter.safepoint` (the same coordination the `Run` loop runs every tick).
-
-Re-entry stays native: after a successful block/complete compile, `reenter` installs
-a plain segment at each loop header (`loops` finds them from back-edge predecessors),
-so the post-yield re-dispatch of `code[addr][header]` resumes natively rather than
-threaded. `journalBudget` is refilled to `i.tick` by `scratch` on every native entry,
-so the budget bounds back-edges between safepoints, not raw instructions — an
-approximate but bounded fuel/cancellation cadence.
-
-Back-edges are polled only when the loop header is at IP > 0 and the operand stack is
-empty there (loop state lives in locals); otherwise block mode rejects to segment
-compilation, where every back-edge already exits to the interpreter. This keeps the
-yield/re-entry path free of operand marshaling.
-
-## Refs, Globals, Locals, And Upvals
-
-`GLOBAL_GET`/`GLOBAL_SET`/`GLOBAL_TEE` lower for in-range globals whose slot
-offset fits the ARM64 unsigned LDR/STR immediate. `LOCAL_*` and `UPVAL_*` lower
-for in-range static slots. Runtime values are still tested by boxed tag: scalar
-values skip RC work, refs use `journalRC`.
-
-`CONST_GET` still rejects ordinary heap refs such as strings so interpreted
-container constructors keep their existing ownership-transfer behavior. Function
-refs that belong to the current complete-JIT component can lower, because they
-are rooted constants and are needed for indirect-call candidates.
-
-Native `retain` increments `i.rc[addr]` inline. Native `release` first guards
-`rc > 1`; if the value might free (`rc == 1`), native restores the pre-op shadow
-stack and falls back so threaded `release()` performs tracing, closing, and free
-list updates. This keeps native code free of allocation and object graph walks.
-
-Closure bodies can compile as native entries. The threaded closure call still
-creates the frame and supplies `fr.upvals`; `context()` captures the upval slice
-base in `journalUpvals` before the entry wrapper clears frame code/upvals for
-native execution. Native direct calls intentionally skip capture-bearing targets
-because their upval base would be stale inside a single native dwell.
-
-## Heap Objects
-
-Native heap-object reads use `journalHeap` to inspect `types.Value` interface
-cells and compare concrete itabs captured at compile time. They never allocate
-and never write Go interface cells.
-
-Fast paths:
-
-- `REF_GET` reads scalar `i32`, `f32`, and `f64` cells. `i64` cells fall back
-  because large values may need heap boxing.
-- `ARRAY_LEN` reads typed arrays and generic `*types.Array`.
-- `ARRAY_GET` reads `i8`, `i32`, `f32`, `f64`, and generic boxed arrays. `i64`
-  typed arrays fall back for the same boxability reason as `REF_GET`.
-- `STRUCT_GET` reads VM-native `*types.Struct` fields for `i32`, `f32`, `f64`,
-  and `ref`; `i64` fields and `HostObject` fields fall back.
-
-Allocation and mutating object ops (`REF_NEW/SET`, `ARRAY_*` writes, `STRUCT_*`
-writes, `MAP_*`, `CLOSURE_NEW`) lower only in framed complete-JIT code as guard
-fallback boundaries. This keeps the function entry compiled while the threaded
-interpreter handles allocation, interface stores, map semantics, and release-to-
-zero behavior.
-
-## Phase A Opcode Coverage
-
-Fully lowered on ARM64:
-
-- Stack: `NOP`, `DROP`, `DUP`, `SWAP`, `SELECT`
-- Const: `I32_CONST`, `I64_CONST`, `F32_CONST`, `F64_CONST`, `CONST_GET`
-- Arithmetic: I32 add/sub/mul/div/rem/bitwise/shifts/comparisons/eqz; I64 add/sub/mul/div/rem/shifts/comparisons/eqz; F32/F64 add/sub/mul/div/comparisons
-- Conversions: `I32→I64`, `I64→I32`, `I32/I64→F32/F64`, `F32/F64→I32/I64`, `F32↔F64`
-- Branches: `BR`, `BR_IF`, `BR_TABLE`
-- Locals + globals: `LOCAL_GET/SET/TEE`, `GLOBAL_GET/SET/TEE`
-- `RETURN` (whole-function Entry path only)
-- `UNREACHABLE`
-
-## Phase B Opcode Coverage
-
-Fast paths implemented on ARM64:
-
-- `REF_NULL`: push `BoxedNull` constant and retain heap slot 0.
-- `REF_IS_NULL`: pop ref, compare full boxed word against `BoxedNull`, push BoxI32 result.
-- `REF_EQ`: pop two boxed values, compare at 64-bit level, push BoxI32 result.
-- `REF_NE`: pop two boxed values, compare at 64-bit level, push BoxI32 result.
-- `UPVAL_GET`/`UPVAL_SET`: closure-body fast paths with the same guarded RC
-  protocol as locals/globals.
-- Indirect `CALL`: monomorphic/polymorphic function-value compare chain in
-  framed native code, with fallback for host functions, closures, and misses.
-- Heap reads: `REF_GET`, `ARRAY_LEN`, selected `ARRAY_GET`, selected
-  `STRUCT_GET`.
-- Framed heap boundaries: allocation, mutation, map, and closure-new opcodes
-  deopt locally instead of rejecting the whole entry.
-
-All other `REF_*` and heap object operations fall back to threaded.
-
-## Value Boxing
-
-Boxed values follow NaN-boxing (see `value-representation.md`). JIT maintains boxed representation on the shadow stack; no unboxing/reboxing unless a typed lane extraction is needed for arithmetic. Boxing constants used by the lowerer:
-
-| Type | Tag bits [63:49] |
-|---|---|
-| F64 | raw IEEE bits (not NaN-boxed) |
-| F32 | `0x7FF2_...` |
-| I64 | `0x7FF4_...` |
-| I32 | `0x7FF6_...` |
-| Ref | `0x7FF8_...` |
-
-`BoxedNull = BoxRef(0) = 0x7FF8_0000_0000_0000`.
-
-## Segment Selection
-
-Emit rules:
-
-- accepted segment emits when lowered opcode count ≥ `c.cutoff` (default 8)
-- hot profile IPs are initial compile entries; no profile falls back to entry IP 0
-- `BR` targets are forced successors unless the target is `NOP` or out of range
-- rejected non-`CALL` ops force successors only when next opcode is `NOP` or `BR`
-- cold successors that are discovered but not forced count as skips
-- each bytecode entry IP is installed at most once per JIT attempt
-
-## Assembler Pipeline
-
-```text
-asm.New(arch)             allocate Assembler
-  Reg(type, width)        allocate VReg
-  Pin(vreg, preg)         bind to physical register
-  Emit(instruction)       append to IR list
-  Label() / Bind(label)   create/place branch targets
-  Build() → *Code         regalloc + encode + intra-Code reloc resolution
-asm.Link(buf, arch, []*Code, resolve) → []Linked
-  patches external relocations, writes to Buffer, flushes icache
-```
-
-`asm.Assembler` is single-shot: build it, link it, discard it. `Code` is immutable after `Build`. The W^X discipline is maintained by `asm.Buffer`: code is installed during `Link` and the buffer is sealed (executable, non-writable) afterward.
-
-## Executable Buffer
-
-`asm.Buffer` is a W^X mmap region for native code.
-
-Apple Silicon (Darwin/ARM64) enforces W^X at the hardware level. `asm/icache_darwin_arm64.go` flushes the instruction cache after each `Link`. Wrong seal/unseal ordering causes `SIGBUS` or `SIGILL`.
-
-Pool-published buffers are sealed once and never written again after publication.
-Later pool members install shared `Callable`s from the cache into their own
-closures instead of linking into the same buffer. The cache holds each published
-buffer until its owner and every attached interpreter have closed.
-
-## ARM64 ABI Summary
-
-AAPCS64: native VM callables receive one context pointer in X0. External entries
-load `scratchStack` through `scratchCtrl` from the journal. The trampoline saves
-and restores X19-X26 because the allocator may use those callee-saved registers;
-D8-D15 stay out of the float pool.
+Read-only heap fast paths cover observed scalar `REF_GET`, selected typed
+`ARRAY_LEN`/`ARRAY_GET`, and selected `STRUCT_GET` shapes. They guard the ref,
+heap itab, element/field kind, and index as needed. Heap allocation and mutation
+remain threaded.

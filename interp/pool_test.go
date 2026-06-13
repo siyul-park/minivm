@@ -289,16 +289,25 @@ func TestPool_Profile(t *testing.T) {
 
 	t.Run("shares one jit attempt across pool", func(t *testing.T) {
 		requireJIT(t)
-		prog := program.New([]instr.Instruction{
+		fn := types.NewFunctionBuilder(nil).WithReturns(types.TypeI32).Emit(
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_ADD),
-		})
-		p := NewPool(prog, 2, WithTick(1), WithCutoff(1), WithThreshold(5))
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.RETURN),
+		).Build()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+		var addr int
+		p := NewPool(prog, 2, WithTick(1), WithCutoff(1), WithThreshold(5), WithHook(captureEntryTrace(&addr)))
 		defer p.Close()
 
 		first, err := p.Get(context.Background())
 		require.NoError(t, err)
+		addr = first.constants[0].Ref()
 		second, err := p.Get(context.Background())
 		require.NoError(t, err)
 
@@ -323,16 +332,25 @@ func TestPool_Profile(t *testing.T) {
 
 	t.Run("late borrower installs published jit without compiling", func(t *testing.T) {
 		requireJIT(t)
-		prog := program.New([]instr.Instruction{
+		fn := types.NewFunctionBuilder(nil).WithReturns(types.TypeI32).Emit(
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_ADD),
-		})
-		p := NewPool(prog, 2, WithTick(1), WithCutoff(1), WithThreshold(1))
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+			instr.New(instr.RETURN),
+		).Build()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+		var addr int
+		p := NewPool(prog, 2, WithTick(1), WithCutoff(1), WithThreshold(5), WithHook(captureEntryTrace(&addr)))
 		defer p.Close()
 
 		first, err := p.Get(context.Background())
 		require.NoError(t, err)
+		addr = first.constants[0].Ref()
 		require.NoError(t, first.Run(context.Background()))
 		require.Equal(t, uint64(1), p.Profile().JIT.Attempts)
 

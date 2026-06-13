@@ -7,7 +7,7 @@
 
 **Fast bytecode VM that embeds anywhere.**
 
-minivm lets Go programs load tiny bytecode programs, call back into host functions, and run under explicit stack, heap, fuel, and hook limits. It starts as a fast threaded interpreter and promotes hot ARM64 segments to native code automatically.
+minivm lets Go programs load tiny bytecode programs, call back into host functions, and run under explicit stack, heap, fuel, and hook limits. It starts as a fast threaded interpreter and compiles hot functions and loops to native ARM64 code automatically with a trace JIT.
 
 ```bash
 go get github.com/siyul-park/minivm
@@ -23,7 +23,7 @@ go get github.com/siyul-park/minivm
 | Call host code | zero-reflection `HostFunction` path plus `Marshal` / `Unmarshal` for ordinary Go values |
 | Keep execution bounded | stack, heap, frame, fuel, context, and hook controls |
 | Stay fast before JIT | closure-threaded dispatch with near-zero allocations on recursive workloads |
-| Get native speed where it matters | adaptive ARM64 JIT for hot numeric segments |
+| Get native speed where it matters | adaptive ARM64 trace JIT for hot functions and loops |
 
 ## Build With It
 
@@ -34,21 +34,21 @@ go get github.com/siyul-park/minivm
 
 ## Performance
 
-Recursive `fib(35)` — darwin/arm64, Apple M4 Pro, Go 1.26.2. minivm is measured twice: **interp** is the pure threaded interpreter, **JIT** is the default `New`, which promotes the hot recursive segment to native code on ARM64:
+Recursive `fib(35)` — darwin/arm64, Apple M4 Pro, Go 1.26.2. minivm is measured twice: **interp** is the pure threaded interpreter, **JIT** is the default `New`, which records hot functions and loops and compiles them to native code on ARM64:
 
 | Runtime | ns/op | B/op | allocs/op | vs native Go | execution model |
 |---|---|---|---|---|---|
-| native Go | 20,120,613 | 0 | 0 | 1× | compiled |
-| wazero | 44,474,194 | 16 | 2 | 2.2× | WASM → native JIT |
-| **minivm (JIT)** | **62,877,686** | **3,589** | **47** | **3.1×** | **threaded interpreter + ARM64 JIT** |
-| minivm (interp) | 670,005,945 | 288 | 2 | 33× | threaded interpreter |
-| tengo | 1,139,041,250 | 312,797,912 | 39,088,180 | 57× | bytecode VM |
-| gopher-lua | 1,428,272,792 | 971,008 | 3,793 | 71× | register VM |
-| goja | 2,022,279,709 | 383,488 | 46,384 | 100× | bytecode VM |
+| native Go | 19,324,275 | 0 | 0 | 1× | compiled |
+| wazero | 44,409,757 | 16 | 2 | 2.3× | WASM → native JIT |
+| **minivm (JIT)** | **51,911,961** | **4,918** | **45** | **2.7×** | **threaded interpreter + ARM64 trace JIT** |
+| minivm (interp) | 669,343,195 | 288 | 2 | 35× | threaded interpreter |
+| tengo | 1,138,199,604 | 312,799,988 | 39,088,179 | 59× | bytecode VM |
+| gopher-lua | 1,462,044,917 | 971,008 | 3,793 | 76× | register VM |
+| goja | 2,052,722,000 | 383,488 | 46,384 | 106× | bytecode VM |
 
-The JIT is worth **10.7× on this workload** (670 ms → 63 ms per call). Among pure interpreters, minivm (interp) leads and is effectively allocation-light: **1.7× faster than tengo, 2.1× gopher-lua, 3.0× goja**, while tengo reaches 312 MB and 39M allocs. With the JIT on, minivm joins wazero as the only runtimes reaching native code, pulling **18–32× ahead** of the script VMs.
+The JIT is worth **13× on this workload** (669 ms → 52 ms per call). Among pure interpreters, minivm (interp) leads and is effectively allocation-light: **1.7× faster than tengo, 2.2× gopher-lua, 3.1× goja**, while tengo reaches 312 MB and 39M allocs. With the JIT on, minivm joins wazero as the only runtimes reaching native code, pulling **22–40× ahead** of the script VMs.
 
-minivm's JIT compiles whole functions, not just numeric segments: fib's recursive `const.get; call` fuses into a native branch-and-link to the callee, so the recursion runs entirely in native code. It still trails wazero by 1.4× because of bookkeeping wazero skips — minivm keeps values NaN-boxed and guards each call with a frame-budget check and a deopt-journal record, while wazero AOT-compiles to unboxed native code with no fallback path.
+minivm's JIT is trace-based: it records the hot path through a function entry or a loop header, then compiles that trace to native code with guards that deopt back to the interpreter on any unrecorded path. fib's recursive `const.get; call` fuses into a native branch-and-link to the callee, so the recursion runs entirely in native code; hot loops run their bodies in registers between safepoints. It trails wazero by 1.2× because of bookkeeping wazero skips — minivm keeps values NaN-boxed and guards each call with a frame-budget check and a deopt-journal record, while wazero AOT-compiles to unboxed native code with no fallback path.
 
 Single-instruction throughput (threaded interpreter, JIT disabled):
 
@@ -160,19 +160,21 @@ minivm runs a two-tier pipeline by default; thresholds and sampling cadence rema
            startup
 bytecode ──────────► threaded interpreter
                            │
-                     every 128 instructions:
-                     sample function + IP
+                     every tick: sample function + IP
                            │
-                     threshold reached
-                     (default 4096 ticks)
+                     function or loop header hot
                            │
                            ▼
-                     JIT compiles hot segments
-                     emits native ARM64
-                     replaces closures in-place
+                     record the live hot path → trace
+                     compile trace to native ARM64
+                     install at the entry / loop header
+                           │
+                     guard fails ──► deopt to interpreter
 ```
 
-JIT covers numeric computation: arithmetic, bitwise operations, comparisons, and type conversions across i32/i64/f32/f64. Stack ops, locals, constants, `select`, and branches compile when the stack shape fits a native segment signature. Direct static calls (`const.get; call`) fuse into a native branch-and-link to the callee's compiled entry, and `return` lowers to a native return, so whole call trees — recursion included — run in native code. Indirect and host calls, ref-holding globals, and heap-object ops stay threaded. The threaded interpreter uses closure dispatch rather than a switch table, so it stays useful before JIT kicks in.
+The JIT is **trace-based**: when a function entry or loop header gets hot, it records the live hot path through one execution, compiles that trace to native code, and installs it in the dispatch table. Every recorded assumption — call target, branch direction, value kind, array bounds — is a runtime guard; a failed guard deopts to the threaded interpreter through a journal and resumes exactly where the trace left off.
+
+Coverage spans arithmetic, bitwise, comparison, and conversion across i32/i64/f32/f64; stack ops, locals, globals, upvalues, constants, `select`, and branches; direct, closure, and guarded indirect calls; read-only heap fast paths (`array.get/len`, `struct.get`, ref reads); and **loops** — a hot loop runs its body in registers across a native back-edge, polling a safepoint between iterations. Allocation, mutation, and host calls end a trace and stay interpreter-owned. The threaded interpreter uses closure dispatch rather than a switch table, so it stays fast before the JIT kicks in.
 
 ## Instruction set
 
@@ -203,7 +205,6 @@ vm := interp.New(prog,
     interp.WithHook(func(vm *interp.Interpreter) error {
         return nil // called every tick — inspect state or enforce policy
     }),
-    interp.WithCutoff(4),       // min ops per JIT segment (default: 4)
 )
 ```
 
@@ -219,8 +220,8 @@ For profile snapshots and JIT counters, see [`docs/profile.md`](docs/profile.md)
 |---|---|
 | Threaded interpreter | ✅ |
 | AOT optimizer (O1) | ✅ |
-| ARM64 JIT — numeric ops, locals, branches | ✅ |
-| ARM64 JIT — calls, globals, refs | 🔲 planned |
+| ARM64 trace JIT — numerics, locals, globals, branches | ✅ |
+| ARM64 trace JIT — calls, upvalues, refs, heap reads, loops | ✅ |
 | x86-64 JIT | 🔲 planned |
 
 See [docs/roadmap.md](docs/roadmap.md) for priorities and future direction.

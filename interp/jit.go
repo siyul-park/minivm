@@ -1,100 +1,101 @@
 package interp
 
 import (
-	"sort"
-
-	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/asm"
-	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/types"
 )
 
-// lowerer is the architecture-specific opcode emitter. jitCompiler drives
-// the arch-neutral pipeline — block planning, segment selection, linking —
-// and delegates every native-code emission to a lowerer, so the same
-// compiler serves any target that implements these operations.
+// lowerer is the architecture-specific JIT lowerer. compiler owns the
+// recorded-trace orchestration and delegates native-code emission to the target
+// backend.
 type lowerer interface {
-	// prologue loads declared live-ins from the VM stack into segment inputs.
-	prologue(ctx *jitContext, fn *types.Function)
-	// enter emits the entry sequence (frame/link save) for a whole-function
-	// target reached as its own callable.
-	enter(ctx *jitContext)
-	// lower emits one opcode, advancing ctx; it returns false to reject.
-	lower(ctx *jitContext, op instr.Opcode) bool
-	// exitIP emits an interpreter exit that resumes threaded dispatch at nextIP.
-	exitIP(ctx *jitContext, nextIP int)
+	lower(ctx *lowering) bool
 }
 
-type jitCompiler struct {
+type compiler struct {
 	lowerer     lowerer
 	arch        asm.Arch
 	buffer      *asm.Buffer
 	scratchRegs []asm.PReg
-
-	cutoff int
 }
 
-type jitModule struct {
-	entries  map[int]asm.Callable
-	segments []jitSegment
-	emits    int
-	links    int
-	skips    int
-	bytes    int
+type module struct {
+	entries map[anchor]asm.Callable
+	loops   map[anchor]bool
+	emits   int
+	links   int
+	skips   int
+	bytes   int
 }
 
-type jitSegment struct {
+// lowering carries the symbolic interpreter state for one trace
+// compilation: typed operand values, the inline frame chain, and the recorded
+// branch continuations still waiting for emission. The arch lowerer mutates it
+// while emitting; compiler builds it and links the result.
+type lowering struct {
+	assembler *asm.Assembler
+	tree      *tree
+	branches  map[int]*trace
+	funcs     map[int]*types.Function
+	constants []types.Boxed
+	globals   []types.Boxed
+	heap      []types.Value
+	scratch   []asm.PReg
+	entry     asm.Label
+	head      asm.Label
+	back      asm.Label
+
+	values  []value
+	frames  []activation
+	pending []pending
+
+	addr    int
+	returns int
+	loop    bool
+}
+
+// value is one typed operand: a register plus the runtime kind the trace
+// observed for it. raw scalars skip NaN-boxing between opcodes — an i32 keeps
+// its value in the low 32 bits, an f64 keeps its IEEE bits (identical to its
+// boxed form). A raw ref is a compile-time function or closure constant that
+// was never materialized; fn holds the target function and ref holds the
+// callable heap ref.
+type value struct {
+	reg  asm.VReg
+	kind types.Kind
+	raw  bool
+	fn   int
+	ref  int
+}
+
+// activation mirrors one interpreter frame the trace inlined. Locals live in
+// registers; loaded marks which have been pulled from the VM stack and dirty
+// marks which must be written back before native code gives up control.
+type activation struct {
+	fn     *types.Function
+	code   []byte
+	kinds  []types.Kind
+	upvals []types.Kind
+	locals []value
+	loaded []bool
+	dirty  []bool
+
 	addr     int
-	ip       int
-	stack    int
-	callable asm.Callable
+	base     int
+	opBase   int
+	upvalRef int
+	resume   int
+	returns  int
 }
 
-type segment struct {
-	addr  int
-	start int
-	code  *asm.Code
-	stack int
-	next  int
-	force bool
-}
-
-type jitTarget struct {
-	addr    int
-	entry   asm.Label
-	label   asm.Label
-	fn      *types.Function
-	blocks  []*analysis.BasicBlock
-	labels  map[int]asm.Label
-	returns int
-}
-
-type jitContext struct {
-	assembler      *asm.Assembler
-	code           []byte
-	constants      []types.Boxed
-	globals        []types.Boxed
-	locals         []types.Kind
-	captures       []types.Kind
-	scratch        []asm.PReg
-	entry          asm.Label
-	labels         map[int]asm.Label
-	targets        map[int]jitTarget
-	functionValues []int
-	stack          []asm.VReg
-	inputs         []asm.VReg
-
-	ip        int
-	end       int
-	successor int
-	stop      bool
-	closed    bool
-
-	whole   bool
-	framed  bool
-	addr    int
-	returns int
+// pending is the cold continuation of a guarded branch: state was
+// flushed to the VM stack at the guard, so the body re-enters at label with
+// every local unloaded and every operand awaiting reload.
+type pending struct {
+	label  asm.Label
+	ops    []step
+	values []value
+	frames []activation
 }
 
 const (
@@ -143,111 +144,124 @@ const (
 	trapYield
 )
 
-func (c *jitCompiler) Close() error {
+// loopBudget is how many native loop back-edges run between safepoints. It is
+// independent of tick so a hot loop amortizes the deopt/re-enter cost of a
+// yield over many iterations while still polling for cancellation and fuel.
+const loopBudget = 1 << 13
+
+// newFrame builds the frame mirror for fn entered at stack delta base
+// with its operands starting at opBase in the value stack.
+func newFrame(addr int, fn *types.Function, base, opBase int) activation {
+	kinds := fn.LocalKinds()
+	upvals := types.Kinds(fn.Captures)
+	returns := 0
+	if fn.Typ != nil {
+		returns = len(fn.Typ.Returns)
+	}
+	return activation{
+		fn:      fn,
+		code:    fn.Code,
+		kinds:   kinds,
+		upvals:  upvals,
+		locals:  make([]value, len(kinds)),
+		loaded:  make([]bool, len(kinds)),
+		dirty:   make([]bool, len(kinds)),
+		addr:    addr,
+		base:    base,
+		opBase:  opBase,
+		returns: returns,
+	}
+}
+
+func (c *compiler) Close() error {
 	return c.buffer.Free()
 }
 
-// Compile attempts to lower fn into native code. Hot profile IPs seed segment
-// selection; rejected or short segments fall back to threaded dispatch.
-func (c *jitCompiler) Compile(i *Interpreter, addr int, fn *types.Function) (*jitModule, error) {
-	mod := &jitModule{entries: map[int]asm.Callable{}}
+// Compile attempts to lower the recorded entry trace for fn into one native
+// callable. Without a usable trace, unsupported op, or rejected observed shape,
+// it emits nothing and leaves threaded dispatch in place.
+func (c *compiler) Compile(i *Interpreter, addr int, fn *types.Function) (*module, error) {
+	mod := &module{entries: map[anchor]asm.Callable{}, loops: map[anchor]bool{}}
 	if fn == nil || len(fn.Code) == 0 {
 		return mod, nil
 	}
-	if addr > 0 {
-		if ok, err := c.complete(i, addr, fn, mod); ok || err != nil {
-			return mod, err
-		}
-	}
-	locals := fn.LocalKinds()
-
-	// A failed analysis (e.g. a branch past the last instruction) only rules out
-	// whole-function compilation; the segment fallback below still applies.
-	if blks, err := c.analyze(fn); err == nil {
-		seg, ok, err := c.function(i, fn, locals, blks, len(blks) <= 1)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			if err := c.linkEntry(mod, addr, seg); err != nil {
-				return nil, err
-			}
-			if err := c.reenter(i, addr, fn, locals, blks, mod); err != nil {
-				return nil, err
-			}
-			return mod, nil
-		}
-	}
-
-	var segs []segment
-	for targetAddr, targetFn := range c.component(i, addr, fn) {
-		targetSegs, err := c.segments(i, targetAddr, targetFn, targetFn.LocalKinds(), mod)
-		if err != nil {
-			return nil, err
-		}
-		segs = append(segs, targetSegs...)
-	}
-	if len(segs) == 0 {
-		return mod, nil
-	}
-	if err := c.link(mod, segs); err != nil {
-		return nil, err
-	}
-	return mod, nil
+	_, err := c.emit(i, addr, fn, mod)
+	return mod, err
 }
 
-func (c *jitCompiler) linkEntry(mod *jitModule, addr int, seg segment) error {
-	linked, err := asm.Link(c.buffer, c.arch, []*asm.Code{seg.code}, nil)
-	if err != nil {
-		return err
+func (c *compiler) scratch() ([]asm.PReg, bool) {
+	if len(c.scratchRegs) < scratchCount {
+		return nil, false
 	}
-	mod.entries[addr] = linked[0].Callable
-	mod.emits++
-	mod.bytes += len(seg.code.Bytes)
-	mod.links = 1
-	return nil
+	return c.scratchRegs[:scratchCount], true
 }
 
-func (c *jitCompiler) complete(i *Interpreter, addr int, fn *types.Function, mod *jitModule) (bool, error) {
+// emit lowers every non-aborted trace root recorded for addr — the function
+// entry plus any hot loop headers — into framed native callables, one per
+// anchor. It returns false (emitting nothing) when no usable trace exists or
+// the typed lowerer rejects them all, so the caller can leave threaded dispatch
+// installed.
+func (c *compiler) emit(i *Interpreter, addr int, fn *types.Function, mod *module) (bool, error) {
+	if i.tracer == nil {
+		return false, nil
+	}
+	any := false
+	for _, ip := range i.tracer.anchors(addr) {
+		ok, err := c.emitRoot(i, addr, fn, mod, anchor{addr: addr, ip: ip})
+		if err != nil {
+			return false, err
+		}
+		any = any || ok
+	}
+	return any, nil
+}
+
+// emitRoot lowers the single trace root anchored at a into one framed native
+// callable keyed by a. An entry root (a.ip == 0) compiles the whole function
+// from a clean frame; a loop root compiles one iteration with a native
+// back-edge re-entered mid-function at a.ip.
+func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *module, a anchor) (bool, error) {
+	tree := i.tracer.rootAt(a)
+	if tree == nil {
+		return false, nil
+	}
+	// Only the function entry and genuine loop headers compile to standalone
+	// native callables. Other non-zero anchors are side-exit branches the
+	// recorder stored as top-level trees; they are inlined into the entry trace
+	// through branchIPs, never installed on their own. A loop whose header is the
+	// function entry (ip 0) has no distinct entry trace to anchor the re-entry
+	// state and is left to threaded dispatch for now.
+	if (a.ip != 0) != (tree.root.kind == loop) {
+		return false, nil
+	}
 	scratch, ok := c.scratch()
 	if !ok {
 		return false, nil
 	}
-	funcs := c.component(i, addr, fn)
-	targets, ok, err := c.targets(funcs)
-	if err != nil || !ok {
-		return false, err
+	asmb := asm.New(c.arch)
+	entry := asmb.Label()
+	ctx := &lowering{
+		assembler: asmb,
+		tree:      tree,
+		branches:  tree.branchIPs(),
+		funcs:     c.funcs(i),
+		constants: i.constants,
+		globals:   i.globals,
+		heap:      i.heap,
+		scratch:   scratch,
+		entry:     entry,
+		head:      asmb.Label(),
+		addr:      addr,
+		loop:      tree.root.kind == loop,
 	}
-
-	a := asm.New(c.arch)
-	for targetAddr, target := range targets {
-		target.labels = c.allocLabels(a, target.blocks)
-		target.entry = a.Label()
-		target.label = target.labels[0]
-		targets[targetAddr] = target
+	if fn.Typ != nil {
+		ctx.returns = len(fn.Typ.Returns)
 	}
-	order := []int{addr}
-	for targetAddr := range funcs {
-		if targetAddr != addr {
-			order = append(order, targetAddr)
-		}
+	ctx.frames = append(ctx.frames, newFrame(addr, fn, 0, 0))
+	if !c.lowerer.lower(ctx) {
+		return false, nil
 	}
-	for _, targetAddr := range order {
-		target := targets[targetAddr]
-		ctx := c.newContext(a, i, target.fn, target.fn.LocalKinds(), 0, scratch)
-		ctx.whole = true
-		ctx.framed = true
-		ctx.addr = targetAddr
-		ctx.entry = target.entry
-		ctx.labels = target.labels
-		ctx.targets = targets
-		ctx.returns = target.returns
-		if !c.walkBlocks(ctx, target.fn, target.blocks, target.returns, true) {
-			return false, nil
-		}
-	}
-
-	code, err := a.Build()
+	code, err := asmb.Build()
 	if err != nil {
 		return false, err
 	}
@@ -255,569 +269,94 @@ func (c *jitCompiler) complete(i *Interpreter, addr int, fn *types.Function, mod
 	if err != nil {
 		return false, err
 	}
+	mod.entries[a] = linked[0].Callable
+	mod.loops[a] = ctx.loop
 	mod.emits++
+	mod.links++
 	mod.bytes += len(code.Bytes)
-	mod.links = len(targets)
-	for targetAddr, target := range targets {
-		callable, ok := linked[0].Entries[target.entry]
-		if !ok {
-			return false, asm.ErrUnresolvedLabel
-		}
-		mod.entries[targetAddr] = callable
-	}
-	for targetAddr, target := range targets {
-		if err := c.reenter(i, targetAddr, target.fn, target.fn.LocalKinds(), target.blocks, mod); err != nil {
-			return false, err
-		}
-	}
 	return true, nil
 }
 
-func (c *jitCompiler) targets(funcs map[int]*types.Function) (map[int]jitTarget, bool, error) {
-	out := make(map[int]jitTarget, len(funcs))
-	for addr, fn := range funcs {
-		if !c.eligible(fn) {
-			return nil, false, nil
-		}
-		blocks, err := c.analyze(fn)
-		if err != nil {
-			return nil, false, err
-		}
-		returns := 0
-		if fn.Typ != nil {
-			returns = len(fn.Typ.Returns)
-		}
-		out[addr] = jitTarget{
-			addr:    addr,
-			fn:      fn,
-			blocks:  blocks,
-			returns: returns,
+// funcs maps every function address to its *types.Function so the trace
+// compiler can inline observed call targets.
+func (c *compiler) funcs(i *Interpreter) map[int]*types.Function {
+	funcs := map[int]*types.Function{}
+	for addr := range i.instrs {
+		if fn, ok := i.function(addr); ok {
+			funcs[addr] = fn
 		}
 	}
-	return out, true, nil
-}
-
-func (c *jitCompiler) eligible(fn *types.Function) bool {
-	if fn == nil || fn.Typ == nil {
-		return false
-	}
-	return true
-}
-
-// analyze runs the pass manager and basic-block analysis for fn, returning its
-// control-flow blocks. A single block means straight-line code; more than one
-// means branches split it into a connected block graph.
-func (c *jitCompiler) analyze(fn *types.Function) ([]*analysis.BasicBlock, error) {
-	m := pass.NewManager()
-	if err := m.Run(fn); err != nil {
-		return nil, err
-	}
-	return analysis.NewBasicBlocksPass().Run(m)
-}
-
-// function runs two walks over blks: a feasibility walk that rejects when any
-// opcode cannot lower, then an emit walk that produces real code. When
-// requireTerminated is true the feasibility walk also checks that the last
-// lowered opcode left ctx in a RETURN-terminated state. Labels are bound per
-// block only when len(blks) > 1; with a single synthetic block the function
-// behaves as a straight-line whole-function compilation.
-func (c *jitCompiler) function(i *Interpreter, fn *types.Function, locals []types.Kind, blks []*analysis.BasicBlock, requireTerminated bool) (segment, bool, error) {
-	scratch, ok := c.scratch()
-	if !ok {
-		return segment{}, false, nil
-	}
-	returns := 0
-	if fn.Typ != nil {
-		returns = len(fn.Typ.Returns)
-	}
-	ctx := c.prepare(i, fn, locals, scratch, blks)
-	if !c.walkBlocks(ctx, fn, blks, returns, false) {
-		return segment{}, false, nil
-	}
-	if requireTerminated && !ctx.terminated() {
-		return segment{}, false, nil
-	}
-	if !c.valid(ctx, returns) {
-		return segment{}, false, nil
-	}
-
-	// Feasibility confirmed; redo on a fresh assembler, this time emitting.
-	ctx = c.prepare(i, fn, locals, scratch, blks)
-	if !c.walkBlocks(ctx, fn, blks, returns, true) {
-		return segment{}, false, nil
-	}
-	if !c.valid(ctx, returns) {
-		return segment{}, false, nil
-	}
-
-	code, err := ctx.assembler.Build()
-	if err != nil {
-		return segment{}, false, err
-	}
-	return segment{start: 0, code: code}, true, nil
-}
-
-// allocLabels assigns a fresh assembler label to each block start.
-func (c *jitCompiler) allocLabels(a *asm.Assembler, blocks []*analysis.BasicBlock) map[int]asm.Label {
-	labels := make(map[int]asm.Label, len(blocks))
-	for _, blk := range blocks {
-		labels[blk.Start] = a.Label()
-	}
-	return labels
-}
-
-// prepare constructs a fresh assembler + jitContext for a whole-function or
-// multi-block compilation. Labels are pre-allocated per block when blks
-// has more than one entry.
-func (c *jitCompiler) prepare(i *Interpreter, fn *types.Function, locals []types.Kind, scratch []asm.PReg, blks []*analysis.BasicBlock) *jitContext {
-	a := asm.New(c.arch)
-	ctx := c.newContext(a, i, fn, locals, 0, scratch)
-	ctx.whole = true
-	if len(blks) > 1 {
-		ctx.labels = c.allocLabels(a, blks)
-	}
-	return ctx
-}
-
-// walkBlocks drives the per-block feasibility or emit loop for both whole-function
-// and framed whole-component compilation. For each reachable block it binds the
-// block label, resets ctx scope, runs walk, and forwards merged stacks to
-// successor blocks. emit selects between a dry-run feasibility pass and emission.
-//
-// ctx.framed selects the entry/exit discipline:
-//   - non-framed: the entry label is bound once and live-ins loaded via prologue;
-//     a RETURN-terminated block emits an interpreter exit (exitIP).
-//   - framed: block 0 opens an Entry callable and saves the frame/link (enter);
-//     RETURN lowers to a native return itself, so no exitIP is appended, and a
-//     block reaching code end without stopping is rejected (a terminated-early
-//     block would leave native branch targets unbound). A guard fallback is kept —
-//     it deopts safely now that the wrapper rebuilds VM frames.
-func (c *jitCompiler) walkBlocks(ctx *jitContext, fn *types.Function, blks []*analysis.BasicBlock, returns int, emit bool) bool {
-	reachable := c.reachable(blks)
-	inputs := map[int][]asm.VReg{0: nil}
-	if !ctx.framed {
-		ctx.assembler.Bind(ctx.entry)
-		c.lowerer.prologue(ctx, fn)
-	}
-	for _, blk := range blks {
-		if !reachable[blk.Start] {
-			continue
-		}
-		stack, ok := inputs[blk.Start]
-		if !ok {
-			return false
-		}
-		switch {
-		case ctx.framed && blk.Start == 0:
-			ctx.assembler.Entry(ctx.entry)
-			c.lowerer.enter(ctx)
-		case ctx.labels != nil:
-			ctx.assembler.Bind(ctx.labels[blk.Start])
-		}
-		ctx.reset(blk, stack)
-
-		if _, reject := c.walk(ctx); reject >= 0 {
-			return false
-		}
-		if ctx.framed {
-			if !ctx.stop && blk.End >= len(fn.Code) {
-				return false
-			}
-		} else if ctx.stop && !ctx.closed {
-			if !c.valid(ctx, returns) {
-				return false
-			}
-			if emit {
-				c.lowerer.exitIP(ctx, ctx.ip)
-			}
-		}
-		if !c.merge(inputs, blks, blk, ctx.stack) {
-			return false
-		}
-	}
-	return true
-}
-
-func (c *jitCompiler) segments(i *Interpreter, addr int, fn *types.Function, locals []types.Kind, mod *jitModule) ([]segment, error) {
-	ips := i.hot(addr)
-	hot := make(map[int]bool, len(ips))
-	for _, ip := range ips {
-		if ip >= 0 && ip < len(fn.Code) {
-			hot[ip] = true
-		}
-	}
-	queue := []int{0}
-	if len(ips) > 0 {
-		queue = make([]int, 0, len(hot))
-		for ip := range hot {
-			queue = append(queue, ip)
-		}
-		sort.Ints(queue)
-	}
-	seen := make(map[int]bool, len(queue))
-	var out []segment
-
-	for len(queue) > 0 {
-		start := queue[0]
-		queue = queue[1:]
-		if seen[start] || start < 0 || start >= len(fn.Code) {
-			continue
-		}
-		seen[start] = true
-
-		seg, ok, err := c.segment(i, fn, locals, start)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			continue
-		}
-		seg.addr = addr
-		out = append(out, seg)
-
-		if seg.next < 0 || seen[seg.next] {
-			continue
-		}
-		if seg.force || hot[seg.next] {
-			queue = append(queue, seg.next)
-			continue
-		}
-		mod.skips++
-	}
-	return out, nil
-}
-
-// segment lowers a contiguous run of opcodes starting at startIP.
-// It walks the bytecode, calling the ARM64 emitter for each opcode. When lower
-// returns false the segment terminates by exiting at the current IP, so the
-// threaded interpreter resumes from there.
-//
-// Returns (code, true, nil) when at least cutoff opcodes lowered, otherwise
-// (nil, false, nil).
-func (c *jitCompiler) segment(i *Interpreter, fn *types.Function, locals []types.Kind, startIP int) (segment, bool, error) {
-	scratch, ok := c.scratch()
-	if !ok {
-		return segment{}, false, nil
-	}
-
-	ctx := c.newContext(asm.New(c.arch), i, fn, locals, startIP, scratch)
-	probed, reject := c.walk(ctx)
-	if probed < c.cutoff {
-		return segment{}, false, nil
-	}
-	inputs := len(ctx.inputs)
-	endIP := ctx.ip
-	next, force := c.next(fn, ctx, reject)
-
-	a := asm.New(c.arch)
-	ctx = c.newContext(a, i, fn, locals, startIP, scratch)
-	for i := 0; i < inputs; i++ {
-		v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		ctx.inputs = append(ctx.inputs, v)
-		ctx.stack = append(ctx.stack, v)
-	}
-	c.lowerer.prologue(ctx, fn)
-	lowered, _ := c.walk(ctx)
-	if lowered < c.cutoff || ctx.ip != endIP || len(ctx.inputs) != inputs {
-		return segment{}, false, nil
-	}
-
-	if !ctx.closed {
-		c.lowerer.exitIP(ctx, ctx.ip)
-	}
-
-	code, err := a.Build()
-	if err != nil {
-		return segment{}, false, err
-	}
-	return segment{
-		start: startIP,
-		code:  code,
-		stack: inputs,
-		next:  next,
-		force: force,
-	}, true, nil
-}
-
-func (c *jitCompiler) link(mod *jitModule, segs []segment) error {
-	codes := make([]*asm.Code, len(segs))
-	for i, seg := range segs {
-		codes[i] = seg.code
-		mod.emits++
-		mod.bytes += len(seg.code.Bytes)
-	}
-	linked, err := asm.Link(c.buffer, c.arch, codes, nil)
-	if err != nil {
-		return err
-	}
-	for i, seg := range segs {
-		mod.segments = append(mod.segments, jitSegment{
-			addr:     seg.addr,
-			ip:       seg.start,
-			stack:    seg.stack,
-			callable: linked[i].Callable,
-		})
-	}
-	mod.links += len(segs)
-	return nil
-}
-
-// reenter installs plain re-entry segments at the loop headers in blks, so a
-// budget yield from the native entry resumes natively at the header instead of
-// dropping to threaded dispatch.
-func (c *jitCompiler) reenter(i *Interpreter, addr int, fn *types.Function, locals []types.Kind, blks []*analysis.BasicBlock, mod *jitModule) error {
-	var segs []segment
-	for _, header := range c.loops(blks) {
-		seg, ok, err := c.segment(i, fn, locals, header)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			continue
-		}
-		seg.addr = addr
-		segs = append(segs, seg)
-	}
-	if len(segs) == 0 {
-		return nil
-	}
-	return c.link(mod, segs)
-}
-
-// loops returns the start IPs of loop headers — blocks targeted by a back-edge
-// from a block at or below them. IP 0 is excluded: re-entry there would re-run
-// the entry prologue.
-func (c *jitCompiler) loops(blks []*analysis.BasicBlock) []int {
-	var out []int
-	for _, b := range blks {
-		if b.Start == 0 {
-			continue
-		}
-		for _, p := range b.Preds {
-			if p >= 0 && p < len(blks) && blks[p].Start >= b.Start {
-				out = append(out, b.Start)
-				break
-			}
-		}
-	}
-	return out
-}
-
-func (c *jitCompiler) component(i *Interpreter, addr int, fn *types.Function) map[int]*types.Function {
-	funcs := map[int]*types.Function{addr: fn}
-	var visit func(*types.Function)
-	visit = func(current *types.Function) {
-		for _, dst := range append(c.calls(i, current), c.functionValues(i, current)...) {
-			target, ok := i.function(dst)
-			if !ok {
-				continue
-			}
-			if _, ok := funcs[dst]; !ok {
-				funcs[dst] = target
-				visit(target)
-			}
-		}
-	}
-	visit(fn)
 	return funcs
 }
 
-func (c *jitCompiler) functionValues(i *Interpreter, fn *types.Function) []int {
-	var out []int
-	for ip := 0; ip < len(fn.Code); {
-		next := ip + instr.Instruction(fn.Code[ip:]).Width()
-		if instr.Opcode(fn.Code[ip]) == instr.CONST_GET && !c.directCall(fn, ip) {
-			idx := int(uint16(fn.Code[ip+1]) | uint16(fn.Code[ip+2])<<8)
-			if idx < len(i.constants) && i.constants[idx].Kind() == types.KindRef {
-				if _, ok := i.function(i.constants[idx].Ref()); ok {
-					out = append(out, i.constants[idx].Ref())
-				}
-			}
+// frame returns the innermost (currently executing) frame.
+func (c *lowering) frame() *activation {
+	return &c.frames[len(c.frames)-1]
+}
+
+// push appends one operand to the symbolic stack.
+func (c *lowering) push(v value) {
+	c.values = append(c.values, v)
+}
+
+// pop removes and returns the top operand.
+func (c *lowering) pop() value {
+	v := c.values[len(c.values)-1]
+	c.values = c.values[:len(c.values)-1]
+	return v
+}
+
+// count reports how many operands the innermost frame owns.
+func (c *lowering) count() int {
+	return len(c.values) - c.frame().opBase
+}
+
+// slot returns the VM stack slot of values[idx] as a delta from the entry
+// frame's bp: the owning frame's locals floor plus the operand's position.
+func (c *lowering) slot(idx int) int {
+	for k := len(c.frames) - 1; k >= 0; k-- {
+		f := &c.frames[k]
+		if f.opBase <= idx {
+			return f.base + len(f.kinds) + (idx - f.opBase)
 		}
-		ip = next
 	}
-	return out
+	return idx
 }
 
-func (c *jitCompiler) calls(i *Interpreter, fn *types.Function) []int {
-	var out []int
-	for ip := 0; ip < len(fn.Code); {
-		next := ip + instr.Instruction(fn.Code[ip:]).Width()
-		if c.directCall(fn, ip) {
-			idx := int(uint16(fn.Code[ip+1]) | uint16(fn.Code[ip+2])<<8)
-			if idx < len(i.constants) && i.constants[idx].Kind() == types.KindRef {
-				if _, ok := i.function(i.constants[idx].Ref()); ok {
-					out = append(out, i.constants[idx].Ref())
-				}
-			}
-		}
-		ip = next
+// sp returns the interpreter stack pointer as a delta from the entry bp.
+func (c *lowering) sp() int {
+	f := c.frame()
+	return f.base + len(f.kinds) + (len(c.values) - f.opBase)
+}
+
+// snapshot deep-copies the operand and frame state for a pending branch:
+// registers are dropped because the guard flushed everything to the VM stack,
+// so the branch body reloads on demand.
+func (c *lowering) snapshot() ([]value, []activation) {
+	values := make([]value, len(c.values))
+	for i, v := range c.values {
+		values[i] = value{kind: v.kind, raw: v.raw, fn: v.fn, ref: v.ref}
 	}
-	return out
-}
-
-func (c *jitCompiler) scratch() ([]asm.PReg, bool) {
-	if len(c.scratchRegs) < scratchCount {
-		return nil, false
+	frames := make([]activation, len(c.frames))
+	for i, f := range c.frames {
+		frames[i] = f
+		frames[i].locals = make([]value, len(f.locals))
+		frames[i].loaded = make([]bool, len(f.loaded))
+		frames[i].dirty = make([]bool, len(f.dirty))
 	}
-	return c.scratchRegs[:scratchCount], true
-}
-
-func (c *jitCompiler) valid(ctx *jitContext, returns int) bool {
-	return len(ctx.inputs) == 0 && len(ctx.stack) == returns
-}
-
-func (c *jitCompiler) newContext(a *asm.Assembler, i *Interpreter, fn *types.Function, locals []types.Kind, startIP int, scratch []asm.PReg) *jitContext {
-	return &jitContext{
-		assembler:      a,
-		code:           fn.Code,
-		constants:      i.constants,
-		globals:        i.globals,
-		locals:         locals,
-		captures:       types.Kinds(fn.Captures),
-		scratch:        scratch,
-		entry:          a.Label(),
-		functionValues: c.functionValues(i, fn),
-		ip:             startIP,
-		end:            len(fn.Code),
-		successor:      -1,
-	}
-}
-
-// terminated reports whether the last walked block ended in a self-contained
-// RETURN: stopped, with no pending successor and no emitted exit.
-func (c *jitContext) terminated() bool {
-	return c.stop && c.successor < 0 && !c.closed
-}
-
-// reset positions ctx to walk block with stack as its entry operands.
-func (c *jitContext) reset(block *analysis.BasicBlock, stack []asm.VReg) {
-	c.ip = block.Start
-	c.end = block.End
-	c.stop = false
-	c.closed = false
-	c.successor = -1
-	c.stack = append(c.stack[:0], stack...)
+	return values, frames
 }
 
 // pin returns a fresh Width64 int vreg bound to the scratch register at idx.
-func (c *jitContext) pin(idx int) asm.VReg {
+func (c *lowering) pin(idx int) asm.VReg {
 	v := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	_ = c.assembler.Pin(v, c.scratch[idx])
 	return v
 }
 
 // pinTo returns a fresh Width64 int vreg bound to the physical register pr.
-func (c *jitContext) pinTo(pr asm.PReg) asm.VReg {
+func (c *lowering) pinTo(pr asm.PReg) asm.VReg {
 	v := c.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	_ = c.assembler.Pin(v, pr)
 	return v
-}
-
-// walk mirrors threaded compilation: decode one opcode, ask the ARM64 emitter
-// to lower it, then advance by the encoded width unless the opcode ended the
-// segment itself.
-func (c *jitCompiler) walk(ctx *jitContext) (count, reject int) {
-	reject = -1
-	for ctx.ip < ctx.end {
-		op := instr.Opcode(ctx.code[ctx.ip])
-		ipBefore := ctx.ip
-		width := instr.Instruction(ctx.code[ipBefore:]).Width()
-		if !c.lowerer.lower(ctx, op) {
-			reject = ipBefore
-			break
-		}
-		if !ctx.stop && ctx.ip == ipBefore {
-			ctx.ip = ipBefore + width
-		}
-		count++
-		if ctx.stop {
-			break
-		}
-	}
-	return count, reject
-}
-
-func (c *jitCompiler) next(fn *types.Function, ctx *jitContext, reject int) (int, bool) {
-	if ctx.successor >= 0 {
-		if ctx.successor >= len(fn.Code) || instr.Opcode(fn.Code[ctx.successor]) == instr.NOP {
-			return -1, false
-		}
-		return ctx.successor, true
-	}
-	if reject < 0 {
-		return -1, false
-	}
-	next := reject + instr.Instruction(fn.Code[reject:]).Width()
-	if next >= len(fn.Code) {
-		return -1, false
-	}
-	if c.directCall(fn, reject) {
-		next += 1
-		if next >= len(fn.Code) {
-			return -1, false
-		}
-		return next, true
-	}
-	if instr.Opcode(fn.Code[reject]) == instr.CALL {
-		return next, false
-	}
-	switch instr.Opcode(fn.Code[next]) {
-	case instr.NOP, instr.BR:
-		return next, true
-	default:
-		return next, false
-	}
-}
-
-func (c *jitCompiler) directCall(fn *types.Function, ip int) bool {
-	if ip < 0 || ip >= len(fn.Code) || instr.Opcode(fn.Code[ip]) != instr.CONST_GET {
-		return false
-	}
-	next := ip + instr.Instruction(fn.Code[ip:]).Width()
-	if next >= len(fn.Code) || instr.Opcode(fn.Code[next]) != instr.CALL {
-		return false
-	}
-	return true
-}
-
-func (c *jitCompiler) reachable(blocks []*analysis.BasicBlock) map[int]bool {
-	reachable := map[int]bool{}
-	if len(blocks) == 0 {
-		return reachable
-	}
-	queue := []int{0}
-	for len(queue) > 0 {
-		idx := queue[0]
-		queue = queue[1:]
-		if idx < 0 || idx >= len(blocks) || reachable[blocks[idx].Start] {
-			continue
-		}
-		reachable[blocks[idx].Start] = true
-		queue = append(queue, blocks[idx].Succs...)
-	}
-	return reachable
-}
-
-func (c *jitCompiler) merge(inputs map[int][]asm.VReg, blocks []*analysis.BasicBlock, block *analysis.BasicBlock, stack []asm.VReg) bool {
-	for _, idx := range block.Succs {
-		if idx < 0 || idx >= len(blocks) {
-			return false
-		}
-		start := blocks[idx].Start
-		existing, ok := inputs[start]
-		if !ok {
-			inputs[start] = append([]asm.VReg(nil), stack...)
-			continue
-		}
-		if len(existing) != len(stack) {
-			return false
-		}
-		for i := range existing {
-			if existing[i].ID() != stack[i].ID() {
-				return false
-			}
-		}
-	}
-	return true
 }

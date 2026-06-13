@@ -11,7 +11,6 @@ import (
 
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -2456,6 +2455,39 @@ func requireJIT(t *testing.T) {
 	}
 }
 
+func requireTraceEntry(t *testing.T, i *Interpreter, addr int) {
+	t.Helper()
+	compiler, err := newCompiler(i.cutoff)
+	require.NoError(t, err)
+	require.NotNil(t, compiler)
+	defer compiler.Close()
+
+	fn, ok := i.function(addr)
+	require.True(t, ok)
+	mod := &module{entries: map[anchor]asm.Callable{}, loops: map[anchor]bool{}}
+	ok, err = compiler.emit(i, addr, fn, mod)
+	require.NoError(t, err)
+	if !ok {
+		if tree := i.tracer.trees[anchor{addr: addr, ip: 0}]; tree != nil && tree.root != nil {
+			for idx, op := range tree.root.ops {
+				t.Logf("trace op %d: op=%v ip=%d fn=%d depth=%d seen=%v target=%d taken=%v callee=%d", idx, op.op, op.ip, op.fn, op.depth, op.seen, op.target, op.taken, op.callee)
+			}
+		}
+	}
+	require.True(t, ok)
+	require.NotNil(t, mod.entries[anchor{addr: addr, ip: 0}])
+}
+
+func captureEntryTrace(target *int) func(*Interpreter) error {
+	return func(i *Interpreter) error {
+		if target == nil || *target == 0 || i.Func() != *target || i.IP() != 0 {
+			return nil
+		}
+		_, err := i.tracer.capture(i, anchor{addr: *target, ip: 0})
+		return err
+	}
+}
+
 func TestInterpreter_Context(t *testing.T) {
 	t.Run("propagates value", func(t *testing.T) {
 		i := New(program.New(nil))
@@ -3335,7 +3367,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 0),
 			instr.New(instr.RETURN),
 		).Build()
-		p := prof.New()
+		p := newStats()
 		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
@@ -3343,14 +3375,14 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(fn),
-		), WithProfile(p), WithCutoff(1), WithFrame(2))
+		), withLocal(p), WithCutoff(1), WithFrame(2))
 		defer func() {
 			i.fp = 1
 			require.NoError(t, i.Close())
 		}()
 
 		addr := i.constants[0].Ref()
-		require.NoError(t, i.jit(addr))
+		require.NoError(t, i.compile(addr))
 		require.ErrorIs(t, i.Run(context.Background()), ErrFrameOverflow)
 	})
 
@@ -3363,19 +3395,19 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.GLOBAL_GET, 0),
 			instr.New(instr.RETURN),
 		).Build()
-		p := prof.New()
+		p := newStats()
 		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(fn),
-		), WithProfile(p), WithCutoff(1), WithGlobals(1))
+		), withLocal(p), WithCutoff(1), WithGlobals(1))
 		defer i.Close()
 		i.globals = append(i.globals, types.BoxI32(1))
 
 		addr := i.constants[0].Ref()
-		require.NoError(t, i.jit(addr))
+		require.NoError(t, i.compile(addr))
 		ref, err := i.Alloc(types.String("live"))
 		require.NoError(t, err)
 		require.NoError(t, i.SetGlobal(0, types.BoxRef(ref)))
@@ -3698,12 +3730,12 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 	})
 
 	t.Run("negative disables jit", func(t *testing.T) {
-		p := prof.New()
+		p := newStats()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_ADD),
-		}), WithProfile(p), WithTick(1), WithThreshold(-1), WithCutoff(1))
+		}), withLocal(p), WithTick(1), WithThreshold(-1), WithCutoff(1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		require.Zero(t, p.Snapshot().JIT.Attempts)
@@ -3711,25 +3743,25 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 
 	t.Run("zero attempts jit on first sample", func(t *testing.T) {
 		requireJIT(t)
-		p := prof.New()
+		p := newStats()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_ADD),
-		}), WithProfile(p), WithTick(1), WithThreshold(0), WithCutoff(1))
+		}), withLocal(p), WithTick(1), WithThreshold(0), WithCutoff(1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		require.Equal(t, uint64(1), p.Snapshot().JIT.Attempts)
 	})
 }
 
-func TestInterpreter_WithProfile(t *testing.T) {
+func TestInterpreter_withLocal(t *testing.T) {
 	t.Run("records opcode samples", func(t *testing.T) {
-		p := prof.New()
+		p := newStats()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.DROP),
-		}), WithProfile(p), WithTick(1))
+		}), withLocal(p), WithTick(1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 
@@ -3748,14 +3780,24 @@ func TestInterpreter_WithProfile(t *testing.T) {
 
 	t.Run("records jit counters", func(t *testing.T) {
 		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
+		p := newStats()
+		fn := types.NewFunctionBuilder(nil).WithReturns(types.TypeI32).Emit(
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_ADD),
-		}), WithProfile(p), WithTick(1), WithThreshold(1), WithCutoff(1))
+			instr.New(instr.RETURN),
+		).Build()
+		var addr int
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn)), withLocal(p), WithTick(1), WithThreshold(3), WithCutoff(1), WithHook(captureEntryTrace(&addr)))
 		defer i.Close()
+		addr = i.constants[0].Ref()
 		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(3), value)
 		jit := p.Snapshot().JIT
 		require.Equal(t, uint64(1), jit.Attempts)
 		require.NotZero(t, jit.Emits)
@@ -3765,7 +3807,7 @@ func TestInterpreter_WithProfile(t *testing.T) {
 
 	t.Run("samples jit loop", func(t *testing.T) {
 		requireJIT(t)
-		p := prof.New()
+		p := newStats()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 256),
 			instr.New(instr.GLOBAL_SET, 0),
@@ -3777,7 +3819,7 @@ func TestInterpreter_WithProfile(t *testing.T) {
 			instr.New(instr.I32_SUB),
 			instr.New(instr.GLOBAL_SET, 0),
 			instr.New(instr.BR, 0xFFEA), // -22 -> header
-		}), WithProfile(p), WithTick(1), WithCutoff(1), WithThreshold(1))
+		}), withLocal(p), WithTick(1), WithCutoff(1), WithThreshold(1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		// JIT fires at the first sample; further samples accrue only if the
@@ -4025,445 +4067,553 @@ func TestInterpreter_WithDebugger(t *testing.T) {
 }
 
 func TestInterpreter_JIT(t *testing.T) {
-	t.Run("lowers unreachable through fallback", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
+	t.Run("records linear trace before native install", func(t *testing.T) {
+		p := newStats()
 		i := New(program.New([]instr.Instruction{
-			instr.New(instr.UNREACHABLE),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.UNREACHABLE))
-
-		require.NoError(t, i.jit(0))
-		require.ErrorIs(t, i.Run(context.Background()), ErrUnreachableExecuted)
-		jit := p.Snapshot().JIT
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("lowers ref ne", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.REF_NE),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.REF_NE))
-		require.NoError(t, i.Push(types.Ref(0)))
-		require.NoError(t, i.Push(types.Ref(1)))
-
-		require.NoError(t, i.jit(0))
-		require.NoError(t, i.Run(context.Background()))
-		value, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(1), value)
-		jit := p.Snapshot().JIT
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("lowers i32 div and rem", func(t *testing.T) {
-		requireJIT(t)
-		cases := []struct {
-			name string
-			op   instr.Opcode
-			a    types.Value
-			b    types.Value
-			want types.Value
-		}{
-			{name: "div_s", op: instr.I32_DIV_S, a: types.I32(-21), b: types.I32(5), want: types.I32(-4)},
-			{name: "div_u", op: instr.I32_DIV_U, a: types.I32(-1), b: types.I32(2), want: types.I32(2147483647)},
-			{name: "rem_s", op: instr.I32_REM_S, a: types.I32(-21), b: types.I32(5), want: types.I32(-1)},
-			{name: "rem_u", op: instr.I32_REM_U, a: types.I32(-1), b: types.I32(2), want: types.I32(1)},
-		}
-		for _, tt := range cases {
-			t.Run(tt.name, func(t *testing.T) {
-				p := prof.New()
-				i := New(program.New([]instr.Instruction{
-					instr.New(tt.op),
-				}), WithProfile(p), WithCutoff(1))
-				defer i.Close()
-				p.Add(0, 0, byte(tt.op))
-				require.NoError(t, i.Push(tt.a))
-				require.NoError(t, i.Push(tt.b))
-
-				require.NoError(t, i.jit(0))
-				require.NoError(t, i.Run(context.Background()))
-				value, err := i.Pop()
-				require.NoError(t, err)
-				require.Equal(t, tt.want, value)
-				jit := p.Snapshot().JIT
-				require.NotZero(t, jit.Emits)
-				require.NotZero(t, jit.Links)
-			})
-		}
-	})
-
-	t.Run("falls back on i32 divide by zero", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.I32_DIV_S),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.I32_DIV_S))
-		require.NoError(t, i.Push(types.I32(1)))
-		require.NoError(t, i.Push(types.I32(0)))
-
-		require.NoError(t, i.jit(0))
-		require.ErrorIs(t, i.Run(context.Background()), ErrDivideByZero)
-		jit := p.Snapshot().JIT
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("loads stack inputs through scratch", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.I32_CONST, 5),
 			instr.New(instr.I32_ADD),
-		}), WithProfile(p), WithCutoff(1))
+		}), withLocal(p), WithTick(1), WithThreshold(1))
 		defer i.Close()
-		p.Add(0, 0, byte(instr.I32_ADD))
-		require.NoError(t, i.Push(types.I32(7)))
-		require.NoError(t, i.Push(types.I32(5)))
-		require.NoError(t, i.jit(0))
-		require.NoError(t, i.Run(context.Background()))
-		v, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(12), v)
 
-		jit := p.Snapshot().JIT
-		require.Equal(t, uint64(1), jit.Attempts)
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("lowers boxable i64 add", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.I64_ADD),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.I64_ADD))
-		require.NoError(t, i.Push(types.I64(40)))
-		require.NoError(t, i.Push(types.I64(2)))
-		require.NoError(t, i.jit(0))
-		require.NoError(t, i.Run(context.Background()))
-		v, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I64(42), v)
-
-		jit := p.Snapshot().JIT
-		require.Equal(t, uint64(1), jit.Attempts)
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("falls back when i64 add leaves boxable range", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.I64_ADD),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.I64_ADD))
-		require.NoError(t, i.Push(types.I64((1<<48)-1)))
-		require.NoError(t, i.Push(types.I64(1)))
-		require.NoError(t, i.jit(0))
-		require.NoError(t, i.Run(context.Background()))
-		v, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I64(1<<48), v)
-
-		jit := p.Snapshot().JIT
-		require.Equal(t, uint64(1), jit.Attempts)
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("lowers i64 arithmetic and shifts", func(t *testing.T) {
-		requireJIT(t)
-		cases := []struct {
-			name string
-			op   instr.Opcode
-			a    types.Value
-			b    types.Value
-			want types.Value
-		}{
-			{name: "sub", op: instr.I64_SUB, a: types.I64(50), b: types.I64(8), want: types.I64(42)},
-			{name: "mul", op: instr.I64_MUL, a: types.I64(6), b: types.I64(7), want: types.I64(42)},
-			{name: "div_s", op: instr.I64_DIV_S, a: types.I64(-84), b: types.I64(-2), want: types.I64(42)},
-			{name: "div_u", op: instr.I64_DIV_U, a: types.I64(84), b: types.I64(2), want: types.I64(42)},
-			{name: "rem_s", op: instr.I64_REM_S, a: types.I64(85), b: types.I64(43), want: types.I64(42)},
-			{name: "rem_u", op: instr.I64_REM_U, a: types.I64(85), b: types.I64(43), want: types.I64(42)},
-			{name: "shl", op: instr.I64_SHL, a: types.I64(21), b: types.I64(1), want: types.I64(42)},
-			{name: "shr_u", op: instr.I64_SHR_U, a: types.I64(84), b: types.I64(1), want: types.I64(42)},
-		}
-		for _, tt := range cases {
-			t.Run(tt.name, func(t *testing.T) {
-				p := prof.New()
-				i := New(program.New([]instr.Instruction{
-					instr.New(tt.op),
-				}), WithProfile(p), WithCutoff(1))
-				defer i.Close()
-				p.Add(0, 0, byte(tt.op))
-				require.NoError(t, i.Push(tt.a))
-				require.NoError(t, i.Push(tt.b))
-
-				require.NoError(t, i.jit(0))
-				require.NoError(t, i.Run(context.Background()))
-				value, err := i.Pop()
-				require.NoError(t, err)
-				require.Equal(t, tt.want, value)
-				jit := p.Snapshot().JIT
-				require.NotZero(t, jit.Emits)
-				require.NotZero(t, jit.Links)
-			})
-		}
-	})
-
-	t.Run("falls back when i64 stack input is heap promoted", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.I64_ADD),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.I64_ADD))
-		require.NoError(t, i.Push(types.I64(1<<50)))
-		require.NoError(t, i.Push(types.I64(1)))
-
-		require.NoError(t, i.jit(0))
 		require.NoError(t, i.Run(context.Background()))
 		value, err := i.Pop()
 		require.NoError(t, err)
-		require.Equal(t, types.I64((1<<50)+1), value)
-		jit := p.Snapshot().JIT
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
+		require.Equal(t, types.I32(12), value)
+
+		require.NotNil(t, i.tracer)
+		tree := i.tracer.trees[anchor{addr: 0, ip: 0}]
+		require.NotNil(t, tree)
+		require.Equal(t, linear, tree.root.kind)
+		require.Len(t, tree.root.ops, 3)
+		require.Equal(t, instr.I32_CONST, tree.root.ops[0].op)
+		require.Equal(t, instr.I32_ADD, tree.root.ops[2].op)
+		require.Equal(t, []int{0, 5, 10}, i.hot(0))
 	})
 
-	t.Run("falls back when i64 op leaves boxable range", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
+	t.Run("records branch direction before native install", func(t *testing.T) {
 		i := New(program.New([]instr.Instruction{
-			instr.New(instr.I64_SHL),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.I64_SHL))
-		require.NoError(t, i.Push(types.I64(1<<47)))
-		require.NoError(t, i.Push(types.I64(2)))
-
-		require.NoError(t, i.jit(0))
-		require.NoError(t, i.Run(context.Background()))
-		value, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I64(1<<49), value)
-		jit := p.Snapshot().JIT
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("falls back on i64 divide by zero", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.I64_DIV_S),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.I64_DIV_S))
-		require.NoError(t, i.Push(types.I64(1)))
-		require.NoError(t, i.Push(types.I64(0)))
-
-		require.NoError(t, i.jit(0))
-		require.ErrorIs(t, i.Run(context.Background()), ErrDivideByZero)
-		jit := p.Snapshot().JIT
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("lowers f32 to integer conversions", func(t *testing.T) {
-		requireJIT(t)
-		cases := []struct {
-			name string
-			op   instr.Opcode
-			in   types.Value
-			want types.Value
-		}{
-			{name: "i32_s", op: instr.F32_TO_I32_S, in: types.F32(-42.9), want: types.I32(-42)},
-			{name: "i32_u", op: instr.F32_TO_I32_U, in: types.F32(42.9), want: types.I32(42)},
-			{name: "i64_s", op: instr.F32_TO_I64_S, in: types.F32(-42.9), want: types.I64(-42)},
-			{name: "i64_u", op: instr.F32_TO_I64_U, in: types.F32(42.9), want: types.I64(42)},
-		}
-		for _, tt := range cases {
-			t.Run(tt.name, func(t *testing.T) {
-				p := prof.New()
-				i := New(program.New([]instr.Instruction{
-					instr.New(tt.op),
-				}), WithProfile(p), WithCutoff(1))
-				defer i.Close()
-				p.Add(0, 0, byte(tt.op))
-				require.NoError(t, i.Push(tt.in))
-
-				require.NoError(t, i.jit(0))
-				require.NoError(t, i.Run(context.Background()))
-				value, err := i.Pop()
-				require.NoError(t, err)
-				require.Equal(t, tt.want, value)
-				jit := p.Snapshot().JIT
-				require.NotZero(t, jit.Emits)
-				require.NotZero(t, jit.Links)
-			})
-		}
-	})
-
-	t.Run("falls back when f32 to i64 leaves boxable range", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.F32_TO_I64_S),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.F32_TO_I64_S))
-		require.NoError(t, i.Push(types.F32(float32(1<<50))))
-
-		require.NoError(t, i.jit(0))
-		require.NoError(t, i.Run(context.Background()))
-		value, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I64(1<<50), value)
-		jit := p.Snapshot().JIT
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("lowers f64 to integer conversions", func(t *testing.T) {
-		requireJIT(t)
-		cases := []struct {
-			name string
-			op   instr.Opcode
-			in   types.Value
-			want types.Value
-		}{
-			{name: "i32_s", op: instr.F64_TO_I32_S, in: types.F64(-42.9), want: types.I32(-42)},
-			{name: "i32_u", op: instr.F64_TO_I32_U, in: types.F64(42.9), want: types.I32(42)},
-			{name: "i64_s", op: instr.F64_TO_I64_S, in: types.F64(-42.9), want: types.I64(-42)},
-			{name: "i64_u", op: instr.F64_TO_I64_U, in: types.F64(42.9), want: types.I64(42)},
-		}
-		for _, tt := range cases {
-			t.Run(tt.name, func(t *testing.T) {
-				p := prof.New()
-				i := New(program.New([]instr.Instruction{
-					instr.New(tt.op),
-				}), WithProfile(p), WithCutoff(1))
-				defer i.Close()
-				p.Add(0, 0, byte(tt.op))
-				require.NoError(t, i.Push(tt.in))
-
-				require.NoError(t, i.jit(0))
-				require.NoError(t, i.Run(context.Background()))
-				value, err := i.Pop()
-				require.NoError(t, err)
-				require.Equal(t, tt.want, value)
-				jit := p.Snapshot().JIT
-				require.NotZero(t, jit.Emits)
-				require.NotZero(t, jit.Links)
-			})
-		}
-	})
-
-	t.Run("falls back when f64 to i64 leaves boxable range", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.F64_TO_I64_U),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.F64_TO_I64_U))
-		require.NoError(t, i.Push(types.F64(float64(1<<50))))
-
-		require.NoError(t, i.jit(0))
-		require.NoError(t, i.Run(context.Background()))
-		value, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I64(1<<50), value)
-		jit := p.Snapshot().JIT
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("compiles numeric globals", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 9),
-			instr.New(instr.GLOBAL_SET, 0),
-			instr.New(instr.GLOBAL_GET, 0),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.I32_CONST))
-		i.globals = append(i.globals, types.BoxI32(1))
-		require.NoError(t, i.jit(0))
-		require.NoError(t, i.Run(context.Background()))
-		v, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(9), v)
-		jit := p.Snapshot().JIT
-		require.Equal(t, uint64(1), jit.Attempts)
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("does not install entry on root frame", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 42),
-			instr.New(instr.RETURN),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.I32_CONST))
-
-		require.NoError(t, i.jit(0))
-		require.ErrorIs(t, i.Run(context.Background()), ErrFrameUnderflow)
-	})
-
-	t.Run("keeps frame teardown after framed heap fallback", func(t *testing.T) {
-		requireJIT(t)
-		fn := types.NewFunctionBuilder(nil).WithReturns(types.TypeI32).Emit(
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.BR_IF, 5),
 			instr.New(instr.I32_CONST, 0),
-			instr.New(instr.REF_NEW),
-			instr.New(instr.DROP),
 			instr.New(instr.I32_CONST, 42),
-			instr.New(instr.RETURN),
-		).Build()
-		returnIP := len(instr.Marshal([]instr.Instruction{
-			instr.New(instr.I32_CONST, 0),
-			instr.New(instr.REF_NEW),
-			instr.New(instr.DROP),
-			instr.New(instr.I32_CONST, 42),
-		}))
-		p := prof.New()
-		i := New(program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
-			},
-			program.WithConstants(fn),
-		), WithProfile(p), WithCutoff(1))
+		}), WithTick(1), WithThreshold(1))
 		defer i.Close()
-		addr := i.constants[0].Ref()
-		p.Add(addr, returnIP, byte(instr.RETURN))
 
-		require.NoError(t, i.jit(addr))
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 1, i.FP())
 		value, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(42), value)
-		require.NotZero(t, p.Snapshot().JIT.Emits)
+
+		tree := i.tracer.trees[anchor{addr: 0, ip: 0}]
+		require.NotNil(t, tree)
+		require.GreaterOrEqual(t, len(tree.root.ops), 2)
+		require.Equal(t, instr.BR_IF, tree.root.ops[1].op)
+		require.True(t, tree.root.ops[1].taken)
+	})
+
+	t.Run("records observed call target and inline depth", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(nil).WithReturns(types.TypeI32).Emit(
+			instr.New(instr.I32_CONST, 9),
+			instr.New(instr.RETURN),
+		).Build()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn)), WithTick(1), WithThreshold(1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(9), value)
+
+		tree := i.tracer.trees[anchor{addr: 0, ip: 0}]
+		require.NotNil(t, tree)
+		require.GreaterOrEqual(t, len(tree.root.ops), 4)
+		require.Equal(t, instr.CALL, tree.root.ops[1].op)
+		require.Equal(t, types.KindRef, tree.root.ops[1].seen.Kind())
+		require.Equal(t, 1, tree.root.ops[1].callee)
+		require.Equal(t, instr.I32_CONST, tree.root.ops[2].op)
+		require.Equal(t, 1, tree.root.ops[2].depth)
+	})
+
+	t.Run("records observed closure call target and inline depth", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Returns: []types.Type{types.TypeI32},
+		}).WithCaptures(types.TypeI32).Emit(
+			instr.New(instr.UPVAL_GET, 0),
+			instr.New(instr.RETURN),
+		).Build()
+		closure := types.NewClosure(fn.Typ, 1, []types.Boxed{types.BoxI32(11)})
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn, closure)), WithTick(1), WithThreshold(1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(11), value)
+
+		tree := i.tracer.trees[anchor{addr: 0, ip: 0}]
+		require.NotNil(t, tree)
+		require.Equal(t, instr.CALL, tree.root.ops[1].op)
+		require.Equal(t, types.KindRef, tree.root.ops[1].seen.Kind())
+		require.Equal(t, 1, tree.root.ops[1].callee)
+		require.Equal(t, instr.UPVAL_GET, tree.root.ops[2].op)
+		require.Equal(t, 1, tree.root.ops[2].depth)
+	})
+
+	t.Run("traces recursive i64 factorial natively", func(t *testing.T) {
+		requireJIT(t)
+		// fact(n) = n<=1 ? 1 : n * fact(n-1). fact(20) overflows the 49-bit
+		// boxable range mid-product, so the i64 multiply guard deopts to the
+		// interpreter (heap promotion) yet still yields the correct value.
+		fact := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI64},
+			Returns: []types.Type{types.TypeI64},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I64_CONST, 1),
+			instr.New(instr.I64_LE_S),
+			instr.New(instr.BR_IF, 20),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I64_CONST, 1),
+			instr.New(instr.I64_SUB),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.I64_MUL),
+			instr.New(instr.RETURN),
+			instr.New(instr.I64_CONST, 1),
+			instr.New(instr.RETURN),
+		).Build()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 20),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fact),
+		), WithTick(1), WithThreshold(1), WithCutoff(1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64(2432902008176640000), value)
+
+		addr := i.constants[0].Ref()
+		tree := i.tracer.trees[anchor{addr: addr, ip: 0}]
+		require.NotNil(t, tree)
+		require.NotNil(t, tree.root)
+		require.NotEqual(t, aborted, tree.root.kind)
+		require.NotZero(t, i.Profile().JIT.Emits)
+	})
+
+	t.Run("traces recursive global accumulation natively", func(t *testing.T) {
+		requireJIT(t)
+		// sumto(n): if n<=0 return; global[0] += n; sumto(n-1). sumto(5) => 15.
+		sumto := types.NewFunctionBuilder(&types.FunctionType{
+			Params: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_LE_S),
+			instr.New(instr.BR_IF, 22),
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.RETURN),
+			instr.New(instr.RETURN),
+		).Build()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.I32_CONST, 5),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+				instr.New(instr.GLOBAL_GET, 0),
+			},
+			program.WithConstants(sumto),
+		), WithTick(1), WithThreshold(1), WithCutoff(1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(15), value)
+
+		addr := i.constants[0].Ref()
+		tree := i.tracer.trees[anchor{addr: addr, ip: 0}]
+		require.NotNil(t, tree)
+		require.NotNil(t, tree.root)
+		require.NotEqual(t, aborted, tree.root.kind)
+		require.NotZero(t, i.Profile().JIT.Emits)
+	})
+
+	t.Run("traces recursive f32 accumulation natively", func(t *testing.T) {
+		requireJIT(t)
+		// acc(n) = n<=0 ? 0.0 : 1.5 + acc(n-1); acc(20) == 30.0.
+		acc := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeF32},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_LE_S),
+			instr.New(instr.BR_IF, 19),
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.F32_ADD),
+			instr.New(instr.RETURN),
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(0))),
+			instr.New(instr.RETURN),
+		).Build()
+		i := New(program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 20),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(acc),
+		), WithTick(1), WithThreshold(1), WithCutoff(1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.F32(30), value)
+
+		addr := i.constants[0].Ref()
+		tree := i.tracer.trees[anchor{addr: addr, ip: 0}]
+		require.NotNil(t, tree)
+		require.NotNil(t, tree.root)
+		require.NotEqual(t, aborted, tree.root.kind)
+		require.NotZero(t, i.Profile().JIT.Emits)
+	})
+
+	t.Run("traces loops natively", func(t *testing.T) {
+		requireJIT(t)
+
+		patch := func(code []instr.Instruction, branch, target int) {
+			start := len(instr.Marshal(code[:branch]))
+			end := start + len(code[branch])
+			dst := len(instr.Marshal(code[:target]))
+			code[branch].SetOperand(0, uint64(uint16(int16(dst-end))))
+		}
+		// requireLoop asserts a non-aborted loop trace was recorded at one of the
+		// function's loop headers and that native code was emitted.
+		requireLoop := func(t *testing.T, i *Interpreter, addr int) {
+			t.Helper()
+			found := false
+			for _, h := range i.tracer.headers(i, addr) {
+				tree := i.tracer.trees[anchor{addr: addr, ip: h}]
+				if tree != nil && tree.root != nil && tree.root.kind == loop {
+					found = true
+				}
+			}
+			require.True(t, found, "no loop trace recorded at a header")
+			require.NotZero(t, i.Profile().JIT.Emits)
+		}
+
+		t.Run("unconditional back-edge sums a counted loop", func(t *testing.T) {
+			// sum = n + (n-1) + ... + 1, looping with a BR back-edge and a forward
+			// BR_IF loop-exit guard (the typed-array-sum loop shape).
+			body := []instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.LOCAL_SET, 1),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_LE_S),
+				instr.New(instr.BR_IF, 0),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.LOCAL_SET, 1),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.LOCAL_SET, 0),
+				instr.New(instr.BR, 0),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.RETURN),
+			}
+			patch(body, 5, 15) // forward exit guard
+			patch(body, 14, 2) // back-edge to header
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			}).WithLocals(types.TypeI32, types.TypeI32).Emit(body...).Build()
+			i := New(program.New(
+				[]instr.Instruction{
+					instr.New(instr.I32_CONST, 1000),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(fn),
+			), WithTick(1), WithThreshold(1), WithCutoff(1))
+			defer i.Close()
+
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(500500), value)
+			requireLoop(t, i, i.constants[0].Ref())
+		})
+
+		t.Run("conditional back-edge counts down", func(t *testing.T) {
+			// counter loops while non-zero via a BR_IF back-edge (the
+			// closure-counter loop shape) and returns the iteration count. Local
+			// setup precedes the loop so its header sits past the function entry.
+			body := []instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.LOCAL_SET, 1),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.LOCAL_SET, 1),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.LOCAL_TEE, 0),
+				instr.New(instr.BR_IF, 0),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.RETURN),
+			}
+			patch(body, 10, 2) // back-edge to header (loop top)
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			}).WithLocals(types.TypeI32, types.TypeI32).Emit(body...).Build()
+			i := New(program.New(
+				[]instr.Instruction{
+					instr.New(instr.I32_CONST, 1000),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(fn),
+			), WithTick(1), WithThreshold(1), WithCutoff(1))
+			defer i.Close()
+
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(1000), value)
+			requireLoop(t, i, i.constants[0].Ref())
+		})
+
+		t.Run("native loop yields to a canceled context", func(t *testing.T) {
+			// A long loop must poll the safepoint across its back-edge so a
+			// canceled context still stops it rather than spinning natively.
+			body := []instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.LOCAL_SET, 1),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.LOCAL_TEE, 0),
+				instr.New(instr.BR_IF, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.RETURN),
+			}
+			patch(body, 6, 2) // back-edge to header past the entry
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			}).WithLocals(types.TypeI32, types.TypeI32).Emit(body...).Build()
+			i := New(program.New(
+				[]instr.Instruction{
+					instr.New(instr.I32_CONST, 2000000000),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(fn),
+			), WithTick(1), WithThreshold(1), WithCutoff(1))
+			defer i.Close()
+
+			ctx, cancel := context.WithCancel(context.Background())
+			// Cancel only once the loop runs natively, so the stop must come from
+			// the native back-edge polling the safepoint, not the threaded warmup.
+			i.hook = func(i *Interpreter) error {
+				if i.Profile().JIT.Emits > 0 {
+					cancel()
+				}
+				return nil
+			}
+			require.ErrorIs(t, i.Run(ctx), context.Canceled)
+		})
+	})
+
+	t.Run("trace lowerer covers phase 3 op classes", func(t *testing.T) {
+		requireJIT(t)
+
+		t.Run("captured closure call", func(t *testing.T) {
+			body := types.NewFunctionBuilder(&types.FunctionType{
+				Returns: []types.Type{types.TypeI32},
+			}).WithCaptures(types.TypeI32).Emit(
+				instr.New(instr.UPVAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.RETURN),
+			).Build()
+			caller := types.NewFunctionBuilder(&types.FunctionType{
+				Returns: []types.Type{types.TypeI32},
+			}).Emit(
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.CALL),
+				instr.New(instr.RETURN),
+			).Build()
+			closure := types.NewClosure(body.Typ, 1, []types.Boxed{types.BoxI32(41)})
+			var addr int
+			i := New(program.New(
+				[]instr.Instruction{
+					instr.New(instr.CONST_GET, 2),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(body, closure, caller),
+			), WithTick(1), WithThreshold(-1), WithCutoff(1), WithHook(captureEntryTrace(&addr)))
+			defer i.Close()
+			addr = i.constants[2].Ref()
+
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(42), v)
+			requireTraceEntry(t, i, addr)
+		})
+
+		t.Run("indirect function call", func(t *testing.T) {
+			add := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			}).Emit(
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.RETURN),
+			).Build()
+			caller := types.NewFunctionBuilder(&types.FunctionType{
+				Returns: []types.Type{types.TypeI32},
+			}).WithLocals(types.TypeRef).Emit(
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.LOCAL_SET, 0),
+				instr.New(instr.I32_CONST, 41),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.CALL),
+				instr.New(instr.RETURN),
+			).Build()
+			var addr int
+			i := New(program.New(
+				[]instr.Instruction{
+					instr.New(instr.CONST_GET, 1),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(add, caller),
+			), WithTick(1), WithThreshold(-1), WithCutoff(1), WithHook(captureEntryTrace(&addr)))
+			defer i.Close()
+			addr = i.constants[1].Ref()
+
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(42), v)
+			requireTraceEntry(t, i, addr)
+		})
+
+		t.Run("heap reads", func(t *testing.T) {
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeRef, types.TypeRef, types.TypeRef},
+				Returns: []types.Type{types.TypeI32},
+			}).Emit(
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.REF_GET),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.ARRAY_LEN),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_GET),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.LOCAL_GET, 2),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.STRUCT_GET),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.RETURN),
+			).Build()
+			var addr int
+			i := New(program.New(
+				[]instr.Instruction{
+					instr.New(instr.GLOBAL_GET, 0),
+					instr.New(instr.GLOBAL_GET, 1),
+					instr.New(instr.GLOBAL_GET, 2),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(fn),
+			), WithTick(1), WithThreshold(-1), WithCutoff(1), WithHook(captureEntryTrace(&addr)))
+			defer i.Close()
+			addr = i.constants[0].Ref()
+			cell, err := i.Alloc(types.I32(5))
+			require.NoError(t, err)
+			array, err := i.Alloc(types.TypedArray[int32]{10, 20})
+			require.NoError(t, err)
+			st, err := i.Alloc(types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32)), types.BoxI32(15)))
+			require.NoError(t, err)
+			i.globals = append(i.globals, types.BoxRef(cell), types.BoxRef(array), types.BoxRef(st))
+
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(42), v)
+			requireTraceEntry(t, i, addr)
+		})
+
+		t.Run("br table", func(t *testing.T) {
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Returns: []types.Type{types.TypeI32},
+			}).Emit(
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.BR_TABLE, 2, 0, 8, 16),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.BR, 16),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.BR, 8),
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.BR, 0),
+				instr.New(instr.NOP),
+				instr.New(instr.RETURN),
+			).Build()
+			var addr int
+			i := New(program.New(
+				[]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(fn),
+			), WithTick(1), WithThreshold(-1), WithCutoff(1), WithHook(captureEntryTrace(&addr)))
+			defer i.Close()
+			addr = i.constants[0].Ref()
+
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(42), v)
+			requireTraceEntry(t, i, addr)
+		})
 	})
 
 	t.Run("updates entry slot for direct call", func(t *testing.T) {
@@ -4480,7 +4630,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			instr.New(instr.CALL),
 			instr.New(instr.RETURN),
 		).Build()
-		p := prof.New()
+		p := newStats()
 		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 21),
@@ -4488,307 +4638,16 @@ func TestInterpreter_JIT(t *testing.T) {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(callee, caller),
-		), WithProfile(p), WithCutoff(1))
+		), withLocal(p), WithCutoff(1))
 		defer i.Close()
 
-		require.NoError(t, i.jit(i.constants[0].Ref()))
-		require.NoError(t, i.jit(i.constants[1].Ref()))
+		require.NoError(t, i.compile(i.constants[0].Ref()))
+		require.NoError(t, i.compile(i.constants[1].Ref()))
 		require.NoError(t, i.Run(context.Background()))
 		require.Equal(t, 1, i.FP())
 		value, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(42), value)
-	})
-
-	t.Run("compiles direct call complete entries", func(t *testing.T) {
-		requireJIT(t)
-		callee := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32},
-			Returns: []types.Type{types.TypeI32},
-		}).Emit(
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I32_CONST, 2),
-			instr.New(instr.I32_MUL),
-			instr.New(instr.RETURN),
-		).Build()
-		caller := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32},
-			Returns: []types.Type{types.TypeI32},
-		}).Emit(
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CALL),
-			instr.New(instr.RETURN),
-		).Build()
-		i := New(program.New(nil, program.WithConstants(callee, caller)), WithCutoff(1))
-		defer i.Close()
-		require.NoError(t, i.ensure())
-
-		calleeAddr := i.constants[0].Ref()
-		callerAddr := i.constants[1].Ref()
-		mod := &jitModule{entries: map[int]asm.Callable{}}
-
-		ok, err := i.compiler.complete(i, callerAddr, caller, mod)
-		require.NoError(t, err)
-		require.True(t, ok)
-		require.NotNil(t, mod.entries[callerAddr])
-		require.NotNil(t, mod.entries[calleeAddr])
-	})
-
-	t.Run("compiles recursive fibonacci complete entry", func(t *testing.T) {
-		requireJIT(t)
-		fib := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32},
-			Returns: []types.Type{types.TypeI32},
-		}).Emit(
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I32_CONST, 2),
-			instr.New(instr.I32_LT_S),
-			instr.New(instr.BR_IF, 26),
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.I32_SUB),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CALL),
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I32_CONST, 2),
-			instr.New(instr.I32_SUB),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CALL),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.RETURN),
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.RETURN),
-		).Build()
-		p := prof.New()
-		i := New(program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 20),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
-			},
-			program.WithConstants(fib),
-		), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-
-		addr := i.constants[0].Ref()
-		require.NoError(t, i.jit(addr))
-		jit := p.Snapshot().JIT
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-		require.Contains(t, i.fallbacks, addr)
-
-		require.NoError(t, i.Run(context.Background()))
-		value, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(6765), value)
-	})
-
-	t.Run("compiles recursive direct call complete entry", func(t *testing.T) {
-		requireJIT(t)
-		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32},
-			Returns: []types.Type{types.TypeI32},
-		}).Emit(
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I32_EQZ),
-			instr.New(instr.BR_IF, 13),
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.I32_SUB),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CALL),
-			instr.New(instr.RETURN),
-			instr.New(instr.I32_CONST, 0),
-			instr.New(instr.RETURN),
-		).Build()
-		i := New(program.New(nil, program.WithConstants(fn)), WithCutoff(1))
-		defer i.Close()
-		require.NoError(t, i.ensure())
-
-		addr := i.constants[0].Ref()
-		mod := &jitModule{entries: map[int]asm.Callable{}}
-
-		ok, err := i.compiler.complete(i, addr, fn, mod)
-		require.NoError(t, err)
-		require.True(t, ok)
-		require.NotNil(t, mod.entries[addr])
-	})
-
-	t.Run("completes guarded i64 factorial entry", func(t *testing.T) {
-		requireJIT(t)
-		// The i64 LOCAL_GET emits a heap-promotion guard, so this entry can deopt.
-		// It still compiles as a complete native entry; the guard recovers a real
-		// VM frame on fallback instead of blocking whole-function compilation.
-		// BR_IF 20 jumps to a dedicated base-case block (return 1) so the recursive
-		// and base paths return independently — no stack-shape merge to reject.
-		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI64},
-			Returns: []types.Type{types.TypeI64},
-		}).Emit(
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I64_CONST, 1),
-			instr.New(instr.I64_LE_S),
-			instr.New(instr.BR_IF, 20),
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I64_CONST, 1),
-			instr.New(instr.I64_SUB),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CALL),
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I64_MUL),
-			instr.New(instr.RETURN),
-			instr.New(instr.I64_CONST, 1),
-			instr.New(instr.RETURN),
-		).Build()
-		i := New(program.New(nil, program.WithConstants(fn)), WithCutoff(1))
-		defer i.Close()
-		require.NoError(t, i.ensure())
-
-		addr := i.constants[0].Ref()
-		mod := &jitModule{entries: map[int]asm.Callable{}}
-
-		ok, err := i.compiler.complete(i, addr, fn, mod)
-		require.NoError(t, err)
-		require.True(t, ok)
-		require.NotNil(t, mod.entries[addr])
-	})
-
-	t.Run("recovers nested native deopt across i64 overflow", func(t *testing.T) {
-		requireJIT(t)
-		// f(n) = n <= 0 ? 0 : LARGE + f(n-1) = n*LARGE. The param stays inline so
-		// each level calls the next natively (native BL), but the I64_ADD on the
-		// way up overflows the 49-bit boxed range partway, deopting a frame reached
-		// through several native callers — exercising the nested unwind + frame
-		// rebuild. Threaded is the ground truth.
-		const large = 1 << 45
-		const depth = 20
-		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI64},
-			Returns: []types.Type{types.TypeI64},
-		}).Emit(
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I64_CONST, 0),
-			instr.New(instr.I64_LE_S),
-			instr.New(instr.BR_IF, 27),
-			instr.New(instr.I64_CONST, large),
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I64_CONST, 1),
-			instr.New(instr.I64_SUB),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CALL),
-			instr.New(instr.I64_ADD),
-			instr.New(instr.RETURN),
-			instr.New(instr.I64_CONST, 0),
-			instr.New(instr.RETURN),
-		).Build()
-		main := []instr.Instruction{
-			instr.New(instr.I64_CONST, depth),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CALL),
-		}
-
-		want := types.I64(int64(depth) * large)
-
-		threaded := New(program.New(main, program.WithConstants(fn)))
-		defer threaded.Close()
-		require.NoError(t, threaded.Run(context.Background()))
-		gt, err := threaded.Pop()
-		require.NoError(t, err)
-		require.Equal(t, want, gt)
-
-		i := New(program.New(main, program.WithConstants(fn)), WithCutoff(1))
-		defer i.Close()
-		addr := i.constants[0].Ref()
-		require.NoError(t, i.jit(addr))
-		require.Contains(t, i.fallbacks, addr)
-
-		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, 1, i.FP())
-		value, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, want, value)
-	})
-
-	t.Run("compiles direct call scc complete entries", func(t *testing.T) {
-		requireJIT(t)
-		even := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32},
-			Returns: []types.Type{types.TypeI32},
-		}).Emit(
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I32_EQZ),
-			instr.New(instr.BR_IF, 13),
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.I32_SUB),
-			instr.New(instr.CONST_GET, 1),
-			instr.New(instr.CALL),
-			instr.New(instr.RETURN),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.RETURN),
-		).Build()
-		odd := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32},
-			Returns: []types.Type{types.TypeI32},
-		}).Emit(
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I32_EQZ),
-			instr.New(instr.BR_IF, 13),
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.I32_SUB),
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.CALL),
-			instr.New(instr.RETURN),
-			instr.New(instr.I32_CONST, 0),
-			instr.New(instr.RETURN),
-		).Build()
-		p := prof.New()
-		i := New(program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 10),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
-			},
-			program.WithConstants(even, odd),
-		), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-
-		evenAddr := i.constants[0].Ref()
-		oddAddr := i.constants[1].Ref()
-		require.NoError(t, i.jit(evenAddr))
-		require.Contains(t, i.fallbacks, evenAddr)
-		require.Contains(t, i.fallbacks, oddAddr)
-
-		require.NoError(t, i.Run(context.Background()))
-		value, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(1), value)
-	})
-
-	t.Run("complete entry merges stack across branch blocks", func(t *testing.T) {
-		requireJIT(t)
-
-		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Returns: []types.Type{types.TypeI32},
-		}).Emit(
-			instr.New(instr.I32_CONST, 40),
-			instr.New(instr.BR, 0),
-			instr.New(instr.I32_CONST, 2),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.RETURN),
-		).Build()
-		i := New(program.New(nil, program.WithConstants(fn)))
-		defer i.Close()
-		require.NoError(t, i.ensure())
-		addr := i.constants[0].Ref()
-		mod := &jitModule{entries: map[int]asm.Callable{}}
-
-		ok, err := i.compiler.complete(i, addr, fn, mod)
-		require.NoError(t, err)
-		require.True(t, ok)
-		require.NotNil(t, mod.entries[addr])
 	})
 
 	t.Run("entry fallback restores frame metadata", func(t *testing.T) {
@@ -4800,7 +4659,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		defer i.Close()
 
 		addr := i.constants[0].Ref()
-		i.fallbacks[addr] = i.code[addr][0]
+		i.fallbacks[anchor{addr: addr, ip: 0}] = i.code[addr][0]
 		i.frames[1] = frame{addr: addr, ref: addr, code: i.code[addr]}
 		i.fp = 2
 		i.fr = &i.frames[1]
@@ -4840,498 +4699,6 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.Len(t, f.code, len(i.code[addr]))
 		require.NotNil(t, f.code[0])
 		require.Equal(t, upvals, f.upvals)
-	})
-
-	t.Run("compiles closure body upvals", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Returns: []types.Type{types.TypeI32},
-		}).WithCaptures(types.TypeI32).Emit(
-			instr.New(instr.UPVAL_GET, 0),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.UPVAL_SET, 0),
-			instr.New(instr.UPVAL_GET, 0),
-			instr.New(instr.RETURN),
-		).Build()
-		i := New(program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 0),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CLOSURE_NEW),
-				instr.New(instr.CALL),
-			},
-			program.WithConstants(fn),
-		), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		addr := i.constants[0].Ref()
-		p.Add(addr, 0, byte(instr.UPVAL_GET))
-
-		require.NoError(t, i.jit(addr))
-		require.NoError(t, i.Run(context.Background()))
-		v, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(1), v)
-		jit := p.Snapshot().JIT
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("compiles indirect function call", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		add := types.NewFunctionBuilder(&types.FunctionType{
-			Params:  []types.Type{types.TypeI32},
-			Returns: []types.Type{types.TypeI32},
-		}).Emit(
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.RETURN),
-		).Build()
-		caller := types.NewFunctionBuilder(&types.FunctionType{
-			Returns: []types.Type{types.TypeI32},
-		}).WithLocals(types.TypeRef).Emit(
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.I32_CONST, 41),
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.CALL),
-			instr.New(instr.RETURN),
-		).Build()
-		i := New(program.New(
-			[]instr.Instruction{
-				instr.New(instr.CONST_GET, 1),
-				instr.New(instr.CALL),
-			},
-			program.WithConstants(add, caller),
-		), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		addr := i.constants[1].Ref()
-		p.Add(addr, 0, byte(instr.CONST_GET))
-
-		require.NoError(t, i.jit(addr))
-		require.NoError(t, i.Run(context.Background()))
-		v, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(42), v)
-		jit := p.Snapshot().JIT
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("compiles ref global get", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.GLOBAL_GET, 0),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.GLOBAL_GET))
-		i.globals = append(i.globals, types.BoxedNull)
-		require.NoError(t, i.jit(0))
-		require.NoError(t, i.Run(context.Background()))
-		v, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.Null, v)
-		jit := p.Snapshot().JIT
-		require.Equal(t, uint64(1), jit.Attempts)
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("compiles ref get for scalar cell", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.REF_GET),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.REF_GET))
-		addr, err := i.Alloc(types.I32(7))
-		require.NoError(t, err)
-		require.NoError(t, i.Push(types.Ref(addr)))
-
-		require.NoError(t, i.jit(0))
-		require.NoError(t, i.Run(context.Background()))
-		v, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(7), v)
-		jit := p.Snapshot().JIT
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("compiles array len and get", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.DUP),
-			instr.New(instr.ARRAY_LEN),
-			instr.New(instr.SWAP),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.ARRAY_GET),
-			instr.New(instr.I32_ADD),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.DUP))
-		addr, err := i.Alloc(types.TypedArray[int32]{4, 7})
-		require.NoError(t, err)
-		_, err = i.Retain(addr)
-		require.NoError(t, err)
-		require.NoError(t, i.Push(types.Ref(addr)))
-
-		require.NoError(t, i.jit(0))
-		require.NoError(t, i.Run(context.Background()))
-		v, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(9), v)
-		jit := p.Snapshot().JIT
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("compiles struct get", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.STRUCT_GET),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.I32_CONST))
-		typ := types.NewStructType(
-			types.NewStructField(types.TypeI32),
-			types.NewStructField(types.TypeF64),
-		)
-		addr, err := i.Alloc(types.NewStruct(typ, types.BoxI32(4), types.BoxF64(8)))
-		require.NoError(t, err)
-		_, err = i.Retain(addr)
-		require.NoError(t, err)
-		require.NoError(t, i.Push(types.Ref(addr)))
-
-		require.NoError(t, i.jit(0))
-		require.NoError(t, i.Run(context.Background()))
-		v, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.F64(8), v)
-		jit := p.Snapshot().JIT
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-	})
-
-	t.Run("executes compiled prefix before unsupported opcode", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 41),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.REF_NULL),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.I32_CONST))
-
-		require.NoError(t, i.jit(0))
-		require.Equal(t, uint64(1), p.Snapshot().JIT.Emits)
-		require.NoError(t, i.Run(context.Background()))
-
-		value, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.Null, value)
-		value, err = i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(42), value)
-	})
-
-	t.Run("links branches", func(t *testing.T) {
-		requireJIT(t)
-
-		loop := types.NewFunctionBuilder(nil).WithLocals(types.TypeI32).Emit(
-			instr.New(instr.I32_CONST, 3),
-			instr.New(instr.LOCAL_SET, 0),
-			instr.New(instr.LOCAL_GET, 0),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.I32_SUB),
-			instr.New(instr.LOCAL_TEE, 0),
-			instr.New(instr.BR_IF, uint64(uint16(-13+1<<16))),
-			instr.New(instr.LOCAL_GET, 0),
-		).Build()
-
-		cases := []struct {
-			name     string
-			program  *program.Program
-			profile  func(*prof.Stats)
-			jitAddr  func(*Interpreter) int
-			value    types.Value
-			minLinks uint64
-		}{
-			{
-				name: "cold forward target",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 10),
-					instr.New(instr.BR, 5),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.I32_CONST, 32),
-					instr.New(instr.I32_ADD),
-				}),
-				profile:  func(p *prof.Stats) { p.Add(0, 0, byte(instr.I32_CONST)) },
-				jitAddr:  func(*Interpreter) int { return 0 },
-				value:    types.I32(42),
-				minLinks: 2,
-			},
-			{
-				name: "param order at target",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 10),
-					instr.New(instr.I32_CONST, 3),
-					instr.New(instr.BR, 0),
-					instr.New(instr.I32_SUB),
-				}),
-				profile: func(p *prof.Stats) { p.Add(0, 0, byte(instr.I32_CONST)) },
-				jitAddr: func(*Interpreter) int { return 0 },
-				value:   types.I32(7),
-			},
-			{
-				name: "signed backward br_if",
-				program: program.New(
-					[]instr.Instruction{
-						instr.New(instr.CONST_GET, 0),
-						instr.New(instr.CALL),
-					},
-					program.WithConstants(loop),
-				),
-				profile: func(p *prof.Stats) { p.Add(1, 7, byte(instr.LOCAL_GET)) },
-				jitAddr: func(i *Interpreter) int { return i.constants[0].Ref() },
-				value:   types.I32(0),
-			},
-			{
-				name: "br_table first target",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 0),
-					instr.New(instr.BR_TABLE, 2, 0, 8, 16),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.BR, 16),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.BR, 8),
-					instr.New(instr.I32_CONST, 3),
-					instr.New(instr.BR, 0),
-					instr.New(instr.NOP),
-				}),
-				profile: func(p *prof.Stats) { p.Add(0, 0, byte(instr.I32_CONST)) },
-				jitAddr: func(*Interpreter) int { return 0 },
-				value:   types.I32(1),
-			},
-			{
-				name: "br_table second target",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.BR_TABLE, 2, 0, 8, 16),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.BR, 16),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.BR, 8),
-					instr.New(instr.I32_CONST, 3),
-					instr.New(instr.BR, 0),
-					instr.New(instr.NOP),
-				}),
-				profile: func(p *prof.Stats) { p.Add(0, 0, byte(instr.I32_CONST)) },
-				jitAddr: func(*Interpreter) int { return 0 },
-				value:   types.I32(2),
-			},
-			{
-				name: "br_table default",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.BR_TABLE, 2, 0, 8, 16),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.BR, 16),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.BR, 8),
-					instr.New(instr.I32_CONST, 3),
-					instr.New(instr.BR, 0),
-					instr.New(instr.NOP),
-				}),
-				profile: func(p *prof.Stats) { p.Add(0, 0, byte(instr.I32_CONST)) },
-				jitAddr: func(*Interpreter) int { return 0 },
-				value:   types.I32(3),
-			},
-			{
-				name: "br_table negative default",
-				program: program.New([]instr.Instruction{
-					instr.New(instr.I32_CONST, 0xFFFFFFFF),
-					instr.New(instr.BR_TABLE, 2, 0, 8, 16),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.BR, 16),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(instr.BR, 8),
-					instr.New(instr.I32_CONST, 3),
-					instr.New(instr.BR, 0),
-					instr.New(instr.NOP),
-				}),
-				profile: func(p *prof.Stats) { p.Add(0, 0, byte(instr.I32_CONST)) },
-				jitAddr: func(*Interpreter) int { return 0 },
-				value:   types.I32(3),
-			},
-		}
-		for _, tt := range cases {
-			tt := tt
-			t.Run(tt.name, func(t *testing.T) {
-				p := prof.New()
-				tt.profile(p)
-				i := New(tt.program, WithProfile(p), WithCutoff(1))
-				defer i.Close()
-
-				err := i.jit(tt.jitAddr(i))
-				require.NoError(t, err)
-				err = i.Run(context.Background())
-				require.NoError(t, err)
-
-				val, err := i.Pop()
-				require.NoError(t, err)
-				require.Equal(t, tt.value, val)
-				require.GreaterOrEqual(t, p.Snapshot().JIT.Links, tt.minLinks)
-			})
-		}
-	})
-
-	t.Run("merges fallthrough block with internal entry", func(t *testing.T) {
-		requireJIT(t)
-
-		code := []instr.Instruction{
-			instr.New(instr.I32_CONST, 40),
-			instr.New(instr.I32_CONST, 2),
-			instr.New(instr.I32_ADD),
-			instr.New(instr.BR, 8),
-			instr.New(instr.I32_CONST, 40),
-			instr.New(instr.BR, uint64(uint16(1<<16-17))),
-			instr.New(instr.NOP),
-		}
-		p := prof.New()
-		p.Add(0, 0, byte(instr.I32_CONST))
-		p.Add(0, 5, byte(instr.I32_CONST))
-		p.Add(0, 5, byte(instr.I32_CONST))
-		p.Add(0, 14, byte(instr.I32_CONST))
-		i := New(program.New(code), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-
-		require.NoError(t, i.jit(0))
-		jit := p.Snapshot().JIT
-		require.Equal(t, uint64(3), jit.Emits)
-		require.Equal(t, uint64(3), jit.Links)
-
-		i.fr.ip = 5
-		require.NoError(t, i.Push(types.I32(40)))
-		require.NoError(t, i.Run(context.Background()))
-		value, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(42), value)
-
-		i.fr.ip = 14
-		require.NoError(t, i.Run(context.Background()))
-		value, err = i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(42), value)
-	})
-
-	t.Run("keeps internal entry with cold predecessor", func(t *testing.T) {
-		requireJIT(t)
-
-		code := []instr.Instruction{
-			instr.New(instr.I32_CONST, 40),
-			instr.New(instr.BR, 5),
-			instr.New(instr.I32_CONST, 40),
-			instr.New(instr.I32_CONST, 2),
-			instr.New(instr.I32_ADD),
-		}
-		p := prof.New()
-		p.Add(0, 8, byte(instr.I32_CONST))
-		i := New(program.New(code), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-
-		require.NoError(t, i.jit(0))
-		jit := p.Snapshot().JIT
-		require.Equal(t, uint64(1), jit.Emits)
-		require.Equal(t, uint64(1), jit.Links)
-
-		require.NoError(t, i.Run(context.Background()))
-		value, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(42), value)
-	})
-
-	t.Run("splits trace when internal entry rejects", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 42),
-			instr.New(instr.REF_NULL),
-			instr.New(instr.BR, 8),
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.BR, uint64(uint16(1<<16-12))),
-			instr.New(instr.NOP),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.I32_CONST))
-		p.Add(0, 5, byte(instr.REF_NULL))
-		p.Add(0, 9, byte(instr.I32_CONST))
-
-		require.NoError(t, i.jit(0))
-		require.NoError(t, i.Run(context.Background()))
-
-		value, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.Null, value)
-		value, err = i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(42), value)
-	})
-
-	t.Run("compiles forced successor after merged prefix rejects", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.NOP),
-			instr.New(instr.REF_NEW),
-			instr.New(instr.NOP),
-			instr.New(instr.BR, 3),
-			instr.New(instr.BR, uint64(uint16(1<<16-7))),
-			instr.New(instr.NOP),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		p.Add(0, 0, byte(instr.NOP))
-
-		require.NoError(t, i.jit(0))
-		jit := p.Snapshot().JIT
-		require.Equal(t, uint64(2), jit.Emits)
-		require.Equal(t, uint64(2), jit.Links)
-	})
-
-	t.Run("skips cold segments", func(t *testing.T) {
-		requireJIT(t)
-		p := prof.New()
-		p.Add(0, 0, byte(instr.NOP))
-		i := New(program.New([]instr.Instruction{
-			instr.New(instr.NOP),
-			instr.New(instr.NOP),
-			instr.New(instr.NOP),
-			instr.New(instr.NOP),
-			instr.New(instr.NOP),
-			instr.New(instr.CALL),
-			instr.New(instr.NOP),
-			instr.New(instr.NOP),
-			instr.New(instr.NOP),
-			instr.New(instr.NOP),
-			instr.New(instr.NOP),
-		}), WithProfile(p), WithCutoff(1))
-		defer i.Close()
-		require.NoError(t, i.jit(0))
-		jit := p.Snapshot().JIT
-		require.Equal(t, uint64(1), jit.Attempts)
-		require.Equal(t, uint64(1), jit.Emits)
-		require.Equal(t, uint64(1), jit.Links)
-		require.Equal(t, uint64(1), jit.Skips)
 	})
 
 	t.Run("canceled execution", func(t *testing.T) {
@@ -6385,7 +5752,7 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 						continue
 					}
 					if _, ok := i.function(constant.Ref()); ok {
-						require.NoError(b, i.jit(constant.Ref()))
+						require.NoError(b, i.compile(constant.Ref()))
 					}
 				}
 

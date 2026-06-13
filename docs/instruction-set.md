@@ -69,11 +69,11 @@ Offsets are signed 16-bit values encoded little-endian. `BR 5` skips 5 bytes pas
 
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|
-| `BR` | `{2}` | `→` | ◐ | Unconditional relative jump. JIT only when current segment has no pending return values. |
+| `BR` | `{2}` | `→` | ◐ | Unconditional relative jump. Trace JIT records the observed path and exits or continues through learned branch traces. |
 | `BR_IF` | `{2}` | `cond →` | ◐ | Jump if `cond ≠ 0`, else fall through. JIT only for simple stack shapes. |
 | `BR_TABLE` | `{-2, 2}` | `index →` | ◐ | Jump table; negative or out-of-range index uses default target. JIT only for simple stack shapes. |
-| `CALL` | `{}` | `fn →` | ◐ | Call `*Function`, `*HostFunction`, or `*Closure`; complete JIT lowers eligible direct calls and small same-arity function-value indirect dispatches to native `BL`. Host calls, closure call sites, and misses fall back. |
-| `RETURN` | `{}` | `→` | ◐ | Return from current frame; complete JIT lowers native entry returns. |
+| `CALL` | `{}` | `fn →` | ◐ | Call `*Function`, `*HostFunction`, or `*Closure`; trace JIT lowers observed direct calls, small same-arity function-value indirect dispatches, and eligible closure-body calls to native `BL`. Host calls and misses fall back. |
+| `RETURN` | `{}` | `→` | ◐ | Return from current frame; trace JIT lowers entry returns and stitches inlined callee returns. |
 
 ## Variables
 

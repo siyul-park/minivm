@@ -10,20 +10,20 @@ import (
 
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
 
 type Interpreter struct {
 	ctx       context.Context
-	prof      *prof.Stats
+	tracer    *Tracer
 	hook      func(*Interpreter) error
 	marshaler Marshaler
 
-	compiler  *jitCompiler
+	compiler  *compiler
 	cache     *Cache
-	fallbacks map[int]func(*Interpreter)
+	local     *stats
+	fallbacks map[anchor]func(*Interpreter)
 	journal   []uint64
 
 	types     []types.Type
@@ -80,10 +80,11 @@ type frame struct {
 }
 
 type option struct {
-	profile   *prof.Stats
 	hook      func(*Interpreter) error
 	marshaler Marshaler
 	cache     *Cache
+	tracer    *Tracer
+	local     *stats
 	threshold int
 	cutoff    int
 
@@ -111,10 +112,6 @@ var (
 	ErrHeapExhausted       = errors.New("heap exhausted")
 )
 
-func WithProfile(p *prof.Stats) func(*option) {
-	return func(o *option) { o.profile = p }
-}
-
 func WithHook(fn func(*Interpreter) error) func(*option) {
 	return func(o *option) { o.hook = fn }
 }
@@ -125,6 +122,16 @@ func WithMarshaler(m Marshaler) func(*option) {
 
 func WithCache(c *Cache) func(*option) {
 	return func(o *option) { o.cache = c }
+}
+
+func WithTracer(t *Tracer) func(*option) {
+	return func(o *option) { o.tracer = t }
+}
+
+// withLocal injects a pre-seeded sampling collector. Tests use it to drive
+// hot-IP selection and to read JIT counters back after a run.
+func withLocal(p *stats) func(*option) {
+	return func(o *option) { o.local = p }
 }
 
 func WithFrame(val int) func(*option) {
@@ -183,9 +190,13 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		opt.tick = 1
 	}
 
-	p := opt.profile
-	if p == nil {
-		p = prof.New()
+	tracer := opt.tracer
+	if tracer == nil {
+		tracer = NewTracer()
+	}
+	local := opt.local
+	if local == nil {
+		local = newStats()
 	}
 	m := opt.marshaler
 	if m == nil {
@@ -206,10 +217,11 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	}
 
 	i := &Interpreter{
-		prof:      p,
+		tracer:    tracer,
 		hook:      opt.hook,
 		marshaler: m,
 		cache:     opt.cache,
+		local:     local,
 		threshold: threshold,
 		cutoff:    opt.cutoff,
 		types:     prog.Types,
@@ -217,7 +229,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		globals:   make([]types.Boxed, 0, opt.globals),
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
-		fallbacks: map[int]func(*Interpreter){},
+		fallbacks: map[anchor]func(*Interpreter){},
 		journal:   make([]uint64, journalHead+journalStride*opt.frame),
 		frames:    make([]frame, opt.frame),
 		stack:     make([]types.Boxed, opt.stack),
@@ -275,7 +287,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	i.fp = 1
 	i.fr = &i.frames[0]
 	i.retain(0)
-	if i.cache != nil && !i.cache.attach() {
+	if opt.cache != nil && !i.cache.attach() {
 		i.cache = nil
 	}
 
@@ -536,6 +548,12 @@ func (i *Interpreter) Close() error {
 	return err
 }
 
+// Profile returns this interpreter's view of collected profile data: its own
+// unflushed samples merged on top of the shared aggregate.
+func (i *Interpreter) Profile() Snapshot {
+	return i.tracer.snapshot(i.local)
+}
+
 func (i *Interpreter) Reset() {
 	for i.fp > 1 {
 		i.frames[i.fp] = frame{}
@@ -573,17 +591,29 @@ func (i *Interpreter) Reset() {
 // jit lazily builds the native compiler, compiles the function at addr, and
 // installs the result into the dispatch table. Triggered once per function from
 // the Run-loop safepoint when its sample count crosses the threshold.
-func (i *Interpreter) jit(addr int) error {
+func (i *Interpreter) compile(addr int) error {
+	// Always record from the function entry. The safepoint that triggers
+	// compilation lands at an arbitrary IP, but the trace compiler installs a
+	// whole-function native entry, so the Tracer replays from a clean entry
+	// state rather than from wherever sampling happened to stop.
+	if _, err := i.tracer.capture(i, anchor{addr: addr, ip: 0}); err != nil {
+		return err
+	}
 	if i.cache != nil {
 		return i.shared(addr)
 	}
-	if err := i.ensure(); err != nil {
-		return err
+	if i.compiler == nil {
+		compiler, err := newCompiler(i.cutoff)
+		if err != nil {
+			i.local.addJIT(JIT{Errors: 1})
+			return err
+		}
+		i.compiler = compiler
 	}
 	if i.compiler == nil {
 		return nil
 	}
-	i.prof.JITAdd(prof.JIT{Attempts: 1})
+	i.local.addJIT(JIT{Attempts: 1})
 
 	fn, ok := i.function(addr)
 	if !ok {
@@ -591,7 +621,7 @@ func (i *Interpreter) jit(addr int) error {
 	}
 	mod, err := i.compiler.Compile(i, addr, fn)
 	if err != nil {
-		i.prof.JITAdd(prof.JIT{Errors: 1})
+		i.local.addJIT(JIT{Errors: 1})
 		return err
 	}
 	if mod == nil {
@@ -611,28 +641,34 @@ func (i *Interpreter) shared(addr int) error {
 	i.cache.mu.Lock()
 	defer i.cache.mu.Unlock()
 
-	compiler, err := newJITCompiler(i.cutoff)
+	compiler, err := newCompiler(i.cutoff)
 	if err != nil {
-		i.cache.stats.JITAdd(prof.JIT{Errors: 1})
-		i.cache.done(addr)
+		i.tracer.addJIT(JIT{Errors: 1})
+		i.cache.ready(addr)
 		return err
 	}
 	if compiler == nil {
-		i.cache.done(addr)
+		i.cache.ready(addr)
 		return nil
 	}
-	i.cache.stats.JITAdd(prof.JIT{Attempts: 1})
+	i.tracer.addJIT(JIT{Attempts: 1})
 
 	mod, err := compiler.Compile(i, addr, fn)
 	if err != nil {
 		_ = compiler.Close()
-		i.cache.stats.JITAdd(prof.JIT{Errors: 1})
-		i.cache.done(addr)
+		i.tracer.addJIT(JIT{Errors: 1})
+		i.cache.ready(addr)
 		return err
 	}
 	if mod == nil {
-		mod = &jitModule{}
+		mod = &module{}
 	}
+	i.tracer.addJIT(JIT{
+		Emits: uint64(mod.emits),
+		Links: uint64(mod.links),
+		Skips: uint64(mod.skips),
+		Bytes: uint64(mod.bytes),
+	})
 	var buf *asm.Buffer
 	if mod.emits > 0 {
 		buf = compiler.buffer
@@ -643,51 +679,36 @@ func (i *Interpreter) shared(addr int) error {
 	return nil
 }
 
-// ensure lazily constructs the native compiler. Any failure here is
-// recorded as a JIT error and propagated.
-func (i *Interpreter) ensure() error {
-	if i.compiler == nil {
-		compiler, err := newJITCompiler(i.cutoff)
-		if err != nil {
-			i.prof.JITAdd(prof.JIT{Errors: 1})
-			return err
-		}
-		i.compiler = compiler
-	}
-	return nil
-}
-
-// install accounts a successful Compile and rewires the dispatch table:
-// the whole-function Entry replaces the first opcode handler, every
-// emitted segment replaces its corresponding handler.
-func (i *Interpreter) install(mod *jitModule, account bool) {
+// install accounts a successful Compile and rewires the dispatch table: a
+// trace entry replaces the function's first opcode handler and keeps the
+// shadowed threaded handler for guard fallback.
+func (i *Interpreter) install(mod *module, account bool) {
 	if account {
-		i.prof.JITAdd(prof.JIT{
+		i.local.addJIT(JIT{
 			Emits: uint64(mod.emits),
 			Links: uint64(mod.links),
 			Skips: uint64(mod.skips),
 			Bytes: uint64(mod.bytes),
 		})
 	}
-	for addr, callable := range mod.entries {
-		if addr <= 0 || addr >= len(i.code) || len(i.code[addr]) == 0 || callable == nil {
+	for a, callable := range mod.entries {
+		if a.addr <= 0 || a.addr >= len(i.code) || a.ip < 0 || a.ip >= len(i.code[a.addr]) || callable == nil {
 			continue
 		}
-		if i.fallbacks[addr] != nil {
-			continue
+		// Save the original threaded handler once so deopt always resumes in the
+		// interpreter, but reinstall the latest native callable on every publish:
+		// a recompiled trace tree (with a hot side exit now inlined) must replace
+		// the earlier one, not be dropped because one was already installed. An
+		// entry root (ip 0) compiles the whole function and tears down the frame
+		// on return; a loop root re-enters mid-function and never unwinds it.
+		if i.fallbacks[a] == nil {
+			i.fallbacks[a] = i.code[a.addr][a.ip]
 		}
-		i.fallbacks[addr] = i.code[addr][0]
-		i.code[addr][0] = i.entry(callable)
-	}
-	for _, seg := range mod.segments {
-		if seg.addr < 0 || seg.addr >= len(i.code) || seg.ip < 0 || seg.ip >= len(i.code[seg.addr]) || seg.callable == nil {
-			continue
+		if mod.loops[a] {
+			i.code[a.addr][a.ip] = i.loop(callable)
+		} else {
+			i.code[a.addr][a.ip] = i.entry(callable)
 		}
-		fallback := i.code[seg.addr][seg.ip]
-		if seg.ip == 0 && seg.addr > 0 && i.fallbacks[seg.addr] == nil {
-			i.fallbacks[seg.addr] = fallback
-		}
-		i.code[seg.addr][seg.ip] = i.segment(seg.addr, seg.callable, seg.stack, fallback)
 	}
 }
 
@@ -695,26 +716,24 @@ func (i *Interpreter) sync() {
 	if i.cache == nil {
 		return
 	}
-	mods := i.cache.mods.Load()
-	if mods == nil {
+	modules := i.cache.modules.Load()
+	if modules == nil {
 		return
 	}
-	for i.gen < len(*mods) {
-		i.install((*mods)[i.gen], false)
+	for i.gen < len(*modules) {
+		i.install((*modules)[i.gen], false)
 		i.gen++
 	}
 }
 
 func (i *Interpreter) flush() {
-	if i.cache != nil {
-		i.cache.flush(i.prof)
-	}
+	i.tracer.flush(i.local)
 }
 
 func (i *Interpreter) hot(addr int) []int {
-	fn := i.prof.Func(addr)
+	fn := i.local.Func(addr)
 	if len(fn.IPs) == 0 {
-		return nil
+		return i.tracer.anchors(addr)
 	}
 	ips := make([]int, 0, len(fn.IPs))
 	for _, ip := range fn.IPs {
@@ -763,55 +782,57 @@ func (i *Interpreter) safepoint() error {
 		}
 	}
 
-	i.prof.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
+	i.local.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
+	if f.addr > 0 && f.ip == 0 && !i.tracer.hasEntry(f.addr) {
+		if _, err := i.tracer.capture(i, anchor{addr: f.addr, ip: 0}); err != nil {
+			return err
+		}
+	}
+	// A hot loop header sampled mid-function: f.ip is genuinely at the back-edge
+	// target, so the clone's operand stack matches the header and a one-iteration
+	// loop trace can be recorded from the live state. A loopy function's entry
+	// trace aborts on the unrolled body, so the one-shot entry threshold never
+	// installs anything; compile here, once the function is hot and the loop
+	// trace first appears, so the loop header gets its own native. The hotness
+	// gate keeps WithThreshold(-1) a pure interpreter.
+	if i.threshold >= 0 && f.addr > 0 && f.ip > 0 &&
+		i.local.Samples(f.addr) >= uint64(i.threshold) &&
+		!i.tracer.hasLoop(f.addr, f.ip) {
+		for _, h := range i.tracer.headers(i, f.addr) {
+			if h != f.ip {
+				continue
+			}
+			if _, err := i.tracer.capture(i, anchor{addr: f.addr, ip: f.ip}); err != nil {
+				return err
+			}
+			if i.tracer.hasLoop(f.addr, f.ip) {
+				if err := i.compile(f.addr); err != nil {
+					return err
+				}
+			}
+			break
+		}
+	}
 	if i.cache != nil {
 		if i.cache.due(f.addr, i.threshold) {
-			if err := i.jit(f.addr); err != nil {
+			if err := i.compile(f.addr); err != nil {
 				return err
 			}
 		}
 		i.sync()
 		return nil
 	}
-	if i.threshold >= 0 && i.prof.Samples(f.addr) == uint64(i.threshold) {
-		if err := i.jit(f.addr); err != nil {
+	if i.threshold >= 0 && i.local.Samples(f.addr) == uint64(i.threshold) {
+		if err := i.compile(f.addr); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// segment wraps a native segment Callable in a threaded-style closure. Native
-// code reads and writes the VM stack directly through the context journal.
-func (i *Interpreter) segment(addr int, callable asm.Callable, argc int, fallback func(*Interpreter)) func(*Interpreter) {
-	return func(i *Interpreter) {
-		if i.sp < argc {
-			panic(ErrStackUnderflow)
-		}
-		if err := callable.Call(i.context()); err != nil {
-			panic(err)
-		}
-
-		i.sp = int(i.journal[journalSP])
-		i.fr.ip = int(i.journal[journalNextIP])
-		switch i.journal[journalTrap] {
-		case trapFallback:
-			i.restore(i.fr, addr)
-			fallback(i)
-		case trapYield:
-			// A loop-region back-edge spent its budget; i.fr.ip is the header.
-			// Service coordination, then let the Run loop re-dispatch this same
-			// segment for native resume.
-			if err := i.safepoint(); err != nil {
-				panic(err)
-			}
-		}
-	}
-}
-
-// entry wraps a whole-function Entry Callable. Unlike segment, the CALL
-// handler has already pushed a frame and set i.fr before this closure runs.
-// The native Entry reads params from stack scratch slots; on a normal return
+// entry wraps a native trace Entry Callable. The CALL handler has already
+// pushed a frame and set i.fr before this closure runs. The native Entry reads
+// params from stack scratch slots; on a normal return
 // this closure performs the frame teardown that RETURN would do in the threaded
 // interpreter, and on a trap it rebuilds the native call chain into real VM
 // frames before resuming threaded execution at the fallback IP.
@@ -847,19 +868,79 @@ func (i *Interpreter) entry(callable asm.Callable) func(*Interpreter) {
 			panic(ErrFrameOverflow)
 		case trapYield:
 			// A loop back-edge spent its budget. deopt left i.fr at the loop header;
-			// run coordination, then let the Run loop re-dispatch the header — a
-			// native loop-region segment is installed there for in-place resume.
+			// run coordination, then let the threaded Run loop continue from there.
 			if err := i.safepoint(); err != nil {
 				panic(err)
 			}
 		default:
+			i.exit(anchor{addr: i.fr.addr, ip: 0})
 			// IP 0 now dispatches to the native entry; run the handler it shadows once
 			// so we make progress instead of re-entering native and re-trapping. Any
 			// later IP is an untouched threaded handler the Run loop dispatches next.
 			if i.fr.ip == 0 {
-				i.fallbacks[i.fr.addr](i)
+				i.fallbacks[anchor{addr: i.fr.addr, ip: 0}](i)
 			}
 		}
+	}
+}
+
+// loop wraps a native loop Callable installed at a loop header. Unlike entry,
+// the header is reached mid-function with the frame already live, so loop never
+// pushes or tears down a frame and never returns normally — it always exits
+// through a trap. A spent budget yields to the safepoint and the Run loop
+// re-enters native at the header; a guarded side exit or the loop-exit edge
+// leaves deopt with i.fr at the resume IP for threaded dispatch to continue.
+func (i *Interpreter) loop(callable asm.Callable) func(*Interpreter) {
+	return func(i *Interpreter) {
+		ctx := i.context()
+		// Decouple the loop's safepoint cadence from tick: a native iteration does
+		// the work of a whole loop body, so yielding every tick (1 under precise
+		// dispatch) would drown the loop in deopt/re-enter churn. Run many
+		// iterations natively between safepoints instead.
+		i.journal[journalBudget] = loopBudget
+		if err := callable.Call(ctx); err != nil {
+			panic(err)
+		}
+		i.sp = int(i.journal[journalSP])
+		i.deopt()
+		switch i.journal[journalTrap] {
+		case trapOverflow:
+			panic(ErrFrameOverflow)
+		case trapYield:
+			if err := i.safepoint(); err != nil {
+				panic(err)
+			}
+		}
+	}
+}
+
+func (i *Interpreter) exit(root anchor) {
+	hits, err := i.tracer.exit(i, root, i.fr.ip)
+	if err != nil {
+		panic(err)
+	}
+	if hits != exitThreshold {
+		return
+	}
+	if i.cache != nil {
+		i.cache.rearm(root.addr)
+		return
+	}
+	if i.compiler == nil {
+		return
+	}
+	i.local.addJIT(JIT{Attempts: 1})
+	fn, ok := i.function(root.addr)
+	if !ok {
+		return
+	}
+	mod, err := i.compiler.Compile(i, root.addr, fn)
+	if err != nil {
+		i.local.addJIT(JIT{Errors: 1})
+		panic(err)
+	}
+	if mod != nil {
+		i.install(mod, true)
 	}
 }
 
@@ -876,7 +957,7 @@ func (i *Interpreter) deopt() {
 	base := i.fp - 1
 
 	// The last record is the live outermost frame; reconcile its resume state.
-	fn, bp, ip, _ := i.record(depth - 1)
+	fn, bp, ip, _ := i.unpack(depth - 1)
 	outer := &i.frames[base]
 	outer.bp = bp
 	outer.ip = ip
@@ -886,7 +967,7 @@ func (i *Interpreter) deopt() {
 	// direct call in fuse.go, the callee ref was never pushed or retained, so
 	// release stays false.
 	for n := 1; n < depth; n++ {
-		fn, bp, ip, returns := i.record(depth - 1 - n)
+		fn, bp, ip, returns := i.unpack(depth - 1 - n)
 		f := &i.frames[base+n]
 		f.addr = fn
 		f.ref = fn
@@ -900,10 +981,10 @@ func (i *Interpreter) deopt() {
 	i.fr = &i.frames[i.fp-1]
 }
 
-// record unpacks frame record n from the native journal.
-func (i *Interpreter) record(n int) (addr, bp, ip, returns int) {
-	rec := i.journal[journalHead+n*journalStride:]
-	return int(rec[recordAddr]), int(rec[recordBP]), int(rec[recordIP]), int(rec[recordReturns])
+// unpack reads frame record n from the native journal.
+func (i *Interpreter) unpack(n int) (addr, bp, ip, returns int) {
+	row := i.journal[journalHead+n*journalStride:]
+	return int(row[recordAddr]), int(row[recordBP]), int(row[recordIP]), int(row[recordReturns])
 }
 
 func (i *Interpreter) restore(f *frame, addr int) {

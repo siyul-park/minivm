@@ -107,7 +107,7 @@ Transform passes load latest cached `*program.Program` and return possibly mutat
 
 ## `BasicBlocksPass`
 
-Shared by optimizer and `jitCompiler`; same pass type and boundary rules.
+Shared by optimizer and `compiler`; same pass type and boundary rules.
 
 Input: `*types.Function` via `m.Run(fn)` or `m.Convert(fn, &blocks)`.
 

@@ -8,7 +8,7 @@ minivm: Go-native programmable runtime for scripting, rules, DSLs, and plugin-st
 - Strengthen host embedding APIs: function registration, error behavior, runtime options.
 - Improve guest execution controls beyond heap limits, cancellation, and failure reporting.
 - Broaden benchmarks beyond numeric loops to justify default JIT thresholds with repeatable data.
-- Keep interpreter/JIT behavior aligned as native segment coverage grows.
+- Keep interpreter/JIT behavior aligned as native trace coverage grows.
 
 ## Completed
 
@@ -16,6 +16,7 @@ minivm: Go-native programmable runtime for scripting, rules, DSLs, and plugin-st
 - Added `RuntimeError` with VM call frames while preserving `errors.Is` / `errors.As` cause checks.
 - Added shared JIT code cache and aggregate profiling for `interp.Pool`.
 - Expanded ARM64 JIT coverage for direct and indirect bytecode calls, guarded ref-bearing slots, closure-body upvalues, and selected heap reads.
+- Replaced the method JIT with a trace JIT and added loop-anchored compilation (native back-edge with a safepoint poll), beating the former method JIT across the fib and issue #60 benchmarks.
 
 ## Near-Term Work
 

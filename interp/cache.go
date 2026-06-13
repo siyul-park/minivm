@@ -5,45 +5,40 @@ import (
 	"sync/atomic"
 
 	"github.com/siyul-park/minivm/asm"
-	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 )
 
+// Cache is the shared store of compiled native modules for a pool. It owns the
+// per-function compile state machine (cold → build → ready), the executable
+// buffers, and the append-only module list members install from. Profiling and
+// trace recording live in the tracer, not here.
 type Cache struct {
-	stats *prof.Stats
-	mods  atomic.Pointer[[]*jitModule]
-	bufs  []*asm.Buffer
-	hits  []atomic.Int64
-	state []atomic.Int32
-	refs  atomic.Int64
+	modules atomic.Pointer[[]*module]
+	buffers []*asm.Buffer
+	hits    []atomic.Int64
+	state   []atomic.Int32
+	refs    atomic.Int64
 
 	mu     sync.Mutex
 	closed bool
 }
 
 const (
-	cold int32 = iota
-	build
-	ready
+	cacheCold int32 = iota
+	cacheBuild
+	cacheReady
 )
 
 func NewCache(prog *program.Program) *Cache {
 	size := len(prog.Constants) + 1
-	mods := []*jitModule{}
+	mods := []*module{}
 	c := &Cache{
-		stats: prof.New(),
 		hits:  make([]atomic.Int64, size),
 		state: make([]atomic.Int32, size),
 	}
 	c.refs.Store(1)
-	c.mods.Store(&mods)
+	c.modules.Store(&mods)
 	return c
-}
-
-func (c *Cache) Profile() prof.Snapshot {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.stats.Snapshot()
 }
 
 func (c *Cache) Close() error {
@@ -76,51 +71,43 @@ func (c *Cache) due(addr int, threshold int64) bool {
 	if threshold < 0 || addr < 0 || addr >= len(c.hits) {
 		return false
 	}
-	if c.state[addr].Load() != cold {
+	if c.state[addr].Load() != cacheCold {
 		return false
 	}
-	return c.hits[addr].Add(1) >= threshold && c.state[addr].CompareAndSwap(cold, build)
+	return c.hits[addr].Add(1) >= threshold && c.state[addr].CompareAndSwap(cacheCold, cacheBuild)
+}
+
+// rearm returns a ready function to the build state so a later safepoint can
+// republish a recompiled module — used when a hot side exit grows the trace
+// tree.
+func (c *Cache) rearm(addr int) bool {
+	if addr < 0 || addr >= len(c.state) {
+		return false
+	}
+	return c.state[addr].CompareAndSwap(cacheReady, cacheBuild)
 }
 
 func (c *Cache) fail(addr int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.done(addr)
+	c.ready(addr)
 }
 
-func (c *Cache) flush(stats *prof.Stats) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.stats.Merge(stats.Snapshot())
-	stats.Reset()
-}
-
-func (c *Cache) publish(addr int, mod *jitModule, buf *asm.Buffer) {
+func (c *Cache) publish(addr int, mod *module, buf *asm.Buffer) {
 	if buf != nil {
-		c.bufs = append(c.bufs, buf)
+		c.buffers = append(c.buffers, buf)
 	}
-	if mod != nil {
-		c.stats.JITAdd(prof.JIT{
-			Emits: uint64(mod.emits),
-			Links: uint64(mod.links),
-			Skips: uint64(mod.skips),
-			Bytes: uint64(mod.bytes),
-		})
-		if len(mod.entries) > 0 || len(mod.segments) > 0 {
-			mods := c.mods.Load()
-			next := make([]*jitModule, 0, len(*mods)+1)
-			next = append(next, (*mods)...)
-			next = append(next, mod)
-			c.mods.Store(&next)
-		}
+	if mod != nil && len(mod.entries) > 0 {
+		modules := c.modules.Load()
+		next := make([]*module, 0, len(*modules)+1)
+		next = append(next, (*modules)...)
+		next = append(next, mod)
+		c.modules.Store(&next)
 		for target := range mod.entries {
-			c.done(target)
-		}
-		for _, seg := range mod.segments {
-			c.done(seg.addr)
+			c.ready(target.addr)
 		}
 	}
-	c.done(addr)
+	c.ready(addr)
 }
 
 func (c *Cache) release() error {
@@ -128,17 +115,17 @@ func (c *Cache) release() error {
 		return nil
 	}
 	var err error
-	for _, buf := range c.bufs {
+	for _, buf := range c.buffers {
 		if e := buf.Free(); e != nil && err == nil {
 			err = e
 		}
 	}
-	c.bufs = nil
+	c.buffers = nil
 	return err
 }
 
-func (c *Cache) done(addr int) {
+func (c *Cache) ready(addr int) {
 	if addr >= 0 && addr < len(c.state) {
-		c.state[addr].Store(ready)
+		c.state[addr].Store(cacheReady)
 	}
 }
