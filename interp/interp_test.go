@@ -4941,6 +4941,42 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NotZero(t, jit.Links)
 	})
 
+	t.Run("compiles ref global tee and releases overwritten ref", func(t *testing.T) {
+		requireJIT(t)
+		p := prof.New()
+		i := New(program.New([]instr.Instruction{
+			instr.New(instr.GLOBAL_TEE, 0),
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.REF_EQ),
+		}), WithProfile(p), WithCutoff(1))
+		defer i.Close()
+		p.Add(0, 0, byte(instr.GLOBAL_TEE))
+
+		old, err := i.Alloc(types.String("old"))
+		require.NoError(t, err)
+		next, err := i.Alloc(types.String("next"))
+		require.NoError(t, err)
+		i.globals = append(i.globals, types.BoxRef(old))
+		require.NoError(t, i.Push(types.Ref(next)))
+
+		require.NoError(t, i.jit(0))
+		require.NoError(t, i.Run(context.Background()))
+		require.Zero(t, i.rc[old])
+
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1), v)
+
+		live, err := i.Load(next)
+		require.NoError(t, err)
+		require.Equal(t, types.String("next"), live)
+
+		jit := p.Snapshot().JIT
+		require.Equal(t, uint64(1), jit.Attempts)
+		require.NotZero(t, jit.Emits)
+		require.NotZero(t, jit.Links)
+	})
+
 	t.Run("compiles ref get for scalar cell", func(t *testing.T) {
 		requireJIT(t)
 		p := prof.New()
