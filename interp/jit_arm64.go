@@ -84,11 +84,11 @@ func (l arm64Lowerer) lower(ctx *lowering) bool {
 	// A loop root re-enters the live frame at the header: bind the back-edge
 	// target after the prologue so each iteration reloads its loop-carried
 	// locals from the VM stack (flushed at the back-edge) without a memory-free
-	// register fixpoint.
-	if ctx.loop {
-		ctx.back = ctx.assembler.Label()
-		ctx.assembler.Bind(ctx.back)
-	}
+	// register fixpoint. An entry trace binds it too, so a self tail-call that
+	// loops back to the function entry has a branch target (see tailLoop). The
+	// label is harmless when no back-edge references it.
+	ctx.back = ctx.assembler.Label()
+	ctx.assembler.Bind(ctx.back)
 	if !l.walk(ctx, ctx.tree.root.ops) {
 		return false
 	}
@@ -161,7 +161,8 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 		case instr.F64_CONST:
 			ok = l.f64Const(ctx, op)
 		case instr.CONST_GET:
-			fused := idx+1 < len(ops) && ops[idx+1].op == instr.CALL && ops[idx+1].depth == op.depth
+			fused := idx+1 < len(ops) && ops[idx+1].depth == op.depth &&
+				(ops[idx+1].op == instr.CALL || ops[idx+1].op == instr.RETURN_CALL)
 			ok = l.constGet(ctx, op, fused)
 		case instr.LOCAL_GET:
 			ok = l.localGet(ctx, op)
@@ -465,6 +466,17 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			ok = l.brIf(ctx, op)
 		case instr.CALL:
 			ok = l.call(ctx, op)
+		case instr.RETURN_CALL:
+			// A tail call back to the trace anchor closes the loop with a native
+			// back-edge (terminal); a tail call to another function morphs the
+			// current frame into the callee in place and keeps walking.
+			if op.callee == ctx.addr {
+				if !l.tailLoop(ctx, op) {
+					return false
+				}
+				return idx == len(ops)-1
+			}
+			ok = l.tailMorph(ctx, op)
 		case instr.RETURN:
 			if len(ctx.frames) > 1 {
 				ok = l.stitch(ctx)
@@ -1711,6 +1723,143 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 	for k, typ := range rets {
 		ctx.push(value{reg: regs[k], kind: typ.Kind(), raw: true})
 	}
+	return true
+}
+
+// tailTarget resolves a recorded tail call's compile-time function target and
+// consumes the funcref marker, emitting the runtime funcref guard for a
+// non-constant ref (mirrors call's guard). Tail calls carry no closure upvals,
+// so a captured target is rejected; the trace stays threaded. On success the
+// top params operands are the validated arguments, still live.
+func (l arm64Lowerer) tailTarget(ctx *lowering, op step) (*types.Function, int, bool) {
+	if ctx.count() < 1 {
+		return nil, 0, false
+	}
+	v := ctx.values[len(ctx.values)-1]
+	if v.kind != types.KindRef {
+		return nil, 0, false
+	}
+	target := ctx.funcs[op.callee]
+	if target == nil || target.Typ == nil || len(target.Captures) > 0 {
+		return nil, 0, false
+	}
+	params := len(target.Typ.Params)
+	if v.raw {
+		if v.fn != op.callee || v.ref != op.callee {
+			return nil, 0, false
+		}
+	} else {
+		if op.seen.Kind() != types.KindRef {
+			return nil, 0, false
+		}
+		wantRef := op.seen.Ref()
+		if wantRef != op.callee || wantRef < 0 || wantRef >= len(ctx.heap) {
+			return nil, 0, false
+		}
+		if _, ok := ctx.heap[wantRef].(*types.Function); !ok {
+			return nil, 0, false
+		}
+		want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDI(want, uint64(types.BoxRef(wantRef)))...)
+		ctx.assembler.Emit(arm64.CMP(v.reg, want))
+		ok := ctx.assembler.Label()
+		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, ok))
+		if !l.exit(ctx, op.ip) {
+			return nil, 0, false
+		}
+		ctx.assembler.Bind(ok)
+		pre := append([]value(nil), ctx.values...)
+		l.releaseBox(ctx, v.reg, pre, op.ip)
+	}
+	ctx.pop()
+	if ctx.count() < params || !l.args(ctx, target, params) {
+		return nil, 0, false
+	}
+	return target, params, true
+}
+
+// locals fills frame f with the call arguments args in its parameter slots and
+// a raw zero in every remaining local, matching threaded tail()/CALL's clear.
+// Each slot is loaded and dirty so the next flush commits it to the VM stack.
+func (l arm64Lowerer) locals(ctx *lowering, f *activation, args []value) bool {
+	for k := range args {
+		f.locals[k] = args[k]
+		f.loaded[k] = true
+		f.dirty[k] = true
+	}
+	if len(f.kinds) > len(args) {
+		zero := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDI(zero, 0)...)
+		for k := len(args); k < len(f.kinds); k++ {
+			switch f.kinds[k] {
+			case types.KindI32, types.KindF32, types.KindF64, types.KindI64:
+			default:
+				return false
+			}
+			f.locals[k] = value{reg: zero, kind: f.kinds[k], raw: true}
+			f.loaded[k] = true
+			f.dirty[k] = true
+		}
+	}
+	return true
+}
+
+// tailLoop lowers a tail call back to the trace anchor as a native loop
+// back-edge: the new arguments become the anchor entry frame's params, the
+// other locals reset, everything commits to the VM stack, and iterate branches
+// to the head (or yields when the safepoint budget runs out). Constant stack
+// depth — no BL, no journalActive — so self/mutual tail recursion never grows.
+func (l arm64Lowerer) tailLoop(ctx *lowering, op step) bool {
+	target, params, ok := l.tailTarget(ctx, op)
+	if !ok {
+		return false
+	}
+	args := make([]value, params)
+	for k := params - 1; k >= 0; k-- {
+		args[k] = ctx.pop()
+	}
+	// A tail call stands in return position: no operands survive besides the
+	// arguments just consumed.
+	if ctx.count() != 0 {
+		return false
+	}
+	f := newFrame(ctx.addr, target, 0, 0)
+	if !l.locals(ctx, &f, args) {
+		return false
+	}
+	ctx.frames = append(ctx.frames[:0], f)
+	if !l.flush(ctx, true) {
+		return false
+	}
+	return l.iterate(ctx, 0)
+}
+
+// tailMorph lowers a tail call to a different function by reusing the current
+// frame in place: the activation is replaced by the callee at the same base,
+// its params seeded from the arguments and its other locals reset, then the
+// walk continues into the callee's body. The frame record save/unwind writes
+// describes the callee, so a later trap rebuilds the reused frame as the callee
+// exactly as threaded tail() leaves it.
+func (l arm64Lowerer) tailMorph(ctx *lowering, op step) bool {
+	target, params, ok := l.tailTarget(ctx, op)
+	if !ok {
+		return false
+	}
+	old := ctx.frame()
+	base := old.base
+	args := make([]value, params)
+	for k := params - 1; k >= 0; k-- {
+		args[k] = ctx.pop()
+	}
+	if ctx.count() != 0 {
+		return false
+	}
+	f := newFrame(op.callee, target, base, len(ctx.values))
+	f.resume = op.ip + 1
+	if !l.locals(ctx, &f, args) {
+		return false
+	}
+	ctx.frames[len(ctx.frames)-1] = f
 	return true
 }
 

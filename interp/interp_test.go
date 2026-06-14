@@ -4879,6 +4879,199 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NotZero(t, i.Profile().JIT.Emits)
 	})
 
+	t.Run("traces tail calls natively", func(t *testing.T) {
+		requireJIT(t)
+
+		patch := func(code []instr.Instruction, branch, target int) {
+			start := len(instr.Marshal(code[:branch]))
+			end := start + len(code[branch])
+			dst := len(instr.Marshal(code[:target]))
+			code[branch].SetOperand(0, uint64(uint16(int16(dst-end))))
+		}
+		requireEntry := func(t *testing.T, i *Interpreter, addr int) {
+			t.Helper()
+			tree := i.tracer.trees[anchor{addr: addr, ip: 0}]
+			require.NotNil(t, tree)
+			require.NotNil(t, tree.root)
+			require.Equal(t, returned, tree.root.kind)
+			require.NotZero(t, i.Profile().JIT.Emits)
+		}
+
+		t.Run("self tail-call loops natively without growing frames", func(t *testing.T) {
+			// f(n) = n==0 ? 0 : return_call f(n-1). n=200 exceeds the 128 frame
+			// budget, so it only completes by reusing the frame; the JIT lowers the
+			// self tail-call as a native loop back-edge anchored at the entry.
+			body := []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_EQZ),
+				instr.New(instr.BR_IF, 0),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.RETURN_CALL),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.RETURN),
+			}
+			patch(body, 2, 8)
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			}).Emit(body...).Build()
+			i := New(program.New(
+				[]instr.Instruction{
+					instr.New(instr.I32_CONST, 200),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(fn),
+			), WithTick(1), WithThreshold(1))
+			defer i.Close()
+
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(0), value)
+			requireEntry(t, i, i.constants[0].Ref())
+		})
+
+		t.Run("self tail-call carries an accumulator and resets extra locals", func(t *testing.T) {
+			// f(n, acc) = n==0 ? acc : return_call f(n-1, acc+n). The unread extra
+			// local exercises the back-edge zero-fill of non-param locals.
+			// f(200, 0) sums 1..200.
+			body := []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_EQZ),
+				instr.New(instr.BR_IF, 0),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.RETURN_CALL),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.RETURN),
+			}
+			patch(body, 2, 11)
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32, types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			}).WithLocals(types.TypeI32).Emit(body...).Build()
+			i := New(program.New(
+				[]instr.Instruction{
+					instr.New(instr.I32_CONST, 200),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(fn),
+			), WithTick(1), WithThreshold(1))
+			defer i.Close()
+
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(20100), value)
+			requireEntry(t, i, i.constants[0].Ref())
+		})
+
+		t.Run("self tail-call yields across the safepoint budget", func(t *testing.T) {
+			// n far exceeds loopBudget, so the native back-edge spends its budget
+			// and yields to the safepoint mid-recursion, deopting and re-entering
+			// at the reused frame each time. The result still resolves to 0.
+			body := []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_EQZ),
+				instr.New(instr.BR_IF, 0),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.RETURN_CALL),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.RETURN),
+			}
+			patch(body, 2, 8)
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			}).Emit(body...).Build()
+			i := New(program.New(
+				[]instr.Instruction{
+					instr.New(instr.I32_CONST, 20000),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(fn),
+			), WithTick(1), WithThreshold(1))
+			defer i.Close()
+
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(0), value)
+			requireEntry(t, i, i.constants[0].Ref())
+		})
+
+		t.Run("cross-function tail call morphs the frame in place", func(t *testing.T) {
+			// Mutual recursion: isEven(n) tail-calls isOdd(n-1) and isOdd(n) tail-
+			// calls isEven(n-1). Traced from isEven's entry, the isEven->isOdd leg
+			// morphs the frame in place and the isOdd->isEven leg closes the loop at
+			// the anchor. isEven(200) == 1.
+			even := []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_EQZ),
+				instr.New(instr.BR_IF, 0),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.RETURN_CALL),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RETURN),
+			}
+			patch(even, 2, 8)
+			odd := []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_EQZ),
+				instr.New(instr.BR_IF, 0),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.RETURN_CALL),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.RETURN),
+			}
+			patch(odd, 2, 8)
+			isEven := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			}).Emit(even...).Build()
+			isOdd := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			}).Emit(odd...).Build()
+			i := New(program.New(
+				[]instr.Instruction{
+					instr.New(instr.I32_CONST, 200),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(isEven, isOdd),
+			), WithTick(1), WithThreshold(1))
+			defer i.Close()
+
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(1), value)
+			requireEntry(t, i, i.constants[0].Ref())
+		})
+	})
+
 	t.Run("traces loops natively", func(t *testing.T) {
 		requireJIT(t)
 
