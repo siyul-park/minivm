@@ -48,7 +48,6 @@ type Interpreter struct {
 	gas int64
 
 	threshold int64
-	cutoff    int
 	tick      int
 	fuel      int64
 	limit     int
@@ -181,10 +180,6 @@ func WithFuel(val uint64) func(*option) {
 	return func(o *option) { o.fuel = val }
 }
 
-func WithCutoff(val int) func(*option) {
-	return func(o *option) { o.cutoff = val }
-}
-
 func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	opt := option{
 		frame:     128,
@@ -193,7 +188,6 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		heap:      128,
 		tick:      128,
 		threshold: 4096,
-		cutoff:    8,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -243,7 +237,6 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		cache:     opt.cache,
 		local:     local,
 		threshold: threshold,
-		cutoff:    opt.cutoff,
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
 		globals:   make([]types.Boxed, 0, opt.globals),
@@ -623,7 +616,7 @@ func (i *Interpreter) compile(addr int) error {
 		return i.shared(addr)
 	}
 	if i.compiler == nil {
-		compiler, err := newCompiler(i.cutoff)
+		compiler, err := newCompiler()
 		if err != nil {
 			i.local.addJIT(JIT{Errors: 1})
 			return err
@@ -661,7 +654,7 @@ func (i *Interpreter) shared(addr int) error {
 	i.cache.mu.Lock()
 	defer i.cache.mu.Unlock()
 
-	compiler, err := newCompiler(i.cutoff)
+	compiler, err := newCompiler()
 	if err != nil {
 		i.tracer.addJIT(JIT{Errors: 1})
 		i.cache.ready(addr)

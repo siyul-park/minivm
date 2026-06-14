@@ -30,6 +30,59 @@ func (fn callableFunc) Call(ctx uintptr) error {
 	return fn(ctx)
 }
 
+// vmPoint opts into its own VM representation (a "x,y" string) even though it
+// has exported fields and methods that would otherwise route to a HostObject.
+type vmPoint struct {
+	X int32
+	Y int32
+}
+
+func (p vmPoint) MarshalVM(_ *Interpreter) (types.Value, error) {
+	return types.String(fmt.Sprintf("%d,%d", p.X, p.Y)), nil
+}
+
+func (p *vmPoint) UnmarshalVM(_ *Interpreter, v types.Value) error {
+	s, ok := v.(types.String)
+	if !ok {
+		return fmt.Errorf("%w: source=%T", ErrTypeMismatch, v)
+	}
+	if _, err := fmt.Sscanf(string(s), "%d,%d", &p.X, &p.Y); err != nil {
+		return err
+	}
+	return nil
+}
+
+// vmOnlyMarshal implements ValueMarshaler but not ValueUnmarshaler.
+type vmOnlyMarshal struct{}
+
+func (vmOnlyMarshal) MarshalVM(_ *Interpreter) (types.Value, error) {
+	return types.I32(7), nil
+}
+
+// extPoint stands in for an external type that cannot implement ValueMarshaler.
+type extPoint struct {
+	X int32
+	Y int32
+}
+
+func extPointConverter() Converter {
+	return Converter{
+		VMType: types.TypeString,
+		Marshal: func(_ *Interpreter, v any) (types.Value, error) {
+			p := v.(extPoint)
+			return types.String(fmt.Sprintf("%d:%d", p.X, p.Y)), nil
+		},
+		Unmarshal: func(_ *Interpreter, val types.Value, dst any) error {
+			s, ok := val.(types.String)
+			if !ok {
+				return fmt.Errorf("%w: source=%T", ErrTypeMismatch, val)
+			}
+			_, err := fmt.Sscanf(string(s), "%d:%d", &dst.(*extPoint).X, &dst.(*extPoint).Y)
+			return err
+		},
+	}
+}
+
 var tests = []test{
 	// --- stack: NOP, DROP, DUP, SWAP, SELECT ---
 	{
@@ -2933,7 +2986,7 @@ func TestInterpreter_Run(t *testing.T) {
 		opts []func(*option)
 	}{
 		{name: "default"},
-		{name: "jit", opts: []func(*option){WithTick(1), WithCutoff(1), WithThreshold(1)}},
+		{name: "jit", opts: []func(*option){WithTick(1), WithThreshold(1)}},
 	}
 	for _, mode := range modes {
 		mode := mode
@@ -3114,7 +3167,7 @@ func TestInterpreter_Run(t *testing.T) {
 		want, err := threaded.Pop()
 		require.NoError(t, err)
 
-		jit := New(prog, WithTick(1), WithCutoff(1), WithThreshold(1))
+		jit := New(prog, WithTick(1), WithThreshold(1))
 		defer jit.Close()
 		require.NoError(t, jit.Run(context.Background()))
 		got, err := jit.Pop()
@@ -3139,7 +3192,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_SUB),
 			instr.New(instr.GLOBAL_SET, 0),
 			instr.New(instr.BR, 0xFFEA), // -22 -> header
-		}), WithTick(1), WithCutoff(1), WithThreshold(1), WithHook(func(*Interpreter) error {
+		}), WithTick(1), WithThreshold(1), WithHook(func(*Interpreter) error {
 			calls++
 			if calls == 5000 {
 				cancel()
@@ -3248,7 +3301,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.GLOBAL_SET, 0),
 			instr.New(instr.BR, 0xFFEA),    // -22 -> header
 			instr.New(instr.GLOBAL_GET, 0), // exit: push final value
-		}), WithTick(1), WithCutoff(1), WithThreshold(1))
+		}), WithTick(1), WithThreshold(1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
@@ -3343,7 +3396,7 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(fn),
-		), withLocal(p), WithCutoff(1), WithFrame(2))
+		), withLocal(p), WithFrame(2))
 		defer func() {
 			i.fp = 1
 			require.NoError(t, i.Close())
@@ -3370,7 +3423,7 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(fn),
-		), withLocal(p), WithCutoff(1), WithGlobals(1))
+		), withLocal(p), WithGlobals(1))
 		defer i.Close()
 		i.globals = append(i.globals, types.BoxI32(1))
 
@@ -3570,7 +3623,7 @@ func TestInterpreter_WithHook(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(NewHostFunction(&types.FunctionType{}, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
 			return nil, nil
-		}))), WithTick(1), WithThreshold(1), WithCutoff(1), WithHook(func(i *Interpreter) error {
+		}))), WithTick(1), WithThreshold(1), WithHook(func(i *Interpreter) error {
 			calls++
 			cancel()
 			return nil
@@ -3703,7 +3756,7 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_ADD),
-		}), withLocal(p), WithTick(1), WithThreshold(-1), WithCutoff(1))
+		}), withLocal(p), WithTick(1), WithThreshold(-1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		require.Zero(t, p.Snapshot().JIT.Attempts)
@@ -3716,7 +3769,7 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_ADD),
-		}), withLocal(p), WithTick(1), WithThreshold(0), WithCutoff(1))
+		}), withLocal(p), WithTick(1), WithThreshold(0))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		require.Equal(t, uint64(1), p.Snapshot().JIT.Attempts)
@@ -3759,7 +3812,7 @@ func TestInterpreter_withLocal(t *testing.T) {
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
-		}, program.WithConstants(fn)), withLocal(p), WithTick(1), WithThreshold(3), WithCutoff(1), WithHook(func(i *Interpreter) error {
+		}, program.WithConstants(fn)), withLocal(p), WithTick(1), WithThreshold(3), WithHook(func(i *Interpreter) error {
 			if addr == 0 || i.Func() != addr || i.IP() != 0 {
 				return nil
 			}
@@ -3793,7 +3846,7 @@ func TestInterpreter_withLocal(t *testing.T) {
 			instr.New(instr.I32_SUB),
 			instr.New(instr.GLOBAL_SET, 0),
 			instr.New(instr.BR, 0xFFEA), // -22 -> header
-		}), withLocal(p), WithTick(1), WithCutoff(1), WithThreshold(1))
+		}), withLocal(p), WithTick(1), WithThreshold(1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		// JIT fires at the first sample; further samples accrue only if the
@@ -3869,7 +3922,7 @@ func TestInterpreter_WithFuel(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(NewHostFunction(&types.FunctionType{}, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
 			return nil, nil
-		}))), WithTick(1), WithThreshold(1), WithCutoff(1), WithFuel(1))
+		}))), WithTick(1), WithThreshold(1), WithFuel(1))
 		defer i.Close()
 		require.ErrorIs(t, i.Run(context.Background()), ErrFuelExhausted)
 	})
@@ -3889,7 +3942,7 @@ func TestInterpreter_WithFuel(t *testing.T) {
 			instr.New(instr.I32_SUB),
 			instr.New(instr.GLOBAL_SET, 0),
 			instr.New(instr.BR, 0xFFEA), // -22 -> header
-		}), WithTick(1), WithCutoff(1), WithThreshold(1), WithFuel(500))
+		}), WithTick(1), WithThreshold(1), WithFuel(500))
 		defer i.Close()
 		require.ErrorIs(t, i.Run(context.Background()), ErrFuelExhausted)
 	})
@@ -4171,7 +4224,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(fact),
-		), WithTick(1), WithThreshold(1), WithCutoff(1))
+		), WithTick(1), WithThreshold(1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -4219,7 +4272,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				instr.New(instr.GLOBAL_GET, 0),
 			},
 			program.WithConstants(sumto),
-		), WithTick(1), WithThreshold(1), WithCutoff(1))
+		), WithTick(1), WithThreshold(1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -4264,7 +4317,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(acc),
-		), WithTick(1), WithThreshold(1), WithCutoff(1))
+		), WithTick(1), WithThreshold(1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -4339,7 +4392,7 @@ func TestInterpreter_JIT(t *testing.T) {
 					instr.New(instr.CALL),
 				},
 				program.WithConstants(fn),
-			), WithTick(1), WithThreshold(1), WithCutoff(1))
+			), WithTick(1), WithThreshold(1))
 			defer i.Close()
 
 			require.NoError(t, i.Run(context.Background()))
@@ -4380,7 +4433,7 @@ func TestInterpreter_JIT(t *testing.T) {
 					instr.New(instr.CALL),
 				},
 				program.WithConstants(fn),
-			), WithTick(1), WithThreshold(1), WithCutoff(1))
+			), WithTick(1), WithThreshold(1))
 			defer i.Close()
 
 			require.NoError(t, i.Run(context.Background()))
@@ -4416,7 +4469,7 @@ func TestInterpreter_JIT(t *testing.T) {
 					instr.New(instr.CALL),
 				},
 				program.WithConstants(fn),
-			), WithTick(1), WithThreshold(1), WithCutoff(1))
+			), WithTick(1), WithThreshold(1))
 			defer i.Close()
 
 			ctx, cancel := context.WithCancel(context.Background())
@@ -4459,7 +4512,7 @@ func TestInterpreter_JIT(t *testing.T) {
 					instr.New(instr.CALL),
 				},
 				program.WithConstants(body, closure, caller),
-			), WithTick(1), WithThreshold(-1), WithCutoff(1), WithHook(func(i *Interpreter) error {
+			), WithTick(1), WithThreshold(-1), WithHook(func(i *Interpreter) error {
 				if addr == 0 || i.Func() != addr || i.IP() != 0 {
 					return nil
 				}
@@ -4474,7 +4527,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), v)
 
-			compiler, err := newCompiler(i.cutoff)
+			compiler, err := newCompiler()
 			require.NoError(t, err)
 			require.NotNil(t, compiler)
 			defer compiler.Close()
@@ -4514,7 +4567,7 @@ func TestInterpreter_JIT(t *testing.T) {
 					instr.New(instr.CALL),
 				},
 				program.WithConstants(add, caller),
-			), WithTick(1), WithThreshold(-1), WithCutoff(1), WithHook(func(i *Interpreter) error {
+			), WithTick(1), WithThreshold(-1), WithHook(func(i *Interpreter) error {
 				if addr == 0 || i.Func() != addr || i.IP() != 0 {
 					return nil
 				}
@@ -4529,7 +4582,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), v)
 
-			compiler, err := newCompiler(i.cutoff)
+			compiler, err := newCompiler()
 			require.NoError(t, err)
 			require.NotNil(t, compiler)
 			defer compiler.Close()
@@ -4572,7 +4625,7 @@ func TestInterpreter_JIT(t *testing.T) {
 					instr.New(instr.CALL),
 				},
 				program.WithConstants(fn),
-			), WithTick(1), WithThreshold(-1), WithCutoff(1), WithHook(func(i *Interpreter) error {
+			), WithTick(1), WithThreshold(-1), WithHook(func(i *Interpreter) error {
 				if addr == 0 || i.Func() != addr || i.IP() != 0 {
 					return nil
 				}
@@ -4594,7 +4647,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), v)
 
-			compiler, err := newCompiler(i.cutoff)
+			compiler, err := newCompiler()
 			require.NoError(t, err)
 			require.NotNil(t, compiler)
 			defer compiler.Close()
@@ -4629,7 +4682,7 @@ func TestInterpreter_JIT(t *testing.T) {
 					instr.New(instr.CALL),
 				},
 				program.WithConstants(fn),
-			), WithTick(1), WithThreshold(-1), WithCutoff(1), WithHook(func(i *Interpreter) error {
+			), WithTick(1), WithThreshold(-1), WithHook(func(i *Interpreter) error {
 				if addr == 0 || i.Func() != addr || i.IP() != 0 {
 					return nil
 				}
@@ -4644,7 +4697,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), v)
 
-			compiler, err := newCompiler(i.cutoff)
+			compiler, err := newCompiler()
 			require.NoError(t, err)
 			require.NotNil(t, compiler)
 			defer compiler.Close()
@@ -4680,7 +4733,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(callee, caller),
-		), withLocal(p), WithCutoff(1))
+		), withLocal(p))
 		defer i.Close()
 
 		require.NoError(t, i.compile(i.constants[0].Ref()))
@@ -4784,7 +4837,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				instr.New(instr.CALL),
 			},
 			program.WithConstants(fn, gate),
-		), WithFrame(1024), WithTick(1), WithThreshold(1), WithCutoff(1))
+		), WithFrame(1024), WithTick(1), WithThreshold(1))
 		defer i.Close()
 
 		errCh := make(chan error, 1)
@@ -5819,7 +5872,153 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 }
 
+func TestValueMarshaler(t *testing.T) {
+	t.Run("marshals via MarshalVM ahead of struct routing", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(vmPoint{X: 3, Y: 4})
+		require.NoError(t, err)
+		require.Equal(t, types.String("3,4"), got)
+	})
+
+	t.Run("nested element converts through MarshalVM", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal([]vmPoint{{X: 1, Y: 2}})
+		require.NoError(t, err)
+		arr, ok := got.(*types.Array)
+		require.True(t, ok)
+
+		elem, err := i.Load(arr.Elems[0].Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.String("1,2"), elem)
+	})
+
+	t.Run("missing UnmarshalVM errors on unmarshal", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(vmOnlyMarshal{})
+		require.NoError(t, err)
+		require.Equal(t, types.I32(7), got)
+
+		var out vmOnlyMarshal
+		require.ErrorIs(t, i.Unmarshal(types.I32(7), &out), ErrUnsupportedMarshalType)
+	})
+}
+
+func TestValueUnmarshaler(t *testing.T) {
+	t.Run("round-trips via UnmarshalVM", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		var out vmPoint
+		require.NoError(t, i.Unmarshal(types.String("5,6"), &out))
+		require.Equal(t, vmPoint{X: 5, Y: 6}, out)
+	})
+
+	t.Run("pointer receiver mutates destination", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		out := &vmPoint{X: 9, Y: 9}
+		require.NoError(t, i.Unmarshal(types.String("1,2"), out))
+		require.Equal(t, &vmPoint{X: 1, Y: 2}, out)
+	})
+}
+
+func TestWithConverter(t *testing.T) {
+	extType := reflect.TypeOf(extPoint{})
+
+	t.Run("marshals and unmarshals an external type", func(t *testing.T) {
+		i := New(program.New(nil), WithConverter(extType, extPointConverter()))
+		defer i.Close()
+
+		got, err := i.Marshal(extPoint{X: 3, Y: 4})
+		require.NoError(t, err)
+		require.Equal(t, types.String("3:4"), got)
+
+		var out extPoint
+		require.NoError(t, i.Unmarshal(types.String("5:6"), &out))
+		require.Equal(t, extPoint{X: 5, Y: 6}, out)
+	})
+
+	t.Run("applies to a nested struct field", func(t *testing.T) {
+		i := New(program.New(nil), WithConverter(extType, extPointConverter()))
+		defer i.Close()
+
+		got, err := i.Marshal(struct{ P extPoint }{P: extPoint{X: 1, Y: 2}})
+		require.NoError(t, err)
+		st, ok := got.(*types.Struct)
+		require.True(t, ok)
+		field, err := i.Load(st.FieldByName("P").Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.String("1:2"), field)
+	})
+
+	t.Run("overrides a builtin converter", func(t *testing.T) {
+		secs := Converter{
+			VMType: types.TypeI64,
+			Marshal: func(_ *Interpreter, v any) (types.Value, error) {
+				return types.I64(v.(time.Time).Unix()), nil
+			},
+		}
+		ts := time.Date(2026, 6, 14, 0, 0, 0, 0, time.UTC)
+		i := New(program.New(nil), WithConverter(reflect.TypeOf(time.Time{}), secs))
+		defer i.Close()
+
+		got, err := i.Marshal(ts)
+		require.NoError(t, err)
+		require.Equal(t, types.I64(ts.Unix()), got)
+	})
+
+	t.Run("nil direction stays unsupported", func(t *testing.T) {
+		marshalOnly := extPointConverter()
+		marshalOnly.Unmarshal = nil
+		i := New(program.New(nil), WithConverter(extType, marshalOnly))
+		defer i.Close()
+
+		var out extPoint
+		require.ErrorIs(t, i.Unmarshal(types.String("1:2"), &out), ErrUnsupportedMarshalType)
+	})
+
+	t.Run("ignored when a custom marshaler is set", func(t *testing.T) {
+		i := New(program.New(nil),
+			WithMarshaler(&recordingMarshaler{}),
+			WithConverter(extType, extPointConverter()),
+		)
+		defer i.Close()
+
+		got, err := i.Marshal(extPoint{X: 1, Y: 2})
+		require.NoError(t, err)
+		require.Equal(t, types.I32(9), got)
+	})
+}
+
 func BenchmarkInterpreter_Run(b *testing.B) {
+	b.Run("default", func(b *testing.B) {
+		for _, tt := range tests {
+			b.Run(tt.program.String(), func(b *testing.B) {
+				ctx, cancel := context.WithCancel(context.TODO())
+				defer cancel()
+
+				i := New(tt.program)
+				defer i.Close()
+
+				b.ResetTimer()
+
+				for n := 0; n < b.N; n++ {
+					_ = i.Run(ctx)
+					i.Reset()
+				}
+				b.StopTimer()
+				require.NoError(b, i.Run(ctx))
+			})
+		}
+	})
+
 	b.Run("threaded", func(b *testing.B) {
 		for _, tt := range tests {
 			b.Run(tt.program.String(), func(b *testing.B) {
@@ -5848,7 +6047,7 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 				ctx, cancel := context.WithCancel(context.TODO())
 				defer cancel()
 
-				i := New(tt.program, WithThreshold(-1), WithCutoff(1))
+				i := New(tt.program, WithThreshold(-1))
 				defer i.Close()
 				for _, constant := range i.constants {
 					if constant.Kind() != types.KindRef {
@@ -6126,182 +6325,4 @@ func BenchmarkInterpreter_Unmarshal(b *testing.B) {
 			require.NoError(b, err)
 		})
 	}
-}
-
-// vmPoint opts into its own VM representation (a "x,y" string) even though it
-// has exported fields and methods that would otherwise route to a HostObject.
-type vmPoint struct {
-	X int32
-	Y int32
-}
-
-func (p vmPoint) MarshalVM(_ *Interpreter) (types.Value, error) {
-	return types.String(fmt.Sprintf("%d,%d", p.X, p.Y)), nil
-}
-
-func (p *vmPoint) UnmarshalVM(_ *Interpreter, v types.Value) error {
-	s, ok := v.(types.String)
-	if !ok {
-		return fmt.Errorf("%w: source=%T", ErrTypeMismatch, v)
-	}
-	if _, err := fmt.Sscanf(string(s), "%d,%d", &p.X, &p.Y); err != nil {
-		return err
-	}
-	return nil
-}
-
-// vmOnlyMarshal implements ValueMarshaler but not ValueUnmarshaler.
-type vmOnlyMarshal struct{}
-
-func (vmOnlyMarshal) MarshalVM(_ *Interpreter) (types.Value, error) {
-	return types.I32(7), nil
-}
-
-func TestValueMarshaler(t *testing.T) {
-	t.Run("marshals via MarshalVM ahead of struct routing", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-
-		got, err := i.Marshal(vmPoint{X: 3, Y: 4})
-		require.NoError(t, err)
-		require.Equal(t, types.String("3,4"), got)
-	})
-
-	t.Run("nested element converts through MarshalVM", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-
-		got, err := i.Marshal([]vmPoint{{X: 1, Y: 2}})
-		require.NoError(t, err)
-		arr, ok := got.(*types.Array)
-		require.True(t, ok)
-
-		elem, err := i.Load(arr.Elems[0].Ref())
-		require.NoError(t, err)
-		require.Equal(t, types.String("1,2"), elem)
-	})
-
-	t.Run("missing UnmarshalVM errors on unmarshal", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-
-		got, err := i.Marshal(vmOnlyMarshal{})
-		require.NoError(t, err)
-		require.Equal(t, types.I32(7), got)
-
-		var out vmOnlyMarshal
-		require.ErrorIs(t, i.Unmarshal(types.I32(7), &out), ErrUnsupportedMarshalType)
-	})
-}
-
-func TestValueUnmarshaler(t *testing.T) {
-	t.Run("round-trips via UnmarshalVM", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-
-		var out vmPoint
-		require.NoError(t, i.Unmarshal(types.String("5,6"), &out))
-		require.Equal(t, vmPoint{X: 5, Y: 6}, out)
-	})
-
-	t.Run("pointer receiver mutates destination", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-
-		out := &vmPoint{X: 9, Y: 9}
-		require.NoError(t, i.Unmarshal(types.String("1,2"), out))
-		require.Equal(t, &vmPoint{X: 1, Y: 2}, out)
-	})
-}
-
-// extPoint stands in for an external type that cannot implement ValueMarshaler.
-type extPoint struct {
-	X int32
-	Y int32
-}
-
-func extPointConverter() Converter {
-	return Converter{
-		VMType: types.TypeString,
-		Marshal: func(_ *Interpreter, v any) (types.Value, error) {
-			p := v.(extPoint)
-			return types.String(fmt.Sprintf("%d:%d", p.X, p.Y)), nil
-		},
-		Unmarshal: func(_ *Interpreter, val types.Value, dst any) error {
-			s, ok := val.(types.String)
-			if !ok {
-				return fmt.Errorf("%w: source=%T", ErrTypeMismatch, val)
-			}
-			_, err := fmt.Sscanf(string(s), "%d:%d", &dst.(*extPoint).X, &dst.(*extPoint).Y)
-			return err
-		},
-	}
-}
-
-func TestWithConverter(t *testing.T) {
-	extType := reflect.TypeOf(extPoint{})
-
-	t.Run("marshals and unmarshals an external type", func(t *testing.T) {
-		i := New(program.New(nil), WithConverter(extType, extPointConverter()))
-		defer i.Close()
-
-		got, err := i.Marshal(extPoint{X: 3, Y: 4})
-		require.NoError(t, err)
-		require.Equal(t, types.String("3:4"), got)
-
-		var out extPoint
-		require.NoError(t, i.Unmarshal(types.String("5:6"), &out))
-		require.Equal(t, extPoint{X: 5, Y: 6}, out)
-	})
-
-	t.Run("applies to a nested struct field", func(t *testing.T) {
-		i := New(program.New(nil), WithConverter(extType, extPointConverter()))
-		defer i.Close()
-
-		got, err := i.Marshal(struct{ P extPoint }{P: extPoint{X: 1, Y: 2}})
-		require.NoError(t, err)
-		st, ok := got.(*types.Struct)
-		require.True(t, ok)
-		field, err := i.Load(st.FieldByName("P").Ref())
-		require.NoError(t, err)
-		require.Equal(t, types.String("1:2"), field)
-	})
-
-	t.Run("overrides a builtin converter", func(t *testing.T) {
-		secs := Converter{
-			VMType: types.TypeI64,
-			Marshal: func(_ *Interpreter, v any) (types.Value, error) {
-				return types.I64(v.(time.Time).Unix()), nil
-			},
-		}
-		ts := time.Date(2026, 6, 14, 0, 0, 0, 0, time.UTC)
-		i := New(program.New(nil), WithConverter(reflect.TypeOf(time.Time{}), secs))
-		defer i.Close()
-
-		got, err := i.Marshal(ts)
-		require.NoError(t, err)
-		require.Equal(t, types.I64(ts.Unix()), got)
-	})
-
-	t.Run("nil direction stays unsupported", func(t *testing.T) {
-		marshalOnly := extPointConverter()
-		marshalOnly.Unmarshal = nil
-		i := New(program.New(nil), WithConverter(extType, marshalOnly))
-		defer i.Close()
-
-		var out extPoint
-		require.ErrorIs(t, i.Unmarshal(types.String("1:2"), &out), ErrUnsupportedMarshalType)
-	})
-
-	t.Run("ignored when a custom marshaler is set", func(t *testing.T) {
-		i := New(program.New(nil),
-			WithMarshaler(&recordingMarshaler{}),
-			WithConverter(extType, extPointConverter()),
-		)
-		defer i.Close()
-
-		got, err := i.Marshal(extPoint{X: 1, Y: 2})
-		require.NoError(t, err)
-		require.Equal(t, types.I32(9), got)
-	})
 }

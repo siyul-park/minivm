@@ -60,7 +60,7 @@ var (
 	heapStruct   = valueItab((*types.Struct)(nil))
 )
 
-func newCompiler(_ int) (*compiler, error) {
+func newCompiler() (*compiler, error) {
 	buffer, err := asm.NewBuffer(4096)
 	if err != nil {
 		return nil, err
