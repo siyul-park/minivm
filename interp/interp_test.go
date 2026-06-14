@@ -226,6 +226,60 @@ var tests = []test{
 		),
 		values: []types.Value{types.I32(1)},
 	},
+	{
+		// tail recursion: f(n) = n==0 ? 0 : return_call f(n-1).
+		// n=200 far exceeds the 128 frame budget, so this only completes
+		// if RETURN_CALL reuses the frame instead of pushing.
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 200),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(
+				types.NewFunctionBuilder(&types.FunctionType{
+					Params:  []types.Type{types.TypeI32},
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_EQZ),
+					instr.New(instr.BR_IF, 12),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.I32_SUB),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.RETURN_CALL),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.RETURN),
+				).Build(),
+			),
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		// cross-function tail call: g() = return_call h(); h() = 42.
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(
+				types.NewFunctionBuilder(&types.FunctionType{
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
+					instr.New(instr.CONST_GET, 1),
+					instr.New(instr.RETURN_CALL),
+				).Build(),
+				types.NewFunctionBuilder(&types.FunctionType{
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
+					instr.New(instr.I32_CONST, 42),
+					instr.New(instr.RETURN),
+				).Build(),
+			),
+		),
+		values: []types.Value{types.I32(42)},
+	},
 	// --- globals: GLOBAL_GET, GLOBAL_SET, GLOBAL_TEE ---
 	{
 		program: program.New(
@@ -678,6 +732,71 @@ var tests = []test{
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CLZ),
+			},
+		),
+		values: []types.Value{types.I32(31)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 8),
+				instr.New(instr.I32_CTZ),
+			},
+		),
+		values: []types.Value{types.I32(3)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.I32_POPCNT),
+			},
+		),
+		values: []types.Value{types.I32(3)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_ROTL),
+			},
+		),
+		values: []types.Value{types.I32(2)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_ROTR),
+			},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 255),
+				instr.New(instr.I32_EXTEND8_S),
+			},
+		),
+		values: []types.Value{types.I32(-1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 65535),
+				instr.New(instr.I32_EXTEND16_S),
+			},
+		),
+		values: []types.Value{types.I32(-1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_EQZ),
 			},
 		),
@@ -959,6 +1078,110 @@ var tests = []test{
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 12),
+				instr.New(instr.I64_CONST, 10),
+				instr.New(instr.I64_XOR),
+			},
+		),
+		values: []types.Value{types.I64(6)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 12),
+				instr.New(instr.I64_CONST, 10),
+				instr.New(instr.I64_AND),
+			},
+		),
+		values: []types.Value{types.I64(8)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 12),
+				instr.New(instr.I64_CONST, 10),
+				instr.New(instr.I64_OR),
+			},
+		),
+		values: []types.Value{types.I64(14)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I64_CLZ),
+			},
+		),
+		values: []types.Value{types.I64(63)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 8),
+				instr.New(instr.I64_CTZ),
+			},
+		),
+		values: []types.Value{types.I64(3)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 7),
+				instr.New(instr.I64_POPCNT),
+			},
+		),
+		values: []types.Value{types.I64(3)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I64_ROTL),
+			},
+		),
+		values: []types.Value{types.I64(2)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 2),
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I64_ROTR),
+			},
+		),
+		values: []types.Value{types.I64(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 255),
+				instr.New(instr.I64_EXTEND8_S),
+			},
+		),
+		values: []types.Value{types.I64(-1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 65535),
+				instr.New(instr.I64_EXTEND16_S),
+			},
+		),
+		values: []types.Value{types.I64(-1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 4294967295),
+				instr.New(instr.I64_EXTEND32_S),
+			},
+		),
+		values: []types.Value{types.I64(-1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.I64_CONST, 1),
 				instr.New(instr.I64_EQZ),
 			},
@@ -1162,6 +1385,99 @@ var tests = []test{
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.5))),
+				instr.New(instr.F32_ABS),
+			},
+		),
+		values: []types.Value{types.F32(3.5)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(3.5))),
+				instr.New(instr.F32_NEG),
+			},
+		),
+		values: []types.Value{types.F32(-3.5)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(9.0))),
+				instr.New(instr.F32_SQRT),
+			},
+		),
+		values: []types.Value{types.F32(3.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.2))),
+				instr.New(instr.F32_CEIL),
+			},
+		),
+		values: []types.Value{types.F32(2.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.8))),
+				instr.New(instr.F32_FLOOR),
+			},
+		),
+		values: []types.Value{types.F32(1.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.8))),
+				instr.New(instr.F32_TRUNC),
+			},
+		),
+		values: []types.Value{types.F32(1.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(2.5))),
+				instr.New(instr.F32_NEAREST),
+			},
+		),
+		values: []types.Value{types.F32(2.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
+				instr.New(instr.F32_MIN),
+			},
+		),
+		values: []types.Value{types.F32(1.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
+				instr.New(instr.F32_MAX),
+			},
+		),
+		values: []types.Value{types.F32(2.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(3.0))),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(-1.0))),
+				instr.New(instr.F32_COPYSIGN),
+			},
+		),
+		values: []types.Value{types.F32(-3.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
 				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
 				instr.New(instr.F32_EQ),
@@ -1316,6 +1632,99 @@ var tests = []test{
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(-3.5)),
+				instr.New(instr.F64_ABS),
+			},
+		),
+		values: []types.Value{types.F64(3.5)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(3.5)),
+				instr.New(instr.F64_NEG),
+			},
+		),
+		values: []types.Value{types.F64(-3.5)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(9.0)),
+				instr.New(instr.F64_SQRT),
+			},
+		),
+		values: []types.Value{types.F64(3.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(1.2)),
+				instr.New(instr.F64_CEIL),
+			},
+		),
+		values: []types.Value{types.F64(2.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(1.8)),
+				instr.New(instr.F64_FLOOR),
+			},
+		),
+		values: []types.Value{types.F64(1.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(1.8)),
+				instr.New(instr.F64_TRUNC),
+			},
+		),
+		values: []types.Value{types.F64(1.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(2.5)),
+				instr.New(instr.F64_NEAREST),
+			},
+		),
+		values: []types.Value{types.F64(2.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(1.0)),
+				instr.New(instr.F64_CONST, math.Float64bits(2.0)),
+				instr.New(instr.F64_MIN),
+			},
+		),
+		values: []types.Value{types.F64(1.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(1.0)),
+				instr.New(instr.F64_CONST, math.Float64bits(2.0)),
+				instr.New(instr.F64_MAX),
+			},
+		),
+		values: []types.Value{types.F64(2.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(3.0)),
+				instr.New(instr.F64_CONST, math.Float64bits(-1.0)),
+				instr.New(instr.F64_COPYSIGN),
+			},
+		),
+		values: []types.Value{types.F64(-3.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.F64_CONST, math.Float64bits(1.0)),
 				instr.New(instr.F64_CONST, math.Float64bits(1.0)),
 				instr.New(instr.F64_EQ),
@@ -1408,6 +1817,114 @@ var tests = []test{
 			},
 		),
 		values: []types.Value{types.I64(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(math.NaN())),
+				instr.New(instr.F64_TO_I32_S),
+			},
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(math.Inf(1))),
+				instr.New(instr.F64_TO_I32_S),
+			},
+		),
+		values: []types.Value{types.I32(math.MaxInt32)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(math.Inf(-1))),
+				instr.New(instr.F64_TO_I32_S),
+			},
+		),
+		values: []types.Value{types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(-1.0)),
+				instr.New(instr.F64_TO_I32_U),
+			},
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(math.NaN())),
+				instr.New(instr.F64_TO_I64_S),
+			},
+		),
+		values: []types.Value{types.I64(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(math.Inf(1))),
+				instr.New(instr.F64_TO_I64_S),
+			},
+		),
+		values: []types.Value{types.I64(math.MaxInt64)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(float32(math.Inf(1))))),
+				instr.New(instr.F32_TO_I32_S),
+			},
+		),
+		values: []types.Value{types.I32(math.MaxInt32)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(float32(math.NaN())))),
+				instr.New(instr.F32_TO_I32_U),
+			},
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))),
+				instr.New(instr.I32_REINTERPRET_F32),
+			},
+		),
+		values: []types.Value{types.I32(int32(math.Float32bits(1.5)))},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, uint64(math.Float32bits(1.5))),
+				instr.New(instr.F32_REINTERPRET_I32),
+			},
+		),
+		values: []types.Value{types.F32(1.5)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(1.5)),
+				instr.New(instr.I64_REINTERPRET_F64),
+			},
+		),
+		values: []types.Value{types.I64(int64(math.Float64bits(1.5)))},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, math.Float64bits(1.5)),
+				instr.New(instr.F64_REINTERPRET_I64),
+			},
+		),
+		values: []types.Value{types.F64(1.5)},
 	},
 	{
 		program: program.New(
@@ -2162,6 +2679,35 @@ var tests = []test{
 			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
 		),
 		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.MAP_KEYS),
+				instr.New(instr.ARRAY_LEN),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 5),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.MAP_KEYS),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(5)},
 	},
 	{
 		program: program.New(
