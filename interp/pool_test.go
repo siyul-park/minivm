@@ -302,7 +302,7 @@ func TestPool_Profile(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 		var addr int
-		p := NewPool(prog, 2, WithTick(1), WithCutoff(1), WithThreshold(5), WithHook(func(i *Interpreter) error {
+		p := NewPool(prog, 2, WithTick(1), WithThreshold(5), WithHook(func(i *Interpreter) error {
 			if addr == 0 || i.Func() != addr || i.IP() != 0 {
 				return nil
 			}
@@ -351,7 +351,7 @@ func TestPool_Profile(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 		var addr int
-		p := NewPool(prog, 2, WithTick(1), WithCutoff(1), WithThreshold(5), WithHook(func(i *Interpreter) error {
+		p := NewPool(prog, 2, WithTick(1), WithThreshold(5), WithHook(func(i *Interpreter) error {
 			if addr == 0 || i.Func() != addr || i.IP() != 0 {
 				return nil
 			}
@@ -375,5 +375,57 @@ func TestPool_Profile(t *testing.T) {
 		p.Put(first)
 		p.Put(second)
 		require.Equal(t, uint64(1), p.Profile().JIT.Attempts)
+	})
+}
+
+func BenchmarkPool_GetPut(b *testing.B) {
+	b.Run("default", func(b *testing.B) {
+		for _, tt := range tests {
+			b.Run(tt.program.String(), func(b *testing.B) {
+				ctx, cancel := context.WithCancel(context.TODO())
+				defer cancel()
+
+				p := NewPool(tt.program, 256)
+				defer p.Close()
+
+				b.ReportAllocs()
+				b.ResetTimer()
+
+				b.RunParallel(func(pb *testing.PB) {
+					i, err := p.Get(ctx)
+					require.NoError(b, err)
+					for pb.Next() {
+						require.NoError(b, i.Run(ctx))
+						i.Reset()
+					}
+					p.Put(i)
+				})
+			})
+		}
+	})
+
+	b.Run("threaded", func(b *testing.B) {
+		for _, tt := range tests {
+			b.Run(tt.program.String(), func(b *testing.B) {
+				ctx, cancel := context.WithCancel(context.TODO())
+				defer cancel()
+
+				p := NewPool(tt.program, 256, WithThreshold(-1))
+				defer p.Close()
+
+				b.ReportAllocs()
+				b.ResetTimer()
+
+				b.RunParallel(func(pb *testing.PB) {
+					i, err := p.Get(ctx)
+					require.NoError(b, err)
+					for pb.Next() {
+						require.NoError(b, i.Run(ctx))
+						i.Reset()
+					}
+					p.Put(i)
+				})
+			})
+		}
 	})
 }
