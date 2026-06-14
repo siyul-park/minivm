@@ -5406,6 +5406,164 @@ func TestInterpreter_JIT(t *testing.T) {
 			t.Fatal("timed out waiting for canceled run")
 		}
 	})
+
+	t.Run("lowers new ops natively and matches threaded", func(t *testing.T) {
+		requireJIT(t)
+
+		// Each case is a counted loop (counter local 0, accumulator local 1 seeded
+		// from param 1) whose body applies one new op to the accumulator. Running
+		// the same program threaded and JIT-compiled must agree, and a non-zero
+		// emit count proves the body's op actually lowered to native code rather
+		// than silently falling back to threaded dispatch.
+		seedPush := func(accType types.Type, seed uint64) instr.Instruction {
+			switch accType.Kind() {
+			case types.KindI32:
+				return instr.New(instr.I32_CONST, seed)
+			case types.KindI64:
+				return instr.New(instr.I64_CONST, seed)
+			case types.KindF32:
+				return instr.New(instr.F32_CONST, seed)
+			default:
+				return instr.New(instr.F64_CONST, seed)
+			}
+		}
+		// The function takes the i32 counter as param 0 and holds the accumulator
+		// in local 1, seeded by a prologue. The prologue keeps the loop header off
+		// instruction 0 (a loop header at the function entry is not compiled), and
+		// because the prologue width cancels out, the relative branch offsets do
+		// not depend on it: BR_IF skips the body plus the 13-byte decrement tail,
+		// and the back-edge BR rewinds the whole header-to-BR span.
+		build := func(accType types.Type, seed uint64, body []instr.Instruction) *program.Program {
+			var b int
+			for _, in := range body {
+				b += in.Width()
+			}
+			loop := []instr.Instruction{
+				seedPush(accType, seed),
+				instr.New(instr.LOCAL_SET, 1),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_EQZ),
+				instr.New(instr.BR_IF, uint64(b+13)),
+			}
+			loop = append(loop, body...)
+			loop = append(loop,
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.LOCAL_SET, 0),
+				instr.New(instr.BR, uint64(uint16(-(19+b)))),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.RETURN),
+			)
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{accType},
+			}).WithLocals(accType).Emit(loop...).Build()
+			return program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 200),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			}, program.WithConstants(fn))
+		}
+
+		tests := []struct {
+			name    string
+			accType types.Type
+			seed    uint64
+			body    []instr.Instruction
+		}{
+			{"i64.and", types.TypeI64, 0xF0F0, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_CONST, 0xFF0F), instr.New(instr.I64_AND), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i64.or", types.TypeI64, 0xF0, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_CONST, 0x0F), instr.New(instr.I64_OR), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i64.xor", types.TypeI64, 0x1234, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_CONST, 0x00FF), instr.New(instr.I64_XOR), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i32.clz", types.TypeI32, 0x0FFF, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CLZ), instr.New(instr.I32_CONST, 7), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i64.ctz", types.TypeI64, 0x1000, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_CTZ), instr.New(instr.I64_CONST, 9), instr.New(instr.I64_ADD), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i32.popcnt", types.TypeI32, 0x7F3, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_POPCNT), instr.New(instr.I32_CONST, 17), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i64.popcnt", types.TypeI64, 0xABCD, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_POPCNT), instr.New(instr.I64_CONST, 21), instr.New(instr.I64_ADD), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i32.rotl", types.TypeI32, 0x12345678, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_ROTL), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i32.rotr", types.TypeI32, 0x12345678, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 5), instr.New(instr.I32_ROTR), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i64.rotl", types.TypeI64, 0x9, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_CONST, 1), instr.New(instr.I64_ROTL), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_AND), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i64.rotr", types.TypeI64, 0x40, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_CONST, 1), instr.New(instr.I64_ROTR), instr.New(instr.I64_CONST, 7), instr.New(instr.I64_AND), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i32.extend8_s", types.TypeI32, 0x1FF, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_EXTEND8_S), instr.New(instr.I32_CONST, 0x100), instr.New(instr.I32_OR), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i64.extend32_s", types.TypeI64, 0x1FFFF, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_EXTEND16_S), instr.New(instr.I64_CONST, 0xFFFF), instr.New(instr.I64_AND), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i32.reinterpret roundtrip", types.TypeI32, 0x40490FDB, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F32_REINTERPRET_I32), instr.New(instr.I32_REINTERPRET_F32), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i64.reinterpret roundtrip", types.TypeI64, 0x3FF0000000000000 & 0x1FFFFFFFFFFFF, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_REINTERPRET_I64), instr.New(instr.I64_REINTERPRET_F64), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"f64.sqrt", types.TypeF64, math.Float64bits(2.0), []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_SQRT), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"f64.abs/neg", types.TypeF64, math.Float64bits(3.5), []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_NEG), instr.New(instr.F64_ABS), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"f64.ceil/floor/trunc/nearest", types.TypeF64, math.Float64bits(2.5), []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_CEIL), instr.New(instr.F64_FLOOR), instr.New(instr.F64_TRUNC), instr.New(instr.F64_NEAREST), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"f64.min", types.TypeF64, math.Float64bits(10.0), []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_CONST, math.Float64bits(4.0)), instr.New(instr.F64_MIN), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"f64.max", types.TypeF64, math.Float64bits(1.0), []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_CONST, math.Float64bits(4.0)), instr.New(instr.F64_MAX), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"f64.copysign", types.TypeF64, math.Float64bits(7.5), []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_CONST, math.Float64bits(-1.0)), instr.New(instr.F64_COPYSIGN), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"f32.sqrt", types.TypeF32, uint64(math.Float32bits(2.0)), []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F32_SQRT), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"f32.min/copysign", types.TypeF32, uint64(math.Float32bits(9.0)), []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F32_CONST, uint64(math.Float32bits(4.0))), instr.New(instr.F32_MIN), instr.New(instr.F32_CONST, uint64(math.Float32bits(-1.0))), instr.New(instr.F32_COPYSIGN), instr.New(instr.LOCAL_SET, 1),
+			}},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				prog := build(tt.accType, tt.seed, tt.body)
+
+				threaded := New(prog, WithThreshold(-1))
+				defer threaded.Close()
+				require.NoError(t, threaded.Run(context.Background()))
+				want, err := threaded.Pop()
+				require.NoError(t, err)
+
+				jit := New(prog, WithTick(1), WithThreshold(1))
+				defer jit.Close()
+				require.NoError(t, jit.Run(context.Background()))
+				got, err := jit.Pop()
+				require.NoError(t, err)
+
+				require.Equal(t, want, got)
+				require.NotZero(t, jit.Profile().JIT.Emits)
+			})
+		}
+	})
 }
 
 func TestDebugger_Breakpoints(t *testing.T) {

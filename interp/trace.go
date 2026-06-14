@@ -565,9 +565,11 @@ func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
 		instr.MAP_SET,
 		instr.MAP_DELETE,
 		instr.MAP_CLEAR,
+		instr.MAP_KEYS,
 		instr.REF_NEW,
 		instr.REF_SET,
-		instr.CLOSURE_NEW:
+		instr.CLOSURE_NEW,
+		instr.RETURN_CALL:
 		return true
 	}
 	return false

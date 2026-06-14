@@ -130,13 +130,13 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `I32_AND` | `{}` | `a b → i32` | ✅ | Bitwise AND. |
 | `I32_OR` | `{}` | `a b → i32` | ✅ | Bitwise OR. |
 | `I32_XOR` | `{}` | `a b → i32` | ✅ | Bitwise XOR. |
-| `I32_CLZ` | `{}` | `x → i32` | ⬜ | Count leading zero bits (`32` if `x == 0`). |
-| `I32_CTZ` | `{}` | `x → i32` | ⬜ | Count trailing zero bits (`32` if `x == 0`). |
-| `I32_POPCNT` | `{}` | `x → i32` | ⬜ | Count set bits. |
-| `I32_ROTL` | `{}` | `a b → i32` | ⬜ | Rotate `a` left by `b` (modulo 32). |
-| `I32_ROTR` | `{}` | `a b → i32` | ⬜ | Rotate `a` right by `b` (modulo 32). |
-| `I32_EXTEND8_S` | `{}` | `x → i32` | ⬜ | Sign-extend low 8 bits to i32. |
-| `I32_EXTEND16_S` | `{}` | `x → i32` | ⬜ | Sign-extend low 16 bits to i32. |
+| `I32_CLZ` | `{}` | `x → i32` | ✅ | Count leading zero bits (`32` if `x == 0`). |
+| `I32_CTZ` | `{}` | `x → i32` | ✅ | Count trailing zero bits (`32` if `x == 0`). |
+| `I32_POPCNT` | `{}` | `x → i32` | ✅ | Count set bits. |
+| `I32_ROTL` | `{}` | `a b → i32` | ✅ | Rotate `a` left by `b` (modulo 32). |
+| `I32_ROTR` | `{}` | `a b → i32` | ✅ | Rotate `a` right by `b` (modulo 32). |
+| `I32_EXTEND8_S` | `{}` | `x → i32` | ✅ | Sign-extend low 8 bits to i32. |
+| `I32_EXTEND16_S` | `{}` | `x → i32` | ✅ | Sign-extend low 16 bits to i32. |
 | `I32_EQZ` | `{}` | `x → i32` | ✅ | Push `I32(1)` if zero. |
 | `I32_EQ` | `{}` | `a b → i32` | ✅ | Equality comparison. |
 | `I32_NE` | `{}` | `a b → i32` | ✅ | Inequality comparison. |
@@ -154,7 +154,7 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `I32_TO_F32_U` | `{}` | `i32 → f32` | ✅ | Convert unsigned i32 to f32. |
 | `I32_TO_F64_S` | `{}` | `i32 → f64` | ✅ | Convert signed i32 to f64. |
 | `I32_TO_F64_U` | `{}` | `i32 → f64` | ✅ | Convert unsigned i32 to f64. |
-| `I32_REINTERPRET_F32` | `{}` | `f32 → i32` | ⬜ | Reinterpret f32 bit pattern as i32 (no conversion). |
+| `I32_REINTERPRET_F32` | `{}` | `f32 → i32` | ✅ | Reinterpret f32 bit pattern as i32 (no conversion). |
 
 ## i64 Operations
 
@@ -171,17 +171,17 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `I64_SHL` | `{}` | `a b → i64` | ✅ | Left shift; amount uses low 6 bits. |
 | `I64_SHR_S` | `{}` | `a b → i64` | ✅ | Arithmetic right shift. |
 | `I64_SHR_U` | `{}` | `a b → i64` | ✅ | Logical right shift. |
-| `I64_XOR` | `{}` | `a b → i64` | ⬜ | Bitwise XOR. |
-| `I64_AND` | `{}` | `a b → i64` | ⬜ | Bitwise AND. |
-| `I64_OR` | `{}` | `a b → i64` | ⬜ | Bitwise OR. |
-| `I64_CLZ` | `{}` | `x → i64` | ⬜ | Count leading zero bits (`64` if `x == 0`). |
-| `I64_CTZ` | `{}` | `x → i64` | ⬜ | Count trailing zero bits (`64` if `x == 0`). |
-| `I64_POPCNT` | `{}` | `x → i64` | ⬜ | Count set bits. |
-| `I64_ROTL` | `{}` | `a b → i64` | ⬜ | Rotate `a` left by `b` (modulo 64). |
-| `I64_ROTR` | `{}` | `a b → i64` | ⬜ | Rotate `a` right by `b` (modulo 64). |
-| `I64_EXTEND8_S` | `{}` | `x → i64` | ⬜ | Sign-extend low 8 bits to i64. |
-| `I64_EXTEND16_S` | `{}` | `x → i64` | ⬜ | Sign-extend low 16 bits to i64. |
-| `I64_EXTEND32_S` | `{}` | `x → i64` | ⬜ | Sign-extend low 32 bits to i64. |
+| `I64_XOR` | `{}` | `a b → i64` | ✅ | Bitwise XOR. |
+| `I64_AND` | `{}` | `a b → i64` | ✅ | Bitwise AND. |
+| `I64_OR` | `{}` | `a b → i64` | ✅ | Bitwise OR. |
+| `I64_CLZ` | `{}` | `x → i64` | ✅ | Count leading zero bits (`64` if `x == 0`). |
+| `I64_CTZ` | `{}` | `x → i64` | ✅ | Count trailing zero bits (`64` if `x == 0`). |
+| `I64_POPCNT` | `{}` | `x → i64` | ✅ | Count set bits. |
+| `I64_ROTL` | `{}` | `a b → i64` | ✅ | Rotate `a` left by `b` (modulo 64). |
+| `I64_ROTR` | `{}` | `a b → i64` | ✅ | Rotate `a` right by `b` (modulo 64). |
+| `I64_EXTEND8_S` | `{}` | `x → i64` | ✅ | Sign-extend low 8 bits to i64. |
+| `I64_EXTEND16_S` | `{}` | `x → i64` | ✅ | Sign-extend low 16 bits to i64. |
+| `I64_EXTEND32_S` | `{}` | `x → i64` | ✅ | Sign-extend low 32 bits to i64. |
 | `I64_EQZ` | `{}` | `x → i32` | ✅ | Push `I32(1)` if zero. |
 | `I64_EQ` … `I64_GE_U` | `{}` | `a b → i32` | ✅ | Same semantics as i32 comparisons. |
 | `I64_TO_I32` | `{}` | `i64 → i32` | ✅ | Truncate to low 32 bits. |
@@ -189,7 +189,7 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `I64_TO_F32_U` | `{}` | `i64 → f32` | ✅ | Convert unsigned i64 to f32. |
 | `I64_TO_F64_S` | `{}` | `i64 → f64` | ✅ | Convert signed i64 to f64. |
 | `I64_TO_F64_U` | `{}` | `i64 → f64` | ✅ | Convert unsigned i64 to f64. |
-| `I64_REINTERPRET_F64` | `{}` | `f64 → i64` | ⬜ | Reinterpret f64 bit pattern as i64 (no conversion). |
+| `I64_REINTERPRET_F64` | `{}` | `f64 → i64` | ✅ | Reinterpret f64 bit pattern as i64 (no conversion). |
 
 ## f32 Operations
 
@@ -200,23 +200,23 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `F32_SUB` | `{}` | `a b → f32` | ✅ | Floating-point subtraction. |
 | `F32_MUL` | `{}` | `a b → f32` | ✅ | Floating-point multiplication. |
 | `F32_DIV` | `{}` | `a b → f32` | ✅ | Floating-point division. |
-| `F32_ABS` | `{}` | `x → f32` | ⬜ | Absolute value (clears sign bit). |
-| `F32_NEG` | `{}` | `x → f32` | ⬜ | Negate (flips sign bit, incl. NaN). |
-| `F32_SQRT` | `{}` | `x → f32` | ⬜ | Square root. |
-| `F32_CEIL` | `{}` | `x → f32` | ⬜ | Round toward +∞. |
-| `F32_FLOOR` | `{}` | `x → f32` | ⬜ | Round toward −∞. |
-| `F32_TRUNC` | `{}` | `x → f32` | ⬜ | Round toward zero. |
-| `F32_NEAREST` | `{}` | `x → f32` | ⬜ | Round to nearest, ties to even. |
-| `F32_MIN` | `{}` | `a b → f32` | ⬜ | Minimum; NaN propagates, `min(-0,+0)=-0`. |
-| `F32_MAX` | `{}` | `a b → f32` | ⬜ | Maximum; NaN propagates, `max(-0,+0)=+0`. |
-| `F32_COPYSIGN` | `{}` | `a b → f32` | ⬜ | Magnitude of `a` with sign of `b`. |
+| `F32_ABS` | `{}` | `x → f32` | ✅ | Absolute value (clears sign bit). |
+| `F32_NEG` | `{}` | `x → f32` | ✅ | Negate (flips sign bit, incl. NaN). |
+| `F32_SQRT` | `{}` | `x → f32` | ✅ | Square root. |
+| `F32_CEIL` | `{}` | `x → f32` | ✅ | Round toward +∞. |
+| `F32_FLOOR` | `{}` | `x → f32` | ✅ | Round toward −∞. |
+| `F32_TRUNC` | `{}` | `x → f32` | ✅ | Round toward zero. |
+| `F32_NEAREST` | `{}` | `x → f32` | ✅ | Round to nearest, ties to even. |
+| `F32_MIN` | `{}` | `a b → f32` | ✅ | Minimum; NaN propagates, `min(-0,+0)=-0`. |
+| `F32_MAX` | `{}` | `a b → f32` | ✅ | Maximum; NaN propagates, `max(-0,+0)=+0`. |
+| `F32_COPYSIGN` | `{}` | `a b → f32` | ✅ | Magnitude of `a` with sign of `b`. |
 | `F32_EQ` … `F32_GE` | `{}` | `a b → i32` | ✅ | Floating-point comparisons. |
 | `F32_TO_I32_S` | `{}` | `f32 → i32` | ✅ | Truncate toward zero to signed i32, saturating (NaN→0, out-of-range→nearest bound). |
 | `F32_TO_I32_U` | `{}` | `f32 → i32` | ✅ | Truncate toward zero to unsigned i32, saturating (NaN/negative→0, overflow→`u32` max). |
 | `F32_TO_I64_S` | `{}` | `f32 → i64` | ✅ | Truncate toward zero to signed i64, saturating (NaN→0, out-of-range→nearest bound). |
 | `F32_TO_I64_U` | `{}` | `f32 → i64` | ✅ | Truncate toward zero to unsigned i64, saturating (NaN/negative→0, overflow→`u64` max). |
 | `F32_TO_F64` | `{}` | `f32 → f64` | ✅ | Widen f32 to f64. |
-| `F32_REINTERPRET_I32` | `{}` | `i32 → f32` | ⬜ | Reinterpret i32 bit pattern as f32 (no conversion). |
+| `F32_REINTERPRET_I32` | `{}` | `i32 → f32` | ✅ | Reinterpret i32 bit pattern as f32 (no conversion). |
 
 ## f64 Operations
 
@@ -227,16 +227,16 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `F64_SUB` | `{}` | `a b → f64` | ✅ | Floating-point subtraction. |
 | `F64_MUL` | `{}` | `a b → f64` | ✅ | Floating-point multiplication. |
 | `F64_DIV` | `{}` | `a b → f64` | ✅ | Floating-point division. |
-| `F64_ABS` | `{}` | `x → f64` | ⬜ | Absolute value (clears sign bit). |
-| `F64_NEG` | `{}` | `x → f64` | ⬜ | Negate (flips sign bit, incl. NaN). |
-| `F64_SQRT` | `{}` | `x → f64` | ⬜ | Square root. |
-| `F64_CEIL` | `{}` | `x → f64` | ⬜ | Round toward +∞. |
-| `F64_FLOOR` | `{}` | `x → f64` | ⬜ | Round toward −∞. |
-| `F64_TRUNC` | `{}` | `x → f64` | ⬜ | Round toward zero. |
-| `F64_NEAREST` | `{}` | `x → f64` | ⬜ | Round to nearest, ties to even. |
-| `F64_MIN` | `{}` | `a b → f64` | ⬜ | Minimum; NaN propagates, `min(-0,+0)=-0`. |
-| `F64_MAX` | `{}` | `a b → f64` | ⬜ | Maximum; NaN propagates, `max(-0,+0)=+0`. |
-| `F64_COPYSIGN` | `{}` | `a b → f64` | ⬜ | Magnitude of `a` with sign of `b`. |
+| `F64_ABS` | `{}` | `x → f64` | ✅ | Absolute value (clears sign bit). |
+| `F64_NEG` | `{}` | `x → f64` | ✅ | Negate (flips sign bit, incl. NaN). |
+| `F64_SQRT` | `{}` | `x → f64` | ✅ | Square root. |
+| `F64_CEIL` | `{}` | `x → f64` | ✅ | Round toward +∞. |
+| `F64_FLOOR` | `{}` | `x → f64` | ✅ | Round toward −∞. |
+| `F64_TRUNC` | `{}` | `x → f64` | ✅ | Round toward zero. |
+| `F64_NEAREST` | `{}` | `x → f64` | ✅ | Round to nearest, ties to even. |
+| `F64_MIN` | `{}` | `a b → f64` | ✅ | Minimum; NaN propagates, `min(-0,+0)=-0`. |
+| `F64_MAX` | `{}` | `a b → f64` | ✅ | Maximum; NaN propagates, `max(-0,+0)=+0`. |
+| `F64_COPYSIGN` | `{}` | `a b → f64` | ✅ | Magnitude of `a` with sign of `b`. |
 | `F64_EQ` … `F64_GE` | `{}` | `a b → i32` | ✅ | Floating-point comparisons. |
 | `F64_TO_I32_S` | `{}` | `f64 → i32` | ✅ | Truncate toward zero to signed i32, saturating (NaN→0, out-of-range→nearest bound). |
 | `F64_TO_I32_U` | `{}` | `f64 → i32` | ✅ | Truncate toward zero to unsigned i32, saturating (NaN/negative→0, overflow→`u32` max). |

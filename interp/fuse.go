@@ -1,6 +1,8 @@
 package interp
 
 import (
+	"math"
+	"math/bits"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
@@ -69,6 +71,61 @@ func (c *threadedCompiler) fuseFunction(fn *types.Function, addr int) func(*Inte
 			i.fp++
 			i.fr = f
 		}
+	case instr.RETURN_CALL:
+		params := len(fn.Typ.Params)
+		returns := len(fn.Typ.Returns)
+		locals := len(fn.Locals)
+		return func(i *Interpreter) {
+			if i.sp < params {
+				panic(ErrStackUnderflow)
+			}
+			if i.fp == 1 {
+				if i.fp == len(i.frames) {
+					panic(ErrFrameOverflow)
+				}
+				if i.sp+locals >= len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				if locals > 0 {
+					clear(i.stack[i.sp : i.sp+locals])
+				}
+				i.fr.ip += 4
+				f := &i.frames[i.fp]
+				f.code = i.code[addr]
+				f.upvals = nil
+				f.addr = addr
+				f.ref = addr
+				f.ip = 0
+				f.bp = i.sp - params
+				f.returns = returns
+				f.release = false
+				i.sp += locals
+				i.fp++
+				i.fr = f
+				return
+			}
+			f := i.fr
+			base := f.bp
+			if base+params+locals > len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			copy(i.stack[base:base+params], i.stack[i.sp-params:i.sp])
+			if f.release {
+				i.release(f.ref)
+			}
+			if locals > 0 {
+				clear(i.stack[base+params : base+params+locals])
+			}
+			f.code = i.code[addr]
+			f.upvals = nil
+			f.addr = addr
+			f.ref = addr
+			f.ip = 0
+			f.bp = base
+			f.returns = returns
+			f.release = false
+			i.sp = base + params + locals
+		}
 	case instr.CLOSURE_NEW:
 		captures := len(fn.Captures)
 		return func(i *Interpreter) {
@@ -132,6 +189,65 @@ func (c *threadedCompiler) fuseClosure(fn *types.Closure, addr int) func(*Interp
 			i.fp++
 			i.fr = f
 		}
+	case instr.RETURN_CALL:
+		tmpl, ok := c.heap[fn.Fn].(*types.Function)
+		if !ok {
+			return nil
+		}
+		params := len(fn.Typ.Params)
+		returns := len(fn.Typ.Returns)
+		locals := len(tmpl.Locals)
+		return func(i *Interpreter) {
+			if i.sp < params {
+				panic(ErrStackUnderflow)
+			}
+			if i.fp == 1 {
+				if i.fp == len(i.frames) {
+					panic(ErrFrameOverflow)
+				}
+				if i.sp+locals >= len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				if locals > 0 {
+					clear(i.stack[i.sp : i.sp+locals])
+				}
+				i.fr.ip += 4
+				f := &i.frames[i.fp]
+				f.code = i.code[fn.Fn]
+				f.upvals = fn.Upvals
+				f.addr = int(fn.Fn)
+				f.ref = addr
+				f.ip = 0
+				f.bp = i.sp - params
+				f.returns = returns
+				f.release = false
+				i.sp += locals
+				i.fp++
+				i.fr = f
+				return
+			}
+			f := i.fr
+			base := f.bp
+			if base+params+locals > len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			copy(i.stack[base:base+params], i.stack[i.sp-params:i.sp])
+			if f.release {
+				i.release(f.ref)
+			}
+			if locals > 0 {
+				clear(i.stack[base+params : base+params+locals])
+			}
+			f.code = i.code[fn.Fn]
+			f.upvals = fn.Upvals
+			f.addr = int(fn.Fn)
+			f.ref = addr
+			f.ip = 0
+			f.bp = base
+			f.returns = returns
+			f.release = false
+			i.sp = base + params + locals
+		}
 	}
 	return nil
 }
@@ -178,6 +294,44 @@ func (c *threadedCompiler) fuseHostFunction(fn *HostFunction, size int) func(*In
 			i.sp += delta
 			copy(i.stack[i.sp-returns:i.sp], rets)
 			i.fr.ip += size + 1
+		}
+	case instr.RETURN_CALL:
+		params := len(fn.Typ.Params)
+		returns := len(fn.Typ.Returns)
+		delta := returns - params
+		return func(i *Interpreter) {
+			if i.sp < params {
+				panic(ErrStackUnderflow)
+			}
+			if i.sp+delta >= len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			args := i.stack[i.sp-params : i.sp]
+			rets, err := fn.Fn(i, args)
+			if err != nil {
+				panic(err)
+			}
+			for _, val := range args {
+				if val.Kind() != types.KindRef {
+					continue
+				}
+				keep := false
+				for _, ret := range rets {
+					if ret == val {
+						keep = true
+						break
+					}
+				}
+				if !keep {
+					i.release(val.Ref())
+				}
+			}
+			i.sp += delta
+			copy(i.stack[i.sp-returns:i.sp], rets)
+			i.fr.ip += size + 1
+			if i.fp > 1 {
+				i.ret()
+			}
 		}
 	}
 	return nil
@@ -428,6 +582,26 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
 			i.stack[i.sp-1] = types.BoxI32(lhs | rhs)
+			i.fr.ip += size + 1
+		}
+	case instr.I32_ROTL:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := rhs(i)
+			lhs := uint32(i.stack[i.sp-1].I32())
+			i.stack[i.sp-1] = types.BoxI32(int32(bits.RotateLeft32(lhs, int(rhs))))
+			i.fr.ip += size + 1
+		}
+	case instr.I32_ROTR:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := rhs(i)
+			lhs := uint32(i.stack[i.sp-1].I32())
+			i.stack[i.sp-1] = types.BoxI32(int32(bits.RotateLeft32(lhs, -int(rhs))))
 			i.fr.ip += size + 1
 		}
 	case instr.I32_EQ:
@@ -691,6 +865,26 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 			i.stack[i.sp-1] = types.BoxI32(lhs | rhs)
 			i.fr.ip += size + 1
 		}
+	case instr.I32_ROTL:
+		amount := int(rhs)
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := uint32(i.stack[i.sp-1].I32())
+			i.stack[i.sp-1] = types.BoxI32(int32(bits.RotateLeft32(lhs, amount)))
+			i.fr.ip += size + 1
+		}
+	case instr.I32_ROTR:
+		amount := -int(rhs)
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := uint32(i.stack[i.sp-1].I32())
+			i.stack[i.sp-1] = types.BoxI32(int32(bits.RotateLeft32(lhs, amount)))
+			i.fr.ip += size + 1
+		}
 	case instr.I32_EQ:
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -900,6 +1094,56 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			rhs := rhs(i) & 0x3F
 			lhs := i.unboxI64(i.stack[i.sp-1])
 			i.stack[i.sp-1] = i.boxI64(int64(uint64(lhs) >> rhs))
+			i.fr.ip += size + 1
+		}
+	case instr.I64_XOR:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := rhs(i)
+			lhs := i.unboxI64(i.stack[i.sp-1])
+			i.stack[i.sp-1] = i.boxI64(lhs ^ rhs)
+			i.fr.ip += size + 1
+		}
+	case instr.I64_AND:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := rhs(i)
+			lhs := i.unboxI64(i.stack[i.sp-1])
+			i.stack[i.sp-1] = i.boxI64(lhs & rhs)
+			i.fr.ip += size + 1
+		}
+	case instr.I64_OR:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := rhs(i)
+			lhs := i.unboxI64(i.stack[i.sp-1])
+			i.stack[i.sp-1] = i.boxI64(lhs | rhs)
+			i.fr.ip += size + 1
+		}
+	case instr.I64_ROTL:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			amount := int(rhs(i))
+			lhs := uint64(i.unboxI64(i.stack[i.sp-1]))
+			i.stack[i.sp-1] = i.boxI64(int64(bits.RotateLeft64(lhs, amount)))
+			i.fr.ip += size + 1
+		}
+	case instr.I64_ROTR:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			amount := int(rhs(i))
+			lhs := uint64(i.unboxI64(i.stack[i.sp-1]))
+			i.stack[i.sp-1] = i.boxI64(int64(bits.RotateLeft64(lhs, -amount)))
 			i.fr.ip += size + 1
 		}
 	case instr.I64_EQ:
@@ -1136,6 +1380,53 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 			i.stack[i.sp-1] = i.boxI64(int64(uint64(lhs) >> rhs))
 			i.fr.ip += size + 1
 		}
+	case instr.I64_XOR:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := i.unboxI64(i.stack[i.sp-1])
+			i.stack[i.sp-1] = i.boxI64(lhs ^ rhs)
+			i.fr.ip += size + 1
+		}
+	case instr.I64_AND:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := i.unboxI64(i.stack[i.sp-1])
+			i.stack[i.sp-1] = i.boxI64(lhs & rhs)
+			i.fr.ip += size + 1
+		}
+	case instr.I64_OR:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := i.unboxI64(i.stack[i.sp-1])
+			i.stack[i.sp-1] = i.boxI64(lhs | rhs)
+			i.fr.ip += size + 1
+		}
+	case instr.I64_ROTL:
+		amount := int(rhs)
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := uint64(i.unboxI64(i.stack[i.sp-1]))
+			i.stack[i.sp-1] = i.boxI64(int64(bits.RotateLeft64(lhs, amount)))
+			i.fr.ip += size + 1
+		}
+	case instr.I64_ROTR:
+		amount := -int(rhs)
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := uint64(i.unboxI64(i.stack[i.sp-1]))
+			i.stack[i.sp-1] = i.boxI64(int64(bits.RotateLeft64(lhs, amount)))
+			i.fr.ip += size + 1
+		}
 	case instr.I64_EQ:
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1278,6 +1569,36 @@ func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) fun
 			i.stack[i.sp-1] = types.BoxF32(lhs / rhs)
 			i.fr.ip += size + 1
 		}
+	case instr.F32_MIN:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := rhs(i)
+			lhs := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = types.BoxF32(float32(math.Min(float64(lhs), float64(rhs))))
+			i.fr.ip += size + 1
+		}
+	case instr.F32_MAX:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := rhs(i)
+			lhs := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = types.BoxF32(float32(math.Max(float64(lhs), float64(rhs))))
+			i.fr.ip += size + 1
+		}
+	case instr.F32_COPYSIGN:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := rhs(i)
+			lhs := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = types.BoxF32(float32(math.Copysign(float64(lhs), float64(rhs))))
+			i.fr.ip += size + 1
+		}
 	case instr.F32_EQ:
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1391,6 +1712,33 @@ func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) 
 			i.stack[i.sp-1] = types.BoxF32(lhs / rhs)
 			i.fr.ip += size + 1
 		}
+	case instr.F32_MIN:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = types.BoxF32(float32(math.Min(float64(lhs), float64(rhs))))
+			i.fr.ip += size + 1
+		}
+	case instr.F32_MAX:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = types.BoxF32(float32(math.Max(float64(lhs), float64(rhs))))
+			i.fr.ip += size + 1
+		}
+	case instr.F32_COPYSIGN:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = types.BoxF32(float32(math.Copysign(float64(lhs), float64(rhs))))
+			i.fr.ip += size + 1
+		}
 	case instr.F32_EQ:
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1495,6 +1843,36 @@ func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) fun
 			}
 			lhs := i.stack[i.sp-1].F64()
 			i.stack[i.sp-1] = types.BoxF64(lhs / rhs)
+			i.fr.ip += size + 1
+		}
+	case instr.F64_MIN:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := rhs(i)
+			lhs := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = types.BoxF64(math.Min(lhs, rhs))
+			i.fr.ip += size + 1
+		}
+	case instr.F64_MAX:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := rhs(i)
+			lhs := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = types.BoxF64(math.Max(lhs, rhs))
+			i.fr.ip += size + 1
+		}
+	case instr.F64_COPYSIGN:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := rhs(i)
+			lhs := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = types.BoxF64(math.Copysign(lhs, rhs))
 			i.fr.ip += size + 1
 		}
 	case instr.F64_EQ:
@@ -1608,6 +1986,33 @@ func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) 
 			}
 			lhs := i.stack[i.sp-1].F64()
 			i.stack[i.sp-1] = types.BoxF64(lhs / rhs)
+			i.fr.ip += size + 1
+		}
+	case instr.F64_MIN:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = types.BoxF64(math.Min(lhs, rhs))
+			i.fr.ip += size + 1
+		}
+	case instr.F64_MAX:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = types.BoxF64(math.Max(lhs, rhs))
+			i.fr.ip += size + 1
+		}
+	case instr.F64_COPYSIGN:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = types.BoxF64(math.Copysign(lhs, rhs))
 			i.fr.ip += size + 1
 		}
 	case instr.F64_EQ:

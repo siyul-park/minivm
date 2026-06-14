@@ -361,6 +361,90 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			ok = l.f64ToI64(ctx, op, arm64.FCVTZS)
 		case instr.F64_TO_I64_U:
 			ok = l.f64ToI64(ctx, op, arm64.FCVTZU)
+		case instr.I64_AND:
+			ok = l.i64Binary(ctx, op, arm64.AND, false)
+		case instr.I64_OR:
+			ok = l.i64Binary(ctx, op, arm64.ORR, false)
+		case instr.I64_XOR:
+			ok = l.i64Binary(ctx, op, arm64.EOR, false)
+		case instr.I32_CLZ:
+			ok = l.countZeros(ctx, types.KindI32, false)
+		case instr.I32_CTZ:
+			ok = l.countZeros(ctx, types.KindI32, true)
+		case instr.I64_CLZ:
+			ok = l.countZeros(ctx, types.KindI64, false)
+		case instr.I64_CTZ:
+			ok = l.countZeros(ctx, types.KindI64, true)
+		case instr.I32_POPCNT:
+			ok = l.popcnt(ctx, types.KindI32)
+		case instr.I64_POPCNT:
+			ok = l.popcnt(ctx, types.KindI64)
+		case instr.I32_ROTL:
+			ok = l.rotate(ctx, op, types.KindI32, true)
+		case instr.I32_ROTR:
+			ok = l.rotate(ctx, op, types.KindI32, false)
+		case instr.I64_ROTL:
+			ok = l.rotate(ctx, op, types.KindI64, true)
+		case instr.I64_ROTR:
+			ok = l.rotate(ctx, op, types.KindI64, false)
+		case instr.I32_EXTEND8_S:
+			ok = l.extend(ctx, types.KindI32, arm64.SXTB)
+		case instr.I32_EXTEND16_S:
+			ok = l.extend(ctx, types.KindI32, arm64.SXTH)
+		case instr.I64_EXTEND8_S:
+			ok = l.extend(ctx, types.KindI64, arm64.SXTB)
+		case instr.I64_EXTEND16_S:
+			ok = l.extend(ctx, types.KindI64, arm64.SXTH)
+		case instr.I64_EXTEND32_S:
+			ok = l.extend(ctx, types.KindI64, arm64.SXTW)
+		case instr.I32_REINTERPRET_F32:
+			ok = l.reinterpret(ctx, op, types.KindF32, types.KindI32)
+		case instr.F32_REINTERPRET_I32:
+			ok = l.reinterpret(ctx, op, types.KindI32, types.KindF32)
+		case instr.I64_REINTERPRET_F64:
+			ok = l.reinterpret(ctx, op, types.KindF64, types.KindI64)
+		case instr.F64_REINTERPRET_I64:
+			ok = l.reinterpret(ctx, op, types.KindI64, types.KindF64)
+		case instr.F32_ABS:
+			ok = l.f32Unary(ctx, arm64.FABS)
+		case instr.F32_NEG:
+			ok = l.f32Unary(ctx, arm64.FNEG)
+		case instr.F32_SQRT:
+			ok = l.f32Unary(ctx, arm64.FSQRT)
+		case instr.F32_CEIL:
+			ok = l.f32Unary(ctx, arm64.FRINTP)
+		case instr.F32_FLOOR:
+			ok = l.f32Unary(ctx, arm64.FRINTM)
+		case instr.F32_TRUNC:
+			ok = l.f32Unary(ctx, arm64.FRINTZ)
+		case instr.F32_NEAREST:
+			ok = l.f32Unary(ctx, arm64.FRINTN)
+		case instr.F32_MIN:
+			ok = l.f32Binary(ctx, arm64.FMIN)
+		case instr.F32_MAX:
+			ok = l.f32Binary(ctx, arm64.FMAX)
+		case instr.F32_COPYSIGN:
+			ok = l.copysign(ctx, types.KindF32)
+		case instr.F64_ABS:
+			ok = l.f64Unary(ctx, arm64.FABS)
+		case instr.F64_NEG:
+			ok = l.f64Unary(ctx, arm64.FNEG)
+		case instr.F64_SQRT:
+			ok = l.f64Unary(ctx, arm64.FSQRT)
+		case instr.F64_CEIL:
+			ok = l.f64Unary(ctx, arm64.FRINTP)
+		case instr.F64_FLOOR:
+			ok = l.f64Unary(ctx, arm64.FRINTM)
+		case instr.F64_TRUNC:
+			ok = l.f64Unary(ctx, arm64.FRINTZ)
+		case instr.F64_NEAREST:
+			ok = l.f64Unary(ctx, arm64.FRINTN)
+		case instr.F64_MIN:
+			ok = l.f64Binary(ctx, arm64.FMIN)
+		case instr.F64_MAX:
+			ok = l.f64Binary(ctx, arm64.FMAX)
+		case instr.F64_COPYSIGN:
+			ok = l.copysign(ctx, types.KindF64)
 		case instr.REF_NULL:
 			ok = l.refNull(ctx)
 		case instr.REF_IS_NULL:
@@ -1096,6 +1180,185 @@ func (l arm64Lowerer) f64ToI64(ctx *lowering, op step, cvt func(dst, src asm.Reg
 	}
 	ctx.pop()
 	ctx.push(value{reg: raw, kind: types.KindI64, raw: true})
+	return true
+}
+
+// countZeros lowers CLZ (reverse=false) or CTZ (reverse=true, via RBIT then
+// CLZ) for an integer kind. The count is always in [0, width] so the result is
+// boxable without a guard. i32 operates on the W view so the upper lane is
+// ignored.
+func (l arm64Lowerer) countZeros(ctx *lowering, kind types.Kind, reverse bool) bool {
+	if ctx.count() < 1 || !l.kinds(ctx, kind, 1) {
+		return false
+	}
+	a := ctx.pop()
+	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	src, out := a.reg, dst
+	if kind == types.KindI32 {
+		src, out = l.narrow32(a.reg), l.narrow32(dst)
+	}
+	if reverse {
+		ctx.assembler.Emit(arm64.RBIT(out, src))
+		ctx.assembler.Emit(arm64.CLZ(out, out))
+	} else {
+		ctx.assembler.Emit(arm64.CLZ(out, src))
+	}
+	ctx.push(value{reg: dst, kind: kind, raw: true})
+	return true
+}
+
+// popcnt lowers a population count through the SIMD pipe (FMOV → CNT → ADDV →
+// FMOV); ARMv8.0 has no scalar GPR popcount. The result is small and boxable.
+// i32 masks the upper lane so CNT counts only the 32-bit value.
+func (l arm64Lowerer) popcnt(ctx *lowering, kind types.Kind) bool {
+	if ctx.count() < 1 || !l.kinds(ctx, kind, 1) {
+		return false
+	}
+	a := ctx.pop()
+	src := a.reg
+	if kind == types.KindI32 {
+		src = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.ANDI(src, a.reg, maskI32))
+	}
+	v := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width64)
+	ctx.assembler.Emit(
+		arm64.FMOV(v, src),
+		arm64.CNT(v, v),
+		arm64.ADDV(v, v),
+	)
+	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.FMOV(dst, v))
+	ctx.push(value{reg: dst, kind: kind, raw: true})
+	return true
+}
+
+// rotate lowers ROTL (left=true) or ROTR for an integer kind via ROR. ROTL is
+// ROR by the negated amount; the rotate width follows the register view (W for
+// i32, X for i64). An i64 rotate of the full 64-bit value can leave the boxable
+// range, so it guards before pushing; i32 always fits.
+func (l arm64Lowerer) rotate(ctx *lowering, op step, kind types.Kind, left bool) bool {
+	if ctx.count() < 2 || !l.kinds(ctx, kind, 2) {
+		return false
+	}
+	src := ctx.values[len(ctx.values)-2].reg
+	amount := ctx.values[len(ctx.values)-1].reg
+	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	out := raw
+	if kind == types.KindI32 {
+		src, amount, out = l.narrow32(src), l.narrow32(amount), l.narrow32(raw)
+	}
+	if left {
+		neg := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		if kind == types.KindI32 {
+			neg = l.narrow32(neg)
+		}
+		ctx.assembler.Emit(arm64.NEG(neg, amount))
+		amount = neg
+	}
+	ctx.assembler.Emit(arm64.ROR(out, src, amount))
+	if kind == types.KindI64 && !l.boxableI64(ctx, raw, op.ip) {
+		return false
+	}
+	ctx.pop()
+	ctx.pop()
+	ctx.push(value{reg: raw, kind: kind, raw: true})
+	return true
+}
+
+// extend lowers a sign-extend op (SXTB/SXTH/SXTW). The 64-bit form is correct
+// for both kinds: it reads only the low byte/half/word and the sign-extended
+// result stays within the boxable i64 range, so no guard is needed.
+func (l arm64Lowerer) extend(ctx *lowering, kind types.Kind, emit func(dst, src asm.Reg) asm.Instruction) bool {
+	if ctx.count() < 1 || !l.kinds(ctx, kind, 1) {
+		return false
+	}
+	a := ctx.pop()
+	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(emit(dst, a.reg))
+	ctx.push(value{reg: dst, kind: kind, raw: true})
+	return true
+}
+
+// reinterpret reinterprets the raw bits of the top value as another kind. The
+// i32/f32 pair and the i64→f64 direction share their register representation,
+// so only the kind changes. Reading an f64 bit pattern as i64 can leave the
+// boxable range, so that direction guards first.
+func (l arm64Lowerer) reinterpret(ctx *lowering, op step, from, to types.Kind) bool {
+	if ctx.count() < 1 || !l.kinds(ctx, from, 1) {
+		return false
+	}
+	if to == types.KindI64 {
+		if !l.boxableI64(ctx, ctx.values[len(ctx.values)-1].reg, op.ip) {
+			return false
+		}
+	}
+	a := ctx.pop()
+	ctx.push(value{reg: a.reg, kind: to, raw: true})
+	return true
+}
+
+// f32Unary lowers a single-operand f32 op. The raw f32 keeps its bits in the
+// low 32 of an int register, so it unboxes with a 32-bit FMOV and the result
+// moves back untagged.
+func (l arm64Lowerer) f32Unary(ctx *lowering, op func(dst, src asm.Reg) asm.Instruction) bool {
+	if ctx.count() < 1 || !l.kinds(ctx, types.KindF32, 1) {
+		return false
+	}
+	a := ctx.pop()
+	fa := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width32)
+	fr := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width32)
+	ctx.assembler.Emit(
+		arm64.FMOV(fa, l.narrow32(a.reg)),
+		op(fr, fa),
+	)
+	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.FMOV(dst, fr))
+	ctx.push(value{reg: dst, kind: types.KindF32, raw: true})
+	return true
+}
+
+// f64Unary lowers a single-operand f64 op. A raw f64 is its own bit pattern.
+func (l arm64Lowerer) f64Unary(ctx *lowering, op func(dst, src asm.Reg) asm.Instruction) bool {
+	if ctx.count() < 1 || !l.kinds(ctx, types.KindF64, 1) {
+		return false
+	}
+	a := ctx.pop()
+	fa := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width64)
+	fr := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width64)
+	ctx.assembler.Emit(
+		arm64.FMOV(fa, a.reg),
+		op(fr, fa),
+	)
+	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.FMOV(dst, fr))
+	ctx.push(value{reg: dst, kind: types.KindF64, raw: true})
+	return true
+}
+
+// copysign splices the sign bit of the top operand onto the magnitude of the
+// one below it with GPR bit ops, matching math.Copysign(magnitude, sign). The
+// raw float bits already live in int registers, so no FP move is needed.
+func (l arm64Lowerer) copysign(ctx *lowering, kind types.Kind) bool {
+	if ctx.count() < 2 || !l.kinds(ctx, kind, 2) {
+		return false
+	}
+	sign := ctx.pop()
+	magnitude := ctx.pop()
+	mask := uint64(0x8000_0000_0000_0000)
+	if kind == types.KindF32 {
+		mask = 0x8000_0000
+	}
+	signbit := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(signbit, mask)...)
+	notSign := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(notSign, ^mask)...)
+	s := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.AND(s, sign.reg, signbit))
+	m := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.AND(m, magnitude.reg, notSign))
+	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ORR(dst, m, s))
+	ctx.push(value{reg: dst, kind: kind, raw: true})
 	return true
 }
 
