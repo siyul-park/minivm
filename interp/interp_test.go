@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"runtime"
 	"testing"
 	"time"
@@ -5485,6 +5486,37 @@ func TestInterpreter_Marshal(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, types.BoxedNull, arr.Elems[0])
 	})
+
+	t.Run("time.Time marshals to i64 nanos", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		ts := time.Date(2026, 6, 14, 1, 2, 3, 4, time.UTC)
+		got, err := i.Marshal(ts)
+		require.NoError(t, err)
+		require.Equal(t, types.I64(ts.UnixNano()), got)
+	})
+
+	t.Run("time.Duration stays i64", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(3 * time.Second)
+		require.NoError(t, err)
+		require.Equal(t, types.I64(3*time.Second), got)
+	})
+
+	t.Run("complex128 marshals to struct", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(complex(1.5, -2.5))
+		require.NoError(t, err)
+		st, ok := got.(*types.Struct)
+		require.True(t, ok)
+		require.Equal(t, types.BoxF64(1.5), st.FieldByName("Real"))
+		require.Equal(t, types.BoxF64(-2.5), st.FieldByName("Imag"))
+	})
 }
 
 func TestInterpreter_Unmarshal(t *testing.T) {
@@ -5754,6 +5786,36 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		require.ErrorIs(t, i.Unmarshal(types.I64(-1), &u32), ErrValueOverflow)
 		var ch chan int
 		require.ErrorIs(t, i.Unmarshal(types.I32(1), &ch), ErrUnsupportedMarshalType)
+	})
+
+	t.Run("time.Time round-trips through i64", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		ts := time.Date(2026, 6, 14, 1, 2, 3, 4, time.UTC)
+		var out time.Time
+		require.NoError(t, i.Unmarshal(types.I64(ts.UnixNano()), &out))
+		require.True(t, out.Equal(ts))
+	})
+
+	t.Run("complex128 round-trips through struct", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		src, err := i.Marshal(complex(1.5, -2.5))
+		require.NoError(t, err)
+
+		var out complex128
+		require.NoError(t, i.Unmarshal(src, &out))
+		require.Equal(t, complex(1.5, -2.5), out)
+	})
+
+	t.Run("complex mismatch errors", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		var out complex128
+		require.ErrorIs(t, i.Unmarshal(types.I32(1), &out), ErrTypeMismatch)
 	})
 }
 
@@ -6064,4 +6126,182 @@ func BenchmarkInterpreter_Unmarshal(b *testing.B) {
 			require.NoError(b, err)
 		})
 	}
+}
+
+// vmPoint opts into its own VM representation (a "x,y" string) even though it
+// has exported fields and methods that would otherwise route to a HostObject.
+type vmPoint struct {
+	X int32
+	Y int32
+}
+
+func (p vmPoint) MarshalVM(_ *Interpreter) (types.Value, error) {
+	return types.String(fmt.Sprintf("%d,%d", p.X, p.Y)), nil
+}
+
+func (p *vmPoint) UnmarshalVM(_ *Interpreter, v types.Value) error {
+	s, ok := v.(types.String)
+	if !ok {
+		return fmt.Errorf("%w: source=%T", ErrTypeMismatch, v)
+	}
+	if _, err := fmt.Sscanf(string(s), "%d,%d", &p.X, &p.Y); err != nil {
+		return err
+	}
+	return nil
+}
+
+// vmOnlyMarshal implements ValueMarshaler but not ValueUnmarshaler.
+type vmOnlyMarshal struct{}
+
+func (vmOnlyMarshal) MarshalVM(_ *Interpreter) (types.Value, error) {
+	return types.I32(7), nil
+}
+
+func TestValueMarshaler(t *testing.T) {
+	t.Run("marshals via MarshalVM ahead of struct routing", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(vmPoint{X: 3, Y: 4})
+		require.NoError(t, err)
+		require.Equal(t, types.String("3,4"), got)
+	})
+
+	t.Run("nested element converts through MarshalVM", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal([]vmPoint{{X: 1, Y: 2}})
+		require.NoError(t, err)
+		arr, ok := got.(*types.Array)
+		require.True(t, ok)
+
+		elem, err := i.Load(arr.Elems[0].Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.String("1,2"), elem)
+	})
+
+	t.Run("missing UnmarshalVM errors on unmarshal", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		got, err := i.Marshal(vmOnlyMarshal{})
+		require.NoError(t, err)
+		require.Equal(t, types.I32(7), got)
+
+		var out vmOnlyMarshal
+		require.ErrorIs(t, i.Unmarshal(types.I32(7), &out), ErrUnsupportedMarshalType)
+	})
+}
+
+func TestValueUnmarshaler(t *testing.T) {
+	t.Run("round-trips via UnmarshalVM", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		var out vmPoint
+		require.NoError(t, i.Unmarshal(types.String("5,6"), &out))
+		require.Equal(t, vmPoint{X: 5, Y: 6}, out)
+	})
+
+	t.Run("pointer receiver mutates destination", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		out := &vmPoint{X: 9, Y: 9}
+		require.NoError(t, i.Unmarshal(types.String("1,2"), out))
+		require.Equal(t, &vmPoint{X: 1, Y: 2}, out)
+	})
+}
+
+// extPoint stands in for an external type that cannot implement ValueMarshaler.
+type extPoint struct {
+	X int32
+	Y int32
+}
+
+func extPointConverter() Converter {
+	return Converter{
+		VMType: types.TypeString,
+		Marshal: func(_ *Interpreter, v any) (types.Value, error) {
+			p := v.(extPoint)
+			return types.String(fmt.Sprintf("%d:%d", p.X, p.Y)), nil
+		},
+		Unmarshal: func(_ *Interpreter, val types.Value, dst any) error {
+			s, ok := val.(types.String)
+			if !ok {
+				return fmt.Errorf("%w: source=%T", ErrTypeMismatch, val)
+			}
+			_, err := fmt.Sscanf(string(s), "%d:%d", &dst.(*extPoint).X, &dst.(*extPoint).Y)
+			return err
+		},
+	}
+}
+
+func TestWithConverter(t *testing.T) {
+	extType := reflect.TypeOf(extPoint{})
+
+	t.Run("marshals and unmarshals an external type", func(t *testing.T) {
+		i := New(program.New(nil), WithConverter(extType, extPointConverter()))
+		defer i.Close()
+
+		got, err := i.Marshal(extPoint{X: 3, Y: 4})
+		require.NoError(t, err)
+		require.Equal(t, types.String("3:4"), got)
+
+		var out extPoint
+		require.NoError(t, i.Unmarshal(types.String("5:6"), &out))
+		require.Equal(t, extPoint{X: 5, Y: 6}, out)
+	})
+
+	t.Run("applies to a nested struct field", func(t *testing.T) {
+		i := New(program.New(nil), WithConverter(extType, extPointConverter()))
+		defer i.Close()
+
+		got, err := i.Marshal(struct{ P extPoint }{P: extPoint{X: 1, Y: 2}})
+		require.NoError(t, err)
+		st, ok := got.(*types.Struct)
+		require.True(t, ok)
+		field, err := i.Load(st.FieldByName("P").Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.String("1:2"), field)
+	})
+
+	t.Run("overrides a builtin converter", func(t *testing.T) {
+		secs := Converter{
+			VMType: types.TypeI64,
+			Marshal: func(_ *Interpreter, v any) (types.Value, error) {
+				return types.I64(v.(time.Time).Unix()), nil
+			},
+		}
+		ts := time.Date(2026, 6, 14, 0, 0, 0, 0, time.UTC)
+		i := New(program.New(nil), WithConverter(reflect.TypeOf(time.Time{}), secs))
+		defer i.Close()
+
+		got, err := i.Marshal(ts)
+		require.NoError(t, err)
+		require.Equal(t, types.I64(ts.Unix()), got)
+	})
+
+	t.Run("nil direction stays unsupported", func(t *testing.T) {
+		marshalOnly := extPointConverter()
+		marshalOnly.Unmarshal = nil
+		i := New(program.New(nil), WithConverter(extType, marshalOnly))
+		defer i.Close()
+
+		var out extPoint
+		require.ErrorIs(t, i.Unmarshal(types.String("1:2"), &out), ErrUnsupportedMarshalType)
+	})
+
+	t.Run("ignored when a custom marshaler is set", func(t *testing.T) {
+		i := New(program.New(nil),
+			WithMarshaler(&recordingMarshaler{}),
+			WithConverter(extType, extPointConverter()),
+		)
+		defer i.Close()
+
+		got, err := i.Marshal(extPoint{X: 1, Y: 2})
+		require.NoError(t, err)
+		require.Equal(t, types.I32(9), got)
+	})
 }

@@ -137,6 +137,11 @@ v, err := vm.Marshal(myGoValue)
 | `interface{}` / `any` | `ref` | dynamic value; the concrete dynamic type is marshaled, `nil` → `Null`. See [Dynamic interface values](#dynamic-interface-values) |
 | `types.Value` | passthrough | returned as-is |
 | `types.Boxed` | unboxed | `KindRef` resolved via `Load` |
+| `time.Time` | `I64` | UnixNano; instant preserved, `Location` not (compare with `.Equal`) |
+| `time.Duration` | `I64` | defined `int64`; normal scalar path |
+| `complex64` | `*Struct{Real, Imag F32}` | heap-allocated |
+| `complex128` | `*Struct{Real, Imag F64}` | heap-allocated |
+| type implementing `ValueMarshaler` | whatever `MarshalVM` returns | see [Custom type conversion](#custom-type-conversion) |
 
 **Nil / null:**
 
@@ -271,6 +276,73 @@ Marshaled refs do not survive `vm.Close()` or `vm.Reset()`.
 
 ---
 
+## Custom type conversion
+
+For a Go type you own, implement `ValueMarshaler` / `ValueUnmarshaler` to define
+its VM representation in its own package — no central registration. The default
+marshaler checks these before reflection, so they take precedence over struct
+and host-object routing.
+
+```go
+type Point struct{ X, Y int32 }
+
+func (p Point) MarshalVM(vm *interp.Interpreter) (types.Value, error) {
+    return types.String(fmt.Sprintf("%d,%d", p.X, p.Y)), nil
+}
+
+// Pointer receiver so the destination can be mutated.
+func (p *Point) UnmarshalVM(vm *interp.Interpreter, v types.Value) error {
+    s, ok := v.(types.String)
+    if !ok {
+        return fmt.Errorf("want string, got %T", v)
+    }
+    _, err := fmt.Sscanf(string(s), "%d,%d", &p.X, &p.Y)
+    return err
+}
+
+v, _ := vm.Marshal(Point{X: 3, Y: 4}) // → types.String("3,4")
+var out Point
+_ = vm.Unmarshal(v, &out)             // out = {3, 4}
+```
+
+A type that nests inside a struct field, slice element, or map value is
+converted the same way (it marshals as `ref`). Implement **both** interfaces for
+a round-trip: a direction the type does not implement returns
+`ErrUnsupportedMarshalType`.
+
+### External types — `WithConverter`
+
+For a type you do **not** own (so you cannot add `MarshalVM` / `UnmarshalVM`),
+register a `Converter` with `WithConverter`. The default marshaler applies it
+wherever that type appears, including nested in structs, slices, and maps. It
+takes precedence over the built-in converters, so a registration can override
+them (e.g. map `time.Time` to seconds instead of nanos).
+
+```go
+ipType := reflect.TypeOf(net.IP{})
+vm := interp.New(prog, interp.WithConverter(ipType, interp.Converter{
+    VMType:  types.TypeString,
+    Marshal: func(_ *interp.Interpreter, v any) (types.Value, error) {
+        return types.String(v.(net.IP).String()), nil
+    },
+    Unmarshal: func(_ *interp.Interpreter, val types.Value, dst any) error {
+        s, ok := val.(types.String)
+        if !ok {
+            return fmt.Errorf("want string, got %T", val)
+        }
+        *dst.(*net.IP) = net.ParseIP(string(s))
+        return nil
+    },
+}))
+```
+
+`Marshal` or `Unmarshal` may be nil to leave that direction
+`ErrUnsupportedMarshalType`. `WithConverter` has no effect when `WithMarshaler`
+supplies a non-default `Marshaler`. `chan` and types with no registration remain
+unconvertible.
+
+---
+
 ## Custom Marshaler
 
 Override conversion for custom types, schema registries, or reflection-free integration:
@@ -300,7 +372,7 @@ vm := interp.New(prog, interp.WithMarshaler(&myMarshaler{}))
 | `RuntimeError` | guest execution failed; unwraps to the cause and carries innermost-first `Frames` |
 | `ErrHeapExhausted` | heap allocation cannot stay within `WithMaxHeap` |
 | `ErrMarshalCycle` | pointer graph contains a cycle |
-| `ErrUnsupportedMarshalType` | Go type cannot be converted (e.g. `chan`, `complex`) |
+| `ErrUnsupportedMarshalType` | Go type cannot be converted (e.g. `chan`), or a custom type implements only one of `ValueMarshaler` / `ValueUnmarshaler` |
 | `ErrInvalidUnmarshalTarget` | destination is not a non-nil pointer |
 | `ErrValueOverflow` | numeric value doesn't fit destination type |
 | `ErrTypeMismatch` | source and destination kinds are incompatible |

@@ -6,6 +6,7 @@ import (
 	"math"
 	"reflect"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/types"
@@ -16,8 +17,36 @@ type Marshaler interface {
 	Unmarshal(*Interpreter, types.Value, any) error
 }
 
+// ValueMarshaler lets a Go type define its own VM representation. A type that
+// implements it is converted by its MarshalVM method instead of by reflection,
+// taking precedence over struct and host-object routing. Implement
+// ValueUnmarshaler as well for a full round-trip.
+type ValueMarshaler interface {
+	MarshalVM(*Interpreter) (types.Value, error)
+}
+
+// ValueUnmarshaler lets a Go type decode itself from a VM value. It is
+// implemented on the pointer receiver so UnmarshalVM can mutate the
+// destination.
+type ValueUnmarshaler interface {
+	UnmarshalVM(*Interpreter, types.Value) error
+}
+
+// Converter registers VM conversion for a Go type that cannot implement
+// ValueMarshaler / ValueUnmarshaler (an external type). Register it with
+// WithConverter; the default marshaler then applies it wherever that type
+// appears, including nested in structs, slices, and maps. Marshal or Unmarshal
+// may be nil to leave that direction unsupported. Unmarshal receives a pointer
+// to the destination.
+type Converter struct {
+	VMType    types.Type
+	Marshal   func(*Interpreter, any) (types.Value, error)
+	Unmarshal func(*Interpreter, types.Value, any) error
+}
+
 type codec struct {
-	plans sync.Map
+	plans      sync.Map
+	converters map[reflect.Type]Converter
 }
 
 type marshalPlan struct {
@@ -74,7 +103,94 @@ var (
 		reflect.TypeOf(types.Boxed(0)):   types.TypeRef,
 		reflect.TypeOf(types.String("")): types.TypeString,
 	}
+
+	valueMarshalerType   = reflect.TypeOf((*ValueMarshaler)(nil)).Elem()
+	valueUnmarshalerType = reflect.TypeOf((*ValueUnmarshaler)(nil)).Elem()
+
+	timeType       = reflect.TypeOf(time.Time{})
+	complex64Type  = reflect.TypeOf(complex64(0))
+	complex128Type = reflect.TypeOf(complex128(0))
+
+	complex64VMType = types.NewStructType(
+		types.NewStructField(types.TypeF32, types.FieldWithName("Real")),
+		types.NewStructField(types.TypeF32, types.FieldWithName("Imag")),
+	)
+	complex128VMType = types.NewStructType(
+		types.NewStructField(types.TypeF64, types.FieldWithName("Real")),
+		types.NewStructField(types.TypeF64, types.FieldWithName("Imag")),
+	)
+
+	// builtinConverters are pre-registered Converters for stdlib types that have
+	// no direct VM kind. They flow through the same path as WithConverter, and a
+	// user registration for the same type overrides them. time.Time maps to I64
+	// (UnixNano); complex maps to a {Real, Imag} struct.
+	builtinConverters = map[reflect.Type]Converter{
+		timeType: {
+			VMType: types.TypeI64,
+			Marshal: func(_ *Interpreter, v any) (types.Value, error) {
+				return types.I64(v.(time.Time).UnixNano()), nil
+			},
+			Unmarshal: func(_ *Interpreter, val types.Value, dst any) error {
+				n, ok := asInt(val)
+				if !ok {
+					return fmt.Errorf("%w: source=%T target=time.Time", ErrTypeMismatch, val)
+				}
+				*dst.(*time.Time) = time.Unix(0, n)
+				return nil
+			},
+		},
+		complex64Type: {
+			VMType: complex64VMType,
+			Marshal: func(_ *Interpreter, v any) (types.Value, error) {
+				c := v.(complex64)
+				return types.NewStruct(complex64VMType, types.BoxF32(real(c)), types.BoxF32(imag(c))), nil
+			},
+			Unmarshal: unmarshalComplex,
+		},
+		complex128Type: {
+			VMType: complex128VMType,
+			Marshal: func(_ *Interpreter, v any) (types.Value, error) {
+				c := v.(complex128)
+				return types.NewStruct(complex128VMType, types.BoxF64(real(c)), types.BoxF64(imag(c))), nil
+			},
+			Unmarshal: unmarshalComplex,
+		},
+	}
 )
+
+// unmarshalComplex decodes a {Real, Imag} struct into a *complex64 or
+// *complex128 destination. Shared by both complex builtin Converters.
+func unmarshalComplex(i *Interpreter, val types.Value, dst any) error {
+	st, ok := structOf(i, val)
+	if !ok {
+		return fmt.Errorf("%w: source=%T", ErrTypeMismatch, val)
+	}
+	re, reOK := asFloat(st.FieldByName("Real"))
+	im, imOK := asFloat(st.FieldByName("Imag"))
+	if !reOK || !imOK {
+		return fmt.Errorf("%w: source=%s", ErrTypeMismatch, st.Typ)
+	}
+	out := reflect.ValueOf(dst).Elem()
+	c := complex(re, im)
+	if out.OverflowComplex(c) {
+		return fmt.Errorf("%w: %v overflows %s", ErrValueOverflow, c, out.Type())
+	}
+	out.SetComplex(c)
+	return nil
+}
+
+// structOf resolves val to a *types.Struct, following a heap ref when needed.
+func structOf(i *Interpreter, val types.Value) (*types.Struct, bool) {
+	if b, ok := val.(types.Boxed); ok && b.Kind() == types.KindRef {
+		v, err := i.Load(b.Ref())
+		if err != nil {
+			return nil, false
+		}
+		val = v
+	}
+	st, ok := val.(*types.Struct)
+	return st, ok
+}
 
 func (m *codec) Marshal(i *Interpreter, v any) (types.Value, error) {
 	state := &marshalState{m: m, i: i, seen: make(map[uintptr]bool)}
@@ -116,6 +232,13 @@ func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*marshalPla
 	}
 	seen[t] = true
 	defer delete(seen, t)
+
+	if p, ok := m.customPlan(t); ok {
+		return p, nil
+	}
+	if p, ok := m.converterPlan(t); ok {
+		return p, nil
+	}
 
 	if t.Kind() == reflect.Pointer {
 		elem := t.Elem()
@@ -266,6 +389,87 @@ func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*marshalPla
 		}, nil
 	}
 	return nil, fmt.Errorf("%w: type=%s", ErrUnsupportedMarshalType, t)
+}
+
+// customPlan returns a plan for a Go type that opts into its own conversion via
+// ValueMarshaler / ValueUnmarshaler. A direction the type does not implement
+// surfaces ErrUnsupportedMarshalType, so round-trip use should implement both.
+func (m *codec) customPlan(t reflect.Type) (*marshalPlan, bool) {
+	ptr := reflect.PointerTo(t)
+	marshalable := t.Implements(valueMarshalerType) || ptr.Implements(valueMarshalerType)
+	unmarshalable := t.Implements(valueUnmarshalerType) || ptr.Implements(valueUnmarshalerType)
+	if !marshalable && !unmarshalable {
+		return nil, false
+	}
+	plan := &marshalPlan{VMType: types.TypeRef, Type: t, marshal: (*marshalState).marshalUnsupported, unmarshal: (*unmarshalState).unmarshalUnsupported}
+	if marshalable {
+		plan.marshal = m.marshalCustom(t)
+	}
+	if unmarshalable {
+		plan.unmarshal = (*unmarshalState).unmarshalCustom
+	}
+	return plan, true
+}
+
+// converterPlan returns a plan for a type handled by a Converter, whether
+// registered via WithConverter or built in (time.Time, complex). A user
+// registration overrides the built-in for the same type. A nil direction stays
+// unsupported.
+func (m *codec) converterPlan(t reflect.Type) (*marshalPlan, bool) {
+	c, ok := m.converters[t]
+	if !ok {
+		c, ok = builtinConverters[t]
+	}
+	if !ok {
+		return nil, false
+	}
+	vmType := c.VMType
+	if vmType == nil {
+		vmType = types.TypeRef
+	}
+	plan := &marshalPlan{VMType: vmType, Type: t, marshal: (*marshalState).marshalUnsupported, unmarshal: (*unmarshalState).unmarshalUnsupported}
+	if c.Marshal != nil {
+		plan.marshal = m.marshalConverter(c)
+	}
+	if c.Unmarshal != nil {
+		plan.unmarshal = m.unmarshalConverter(c)
+	}
+	return plan, true
+}
+
+func (m *codec) marshalCustom(t reflect.Type) marshaler {
+	value := t.Implements(valueMarshalerType)
+	return func(s *marshalState, v reflect.Value) (types.Value, error) {
+		if !v.CanAddr() {
+			p := reflect.New(v.Type())
+			p.Elem().Set(v)
+			v = p.Elem()
+		}
+		var vm ValueMarshaler
+		if value {
+			vm = v.Interface().(ValueMarshaler)
+		} else {
+			vm = v.Addr().Interface().(ValueMarshaler)
+		}
+		return vm.MarshalVM(s.i)
+	}
+}
+
+func (m *codec) marshalConverter(c Converter) marshaler {
+	return func(s *marshalState, v reflect.Value) (types.Value, error) {
+		if !v.CanInterface() {
+			p := reflect.New(v.Type())
+			p.Elem().Set(v)
+			v = p.Elem()
+		}
+		return c.Marshal(s.i, v.Interface())
+	}
+}
+
+func (m *codec) unmarshalConverter(c Converter) unmarshaler {
+	return func(s *unmarshalState, val types.Value, dst reflect.Value) error {
+		return c.Unmarshal(s.i, val, dst.Addr().Interface())
+	}
 }
 
 func (m *codec) compileStructType(t reflect.Type, seen map[reflect.Type]bool) (*types.StructType, []fieldPlan, error) {
@@ -696,6 +900,10 @@ func (s *marshalState) marshalCycle(v reflect.Value) (types.Value, error) {
 	return nil, fmt.Errorf("%w: %s", ErrMarshalCycle, v.Type())
 }
 
+func (s *marshalState) marshalUnsupported(v reflect.Value) (types.Value, error) {
+	return nil, fmt.Errorf("%w: type=%s", ErrUnsupportedMarshalType, v.Type())
+}
+
 func (m *codec) marshalPointer(elem *marshalPlan) marshaler {
 	return func(s *marshalState, v reflect.Value) (types.Value, error) {
 		if v.IsNil() {
@@ -1005,6 +1213,10 @@ func (s *unmarshalState) unmarshalCycle(_ types.Value, dst reflect.Value) error 
 
 func (s *unmarshalState) unmarshalUnsupported(_ types.Value, dst reflect.Value) error {
 	return fmt.Errorf("%w: type=%s", ErrUnsupportedMarshalType, dst.Type())
+}
+
+func (s *unmarshalState) unmarshalCustom(val types.Value, dst reflect.Value) error {
+	return dst.Addr().Interface().(ValueUnmarshaler).UnmarshalVM(s.i, val)
 }
 
 func (m *codec) unmarshalPointer(elem *marshalPlan) unmarshaler {

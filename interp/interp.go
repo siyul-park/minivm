@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"unsafe"
 
@@ -80,13 +81,14 @@ type frame struct {
 }
 
 type option struct {
-	hook      func(*Interpreter) error
-	marshaler Marshaler
-	cache     *Cache
-	tracer    *Tracer
-	local     *stats
-	threshold int
-	cutoff    int
+	hook       func(*Interpreter) error
+	marshaler  Marshaler
+	converters map[reflect.Type]Converter
+	cache      *Cache
+	tracer     *Tracer
+	local      *stats
+	threshold  int
+	cutoff     int
 
 	frame   int
 	globals int
@@ -118,6 +120,19 @@ func WithHook(fn func(*Interpreter) error) func(*option) {
 
 func WithMarshaler(m Marshaler) func(*option) {
 	return func(o *option) { o.marshaler = m }
+}
+
+// WithConverter registers VM conversion for an external Go type t that cannot
+// implement ValueMarshaler / ValueUnmarshaler. It layers onto the default
+// marshaler and applies wherever t appears, including nested values. It has no
+// effect when WithMarshaler supplies a non-default Marshaler.
+func WithConverter(t reflect.Type, c Converter) func(*option) {
+	return func(o *option) {
+		if o.converters == nil {
+			o.converters = make(map[reflect.Type]Converter)
+		}
+		o.converters[t] = c
+	}
 }
 
 func WithCache(c *Cache) func(*option) {
@@ -201,6 +216,11 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	m := opt.marshaler
 	if m == nil {
 		m = DefaultMarshaler
+	}
+	if len(opt.converters) > 0 {
+		if _, ok := m.(*codec); ok {
+			m = &codec{converters: opt.converters}
+		}
 	}
 
 	var fuel int64 = -1
