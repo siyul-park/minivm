@@ -854,6 +854,10 @@ func (i *Interpreter) entry(callable asm.Callable) func(*Interpreter) {
 		ctx := i.context()
 		i.fr.code = nil
 		i.fr.upvals = nil
+		// Refresh the back-edge budget like loop does: an entry trace can carry a
+		// self tail-call back-edge (see tailLoop) that polls the safepoint every
+		// loopBudget iterations, re-entering native here after each yield.
+		i.journal[journalBudget] = loopBudget
 		if err := callable.Call(ctx); err != nil {
 			panic(err)
 		}

@@ -226,6 +226,60 @@ var tests = []test{
 		),
 		values: []types.Value{types.I32(1)},
 	},
+	{
+		// tail recursion: f(n) = n==0 ? 0 : return_call f(n-1).
+		// n=200 far exceeds the 128 frame budget, so this only completes
+		// if RETURN_CALL reuses the frame instead of pushing.
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 200),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(
+				types.NewFunctionBuilder(&types.FunctionType{
+					Params:  []types.Type{types.TypeI32},
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_EQZ),
+					instr.New(instr.BR_IF, 12),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.I32_SUB),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.RETURN_CALL),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.RETURN),
+				).Build(),
+			),
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		// cross-function tail call: g() = return_call h(); h() = 42.
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(
+				types.NewFunctionBuilder(&types.FunctionType{
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
+					instr.New(instr.CONST_GET, 1),
+					instr.New(instr.RETURN_CALL),
+				).Build(),
+				types.NewFunctionBuilder(&types.FunctionType{
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
+					instr.New(instr.I32_CONST, 42),
+					instr.New(instr.RETURN),
+				).Build(),
+			),
+		),
+		values: []types.Value{types.I32(42)},
+	},
 	// --- globals: GLOBAL_GET, GLOBAL_SET, GLOBAL_TEE ---
 	{
 		program: program.New(
@@ -678,6 +732,71 @@ var tests = []test{
 		program: program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CLZ),
+			},
+		),
+		values: []types.Value{types.I32(31)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 8),
+				instr.New(instr.I32_CTZ),
+			},
+		),
+		values: []types.Value{types.I32(3)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.I32_POPCNT),
+			},
+		),
+		values: []types.Value{types.I32(3)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_ROTL),
+			},
+		),
+		values: []types.Value{types.I32(2)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_ROTR),
+			},
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 255),
+				instr.New(instr.I32_EXTEND8_S),
+			},
+		),
+		values: []types.Value{types.I32(-1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 65535),
+				instr.New(instr.I32_EXTEND16_S),
+			},
+		),
+		values: []types.Value{types.I32(-1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_EQZ),
 			},
 		),
@@ -959,6 +1078,110 @@ var tests = []test{
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 12),
+				instr.New(instr.I64_CONST, 10),
+				instr.New(instr.I64_XOR),
+			},
+		),
+		values: []types.Value{types.I64(6)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 12),
+				instr.New(instr.I64_CONST, 10),
+				instr.New(instr.I64_AND),
+			},
+		),
+		values: []types.Value{types.I64(8)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 12),
+				instr.New(instr.I64_CONST, 10),
+				instr.New(instr.I64_OR),
+			},
+		),
+		values: []types.Value{types.I64(14)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I64_CLZ),
+			},
+		),
+		values: []types.Value{types.I64(63)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 8),
+				instr.New(instr.I64_CTZ),
+			},
+		),
+		values: []types.Value{types.I64(3)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 7),
+				instr.New(instr.I64_POPCNT),
+			},
+		),
+		values: []types.Value{types.I64(3)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I64_ROTL),
+			},
+		),
+		values: []types.Value{types.I64(2)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 2),
+				instr.New(instr.I64_CONST, 1),
+				instr.New(instr.I64_ROTR),
+			},
+		),
+		values: []types.Value{types.I64(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 255),
+				instr.New(instr.I64_EXTEND8_S),
+			},
+		),
+		values: []types.Value{types.I64(-1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 65535),
+				instr.New(instr.I64_EXTEND16_S),
+			},
+		),
+		values: []types.Value{types.I64(-1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, 4294967295),
+				instr.New(instr.I64_EXTEND32_S),
+			},
+		),
+		values: []types.Value{types.I64(-1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.I64_CONST, 1),
 				instr.New(instr.I64_EQZ),
 			},
@@ -1162,6 +1385,99 @@ var tests = []test{
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.5))),
+				instr.New(instr.F32_ABS),
+			},
+		),
+		values: []types.Value{types.F32(3.5)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(3.5))),
+				instr.New(instr.F32_NEG),
+			},
+		),
+		values: []types.Value{types.F32(-3.5)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(9.0))),
+				instr.New(instr.F32_SQRT),
+			},
+		),
+		values: []types.Value{types.F32(3.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.2))),
+				instr.New(instr.F32_CEIL),
+			},
+		),
+		values: []types.Value{types.F32(2.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.8))),
+				instr.New(instr.F32_FLOOR),
+			},
+		),
+		values: []types.Value{types.F32(1.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.8))),
+				instr.New(instr.F32_TRUNC),
+			},
+		),
+		values: []types.Value{types.F32(1.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(2.5))),
+				instr.New(instr.F32_NEAREST),
+			},
+		),
+		values: []types.Value{types.F32(2.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
+				instr.New(instr.F32_MIN),
+			},
+		),
+		values: []types.Value{types.F32(1.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
+				instr.New(instr.F32_MAX),
+			},
+		),
+		values: []types.Value{types.F32(2.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(3.0))),
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(-1.0))),
+				instr.New(instr.F32_COPYSIGN),
+			},
+		),
+		values: []types.Value{types.F32(-3.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
 				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
 				instr.New(instr.F32_EQ),
@@ -1316,6 +1632,99 @@ var tests = []test{
 	{
 		program: program.New(
 			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(-3.5)),
+				instr.New(instr.F64_ABS),
+			},
+		),
+		values: []types.Value{types.F64(3.5)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(3.5)),
+				instr.New(instr.F64_NEG),
+			},
+		),
+		values: []types.Value{types.F64(-3.5)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(9.0)),
+				instr.New(instr.F64_SQRT),
+			},
+		),
+		values: []types.Value{types.F64(3.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(1.2)),
+				instr.New(instr.F64_CEIL),
+			},
+		),
+		values: []types.Value{types.F64(2.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(1.8)),
+				instr.New(instr.F64_FLOOR),
+			},
+		),
+		values: []types.Value{types.F64(1.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(1.8)),
+				instr.New(instr.F64_TRUNC),
+			},
+		),
+		values: []types.Value{types.F64(1.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(2.5)),
+				instr.New(instr.F64_NEAREST),
+			},
+		),
+		values: []types.Value{types.F64(2.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(1.0)),
+				instr.New(instr.F64_CONST, math.Float64bits(2.0)),
+				instr.New(instr.F64_MIN),
+			},
+		),
+		values: []types.Value{types.F64(1.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(1.0)),
+				instr.New(instr.F64_CONST, math.Float64bits(2.0)),
+				instr.New(instr.F64_MAX),
+			},
+		),
+		values: []types.Value{types.F64(2.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(3.0)),
+				instr.New(instr.F64_CONST, math.Float64bits(-1.0)),
+				instr.New(instr.F64_COPYSIGN),
+			},
+		),
+		values: []types.Value{types.F64(-3.0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
 				instr.New(instr.F64_CONST, math.Float64bits(1.0)),
 				instr.New(instr.F64_CONST, math.Float64bits(1.0)),
 				instr.New(instr.F64_EQ),
@@ -1408,6 +1817,114 @@ var tests = []test{
 			},
 		),
 		values: []types.Value{types.I64(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(math.NaN())),
+				instr.New(instr.F64_TO_I32_S),
+			},
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(math.Inf(1))),
+				instr.New(instr.F64_TO_I32_S),
+			},
+		),
+		values: []types.Value{types.I32(math.MaxInt32)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(math.Inf(-1))),
+				instr.New(instr.F64_TO_I32_S),
+			},
+		),
+		values: []types.Value{types.I32(math.MinInt32)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(-1.0)),
+				instr.New(instr.F64_TO_I32_U),
+			},
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(math.NaN())),
+				instr.New(instr.F64_TO_I64_S),
+			},
+		),
+		values: []types.Value{types.I64(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(math.Inf(1))),
+				instr.New(instr.F64_TO_I64_S),
+			},
+		),
+		values: []types.Value{types.I64(math.MaxInt64)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(float32(math.Inf(1))))),
+				instr.New(instr.F32_TO_I32_S),
+			},
+		),
+		values: []types.Value{types.I32(math.MaxInt32)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(float32(math.NaN())))),
+				instr.New(instr.F32_TO_I32_U),
+			},
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))),
+				instr.New(instr.I32_REINTERPRET_F32),
+			},
+		),
+		values: []types.Value{types.I32(int32(math.Float32bits(1.5)))},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, uint64(math.Float32bits(1.5))),
+				instr.New(instr.F32_REINTERPRET_I32),
+			},
+		),
+		values: []types.Value{types.F32(1.5)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(1.5)),
+				instr.New(instr.I64_REINTERPRET_F64),
+			},
+		),
+		values: []types.Value{types.I64(int64(math.Float64bits(1.5)))},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, math.Float64bits(1.5)),
+				instr.New(instr.F64_REINTERPRET_I64),
+			},
+		),
+		values: []types.Value{types.F64(1.5)},
 	},
 	{
 		program: program.New(
@@ -2162,6 +2679,35 @@ var tests = []test{
 			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
 		),
 		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.MAP_KEYS),
+				instr.New(instr.ARRAY_LEN),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 5),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.MAP_KEYS),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(5)},
 	},
 	{
 		program: program.New(
@@ -4333,6 +4879,199 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NotZero(t, i.Profile().JIT.Emits)
 	})
 
+	t.Run("traces tail calls natively", func(t *testing.T) {
+		requireJIT(t)
+
+		patch := func(code []instr.Instruction, branch, target int) {
+			start := len(instr.Marshal(code[:branch]))
+			end := start + len(code[branch])
+			dst := len(instr.Marshal(code[:target]))
+			code[branch].SetOperand(0, uint64(uint16(int16(dst-end))))
+		}
+		requireEntry := func(t *testing.T, i *Interpreter, addr int) {
+			t.Helper()
+			tree := i.tracer.trees[anchor{addr: addr, ip: 0}]
+			require.NotNil(t, tree)
+			require.NotNil(t, tree.root)
+			require.Equal(t, returned, tree.root.kind)
+			require.NotZero(t, i.Profile().JIT.Emits)
+		}
+
+		t.Run("self tail-call loops natively without growing frames", func(t *testing.T) {
+			// f(n) = n==0 ? 0 : return_call f(n-1). n=200 exceeds the 128 frame
+			// budget, so it only completes by reusing the frame; the JIT lowers the
+			// self tail-call as a native loop back-edge anchored at the entry.
+			body := []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_EQZ),
+				instr.New(instr.BR_IF, 0),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.RETURN_CALL),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.RETURN),
+			}
+			patch(body, 2, 8)
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			}).Emit(body...).Build()
+			i := New(program.New(
+				[]instr.Instruction{
+					instr.New(instr.I32_CONST, 200),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(fn),
+			), WithTick(1), WithThreshold(1))
+			defer i.Close()
+
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(0), value)
+			requireEntry(t, i, i.constants[0].Ref())
+		})
+
+		t.Run("self tail-call carries an accumulator and resets extra locals", func(t *testing.T) {
+			// f(n, acc) = n==0 ? acc : return_call f(n-1, acc+n). The unread extra
+			// local exercises the back-edge zero-fill of non-param locals.
+			// f(200, 0) sums 1..200.
+			body := []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_EQZ),
+				instr.New(instr.BR_IF, 0),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.RETURN_CALL),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.RETURN),
+			}
+			patch(body, 2, 11)
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32, types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			}).WithLocals(types.TypeI32).Emit(body...).Build()
+			i := New(program.New(
+				[]instr.Instruction{
+					instr.New(instr.I32_CONST, 200),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(fn),
+			), WithTick(1), WithThreshold(1))
+			defer i.Close()
+
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(20100), value)
+			requireEntry(t, i, i.constants[0].Ref())
+		})
+
+		t.Run("self tail-call yields across the safepoint budget", func(t *testing.T) {
+			// n far exceeds loopBudget, so the native back-edge spends its budget
+			// and yields to the safepoint mid-recursion, deopting and re-entering
+			// at the reused frame each time. The result still resolves to 0.
+			body := []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_EQZ),
+				instr.New(instr.BR_IF, 0),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.RETURN_CALL),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.RETURN),
+			}
+			patch(body, 2, 8)
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			}).Emit(body...).Build()
+			i := New(program.New(
+				[]instr.Instruction{
+					instr.New(instr.I32_CONST, 20000),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(fn),
+			), WithTick(1), WithThreshold(1))
+			defer i.Close()
+
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(0), value)
+			requireEntry(t, i, i.constants[0].Ref())
+		})
+
+		t.Run("cross-function tail call morphs the frame in place", func(t *testing.T) {
+			// Mutual recursion: isEven(n) tail-calls isOdd(n-1) and isOdd(n) tail-
+			// calls isEven(n-1). Traced from isEven's entry, the isEven->isOdd leg
+			// morphs the frame in place and the isOdd->isEven leg closes the loop at
+			// the anchor. isEven(200) == 1.
+			even := []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_EQZ),
+				instr.New(instr.BR_IF, 0),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.RETURN_CALL),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.RETURN),
+			}
+			patch(even, 2, 8)
+			odd := []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_EQZ),
+				instr.New(instr.BR_IF, 0),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.RETURN_CALL),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.RETURN),
+			}
+			patch(odd, 2, 8)
+			isEven := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			}).Emit(even...).Build()
+			isOdd := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			}).Emit(odd...).Build()
+			i := New(program.New(
+				[]instr.Instruction{
+					instr.New(instr.I32_CONST, 200),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(isEven, isOdd),
+			), WithTick(1), WithThreshold(1))
+			defer i.Close()
+
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(1), value)
+			requireEntry(t, i, i.constants[0].Ref())
+		})
+	})
+
 	t.Run("traces loops natively", func(t *testing.T) {
 		requireJIT(t)
 
@@ -4858,6 +5597,164 @@ func TestInterpreter_JIT(t *testing.T) {
 			require.ErrorIs(t, err, context.Canceled)
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for canceled run")
+		}
+	})
+
+	t.Run("lowers new ops natively and matches threaded", func(t *testing.T) {
+		requireJIT(t)
+
+		// Each case is a counted loop (counter local 0, accumulator local 1 seeded
+		// from param 1) whose body applies one new op to the accumulator. Running
+		// the same program threaded and JIT-compiled must agree, and a non-zero
+		// emit count proves the body's op actually lowered to native code rather
+		// than silently falling back to threaded dispatch.
+		seedPush := func(accType types.Type, seed uint64) instr.Instruction {
+			switch accType.Kind() {
+			case types.KindI32:
+				return instr.New(instr.I32_CONST, seed)
+			case types.KindI64:
+				return instr.New(instr.I64_CONST, seed)
+			case types.KindF32:
+				return instr.New(instr.F32_CONST, seed)
+			default:
+				return instr.New(instr.F64_CONST, seed)
+			}
+		}
+		// The function takes the i32 counter as param 0 and holds the accumulator
+		// in local 1, seeded by a prologue. The prologue keeps the loop header off
+		// instruction 0 (a loop header at the function entry is not compiled), and
+		// because the prologue width cancels out, the relative branch offsets do
+		// not depend on it: BR_IF skips the body plus the 13-byte decrement tail,
+		// and the back-edge BR rewinds the whole header-to-BR span.
+		build := func(accType types.Type, seed uint64, body []instr.Instruction) *program.Program {
+			var b int
+			for _, in := range body {
+				b += in.Width()
+			}
+			loop := []instr.Instruction{
+				seedPush(accType, seed),
+				instr.New(instr.LOCAL_SET, 1),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_EQZ),
+				instr.New(instr.BR_IF, uint64(b+13)),
+			}
+			loop = append(loop, body...)
+			loop = append(loop,
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.LOCAL_SET, 0),
+				instr.New(instr.BR, uint64(uint16(-(19+b)))),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.RETURN),
+			)
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{accType},
+			}).WithLocals(accType).Emit(loop...).Build()
+			return program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 200),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			}, program.WithConstants(fn))
+		}
+
+		tests := []struct {
+			name    string
+			accType types.Type
+			seed    uint64
+			body    []instr.Instruction
+		}{
+			{"i64.and", types.TypeI64, 0xF0F0, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_CONST, 0xFF0F), instr.New(instr.I64_AND), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i64.or", types.TypeI64, 0xF0, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_CONST, 0x0F), instr.New(instr.I64_OR), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i64.xor", types.TypeI64, 0x1234, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_CONST, 0x00FF), instr.New(instr.I64_XOR), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i32.clz", types.TypeI32, 0x0FFF, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CLZ), instr.New(instr.I32_CONST, 7), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i64.ctz", types.TypeI64, 0x1000, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_CTZ), instr.New(instr.I64_CONST, 9), instr.New(instr.I64_ADD), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i32.popcnt", types.TypeI32, 0x7F3, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_POPCNT), instr.New(instr.I32_CONST, 17), instr.New(instr.I32_ADD), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i64.popcnt", types.TypeI64, 0xABCD, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_POPCNT), instr.New(instr.I64_CONST, 21), instr.New(instr.I64_ADD), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i32.rotl", types.TypeI32, 0x12345678, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_ROTL), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i32.rotr", types.TypeI32, 0x12345678, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 5), instr.New(instr.I32_ROTR), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i64.rotl", types.TypeI64, 0x9, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_CONST, 1), instr.New(instr.I64_ROTL), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_AND), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i64.rotr", types.TypeI64, 0x40, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_CONST, 1), instr.New(instr.I64_ROTR), instr.New(instr.I64_CONST, 7), instr.New(instr.I64_AND), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i32.extend8_s", types.TypeI32, 0x1FF, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_EXTEND8_S), instr.New(instr.I32_CONST, 0x100), instr.New(instr.I32_OR), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i64.extend32_s", types.TypeI64, 0x1FFFF, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_EXTEND16_S), instr.New(instr.I64_CONST, 0xFFFF), instr.New(instr.I64_AND), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i32.reinterpret roundtrip", types.TypeI32, 0x40490FDB, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F32_REINTERPRET_I32), instr.New(instr.I32_REINTERPRET_F32), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"i64.reinterpret roundtrip", types.TypeI64, 0x3FF0000000000000 & 0x1FFFFFFFFFFFF, []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_REINTERPRET_I64), instr.New(instr.I64_REINTERPRET_F64), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"f64.sqrt", types.TypeF64, math.Float64bits(2.0), []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_SQRT), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"f64.abs/neg", types.TypeF64, math.Float64bits(3.5), []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_NEG), instr.New(instr.F64_ABS), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"f64.ceil/floor/trunc/nearest", types.TypeF64, math.Float64bits(2.5), []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_CEIL), instr.New(instr.F64_FLOOR), instr.New(instr.F64_TRUNC), instr.New(instr.F64_NEAREST), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"f64.min", types.TypeF64, math.Float64bits(10.0), []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_CONST, math.Float64bits(4.0)), instr.New(instr.F64_MIN), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"f64.max", types.TypeF64, math.Float64bits(1.0), []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_CONST, math.Float64bits(4.0)), instr.New(instr.F64_MAX), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"f64.copysign", types.TypeF64, math.Float64bits(7.5), []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_CONST, math.Float64bits(-1.0)), instr.New(instr.F64_COPYSIGN), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"f32.sqrt", types.TypeF32, uint64(math.Float32bits(2.0)), []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F32_SQRT), instr.New(instr.LOCAL_SET, 1),
+			}},
+			{"f32.min/copysign", types.TypeF32, uint64(math.Float32bits(9.0)), []instr.Instruction{
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.F32_CONST, uint64(math.Float32bits(4.0))), instr.New(instr.F32_MIN), instr.New(instr.F32_CONST, uint64(math.Float32bits(-1.0))), instr.New(instr.F32_COPYSIGN), instr.New(instr.LOCAL_SET, 1),
+			}},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				prog := build(tt.accType, tt.seed, tt.body)
+
+				threaded := New(prog, WithThreshold(-1))
+				defer threaded.Close()
+				require.NoError(t, threaded.Run(context.Background()))
+				want, err := threaded.Pop()
+				require.NoError(t, err)
+
+				jit := New(prog, WithTick(1), WithThreshold(1))
+				defer jit.Close()
+				require.NoError(t, jit.Run(context.Background()))
+				got, err := jit.Pop()
+				require.NoError(t, err)
+
+				require.Equal(t, want, got)
+				require.NotZero(t, jit.Profile().JIT.Emits)
+			})
 		}
 	})
 }

@@ -252,6 +252,17 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 			t.ops = append(t.ops, st)
 			continue
 		}
+		// A tail call back to the entry anchor closes the trace as a native loop
+		// back-edge: record it as the entry trace's terminal op without stepping
+		// into the reused frame, so it compiles like a loop without tripping the
+		// ip-0 loop ban (the trace stays kind=returned).
+		if op == instr.RETURN_CALL && a.ip == 0 && r.tailToAnchor(&clone, a) {
+			st.callee = a.addr
+			t.ops = append(t.ops, st)
+			t.kind = returned
+			r.store(a, t)
+			return t, nil
+		}
 		if err := r.step(&clone, f.addr, f.ip); err != nil {
 			t.kind = aborted
 			break
@@ -369,7 +380,7 @@ func (r *Tracer) op(i *Interpreter, op instr.Opcode, startFP int) step {
 	switch op {
 	case instr.BR, instr.BR_IF:
 		st.target = f.ip + instr.ParseI16(i.instrs[f.addr], f.ip+1) + 3
-	case instr.CALL:
+	case instr.CALL, instr.RETURN_CALL:
 		if i.sp > 0 {
 			st.seen = i.stack[i.sp-1]
 		}
@@ -385,7 +396,7 @@ func (r *Tracer) finish(i *Interpreter, st *step, op instr.Opcode) {
 		}
 	case instr.BR_TABLE:
 		st.target = i.fr.ip
-	case instr.CALL:
+	case instr.CALL, instr.RETURN_CALL:
 		st.callee = i.fr.addr
 	case instr.REF_GET, instr.ARRAY_GET, instr.STRUCT_GET:
 		if i.sp > 0 {
@@ -395,6 +406,22 @@ func (r *Tracer) finish(i *Interpreter, st *step, op instr.Opcode) {
 }
 
 func (r *Tracer) recursive(i *Interpreter, a anchor) bool {
+	if i.sp == 0 || i.stack[i.sp-1].Kind() != types.KindRef {
+		return false
+	}
+	addr := i.stack[i.sp-1].Ref()
+	if addr != a.addr || addr < 0 || addr >= len(i.heap) {
+		return false
+	}
+	_, ok := i.heap[addr].(*types.Function)
+	return ok
+}
+
+// tailToAnchor reports whether the next RETURN_CALL tail-calls the trace's own
+// anchor function with a plain function ref on top of the stack. Such a tail
+// call closes the trace as a native loop back-edge rather than stepping into a
+// fresh callee body, so the recorder treats it as the entry trace's terminal.
+func (r *Tracer) tailToAnchor(i *Interpreter, a anchor) bool {
 	if i.sp == 0 || i.stack[i.sp-1].Kind() != types.KindRef {
 		return false
 	}
@@ -539,7 +566,7 @@ func (r *Tracer) exitIndex(tree *tree, ip int) int {
 }
 
 func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
-	if op == instr.CALL && i.sp > 0 {
+	if (op == instr.CALL || op == instr.RETURN_CALL) && i.sp > 0 {
 		if i.stack[i.sp-1].Kind() != types.KindRef {
 			return false
 		}
@@ -547,8 +574,17 @@ func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
 		if addr < 0 || addr >= len(i.heap) {
 			return false
 		}
-		_, ok := i.heap[addr].(*HostFunction)
-		return ok
+		if _, ok := i.heap[addr].(*HostFunction); ok {
+			return true
+		}
+		// A tail call only lowers to a plain function target: the loop back-edge
+		// and the in-place activation morph have no slot for closure upvals, so
+		// closures deopt to the threaded tail() handler.
+		if op == instr.RETURN_CALL {
+			_, ok := i.heap[addr].(*types.Function)
+			return !ok
+		}
+		return false
 	}
 	switch op {
 	case instr.STRING_NEW_UTF32,
@@ -565,6 +601,7 @@ func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
 		instr.MAP_SET,
 		instr.MAP_DELETE,
 		instr.MAP_CLEAR,
+		instr.MAP_KEYS,
 		instr.REF_NEW,
 		instr.REF_SET,
 		instr.CLOSURE_NEW:

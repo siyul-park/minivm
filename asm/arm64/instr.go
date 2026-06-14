@@ -117,6 +117,8 @@ const (
 	OpFSUB
 	OpFMUL
 	OpFDIV
+	OpFMIN
+	OpFMAX
 	OpFMADD
 	OpFMSUB
 	OpFNMADD
@@ -130,6 +132,10 @@ const (
 	OpFRINTM
 	OpFRINTP
 	OpFRINTZ
+
+	// SIMD (fixed 8B arrangement)
+	OpCNT
+	OpADDV
 
 	// Float move / compare
 	OpFMOV
@@ -489,6 +495,8 @@ func FADD(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpFADD, dst,
 func FSUB(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpFSUB, dst, src1, src2) }
 func FMUL(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpFMUL, dst, src1, src2) }
 func FDIV(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpFDIV, dst, src1, src2) }
+func FMIN(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpFMIN, dst, src1, src2) }
+func FMAX(dst, src1, src2 asm.Reg) asm.Instruction { return newReg3(OpFMAX, dst, src1, src2) }
 
 // FMADD Dd, Dn, Dm, Da  →  Dd = Da + Dn*Dm
 func FMADD(dst, src1, src2, acc asm.Reg) asm.Instruction {
@@ -518,6 +526,12 @@ func FRINTN(dst, src asm.Reg) asm.Instruction { return newReg2(OpFRINTN, dst, sr
 func FRINTM(dst, src asm.Reg) asm.Instruction { return newReg2(OpFRINTM, dst, src) }
 func FRINTP(dst, src asm.Reg) asm.Instruction { return newReg2(OpFRINTP, dst, src) }
 func FRINTZ(dst, src asm.Reg) asm.Instruction { return newReg2(OpFRINTZ, dst, src) }
+
+// CNT Vd.8B, Vn.8B  →  per-byte population count.
+// ADDV Bd, Vn.8B    →  sum the 8 byte lanes into the low byte of Vd.
+// Both take SIMD V registers (fixed 8-byte arrangement).
+func CNT(dst, src asm.Reg) asm.Instruction  { return newReg2(OpCNT, dst, src) }
+func ADDV(dst, src asm.Reg) asm.Instruction { return newReg2(OpADDV, dst, src) }
 
 // ---------------------------------------------------------------------------
 // Float-point move / compare

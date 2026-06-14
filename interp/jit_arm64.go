@@ -84,11 +84,11 @@ func (l arm64Lowerer) lower(ctx *lowering) bool {
 	// A loop root re-enters the live frame at the header: bind the back-edge
 	// target after the prologue so each iteration reloads its loop-carried
 	// locals from the VM stack (flushed at the back-edge) without a memory-free
-	// register fixpoint.
-	if ctx.loop {
-		ctx.back = ctx.assembler.Label()
-		ctx.assembler.Bind(ctx.back)
-	}
+	// register fixpoint. An entry trace binds it too, so a self tail-call that
+	// loops back to the function entry has a branch target (see tailLoop). The
+	// label is harmless when no back-edge references it.
+	ctx.back = ctx.assembler.Label()
+	ctx.assembler.Bind(ctx.back)
 	if !l.walk(ctx, ctx.tree.root.ops) {
 		return false
 	}
@@ -161,7 +161,8 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 		case instr.F64_CONST:
 			ok = l.f64Const(ctx, op)
 		case instr.CONST_GET:
-			fused := idx+1 < len(ops) && ops[idx+1].op == instr.CALL && ops[idx+1].depth == op.depth
+			fused := idx+1 < len(ops) && ops[idx+1].depth == op.depth &&
+				(ops[idx+1].op == instr.CALL || ops[idx+1].op == instr.RETURN_CALL)
 			ok = l.constGet(ctx, op, fused)
 		case instr.LOCAL_GET:
 			ok = l.localGet(ctx, op)
@@ -361,6 +362,90 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			ok = l.f64ToI64(ctx, op, arm64.FCVTZS)
 		case instr.F64_TO_I64_U:
 			ok = l.f64ToI64(ctx, op, arm64.FCVTZU)
+		case instr.I64_AND:
+			ok = l.i64Binary(ctx, op, arm64.AND, false)
+		case instr.I64_OR:
+			ok = l.i64Binary(ctx, op, arm64.ORR, false)
+		case instr.I64_XOR:
+			ok = l.i64Binary(ctx, op, arm64.EOR, false)
+		case instr.I32_CLZ:
+			ok = l.countZeros(ctx, types.KindI32, false)
+		case instr.I32_CTZ:
+			ok = l.countZeros(ctx, types.KindI32, true)
+		case instr.I64_CLZ:
+			ok = l.countZeros(ctx, types.KindI64, false)
+		case instr.I64_CTZ:
+			ok = l.countZeros(ctx, types.KindI64, true)
+		case instr.I32_POPCNT:
+			ok = l.popcnt(ctx, types.KindI32)
+		case instr.I64_POPCNT:
+			ok = l.popcnt(ctx, types.KindI64)
+		case instr.I32_ROTL:
+			ok = l.rotate(ctx, op, types.KindI32, true)
+		case instr.I32_ROTR:
+			ok = l.rotate(ctx, op, types.KindI32, false)
+		case instr.I64_ROTL:
+			ok = l.rotate(ctx, op, types.KindI64, true)
+		case instr.I64_ROTR:
+			ok = l.rotate(ctx, op, types.KindI64, false)
+		case instr.I32_EXTEND8_S:
+			ok = l.extend(ctx, types.KindI32, arm64.SXTB)
+		case instr.I32_EXTEND16_S:
+			ok = l.extend(ctx, types.KindI32, arm64.SXTH)
+		case instr.I64_EXTEND8_S:
+			ok = l.extend(ctx, types.KindI64, arm64.SXTB)
+		case instr.I64_EXTEND16_S:
+			ok = l.extend(ctx, types.KindI64, arm64.SXTH)
+		case instr.I64_EXTEND32_S:
+			ok = l.extend(ctx, types.KindI64, arm64.SXTW)
+		case instr.I32_REINTERPRET_F32:
+			ok = l.reinterpret(ctx, op, types.KindF32, types.KindI32)
+		case instr.F32_REINTERPRET_I32:
+			ok = l.reinterpret(ctx, op, types.KindI32, types.KindF32)
+		case instr.I64_REINTERPRET_F64:
+			ok = l.reinterpret(ctx, op, types.KindF64, types.KindI64)
+		case instr.F64_REINTERPRET_I64:
+			ok = l.reinterpret(ctx, op, types.KindI64, types.KindF64)
+		case instr.F32_ABS:
+			ok = l.f32Unary(ctx, arm64.FABS)
+		case instr.F32_NEG:
+			ok = l.f32Unary(ctx, arm64.FNEG)
+		case instr.F32_SQRT:
+			ok = l.f32Unary(ctx, arm64.FSQRT)
+		case instr.F32_CEIL:
+			ok = l.f32Unary(ctx, arm64.FRINTP)
+		case instr.F32_FLOOR:
+			ok = l.f32Unary(ctx, arm64.FRINTM)
+		case instr.F32_TRUNC:
+			ok = l.f32Unary(ctx, arm64.FRINTZ)
+		case instr.F32_NEAREST:
+			ok = l.f32Unary(ctx, arm64.FRINTN)
+		case instr.F32_MIN:
+			ok = l.f32Binary(ctx, arm64.FMIN)
+		case instr.F32_MAX:
+			ok = l.f32Binary(ctx, arm64.FMAX)
+		case instr.F32_COPYSIGN:
+			ok = l.copysign(ctx, types.KindF32)
+		case instr.F64_ABS:
+			ok = l.f64Unary(ctx, arm64.FABS)
+		case instr.F64_NEG:
+			ok = l.f64Unary(ctx, arm64.FNEG)
+		case instr.F64_SQRT:
+			ok = l.f64Unary(ctx, arm64.FSQRT)
+		case instr.F64_CEIL:
+			ok = l.f64Unary(ctx, arm64.FRINTP)
+		case instr.F64_FLOOR:
+			ok = l.f64Unary(ctx, arm64.FRINTM)
+		case instr.F64_TRUNC:
+			ok = l.f64Unary(ctx, arm64.FRINTZ)
+		case instr.F64_NEAREST:
+			ok = l.f64Unary(ctx, arm64.FRINTN)
+		case instr.F64_MIN:
+			ok = l.f64Binary(ctx, arm64.FMIN)
+		case instr.F64_MAX:
+			ok = l.f64Binary(ctx, arm64.FMAX)
+		case instr.F64_COPYSIGN:
+			ok = l.copysign(ctx, types.KindF64)
 		case instr.REF_NULL:
 			ok = l.refNull(ctx)
 		case instr.REF_IS_NULL:
@@ -381,6 +466,17 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			ok = l.brIf(ctx, op)
 		case instr.CALL:
 			ok = l.call(ctx, op)
+		case instr.RETURN_CALL:
+			// A tail call back to the trace anchor closes the loop with a native
+			// back-edge (terminal); a tail call to another function morphs the
+			// current frame into the callee in place and keeps walking.
+			if op.callee == ctx.addr {
+				if !l.tailLoop(ctx, op) {
+					return false
+				}
+				return idx == len(ops)-1
+			}
+			ok = l.tailMorph(ctx, op)
 		case instr.RETURN:
 			if len(ctx.frames) > 1 {
 				ok = l.stitch(ctx)
@@ -1099,6 +1195,185 @@ func (l arm64Lowerer) f64ToI64(ctx *lowering, op step, cvt func(dst, src asm.Reg
 	return true
 }
 
+// countZeros lowers CLZ (reverse=false) or CTZ (reverse=true, via RBIT then
+// CLZ) for an integer kind. The count is always in [0, width] so the result is
+// boxable without a guard. i32 operates on the W view so the upper lane is
+// ignored.
+func (l arm64Lowerer) countZeros(ctx *lowering, kind types.Kind, reverse bool) bool {
+	if ctx.count() < 1 || !l.kinds(ctx, kind, 1) {
+		return false
+	}
+	a := ctx.pop()
+	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	src, out := a.reg, dst
+	if kind == types.KindI32 {
+		src, out = l.narrow32(a.reg), l.narrow32(dst)
+	}
+	if reverse {
+		ctx.assembler.Emit(arm64.RBIT(out, src))
+		ctx.assembler.Emit(arm64.CLZ(out, out))
+	} else {
+		ctx.assembler.Emit(arm64.CLZ(out, src))
+	}
+	ctx.push(value{reg: dst, kind: kind, raw: true})
+	return true
+}
+
+// popcnt lowers a population count through the SIMD pipe (FMOV → CNT → ADDV →
+// FMOV); ARMv8.0 has no scalar GPR popcount. The result is small and boxable.
+// i32 masks the upper lane so CNT counts only the 32-bit value.
+func (l arm64Lowerer) popcnt(ctx *lowering, kind types.Kind) bool {
+	if ctx.count() < 1 || !l.kinds(ctx, kind, 1) {
+		return false
+	}
+	a := ctx.pop()
+	src := a.reg
+	if kind == types.KindI32 {
+		src = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.ANDI(src, a.reg, maskI32))
+	}
+	v := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width64)
+	ctx.assembler.Emit(
+		arm64.FMOV(v, src),
+		arm64.CNT(v, v),
+		arm64.ADDV(v, v),
+	)
+	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.FMOV(dst, v))
+	ctx.push(value{reg: dst, kind: kind, raw: true})
+	return true
+}
+
+// rotate lowers ROTL (left=true) or ROTR for an integer kind via ROR. ROTL is
+// ROR by the negated amount; the rotate width follows the register view (W for
+// i32, X for i64). An i64 rotate of the full 64-bit value can leave the boxable
+// range, so it guards before pushing; i32 always fits.
+func (l arm64Lowerer) rotate(ctx *lowering, op step, kind types.Kind, left bool) bool {
+	if ctx.count() < 2 || !l.kinds(ctx, kind, 2) {
+		return false
+	}
+	src := ctx.values[len(ctx.values)-2].reg
+	amount := ctx.values[len(ctx.values)-1].reg
+	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	out := raw
+	if kind == types.KindI32 {
+		src, amount, out = l.narrow32(src), l.narrow32(amount), l.narrow32(raw)
+	}
+	if left {
+		neg := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		if kind == types.KindI32 {
+			neg = l.narrow32(neg)
+		}
+		ctx.assembler.Emit(arm64.NEG(neg, amount))
+		amount = neg
+	}
+	ctx.assembler.Emit(arm64.ROR(out, src, amount))
+	if kind == types.KindI64 && !l.boxableI64(ctx, raw, op.ip) {
+		return false
+	}
+	ctx.pop()
+	ctx.pop()
+	ctx.push(value{reg: raw, kind: kind, raw: true})
+	return true
+}
+
+// extend lowers a sign-extend op (SXTB/SXTH/SXTW). The 64-bit form is correct
+// for both kinds: it reads only the low byte/half/word and the sign-extended
+// result stays within the boxable i64 range, so no guard is needed.
+func (l arm64Lowerer) extend(ctx *lowering, kind types.Kind, emit func(dst, src asm.Reg) asm.Instruction) bool {
+	if ctx.count() < 1 || !l.kinds(ctx, kind, 1) {
+		return false
+	}
+	a := ctx.pop()
+	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(emit(dst, a.reg))
+	ctx.push(value{reg: dst, kind: kind, raw: true})
+	return true
+}
+
+// reinterpret reinterprets the raw bits of the top value as another kind. The
+// i32/f32 pair and the i64→f64 direction share their register representation,
+// so only the kind changes. Reading an f64 bit pattern as i64 can leave the
+// boxable range, so that direction guards first.
+func (l arm64Lowerer) reinterpret(ctx *lowering, op step, from, to types.Kind) bool {
+	if ctx.count() < 1 || !l.kinds(ctx, from, 1) {
+		return false
+	}
+	if to == types.KindI64 {
+		if !l.boxableI64(ctx, ctx.values[len(ctx.values)-1].reg, op.ip) {
+			return false
+		}
+	}
+	a := ctx.pop()
+	ctx.push(value{reg: a.reg, kind: to, raw: true})
+	return true
+}
+
+// f32Unary lowers a single-operand f32 op. The raw f32 keeps its bits in the
+// low 32 of an int register, so it unboxes with a 32-bit FMOV and the result
+// moves back untagged.
+func (l arm64Lowerer) f32Unary(ctx *lowering, op func(dst, src asm.Reg) asm.Instruction) bool {
+	if ctx.count() < 1 || !l.kinds(ctx, types.KindF32, 1) {
+		return false
+	}
+	a := ctx.pop()
+	fa := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width32)
+	fr := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width32)
+	ctx.assembler.Emit(
+		arm64.FMOV(fa, l.narrow32(a.reg)),
+		op(fr, fa),
+	)
+	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.FMOV(dst, fr))
+	ctx.push(value{reg: dst, kind: types.KindF32, raw: true})
+	return true
+}
+
+// f64Unary lowers a single-operand f64 op. A raw f64 is its own bit pattern.
+func (l arm64Lowerer) f64Unary(ctx *lowering, op func(dst, src asm.Reg) asm.Instruction) bool {
+	if ctx.count() < 1 || !l.kinds(ctx, types.KindF64, 1) {
+		return false
+	}
+	a := ctx.pop()
+	fa := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width64)
+	fr := ctx.assembler.Reg(asm.RegTypeFloat, asm.Width64)
+	ctx.assembler.Emit(
+		arm64.FMOV(fa, a.reg),
+		op(fr, fa),
+	)
+	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.FMOV(dst, fr))
+	ctx.push(value{reg: dst, kind: types.KindF64, raw: true})
+	return true
+}
+
+// copysign splices the sign bit of the top operand onto the magnitude of the
+// one below it with GPR bit ops, matching math.Copysign(magnitude, sign). The
+// raw float bits already live in int registers, so no FP move is needed.
+func (l arm64Lowerer) copysign(ctx *lowering, kind types.Kind) bool {
+	if ctx.count() < 2 || !l.kinds(ctx, kind, 2) {
+		return false
+	}
+	sign := ctx.pop()
+	magnitude := ctx.pop()
+	mask := uint64(0x8000_0000_0000_0000)
+	if kind == types.KindF32 {
+		mask = 0x8000_0000
+	}
+	signbit := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(signbit, mask)...)
+	notSign := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(notSign, ^mask)...)
+	s := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.AND(s, sign.reg, signbit))
+	m := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.AND(m, magnitude.reg, notSign))
+	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ORR(dst, m, s))
+	ctx.push(value{reg: dst, kind: kind, raw: true})
+	return true
+}
+
 // guardI64 deopts at ip when v is not an inline i64 (a heap-promoted i64
 // whose bits the trace cannot read as a value).
 func (l arm64Lowerer) guardI64(ctx *lowering, v asm.VReg, ip int) bool {
@@ -1448,6 +1723,143 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 	for k, typ := range rets {
 		ctx.push(value{reg: regs[k], kind: typ.Kind(), raw: true})
 	}
+	return true
+}
+
+// tailTarget resolves a recorded tail call's compile-time function target and
+// consumes the funcref marker, emitting the runtime funcref guard for a
+// non-constant ref (mirrors call's guard). Tail calls carry no closure upvals,
+// so a captured target is rejected; the trace stays threaded. On success the
+// top params operands are the validated arguments, still live.
+func (l arm64Lowerer) tailTarget(ctx *lowering, op step) (*types.Function, int, bool) {
+	if ctx.count() < 1 {
+		return nil, 0, false
+	}
+	v := ctx.values[len(ctx.values)-1]
+	if v.kind != types.KindRef {
+		return nil, 0, false
+	}
+	target := ctx.funcs[op.callee]
+	if target == nil || target.Typ == nil || len(target.Captures) > 0 {
+		return nil, 0, false
+	}
+	params := len(target.Typ.Params)
+	if v.raw {
+		if v.fn != op.callee || v.ref != op.callee {
+			return nil, 0, false
+		}
+	} else {
+		if op.seen.Kind() != types.KindRef {
+			return nil, 0, false
+		}
+		wantRef := op.seen.Ref()
+		if wantRef != op.callee || wantRef < 0 || wantRef >= len(ctx.heap) {
+			return nil, 0, false
+		}
+		if _, ok := ctx.heap[wantRef].(*types.Function); !ok {
+			return nil, 0, false
+		}
+		want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDI(want, uint64(types.BoxRef(wantRef)))...)
+		ctx.assembler.Emit(arm64.CMP(v.reg, want))
+		ok := ctx.assembler.Label()
+		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, ok))
+		if !l.exit(ctx, op.ip) {
+			return nil, 0, false
+		}
+		ctx.assembler.Bind(ok)
+		pre := append([]value(nil), ctx.values...)
+		l.releaseBox(ctx, v.reg, pre, op.ip)
+	}
+	ctx.pop()
+	if ctx.count() < params || !l.args(ctx, target, params) {
+		return nil, 0, false
+	}
+	return target, params, true
+}
+
+// locals fills frame f with the call arguments args in its parameter slots and
+// a raw zero in every remaining local, matching threaded tail()/CALL's clear.
+// Each slot is loaded and dirty so the next flush commits it to the VM stack.
+func (l arm64Lowerer) locals(ctx *lowering, f *activation, args []value) bool {
+	for k := range args {
+		f.locals[k] = args[k]
+		f.loaded[k] = true
+		f.dirty[k] = true
+	}
+	if len(f.kinds) > len(args) {
+		zero := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDI(zero, 0)...)
+		for k := len(args); k < len(f.kinds); k++ {
+			switch f.kinds[k] {
+			case types.KindI32, types.KindF32, types.KindF64, types.KindI64:
+			default:
+				return false
+			}
+			f.locals[k] = value{reg: zero, kind: f.kinds[k], raw: true}
+			f.loaded[k] = true
+			f.dirty[k] = true
+		}
+	}
+	return true
+}
+
+// tailLoop lowers a tail call back to the trace anchor as a native loop
+// back-edge: the new arguments become the anchor entry frame's params, the
+// other locals reset, everything commits to the VM stack, and iterate branches
+// to the head (or yields when the safepoint budget runs out). Constant stack
+// depth — no BL, no journalActive — so self/mutual tail recursion never grows.
+func (l arm64Lowerer) tailLoop(ctx *lowering, op step) bool {
+	target, params, ok := l.tailTarget(ctx, op)
+	if !ok {
+		return false
+	}
+	args := make([]value, params)
+	for k := params - 1; k >= 0; k-- {
+		args[k] = ctx.pop()
+	}
+	// A tail call stands in return position: no operands survive besides the
+	// arguments just consumed.
+	if ctx.count() != 0 {
+		return false
+	}
+	f := newFrame(ctx.addr, target, 0, 0)
+	if !l.locals(ctx, &f, args) {
+		return false
+	}
+	ctx.frames = append(ctx.frames[:0], f)
+	if !l.flush(ctx, true) {
+		return false
+	}
+	return l.iterate(ctx, 0)
+}
+
+// tailMorph lowers a tail call to a different function by reusing the current
+// frame in place: the activation is replaced by the callee at the same base,
+// its params seeded from the arguments and its other locals reset, then the
+// walk continues into the callee's body. The frame record save/unwind writes
+// describes the callee, so a later trap rebuilds the reused frame as the callee
+// exactly as threaded tail() leaves it.
+func (l arm64Lowerer) tailMorph(ctx *lowering, op step) bool {
+	target, params, ok := l.tailTarget(ctx, op)
+	if !ok {
+		return false
+	}
+	old := ctx.frame()
+	base := old.base
+	args := make([]value, params)
+	for k := params - 1; k >= 0; k-- {
+		args[k] = ctx.pop()
+	}
+	if ctx.count() != 0 {
+		return false
+	}
+	f := newFrame(op.callee, target, base, len(ctx.values))
+	f.resume = op.ip + 1
+	if !l.locals(ctx, &f, args) {
+		return false
+	}
+	ctx.frames[len(ctx.frames)-1] = f
 	return true
 }
 

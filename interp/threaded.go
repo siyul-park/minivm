@@ -2,6 +2,7 @@ package interp
 
 import (
 	"math"
+	"math/bits"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
@@ -209,35 +210,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				i.fp++
 				i.fr = f
 			case *HostFunction:
-				if i.sp <= len(fn.Typ.Params) {
-					panic(ErrStackUnderflow)
-				}
-				if i.sp+len(fn.Typ.Returns)-len(fn.Typ.Params)-1 >= len(i.stack) {
-					panic(ErrStackOverflow)
-				}
-				params := i.stack[i.sp-len(fn.Typ.Params)-1 : i.sp-1]
-				returns, err := fn.Fn(i, params)
-				if err != nil {
-					panic(err)
-				}
-				for _, val := range params {
-					if val.Kind() != types.KindRef {
-						continue
-					}
-					ok := false
-					for _, r := range returns {
-						if r == val {
-							ok = true
-							break
-						}
-					}
-					if !ok {
-						i.release(val.Ref())
-					}
-				}
-				i.sp += len(fn.Typ.Returns) - len(fn.Typ.Params) - 1
-				copy(i.stack[i.sp-len(fn.Typ.Returns):i.sp], returns)
-				i.fr.ip++
+				i.callHost(fn)
 			default:
 				panic(ErrTypeMismatch)
 			}
@@ -249,24 +222,33 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.fp == 1 {
 				panic(ErrFrameUnderflow)
 			}
-			f := i.fr
-			if i.sp < f.returns {
+			i.ret()
+		}
+	},
+	instr.RETURN_CALL: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			switch f.returns {
-			case 0:
-			case 1:
-				i.stack[f.bp] = i.stack[i.sp-1]
+			addr := i.stack[i.sp-1].Ref()
+			switch fn := i.heap[addr].(type) {
+			case *types.Function:
+				i.tail(addr, addr, nil, len(fn.Typ.Params), len(fn.Typ.Returns), len(fn.Locals))
+			case *types.Closure:
+				tmpl, ok := i.heap[fn.Fn].(*types.Function)
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+				i.tail(int(fn.Fn), addr, fn.Upvals, len(fn.Typ.Params), len(fn.Typ.Returns), len(tmpl.Locals))
+			case *HostFunction:
+				i.callHost(fn)
+				if i.fp > 1 {
+					i.ret()
+				}
 			default:
-				copy(i.stack[f.bp:f.bp+f.returns], i.stack[i.sp-f.returns:i.sp])
+				panic(ErrTypeMismatch)
 			}
-			i.sp = f.bp + f.returns
-			if f.release {
-				i.release(f.ref)
-			}
-			f.code = nil
-			i.fp--
-			i.fr = &i.frames[i.fp-1]
 		}
 	},
 	instr.GLOBAL_GET: func(c *threadedCompiler) func(i *Interpreter) {
@@ -971,6 +953,87 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
+	instr.I32_CLZ: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := uint32(i.stack[i.sp-1].I32())
+			i.stack[i.sp-1] = types.BoxI32(int32(bits.LeadingZeros32(v)))
+			i.fr.ip++
+		}
+	},
+	instr.I32_CTZ: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := uint32(i.stack[i.sp-1].I32())
+			i.stack[i.sp-1] = types.BoxI32(int32(bits.TrailingZeros32(v)))
+			i.fr.ip++
+		}
+	},
+	instr.I32_POPCNT: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := uint32(i.stack[i.sp-1].I32())
+			i.stack[i.sp-1] = types.BoxI32(int32(bits.OnesCount32(v)))
+			i.fr.ip++
+		}
+	},
+	instr.I32_ROTL: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			amount := int(i.stack[i.sp-1].I32())
+			v := uint32(i.stack[i.sp-2].I32())
+			i.sp--
+			i.stack[i.sp-1] = types.BoxI32(int32(bits.RotateLeft32(v, amount)))
+			i.fr.ip++
+		}
+	},
+	instr.I32_ROTR: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			amount := int(i.stack[i.sp-1].I32())
+			v := uint32(i.stack[i.sp-2].I32())
+			i.sp--
+			i.stack[i.sp-1] = types.BoxI32(int32(bits.RotateLeft32(v, -amount)))
+			i.fr.ip++
+		}
+	},
+	instr.I32_EXTEND8_S: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].I32()
+			i.stack[i.sp-1] = types.BoxI32(int32(int8(v)))
+			i.fr.ip++
+		}
+	},
+	instr.I32_EXTEND16_S: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].I32()
+			i.stack[i.sp-1] = types.BoxI32(int32(int16(v)))
+			i.fr.ip++
+		}
+	},
 	instr.I32_EQZ: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
@@ -1178,6 +1241,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
+	instr.I32_REINTERPRET_F32: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = types.BoxI32(int32(math.Float32bits(v)))
+			i.fr.ip++
+		}
+	},
 	instr.I64_CONST: func(c *threadedCompiler) func(i *Interpreter) {
 		val := int64(*(*uint64)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 9
@@ -1344,6 +1418,137 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
 			i.stack[i.sp-1] = i.boxI64(int64(uint64(v2) >> (v1 & 0x3F)))
+			i.fr.ip++
+		}
+	},
+	instr.I64_XOR: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v1 := i.unboxI64(i.stack[i.sp-1])
+			v2 := i.unboxI64(i.stack[i.sp-2])
+			i.sp--
+			i.stack[i.sp-1] = i.boxI64(v1 ^ v2)
+			i.fr.ip++
+		}
+	},
+	instr.I64_AND: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v1 := i.unboxI64(i.stack[i.sp-1])
+			v2 := i.unboxI64(i.stack[i.sp-2])
+			i.sp--
+			i.stack[i.sp-1] = i.boxI64(v1 & v2)
+			i.fr.ip++
+		}
+	},
+	instr.I64_OR: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v1 := i.unboxI64(i.stack[i.sp-1])
+			v2 := i.unboxI64(i.stack[i.sp-2])
+			i.sp--
+			i.stack[i.sp-1] = i.boxI64(v1 | v2)
+			i.fr.ip++
+		}
+	},
+	instr.I64_CLZ: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := uint64(i.unboxI64(i.stack[i.sp-1]))
+			i.stack[i.sp-1] = i.boxI64(int64(bits.LeadingZeros64(v)))
+			i.fr.ip++
+		}
+	},
+	instr.I64_CTZ: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := uint64(i.unboxI64(i.stack[i.sp-1]))
+			i.stack[i.sp-1] = i.boxI64(int64(bits.TrailingZeros64(v)))
+			i.fr.ip++
+		}
+	},
+	instr.I64_POPCNT: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := uint64(i.unboxI64(i.stack[i.sp-1]))
+			i.stack[i.sp-1] = i.boxI64(int64(bits.OnesCount64(v)))
+			i.fr.ip++
+		}
+	},
+	instr.I64_ROTL: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			amount := int(i.unboxI64(i.stack[i.sp-1]))
+			v := uint64(i.unboxI64(i.stack[i.sp-2]))
+			i.sp--
+			i.stack[i.sp-1] = i.boxI64(int64(bits.RotateLeft64(v, amount)))
+			i.fr.ip++
+		}
+	},
+	instr.I64_ROTR: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			amount := int(i.unboxI64(i.stack[i.sp-1]))
+			v := uint64(i.unboxI64(i.stack[i.sp-2]))
+			i.sp--
+			i.stack[i.sp-1] = i.boxI64(int64(bits.RotateLeft64(v, -amount)))
+			i.fr.ip++
+		}
+	},
+	instr.I64_EXTEND8_S: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.unboxI64(i.stack[i.sp-1])
+			i.stack[i.sp-1] = i.boxI64(int64(int8(v)))
+			i.fr.ip++
+		}
+	},
+	instr.I64_EXTEND16_S: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.unboxI64(i.stack[i.sp-1])
+			i.stack[i.sp-1] = i.boxI64(int64(int16(v)))
+			i.fr.ip++
+		}
+	},
+	instr.I64_EXTEND32_S: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.unboxI64(i.stack[i.sp-1])
+			i.stack[i.sp-1] = i.boxI64(int64(int32(v)))
 			i.fr.ip++
 		}
 	},
@@ -1543,6 +1748,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
+	instr.I64_REINTERPRET_F64: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = i.boxI64(int64(math.Float64bits(v)))
+			i.fr.ip++
+		}
+	},
 	instr.F32_CONST: func(c *threadedCompiler) func(i *Interpreter) {
 		raw := *(*float32)(unsafe.Pointer(&c.code[c.ip+1]))
 		val := types.BoxF32(raw)
@@ -1611,6 +1827,122 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp--
 			i.stack[i.sp-1] = types.BoxF32(v2 / v1)
+			i.fr.ip++
+		}
+	},
+	instr.F32_ABS: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = types.BoxF32(float32(math.Abs(float64(v))))
+			i.fr.ip++
+		}
+	},
+	instr.F32_NEG: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = types.BoxF32(-v)
+			i.fr.ip++
+		}
+	},
+	instr.F32_SQRT: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = types.BoxF32(float32(math.Sqrt(float64(v))))
+			i.fr.ip++
+		}
+	},
+	instr.F32_CEIL: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = types.BoxF32(float32(math.Ceil(float64(v))))
+			i.fr.ip++
+		}
+	},
+	instr.F32_FLOOR: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = types.BoxF32(float32(math.Floor(float64(v))))
+			i.fr.ip++
+		}
+	},
+	instr.F32_TRUNC: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = types.BoxF32(float32(math.Trunc(float64(v))))
+			i.fr.ip++
+		}
+	},
+	instr.F32_NEAREST: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = types.BoxF32(float32(math.RoundToEven(float64(v))))
+			i.fr.ip++
+		}
+	},
+	instr.F32_MIN: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v1 := i.stack[i.sp-1].F32()
+			v2 := i.stack[i.sp-2].F32()
+			i.sp--
+			i.stack[i.sp-1] = types.BoxF32(float32(math.Min(float64(v2), float64(v1))))
+			i.fr.ip++
+		}
+	},
+	instr.F32_MAX: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v1 := i.stack[i.sp-1].F32()
+			v2 := i.stack[i.sp-2].F32()
+			i.sp--
+			i.stack[i.sp-1] = types.BoxF32(float32(math.Max(float64(v2), float64(v1))))
+			i.fr.ip++
+		}
+	},
+	instr.F32_COPYSIGN: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v1 := i.stack[i.sp-1].F32()
+			v2 := i.stack[i.sp-2].F32()
+			i.sp--
+			i.stack[i.sp-1] = types.BoxF32(float32(math.Copysign(float64(v2), float64(v1))))
 			i.fr.ip++
 		}
 	},
@@ -1699,7 +2031,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxI32(int32(v))
+			i.stack[i.sp-1] = types.BoxI32(i.satI32(float64(v)))
 			i.fr.ip++
 		}
 	},
@@ -1710,7 +2042,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxI32(int32(uint32(v)))
+			i.stack[i.sp-1] = types.BoxI32(int32(i.satU32(float64(v))))
 			i.fr.ip++
 		}
 	},
@@ -1721,7 +2053,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = i.boxI64(int64(v))
+			i.stack[i.sp-1] = i.boxI64(i.satI64(float64(v)))
 			i.fr.ip++
 		}
 	},
@@ -1732,7 +2064,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = i.boxI64(int64(uint32(v)))
+			i.stack[i.sp-1] = i.boxI64(int64(i.satU64(float64(v))))
 			i.fr.ip++
 		}
 	},
@@ -1744,6 +2076,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.stack[i.sp-1].F32()
 			i.stack[i.sp-1] = types.BoxF64(float64(v))
+			i.fr.ip++
+		}
+	},
+	instr.F32_REINTERPRET_I32: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].I32()
+			i.stack[i.sp-1] = types.BoxF32(math.Float32frombits(uint32(v)))
 			i.fr.ip++
 		}
 	},
@@ -1815,6 +2158,122 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp--
 			i.stack[i.sp-1] = types.BoxF64(v2 / v1)
+			i.fr.ip++
+		}
+	},
+	instr.F64_ABS: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = types.BoxF64(math.Abs(v))
+			i.fr.ip++
+		}
+	},
+	instr.F64_NEG: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = types.BoxF64(-v)
+			i.fr.ip++
+		}
+	},
+	instr.F64_SQRT: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = types.BoxF64(math.Sqrt(v))
+			i.fr.ip++
+		}
+	},
+	instr.F64_CEIL: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = types.BoxF64(math.Ceil(v))
+			i.fr.ip++
+		}
+	},
+	instr.F64_FLOOR: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = types.BoxF64(math.Floor(v))
+			i.fr.ip++
+		}
+	},
+	instr.F64_TRUNC: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = types.BoxF64(math.Trunc(v))
+			i.fr.ip++
+		}
+	},
+	instr.F64_NEAREST: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = types.BoxF64(math.RoundToEven(v))
+			i.fr.ip++
+		}
+	},
+	instr.F64_MIN: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v1 := i.stack[i.sp-1].F64()
+			v2 := i.stack[i.sp-2].F64()
+			i.sp--
+			i.stack[i.sp-1] = types.BoxF64(math.Min(v2, v1))
+			i.fr.ip++
+		}
+	},
+	instr.F64_MAX: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v1 := i.stack[i.sp-1].F64()
+			v2 := i.stack[i.sp-2].F64()
+			i.sp--
+			i.stack[i.sp-1] = types.BoxF64(math.Max(v2, v1))
+			i.fr.ip++
+		}
+	},
+	instr.F64_COPYSIGN: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			v1 := i.stack[i.sp-1].F64()
+			v2 := i.stack[i.sp-2].F64()
+			i.sp--
+			i.stack[i.sp-1] = types.BoxF64(math.Copysign(v2, v1))
 			i.fr.ip++
 		}
 	},
@@ -1903,7 +2362,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxI32(int32(v))
+			i.stack[i.sp-1] = types.BoxI32(i.satI32(v))
 			i.fr.ip++
 		}
 	},
@@ -1914,7 +2373,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxI32(int32(uint32(v)))
+			i.stack[i.sp-1] = types.BoxI32(int32(i.satU32(v)))
 			i.fr.ip++
 		}
 	},
@@ -1925,7 +2384,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = i.boxI64(int64(v))
+			i.stack[i.sp-1] = i.boxI64(i.satI64(v))
 			i.fr.ip++
 		}
 	},
@@ -1936,7 +2395,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = i.boxI64(int64(uint64(v)))
+			i.stack[i.sp-1] = i.boxI64(int64(i.satU64(v)))
 			i.fr.ip++
 		}
 	},
@@ -1948,6 +2407,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			v := i.stack[i.sp-1].F64()
 			i.stack[i.sp-1] = types.BoxF32(float32(v))
+			i.fr.ip++
+		}
+	},
+	instr.F64_REINTERPRET_I64: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			v := i.unboxI64(i.stack[i.sp-1])
+			i.stack[i.sp-1] = types.BoxF64(math.Float64frombits(uint64(v)))
 			i.fr.ip++
 		}
 	},
@@ -3284,6 +3754,61 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
+	instr.MAP_KEYS: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 1 {
+				panic(ErrStackUnderflow)
+			}
+			ref := i.stack[i.sp-1]
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			var keyType types.Type
+			var elems []types.Boxed
+			switch m := i.heap[addr].(type) {
+			case *types.TypedMap[int32]:
+				keyType = m.Typ.Key
+				elems = make([]types.Boxed, 0, m.Len())
+				m.Range(func(k int32, _ types.Boxed) {
+					elems = append(elems, types.BoxI32(k))
+				})
+			case *types.TypedMap[int64]:
+				keyType = m.Typ.Key
+				elems = make([]types.Boxed, 0, m.Len())
+				m.Range(func(k int64, _ types.Boxed) {
+					elems = append(elems, i.boxI64(k))
+				})
+			case *types.TypedMap[float32]:
+				keyType = m.Typ.Key
+				elems = make([]types.Boxed, 0, m.Len())
+				m.Range(func(k float32, _ types.Boxed) {
+					elems = append(elems, types.BoxF32(k))
+				})
+			case *types.TypedMap[float64]:
+				keyType = m.Typ.Key
+				elems = make([]types.Boxed, 0, m.Len())
+				m.Range(func(k float64, _ types.Boxed) {
+					elems = append(elems, types.BoxF64(k))
+				})
+			case *types.Map:
+				keyType = m.Typ.Key
+				elems = make([]types.Boxed, 0, m.Len())
+				m.Range(func(_ types.MapKey, entry types.MapEntry) {
+					i.retainBox(entry.Key)
+					elems = append(elems, entry.Key)
+				})
+			default:
+				panic(ErrTypeMismatch)
+			}
+			arr := &types.Array{Typ: types.NewArrayType(keyType), Elems: elems}
+			out := types.BoxRef(i.alloc(arr))
+			i.release(addr)
+			i.stack[i.sp-1] = out
+			i.fr.ip++
+		}
+	},
 	instr.CLOSURE_NEW: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
@@ -3346,4 +3871,178 @@ func (c *threadedCompiler) Compile(code []byte, locals []types.Kind) []func(*Int
 		}
 	}
 	return compiled
+}
+
+// callHost invokes a host function in place, replacing its arguments and the
+// funcref on the stack with the call's results and releasing any consumed ref
+// arguments. It does not push a VM frame.
+func (i *Interpreter) callHost(fn *HostFunction) {
+	params := len(fn.Typ.Params)
+	returns := len(fn.Typ.Returns)
+	if i.sp <= params {
+		panic(ErrStackUnderflow)
+	}
+	if i.sp+returns-params-1 >= len(i.stack) {
+		panic(ErrStackOverflow)
+	}
+	args := i.stack[i.sp-params-1 : i.sp-1]
+	out, err := fn.Fn(i, args)
+	if err != nil {
+		panic(err)
+	}
+	for _, val := range args {
+		if val.Kind() != types.KindRef {
+			continue
+		}
+		kept := false
+		for _, r := range out {
+			if r == val {
+				kept = true
+				break
+			}
+		}
+		if !kept {
+			i.release(val.Ref())
+		}
+	}
+	i.sp += returns - params - 1
+	copy(i.stack[i.sp-returns:i.sp], out)
+	i.fr.ip++
+}
+
+// ret pops the current frame, moving its return values down to the frame base
+// and releasing the frame's function ref. The caller checks for frame underflow.
+func (i *Interpreter) ret() {
+	f := i.fr
+	if i.sp < f.returns {
+		panic(ErrStackUnderflow)
+	}
+	switch f.returns {
+	case 0:
+	case 1:
+		i.stack[f.bp] = i.stack[i.sp-1]
+	default:
+		copy(i.stack[f.bp:f.bp+f.returns], i.stack[i.sp-f.returns:i.sp])
+	}
+	i.sp = f.bp + f.returns
+	if f.release {
+		i.release(f.ref)
+	}
+	f.code = nil
+	i.fp--
+	i.fr = &i.frames[i.fp-1]
+}
+
+// tail performs a tail call to a *Function (or *Closure) body. Above the entry
+// frame it reuses the current frame in place, so tail recursion runs in constant
+// frame depth; at the entry frame it pushes a new frame instead, because a reused
+// entry frame's callee would hit ErrFrameUnderflow on its own RETURN. The funcref
+// at the top of the stack and its arguments below it transfer into the new frame.
+func (i *Interpreter) tail(code, ref int, upvals []types.Boxed, params, returns, locals int) {
+	if i.sp <= params {
+		panic(ErrStackUnderflow)
+	}
+	if i.fp == 1 {
+		if i.fp == len(i.frames) {
+			panic(ErrFrameOverflow)
+		}
+		if i.sp+locals-1 >= len(i.stack) {
+			panic(ErrStackOverflow)
+		}
+		if locals > 0 {
+			clear(i.stack[i.sp-1 : i.sp+locals-1])
+		}
+		f := &i.frames[i.fp]
+		f.code = i.code[code]
+		f.upvals = upvals
+		f.addr = code
+		f.ref = ref
+		f.ip = 0
+		f.bp = i.sp - params - 1
+		f.returns = returns
+		f.release = true
+		i.sp = f.bp + params + locals
+		i.fr.ip++
+		i.fp++
+		i.fr = f
+		return
+	}
+
+	f := i.fr
+	base := f.bp
+	if base+params+locals > len(i.stack) {
+		panic(ErrStackOverflow)
+	}
+	copy(i.stack[base:base+params], i.stack[i.sp-params-1:i.sp-1])
+	if f.release {
+		i.release(f.ref)
+	}
+	if locals > 0 {
+		clear(i.stack[base+params : base+params+locals])
+	}
+	f.code = i.code[code]
+	f.upvals = upvals
+	f.addr = code
+	f.ref = ref
+	f.ip = 0
+	f.bp = base
+	f.returns = returns
+	f.release = true
+	i.sp = base + params + locals
+}
+
+// satI32 truncates v toward zero into a signed i32, saturating out-of-range
+// inputs to the i32 bounds and mapping NaN to 0 (WebAssembly trunc_sat_s).
+func (*Interpreter) satI32(v float64) int32 {
+	switch {
+	case math.IsNaN(v):
+		return 0
+	case v >= 2147483648.0:
+		return math.MaxInt32
+	case v < -2147483648.0:
+		return math.MinInt32
+	default:
+		return int32(v)
+	}
+}
+
+// satU32 truncates v toward zero into an unsigned i32, saturating out-of-range
+// inputs to the u32 bounds and mapping NaN to 0 (WebAssembly trunc_sat_u).
+func (*Interpreter) satU32(v float64) uint32 {
+	switch {
+	case math.IsNaN(v), v < 0:
+		return 0
+	case v >= 4294967296.0:
+		return math.MaxUint32
+	default:
+		return uint32(v)
+	}
+}
+
+// satI64 truncates v toward zero into a signed i64, saturating out-of-range
+// inputs to the i64 bounds and mapping NaN to 0 (WebAssembly trunc_sat_s).
+func (*Interpreter) satI64(v float64) int64 {
+	switch {
+	case math.IsNaN(v):
+		return 0
+	case v >= 9223372036854775808.0:
+		return math.MaxInt64
+	case v < -9223372036854775808.0:
+		return math.MinInt64
+	default:
+		return int64(v)
+	}
+}
+
+// satU64 truncates v toward zero into an unsigned i64, saturating out-of-range
+// inputs to the u64 bounds and mapping NaN to 0 (WebAssembly trunc_sat_u).
+func (*Interpreter) satU64(v float64) uint64 {
+	switch {
+	case math.IsNaN(v), v < 0:
+		return 0
+	case v >= 18446744073709551616.0:
+		return math.MaxUint64
+	default:
+		return uint64(v)
+	}
 }

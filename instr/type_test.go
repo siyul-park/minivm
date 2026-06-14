@@ -26,6 +26,7 @@ func TestTypeOf(t *testing.T) {
 
 		{opcode: CALL},
 		{opcode: RETURN},
+		{opcode: RETURN_CALL},
 
 		{opcode: GLOBAL_GET},
 		{opcode: GLOBAL_SET},
@@ -51,6 +52,15 @@ func TestTypeOf(t *testing.T) {
 		{opcode: I32_XOR},
 		{opcode: I32_AND},
 		{opcode: I32_OR},
+
+		{opcode: I32_CLZ},
+		{opcode: I32_CTZ},
+		{opcode: I32_POPCNT},
+		{opcode: I32_ROTL},
+		{opcode: I32_ROTR},
+
+		{opcode: I32_EXTEND8_S},
+		{opcode: I32_EXTEND16_S},
 
 		{opcode: I32_ADD},
 		{opcode: I32_SUB},
@@ -82,6 +92,8 @@ func TestTypeOf(t *testing.T) {
 		{opcode: I32_TO_F64_S},
 		{opcode: I32_TO_F64_U},
 
+		{opcode: I32_REINTERPRET_F32},
+
 		{opcode: I64_CONST},
 
 		{opcode: I64_ADD},
@@ -94,6 +106,20 @@ func TestTypeOf(t *testing.T) {
 		{opcode: I64_SHL},
 		{opcode: I64_SHR_S},
 		{opcode: I64_SHR_U},
+
+		{opcode: I64_XOR},
+		{opcode: I64_AND},
+		{opcode: I64_OR},
+
+		{opcode: I64_CLZ},
+		{opcode: I64_CTZ},
+		{opcode: I64_POPCNT},
+		{opcode: I64_ROTL},
+		{opcode: I64_ROTR},
+
+		{opcode: I64_EXTEND8_S},
+		{opcode: I64_EXTEND16_S},
+		{opcode: I64_EXTEND32_S},
 
 		{opcode: I64_EQZ},
 		{opcode: I64_EQ},
@@ -113,12 +139,25 @@ func TestTypeOf(t *testing.T) {
 		{opcode: I64_TO_F64_S},
 		{opcode: I64_TO_F64_U},
 
+		{opcode: I64_REINTERPRET_F64},
+
 		{opcode: F32_CONST},
 
 		{opcode: F32_ADD},
 		{opcode: F32_SUB},
 		{opcode: F32_MUL},
 		{opcode: F32_DIV},
+
+		{opcode: F32_ABS},
+		{opcode: F32_NEG},
+		{opcode: F32_SQRT},
+		{opcode: F32_CEIL},
+		{opcode: F32_FLOOR},
+		{opcode: F32_TRUNC},
+		{opcode: F32_NEAREST},
+		{opcode: F32_MIN},
+		{opcode: F32_MAX},
+		{opcode: F32_COPYSIGN},
 
 		{opcode: F32_EQ},
 		{opcode: F32_NE},
@@ -133,6 +172,8 @@ func TestTypeOf(t *testing.T) {
 		{opcode: F32_TO_I64_U},
 		{opcode: F32_TO_F64},
 
+		{opcode: F32_REINTERPRET_I32},
+
 		{opcode: F64_CONST},
 
 		{opcode: F64_ADD},
@@ -140,12 +181,25 @@ func TestTypeOf(t *testing.T) {
 		{opcode: F64_MUL},
 		{opcode: F64_DIV},
 
+		{opcode: F64_ABS},
+		{opcode: F64_NEG},
+		{opcode: F64_SQRT},
+		{opcode: F64_CEIL},
+		{opcode: F64_FLOOR},
+		{opcode: F64_TRUNC},
+		{opcode: F64_NEAREST},
+		{opcode: F64_MIN},
+		{opcode: F64_MAX},
+		{opcode: F64_COPYSIGN},
+
 		{opcode: F64_EQ},
 		{opcode: F64_NE},
 		{opcode: F64_LT},
 		{opcode: F64_GT},
 		{opcode: F64_LE},
 		{opcode: F64_GE},
+
+		{opcode: F64_REINTERPRET_I64},
 
 		{opcode: STRING_NEW_UTF32},
 
@@ -185,6 +239,7 @@ func TestTypeOf(t *testing.T) {
 		{opcode: MAP_SET},
 		{opcode: MAP_DELETE},
 		{opcode: MAP_CLEAR},
+		{opcode: MAP_KEYS},
 
 		{opcode: REF_NEW},
 		{opcode: REF_GET},

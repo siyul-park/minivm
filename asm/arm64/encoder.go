@@ -189,6 +189,8 @@ var floatBinaryOpcodes = map[Op]struct{ single, double uint32 }{
 	OpFSUB: {0x1E203800, 0x1E603800},
 	OpFMUL: {0x1E200800, 0x1E600800},
 	OpFDIV: {0x1E201800, 0x1E601800},
+	OpFMIN: {0x1E205800, 0x1E605800},
+	OpFMAX: {0x1E204800, 0x1E604800},
 }
 
 // floatTernaryOpcodes maps each 4-register scalar float opcode (FMADD-family)
@@ -585,9 +587,24 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		// Float — arithmetic (double precision)
 		// -----------------------------------------------------------------------
 
-	case OpFADD, OpFSUB, OpFMUL, OpFDIV:
+	case OpFADD, OpFSUB, OpFMUL, OpFDIV, OpFMIN, OpFMAX:
 		fb := floatBinaryOpcodes[op]
 		return e.encodeFloatBinary(fb.single, fb.double, inst)
+
+	// -----------------------------------------------------------------------
+	// SIMD (fixed 8B arrangement): CNT, ADDV
+	// -----------------------------------------------------------------------
+
+	case OpCNT, OpADDV:
+		d, n, err := e.decodeReg2(inst)
+		if err != nil {
+			return nil, err
+		}
+		base := uint32(0x0E205800) // CNT Vd.8B, Vn.8B
+		if op == OpADDV {
+			base = 0x0E31B800 // ADDV Bd, Vn.8B
+		}
+		return enc(base | reg(n)<<5 | reg(d)), nil
 
 	case OpFMADD, OpFMSUB, OpFNMADD, OpFNMSUB:
 		ft := floatTernaryOpcodes[op]
