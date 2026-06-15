@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBasicBlocksPass_Run(t *testing.T) {
+func TestBasicBlocksAnalysis_Run(t *testing.T) {
 	tests := []struct {
 		name   string
 		fn     *types.Function
@@ -215,18 +215,14 @@ func TestBasicBlocksPass_Run(t *testing.T) {
 
 	for _, tt := range tests {
 		m := pass.NewManager()
-		_ = m.Register(NewBasicBlocksPass())
+		pass.Register[*types.Function, []*BasicBlock](m, NewBasicBlocksAnalysis())
 
 		name := tt.name
 		if name == "" {
 			name = tt.fn.String()
 		}
 		t.Run(name, func(t *testing.T) {
-			err := m.Run(tt.fn)
-			require.NoError(t, err)
-
-			var actual []*BasicBlock
-			err = m.Load(&actual)
+			actual, err := pass.GetResult[[]*BasicBlock](m, tt.fn)
 			if tt.err != nil {
 				require.ErrorIs(t, err, tt.err)
 				return

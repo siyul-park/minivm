@@ -15,7 +15,7 @@ Read when a change crosses package boundaries or depends on state ownership.
 | `analysis/`, `transform/`, `optimize/`, `pass/` | `pass-system.md` |
 | `cli/` or `cmd/minivm/` | `guides/repl.md` |
 
-Boundary rules: `instr` stays leaf-like, `types` must not import `interp`, and optimizer code flows through `pass.Manager`.
+Boundary rules: `instr` stays leaf-like, `types` must not import `interp`, and optimizer code flows through `pass.Pipeline` + `pass.Manager`.
 
 ## Package Dependency Graph
 
@@ -142,23 +142,26 @@ The native trampoline uses `abi_arm64.go`/`abi_arm64.s` behind `//go:build arm64
 
 ### `pass/`
 
-`pass.Manager`: reflection-based pipeline dispatcher.
+Generics-based, modeled on LLVM's new pass manager (see `pass-system.md`):
 
-- `Register(pass)`: key pass by `Run` return type.
-- `Run(value)`: seed cache with input.
-- `Load(&result)`: run/cached-load passes producing `typeof(result)`.
-- `Convert(src,dst)`: child manager runs `src`, then loads `dst`.
+- `pass.Manager`: lazy analysis cache. `Register[U,R]` adds an `Analysis[U,R]`;
+  `GetResult[R](m, unit)` runs/caches by result type and unit; `Invalidate` drops
+  non-preserved results. Only reflection is `reflect.TypeFor[R]()` as a map key.
+- `pass.Pipeline[U]`: ordered transform sequence. `AddPass` appends; `Run(unit, m)`
+  runs each `Pass[U]` and invalidates between them by its returned `Preserved`.
 
-Passes communicate through manager outputs. Downstream passes `Load` from upstream outputs. Each pass runs at most once per `Manager.Run`.
+Transforms request analyses through the manager; analyses are recomputed after a
+transform mutates code.
 
 ### `analysis/`, `transform/`, `optimize/`
 
-`BasicBlocksPass` underpins JIT + optimizer. Boundaries at code start, after `BR`/`BR_IF`/`BR_TABLE`/`UNREACHABLE`/`RETURN`, at every jump target.
+`BasicBlocksAnalysis` underpins JIT + optimizer. Boundaries at code start, after `BR`/`BR_IF`/`BR_TABLE`/`UNREACHABLE`/`RETURN`, at every jump target.
 
-`optimize.NewOptimizer(O1)` order:
+`optimize.NewOptimizer(level)` builds a cumulative pipeline:
 
 ```text
-BasicBlocksPass → ConstantFoldingPass → ConstantDeduplicationPass → DeadCodeEliminationPass
+O1  ConstantFoldingPass → ConstantDeduplicationPass
+O2  ConstantFoldingPass → AlgebraicSimplificationPass → ConstantDeduplicationPass → DeadCodeEliminationPass
 ```
 
 Transform passes mutate `*program.Program` in-place: edit `prog.Code` bytes and `prog.Constants`.
@@ -194,7 +197,7 @@ Thin entrypoint around `cli.Root().Execute()`.
    └─ instr.Marshal(instrs) → prog.Code
 
 2. optimize.Optimize(prog) [optional AOT]
-   └─ BasicBlocksPass → CF → CD → DCE
+   └─ CF → (AS) → CD → (DCE), each requesting BasicBlocksAnalysis
 
 3. interp.New(prog, opts...)
    ├─ threadedCompiler.Compile(prog.Code) → i.code[0]

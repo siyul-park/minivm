@@ -58,14 +58,10 @@ func TestConstantDeduplicationPassPass_Run(t *testing.T) {
 
 	for _, tt := range tests {
 		m := pass.NewManager()
-		_ = m.Register(NewConstantDeduplicationPass())
 
 		t.Run(tt.program.String(), func(t *testing.T) {
-			err := m.Run(tt.program)
-			require.NoError(t, err)
-
-			var actual *program.Program
-			err = m.Load(&actual)
+			actual := tt.program
+			_, err := NewConstantDeduplicationPass().Run(m, actual)
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, actual)
 		})

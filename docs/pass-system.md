@@ -1,14 +1,18 @@
 # Pass System
 
-How analysis/transform/optimization pipeline works and how to write passes.
+How the analysis/transform/optimization pipeline works and how to write passes.
+The design follows LLVM's new pass manager: a lazy, caching **analysis manager**
+(`pass.Manager`) is kept separate from an ordered **transform pipeline**
+(`pass.Pipeline`).
 
 ## Agent Checklist
 
 Before editing:
 
-- identify whether pass consumes `*program.Program`, `*types.Function`, or another cached type
-- use `m.Load` for current state and `m.Convert` for sub-pipelines
-- preserve in-place mutation unless existing pass returns a replacement
+- decide whether you are writing an **analysis** (computes a cached result for an
+  IR unit) or a **transform** (mutates `*program.Program` in place)
+- request cached analyses with `pass.GetResult[R](m, unit)`; never recompute by hand
+- preserve in-place mutation — transforms mutate the unit and report `pass.Preserved`
 
 After editing:
 
@@ -16,27 +20,57 @@ After editing:
 - for bytecode rewrites, verify branch offsets and constant/type indexes separately
 - run `go test ./analysis ./transform ./optimize ./pass`
 
-## `pass.Manager` Internals
+## `pass.Manager` (analysis cache)
 
-`pass.Manager`: reflection-based pipeline dispatcher mapping result types to producing passes.
+`pass.Manager` lazily runs analyses and caches their results, keyed by result
+type and unit identity. Generics carry the types; the only reflection is
+`reflect.TypeFor[R]()` used as a map key (no dynamic dispatch).
 
 ```go
 type Manager struct {
-    passes map[reflect.Type][]reflect.Value // type → []Pass
-    cache  map[reflect.Type]reflect.Value   // type → cached result
-    parent *Manager
+    analyses map[reflect.Type]func(any, *Manager) (any, error) // result type → runner
+    cache    map[cacheKey]any                                  // (result type, unit) → result
 }
 ```
 
-- `Register(pass)`: inspects `Run(*Manager) (T, error)` and registers pass under `reflect.TypeOf(T)`.
-- `Run(value)`: seeds cache with `value` by `reflect.TypeOf(value)`. A `T → T` pass overwrites cached `T`.
-- `Load(&result)`: runs all passes producing `typeof(*result)` in registration order, caches output, sets `*result`; later loads return cache.
-- `Convert(src,dst)`: creates child manager sharing passes but own cache, runs `src`, then loads `dst`.
-- Caching: each pass runs at most once per `Manager.Run`; passes reading via `Load` see latest cached value for that type.
+- `Register[U, R](m, analysis)`: registers an `Analysis[U, R]` under `R`.
+- `GetResult[R](m, unit)`: returns the cached `R` for `unit`, computing and caching
+  on a miss; errors with `ErrUnregisteredAnalysis` if no analysis produces `R`.
+- `Invalidate(preserved)`: drops cached results unless `preserved` is `PreserveAll()`.
 
-## Writing a Pass
+## `pass.Pipeline` (transform sequence)
 
-A pass is any type with `Run(*Manager) (T, error)`.
+`pass.Pipeline[U]` runs an ordered sequence of transforms over an IR unit of type
+`U`, invalidating stale analyses between passes (LLVM's `PassManager`).
+
+```go
+pl := pass.NewPipeline[*program.Program]()
+pl.AddPass(transform.NewConstantFoldingPass())
+prog, err := pl.Run(m, prog) // m is a *pass.Manager
+```
+
+## Writing an Analysis
+
+An analysis implements `Analysis[U, R]` — `Run(*Manager, U) (R, error)`. It receives
+its IR unit directly and may request other analyses through the manager.
+
+```go
+type BasicBlocksAnalysis struct{}
+
+var _ pass.Analysis[*types.Function, []*BasicBlock] = (*BasicBlocksAnalysis)(nil)
+
+func NewBasicBlocksAnalysis() *BasicBlocksAnalysis { return &BasicBlocksAnalysis{} }
+
+func (a *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*BasicBlock, error) {
+    // compute control-flow blocks for fn
+}
+```
+
+## Writing a Transform
+
+A transform implements `Pass[U]` — `Run(*Manager, U) (Preserved, error)`. It mutates
+the unit in place and reports which analyses it preserved. Transforms that touch
+code return `pass.PreserveNone()`.
 
 ```go
 type MyPass struct{}
@@ -45,73 +79,47 @@ var _ pass.Pass[*program.Program] = (*MyPass)(nil)
 
 func NewMyPass() *MyPass { return &MyPass{} }
 
-func (p *MyPass) Run(m *pass.Manager) (*program.Program, error) {
-    var prog *program.Program
-    if err := m.Load(&prog); err != nil {
-        return nil, err
+func (p *MyPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
+    for _, fn := range functions(prog) {
+        blocks, err := pass.GetResult[[]*analysis.BasicBlock](m, fn)
+        if err != nil {
+            return pass.PreserveNone(), err
+        }
+        // mutate fn.Code / prog.Constants in place using blocks
+        _ = blocks
     }
-
-    fn := &types.Function{Typ: &types.FunctionType{}, Code: prog.Code}
-
-    var blocks []*analysis.BasicBlock
-    if err := m.Convert(fn, &blocks); err != nil {
-        return nil, err
-    }
-
-    // mutate prog.Code or prog.Constants in-place
-    _ = blocks
-
-    return prog, nil
+    return pass.PreserveNone(), nil
 }
 ```
 
 Rules:
 
-- always `m.Load` before modifying; another pass may have already transformed the value
-- wrap code slices as `*types.Function{Typ: &types.FunctionType{}, Code: slice}` for `BasicBlocksPass`
-- return `nil, err` on failure; manager stops and propagates it
-- return input unchanged if no modifications made
-- do not retain manager after `Run` returns
+- request analyses with `pass.GetResult`; the manager runs `BasicBlocksAnalysis`
+  on demand and caches it per function
+- mutate the program in place; return `pass.PreserveNone()` after code changes so
+  cached analyses are invalidated, or `pass.PreserveAll()` if nothing changed
+- return `pass.PreserveNone(), err` on failure; the pipeline stops and propagates it
+- do not retain the manager after `Run` returns
 
-## One-Off Passes
+## Optimizer Levels
 
-Use `pass.New` for simple inline passes.
-
-```go
-customPass := pass.New(func(m *pass.Manager) (*program.Program, error) {
-    var prog *program.Program
-    if err := m.Load(&prog); err != nil {
-        return nil, err
-    }
-    // transform
-    return prog, nil
-})
-
-opt := optimize.NewOptimizer(optimize.O0)
-_ = opt.Register(customPass)
-prog, _ = opt.Optimize(prog)
-```
-
-## Optimizer Pipeline `O1`
-
-`optimize.NewOptimizer(O1)` registers:
+`optimize.NewOptimizer(level)` registers `BasicBlocksAnalysis` and builds the
+transform pipeline for the level. Levels are cumulative:
 
 ```text
-BasicBlocksPass            analysis  → []*BasicBlock
-ConstantFoldingPass        transform → *program.Program
-ConstantDeduplicationPass  transform → *program.Program
-DeadCodeEliminationPass    transform → *program.Program
+O0  no transforms
+O1  ConstantFoldingPass, ConstantDeduplicationPass                          (cheap, local)
+O2  + AlgebraicSimplificationPass, DeadCodeEliminationPass                  (CFG / peephole)
 ```
 
-Transform passes load latest cached `*program.Program` and return possibly mutated one. Because caching is by type, each pass sees previous pass output.
+`Optimize(prog)` runs the pipeline; `AddPass(p)` appends a custom transform.
+Because analyses are invalidated between passes, each transform sees fresh blocks.
 
-## `BasicBlocksPass`
+## `BasicBlocksAnalysis`
 
-Shared by optimizer and `compiler`; same pass type and boundary rules.
+Shared by the optimizer and the JIT `compiler`; same boundary rules.
 
-Input: `*types.Function` via `m.Run(fn)` or `m.Convert(fn, &blocks)`.
-
-Output: `[]*analysis.BasicBlock`:
+Input: `*types.Function`. Output: `[]*analysis.BasicBlock`:
 
 - `Start`: first instruction byte offset, inclusive
 - `End`: byte offset past last instruction, exclusive
@@ -128,32 +136,41 @@ Block boundaries:
 
 Folds 2- and 3-instruction windows: `CONST CONST OP` → `CONST result`.
 
-Folded output is right-aligned in original byte range; left side padded with NOPs.
+Folded output is right-aligned in the original byte range; the left side is padded
+with NOPs.
 
 ```text
 Before: [I32_CONST 3][I32_CONST 4][I32_ADD]             11 bytes
 After:  [NOP][NOP][NOP][NOP][NOP][NOP][I32_CONST 7]    11 bytes
 ```
 
-Normal threaded NOP fast-forwards consecutive NOPs as one dispatch. `WithTick(1)` preserves exact per-instruction boundaries for hooks/debugging.
+Supported folds: `I32`/`I64`/`F32`/`F64` constant pairs (arithmetic, bitwise,
+comparisons), `I32_CONST × I32_EQZ`, type conversions such as
+`I32_CONST × I32_TO_F32_S`, and string `CONST_GET` ops.
 
-Supported folds:
+## `AlgebraicSimplificationPass`
 
-- `I32_CONST × I32_CONST × op`: arithmetic, bitwise, comparisons
-- `I64_CONST × I64_CONST × op`: same
-- `F32_CONST × F32_CONST × op`: same
-- `F64_CONST × F64_CONST × op`: same
-- `I32_CONST × I32_EQZ`
-- type conversions such as `I32_CONST × I32_TO_F32_S`
-- `CONST_GET(String) × CONST_GET(String) × STRING_CONCAT/EQ/...`
+Integer peepholes whose right operand is a constant, on `I32`/`I64`:
+
+- identities dropped to NOPs, leaving the left operand: `x+0`, `x-0`, `x*1`, `x/1`,
+  `x|0`, `x^0`, `x&-1`, `x<<0`, `x>>0`
+- strength reduction: `x*2ⁿ` → `x << n`; unsigned `x/2ⁿ` → `x >> n`
+
+Float identities are intentionally skipped (unsound under IEEE-754: NaN, signed
+zero), as are annihilators such as `x*0` and `x&0` (they would need to drop the
+live left operand).
 
 ## `ConstantDeduplicationPass`
 
-Scans all `CONST_GET` operands in all functions. If multiple constant indices point to equal `types.Value`s, rewrites references to lowest index. Shrinks constant table and improves cache locality.
+Scans all `CONST_GET` and type operands across functions; collapses equal
+constants/types to the lowest index, rewrites references, and shrinks the tables.
 
 ## `DeadCodeEliminationPass`
 
 1. Mark bytes in basic blocks with no predecessors as `UNREACHABLE`.
-2. Compact bytecode by removing NOP runs and unreachable sequences, rewriting branch offsets for new positions.
+2. Compact bytecode by removing NOP runs and unreachable sequences, rewriting
+   branch offsets for the new positions.
 
-Compaction rewrites only branch operands: `BR`, `BR_IF`, `BR_TABLE`. Other operands keep meaning because compaction changes instruction positions, not constant/type/global/local indexes.
+Compaction rewrites only branch operands (`BR`, `BR_IF`, `BR_TABLE`). Other
+operands keep meaning because compaction changes instruction positions, not
+constant/type/global/local indexes.

@@ -10,7 +10,7 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-type BasicBlocksPass struct{}
+type BasicBlocksAnalysis struct{}
 
 type BasicBlock struct {
 	Start int
@@ -21,18 +21,13 @@ type BasicBlock struct {
 
 var ErrInvalidJump = errors.New("invalid jump")
 
-var _ pass.Pass[[]*BasicBlock] = (*BasicBlocksPass)(nil)
+var _ pass.Analysis[*types.Function, []*BasicBlock] = (*BasicBlocksAnalysis)(nil)
 
-func NewBasicBlocksPass() *BasicBlocksPass {
-	return &BasicBlocksPass{}
+func NewBasicBlocksAnalysis() *BasicBlocksAnalysis {
+	return &BasicBlocksAnalysis{}
 }
 
-func (p *BasicBlocksPass) Run(m *pass.Manager) ([]*BasicBlock, error) {
-	var fn *types.Function
-	if err := m.Load(&fn); err != nil {
-		return nil, err
-	}
-
+func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*BasicBlock, error) {
 	offsets := []int{0}
 	for ip := 0; ip < len(fn.Code); {
 		inst := instr.Instruction(fn.Code[ip:])
@@ -139,7 +134,7 @@ func (p *BasicBlocksPass) Run(m *pass.Manager) ([]*BasicBlock, error) {
 	return blocks, nil
 }
 
-func (p *BasicBlocksPass) link(blocks []*BasicBlock, src, dst int) bool {
+func (p *BasicBlocksAnalysis) link(blocks []*BasicBlock, src, dst int) bool {
 	for i, b := range blocks {
 		if b.Start <= dst && dst < b.End {
 			blocks[src].Succs = append(blocks[src].Succs, i)

@@ -18,16 +18,11 @@ func NewConstantFoldingPass() *ConstantFoldingPass {
 	return &ConstantFoldingPass{}
 }
 
-func (p *ConstantFoldingPass) Run(m *pass.Manager) (*program.Program, error) {
-	var prog *program.Program
-	if err := m.Load(&prog); err != nil {
-		return nil, err
-	}
-
+func (p *ConstantFoldingPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
 	for _, fn := range functions(prog) {
-		var blocks []*analysis.BasicBlock
-		if err := m.Convert(fn, &blocks); err != nil {
-			return nil, err
+		blocks, err := pass.GetResult[[]*analysis.BasicBlock](m, fn)
+		if err != nil {
+			return pass.PreserveNone(), err
 		}
 
 		for _, blk := range blocks {
@@ -454,7 +449,7 @@ func (p *ConstantFoldingPass) Run(m *pass.Manager) (*program.Program, error) {
 			}
 		}
 	}
-	return prog, nil
+	return pass.PreserveNone(), nil
 }
 
 // replace folds the [ip, ip+width) range to inst and returns the next ip.
