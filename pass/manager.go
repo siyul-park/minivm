@@ -2,103 +2,63 @@ package pass
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 )
 
+// Manager lazily runs analyses and caches their results per IR unit, keyed by
+// result type and unit identity. It mirrors LLVM's AnalysisManager.
 type Manager struct {
-	parent *Manager
-	passes map[reflect.Type][]reflect.Value
-	cache  map[reflect.Type]reflect.Value
+	analyses map[reflect.Type]func(*Manager, any) (any, error)
+	cache    map[cacheKey]any
 }
 
-var (
-	ErrInvalidPassType      = errors.New("invalid pass type")
-	ErrUnregisteredPassType = errors.New("unregistered pass type")
-)
+type cacheKey struct {
+	result reflect.Type
+	unit   any
+}
+
+var ErrUnregisteredAnalysis = errors.New("unregistered analysis")
 
 func NewManager() *Manager {
 	return &Manager{
-		passes: make(map[reflect.Type][]reflect.Value),
-		cache:  make(map[reflect.Type]reflect.Value),
+		analyses: make(map[reflect.Type]func(*Manager, any) (any, error)),
+		cache:    make(map[cacheKey]any),
 	}
 }
 
-func (m *Manager) Register(pass any) error {
-	val := reflect.ValueOf(pass)
-	run, ok := val.Type().MethodByName("Run")
-	if !ok ||
-		run.Type.NumIn() != 2 || run.Type.In(1) != reflect.TypeOf(m) ||
-		run.Type.NumOut() != 2 || run.Type.Out(1) != reflect.TypeOf((*error)(nil)).Elem() {
-		return ErrInvalidPassType
+// Register adds an analysis, keyed by its result type R.
+func Register[U, R any](m *Manager, a Analysis[U, R]) {
+	m.analyses[reflect.TypeFor[R]()] = func(m *Manager, unit any) (any, error) {
+		return a.Run(m, unit.(U))
 	}
-	m.passes[run.Type.Out(0)] = append(m.passes[run.Type.Out(0)], val)
-	return nil
 }
 
-func (m *Manager) Convert(src, dst any) error {
-	child := &Manager{
-		parent: m,
-		passes: m.passes,
-		cache:  make(map[reflect.Type]reflect.Value),
-	}
-	if err := child.Run(src); err != nil {
-		return err
-	}
-	return child.Load(dst)
-}
-
-func (m *Manager) Load(val any) error {
-	v := reflect.ValueOf(val)
-	if v.Kind() != reflect.Ptr || v.IsNil() {
-		return ErrUnregisteredPassType
+// GetResult returns the result of type R for unit, computing and caching it on a miss.
+func GetResult[R any](m *Manager, unit any) (R, error) {
+	key := cacheKey{result: reflect.TypeFor[R](), unit: unit}
+	if v, ok := m.cache[key]; ok {
+		return v.(R), nil
 	}
 
-	typ := v.Elem().Type()
-
-	r, ok := m.cache[typ]
+	run, ok := m.analyses[key.result]
 	if !ok {
-		passes, ok := m.passes[typ]
-		if !ok {
-			if p := m.parent; p != nil {
-				for p := m.parent; p != nil; p = p.parent {
-					if err := p.Load(val); err == nil {
-						return nil
-					}
-				}
-			}
-			return ErrUnregisteredPassType
-		}
-		for _, p := range passes {
-			run := p.MethodByName("Run")
-			res := run.Call([]reflect.Value{reflect.ValueOf(m)})
-			if err := res[1]; !err.IsNil() {
-				return err.Interface().(error)
-			}
-			r = res[0]
-			m.cache[typ] = r
-		}
+		var zero R
+		return zero, fmt.Errorf("%w: %s", ErrUnregisteredAnalysis, key.result)
 	}
 
-	v.Elem().Set(r)
-	return nil
+	res, err := run(m, unit)
+	if err != nil {
+		var zero R
+		return zero, err
+	}
+	m.cache[key] = res
+	return res.(R), nil
 }
 
-func (m *Manager) Run(val any) error {
-	typ := reflect.TypeOf(val)
-	m.cache = map[reflect.Type]reflect.Value{
-		typ: reflect.ValueOf(val),
+// Invalidate drops cached results unless the transform preserved everything.
+func (m *Manager) Invalidate(p Preserved) {
+	if !p.all {
+		clear(m.cache)
 	}
-	for _, p := range m.passes[typ] {
-		run := p.MethodByName("Run")
-		res := run.Call([]reflect.Value{reflect.ValueOf(m)})
-		if err := res[1]; !err.IsNil() {
-			return err.Interface().(error)
-		}
-		if !res[0].IsZero() && res[0].IsValid() {
-			m.cache = map[reflect.Type]reflect.Value{
-				typ: res[0],
-			}
-		}
-	}
-	return nil
 }

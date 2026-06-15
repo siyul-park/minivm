@@ -17,18 +17,13 @@ func NewDeadCodeEliminationPass() *DeadCodeEliminationPass {
 	return &DeadCodeEliminationPass{}
 }
 
-func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error) {
-	var prog *program.Program
-	if err := m.Load(&prog); err != nil {
-		return nil, err
-	}
-
+func (p *DeadCodeEliminationPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
 	for i, fn := range functions(prog) {
 		code := fn.Code
 
-		var blocks []*analysis.BasicBlock
-		if err := m.Convert(fn, &blocks); err != nil {
-			return nil, err
+		blocks, err := pass.GetResult[[]*analysis.BasicBlock](m, fn)
+		if err != nil {
+			return pass.PreserveNone(), err
 		}
 		for i := 1; i < len(blocks); i++ {
 			blk := blocks[i]
@@ -75,7 +70,7 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error)
 					target++
 				}
 				if target < 0 || target >= len(offsets) {
-					return nil, fmt.Errorf("%w: at=%d", analysis.ErrInvalidJump, read)
+					return pass.PreserveNone(), fmt.Errorf("%w: at=%d", analysis.ErrInvalidJump, read)
 				}
 				inst.SetOperand(0, uint64(offsets[target]-write-inst.Width()))
 			case instr.BR_TABLE:
@@ -88,7 +83,7 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error)
 						target++
 					}
 					if target < 0 || target >= len(offsets) {
-						return nil, fmt.Errorf("%w: at=%d", analysis.ErrInvalidJump, read)
+						return pass.PreserveNone(), fmt.Errorf("%w: at=%d", analysis.ErrInvalidJump, read)
 					}
 					inst.SetOperand(j+1, uint64(offsets[target]-write-width))
 				}
@@ -106,5 +101,5 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager) (*program.Program, error)
 		}
 	}
 
-	return prog, nil
+	return pass.PreserveNone(), nil
 }

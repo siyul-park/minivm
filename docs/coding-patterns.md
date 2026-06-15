@@ -398,7 +398,7 @@ Constructors use `New<Type>`.
 
 ```go
 func NewOptimizer(level Level) *Optimizer
-func NewBasicBlocksPass() pass.Pass[[]*BasicBlock]
+func NewBasicBlocksAnalysis() *BasicBlocksAnalysis
 func NewCaller(chunk *Chunk) (Caller, error)
 ```
 

@@ -15,12 +15,7 @@ func NewConstantDeduplicationPass() *ConstantDeduplicationPass {
 	return &ConstantDeduplicationPass{}
 }
 
-func (p *ConstantDeduplicationPass) Run(m *pass.Manager) (*program.Program, error) {
-	var prog *program.Program
-	if err := m.Load(&prog); err != nil {
-		return nil, err
-	}
-
+func (p *ConstantDeduplicationPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
 	fns := functions(prog)
 
 	constants := prog.Constants
@@ -88,5 +83,5 @@ func (p *ConstantDeduplicationPass) Run(m *pass.Manager) (*program.Program, erro
 	prog.Constants = constants
 	prog.Types = typs
 
-	return prog, nil
+	return pass.PreserveNone(), nil
 }

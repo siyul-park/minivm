@@ -4,162 +4,98 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
-	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
-// funcPass adapts a closure into a Pass for tests.
-type funcPass[T any] struct {
-	run func(*Manager) (T, error)
+// lenAnalysis is a test analysis whose result is the program's code length; it
+// records how many times it runs so caching and invalidation can be observed.
+type lenAnalysis struct{ calls *int }
+
+func (a lenAnalysis) Run(m *Manager, prog *program.Program) (int, error) {
+	if a.calls != nil {
+		*a.calls++
+	}
+	return len(prog.Code), nil
 }
 
-func (p funcPass[T]) Run(m *Manager) (T, error) {
-	return p.run(m)
+// failAnalysis is a test analysis that always fails.
+type failAnalysis struct{ err error }
+
+func (a failAnalysis) Run(m *Manager, prog *program.Program) (int, error) {
+	return 0, a.err
 }
 
-func TestManager_Register(t *testing.T) {
-	t.Run("valid pass", func(t *testing.T) {
+func TestRegister(t *testing.T) {
+	m := NewManager()
+	Register[*program.Program, int](m, lenAnalysis{})
+
+	got, err := GetResult[int](m, program.New([]instr.Instruction{instr.New(instr.NOP)}))
+	require.NoError(t, err)
+	require.Equal(t, 1, got)
+}
+
+func TestGetResult(t *testing.T) {
+	t.Run("computes and caches", func(t *testing.T) {
+		calls := 0
 		m := NewManager()
-		err := m.Register(funcPass[*program.Program]{run: func(m *Manager) (*program.Program, error) {
-			var prog *program.Program
-			if err := m.Load(&prog); err != nil {
-				return nil, err
-			}
-			return prog, nil
-		}})
+		Register[*program.Program, int](m, lenAnalysis{calls: &calls})
+
+		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+		first, err := GetResult[int](m, prog)
 		require.NoError(t, err)
-	})
-
-	t.Run("invalid pass", func(t *testing.T) {
-		m := NewManager()
-		require.ErrorIs(t, m.Register(struct{}{}), ErrInvalidPassType)
-	})
-}
-
-func TestManager_Convert(t *testing.T) {
-	t.Run("child pipeline", func(t *testing.T) {
-		m := NewManager()
-		require.NoError(t, m.Register(funcPass[*program.Program]{run: func(m *Manager) (*program.Program, error) {
-			var prog *program.Program
-			if err := m.Load(&prog); err != nil {
-				return nil, err
-			}
-			var fn *types.Function
-			if err := m.Convert(types.NewFunctionBuilder(nil).Emit(prog.Code).Build(), &fn); err != nil {
-				return nil, err
-			}
-			return prog, nil
-		}}))
-		require.NoError(t, m.Register(funcPass[*types.Function]{run: func(m *Manager) (*types.Function, error) {
-			var fn *types.Function
-			if err := m.Load(&fn); err != nil {
-				return nil, err
-			}
-			return fn, nil
-		}}))
-
-		err := m.Run(program.New(nil))
+		second, err := GetResult[int](m, prog)
 		require.NoError(t, err)
+
+		require.Equal(t, first, second)
+		require.Equal(t, 1, calls)
 	})
 
-	t.Run("propagates child error", func(t *testing.T) {
+	t.Run("unregistered analysis", func(t *testing.T) {
+		m := NewManager()
+		_, err := GetResult[int](m, program.New(nil))
+		require.ErrorIs(t, err, ErrUnregisteredAnalysis)
+	})
+
+	t.Run("propagates error", func(t *testing.T) {
 		want := errors.New("fail")
 		m := NewManager()
-		require.NoError(t, m.Register(funcPass[*types.Function]{run: func(m *Manager) (*types.Function, error) {
-			return nil, want
-		}}))
+		Register[*program.Program, int](m, failAnalysis{err: want})
 
-		var fn *types.Function
-		err := m.Convert(types.NewFunction(nil, nil, nil), &fn)
+		_, err := GetResult[int](m, program.New(nil))
 		require.ErrorIs(t, err, want)
 	})
 }
 
-func TestManager_Load(t *testing.T) {
-	t.Run("cached value", func(t *testing.T) {
-		m := NewManager()
-		prog := program.New(nil)
-		require.NoError(t, m.Run(prog))
-
-		var got *program.Program
-		require.NoError(t, m.Load(&got))
-		require.Same(t, prog, got)
-	})
-
-	t.Run("runs registered pass once", func(t *testing.T) {
+func TestManager_Invalidate(t *testing.T) {
+	t.Run("drops cached results", func(t *testing.T) {
 		calls := 0
 		m := NewManager()
-		require.NoError(t, m.Register(funcPass[*types.Function]{run: func(m *Manager) (*types.Function, error) {
-			calls++
-			return types.NewFunction(nil, nil, nil), nil
-		}}))
+		Register[*program.Program, int](m, lenAnalysis{calls: &calls})
 
-		var first *types.Function
-		require.NoError(t, m.Load(&first))
-		var second *types.Function
-		require.NoError(t, m.Load(&second))
-
-		require.Same(t, first, second)
-		require.Equal(t, 1, calls)
-	})
-
-	t.Run("loads from parent", func(t *testing.T) {
-		m := NewManager()
-		prog := program.New(nil)
-		require.NoError(t, m.Run(prog))
-
-		var got *program.Program
-		require.NoError(t, m.Convert(types.NewFunction(nil, nil, nil), &got))
-		require.Same(t, prog, got)
-	})
-
-	t.Run("invalid destination", func(t *testing.T) {
-		m := NewManager()
-		require.ErrorIs(t, m.Load((*program.Program)(nil)), ErrUnregisteredPassType)
-		require.ErrorIs(t, m.Load(program.New(nil)), ErrUnregisteredPassType)
-	})
-
-	t.Run("unregistered type", func(t *testing.T) {
-		m := NewManager()
-		var prog *program.Program
-		require.ErrorIs(t, m.Load(&prog), ErrUnregisteredPassType)
-	})
-
-	t.Run("propagates pass error", func(t *testing.T) {
-		want := errors.New("fail")
-		m := NewManager()
-		require.NoError(t, m.Register(funcPass[*program.Program]{run: func(m *Manager) (*program.Program, error) {
-			return nil, want
-		}}))
-
-		var prog *program.Program
-		require.ErrorIs(t, m.Load(&prog), want)
-	})
-}
-
-func TestManager_Run(t *testing.T) {
-	t.Run("runs pass", func(t *testing.T) {
-		m := NewManager()
-		require.NoError(t, m.Register(funcPass[*program.Program]{run: func(m *Manager) (*program.Program, error) {
-			var prog *program.Program
-			if err := m.Load(&prog); err != nil {
-				return nil, err
-			}
-			return prog, nil
-		}}))
-
-		err := m.Run(program.New(nil))
+		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+		_, err := GetResult[int](m, prog)
 		require.NoError(t, err)
+		m.Invalidate(PreserveNone())
+		_, err = GetResult[int](m, prog)
+		require.NoError(t, err)
+
+		require.Equal(t, 2, calls)
 	})
 
-	t.Run("propagates pass error", func(t *testing.T) {
-		want := errors.New("fail")
+	t.Run("preserve all keeps results", func(t *testing.T) {
+		calls := 0
 		m := NewManager()
-		require.NoError(t, m.Register(funcPass[*program.Program]{run: func(m *Manager) (*program.Program, error) {
-			return nil, want
-		}}))
+		Register[*program.Program, int](m, lenAnalysis{calls: &calls})
 
-		require.ErrorIs(t, m.Run(program.New(nil)), want)
+		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+		_, err := GetResult[int](m, prog)
+		require.NoError(t, err)
+		m.Invalidate(PreserveAll())
+		_, err = GetResult[int](m, prog)
+		require.NoError(t, err)
+
+		require.Equal(t, 1, calls)
 	})
 }
