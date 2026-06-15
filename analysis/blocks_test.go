@@ -19,7 +19,7 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 		{
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.NOP),
-			).Build(),
+			).MustBuild(),
 			blocks: []*BasicBlock{
 				{
 					Start: 0,
@@ -32,7 +32,7 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 		{
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.UNREACHABLE),
-			).Build(),
+			).MustBuild(),
 			blocks: []*BasicBlock{
 				{
 					Start: 0,
@@ -45,7 +45,7 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 		{
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.RETURN),
-			).Build(),
+			).MustBuild(),
 			blocks: []*BasicBlock{
 				{
 					Start: 0,
@@ -60,7 +60,7 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 				instr.New(instr.BR, 5),
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_CONST, 2),
-			).Build(),
+			).MustBuild(),
 			blocks: []*BasicBlock{
 				{
 					Start: 0,
@@ -88,7 +88,7 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 				instr.New(instr.BR_IF, 5),
 				instr.New(instr.I32_CONST, 2),
 				instr.New(instr.I32_CONST, 3),
-			).Build(),
+			).MustBuild(),
 			blocks: []*BasicBlock{
 				{
 					Start: 0,
@@ -117,7 +117,7 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 				instr.New(instr.BR_TABLE, 1, 5, 0),
 				instr.New(instr.I32_CONST, 2),
 				instr.New(instr.I32_CONST, 3),
-			).Build(),
+			).MustBuild(),
 			blocks: []*BasicBlock{
 				{
 					Start: 0,
@@ -144,7 +144,7 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 				instr.New(instr.NOP),
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.BR, uint64(uint16(-9+1<<16))),
-			).Build(),
+			).MustBuild(),
 			blocks: []*BasicBlock{
 				{
 					Start: 0,
@@ -160,7 +160,7 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.BR_IF, uint64(uint16(-9+1<<16))),
 				instr.New(instr.I32_CONST, 2),
-			).Build(),
+			).MustBuild(),
 			blocks: []*BasicBlock{
 				{
 					Start: 0,
@@ -181,7 +181,7 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.BR_TABLE, 1, uint64(uint16(-11+1<<16)), 0),
 				instr.New(instr.I32_CONST, 2),
-			).Build(),
+			).MustBuild(),
 			blocks: []*BasicBlock{
 				{
 					Start: 0,
@@ -201,14 +201,14 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 			name: "invalid br target",
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.BR, 10),
-			).Build(),
+			).MustBuild(),
 			err: ErrInvalidJump,
 		},
 		{
 			name: "invalid br_table target",
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.BR_TABLE, 1, 0, 10),
-			).Build(),
+			).MustBuild(),
 			err: ErrInvalidJump,
 		},
 	}

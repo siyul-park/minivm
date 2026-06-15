@@ -46,7 +46,6 @@ func BenchmarkJITIssue60(b *testing.B) {
 					tt.program,
 					interp.WithTick(1),
 					interp.WithThreshold(1),
-					interp.WithCutoff(1),
 				), tt.want)
 			})
 		})

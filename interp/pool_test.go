@@ -296,7 +296,7 @@ func TestPool_Profile(t *testing.T) {
 			instr.New(instr.NOP),
 			instr.New(instr.NOP),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -345,7 +345,7 @@ func TestPool_Profile(t *testing.T) {
 			instr.New(instr.NOP),
 			instr.New(instr.NOP),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),

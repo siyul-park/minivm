@@ -58,6 +58,8 @@ type Program struct {
 
 `Code` holds top-level bytecode. `Constants` hold functions, strings, arrays, and other values. `Types` holds descriptors for `ARRAY_NEW` and `STRUCT_NEW`. `*types.Function` constants have their own `Code []byte`. `interp.New()` compiles function constant `j` into slot `j+1`; slot `0` is program code.
 
+`program.Builder` is the high-level way to author a `Program`. It wraps an `instr.Builder` (label-patching assembler: branch to a `Label`, offsets back-patched on `Build`) and interned constant/type pools (`Const`/`ConstGet`/`Type` dedup by `String()` and return a stable index), so authors never hand-compute branch byte offsets or pool indices. `types.FunctionBuilder` carries the same `Label`/`Bind`/`Br`/`BrIf`/`BrTable` methods for function bodies. Branch targets are PC-relative signed-i16 byte offsets relative to the end of the branch instruction (see `interp/threaded.go`); `instr.Builder.Assemble` is the single source of that encoding.
+
 ### `instr/`
 
 Instruction set: byte-sized `Opcode`. Each opcode has `Type` metadata in `instr/type.go`: mnemonic plus `Widths []int` for variable-width encoding/decoding.

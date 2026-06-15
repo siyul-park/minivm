@@ -185,7 +185,7 @@ var tests = []test{
 			program.WithConstants(
 				types.NewFunctionBuilder(nil).Emit(
 					instr.New(instr.I32_CONST, 1),
-				).Build(),
+				).MustBuild(),
 			),
 		),
 		values: []types.Value{types.I32(1)},
@@ -221,7 +221,7 @@ var tests = []test{
 				}).Emit(
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.RETURN),
-				).Build(),
+				).MustBuild(),
 			),
 		),
 		values: []types.Value{types.I32(1)},
@@ -251,7 +251,7 @@ var tests = []test{
 					instr.New(instr.RETURN_CALL),
 					instr.New(instr.I32_CONST, 0),
 					instr.New(instr.RETURN),
-				).Build(),
+				).MustBuild(),
 			),
 		),
 		values: []types.Value{types.I32(0)},
@@ -269,13 +269,13 @@ var tests = []test{
 				}).Emit(
 					instr.New(instr.CONST_GET, 1),
 					instr.New(instr.RETURN_CALL),
-				).Build(),
+				).MustBuild(),
 				types.NewFunctionBuilder(&types.FunctionType{
 					Returns: []types.Type{types.TypeI32},
 				}).Emit(
 					instr.New(instr.I32_CONST, 42),
 					instr.New(instr.RETURN),
-				).Build(),
+				).MustBuild(),
 			),
 		),
 		values: []types.Value{types.I32(42)},
@@ -352,7 +352,7 @@ var tests = []test{
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.LOCAL_SET, 0),
 					instr.New(instr.LOCAL_GET, 0),
-				).Build(),
+				).MustBuild(),
 			),
 		),
 		values: []types.Value{types.I32(1)},
@@ -367,7 +367,7 @@ var tests = []test{
 				types.NewFunctionBuilder(nil).WithLocals(types.TypeI32).Emit(
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.LOCAL_SET, 0),
-				).Build(),
+				).MustBuild(),
 			),
 		),
 		values: nil,
@@ -382,7 +382,7 @@ var tests = []test{
 				types.NewFunctionBuilder(nil).WithLocals(types.TypeI32).Emit(
 					instr.New(instr.I32_CONST, 1),
 					instr.New(instr.LOCAL_TEE, 0),
-				).Build(),
+				).MustBuild(),
 			),
 		),
 		values: []types.Value{types.I32(1)},
@@ -392,9 +392,9 @@ var tests = []test{
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 			},
-			program.WithConstants(types.NewFunctionBuilder(nil).Build()),
+			program.WithConstants(types.NewFunctionBuilder(nil).MustBuild()),
 		),
-		values: []types.Value{types.NewFunctionBuilder(nil).Build()},
+		values: []types.Value{types.NewFunctionBuilder(nil).MustBuild()},
 	},
 	// --- refs: REF_NEW, REF_GET, REF_SET, REF_NULL, REF_TEST, REF_CAST, REF_IS_NULL, REF_EQ, REF_NE ---
 	{
@@ -2880,7 +2880,7 @@ var tests = []test{
 				}).Emit(
 					instr.New(instr.I32_CONST, 42),
 					instr.New(instr.RETURN),
-				).Build(),
+				).MustBuild(),
 			),
 		),
 		values: []types.Value{types.I32(42)},
@@ -2912,7 +2912,7 @@ var tests = []test{
 					instr.New(instr.UPVAL_SET, 0),
 					instr.New(instr.UPVAL_GET, 0),
 					instr.New(instr.RETURN),
-				).Build(),
+				).MustBuild(),
 			),
 		),
 		values: []types.Value{types.I32(3)},
@@ -2947,14 +2947,14 @@ var tests = []test{
 					instr.New(instr.I32_ADD),
 					instr.New(instr.REF_SET),
 					instr.New(instr.RETURN),
-				).Build(),
+				).MustBuild(),
 				types.NewFunctionBuilder(&types.FunctionType{
 					Returns: []types.Type{types.TypeI32},
 				}).WithCaptures(types.TypeRef).Emit(
 					instr.New(instr.UPVAL_GET, 0),
 					instr.New(instr.REF_GET),
 					instr.New(instr.RETURN),
-				).Build(),
+				).MustBuild(),
 			),
 		),
 		values: []types.Value{types.I32(2)},
@@ -2990,7 +2990,7 @@ var tests = []test{
 					instr.New(instr.RETURN),
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.RETURN),
-				).Build(),
+				).MustBuild(),
 			),
 		),
 		values: []types.Value{types.I32(6765)},
@@ -3021,7 +3021,7 @@ var tests = []test{
 					instr.New(instr.RETURN),
 					instr.New(instr.I64_CONST, 1),
 					instr.New(instr.RETURN),
-				).Build(),
+				).MustBuild(),
 			),
 		),
 		values: []types.Value{types.I64(3628800)},
@@ -3581,7 +3581,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.BR, 0xFFE6), // -26 -> header
 			instr.New(instr.LOCAL_GET, 1),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 200),
 			instr.New(instr.CONST_GET, 0),
@@ -3609,7 +3609,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I64_CONST, 3),
 			instr.New(instr.I64_MUL),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		const big = int64(1) << 50
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, uint64(big)),
@@ -3635,7 +3635,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))),
 			instr.New(instr.F32_SUB),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(10.5))),
 			instr.New(instr.CONST_GET, 0),
@@ -3660,7 +3660,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.F64_CONST, math.Float64bits(2.5)),
 			instr.New(instr.F64_ADD),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(39.5)),
 			instr.New(instr.CONST_GET, 0),
@@ -3700,7 +3700,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.BR, 0xFFE6), // -26 -> header
 			instr.New(instr.LOCAL_GET, 1),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 200),
 			instr.New(instr.CONST_GET, 0),
@@ -3801,12 +3801,12 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 0),
 			instr.New(instr.I32_DIV_S),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		outer := types.NewFunctionBuilder(&types.FunctionType{}).Emit(
 			instr.New(instr.CONST_GET, 1),
 			instr.New(instr.CALL),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		prog := program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
@@ -3890,7 +3890,7 @@ func TestInterpreter_Run(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{
 			Params:  []types.Type{types.TypeI64},
 			Returns: []types.Type{types.TypeI64},
-		}).Emit(code...).Build()
+		}).Emit(code...).MustBuild()
 
 		want := types.I64(int64(depth) * (depth + 1) / 2 * step)
 
@@ -3933,7 +3933,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.RETURN),
 			instr.New(instr.I32_CONST, 0),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		p := newStats()
 		i := New(program.New(
 			[]instr.Instruction{
@@ -3961,7 +3961,7 @@ func TestInterpreter_Run(t *testing.T) {
 		}).Emit(
 			instr.New(instr.GLOBAL_GET, 0),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		p := newStats()
 		i := New(program.New(
 			[]instr.Instruction{
@@ -3994,7 +3994,7 @@ func TestInterpreter_Run(t *testing.T) {
 		}).Emit(
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		caller := types.NewFunctionBuilder(&types.FunctionType{
 			Returns: []types.Type{types.TypeI32},
 		}).WithLocals(types.TypeI32).Emit(
@@ -4003,7 +4003,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.LOCAL_GET, 0),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 
 		i := New(program.New(
 			[]instr.Instruction{
@@ -4023,7 +4023,7 @@ func TestInterpreter_Run(t *testing.T) {
 	t.Run("fused direct call clears stale release flag", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{}).Emit(
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
@@ -4074,7 +4074,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.CALL),
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
-		).Build()
+		).MustBuild()
 		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
@@ -4353,7 +4353,7 @@ func TestInterpreter_withLocal(t *testing.T) {
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_ADD),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		var addr int
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
@@ -4419,7 +4419,7 @@ func TestInterpreter_WithFuel(t *testing.T) {
 		recursiveFn := types.NewFunctionBuilder(nil).Emit(
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
-		).Build()
+		).MustBuild()
 		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
@@ -4435,7 +4435,7 @@ func TestInterpreter_WithFuel(t *testing.T) {
 		recursiveFn := types.NewFunctionBuilder(nil).Emit(
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
-		).Build()
+		).MustBuild()
 		calls := 0
 		i := New(program.New(
 			[]instr.Instruction{
@@ -4577,7 +4577,7 @@ func TestInterpreter_WithDebugger(t *testing.T) {
 		}).Emit(
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		return program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -4689,7 +4689,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		fn := types.NewFunctionBuilder(nil).WithReturns(types.TypeI32).Emit(
 			instr.New(instr.I32_CONST, 9),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -4717,7 +4717,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		}).WithCaptures(types.TypeI32).Emit(
 			instr.New(instr.UPVAL_GET, 0),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		closure := types.NewClosure(fn.Typ, 1, []types.Boxed{types.BoxI32(11)})
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 1),
@@ -4762,7 +4762,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			instr.New(instr.RETURN),
 			instr.New(instr.I64_CONST, 1),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.I64_CONST, 20),
@@ -4807,7 +4807,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			instr.New(instr.CALL),
 			instr.New(instr.RETURN),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 0),
@@ -4855,7 +4855,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			instr.New(instr.RETURN),
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(0))),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 20),
@@ -4917,7 +4917,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			fn := types.NewFunctionBuilder(&types.FunctionType{
 				Params:  []types.Type{types.TypeI32},
 				Returns: []types.Type{types.TypeI32},
-			}).Emit(body...).Build()
+			}).Emit(body...).MustBuild()
 			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.I32_CONST, 200),
@@ -4958,7 +4958,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			fn := types.NewFunctionBuilder(&types.FunctionType{
 				Params:  []types.Type{types.TypeI32, types.TypeI32},
 				Returns: []types.Type{types.TypeI32},
-			}).WithLocals(types.TypeI32).Emit(body...).Build()
+			}).WithLocals(types.TypeI32).Emit(body...).MustBuild()
 			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.I32_CONST, 200),
@@ -4997,7 +4997,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			fn := types.NewFunctionBuilder(&types.FunctionType{
 				Params:  []types.Type{types.TypeI32},
 				Returns: []types.Type{types.TypeI32},
-			}).Emit(body...).Build()
+			}).Emit(body...).MustBuild()
 			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.I32_CONST, 20000),
@@ -5049,11 +5049,11 @@ func TestInterpreter_JIT(t *testing.T) {
 			isEven := types.NewFunctionBuilder(&types.FunctionType{
 				Params:  []types.Type{types.TypeI32},
 				Returns: []types.Type{types.TypeI32},
-			}).Emit(even...).Build()
+			}).Emit(even...).MustBuild()
 			isOdd := types.NewFunctionBuilder(&types.FunctionType{
 				Params:  []types.Type{types.TypeI32},
 				Returns: []types.Type{types.TypeI32},
-			}).Emit(odd...).Build()
+			}).Emit(odd...).MustBuild()
 			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.I32_CONST, 200),
@@ -5123,7 +5123,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			fn := types.NewFunctionBuilder(&types.FunctionType{
 				Params:  []types.Type{types.TypeI32},
 				Returns: []types.Type{types.TypeI32},
-			}).WithLocals(types.TypeI32, types.TypeI32).Emit(body...).Build()
+			}).WithLocals(types.TypeI32, types.TypeI32).Emit(body...).MustBuild()
 			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.I32_CONST, 1000),
@@ -5164,7 +5164,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			fn := types.NewFunctionBuilder(&types.FunctionType{
 				Params:  []types.Type{types.TypeI32},
 				Returns: []types.Type{types.TypeI32},
-			}).WithLocals(types.TypeI32, types.TypeI32).Emit(body...).Build()
+			}).WithLocals(types.TypeI32, types.TypeI32).Emit(body...).MustBuild()
 			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.I32_CONST, 1000),
@@ -5200,7 +5200,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			fn := types.NewFunctionBuilder(&types.FunctionType{
 				Params:  []types.Type{types.TypeI32},
 				Returns: []types.Type{types.TypeI32},
-			}).WithLocals(types.TypeI32, types.TypeI32).Emit(body...).Build()
+			}).WithLocals(types.TypeI32, types.TypeI32).Emit(body...).MustBuild()
 			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.I32_CONST, 2000000000),
@@ -5235,14 +5235,14 @@ func TestInterpreter_JIT(t *testing.T) {
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_ADD),
 				instr.New(instr.RETURN),
-			).Build()
+			).MustBuild()
 			caller := types.NewFunctionBuilder(&types.FunctionType{
 				Returns: []types.Type{types.TypeI32},
 			}).Emit(
 				instr.New(instr.CONST_GET, 1),
 				instr.New(instr.CALL),
 				instr.New(instr.RETURN),
-			).Build()
+			).MustBuild()
 			closure := types.NewClosure(body.Typ, 1, []types.Boxed{types.BoxI32(41)})
 			var addr int
 			i := New(program.New(
@@ -5288,7 +5288,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.I32_ADD),
 				instr.New(instr.RETURN),
-			).Build()
+			).MustBuild()
 			caller := types.NewFunctionBuilder(&types.FunctionType{
 				Returns: []types.Type{types.TypeI32},
 			}).WithLocals(types.TypeRef).Emit(
@@ -5298,7 +5298,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				instr.New(instr.LOCAL_GET, 0),
 				instr.New(instr.CALL),
 				instr.New(instr.RETURN),
-			).Build()
+			).MustBuild()
 			var addr int
 			i := New(program.New(
 				[]instr.Instruction{
@@ -5353,7 +5353,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				instr.New(instr.STRUCT_GET),
 				instr.New(instr.I32_ADD),
 				instr.New(instr.RETURN),
-			).Build()
+			).MustBuild()
 			var addr int
 			i := New(program.New(
 				[]instr.Instruction{
@@ -5413,7 +5413,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				instr.New(instr.BR, 0),
 				instr.New(instr.NOP),
 				instr.New(instr.RETURN),
-			).Build()
+			).MustBuild()
 			var addr int
 			i := New(program.New(
 				[]instr.Instruction{
@@ -5457,13 +5457,13 @@ func TestInterpreter_JIT(t *testing.T) {
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_MUL),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		caller := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32).Emit(
 			instr.New(instr.LOCAL_GET, 0),
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		p := newStats()
 		i := New(program.New(
 			[]instr.Instruction{
@@ -5488,7 +5488,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{}).Emit(
 			instr.New(instr.NOP),
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		i := New(program.New(nil, program.WithConstants(fn)))
 		defer i.Close()
 
@@ -5518,7 +5518,7 @@ func TestInterpreter_JIT(t *testing.T) {
 	t.Run("restore frame metadata keeps closure upvals", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{}).WithCaptures(types.TypeI32).Emit(
 			instr.New(instr.RETURN),
-		).Build()
+		).MustBuild()
 		i := New(program.New(nil, program.WithConstants(fn)))
 		defer i.Close()
 
@@ -5569,7 +5569,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			instr.New(instr.CALL),
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
-		).Build()
+		).MustBuild()
 		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
@@ -5651,7 +5651,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			fn := types.NewFunctionBuilder(&types.FunctionType{
 				Params:  []types.Type{types.TypeI32},
 				Returns: []types.Type{accType},
-			}).WithLocals(accType).Emit(loop...).Build()
+			}).WithLocals(accType).Emit(loop...).MustBuild()
 			return program.New([]instr.Instruction{
 				instr.New(instr.I32_CONST, 200),
 				instr.New(instr.CONST_GET, 0),

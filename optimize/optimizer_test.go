@@ -71,7 +71,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 					instr.New(instr.RETURN),
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.RETURN),
-				).Build(),
+				).MustBuild(),
 			),
 		)
 		_, err := o.Optimize(prog)
@@ -109,7 +109,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 					instr.New(instr.RETURN),
 					instr.New(instr.LOCAL_GET, 0),
 					instr.New(instr.RETURN),
-				).Build(),
+				).MustBuild(),
 			),
 		)
 		_, err := o.Optimize(prog)
