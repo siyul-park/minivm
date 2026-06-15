@@ -28,7 +28,7 @@ func TestFunction_String(t *testing.T) {
 			WithCaptures(TypeI32, TypeRef).
 			WithLocals(TypeI64).
 			Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN)).
-			Build()
+			MustBuild()
 		require.Contains(t, fn.String(), "capture i32\ncapture ref\n")
 	})
 }
@@ -52,17 +52,17 @@ func TestFunction_LocalKinds(t *testing.T) {
 }
 
 func TestFunctionBuilder_WithParams(t *testing.T) {
-	fn := NewFunctionBuilder(nil).WithParams(TypeI32, TypeRef).Build()
+	fn := NewFunctionBuilder(nil).WithParams(TypeI32, TypeRef).MustBuild()
 	require.Equal(t, []Type{TypeI32, TypeRef}, fn.Typ.Params)
 }
 
 func TestFunctionBuilder_WithReturns(t *testing.T) {
-	fn := NewFunctionBuilder(nil).WithReturns(TypeI32, TypeRef).Build()
+	fn := NewFunctionBuilder(nil).WithReturns(TypeI32, TypeRef).MustBuild()
 	require.Equal(t, []Type{TypeI32, TypeRef}, fn.Typ.Returns)
 }
 
 func TestFunctionBuilder_WithCaptures(t *testing.T) {
-	fn := NewFunctionBuilder(nil).WithCaptures(TypeI32, TypeF64).Build()
+	fn := NewFunctionBuilder(nil).WithCaptures(TypeI32, TypeF64).MustBuild()
 	require.Equal(t, []Type{TypeI32, TypeF64}, fn.Captures)
 }
 

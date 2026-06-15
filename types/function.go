@@ -8,10 +8,11 @@ import (
 )
 
 type FunctionBuilder struct {
+	code *instr.Builder
+
 	typ      *FunctionType
 	locals   []Type
 	captures []Type
-	instrs   []instr.Instruction
 }
 
 type Function struct {
@@ -33,7 +34,7 @@ func NewFunctionBuilder(typ *FunctionType) *FunctionBuilder {
 	if typ == nil {
 		typ = &FunctionType{}
 	}
-	return &FunctionBuilder{typ: typ}
+	return &FunctionBuilder{code: instr.NewBuilder(), typ: typ}
 }
 
 func (b *FunctionBuilder) WithParams(ps ...Type) *FunctionBuilder {
@@ -57,17 +58,62 @@ func (b *FunctionBuilder) WithCaptures(cs ...Type) *FunctionBuilder {
 }
 
 func (b *FunctionBuilder) Emit(instrs ...instr.Instruction) *FunctionBuilder {
-	b.instrs = append(b.instrs, instrs...)
+	b.code.Append(instrs...)
 	return b
 }
 
-func (b *FunctionBuilder) Build() *Function {
+// Label allocates an unbound branch target for the function body.
+func (b *FunctionBuilder) Label() instr.Label {
+	return b.code.Label()
+}
+
+// Bind fixes l to the next instruction emitted.
+func (b *FunctionBuilder) Bind(l instr.Label) *FunctionBuilder {
+	b.code.Bind(l)
+	return b
+}
+
+// Br emits an unconditional branch to l.
+func (b *FunctionBuilder) Br(l instr.Label) *FunctionBuilder {
+	b.code.Br(l)
+	return b
+}
+
+// BrIf emits a conditional branch to l.
+func (b *FunctionBuilder) BrIf(l instr.Label) *FunctionBuilder {
+	b.code.BrIf(l)
+	return b
+}
+
+// BrTable emits a jump table to targets with def as the out-of-range case.
+func (b *FunctionBuilder) BrTable(def instr.Label, targets ...instr.Label) *FunctionBuilder {
+	b.code.BrTable(def, targets...)
+	return b
+}
+
+// MustBuild is like Build but panics on failure. Use it only with statically
+// known-good bodies, such as in tests and fixtures.
+func (b *FunctionBuilder) MustBuild() *Function {
+	fn, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+	return fn
+}
+
+// Build resolves the body's branches and returns the function. It fails when a
+// branch references an unbound label or overflows the offset operand.
+func (b *FunctionBuilder) Build() (*Function, error) {
+	instrs, err := b.code.Assemble()
+	if err != nil {
+		return nil, err
+	}
 	return &Function{
 		Typ:      b.typ,
 		Locals:   b.locals,
 		Captures: b.captures,
-		Code:     instr.Marshal(b.instrs),
-	}
+		Code:     instr.Marshal(instrs),
+	}, nil
 }
 
 func NewFunction(typ *FunctionType, locals []Type, instrs []instr.Instruction) *Function {

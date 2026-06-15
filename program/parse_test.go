@@ -29,7 +29,7 @@ func TestParse(t *testing.T) {
 				WithConstants(
 					types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
 						Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
-						Build(),
+						MustBuild(),
 				),
 			),
 		},
@@ -43,7 +43,7 @@ func TestParse(t *testing.T) {
 					}).
 						WithLocals(types.TypeI32).
 						Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).
-						Build(),
+						MustBuild(),
 				),
 			),
 		},
