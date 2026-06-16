@@ -16,6 +16,7 @@ minivm: Go-native programmable runtime for scripting, rules, DSLs, and plugin-st
 - Added `RuntimeError` with VM call frames while preserving `errors.Is` / `errors.As` cause checks.
 - Added shared JIT code cache and aggregate profiling for `interp.Pool`.
 - Expanded ARM64 JIT coverage for direct and indirect bytecode calls, guarded ref-bearing slots, closure-body upvalues, and selected heap reads.
+- Extended ARM64 JIT coverage to coroutines: `CORO_DONE`/`CORO_VALUE` lower as itab-guarded heap reads, and `YIELD`/`RESUME` record as anchor-frame trace terminals that deopt to the threaded suspend/resume, so a hot loop that yields only on a rare branch now compiles instead of being rejected wholesale.
 - Replaced the method JIT with a trace JIT and added loop-anchored compilation (native back-edge with a safepoint poll), beating the former method JIT across the fib and issue #60 benchmarks.
 
 ## Near-Term Work

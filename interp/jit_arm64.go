@@ -469,6 +469,14 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			ok = l.coroDone(ctx, op)
 		case instr.CORO_VALUE:
 			ok = l.coroValue(ctx, op)
+		case instr.YIELD, instr.RESUME:
+			// True suspension points: deopt to the threaded handler, which runs
+			// the real suspend/resume. Resume at op.ip (not op.ip+1) because the
+			// YIELD and RESUME handlers perform their own ip advance.
+			if !l.exit(ctx, op.ip) {
+				return false
+			}
+			return idx == len(ops)-1
 		case instr.BR_IF:
 			ok = l.brIf(ctx, op)
 		case instr.CALL:

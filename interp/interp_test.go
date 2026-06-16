@@ -3907,6 +3907,162 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Greater(t, jit.Profile().JIT.Emits, uint64(0))
 	})
 
+	t.Run("jit deopts on resume in a hot driver loop", func(t *testing.T) {
+		requireJIT(t)
+
+		// An infinite generator yields 1 on every resume. The driver loop resumes
+		// it n times and sums the yielded values, so the RESUME lands on a hot
+		// back-edge and the trace records it. RESUME cannot run natively, so the
+		// trace must terminate at it with a deopt to the threaded handler; sum is n.
+		gb := types.NewFunctionBuilder(&types.FunctionType{
+			Returns: []types.Type{types.TypeI32},
+		})
+		gloop := gb.Label()
+		generator := gb.Bind(gloop).Emit(
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.YIELD),
+			instr.New(instr.DROP),
+		).Br(gloop).MustBuild()
+
+		pb := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeRef, types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).WithLocals(types.TypeI32)
+		header := pb.Label()
+		exit := pb.Label()
+		driver := pb.Emit(
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.LOCAL_SET, 2),
+		).Bind(header).Emit(
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_EQZ),
+		).BrIf(exit).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.RESUME),
+			instr.New(instr.DROP),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.CORO_VALUE),
+			instr.New(instr.LOCAL_GET, 2),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.LOCAL_SET, 2),
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.LOCAL_SET, 1),
+		).Br(header).Bind(exit).Emit(
+			instr.New(instr.LOCAL_GET, 2),
+			instr.New(instr.RETURN),
+		).MustBuild()
+
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.I32_CONST, 300),
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CALL),
+		}, program.WithConstants(generator, driver))
+
+		threaded := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(300), want)
+
+		jit := New(prog, WithTick(1), WithThreshold(1))
+		defer jit.Close()
+		require.NoError(t, jit.Run(context.Background()))
+		got, err := jit.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Greater(t, jit.Profile().JIT.Emits, uint64(0))
+	})
+
+	t.Run("jit deopts on yield reached from a hot driver loop", func(t *testing.T) {
+		requireJIT(t)
+
+		// The driver loop calls a fresh coroutine each iteration; every call runs
+		// the coroutine to its first YIELD, so the coroutine entry (and the YIELD)
+		// becomes hot and the trace records the YIELD. YIELD cannot run natively, so
+		// the trace must terminate at it with a deopt; each call yields 7, sum 7*n.
+		producer := types.NewFunctionBuilder(&types.FunctionType{
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.YIELD),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.RETURN),
+		).MustBuild()
+
+		pb := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).WithLocals(types.TypeI32)
+		header := pb.Label()
+		exit := pb.Label()
+		driver := pb.Emit(
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.LOCAL_SET, 1),
+		).Bind(header).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_EQZ),
+		).BrIf(exit).Emit(
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.CORO_VALUE),
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.LOCAL_SET, 0),
+		).Br(header).Bind(exit).Emit(
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.RETURN),
+		).MustBuild()
+
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 200),
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CALL),
+		}, program.WithConstants(producer, driver))
+
+		threaded := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1400), want)
+
+		jit := New(prog, WithTick(1), WithThreshold(1))
+		defer jit.Close()
+		require.NoError(t, jit.Run(context.Background()))
+		got, err := jit.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Greater(t, jit.Profile().JIT.Emits, uint64(0))
+	})
+
+	t.Run("root-frame yield returns ErrYield under jit and threaded", func(t *testing.T) {
+		// A root-frame YIELD (fp==1) panics errYield and Run returns ErrYield. The
+		// JIT config must preserve that after any deopt, identical to threaded.
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.YIELD),
+		})
+
+		threaded := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.ErrorIs(t, threaded.Run(context.Background()), ErrYield)
+
+		jit := New(prog, WithTick(1), WithThreshold(1))
+		defer jit.Close()
+		require.ErrorIs(t, jit.Run(context.Background()), ErrYield)
+	})
+
 	t.Run("local.get const binop superinstruction", func(t *testing.T) {
 		// The loop body fuses `local.get 0; i32.const 1; i32.sub` into one
 		// dispatch; run it in pure threaded mode and assert the exact sum so a

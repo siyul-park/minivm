@@ -263,6 +263,26 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 			r.store(a, t)
 			return t, nil
 		}
+		// YIELD and RESUME are true suspension points whose suspend/resume bodies
+		// a linear trace cannot represent. In the anchor frame, record the op as
+		// the trace's terminal and store kind=returned WITHOUT stepping the clone
+		// (which would unwind it on YIELD or splice the uncompilable resumed-frame
+		// body on RESUME); the JIT lowers this to an unconditional deopt so the
+		// threaded handler performs the real suspend/resume. The deopt only
+		// preserves the coroutine handle on the outermost (anchor) frame — inlined
+		// callee frames are rebuilt without their coro field, so a suspend there
+		// would mis-read. Abort rather than miscompile when the op sits in an
+		// inlined frame.
+		if op == instr.YIELD || op == instr.RESUME {
+			if clone.fp != startFP {
+				t.kind = aborted
+				break
+			}
+			t.ops = append(t.ops, st)
+			t.kind = returned
+			r.store(a, t)
+			return t, nil
+		}
 		if err := r.step(&clone, f.addr, f.ip); err != nil {
 			t.kind = aborted
 			break
@@ -588,12 +608,12 @@ func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
 	}
 	switch op {
 	// YIELD and RESUME suspend or rebuild a frame, so a linear trace cannot
-	// span them. CORO_DONE and CORO_VALUE are pure heap reads (handle in,
-	// value out) and stay recordable like ARRAY_GET/STRUCT_GET; the JIT lowers
-	// them directly.
-	case instr.YIELD,
-		instr.RESUME,
-		instr.STRING_NEW_UTF32,
+	// span them; capture records them as terminal deopt boundaries instead of
+	// aborting, and the JIT lowers each to an unconditional deopt that hands the
+	// real suspend/resume back to the threaded handler. CORO_DONE and CORO_VALUE
+	// are pure heap reads (handle in, value out) and stay recordable like
+	// ARRAY_GET/STRUCT_GET; the JIT lowers them directly.
+	case instr.STRING_NEW_UTF32,
 		instr.ARRAY_NEW,
 		instr.ARRAY_NEW_DEFAULT,
 		instr.ARRAY_SET,
