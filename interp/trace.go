@@ -398,7 +398,7 @@ func (r *Tracer) finish(i *Interpreter, st *step, op instr.Opcode) {
 		st.target = i.fr.ip
 	case instr.CALL, instr.RETURN_CALL:
 		st.callee = i.fr.addr
-	case instr.REF_GET, instr.ARRAY_GET, instr.STRUCT_GET:
+	case instr.REF_GET, instr.ARRAY_GET, instr.STRUCT_GET, instr.CORO_VALUE:
 		if i.sp > 0 {
 			st.seen = i.stack[i.sp-1]
 		}
@@ -587,10 +587,12 @@ func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
 		return false
 	}
 	switch op {
+	// YIELD and RESUME suspend or rebuild a frame, so a linear trace cannot
+	// span them. CORO_DONE and CORO_VALUE are pure heap reads (handle in,
+	// value out) and stay recordable like ARRAY_GET/STRUCT_GET; the JIT lowers
+	// them directly.
 	case instr.YIELD,
 		instr.RESUME,
-		instr.CORO_DONE,
-		instr.CORO_VALUE,
 		instr.STRING_NEW_UTF32,
 		instr.ARRAY_NEW,
 		instr.ARRAY_NEW_DEFAULT,

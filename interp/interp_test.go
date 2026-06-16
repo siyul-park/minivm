@@ -3769,6 +3769,144 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("jit lowers coro.value in a hot loop", func(t *testing.T) {
+		requireJIT(t)
+
+		// A coroutine suspended at its first YIELD exposes the yielded value
+		// through CORO_VALUE. The poller reads it n times in a loop hot enough to
+		// JIT-compile, so the trace must lower CORO_VALUE natively instead of
+		// aborting. Each read returns the yielded 1, so the sum is n.
+		producer := types.NewFunctionBuilder(&types.FunctionType{
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.YIELD),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.RETURN),
+		).MustBuild()
+
+		pb := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeRef, types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).WithLocals(types.TypeI32)
+		header := pb.Label()
+		exit := pb.Label()
+		poller := pb.Emit(
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.LOCAL_SET, 2),
+		).Bind(header).Emit(
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_EQZ),
+		).BrIf(exit).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.CORO_VALUE),
+			instr.New(instr.LOCAL_GET, 2),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.LOCAL_SET, 2),
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.LOCAL_SET, 1),
+		).Br(header).Bind(exit).Emit(
+			instr.New(instr.LOCAL_GET, 2),
+			instr.New(instr.RETURN),
+		).MustBuild()
+
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.I32_CONST, 300),
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CALL),
+		}, program.WithConstants(producer, poller))
+
+		threaded := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(300), want)
+
+		jit := New(prog, WithTick(1), WithThreshold(1))
+		defer jit.Close()
+		require.NoError(t, jit.Run(context.Background()))
+		got, err := jit.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Greater(t, jit.Profile().JIT.Emits, uint64(0))
+	})
+
+	t.Run("jit lowers coro.done in a hot loop", func(t *testing.T) {
+		requireJIT(t)
+
+		// RESUME drives the coroutine to completion before the loop, so CORO_DONE
+		// reports 1 on every poll. The loop is hot enough to JIT-compile, so the
+		// trace must lower CORO_DONE (a heap read plus an itab guard) natively.
+		// Each poll returns 1, so the sum is n.
+		producer := types.NewFunctionBuilder(&types.FunctionType{
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.YIELD),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.RETURN),
+		).MustBuild()
+
+		pb := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeRef, types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).WithLocals(types.TypeI32)
+		header := pb.Label()
+		exit := pb.Label()
+		poller := pb.Emit(
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.LOCAL_SET, 2),
+		).Bind(header).Emit(
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_EQZ),
+		).BrIf(exit).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.CORO_DONE),
+			instr.New(instr.LOCAL_GET, 2),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.LOCAL_SET, 2),
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.LOCAL_SET, 1),
+		).Br(header).Bind(exit).Emit(
+			instr.New(instr.LOCAL_GET, 2),
+			instr.New(instr.RETURN),
+		).MustBuild()
+
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.RESUME),
+			instr.New(instr.I32_CONST, 300),
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CALL),
+		}, program.WithConstants(producer, poller))
+
+		threaded := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(300), want)
+
+		jit := New(prog, WithTick(1), WithThreshold(1))
+		defer jit.Close()
+		require.NoError(t, jit.Run(context.Background()))
+		got, err := jit.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Greater(t, jit.Profile().JIT.Emits, uint64(0))
+	})
+
 	t.Run("local.get const binop superinstruction", func(t *testing.T) {
 		// The loop body fuses `local.get 0; i32.const 1; i32.sub` into one
 		// dispatch; run it in pure threaded mode and assert the exact sum so a

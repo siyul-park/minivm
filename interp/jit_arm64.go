@@ -43,21 +43,24 @@ const (
 	fieldsSlice = int(unsafe.Offsetof(types.StructType{}.Fields))
 	fieldKind   = int(unsafe.Offsetof(types.StructField{}.Kind))
 	fieldSize   = int(unsafe.Sizeof(types.StructField{}))
+	coroValue   = int(unsafe.Offsetof(Coroutine{}.value))
+	coroDone    = int(unsafe.Offsetof(Coroutine{}.done))
 )
 
 var (
 	_ lowerer = arm64Lowerer{}
 
-	heapI32      = valueItab(types.I32(0))
-	heapF32      = valueItab(types.F32(0))
-	heapF64      = valueItab(types.F64(0))
-	heapArrayI8  = valueItab(types.TypedArray[int8](nil))
-	heapArrayI32 = valueItab(types.TypedArray[int32](nil))
-	heapArrayI64 = valueItab(types.TypedArray[int64](nil))
-	heapArrayF32 = valueItab(types.TypedArray[float32](nil))
-	heapArrayF64 = valueItab(types.TypedArray[float64](nil))
-	heapArrayRef = valueItab((*types.Array)(nil))
-	heapStruct   = valueItab((*types.Struct)(nil))
+	heapI32       = valueItab(types.I32(0))
+	heapF32       = valueItab(types.F32(0))
+	heapF64       = valueItab(types.F64(0))
+	heapArrayI8   = valueItab(types.TypedArray[int8](nil))
+	heapArrayI32  = valueItab(types.TypedArray[int32](nil))
+	heapArrayI64  = valueItab(types.TypedArray[int64](nil))
+	heapArrayF32  = valueItab(types.TypedArray[float32](nil))
+	heapArrayF64  = valueItab(types.TypedArray[float64](nil))
+	heapArrayRef  = valueItab((*types.Array)(nil))
+	heapStruct    = valueItab((*types.Struct)(nil))
+	heapCoroutine = valueItab((*Coroutine)(nil))
 )
 
 func newCompiler() (*compiler, error) {
@@ -462,6 +465,10 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			ok = l.arrayGet(ctx, op)
 		case instr.STRUCT_GET:
 			ok = l.structGet(ctx, op)
+		case instr.CORO_DONE:
+			ok = l.coroDone(ctx, op)
+		case instr.CORO_VALUE:
+			ok = l.coroValue(ctx, op)
 		case instr.BR_IF:
 			ok = l.brIf(ctx, op)
 		case instr.CALL:
@@ -2494,6 +2501,86 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 		return false
 	}
 	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: out, raw: out != types.KindRef})
+	return true
+}
+
+// coroDone reads a coroutine handle's done flag and pushes it as an i32 (0 or
+// 1). It mirrors the threaded handler: the handle ref stays owned by its stack
+// slot, so no refcount changes. A constant coroutine handle is impossible, so
+// a raw (unboxed constant) ref is rejected to avoid box's retain side effect.
+func (l arm64Lowerer) coroDone(ctx *lowering, op step) bool {
+	if ctx.count() < 1 {
+		return false
+	}
+	v := ctx.values[len(ctx.values)-1]
+	if v.kind != types.KindRef || v.raw {
+		return false
+	}
+	pre := append([]value(nil), ctx.values...)
+	ref, ok := l.box(ctx, v)
+	if !ok {
+		return false
+	}
+	_, itab, data := l.heapValue(ctx, ref, pre, op.ip)
+
+	hit := ctx.assembler.Label()
+	l.matchItab(ctx, itab, heapCoroutine, hit)
+	ctx.values = append(ctx.values[:0], pre...)
+	if !l.exit(ctx, op.ip) {
+		return false
+	}
+	ctx.assembler.Bind(hit)
+
+	done := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDRB(done, data, int16(coroDone)))
+	ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: done, kind: types.KindI32, raw: true})
+	return true
+}
+
+// coroValue reads a coroutine handle's last yielded or returned value. It
+// mirrors the threaded handler: retain the value, then release the handle.
+// The stored field is a full Boxed, so its representation matches a global
+// slot (see globalGet) — scalars push raw, refs stay boxed.
+func (l arm64Lowerer) coroValue(ctx *lowering, op step) bool {
+	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
+		return false
+	}
+	pre := append([]value(nil), ctx.values...)
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
+	if !ok {
+		return false
+	}
+	addr, itab, data := l.heapValue(ctx, ref, pre, op.ip)
+
+	hit := ctx.assembler.Label()
+	l.matchItab(ctx, itab, heapCoroutine, hit)
+	ctx.values = append(ctx.values[:0], pre...)
+	if !l.exit(ctx, op.ip) {
+		return false
+	}
+	ctx.assembler.Bind(hit)
+
+	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDR(dst, data, int16(coroValue)))
+	kind := op.seen.Kind()
+	switch kind {
+	case types.KindI64:
+		if !l.guardI64(ctx, dst, op.ip) {
+			return false
+		}
+		dst = l.sign64(ctx, dst)
+		l.releaseRef(ctx, addr, pre, op.ip)
+		ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: true})
+	case types.KindRef:
+		l.retainBox(ctx, dst)
+		l.releaseRef(ctx, addr, pre, op.ip)
+		ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: false})
+	case types.KindI32, types.KindF32, types.KindF64:
+		l.releaseRef(ctx, addr, pre, op.ip)
+		ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: true})
+	default:
+		return false
+	}
 	return true
 }
 
