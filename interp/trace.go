@@ -587,7 +587,11 @@ func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
 		return false
 	}
 	switch op {
-	case instr.STRING_NEW_UTF32,
+	case instr.YIELD,
+		instr.RESUME,
+		instr.CORO_DONE,
+		instr.CORO_VALUE,
+		instr.STRING_NEW_UTF32,
 		instr.ARRAY_NEW,
 		instr.ARRAY_NEW_DEFAULT,
 		instr.ARRAY_SET,

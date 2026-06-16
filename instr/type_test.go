@@ -28,6 +28,11 @@ func TestTypeOf(t *testing.T) {
 		{opcode: RETURN},
 		{opcode: RETURN_CALL},
 
+		{opcode: YIELD},
+		{opcode: RESUME},
+		{opcode: CORO_DONE},
+		{opcode: CORO_VALUE},
+
 		{opcode: GLOBAL_GET},
 		{opcode: GLOBAL_SET},
 		{opcode: GLOBAL_TEE},

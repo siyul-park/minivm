@@ -3557,6 +3557,218 @@ func TestInterpreter_Run(t *testing.T) {
 		})
 	}
 
+	t.Run("yield from root frame escapes to host", func(t *testing.T) {
+		// A YIELD in the entry frame suspends the whole interpreter: Run returns
+		// ErrYield with the yielded value left on the stack, and the next Run
+		// resumes after the YIELD with the host-pushed value as its result.
+		for _, mode := range modes {
+			mode := mode
+			t.Run(mode.name, func(t *testing.T) {
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 42),
+					instr.New(instr.YIELD),
+				})
+				i := New(prog, mode.opts...)
+				defer i.Close()
+
+				err := i.Run(context.Background())
+				require.ErrorIs(t, err, ErrYield)
+
+				v, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I32(42), v)
+
+				require.NoError(t, i.Push(types.I32(7)))
+				require.NoError(t, i.Run(context.Background()))
+				got, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I32(7), got)
+			})
+		}
+	})
+
+	t.Run("call starts coroutine and first yield delivers a value", func(t *testing.T) {
+		// CALL of a coroutine-function (one containing YIELD) produces a Coroutine
+		// handle instead of return values; coro.value reads the first yielded value.
+		for _, mode := range modes {
+			mode := mode
+			t.Run(mode.name, func(t *testing.T) {
+				producer := types.NewFunctionBuilder(&types.FunctionType{
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
+					instr.New(instr.I32_CONST, 7),
+					instr.New(instr.YIELD),
+					instr.New(instr.DROP),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.RETURN),
+				).MustBuild()
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+					instr.New(instr.CORO_VALUE),
+				}, program.WithConstants(producer))
+
+				i := New(prog, mode.opts...)
+				defer i.Close()
+				require.NoError(t, i.Run(context.Background()))
+				got, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I32(7), got)
+			})
+		}
+	})
+
+	t.Run("resume passes a value in and runs to completion", func(t *testing.T) {
+		// RESUME delivers its value as the result of the pending YIELD; the
+		// coroutine adds it to its retained local and returns, and coro.value reads
+		// the final return.
+		for _, mode := range modes {
+			mode := mode
+			t.Run(mode.name, func(t *testing.T) {
+				producer := types.NewFunctionBuilder(&types.FunctionType{
+					Params:  []types.Type{types.TypeI32},
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.YIELD),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_ADD),
+					instr.New(instr.RETURN),
+				).MustBuild()
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 5),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+					instr.New(instr.I32_CONST, 100),
+					instr.New(instr.RESUME),
+					instr.New(instr.CORO_VALUE),
+				}, program.WithConstants(producer))
+
+				i := New(prog, mode.opts...)
+				defer i.Close()
+				require.NoError(t, i.Run(context.Background()))
+				got, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I32(105), got)
+			})
+		}
+	})
+
+	t.Run("coro.done reports suspended then finished", func(t *testing.T) {
+		for _, mode := range modes {
+			mode := mode
+			t.Run(mode.name, func(t *testing.T) {
+				producer := types.NewFunctionBuilder(&types.FunctionType{
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.YIELD),
+					instr.New(instr.DROP),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.RETURN),
+				).MustBuild()
+
+				suspended := program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+					instr.New(instr.CORO_DONE),
+				}, program.WithConstants(producer))
+				i := New(suspended, mode.opts...)
+				defer i.Close()
+				require.NoError(t, i.Run(context.Background()))
+				got, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I32(0), got)
+
+				finished := program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.RESUME),
+					instr.New(instr.CORO_DONE),
+				}, program.WithConstants(producer))
+				j := New(finished, mode.opts...)
+				defer j.Close()
+				require.NoError(t, j.Run(context.Background()))
+				got, err = j.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I32(1), got)
+			})
+		}
+	})
+
+	t.Run("resume after done errors", func(t *testing.T) {
+		for _, mode := range modes {
+			mode := mode
+			t.Run(mode.name, func(t *testing.T) {
+				producer := types.NewFunctionBuilder(&types.FunctionType{
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.YIELD),
+					instr.New(instr.DROP),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.RETURN),
+				).MustBuild()
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.RESUME),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.RESUME),
+				}, program.WithConstants(producer))
+
+				i := New(prog, mode.opts...)
+				defer i.Close()
+				err := i.Run(context.Background())
+				require.ErrorIs(t, err, ErrCoroutineDone)
+			})
+		}
+	})
+
+	t.Run("nested coroutine yields through its caller", func(t *testing.T) {
+		// An outer coroutine resumes an inner coroutine, reads its yielded value,
+		// and re-yields it to main, exercising a coroutine driving a coroutine.
+		for _, mode := range modes {
+			mode := mode
+			t.Run(mode.name, func(t *testing.T) {
+				inner := types.NewFunctionBuilder(&types.FunctionType{
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
+					instr.New(instr.I32_CONST, 11),
+					instr.New(instr.YIELD),
+					instr.New(instr.DROP),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.RETURN),
+				).MustBuild()
+				outer := types.NewFunctionBuilder(&types.FunctionType{
+					Returns: []types.Type{types.TypeI32},
+				}).Emit(
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+					instr.New(instr.CORO_VALUE),
+					instr.New(instr.YIELD),
+					instr.New(instr.DROP),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.RETURN),
+				).MustBuild()
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 1),
+					instr.New(instr.CALL),
+					instr.New(instr.CORO_VALUE),
+				}, program.WithConstants(inner, outer))
+
+				i := New(prog, mode.opts...)
+				defer i.Close()
+				require.NoError(t, i.Run(context.Background()))
+				got, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I32(11), got)
+			})
+		}
+	})
+
 	t.Run("local.get const binop superinstruction", func(t *testing.T) {
 		// The loop body fuses `local.get 0; i32.const 1; i32.sub` into one
 		// dispatch; run it in pure threaded mode and assert the exact sum so a
