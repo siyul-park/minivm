@@ -41,6 +41,12 @@ func (c *threadedCompiler) fuseFunction(fn *types.Function, addr int) func(*Inte
 	}
 	switch instr.Opcode(c.code[c.ip]) {
 	case instr.CALL:
+		// A coroutine-function's CALL must allocate a Coroutine and tag the frame,
+		// which only the generic CALL handler does. Leave it unfused so the plain
+		// CONST_GET; CALL pair runs and the coroutine path is taken.
+		if containsYield(fn.Code) {
+			return nil
+		}
 		params := len(fn.Typ.Params)
 		returns := len(fn.Typ.Returns)
 		locals := len(fn.Locals)
@@ -67,11 +73,15 @@ func (c *threadedCompiler) fuseFunction(fn *types.Function, addr int) func(*Inte
 			f.bp = i.sp - params
 			f.returns = returns
 			f.release = false
+			f.coro = 0
 			i.sp += locals
 			i.fp++
 			i.fr = f
 		}
 	case instr.RETURN_CALL:
+		if containsYield(fn.Code) {
+			return nil
+		}
 		params := len(fn.Typ.Params)
 		returns := len(fn.Typ.Returns)
 		locals := len(fn.Locals)
@@ -99,6 +109,7 @@ func (c *threadedCompiler) fuseFunction(fn *types.Function, addr int) func(*Inte
 				f.bp = i.sp - params
 				f.returns = returns
 				f.release = false
+				f.coro = 0
 				i.sp += locals
 				i.fp++
 				i.fr = f
@@ -124,6 +135,7 @@ func (c *threadedCompiler) fuseFunction(fn *types.Function, addr int) func(*Inte
 			f.bp = base
 			f.returns = returns
 			f.release = false
+			f.coro = 0
 			i.sp = base + params + locals
 		}
 	case instr.CLOSURE_NEW:
@@ -159,6 +171,11 @@ func (c *threadedCompiler) fuseClosure(fn *types.Closure, addr int) func(*Interp
 		if !ok {
 			return nil
 		}
+		// Coroutine closures take the generic CALL path so the Coroutine handle is
+		// allocated and the frame tagged; see fuseFunction.
+		if containsYield(tmpl.Code) {
+			return nil
+		}
 		params := len(fn.Typ.Params)
 		returns := len(fn.Typ.Returns)
 		locals := len(tmpl.Locals)
@@ -185,6 +202,7 @@ func (c *threadedCompiler) fuseClosure(fn *types.Closure, addr int) func(*Interp
 			f.bp = i.sp - params
 			f.returns = returns
 			f.release = false
+			f.coro = 0
 			i.sp += locals
 			i.fp++
 			i.fr = f
@@ -192,6 +210,9 @@ func (c *threadedCompiler) fuseClosure(fn *types.Closure, addr int) func(*Interp
 	case instr.RETURN_CALL:
 		tmpl, ok := c.heap[fn.Fn].(*types.Function)
 		if !ok {
+			return nil
+		}
+		if containsYield(tmpl.Code) {
 			return nil
 		}
 		params := len(fn.Typ.Params)
@@ -221,6 +242,7 @@ func (c *threadedCompiler) fuseClosure(fn *types.Closure, addr int) func(*Interp
 				f.bp = i.sp - params
 				f.returns = returns
 				f.release = false
+				f.coro = 0
 				i.sp += locals
 				i.fp++
 				i.fr = f
@@ -246,6 +268,7 @@ func (c *threadedCompiler) fuseClosure(fn *types.Closure, addr int) func(*Interp
 			f.bp = base
 			f.returns = returns
 			f.release = false
+			f.coro = 0
 			i.sp = base + params + locals
 		}
 	}

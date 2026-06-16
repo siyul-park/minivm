@@ -175,6 +175,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				f.bp = i.sp - params - 1
 				f.returns = returns
 				f.release = true
+				f.coro = 0
+				if addr < len(i.coros) && i.coros[addr] {
+					f.coro = i.alloc(&Coroutine{typ: fn.Typ})
+				}
 				i.sp = f.bp + params + locals
 				i.fr.ip++
 				i.fp++
@@ -205,6 +209,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				f.bp = i.sp - params - 1
 				f.returns = returns
 				f.release = true
+				f.coro = 0
+				if int(fn.Fn) < len(i.coros) && i.coros[fn.Fn] {
+					f.coro = i.alloc(&Coroutine{typ: fn.Typ})
+				}
 				i.sp = f.bp + params + locals
 				i.fr.ip++
 				i.fp++
@@ -222,7 +230,66 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.fp == 1 {
 				panic(ErrFrameUnderflow)
 			}
+			if i.fr.coro != 0 {
+				i.finish()
+				return
+			}
 			i.ret()
+		}
+	},
+	instr.YIELD: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			i.fr.ip++
+			if i.fp == 1 {
+				panic(errYield)
+			}
+			i.suspend()
+		}
+	},
+	instr.RESUME: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			i.resume()
+		}
+	},
+	instr.CORO_DONE: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			co := unboxRef[*Coroutine](i, i.stack[i.sp-1])
+			done := int32(0)
+			if co.done {
+				done = 1
+			}
+			i.stack[i.sp-1] = types.BoxI32(done)
+			i.fr.ip++
+		}
+	},
+	instr.CORO_VALUE: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			box := i.stack[i.sp-1]
+			if box.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			co, ok := i.heap[box.Ref()].(*Coroutine)
+			if !ok {
+				panic(ErrTypeMismatch)
+			}
+			val := co.value
+			i.retainBox(val)
+			i.releaseBox(box)
+			i.stack[i.sp-1] = val
+			i.fr.ip++
 		}
 	},
 	instr.RETURN_CALL: func(c *threadedCompiler) func(i *Interpreter) {
@@ -3988,7 +4055,140 @@ func (i *Interpreter) tail(code, ref int, upvals []types.Boxed, params, returns,
 	f.bp = base
 	f.returns = returns
 	f.release = true
+	f.coro = 0
 	i.sp = base + params + locals
+}
+
+// suspend captures the current coroutine frame into its Coroutine heap object on
+// a YIELD, unwinds to the caller, and delivers the handle in the slot the call
+// produced. The yielded value (top of stack) becomes co.value; the frame's
+// locals and operand stack move into co.image with ownership transferred, so the
+// collector keeps them live through the Coroutine while suspended. The caller's
+// ip was already advanced by the CALL or RESUME that activated the frame.
+func (i *Interpreter) suspend() {
+	f := i.fr
+	coAddr := f.coro
+	co, ok := i.heap[coAddr].(*Coroutine)
+	if !ok {
+		panic(ErrTypeMismatch)
+	}
+
+	i.sp--
+	co.value = i.stack[i.sp]
+	co.addr = f.addr
+	co.ref = f.ref
+	co.returns = f.returns
+	co.release = f.release
+	co.ip = f.ip
+	co.upvals = f.upvals
+	co.image = append(co.image[:0], i.stack[f.bp:i.sp]...)
+
+	bp := f.bp
+	clear(i.stack[bp:i.sp])
+	f.code = nil
+	f.upvals = nil
+	f.coro = 0
+	i.fp--
+	i.fr = &i.frames[i.fp-1]
+
+	i.stack[bp] = types.BoxRef(coAddr)
+	i.sp = bp + 1
+}
+
+// finish completes a coroutine frame on RETURN: it records the final value and
+// the done state, releases the function activation, unwinds to the caller, and
+// delivers the handle in place of plain return values so a coroutine-function's
+// call always yields a single Coroutine handle.
+func (i *Interpreter) finish() {
+	f := i.fr
+	coAddr := f.coro
+	co, ok := i.heap[coAddr].(*Coroutine)
+	if !ok {
+		panic(ErrTypeMismatch)
+	}
+	if i.sp < f.returns {
+		panic(ErrStackUnderflow)
+	}
+
+	if f.returns > 0 {
+		co.value = i.stack[i.sp-1]
+	} else {
+		co.value = types.BoxedNull
+	}
+	co.done = true
+	co.image = co.image[:0]
+	co.upvals = nil
+	if f.release {
+		i.release(f.ref)
+	}
+	co.ref = 0
+	co.release = false
+
+	bp := f.bp
+	f.code = nil
+	f.upvals = nil
+	f.coro = 0
+	i.fp--
+	i.fr = &i.frames[i.fp-1]
+
+	i.stack[bp] = types.BoxRef(coAddr)
+	i.sp = bp + 1
+}
+
+// resume continues a suspended coroutine on RESUME: it pops the handle and the
+// resume-in value, restores the captured frame above the resumer's stack, and
+// delivers the in value as the result of the pending YIELD. The handle's
+// reference moves onto frame.coro, which the collector roots while it runs.
+func (i *Interpreter) resume() {
+	if i.sp < 2 {
+		panic(ErrStackUnderflow)
+	}
+	if i.fp == len(i.frames) {
+		panic(ErrFrameOverflow)
+	}
+	in := i.stack[i.sp-1]
+	box := i.stack[i.sp-2]
+	if box.Kind() != types.KindRef {
+		panic(ErrTypeMismatch)
+	}
+	coAddr := box.Ref()
+	co, ok := i.heap[coAddr].(*Coroutine)
+	if !ok {
+		panic(ErrTypeMismatch)
+	}
+	if co.done {
+		panic(ErrCoroutineDone)
+	}
+
+	i.sp -= 2
+	base := i.sp
+	if base+len(co.image)+1 > len(i.stack) {
+		panic(ErrStackOverflow)
+	}
+	copy(i.stack[base:], co.image)
+	i.sp = base + len(co.image)
+	i.stack[i.sp] = in
+	i.sp++
+
+	f := &i.frames[i.fp]
+	f.code = i.code[co.addr]
+	f.upvals = co.upvals
+	f.addr = co.addr
+	f.ref = co.ref
+	f.returns = co.returns
+	f.release = co.release
+	f.ip = co.ip
+	f.bp = base
+	f.coro = coAddr
+
+	co.image = co.image[:0]
+	co.upvals = nil
+	co.ref = 0
+	co.release = false
+
+	i.fr.ip++
+	i.fp++
+	i.fr = f
 }
 
 // satI32 truncates v toward zero into a signed i32, saturating out-of-range
@@ -4045,4 +4245,21 @@ func (*Interpreter) satU64(v float64) uint64 {
 	default:
 		return uint64(v)
 	}
+}
+
+// containsYield reports whether code contains a YIELD opcode, marking its
+// function as a coroutine-function: one whose CALL produces a Coroutine handle
+// and whose traces abort rather than compile across the suspension point.
+func containsYield(code []byte) bool {
+	for ip := 0; ip < len(code); {
+		if instr.Opcode(code[ip]) == instr.YIELD {
+			return true
+		}
+		w := instr.Instruction(code[ip:]).Width()
+		if w <= 0 {
+			break
+		}
+		ip += w
+	}
+	return false
 }

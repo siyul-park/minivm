@@ -23,6 +23,11 @@ var types = map[Opcode]Type{
 	RETURN:      {"return", []int{}},
 	RETURN_CALL: {"return_call", []int{}},
 
+	YIELD:      {"yield", []int{}},
+	RESUME:     {"resume", []int{}},
+	CORO_DONE:  {"coro.done", []int{}},
+	CORO_VALUE: {"coro.value", []int{}},
+
 	GLOBAL_GET: {"global.get", []int{2}},
 	GLOBAL_SET: {"global.set", []int{2}},
 	GLOBAL_TEE: {"global.tee", []int{2}},

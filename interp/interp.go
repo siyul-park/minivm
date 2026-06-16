@@ -32,6 +32,7 @@ type Interpreter struct {
 	globals   []types.Boxed
 	instrs    [][]byte
 	code      [][]func(*Interpreter)
+	coros     []bool
 
 	frames   []frame
 	fr       *frame
@@ -75,6 +76,8 @@ type frame struct {
 	ref     int
 	release bool
 
+	coro int
+
 	ip int
 	bp int
 }
@@ -111,7 +114,14 @@ var (
 	ErrIndexOutOfRange     = errors.New("index out of range")
 	ErrFuelExhausted       = errors.New("fuel exhausted")
 	ErrHeapExhausted       = errors.New("heap exhausted")
+	ErrYield               = errors.New("yield")
+	ErrCoroutineDone       = errors.New("coroutine done")
 )
+
+// errYield is the panic value a root-frame YIELD raises to unwind the Run loop.
+// Run recovers it and returns ErrYield without wrapping, preserving all state so
+// the next Run call resumes exactly after the YIELD.
+var errYield = errors.New("yield")
 
 func WithHook(fn func(*Interpreter) error) func(*option) {
 	return func(o *option) { o.hook = fn }
@@ -295,6 +305,11 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		}
 	}
 
+	i.coros = make([]bool, len(i.instrs))
+	for addr, code := range i.instrs {
+		i.coros[addr] = containsYield(code)
+	}
+
 	i.frames[0].code = i.code[0]
 	i.frames[0].bp = i.sp
 	i.fp = 1
@@ -343,6 +358,10 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 	defer func() {
 		i.ctx = nil
 		if r := recover(); r != nil {
+			if r == errYield {
+				err = ErrYield
+				return
+			}
 			err = i.runtimeError(r)
 		}
 	}()
@@ -1331,8 +1350,11 @@ func (i *Interpreter) gc() {
 			push(val.Ref())
 		}
 	}
-	if j := i.fp - 1; j >= 0 {
+	for j := 0; j < i.fp; j++ {
 		push(i.frames[j].ref)
+		if co := i.frames[j].coro; co > 0 {
+			push(co)
+		}
 	}
 
 	for len(stack) > 0 {

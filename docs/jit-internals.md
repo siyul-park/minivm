@@ -187,6 +187,28 @@ yields), runs the native loop, then on `trapYield` deopts to the header and runs
 one safepoint before the Run loop re-dispatches the header callable; on a
 `trapFallback` side exit it deopts to the resume IP for threaded dispatch.
 
+## Coroutine Suspension
+
+`YIELD` and `RESUME` are true suspension points: `suspend` snapshots the frame
+into the `Coroutine` heap handle and unwinds to the caller, while `resume`
+rebuilds a frame from a runtime-only stack image. Neither is representable in a
+linear trace, so the JIT does not execute them natively. Instead the tracer
+records a `YIELD`/`RESUME` reached in the trace's **anchor frame** as the trace's
+terminal (`kind = returned`) without stepping it, and `walk` lowers it to an
+unconditional `trapFallback` deopt at the op's own IP. After deopt the Run loop
+re-dispatches that IP, so the threaded handler performs the real suspend/resume
+exactly once (each handler advances `ip` itself, which is why the resume IP is
+the op, not the next instruction). Native emits only the deopt — it never
+touches the coroutine handle — so refcounts match threaded execution.
+
+A suspension reached inside an **inlined callee** frame aborts the trace rather
+than compiling: `deopt` rebuilds inlined frames from the journal records
+(`addr`, `bp`, `ip`, `returns`) and never restores their `coro` field, so a
+threaded `suspend` there would look up `heap[0]` and trap. Only the outermost
+(anchor) frame keeps its `coro` across deopt, so only an anchor-frame suspension
+is safe. This lifts the former blanket rejection: a hot loop whose hot back-edge
+never yields now compiles, with the rare `RESUME`/`YIELD` as a clean side exit.
+
 ## Values, Refs, And Heap Reads
 
 Scalars stay unboxed between trace opcodes. `i32` values use low 32 bits, `f32`
@@ -200,6 +222,9 @@ retain/release. If a release might free (`rc == 1`), native deopts so the
 interpreter owns recursive release.
 
 Read-only heap fast paths cover observed scalar `REF_GET`, selected typed
-`ARRAY_LEN`/`ARRAY_GET`, and selected `STRUCT_GET` shapes. They guard the ref,
-heap itab, element/field kind, and index as needed. Heap allocation and mutation
-remain threaded.
+`ARRAY_LEN`/`ARRAY_GET`, selected `STRUCT_GET` shapes, and the coroutine reads
+`CORO_DONE`/`CORO_VALUE`. They guard the ref, heap itab, element/field kind, and
+index as needed; the coroutine reads guard the handle's itab and load the `done`
+byte or the boxed `value` directly (`CORO_VALUE` retains the value and releases
+the handle, `CORO_DONE` keeps it, matching the threaded handlers). Heap
+allocation and mutation remain threaded.
