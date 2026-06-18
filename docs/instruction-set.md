@@ -304,3 +304,21 @@ A function whose body contains `YIELD` is a coroutine-function: its `CALL` alloc
 | `RESUME` | `{}` | `coro in → coro` | ◐ | Resume a suspended handle, delivering `in` as the pending `YIELD`'s result, running to the next `YIELD`/`RETURN`, and pushing the handle back; traps `ErrCoroutineDone` if already finished. JIT lowers an anchor-frame `RESUME` to a terminal deopt that runs the threaded resume. |
 | `CORO_DONE` | `{}` | `coro → i32` | ◐ | Push `I32(1)` if the handle has finished, else `I32(0)`; does not release the handle. JIT has a native fast path behind an itab guard (reads the `done` byte). |
 | `CORO_VALUE` | `{}` | `coro → value` | ◐ | Push the handle's last yielded or returned value and release the handle. JIT has a native fast path behind an itab guard (loads the boxed `value`, retains it, releases the handle). |
+
+## Extensions
+
+`EXT` is the reserved prefix opcode (`0xFF`) for user-registered custom
+instructions. It carries a `uint16` code split `[extID:1][opID:1]` followed by
+the standard variable-length operand region: the high byte routes to a
+registered `interp.Extension` (its `interp.Registry` slot), the low byte selects
+the op within that extension. Because the operand region uses the same
+self-describing `-8` count encoding as `BR_TABLE`, length varies per op and the
+whole instruction decodes generically — `analysis`, the optimizer passes, and
+the disassembler need no special cases.
+
+Register extensions in a `Registry`, address ops by the returned id, and install
+the registry with `interp.WithRegistry`. See `docs/host-integration.md`.
+
+| Opcode | Widths | Stack | JIT | Description |
+|---|---|---|---|---|
+| `EXT` | `{2, -8}` | op-defined | ◐ | Dispatch a custom instruction. Operand 0 is `extID<<8 \| opID`; operand 1 is the operand count; operands 2.. are the op's args (8-byte slots). Threaded dispatch resolves the extension by `extID` (out-of-range/unregistered traps `ErrUnknownOpcode`) and runs its `Compile` handler. JIT calls the extension's `Lower`; if it declines, the op deopts to the threaded handler at its own `ip`. |

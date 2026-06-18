@@ -228,3 +228,30 @@ index as needed; the coroutine reads guard the handle's itab and load the `done`
 byte or the boxed `value` directly (`CORO_VALUE` retains the value and releases
 the handle, `CORO_DONE` keeps it, matching the threaded handlers). Heap
 allocation and mutation remain threaded.
+
+## Extension Lowering
+
+`EXT` ops carry their own JIT path. `walk` resolves the owning `Extension` by the
+operand's high byte and calls `Extension.Lower(inst, e)` with an `Emitter`. A
+successful `Lower` inlines native code and the trace continues; a `false` (no
+hook, declined kind, or unsupported shape) takes the same `l.exit(ctx, op.ip)`
+deopt as `YIELD`/`RESUME` — a `trapFallback` that flushes state and resumes the
+threaded handler at the EXT op's own IP, so the hot prefix stays native and the
+EXT op plus tail run threaded. No new journal cells or trap kinds.
+
+`Emitter` is the only surface an extension touches: `Pop`/`Push` move typed
+operands on the trace value stack, `Reg` allocates a vreg, `Emit` buffers
+`asm.Instruction`s, `Kinds` reports the live operand kinds. The buffered
+instructions commit only when `Lower` returns `true`; when `Lower` returns
+`false`, operand-stack changes are rolled back and buffered instructions are
+dropped before deopt. Popped values follow the trace's **raw-unboxed** convention
+— an i32 keeps its value in the low 32 bits, an f64 its IEEE bits — and the
+returned `types.Kind` tells the extension how to treat each register; `Push`
+records a raw result. v1 lowerings should produce scalar kinds (ref-producing
+lowerings interact with flush/retain rules on loop back-edges and are
+expert-mode).
+
+Stability caveat: `Emitter` and the `asm`/`asm/arm64` builders it exposes are an
+advanced, ARM64-only API, unstable until 1.0. The threaded `Compile` handler is
+the stable contract — an extension that returns `false` from `Lower` is always
+correct, just threaded.

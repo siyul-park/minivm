@@ -33,6 +33,7 @@ type Interpreter struct {
 	instrs    [][]byte
 	code      [][]func(*Interpreter)
 	coros     []bool
+	exts      []Extension
 
 	frames   []frame
 	fr       *frame
@@ -89,6 +90,7 @@ type option struct {
 	cache      *Cache
 	tracer     *Tracer
 	local      *stats
+	registry   *Registry
 	threshold  int
 	cutoff     int
 
@@ -150,6 +152,13 @@ func WithCache(c *Cache) func(*option) {
 
 func WithTracer(t *Tracer) func(*option) {
 	return func(o *option) { o.tracer = t }
+}
+
+// WithRegistry installs the extension registry that resolves EXT instructions.
+// An EXT operand's high byte selects the registered Extension by its slot; an
+// out-of-range or absent slot traps ErrUnknownOpcode at run time.
+func WithRegistry(r *Registry) func(*option) {
+	return func(o *option) { o.registry = r }
 }
 
 // withLocal injects a pre-seeded sampling collector. Tests use it to drive
@@ -265,6 +274,9 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		gas:       fuel,
 		limit:     opt.maxHeap,
 	}
+	if opt.registry != nil {
+		i.exts = append([]Extension(nil), opt.registry.exts...)
+	}
 
 	i.alloc(types.Null)
 
@@ -293,6 +305,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		types:     i.types,
 		constants: i.constants,
 		heap:      i.heap,
+		exts:      i.exts,
 		precise:   opt.tick == 1,
 	}
 

@@ -32,6 +32,31 @@ func TestOptimizer_AddPass(t *testing.T) {
 }
 
 func TestOptimizer_Optimize(t *testing.T) {
+	t.Run("preserves ext instruction", func(t *testing.T) {
+		o := NewOptimizer(O2)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.EXT, uint64(7)<<8|3, 1, 42),
+			instr.New(instr.RETURN),
+		})
+
+		got, err := o.Optimize(prog)
+		require.NoError(t, err)
+
+		var ext instr.Instruction
+		for _, in := range instr.Unmarshal(got.Code) {
+			if in.Opcode() == instr.EXT {
+				ext = in
+			}
+		}
+		require.NotNil(t, ext)
+		require.Equal(t, uint64(7<<8|3), ext.Operand(0))
+		require.Equal(t, uint64(1), ext.Operand(1))
+		require.Equal(t, uint64(42), ext.Operand(2))
+	})
+
 	t.Run("O0 passthrough", func(t *testing.T) {
 		o := NewOptimizer(O0)
 		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})

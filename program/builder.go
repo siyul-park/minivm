@@ -62,6 +62,18 @@ func (b *Builder) BrTable(def instr.Label, targets ...instr.Label) *Builder {
 	return b
 }
 
+// Ext emits an extension instruction (EXT) addressed by extID (the registry
+// slot of the owning interp.Extension) and opID (its op index), carrying
+// operands in the variable-length region. The interpreter routes by extID and
+// the extension reads opID from the low byte of the operand.
+func (b *Builder) Ext(extID, opID uint8, operands ...uint64) *Builder {
+	code := uint64(extID)<<8 | uint64(opID)
+	args := make([]uint64, 0, len(operands)+2)
+	args = append(args, code, uint64(len(operands)))
+	args = append(args, operands...)
+	return b.Emit(instr.EXT, args...)
+}
+
 // ConstGet interns v and emits CONST_GET for its index.
 func (b *Builder) ConstGet(v types.Value) *Builder {
 	return b.Emit(instr.CONST_GET, uint64(b.Const(v)))

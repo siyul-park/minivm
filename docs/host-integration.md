@@ -365,6 +365,60 @@ vm := interp.New(prog, interp.WithMarshaler(&myMarshaler{}))
 
 ---
 
+## Extensions
+
+Where a `HostFunction` is a dynamic `CALL` target and `WithConverter` teaches the
+marshaler about a Go type, an **extension** adds first-class *instructions*. An
+`Extension` owns a family of ops dispatched through the `EXT` opcode at
+near-native cost: a single indirect call on the threaded path, and an optional
+native ARM64 lowering with a clean threaded fallback. Custom value types still
+use the existing path — implement `types.Value` / `types.Type` (heap values are
+`KindRef`) and marshal them with `WithConverter` or `ValueMarshaler`.
+
+```go
+type Extension interface {
+    Types() []instr.Type                                       // ops; slice index = opID
+    Compile(inst instr.Instruction) func(i *Interpreter) error // threaded handler
+    Lower(inst instr.Instruction, e *Emitter) bool             // emit ARM64; false → threaded fallback
+}
+```
+
+`Types` reports each op's `instr.Type` (mnemonic + operand widths); the op is the
+low byte of `inst.Operand(0)`, so one extension branches internally. `Compile`
+returns the threaded handler (it must not advance `i.fr.ip` — the trampoline does
+that); `Lower` may emit native code via `Emitter` or return `false` to deopt to
+`Compile`. If `Lower` returns `false` after using `Pop`, `Push`, or `Emit`, the
+JIT rolls operand-stack changes back and drops buffered native instructions
+before deopting.
+
+Register extensions into a `Registry` (it assigns each a sequential id) and
+install it with `WithRegistry`, which snapshots the registry's extension slice at
+interpreter construction. The build site emits ops with `Builder.Ext(extID,
+opID, operands...)`, addressing the extension by the id `Register` returned.
+
+```go
+reg := interp.NewRegistry()
+id := reg.Register(myVecExt) // auto-assigned extID
+
+b := program.NewBuilder()
+b.Emit(instr.I32_CONST, 5)
+b.Ext(id, 0)                 // run myVecExt op 0 on the stack
+prog, _ := b.Build()
+
+vm := interp.New(prog, interp.WithRegistry(reg))
+defer vm.Close()
+_ = vm.Run(context.Background())
+out, _ := vm.Pop()
+```
+
+An `EXT` whose `extID` is out of range or unregistered traps `ErrUnknownOpcode`;
+ids are the registry slot, so a program is portable across interpreters that
+register the same extensions in the same order (or share the `Registry`). The
+`Emitter` JIT seam and its raw-value convention are documented in
+`docs/jit-internals.md`.
+
+---
+
 ## Errors
 
 | Error | When |

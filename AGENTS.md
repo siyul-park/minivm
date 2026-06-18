@@ -168,6 +168,14 @@ Incorrect ordering crashes on Apple Silicon.
 - Preserve folded ranges until `DeadCodeEliminationPass` compacts bytecode and rewrites branches.
 - Threaded NOP handlers absorb consecutive gaps with one runtime dispatch.
 
+### Extensions
+
+- `EXT` is pinned to `0xFF` — never reuse it or renumber the builtin opcodes above it.
+- The `EXT` operand is `extID<<8 | opID`; `extID` is the `interp.Registry` slot, `opID` indexes the extension's `Types()`.
+- An extension's `Compile` handler must not advance `i.fr.ip` — the trampoline adds the instruction width.
+- `Lower` may return `false` at any point for a clean threaded deopt; `Emitter` stack changes are rolled back and buffered native instructions are dropped.
+- `EXT` operands are pass-stable: not branch offsets and not constant indices, so `analysis`/`pass` need no special cases — keep the `{2,-8}` self-describing encoding so `inst.Width()` stays correct.
+
 ## Coding Expectations
 
 - Apply `docs/coding-patterns.md` for every code change.

@@ -152,6 +152,8 @@ slice to `1 + len(Upvals)` and never takes the lazy-nil path.
 
 `STRUCT_GET` and `STRUCT_SET` handle VM-native `*types.Struct` directly and fall back to `*interp.HostObject` for host-supplied values. See [host-integration.md](host-integration.md) for HostObject semantics.
 
+User-defined heap types add no new `Kind`: a custom value implements `types.Value` / `types.Type` and is `KindRef` like every heap object (implement `Traceable` if it holds refs, `io.Closer` to release native resources). `Zero` returns `BoxedNull` for `KindRef`, so a custom type's default is null until an opcode constructs it. Reference the type programmatically via `b.Type(t)` and marshal Go values with `WithConverter` / `ValueMarshaler`; reconstructing a custom type from a textual type string is not yet supported.
+
 Defined scalar values with methods marshal as their underlying primitive unless passed by pointer. Pointer form becomes a `HostObject`; field `0` is reserved as `Value` and exposes the current primitive for ordinary opcodes.
 
 Strings created by interpreter opcodes and the marshaler are interned per `Interpreter`. Equal string contents share one heap ref while live; the intern table drops an entry when the last ref is released.

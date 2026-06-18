@@ -382,6 +382,7 @@ func (r *Tracer) codes(i *Interpreter) [][]func(*Interpreter) {
 			types:     i.types,
 			constants: i.constants,
 			heap:      i.heap,
+			exts:      i.exts,
 			precise:   true,
 		}
 		r.precise[addr] = tc.Compile(code, locals)

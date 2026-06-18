@@ -255,6 +255,8 @@ var types = map[Opcode]Type{
 
 	UPVAL_GET: {"upval.get", []int{1}},
 	UPVAL_SET: {"upval.set", []int{1}},
+
+	EXT: {"ext", []int{2, -8}},
 }
 
 func TypeOf(op Opcode) Type {
