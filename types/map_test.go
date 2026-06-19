@@ -118,6 +118,31 @@ func TestMap_Clear(t *testing.T) {
 	require.Equal(t, 0, m.Len())
 }
 
+func TestMapIterator(t *testing.T) {
+	t.Run("typed map key", func(t *testing.T) {
+		m := NewTypedMap[int64](NewMapType(TypeI64, TypeI32), 0)
+		m.Set(1<<50, BoxI32(2))
+
+		iter := NewMapIterator(Ref(7), m)
+		require.True(t, iter.Done())
+		require.True(t, iter.Next())
+		require.Equal(t, I64(1<<50), iter.Current())
+		require.False(t, iter.Next())
+		require.True(t, iter.Done())
+		require.Equal(t, []Ref{7}, iter.Refs())
+	})
+
+	t.Run("generic map ref key", func(t *testing.T) {
+		m := NewMap(NewMapType(TypeString, TypeI32))
+		m.Set(MapKey{Kind: KindRef, Bits: 9}, MapEntry{Key: BoxRef(9), Value: BoxI32(2)})
+
+		iter := NewMapIterator(Ref(7), m)
+		require.True(t, iter.Next())
+		require.Equal(t, BoxRef(9), iter.Current())
+		require.Equal(t, []Ref{7, 9}, iter.Refs())
+	})
+}
+
 func TestMap_Refs(t *testing.T) {
 	t.Run("inline i64 value", func(t *testing.T) {
 		m := NewMap(NewMapType(TypeI32, TypeI64))

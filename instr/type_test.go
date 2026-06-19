@@ -245,6 +245,7 @@ func TestTypeOf(t *testing.T) {
 		{opcode: MAP_DELETE},
 		{opcode: MAP_CLEAR},
 		{opcode: MAP_KEYS},
+		{opcode: MAP_ITER},
 
 		{opcode: REF_NEW},
 		{opcode: REF_GET},

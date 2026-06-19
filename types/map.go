@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"math"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -38,12 +39,33 @@ type MapType struct {
 	TraceValues bool
 }
 
+type MapIterator struct {
+	iter    *reflect.MapIter
+	current Value
+	ref     Ref
+	kind    mapIteratorKind
+	done    bool
+}
+
+type mapIteratorKind byte
+
+const (
+	mapIteratorInvalid mapIteratorKind = iota
+	mapIteratorI32
+	mapIteratorI64
+	mapIteratorF32
+	mapIteratorF64
+	mapIteratorGeneric
+)
+
 var (
 	_ Traceable = (*Map)(nil)
 	_ Traceable = (*TypedMap[int32])(nil)
 	_ Traceable = (*TypedMap[int64])(nil)
 	_ Traceable = (*TypedMap[float32])(nil)
 	_ Traceable = (*TypedMap[float64])(nil)
+	_ Traceable = (*MapIterator)(nil)
+	_ Iterator  = (*MapIterator)(nil)
 	_ Type      = (*MapType)(nil)
 )
 
@@ -76,6 +98,28 @@ func NewMapForType(typ *MapType, capacity int) Value {
 	default:
 		return NewMapWithCapacity(typ, capacity)
 	}
+}
+
+func NewMapIterator(ref Ref, val Value) *MapIterator {
+	it := &MapIterator{ref: ref, done: true, current: BoxedNull}
+	switch m := val.(type) {
+	case *TypedMap[int32]:
+		it.kind = mapIteratorI32
+		it.iter = reflect.ValueOf(m.entries).MapRange()
+	case *TypedMap[int64]:
+		it.kind = mapIteratorI64
+		it.iter = reflect.ValueOf(m.entries).MapRange()
+	case *TypedMap[float32]:
+		it.kind = mapIteratorF32
+		it.iter = reflect.ValueOf(m.entries).MapRange()
+	case *TypedMap[float64]:
+		it.kind = mapIteratorF64
+		it.iter = reflect.ValueOf(m.entries).MapRange()
+	case *Map:
+		it.kind = mapIteratorGeneric
+		it.iter = reflect.ValueOf(m.entries).MapRange()
+	}
+	return it
 }
 
 func NewMapType(key Type, elem Type) *MapType {
@@ -223,6 +267,59 @@ func (m *Map) Refs() []Ref {
 	return refs
 }
 
+func (it *MapIterator) Kind() Kind { return KindRef }
+
+func (it *MapIterator) Type() Type { return TypeRef }
+
+func (it *MapIterator) String() string { return "map.iterator" }
+
+func (it *MapIterator) Next() bool {
+	if it.iter == nil || !it.iter.Next() {
+		it.current = BoxedNull
+		it.done = true
+		return false
+	}
+	it.done = false
+	switch it.kind {
+	case mapIteratorI32:
+		it.current = I32(int32(it.iter.Key().Int()))
+	case mapIteratorI64:
+		it.current = I64(it.iter.Key().Int())
+	case mapIteratorF32:
+		it.current = F32(float32(it.iter.Key().Float()))
+	case mapIteratorF64:
+		it.current = F64(it.iter.Key().Float())
+	case mapIteratorGeneric:
+		key := it.iter.Key().Interface().(MapKey)
+		entry := it.iter.Value().Interface().(MapEntry)
+		it.current = key.value(entry)
+	default:
+		it.current = BoxedNull
+		it.done = true
+		return false
+	}
+	return true
+}
+
+func (it *MapIterator) Current() Value { return it.current }
+
+func (it *MapIterator) Done() bool { return it.done }
+
+func (it *MapIterator) Refs() []Ref {
+	refs := []Ref{it.ref}
+	if !it.done {
+		switch current := it.current.(type) {
+		case Boxed:
+			if current.Kind() == KindRef {
+				refs = append(refs, Ref(current.Ref()))
+			}
+		case Ref:
+			refs = append(refs, current)
+		}
+	}
+	return refs
+}
+
 func (k MapKey) String() string {
 	switch k.Kind {
 	case KindI32:
@@ -237,6 +334,26 @@ func (k MapKey) String() string {
 		return BoxRef(int(k.Bits)).String()
 	default:
 		return "<invalid>"
+	}
+}
+
+func (k MapKey) value(entry MapEntry) Value {
+	if entry.Key != 0 {
+		return entry.Key
+	}
+	switch k.Kind {
+	case KindI32:
+		return I32(int32(k.Bits))
+	case KindI64:
+		return I64(int64(k.Bits))
+	case KindF32:
+		return F32(math.Float32frombits(uint32(k.Bits)))
+	case KindF64:
+		return F64(math.Float64frombits(k.Bits))
+	case KindRef:
+		return Ref(int32(k.Bits))
+	default:
+		return BoxedNull
 	}
 }
 

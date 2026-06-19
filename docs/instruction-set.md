@@ -293,17 +293,18 @@ Map keys use primitive value identity for `i32`, `i64`, `f32`, and `f64`; all re
 | `MAP_DELETE` | `{}` | `map key →` | ◐ | Delete entry; missing key is a no-op. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `MAP_CLEAR` | `{}` | `map →` | ◐ | Delete all entries. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `MAP_KEYS` | `{}` | `map → array` | ⬜ | Snapshot keys into a new `[]K` array (`K` = map key type), in unspecified order. Enables guest map iteration with `ARRAY_LEN`/`ARRAY_GET` + `MAP_GET`. |
+| `MAP_ITER` | `{}` | `map → iterator` | ⬜ | Create a `types.MapIterator` over the map without snapshotting keys, advance it to the first key, and transfer map ownership into the iterator. The iterator yields keys only; use `MAP_GET` when the value is needed. Iteration order and mutation visibility are unspecified, matching Go map range semantics. |
 
 ## Coroutines
 
-A function whose body contains `YIELD` is a coroutine-function: its `CALL` allocates a `Coroutine` handle and runs the body until the first `YIELD` (suspend) or `RETURN` (finish), yielding the handle instead of plain returns. `RESUME` re-enters a suspended handle. A `YIELD` in the entry frame (`fp == 1`) is an interpreter escape: it panics the private `errYield`, `Run` returns the exported `ErrYield` without losing state, and the next `Run` resumes after the `YIELD`.
+A function whose body contains `YIELD` is a coroutine-function: its `CALL` allocates a `Coroutine` handle and runs the body until the first `YIELD` (suspend) or `RETURN` (finish), yielding the handle instead of plain returns. `RESUME` re-enters a suspended handle. A `YIELD` in the entry frame (`fp == 1`) is an interpreter escape: it panics the private `errYield`, `Run` returns the exported `ErrYield` without losing state, and the next `Run` resumes after the `YIELD`. `RESUME`, `CORO_DONE`, and `CORO_VALUE` also accept custom `types.Iterator` heap values; iterators are single-value producers whose `Current` value is read with `CORO_VALUE`.
 
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|
 | `YIELD` | `{}` | `value → result` | ◐ | Suspend the current coroutine frame, capturing `value` into the handle and unwinding to the caller; `RESUME` later delivers its in-value as `result`. In the entry frame it escapes via `ErrYield`. JIT records a `YIELD` reached in the trace's anchor frame as a terminal and lowers it to an unconditional deopt that runs the threaded suspend; a `YIELD` inside an inlined callee frame aborts the trace. |
-| `RESUME` | `{}` | `coro in → coro` | ◐ | Resume a suspended handle, delivering `in` as the pending `YIELD`'s result, running to the next `YIELD`/`RETURN`, and pushing the handle back; traps `ErrCoroutineDone` if already finished. JIT lowers an anchor-frame `RESUME` to a terminal deopt that runs the threaded resume. |
-| `CORO_DONE` | `{}` | `coro → i32` | ◐ | Push `I32(1)` if the handle has finished, else `I32(0)`; does not release the handle. JIT has a native fast path behind an itab guard (reads the `done` byte). |
-| `CORO_VALUE` | `{}` | `coro → value` | ◐ | Push the handle's last yielded or returned value and release the handle. JIT has a native fast path behind an itab guard (loads the boxed `value`, retains it, releases the handle). |
+| `RESUME` | `{}` | `coro in → coro` | ◐ | Resume a suspended coroutine handle, delivering `in` as the pending `YIELD`'s result, or advance a `types.Iterator` while ignoring `in`. Traps `ErrCoroutineDone` if already finished. JIT lowers an anchor-frame `RESUME` to a terminal deopt that runs the threaded resume. |
+| `CORO_DONE` | `{}` | `coro → i32` | ◐ | Push `I32(1)` if the coroutine or iterator has finished, else `I32(0)`; does not release the handle. JIT has a native fast path for `*Coroutine` behind an itab guard and falls back for custom iterators. |
+| `CORO_VALUE` | `{}` | `coro → value` | ◐ | Push the coroutine's last yielded/returned value or the iterator's current value, then release the handle. JIT has a native fast path for `*Coroutine` behind an itab guard and falls back for custom iterators. |
 
 ## Extensions
 

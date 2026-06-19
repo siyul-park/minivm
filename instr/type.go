@@ -246,6 +246,7 @@ var types = map[Opcode]Type{
 	MAP_DELETE: {"map.delete", []int{}},
 	MAP_CLEAR:  {"map.clear", []int{}},
 	MAP_KEYS:   {"map.keys", []int{}},
+	MAP_ITER:   {"map.iter", []int{}},
 
 	REF_NEW: {"ref.new", []int{}},
 	REF_GET: {"ref.get", []int{}},

@@ -310,6 +310,12 @@ converted the same way (it marshals as `ref`). Implement **both** interfaces for
 a round-trip: a direction the type does not implement returns
 `ErrUnsupportedMarshalType`.
 
+Custom producer types can marshal to a heap value implementing
+`types.Iterator`. Bytecode consumes that value with `RESUME`, `CORO_DONE`, and
+`CORO_VALUE`, the same opcodes used for coroutine handles. An iterator yields
+one `types.Value` at a time from `Current`; if it retains heap refs, implement
+`types.Traceable` so the collector can see its backing state and current value.
+
 ### External types — `WithConverter`
 
 For a type you do **not** own (so you cannot add `MarshalVM` / `UnmarshalVM`),

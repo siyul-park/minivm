@@ -18,6 +18,13 @@ type Traceable interface {
 	Refs() []Ref
 }
 
+type Iterator interface {
+	Value
+	Next() bool
+	Current() Value
+	Done() bool
+}
+
 func Zero(kind Kind) Boxed {
 	switch kind {
 	case KindI32:

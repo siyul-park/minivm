@@ -264,6 +264,8 @@ const (
 	MAP_KEYS
 
 	CLOSURE_NEW
+
+	MAP_ITER
 )
 
 // EXT is the reserved prefix opcode for user-registered extension instructions.
