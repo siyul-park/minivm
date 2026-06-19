@@ -132,6 +132,7 @@ Heap objects implement `types.Value`.
 | `*types.Struct` | `KindRef` | `*StructType` | `Value`, `Traceable` |
 | `*types.Map` | `KindRef` | `*MapType` | `Value`, `Traceable` |
 | `*types.MapI32`, `*types.MapI64`, `*types.MapF32`, `*types.MapF64` | `KindRef` | `*MapType` | `Value`, `Traceable` |
+| `*types.MapIterator` | `KindRef` | `TypeRef` | `Value`, `Traceable`, `Iterator` |
 | `*types.Function` | `KindRef` | `*FunctionType` | `Value` |
 | `*types.Closure` | `KindRef` | `*FunctionType` | `Value`, `Traceable` |
 | `*interp.HostFunction` | `KindRef` | `*FunctionType` | `Value` |
@@ -151,6 +152,13 @@ allocation-free while ref-containing values keep one pre-sized result slice.
 slice to `1 + len(Upvals)` and never takes the lazy-nil path.
 
 `STRUCT_GET` and `STRUCT_SET` handle VM-native `*types.Struct` directly and fall back to `*interp.HostObject` for host-supplied values. See [host-integration.md](host-integration.md) for HostObject semantics.
+
+`Iterator` marks heap values that can be consumed by `RESUME`, `CORO_DONE`, and
+`CORO_VALUE`. `Next()` advances one item, `Current()` returns the single current
+VM value, and `Done()` reports exhaustion. Iterators that hold refs must also
+implement `Traceable` and report retained backing refs plus any current ref.
+`MapIterator` keeps its source map and current ref key live while it traverses
+without building a key array; it yields keys only.
 
 User-defined heap types add no new `Kind`: a custom value implements `types.Value` / `types.Type` and is `KindRef` like every heap object (implement `Traceable` if it holds refs, `io.Closer` to release native resources). `Zero` returns `BoxedNull` for `KindRef`, so a custom type's default is null until an opcode constructs it. Reference the type programmatically via `b.Type(t)` and marshal Go values with `WithConverter` / `ValueMarshaler`; reconstructing a custom type from a textual type string is not yet supported.
 

@@ -264,10 +264,22 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			co := unboxRef[*Coroutine](i, i.stack[i.sp-1])
+			ref := i.stack[i.sp-1]
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
 			done := int32(0)
-			if co.done {
-				done = 1
+			switch co := i.heap[ref.Ref()].(type) {
+			case *Coroutine:
+				if co.done {
+					done = 1
+				}
+			case types.Iterator:
+				if co.Done() {
+					done = 1
+				}
+			default:
+				panic(ErrTypeMismatch)
 			}
 			i.stack[i.sp-1] = types.BoxI32(done)
 			i.fr.ip++
@@ -283,12 +295,16 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if box.Kind() != types.KindRef {
 				panic(ErrTypeMismatch)
 			}
-			co, ok := i.heap[box.Ref()].(*Coroutine)
-			if !ok {
+			var val types.Boxed
+			switch co := i.heap[box.Ref()].(type) {
+			case *Coroutine:
+				val = co.value
+				i.retainBox(val)
+			case types.Iterator:
+				val = i.boxIteratorCurrent(co.Current())
+			default:
 				panic(ErrTypeMismatch)
 			}
-			val := co.value
-			i.retainBox(val)
 			i.releaseBox(box)
 			i.stack[i.sp-1] = val
 			i.fr.ip++
@@ -3878,6 +3894,33 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
+	instr.MAP_ITER: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 1 {
+				panic(ErrStackUnderflow)
+			}
+			ref := i.stack[i.sp-1]
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			switch i.heap[addr].(type) {
+			case *types.TypedMap[int32],
+				*types.TypedMap[int64],
+				*types.TypedMap[float32],
+				*types.TypedMap[float64],
+				*types.Map:
+			default:
+				panic(ErrTypeMismatch)
+			}
+			iter := types.NewMapIterator(types.Ref(addr), i.heap[addr])
+			iter.Next()
+			i.retainIteratorCurrent(iter)
+			i.stack[i.sp-1] = types.BoxRef(i.keep(iter))
+			i.fr.ip++
+		}
+	},
 	instr.CLOSURE_NEW: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
@@ -4173,10 +4216,17 @@ func (i *Interpreter) resume() {
 		panic(ErrTypeMismatch)
 	}
 	coAddr := box.Ref()
-	co, ok := i.heap[coAddr].(*Coroutine)
-	if !ok {
+	switch co := i.heap[coAddr].(type) {
+	case *Coroutine:
+		i.resumeCoroutine(coAddr, co, in)
+	case types.Iterator:
+		i.resumeIterator(co, in)
+	default:
 		panic(ErrTypeMismatch)
 	}
+}
+
+func (i *Interpreter) resumeCoroutine(coAddr int, co *Coroutine, in types.Boxed) {
 	if co.done {
 		panic(ErrCoroutineDone)
 	}
@@ -4210,6 +4260,64 @@ func (i *Interpreter) resume() {
 	i.fr.ip++
 	i.fp++
 	i.fr = f
+}
+
+func (i *Interpreter) resumeIterator(iter types.Iterator, in types.Boxed) {
+	if iter.Done() {
+		panic(ErrCoroutineDone)
+	}
+	i.releaseBox(in)
+	i.releaseIteratorCurrent(iter)
+	iter.Next()
+	i.retainIteratorCurrent(iter)
+	i.sp--
+	i.fr.ip++
+}
+
+func (i *Interpreter) retainIteratorCurrent(iter types.Iterator) {
+	if iter.Done() {
+		return
+	}
+	if _, ok := iter.(*types.MapIterator); ok {
+		i.retainValue(iter.Current())
+	}
+}
+
+func (i *Interpreter) releaseIteratorCurrent(iter types.Iterator) {
+	if iter.Done() {
+		return
+	}
+	if _, ok := iter.(*types.MapIterator); ok {
+		i.releaseValue(iter.Current())
+	}
+}
+
+func (i *Interpreter) boxIteratorCurrent(val types.Value) types.Boxed {
+	if val == nil {
+		i.retain(0)
+		return types.BoxedNull
+	}
+	box := i.box(val)
+	i.retainValue(val)
+	return box
+}
+
+func (i *Interpreter) retainValue(val types.Value) {
+	switch val := val.(type) {
+	case types.Boxed:
+		i.retainBox(val)
+	case types.Ref:
+		i.retain(int(val))
+	}
+}
+
+func (i *Interpreter) releaseValue(val types.Value) {
+	switch val := val.(type) {
+	case types.Boxed:
+		i.releaseBox(val)
+	case types.Ref:
+		i.release(int(val))
+	}
 }
 
 // satI32 truncates v toward zero into a signed i32, saturating out-of-range

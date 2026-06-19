@@ -30,6 +30,36 @@ func (fn callableFunc) Call(ctx uintptr) error {
 	return fn(ctx)
 }
 
+type testIterator struct {
+	values []types.Value
+	value  types.Value
+	done   bool
+}
+
+var _ types.Iterator = (*testIterator)(nil)
+
+func (it *testIterator) Kind() types.Kind { return types.KindRef }
+
+func (it *testIterator) Type() types.Type { return types.TypeRef }
+
+func (it *testIterator) String() string { return "test.iterator" }
+
+func (it *testIterator) Next() bool {
+	if len(it.values) == 0 {
+		it.value = types.BoxedNull
+		it.done = true
+		return false
+	}
+	it.value = it.values[0]
+	it.values = it.values[1:]
+	it.done = false
+	return true
+}
+
+func (it *testIterator) Current() types.Value { return it.value }
+
+func (it *testIterator) Done() bool { return it.done }
+
 // vmPoint opts into its own VM representation (a "x,y" string) even though it
 // has exported fields and methods that would otherwise route to a HostObject.
 type vmPoint struct {
@@ -2701,6 +2731,65 @@ var tests = []test{
 				instr.New(instr.I32_CONST, 42),
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.MAP_ITER),
+				instr.New(instr.CORO_VALUE),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(5)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I64_CONST, uint64(int64(1<<50))),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.MAP_ITER),
+				instr.New(instr.CORO_VALUE),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI64, types.TypeI32)),
+		),
+		values: []types.Value{types.I64(1 << 50)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.MAP_ITER),
+				instr.New(instr.CORO_VALUE),
+			},
+			program.WithConstants(types.String("key")),
+			program.WithTypes(types.NewMapType(types.TypeString, types.TypeI32)),
+		),
+		values: []types.Value{types.String("key")},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 5),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.MAP_ITER),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.RESUME),
+				instr.New(instr.CORO_DONE),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 5),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
 				instr.New(instr.MAP_KEYS),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.ARRAY_GET),
@@ -3583,6 +3672,52 @@ func TestInterpreter_Run(t *testing.T) {
 				got, err := i.Pop()
 				require.NoError(t, err)
 				require.Equal(t, types.I32(7), got)
+			})
+		}
+	})
+
+	t.Run("custom iterator resumes through coroutine opcodes", func(t *testing.T) {
+		for _, mode := range modes {
+			mode := mode
+			t.Run(mode.name, func(t *testing.T) {
+				it := &testIterator{values: []types.Value{types.I32(7), types.I32(11)}}
+				require.True(t, it.Next())
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.RESUME),
+					instr.New(instr.CORO_VALUE),
+				}, program.WithConstants(it))
+
+				i := New(prog, mode.opts...)
+				defer i.Close()
+				require.NoError(t, i.Run(context.Background()))
+				got, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I32(11), got)
+			})
+		}
+	})
+
+	t.Run("custom iterator reports done", func(t *testing.T) {
+		for _, mode := range modes {
+			mode := mode
+			t.Run(mode.name, func(t *testing.T) {
+				it := &testIterator{values: []types.Value{types.I32(7)}}
+				require.True(t, it.Next())
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.RESUME),
+					instr.New(instr.CORO_DONE),
+				}, program.WithConstants(it))
+
+				i := New(prog, mode.opts...)
+				defer i.Close()
+				require.NoError(t, i.Run(context.Background()))
+				got, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I32(1), got)
 			})
 		}
 	})
