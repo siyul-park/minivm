@@ -11,6 +11,7 @@ import (
 
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
@@ -23,7 +24,8 @@ type Interpreter struct {
 
 	compiler  *compiler
 	cache     *Cache
-	local     *stats
+	profiler  *prof.Profiler
+	local     *prof.Collector
 	fallbacks map[anchor]func(*Interpreter)
 	journal   []uint64
 
@@ -89,7 +91,8 @@ type option struct {
 	converters map[reflect.Type]Converter
 	cache      *Cache
 	tracer     *Tracer
-	local      *stats
+	profiler   *prof.Profiler
+	local      *prof.Collector
 	registry   *Registry
 	threshold  int
 	cutoff     int
@@ -154,6 +157,14 @@ func WithTracer(t *Tracer) func(*option) {
 	return func(o *option) { o.tracer = t }
 }
 
+// WithProfiler attaches a profiler that aggregates this interpreter's execution
+// samples and JIT counters. It is opt-in: without one, sampling still drives JIT
+// hotness but no profile is collected. Pass the same Profiler to NewPool so every
+// pooled interpreter shares it.
+func WithProfiler(p *prof.Profiler) func(*option) {
+	return func(o *option) { o.profiler = p }
+}
+
 // WithRegistry installs the extension registry that resolves EXT instructions.
 // An EXT operand's high byte selects the registered Extension by its slot; an
 // out-of-range or absent slot traps ErrUnknownOpcode at run time.
@@ -161,9 +172,9 @@ func WithRegistry(r *Registry) func(*option) {
 	return func(o *option) { o.registry = r }
 }
 
-// withLocal injects a pre-seeded sampling collector. Tests use it to drive
-// hot-IP selection and to read JIT counters back after a run.
-func withLocal(p *stats) func(*option) {
+// withLocal injects a pre-seeded sample collector. Tests use it to drive hot-IP
+// selection and to read JIT counters back after a run.
+func withLocal(p *prof.Collector) func(*option) {
 	return func(o *option) { o.local = p }
 }
 
@@ -224,7 +235,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	}
 	local := opt.local
 	if local == nil {
-		local = newStats()
+		local = prof.NewCollector()
 	}
 	m := opt.marshaler
 	if m == nil {
@@ -254,6 +265,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		hook:      opt.hook,
 		marshaler: m,
 		cache:     opt.cache,
+		profiler:  opt.profiler,
 		local:     local,
 		threshold: threshold,
 		types:     prog.Types,
@@ -580,6 +592,7 @@ func (i *Interpreter) Len() int {
 }
 
 func (i *Interpreter) Close() error {
+	i.flush()
 	i.Reset()
 	var err error
 	if i.compiler != nil {
@@ -591,12 +604,6 @@ func (i *Interpreter) Close() error {
 		i.cache = nil
 	}
 	return err
-}
-
-// Profile returns this interpreter's view of collected profile data: its own
-// unflushed samples merged on top of the shared aggregate.
-func (i *Interpreter) Profile() Snapshot {
-	return i.tracer.snapshot(i.local)
 }
 
 func (i *Interpreter) Reset() {
@@ -650,7 +657,7 @@ func (i *Interpreter) compile(addr int) error {
 	if i.compiler == nil {
 		compiler, err := newCompiler()
 		if err != nil {
-			i.local.addJIT(JIT{Errors: 1})
+			i.local.AddMetric("vm_jit_errors_total", 1)
 			return err
 		}
 		i.compiler = compiler
@@ -658,7 +665,7 @@ func (i *Interpreter) compile(addr int) error {
 	if i.compiler == nil {
 		return nil
 	}
-	i.local.addJIT(JIT{Attempts: 1})
+	i.local.AddMetric("vm_jit_attempts_total", 1)
 
 	fn, ok := i.function(addr)
 	if !ok {
@@ -666,7 +673,7 @@ func (i *Interpreter) compile(addr int) error {
 	}
 	mod, err := i.compiler.Compile(i, addr, fn)
 	if err != nil {
-		i.local.addJIT(JIT{Errors: 1})
+		i.local.AddMetric("vm_jit_errors_total", 1)
 		return err
 	}
 	if mod == nil {
@@ -688,7 +695,7 @@ func (i *Interpreter) shared(addr int) error {
 
 	compiler, err := newCompiler()
 	if err != nil {
-		i.tracer.addJIT(JIT{Errors: 1})
+		i.local.AddMetric("vm_jit_errors_total", 1)
 		i.cache.ready(addr)
 		return err
 	}
@@ -696,24 +703,22 @@ func (i *Interpreter) shared(addr int) error {
 		i.cache.ready(addr)
 		return nil
 	}
-	i.tracer.addJIT(JIT{Attempts: 1})
+	i.local.AddMetric("vm_jit_attempts_total", 1)
 
 	mod, err := compiler.Compile(i, addr, fn)
 	if err != nil {
 		_ = compiler.Close()
-		i.tracer.addJIT(JIT{Errors: 1})
+		i.local.AddMetric("vm_jit_errors_total", 1)
 		i.cache.ready(addr)
 		return err
 	}
 	if mod == nil {
 		mod = &module{}
 	}
-	i.tracer.addJIT(JIT{
-		Emits: uint64(mod.emits),
-		Links: uint64(mod.links),
-		Skips: uint64(mod.skips),
-		Bytes: uint64(mod.bytes),
-	})
+	i.local.AddMetric("vm_jit_emits_total", float64(mod.emits))
+	i.local.AddMetric("vm_jit_links_total", float64(mod.links))
+	i.local.AddMetric("vm_jit_skips_total", float64(mod.skips))
+	i.local.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
 	var buf *asm.Buffer
 	if mod.emits > 0 {
 		buf = compiler.buffer
@@ -729,12 +734,10 @@ func (i *Interpreter) shared(addr int) error {
 // shadowed threaded handler for guard fallback.
 func (i *Interpreter) install(mod *module, account bool) {
 	if account {
-		i.local.addJIT(JIT{
-			Emits: uint64(mod.emits),
-			Links: uint64(mod.links),
-			Skips: uint64(mod.skips),
-			Bytes: uint64(mod.bytes),
-		})
+		i.local.AddMetric("vm_jit_emits_total", float64(mod.emits))
+		i.local.AddMetric("vm_jit_links_total", float64(mod.links))
+		i.local.AddMetric("vm_jit_skips_total", float64(mod.skips))
+		i.local.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
 	}
 	for a, callable := range mod.entries {
 		if a.addr <= 0 || a.addr >= len(i.code) || a.ip < 0 || a.ip >= len(i.code[a.addr]) || callable == nil {
@@ -772,17 +775,15 @@ func (i *Interpreter) sync() {
 }
 
 func (i *Interpreter) flush() {
-	i.tracer.flush(i.local)
+	if i.profiler != nil {
+		i.profiler.Flush(i.local)
+	}
 }
 
 func (i *Interpreter) hot(addr int) []int {
-	fn := i.local.Func(addr)
-	if len(fn.IPs) == 0 {
+	ips := i.local.IPs(addr)
+	if len(ips) == 0 {
 		return i.tracer.anchors(addr)
-	}
-	ips := make([]int, 0, len(fn.IPs))
-	for _, ip := range fn.IPs {
-		ips = append(ips, ip.Offset)
 	}
 	return ips
 }
@@ -978,14 +979,14 @@ func (i *Interpreter) exit(root anchor) {
 	if i.compiler == nil {
 		return
 	}
-	i.local.addJIT(JIT{Attempts: 1})
+	i.local.AddMetric("vm_jit_attempts_total", 1)
 	fn, ok := i.function(root.addr)
 	if !ok {
 		return
 	}
 	mod, err := i.compiler.Compile(i, root.addr, fn)
 	if err != nil {
-		i.local.addJIT(JIT{Errors: 1})
+		i.local.AddMetric("vm_jit_errors_total", 1)
 		panic(err)
 	}
 	if mod != nil {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -3969,7 +3970,7 @@ func TestInterpreter_Run(t *testing.T) {
 		got, err := jit.Pop()
 		require.NoError(t, err)
 		require.Equal(t, want, got)
-		require.Greater(t, jit.Profile().JIT.Emits, uint64(0))
+		require.Greater(t, jit.local.Value("vm_jit_emits_total"), float64(0))
 	})
 
 	t.Run("jit lowers coro.done in a hot loop", func(t *testing.T) {
@@ -4039,7 +4040,7 @@ func TestInterpreter_Run(t *testing.T) {
 		got, err := jit.Pop()
 		require.NoError(t, err)
 		require.Equal(t, want, got)
-		require.Greater(t, jit.Profile().JIT.Emits, uint64(0))
+		require.Greater(t, jit.local.Value("vm_jit_emits_total"), float64(0))
 	})
 
 	t.Run("jit deopts on resume in a hot driver loop", func(t *testing.T) {
@@ -4111,7 +4112,7 @@ func TestInterpreter_Run(t *testing.T) {
 		got, err := jit.Pop()
 		require.NoError(t, err)
 		require.Equal(t, want, got)
-		require.Greater(t, jit.Profile().JIT.Emits, uint64(0))
+		require.Greater(t, jit.local.Value("vm_jit_emits_total"), float64(0))
 	})
 
 	t.Run("jit deopts on yield reached from a hot driver loop", func(t *testing.T) {
@@ -4178,7 +4179,7 @@ func TestInterpreter_Run(t *testing.T) {
 		got, err := jit.Pop()
 		require.NoError(t, err)
 		require.Equal(t, want, got)
-		require.Greater(t, jit.Profile().JIT.Emits, uint64(0))
+		require.Greater(t, jit.local.Value("vm_jit_emits_total"), float64(0))
 	})
 
 	t.Run("root-frame yield returns ErrYield under jit and threaded", func(t *testing.T) {
@@ -4575,7 +4576,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 0),
 			instr.New(instr.RETURN),
 		).MustBuild()
-		p := newStats()
+		p := prof.NewCollector()
 		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
@@ -4603,7 +4604,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.GLOBAL_GET, 0),
 			instr.New(instr.RETURN),
 		).MustBuild()
-		p := newStats()
+		p := prof.NewCollector()
 		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
@@ -4938,7 +4939,7 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 	})
 
 	t.Run("negative disables jit", func(t *testing.T) {
-		p := newStats()
+		p := prof.NewCollector()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.I32_CONST, 2),
@@ -4946,12 +4947,12 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 		}), withLocal(p), WithTick(1), WithThreshold(-1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
-		require.Zero(t, p.Snapshot().JIT.Attempts)
+		require.Zero(t, p.Value("vm_jit_attempts_total"))
 	})
 
 	t.Run("zero attempts jit on first sample", func(t *testing.T) {
 		requireJIT(t)
-		p := newStats()
+		p := prof.NewCollector()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.I32_CONST, 2),
@@ -4959,13 +4960,13 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 		}), withLocal(p), WithTick(1), WithThreshold(0))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
-		require.Equal(t, uint64(1), p.Snapshot().JIT.Attempts)
+		require.Equal(t, float64(1), p.Value("vm_jit_attempts_total"))
 	})
 }
 
 func TestInterpreter_withLocal(t *testing.T) {
 	t.Run("records opcode samples", func(t *testing.T) {
-		p := newStats()
+		p := prof.NewCollector()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.DROP),
@@ -4973,22 +4974,17 @@ func TestInterpreter_withLocal(t *testing.T) {
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 
-		snap := p.Snapshot()
-		require.Equal(t, uint64(2), snap.Samples)
-		require.Equal(t, uint64(2), snap.Funcs[0].Samples)
-		require.Equal(t, uint64(1), p.IP(0, 0).Samples)
-		require.Equal(t, uint64(1), p.IP(0, 5).Samples)
-		opcodes := map[byte]uint64{}
-		for _, op := range snap.Opcodes {
-			opcodes[op.Code] = op.Samples
-		}
-		require.Equal(t, uint64(1), opcodes[byte(instr.I32_CONST)])
-		require.Equal(t, uint64(1), opcodes[byte(instr.DROP)])
+		require.Equal(t, uint64(2), p.Total())
+		require.Equal(t, uint64(2), p.Samples(0))
+		require.Equal(t, uint64(1), p.IP(0, 0))
+		require.Equal(t, uint64(1), p.IP(0, 5))
+		require.Equal(t, uint64(1), p.Opcode(byte(instr.I32_CONST)))
+		require.Equal(t, uint64(1), p.Opcode(byte(instr.DROP)))
 	})
 
 	t.Run("records jit counters", func(t *testing.T) {
 		requireJIT(t)
-		p := newStats()
+		p := prof.NewCollector()
 		fn := types.NewFunctionBuilder(nil).WithReturns(types.TypeI32).Emit(
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.I32_CONST, 2),
@@ -5012,16 +5008,15 @@ func TestInterpreter_withLocal(t *testing.T) {
 		value, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(3), value)
-		jit := p.Snapshot().JIT
-		require.Equal(t, uint64(1), jit.Attempts)
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-		require.NotZero(t, jit.Bytes)
+		require.Equal(t, float64(1), p.Value("vm_jit_attempts_total"))
+		require.NotZero(t, p.Value("vm_jit_emits_total"))
+		require.NotZero(t, p.Value("vm_jit_links_total"))
+		require.NotZero(t, p.Value("vm_jit_bytes_total"))
 	})
 
 	t.Run("samples jit loop", func(t *testing.T) {
 		requireJIT(t)
-		p := newStats()
+		p := prof.NewCollector()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 256),
 			instr.New(instr.GLOBAL_SET, 0),
@@ -5282,7 +5277,7 @@ func TestInterpreter_WithDebugger(t *testing.T) {
 
 func TestInterpreter_JIT(t *testing.T) {
 	t.Run("records linear trace before native install", func(t *testing.T) {
-		p := newStats()
+		p := prof.NewCollector()
 		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.I32_CONST, 5),
@@ -5424,7 +5419,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NotNil(t, tree)
 		require.NotNil(t, tree.root)
 		require.NotEqual(t, aborted, tree.root.kind)
-		require.NotZero(t, i.Profile().JIT.Emits)
+		require.NotZero(t, i.local.Value("vm_jit_emits_total"))
 	})
 
 	t.Run("traces recursive global accumulation natively", func(t *testing.T) {
@@ -5472,7 +5467,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NotNil(t, tree)
 		require.NotNil(t, tree.root)
 		require.NotEqual(t, aborted, tree.root.kind)
-		require.NotZero(t, i.Profile().JIT.Emits)
+		require.NotZero(t, i.local.Value("vm_jit_emits_total"))
 	})
 
 	t.Run("traces recursive f32 accumulation natively", func(t *testing.T) {
@@ -5517,7 +5512,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		require.NotNil(t, tree)
 		require.NotNil(t, tree.root)
 		require.NotEqual(t, aborted, tree.root.kind)
-		require.NotZero(t, i.Profile().JIT.Emits)
+		require.NotZero(t, i.local.Value("vm_jit_emits_total"))
 	})
 
 	t.Run("traces tail calls natively", func(t *testing.T) {
@@ -5535,7 +5530,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			require.NotNil(t, tree)
 			require.NotNil(t, tree.root)
 			require.Equal(t, returned, tree.root.kind)
-			require.NotZero(t, i.Profile().JIT.Emits)
+			require.NotZero(t, i.local.Value("vm_jit_emits_total"))
 		}
 
 		t.Run("self tail-call loops natively without growing frames", func(t *testing.T) {
@@ -5734,7 +5729,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				}
 			}
 			require.True(t, found, "no loop trace recorded at a header")
-			require.NotZero(t, i.Profile().JIT.Emits)
+			require.NotZero(t, i.local.Value("vm_jit_emits_total"))
 		}
 
 		t.Run("unconditional back-edge sums a counted loop", func(t *testing.T) {
@@ -5856,7 +5851,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			// Cancel only once the loop runs natively, so the stop must come from
 			// the native back-edge polling the safepoint, not the threaded warmup.
 			i.hook = func(i *Interpreter) error {
-				if i.Profile().JIT.Emits > 0 {
+				if i.local.Value("vm_jit_emits_total") > 0 {
 					cancel()
 				}
 				return nil
@@ -6105,7 +6100,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			instr.New(instr.CALL),
 			instr.New(instr.RETURN),
 		).MustBuild()
-		p := newStats()
+		p := prof.NewCollector()
 		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 21),
@@ -6394,7 +6389,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				require.NoError(t, err)
 
 				require.Equal(t, want, got)
-				require.NotZero(t, jit.Profile().JIT.Emits)
+				require.NotZero(t, jit.local.Value("vm_jit_emits_total"))
 			})
 		}
 	})

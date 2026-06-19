@@ -124,10 +124,6 @@ func (p *Pool) Close() error {
 	return errors.Join(errs...)
 }
 
-func (p *Pool) Profile() Snapshot {
-	return p.tracer.Profile()
-}
-
 func (p *Pool) dead() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

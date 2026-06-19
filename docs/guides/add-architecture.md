@@ -64,7 +64,7 @@ go test ./asm/<arch>/... ./interp/...
 GOOS=linux GOARCH=<arch> go build ./...
 ```
 
-A nonzero trace counter (`p.Snapshot().JIT.Emits > 0`) after running a hot arithmetic function confirms end-to-end emission.
+A nonzero `vm_jit_emits_total` metric after running a hot arithmetic function confirms end-to-end emission.
 
 ## Opcode Priority
 

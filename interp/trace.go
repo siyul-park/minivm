@@ -8,73 +8,15 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// Snapshot is an immutable copy of collected profile data.
-type Snapshot struct {
-	Samples uint64
-	Funcs   []Func
-	Opcodes []Opcode
-	JIT     JIT
-}
-
-// Func holds sample data for one function.
-type Func struct {
-	Index   int
-	Samples uint64
-	Percent float64
-	IPs     []IP
-}
-
-// IP holds sample data for one instruction offset.
-type IP struct {
-	Offset  int
-	Samples uint64
-	Percent float64
-}
-
-// Opcode holds sample data for one opcode byte.
-type Opcode struct {
-	Code    byte
-	Samples uint64
-	Percent float64
-}
-
-// JIT holds aggregate JIT compilation counters.
-type JIT struct {
-	Attempts uint64
-	Emits    uint64
-	Links    uint64
-	Skips    uint64
-	Errors   uint64
-	Bytes    uint64
-}
-
-// Tracer is the shared JIT front-end: it samples execution into an aggregate
-// profile and records hot linear traces that the trace compiler consumes. One
-// Tracer is shared across a pool so a trace recorded by one member compiles
-// once and serves all.
+// Tracer is the shared JIT front-end: it records hot linear traces that the
+// trace compiler consumes. One Tracer is shared across a pool so a trace
+// recorded by one member compiles once and serves all.
 type Tracer struct {
 	mu        sync.Mutex
-	stats     *stats
 	precise   [][]func(*Interpreter)
 	loops     map[int][]int
 	trees     map[anchor]*tree
 	blacklist map[anchor]bool
-}
-
-// stats records execution-frequency data during bytecode interpretation. It
-// grows automatically to accommodate any function index and instruction
-// pointer. Each interpreter owns a private stats for contention-free sampling
-// on the hot path; the shared Tracer merges them into its aggregate.
-type stats struct {
-	samples uint64
-	funcs   []funcData
-	opcodes [256]uint64
-	jit     JIT
-}
-
-type funcData struct {
-	samples uint64
-	ips     []uint64
 }
 
 type anchor struct {
@@ -126,51 +68,10 @@ const attemptLimit = 8
 
 func NewTracer() *Tracer {
 	return &Tracer{
-		stats:     newStats(),
 		loops:     map[int][]int{},
 		trees:     map[anchor]*tree{},
 		blacklist: map[anchor]bool{},
 	}
-}
-
-func newStats() *stats {
-	return &stats{}
-}
-
-// Profile returns an immutable copy of the shared aggregate profile.
-func (r *Tracer) Profile() Snapshot {
-	return r.snapshot(nil)
-}
-
-// flush merges a member's local samples into the shared aggregate and resets
-// the local collector.
-func (r *Tracer) flush(local *stats) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.stats.Merge(local.Snapshot())
-	local.Reset()
-}
-
-// addJIT records compilation counters straight into the shared aggregate.
-// Compilation is a shared event in a pool, so counters are visible to every
-// member immediately rather than waiting for a flush.
-func (r *Tracer) addJIT(d JIT) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.stats.addJIT(d)
-}
-
-// snapshot returns the aggregate merged with local without disturbing either,
-// so a caller sees its own unflushed samples on top of the shared total.
-func (r *Tracer) snapshot(local *stats) Snapshot {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	merged := newStats()
-	merged.Merge(r.stats.Snapshot())
-	if local != nil {
-		merged.Merge(local.Snapshot())
-	}
-	return merged.Snapshot()
 }
 
 func (r *Tracer) exit(i *Interpreter, root anchor, ip int) (int64, error) {
@@ -638,165 +539,6 @@ func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
 	return false
 }
 
-// Add records one execution sample at (fn, ip) for op. It grows to accommodate
-// new function indices and IPs.
-func (p *stats) Add(fn, ip int, op byte) {
-	if fn < 0 || ip < 0 {
-		return
-	}
-	for len(p.funcs) <= fn {
-		p.funcs = append(p.funcs, funcData{})
-	}
-	if len(p.funcs[fn].ips) <= ip {
-		ips := make([]uint64, ip+1)
-		copy(ips, p.funcs[fn].ips)
-		p.funcs[fn].ips = ips
-	}
-	p.samples++
-	p.funcs[fn].samples++
-	p.funcs[fn].ips[ip]++
-	p.opcodes[op]++
-}
-
-// Samples returns the sample count for fn, or 0 for an unknown index.
-func (p *stats) Samples(fn int) uint64 {
-	if fn < 0 || fn >= len(p.funcs) {
-		return 0
-	}
-	return p.funcs[fn].samples
-}
-
-// Func returns a copy of the profile data for fn.
-func (p *stats) Func(fn int) Func {
-	if fn < 0 || fn >= len(p.funcs) {
-		return Func{Index: fn}
-	}
-	return p.funcData(fn, p.samples)
-}
-
-// IP returns the profile data for fn at ip.
-func (p *stats) IP(fn, ip int) IP {
-	if fn < 0 || fn >= len(p.funcs) || ip < 0 || ip >= len(p.funcs[fn].ips) {
-		return IP{Offset: ip}
-	}
-	return IP{
-		Offset:  ip,
-		Samples: p.funcs[fn].ips[ip],
-		Percent: percent(p.funcs[fn].ips[ip], p.funcs[fn].samples),
-	}
-}
-
-// Range returns the sum of samples for fn over [start, end).
-func (p *stats) Range(fn, start, end int) uint64 {
-	if fn < 0 || fn >= len(p.funcs) || start >= end {
-		return 0
-	}
-	if start < 0 {
-		start = 0
-	}
-	ips := p.funcs[fn].ips
-	var total uint64
-	for ip := start; ip < end && ip < len(ips); ip++ {
-		total += ips[ip]
-	}
-	return total
-}
-
-// Snapshot returns an immutable deep copy of collected profile data.
-func (p *stats) Snapshot() Snapshot {
-	funcs := make([]Func, len(p.funcs))
-	for i := range p.funcs {
-		funcs[i] = p.funcData(i, p.samples)
-	}
-
-	opcodes := make([]Opcode, 0, len(p.opcodes))
-	for code, samples := range p.opcodes {
-		if samples == 0 {
-			continue
-		}
-		opcodes = append(opcodes, Opcode{
-			Code:    byte(code),
-			Samples: samples,
-			Percent: percent(samples, p.samples),
-		})
-	}
-
-	return Snapshot{
-		Samples: p.samples,
-		Funcs:   funcs,
-		Opcodes: opcodes,
-		JIT:     p.jit,
-	}
-}
-
-// Merge adds snapshot data into p.
-func (p *stats) Merge(s Snapshot) {
-	for _, fn := range s.Funcs {
-		if fn.Index < 0 || fn.Samples == 0 {
-			continue
-		}
-		for len(p.funcs) <= fn.Index {
-			p.funcs = append(p.funcs, funcData{})
-		}
-		p.samples += fn.Samples
-		p.funcs[fn.Index].samples += fn.Samples
-		for _, ip := range fn.IPs {
-			if ip.Offset < 0 || ip.Samples == 0 {
-				continue
-			}
-			if len(p.funcs[fn.Index].ips) <= ip.Offset {
-				ips := make([]uint64, ip.Offset+1)
-				copy(ips, p.funcs[fn.Index].ips)
-				p.funcs[fn.Index].ips = ips
-			}
-			p.funcs[fn.Index].ips[ip.Offset] += ip.Samples
-		}
-	}
-	for _, op := range s.Opcodes {
-		p.opcodes[op.Code] += op.Samples
-	}
-	p.addJIT(s.JIT)
-}
-
-// Reset clears all collected profile data.
-func (p *stats) Reset() {
-	p.samples = 0
-	p.funcs = nil
-	clear(p.opcodes[:])
-	p.jit = JIT{}
-}
-
-// addJIT merges d into the aggregate JIT counters.
-func (p *stats) addJIT(d JIT) {
-	p.jit.Attempts += d.Attempts
-	p.jit.Emits += d.Emits
-	p.jit.Links += d.Links
-	p.jit.Skips += d.Skips
-	p.jit.Errors += d.Errors
-	p.jit.Bytes += d.Bytes
-}
-
-func (p *stats) funcData(fn int, total uint64) Func {
-	f := p.funcs[fn]
-	ips := make([]IP, 0, len(f.ips))
-	for offset, samples := range f.ips {
-		if samples == 0 {
-			continue
-		}
-		ips = append(ips, IP{
-			Offset:  offset,
-			Samples: samples,
-			Percent: percent(samples, f.samples),
-		})
-	}
-	return Func{
-		Index:   fn,
-		Samples: f.samples,
-		Percent: percent(f.samples, total),
-		IPs:     ips,
-	}
-}
-
 func (t *tree) branchIPs() map[int]*trace {
 	out := map[int]*trace{}
 	for _, branch := range t.branches {
@@ -805,11 +547,4 @@ func (t *tree) branchIPs() map[int]*trace {
 		}
 	}
 	return out
-}
-
-func percent(samples, total uint64) float64 {
-	if total == 0 {
-		return 0
-	}
-	return float64(samples) / float64(total) * 100
 }

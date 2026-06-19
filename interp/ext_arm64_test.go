@@ -114,7 +114,7 @@ func TestExtension_Lower(t *testing.T) {
 		got, err := jit.Pop()
 		require.NoError(t, err)
 		require.Equal(t, want, got)
-		require.Greater(t, jit.Profile().JIT.Emits, uint64(0))
+		require.Greater(t, jit.local.Value("vm_jit_emits_total"), float64(0))
 	})
 
 	t.Run("declined lower deopts cleanly", func(t *testing.T) {

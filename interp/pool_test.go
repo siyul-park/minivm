@@ -6,10 +6,22 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
+
+func label(key, value string) prof.Label {
+	return prof.Label{Key: key, Value: value}
+}
+
+func mustMetric(t *testing.T, p *prof.Profiler, name string, labels ...prof.Label) float64 {
+	t.Helper()
+	v, ok := p.Metric(name, labels...)
+	require.True(t, ok, "metric %s missing", name)
+	return v
+}
 
 func TestNewPool(t *testing.T) {
 	t.Run("normalizes non-positive size", func(t *testing.T) {
@@ -250,7 +262,8 @@ func TestPool_Profile(t *testing.T) {
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.DROP),
 		})
-		p := NewPool(prog, 2, WithTick(1), WithThreshold(-1))
+		pr := prof.New()
+		p := NewPool(prog, 2, WithProfiler(pr), WithTick(1), WithThreshold(-1))
 		defer p.Close()
 
 		for range 2 {
@@ -260,31 +273,30 @@ func TestPool_Profile(t *testing.T) {
 			p.Put(i)
 		}
 
-		snap := p.Profile()
-		require.Equal(t, uint64(4), snap.Samples)
-		require.Equal(t, uint64(4), snap.Funcs[0].Samples)
-		require.Equal(t, uint64(2), snap.Funcs[0].IPs[0].Samples)
-		require.Equal(t, 5, snap.Funcs[0].IPs[1].Offset)
-		require.Equal(t, uint64(2), snap.Funcs[0].IPs[1].Samples)
+		require.Equal(t, float64(4), mustMetric(t, pr, "vm_samples_total"))
+		require.Equal(t, float64(4), mustMetric(t, pr, "vm_func_samples_total", label("func", "0")))
+		require.Equal(t, float64(2), mustMetric(t, pr, "vm_func_ip_samples_total", label("func", "0"), label("ip", "0")))
+		require.Equal(t, float64(2), mustMetric(t, pr, "vm_func_ip_samples_total", label("func", "0"), label("ip", "5")))
 	})
 
 	t.Run("does not double count repeated put cycles", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 		})
-		p := NewPool(prog, 1, WithTick(1), WithThreshold(-1))
+		pr := prof.New()
+		p := NewPool(prog, 1, WithProfiler(pr), WithTick(1), WithThreshold(-1))
 		defer p.Close()
 
 		i, err := p.Get(context.Background())
 		require.NoError(t, err)
 		require.NoError(t, i.Run(context.Background()))
 		p.Put(i)
-		require.Equal(t, uint64(1), p.Profile().Samples)
+		require.Equal(t, float64(1), mustMetric(t, pr, "vm_samples_total"))
 
 		i, err = p.Get(context.Background())
 		require.NoError(t, err)
 		p.Put(i)
-		require.Equal(t, uint64(1), p.Profile().Samples)
+		require.Equal(t, float64(1), mustMetric(t, pr, "vm_samples_total"))
 	})
 
 	t.Run("shares one jit attempt across pool", func(t *testing.T) {
@@ -302,7 +314,8 @@ func TestPool_Profile(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 		var addr int
-		p := NewPool(prog, 2, WithTick(1), WithThreshold(5), WithHook(func(i *Interpreter) error {
+		pr := prof.New()
+		p := NewPool(prog, 2, WithProfiler(pr), WithTick(1), WithThreshold(5), WithHook(func(i *Interpreter) error {
 			if addr == 0 || i.Func() != addr || i.IP() != 0 {
 				return nil
 			}
@@ -329,11 +342,10 @@ func TestPool_Profile(t *testing.T) {
 		p.Put(first)
 		p.Put(second)
 
-		jit := p.Profile().JIT
-		require.Equal(t, uint64(1), jit.Attempts)
-		require.NotZero(t, jit.Emits)
-		require.NotZero(t, jit.Links)
-		require.NotZero(t, jit.Bytes)
+		require.Equal(t, float64(1), mustMetric(t, pr, "vm_jit_attempts_total"))
+		require.NotZero(t, mustMetric(t, pr, "vm_jit_emits_total"))
+		require.NotZero(t, mustMetric(t, pr, "vm_jit_links_total"))
+		require.NotZero(t, mustMetric(t, pr, "vm_jit_bytes_total"))
 	})
 
 	t.Run("late borrower installs published jit without compiling", func(t *testing.T) {
@@ -351,7 +363,8 @@ func TestPool_Profile(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 		var addr int
-		p := NewPool(prog, 2, WithTick(1), WithThreshold(5), WithHook(func(i *Interpreter) error {
+		pr := prof.New()
+		p := NewPool(prog, 2, WithProfiler(pr), WithTick(1), WithThreshold(5), WithHook(func(i *Interpreter) error {
 			if addr == 0 || i.Func() != addr || i.IP() != 0 {
 				return nil
 			}
@@ -364,7 +377,8 @@ func TestPool_Profile(t *testing.T) {
 		require.NoError(t, err)
 		addr = first.constants[0].Ref()
 		require.NoError(t, first.Run(context.Background()))
-		require.Equal(t, uint64(1), p.Profile().JIT.Attempts)
+		first.flush()
+		require.Equal(t, float64(1), mustMetric(t, pr, "vm_jit_attempts_total"))
 
 		second, err := p.Get(context.Background())
 		require.NoError(t, err)
@@ -374,7 +388,7 @@ func TestPool_Profile(t *testing.T) {
 		require.Equal(t, types.I32(3), value)
 		p.Put(first)
 		p.Put(second)
-		require.Equal(t, uint64(1), p.Profile().JIT.Attempts)
+		require.Equal(t, float64(1), mustMetric(t, pr, "vm_jit_attempts_total"))
 	})
 }
 

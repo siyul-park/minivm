@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/interp"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
@@ -355,13 +357,17 @@ func (r *REPL) profile(ctx context.Context) error {
 		return nil
 	}
 
-	vm := interp.New(r.build(), interp.WithTick(1))
-	defer vm.Close()
+	p := prof.New()
+	vm := interp.New(r.build(), interp.WithProfiler(p), interp.WithTick(1))
 	if err := vm.Run(ctx); err != nil {
+		_ = vm.Close()
+		return err
+	}
+	if err := vm.Close(); err != nil {
 		return err
 	}
 
-	printProfile(r.out, vm.Profile())
+	printProfile(r.out, p.Metrics())
 	return nil
 }
 
@@ -635,54 +641,113 @@ func printFrames(out io.Writer, vm *interp.Interpreter) {
 	}
 }
 
-func printProfile(out io.Writer, snap interp.Snapshot) {
-	fmt.Fprintf(out, "profile samples: %d\n", snap.Samples)
-	if len(snap.Funcs) > 0 {
+// printProfile renders the metrics emitted by a prof.Profiler as the human-
+// readable profile table. It groups the flat metric stream back into functions,
+// per-instruction samples, opcodes, and JIT counters, computing percentages
+// from the totals.
+func printProfile(out io.Writer, metrics []prof.Metric) {
+	var total uint64
+	funcs := map[int]uint64{}
+	ips := map[int][]ipSample{}
+	var opcodes []opcodeSample
+	jit := map[string]uint64{}
+
+	for _, m := range metrics {
+		switch m.Name {
+		case "vm_samples_total":
+			total = uint64(m.Value)
+		case "vm_func_samples_total":
+			funcs[metricLabelInt(m, "func")] = uint64(m.Value)
+		case "vm_func_ip_samples_total":
+			fn := metricLabelInt(m, "func")
+			ips[fn] = append(ips[fn], ipSample{metricLabelInt(m, "ip"), uint64(m.Value)})
+		case "vm_opcode_samples_total":
+			opcodes = append(opcodes, opcodeSample{metricLabel(m, "opcode"), uint64(m.Value)})
+		default:
+			if name, ok := strings.CutPrefix(m.Name, "vm_jit_"); ok {
+				jit[strings.TrimSuffix(name, "_total")] = uint64(m.Value)
+			}
+		}
+	}
+
+	fmt.Fprintf(out, "profile samples: %d\n", total)
+	order := sortedKeys(funcs)
+	if len(order) > 0 {
 		fmt.Fprintln(out, "functions:")
 		fmt.Fprintln(out, "func\tsamples\t%")
-		for _, fn := range snap.Funcs {
-			if fn.Samples == 0 {
-				continue
-			}
-			fmt.Fprintf(out, "%d\t%d\t%s\n", fn.Index, fn.Samples, formatPercent(fn.Percent))
+		for _, fn := range order {
+			fmt.Fprintf(out, "%d\t%d\t%s\n", fn, funcs[fn], formatPercent(percentage(funcs[fn], total)))
 		}
 	}
-	for _, fn := range snap.Funcs {
-		if len(fn.IPs) == 0 {
+	for _, fn := range order {
+		samples := ips[fn]
+		if len(samples) == 0 {
 			continue
 		}
-		fmt.Fprintf(out, "func %d ips:\n", fn.Index)
+		sort.Slice(samples, func(a, b int) bool { return samples[a].offset < samples[b].offset })
+		fmt.Fprintf(out, "func %d ips:\n", fn)
 		fmt.Fprintln(out, "ip\tsamples\t%")
-		for _, ip := range fn.IPs {
-			fmt.Fprintf(out, "%04d\t%d\t%s\n", ip.Offset, ip.Samples, formatPercent(ip.Percent))
+		for _, ip := range samples {
+			fmt.Fprintf(out, "%04d\t%d\t%s\n", ip.offset, ip.samples, formatPercent(percentage(ip.samples, funcs[fn])))
 		}
 	}
-	if len(snap.Opcodes) > 0 {
+	if len(opcodes) > 0 {
 		fmt.Fprintln(out, "opcodes:")
 		fmt.Fprintln(out, "opcode\tsamples\t%")
-		for _, op := range snap.Opcodes {
-			fmt.Fprintf(out, "%s\t%d\t%s\n", opcodeLabel(op.Code), op.Samples, formatPercent(op.Percent))
+		for _, op := range opcodes {
+			fmt.Fprintf(out, "%s\t%d\t%s\n", op.name, op.samples, formatPercent(percentage(op.samples, total)))
 		}
 	}
-	if snap.JIT != (interp.JIT{}) {
-		jit := snap.JIT
+	if jit["attempts"]+jit["emits"]+jit["links"]+jit["skips"]+jit["errors"]+jit["bytes"] > 0 {
 		fmt.Fprintln(out, "jit:")
 		fmt.Fprintln(out, "attempts\temits\tlinks\tskips\terrors\tbytes")
 		fmt.Fprintf(out, "%d\t%d\t%d\t%d\t%d\t%d\n",
-			jit.Attempts, jit.Emits, jit.Links, jit.Skips, jit.Errors, jit.Bytes)
+			jit["attempts"], jit["emits"], jit["links"], jit["skips"], jit["errors"], jit["bytes"])
 	}
+}
+
+type ipSample struct {
+	offset  int
+	samples uint64
+}
+
+type opcodeSample struct {
+	name    string
+	samples uint64
 }
 
 func formatPercent(v float64) string {
 	return fmt.Sprintf("%.1f%%", v)
 }
 
-func opcodeLabel(code byte) string {
-	op := instr.Opcode(code)
-	if typ := instr.TypeOf(op); typ.Mnemonic != "" {
-		return typ.Mnemonic
+func percentage(samples, total uint64) float64 {
+	if total == 0 {
+		return 0
 	}
-	return fmt.Sprintf("0x%02X", code)
+	return float64(samples) / float64(total) * 100
+}
+
+func metricLabel(m prof.Metric, key string) string {
+	for _, l := range m.Labels {
+		if l.Key == key {
+			return l.Value
+		}
+	}
+	return ""
+}
+
+func metricLabelInt(m prof.Metric, key string) int {
+	v, _ := strconv.Atoi(metricLabel(m, key))
+	return v
+}
+
+func sortedKeys(m map[int]uint64) []int {
+	keys := make([]int, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+	return keys
 }
 
 // normalize converts "@N" absolute byte targets in branch instructions to relative

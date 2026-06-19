@@ -41,13 +41,13 @@ For pooled execution, use `pool.Profile()`. `NewPool` creates one shared
 `Tracer` for all members; `Put`/`Close` flush member-local samples into it, and
 shared JIT counters are recorded when compilation is published.
 
-Internal hot-path counters:
+Internal hot-path methods:
 
 | Method | Use |
 |---|---|
 | `Add(fn, ip, op)` | record one sample |
 | `Samples(fn)` | function sample count; used by JIT threshold checks |
-| `Range(fn,start,end)` | sample count for byte range `[start,end)` |
+| `AddMetric(name, value, labels...)` | record a named counter-style metric |
 
 Public reporting APIs:
 
@@ -57,20 +57,20 @@ Public reporting APIs:
 | `Pool.Profile()` | shared aggregate for all flushed pool members |
 | `Tracer.Profile()` | shared aggregate for a manually shared tracer |
 
-`Snapshot` includes total samples, function/IP/opcode samples, and JIT counters. Function percent relative to total samples, IP percent to its function, opcode percent to total samples. `Interpreter.Profile()` merges the current interpreter's unflushed local samples with its shared `Tracer`; `Tracer.Profile()` reports only the shared aggregate.
+Metrics include total samples, function/IP/opcode samples, and named JIT counters. Function percent relative to total samples, IP percent to its function, opcode percent to total samples. `Interpreter.Profile()` merges the current interpreter's unflushed local samples with its shared `Tracer`; `Tracer.Profile()` reports only the shared aggregate.
 
-## JIT Counters
+## JIT Metrics
 
-`Snapshot().JIT` records aggregate JIT activity.
+JIT activity is exported as ordinary named metrics.
 
-| Counter | Meaning |
+| Metric | Meaning |
 |---|---|
-| `Attempts` | function-level tracing/native compilation attempts |
-| `Emits` | native trace objects emitted |
-| `Links` | callable function entries installed |
-| `Skips` | reserved; trace-only JIT leaves this at zero |
-| `Errors` | buffer, compile, or link errors |
-| `Bytes` | total emitted native code bytes |
+| `vm_jit_attempts_total` | function-level tracing/native compilation attempts |
+| `vm_jit_emits_total` | native trace objects emitted |
+| `vm_jit_links_total` | callable function entries installed |
+| `vm_jit_skips_total` | reserved; trace-only JIT leaves this at zero |
+| `vm_jit_errors_total` | buffer, compile, or link errors |
+| `vm_jit_bytes_total` | total emitted native code bytes |
 
 ## Profile-Guided JIT
 
