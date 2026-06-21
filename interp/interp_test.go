@@ -3445,6 +3445,151 @@ func TestInterpreter_Release(t *testing.T) {
 	})
 }
 
+// gcCloser is a leaf heap value that records how many times it was finalized,
+// so a test can prove the tracing sweep runs io.Closer.Close on collected nodes.
+type gcCloser struct{ closed *int }
+
+func (gcCloser) Kind() types.Kind { return types.KindRef }
+func (gcCloser) Type() types.Type { return types.TypeRef }
+func (gcCloser) String() string   { return "gcCloser" }
+func (c gcCloser) Close() error   { *c.closed++; return nil }
+
+func TestInterpreter_gc(t *testing.T) {
+	oneRef := types.NewStructType(types.NewStructField(types.TypeRef))
+	twoRef := types.NewStructType(types.NewStructField(types.TypeRef), types.NewStructField(types.TypeRef))
+
+	// link wires src.field -> dst as a counted reference, mirroring a STRUCT_SET:
+	// it stores the ref and retains the target the way the interpreter would.
+	link := func(i *Interpreter, src, field, dst int) {
+		i.heap[src].(*types.Struct).SetField(field, types.BoxRef(dst))
+		i.retain(dst)
+	}
+
+	t.Run("collects a cycle", func(t *testing.T) {
+		i, _ := New(program.New(nil))
+		defer i.Close()
+
+		a, _ := i.Alloc(types.NewStruct(oneRef))
+		b, _ := i.Alloc(types.NewStruct(oneRef))
+		link(i, a, 0, b)
+		link(i, b, 0, a)
+		// Drop the allocation temporaries; only the cross-edges remain, so plain
+		// refcounting can never reclaim the pair.
+		i.release(a)
+		i.release(b)
+		require.Equal(t, 1, i.rc[a])
+		require.Equal(t, 1, i.rc[b])
+
+		i.gc()
+
+		require.Nil(t, i.heap[a])
+		require.Nil(t, i.heap[b])
+		require.Zero(t, i.rc[a])
+		require.Zero(t, i.rc[b])
+		require.Contains(t, i.free, a)
+		require.Contains(t, i.free, b)
+	})
+
+	t.Run("keeps a rooted cycle", func(t *testing.T) {
+		i, _ := New(program.New(nil))
+		defer i.Close()
+
+		a, _ := i.Alloc(types.NewStruct(oneRef))
+		b, _ := i.Alloc(types.NewStruct(oneRef))
+		link(i, a, 0, b)
+		link(i, b, 0, a)
+		i.release(a)
+		i.release(b)
+		i.root(types.BoxRef(a)) // reachable from a GC root
+
+		i.gc()
+
+		require.NotNil(t, i.heap[a])
+		require.NotNil(t, i.heap[b])
+		require.NotContains(t, i.free, a)
+		require.NotContains(t, i.free, b)
+	})
+
+	t.Run("interned string in a cycle is re-internable", func(t *testing.T) {
+		i, _ := New(program.New(nil))
+		defer i.Close()
+
+		str := i.intern("ghost") // weak-held: only the cycle keeps it live
+		require.Contains(t, i.interned, "ghost")
+		require.Equal(t, 1, i.rc[int(str)])
+
+		a, _ := i.Alloc(types.NewStruct(twoRef))
+		b, _ := i.Alloc(types.NewStruct(oneRef))
+		link(i, a, 0, b)
+		link(i, b, 0, a)
+		// a -> str reuses the intern's own count as the edge; no extra retain.
+		i.heap[a].(*types.Struct).SetField(1, types.BoxRef(int(str)))
+		i.release(a)
+		i.release(b)
+
+		i.gc()
+
+		require.Nil(t, i.heap[a])
+		require.Nil(t, i.heap[b])
+		require.Nil(t, i.heap[int(str)])
+		require.NotContains(t, i.interned, "ghost")
+
+		again := i.intern("ghost")
+		require.Equal(t, types.String("ghost"), i.heap[int(again)])
+		require.Contains(t, i.interned, "ghost")
+	})
+
+	t.Run("does not inflate survivor refcount", func(t *testing.T) {
+		i, _ := New(program.New(nil))
+		defer i.Close()
+
+		require.NoError(t, i.Push(types.String("live")))
+		top, _ := i.Peek(0)
+		s := top.Ref() // rooted from the stack, rc == 1
+
+		d1, _ := i.Alloc(types.NewStruct(twoRef))
+		d2, _ := i.Alloc(types.NewStruct(oneRef))
+		link(i, d1, 0, d2)
+		link(i, d1, 1, s) // dead garbage also references the survivor
+		link(i, d2, 0, d1)
+		i.release(d1)
+		i.release(d2)
+		require.Equal(t, 2, i.rc[s]) // stack + dead edge
+
+		i.gc()
+
+		require.Nil(t, i.heap[d1])
+		require.Nil(t, i.heap[d2])
+		require.NotNil(t, i.heap[s])
+		require.Equal(t, 1, i.rc[s]) // dead edge removed, not pinned
+
+		_, err := i.Pop() // releasing the last root now frees it
+		require.NoError(t, err)
+		require.Nil(t, i.heap[s])
+		require.Contains(t, i.free, s)
+	})
+
+	t.Run("finalizes a closer in a dead cycle", func(t *testing.T) {
+		i, _ := New(program.New(nil))
+		defer i.Close()
+
+		closed := 0
+		c, _ := i.Alloc(gcCloser{closed: &closed}) // leaf, rc == 1 == d1 -> c edge
+		d1, _ := i.Alloc(types.NewStruct(twoRef))
+		d2, _ := i.Alloc(types.NewStruct(oneRef))
+		link(i, d1, 0, d2)
+		i.heap[d1].(*types.Struct).SetField(1, types.BoxRef(c))
+		link(i, d2, 0, d1)
+		i.release(d1)
+		i.release(d2)
+
+		i.gc()
+
+		require.Nil(t, i.heap[c])
+		require.Equal(t, 1, closed)
+	})
+}
+
 func TestInterpreter_Global(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
 		prog := program.New(

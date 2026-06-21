@@ -1312,19 +1312,12 @@ func (i *Interpreter) release(addr int) {
 		i.rc[addr]--
 		if i.rc[addr] == 0 {
 			v := i.heap[addr]
-			if s, ok := v.(types.String); ok {
-				delete(i.interned, string(s))
-			}
 			if t, ok := v.(types.Traceable); ok {
 				for _, r := range t.Refs() {
 					stack = append(stack, int(r))
 				}
 			}
-			if c, ok := v.(io.Closer); ok {
-				_ = c.Close()
-			}
-			i.heap[addr] = nil
-			i.free = append(i.free, addr)
+			i.reclaim(addr, v)
 		}
 	}
 }
@@ -1357,6 +1350,15 @@ func (i *Interpreter) unroot(n int) {
 }
 
 func (i *Interpreter) gc() {
+	i.mark()
+	i.sweep()
+}
+
+// mark negates every live refcount, then walks the object graph from the roots,
+// flipping each reachable slot back to its original positive count. When it
+// returns, survivors hold positive counts, unreachable-but-allocated slots are
+// negative, and free slots remain zero.
+func (i *Interpreter) mark() {
 	for j := 1; j < len(i.heap); j++ {
 		if i.rc[j] < 0 {
 			i.rc[j] = 0
@@ -1371,27 +1373,23 @@ func (i *Interpreter) gc() {
 			stack = append(stack, addr)
 		}
 	}
+	pushBox := func(val types.Boxed) {
+		if val.Kind() == types.KindRef {
+			push(val.Ref())
+		}
+	}
 
 	for j := 0; j < i.sp; j++ {
-		val := i.stack[j]
-		if val.Kind() == types.KindRef {
-			push(val.Ref())
-		}
+		pushBox(i.stack[j])
 	}
 	for _, val := range i.constants {
-		if val.Kind() == types.KindRef {
-			push(val.Ref())
-		}
+		pushBox(val)
 	}
 	for _, val := range i.globals {
-		if val.Kind() == types.KindRef {
-			push(val.Ref())
-		}
+		pushBox(val)
 	}
 	for _, val := range i.roots {
-		if val.Kind() == types.KindRef {
-			push(val.Ref())
-		}
+		pushBox(val)
 	}
 	for j := 0; j < i.fp; j++ {
 		push(i.frames[j].ref)
@@ -1409,14 +1407,43 @@ func (i *Interpreter) gc() {
 			}
 		}
 	}
+}
 
-	for j := 0; j < len(i.heap); j++ {
-		if i.rc[j] < 0 {
-			i.heap[j] = nil
-			i.rc[j] = 0
-			i.free = append(i.free, j)
+// sweep frees every slot mark left negative. For each dead object it first
+// removes that object's contribution to its live referents' counts, so the
+// surviving graph's refcounts stay exact and survivors are not pinned by edges
+// from collected garbage. Dead->dead edges are skipped: the referent is zeroed
+// by its own sweep.
+func (i *Interpreter) sweep() {
+	for j := 1; j < len(i.heap); j++ {
+		if i.rc[j] >= 0 {
+			continue
 		}
+		v := i.heap[j]
+		if t, ok := v.(types.Traceable); ok {
+			for _, ref := range t.Refs() {
+				if r := int(ref); i.rc[r] > 0 {
+					i.rc[r]--
+				}
+			}
+		}
+		i.rc[j] = 0
+		i.reclaim(j, v)
 	}
+}
+
+// reclaim finalizes slot addr holding v: it drops interned-string and
+// OS-resource bookkeeping, clears the slot, and returns it to the free list. The
+// caller has already decided addr is dead and settled its referents' counts.
+func (i *Interpreter) reclaim(addr int, v types.Value) {
+	if s, ok := v.(types.String); ok {
+		delete(i.interned, string(s))
+	}
+	if c, ok := v.(io.Closer); ok {
+		_ = c.Close()
+	}
+	i.heap[addr] = nil
+	i.free = append(i.free, addr)
 }
 
 func unboxRef[T types.Value](i *Interpreter, val types.Boxed) T {
