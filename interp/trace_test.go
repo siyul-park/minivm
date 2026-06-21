@@ -22,7 +22,7 @@ func TestInterpreter_flush(t *testing.T) {
 	prog := program.New([]instr.Instruction{
 		instr.New(instr.I32_CONST, 1),
 	})
-	i := New(prog, WithProfiler(pr), WithTick(1), WithThreshold(-1))
+	i, _ := New(prog, WithProfiler(pr), WithTick(1), WithThreshold(-1))
 	defer i.Close()
 
 	require.NoError(t, i.Run(context.Background()))
@@ -44,7 +44,7 @@ func TestTracer_Capture(t *testing.T) {
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.YIELD),
 		})
-		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		i, _ := New(prog, WithTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
 		tr, err := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})

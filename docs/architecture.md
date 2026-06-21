@@ -13,6 +13,7 @@ Read when a change crosses package boundaries or depends on state ownership.
 | `interp.Tracer` or profile options | `profile.md` |
 | `interp/threaded.go` or `interp/jit*.go` | `jit-internals.md`, `instruction-set.md` |
 | `analysis/`, `transform/`, `optimize/`, `pass/` | `pass-system.md` |
+| `verify/` or admitting untrusted bytecode | `verification.md` |
 | `cli/` or `cmd/minivm/` | `guides/repl.md` |
 
 Boundary rules: `instr` stays leaf-like, `types` must not import `interp`, and optimizer code flows through `pass.Pipeline` + `pass.Manager`.
@@ -23,7 +24,8 @@ Import direction: `A → B` means `A` imports `B`.
 
 ```text
 program → instr
-interp  → program, instr, types, asm, pass, analysis
+verify  → instr, types, program, analysis, pass
+interp  → program, instr, types, asm, pass, analysis, verify
 asm/arm64 → asm
 analysis → pass, types, instr
 transform → analysis, pass, types, instr, program
@@ -172,6 +174,17 @@ O2  ConstantFoldingPass → AlgebraicSimplificationPass → ConstantDeduplicatio
 
 Transform passes mutate `*program.Program` in-place: edit `prog.Code` bytes and `prog.Constants`.
 
+### `verify/`
+
+Static pre-execution validator. `verify.Verify(prog, opts...)` proves each
+function slot decodes within bounds, references valid opcodes and in-range
+pool/local/upval indices, has valid branch targets and proper termination, and
+(where statically determinable) keeps the operand stack balanced and
+type-consistent. It reuses `analysis.BasicBlocksAnalysis` through `pass.Manager`
+and keeps `instr`/`types`/`program` leaf-like — its abstract kind lattice reuses
+`types.Kind` rather than defining a parallel enum. `interp.New` runs it when
+`WithVerify(true)` is set. See `verification.md`.
+
 ### `cli/`
 
 Top-level command tree, interactive REPL, and shared stack/value formatting live flat in one package. `cli.Root()` returns the `minivm` cobra command (REPL by default) plus subcommands. `cli.NewRunCommand(fs.FS)` builds `run <file>` and accepts any `io/fs.FS`, so embedders can use `os.DirFS`, `embed.FS`, or `fstest.MapFS`. `cli.NewREPL(in, out, fs WriteFS)` constructs the REPL directly; pass `nil` to disable `.load`/`.save`. `cli.WriteFS` extends `fs.FS` with `Create`; `cli.OS()` returns the host filesystem. `cli.WithFS(WriteFS)` overrides the filesystem used by `run` and the REPL's `.load` / `.save`.
@@ -205,7 +218,8 @@ Thin entrypoint around `cli.Root().Execute()`.
 2. optimize.Optimize(prog) [optional AOT]
    └─ CF → (AS) → CD → (DCE), each requesting BasicBlocksAnalysis
 
-3. interp.New(prog, opts...)
+3. interp.New(prog, opts...) → (*Interpreter, error)
+   ├─ if WithVerify(true): verify.Verify(prog) → *VerifyError on malformed bytecode
    ├─ threadedCompiler.Compile(prog.Code) → i.code[0]
    └─ for each *Function constant j:
       threadedCompiler.Compile(fn.Code) → i.code[j+1]

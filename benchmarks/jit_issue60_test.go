@@ -39,14 +39,16 @@ func BenchmarkJITIssue60(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
 			b.Run("interp", func(b *testing.B) {
-				runMiniVMProgram(b, interp.New(tt.program, interp.WithThreshold(-1)), tt.want)
+				vm, _ := interp.New(tt.program, interp.WithThreshold(-1))
+				runMiniVMProgram(b, vm, tt.want)
 			})
 			b.Run("jit", func(b *testing.B) {
-				runMiniVMProgram(b, interp.New(
+				vm, _ := interp.New(
 					tt.program,
 					interp.WithTick(1),
 					interp.WithThreshold(1),
-				), tt.want)
+				)
+				runMiniVMProgram(b, vm, tt.want)
 			})
 		})
 	}

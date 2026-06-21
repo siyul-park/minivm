@@ -65,6 +65,7 @@ If `codegraph` reports the index is stale or not initialized, fall back to grep/
 | Ref/GC/host function | `docs/memory-model.md`, `docs/value-representation.md` | `interp/host.go`, `interp/threaded.go`, `types/` | `go test ./interp ./types` |
 | JIT/ARM64 backend | `docs/jit-internals.md`, `docs/value-representation.md` | `interp/jit*.go`, `asm/`, `asm/arm64/` | `go test ./asm/... ./interp` |
 | Optimizer/pass | `docs/pass-system.md` | `analysis/`, `transform/`, `optimize/`, `pass/` | `go test ./analysis ./transform ./optimize ./pass` |
+| Bytecode verification / untrusted input | `docs/verification.md` | `verify/`, `interp/interp.go` | `go test ./verify ./interp` |
 | REPL/CLI | `docs/guides/repl.md` | `cli/`, `cmd/minivm/`, `instr/parse.go` | `go test ./cli/... ./cmd/minivm ./instr` |
 | Debugger / stepping | `docs/debugging.md`, `docs/profile.md` | `interp/debugger.go`, `cli/repl.go` | `go test -race -run 'TestInterpreter_WithDebugger|TestDebugger_Breakpoints' ./interp` |
 | Style-only change | `docs/coding-patterns.md` | touched package | package tests |
@@ -83,6 +84,7 @@ Read only relevant docs.
 | `docs/instruction-set.md` | adding or debugging opcodes |
 | `docs/jit-internals.md` | modifying threaded/JIT compilation |
 | `docs/pass-system.md` | adding optimization or analysis passes |
+| `docs/verification.md` | verifying bytecode or admitting untrusted programs |
 | `docs/coding-patterns.md` | writing new code |
 | `docs/guides/add-opcode.md` | implementing a new instruction |
 | `docs/guides/add-architecture.md` | adding a new JIT backend |

@@ -266,3 +266,9 @@ func TypeOf(op Opcode) Type {
 	}
 	return Type{}
 }
+
+// Valid reports whether op is a defined opcode with encoding metadata.
+func Valid(op Opcode) bool {
+	_, ok := types[op]
+	return ok
+}

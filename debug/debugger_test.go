@@ -15,7 +15,7 @@ func TestDebugger(t *testing.T) {
 	t.Run("breakpoint stops before instruction", func(t *testing.T) {
 		dbg := NewDebugger()
 		id := dbg.Break(0, 0)
-		i := interp.New(program.New([]instr.Instruction{
+		i, _ := interp.New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
 		}), interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
 		defer i.Close()
@@ -37,7 +37,7 @@ func TestDebugger(t *testing.T) {
 		id := dbg.BreakIf(0, 5, func(i *interp.Interpreter) bool {
 			return i.Len() == 1
 		})
-		i := interp.New(program.New([]instr.Instruction{
+		i, _ := interp.New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.DROP),
 		}), interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
@@ -52,7 +52,7 @@ func TestDebugger(t *testing.T) {
 	t.Run("helpers inspect current frame", func(t *testing.T) {
 		dbg := NewDebugger()
 		dbg.Break(0, 0)
-		i := interp.New(program.New([]instr.Instruction{
+		i, _ := interp.New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
 		}), interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
 		defer i.Close()
@@ -92,7 +92,7 @@ func TestDebugger(t *testing.T) {
 	t.Run("step enters call", func(t *testing.T) {
 		dbg := NewDebugger()
 		dbg.Break(0, 3)
-		i := interp.New(makeCallProg(), interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
+		i, _ := interp.New(makeCallProg(), interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
@@ -114,7 +114,7 @@ func TestDebugger(t *testing.T) {
 	t.Run("next steps over call", func(t *testing.T) {
 		dbg := NewDebugger()
 		dbg.Break(0, 3)
-		i := interp.New(makeCallProg(), interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
+		i, _ := interp.New(makeCallProg(), interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), ErrStopped)
@@ -129,7 +129,7 @@ func TestDebugger(t *testing.T) {
 	t.Run("finish stops in caller", func(t *testing.T) {
 		dbg := NewDebugger()
 		dbg.Break(0, 3)
-		i := interp.New(makeCallProg(), interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
+		i, _ := interp.New(makeCallProg(), interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), ErrStopped)

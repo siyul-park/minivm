@@ -68,6 +68,21 @@ func TestNewRunCommand(t *testing.T) {
 
 	t.Run("runtime error propagates", func(t *testing.T) {
 		fsys := fstest.MapFS{
+			"divzero.mvm": &fstest.MapFile{Data: []byte("0000:\ti32.const 0x00000001\n0005:\ti32.const 0x00000000\n0010:\ti32.div_s\n")},
+		}
+		var out bytes.Buffer
+		cmd := NewRunCommand(fsys)
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs([]string{"divzero.mvm"})
+
+		err := cmd.ExecuteContext(context.Background())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "run divzero.mvm")
+	})
+
+	t.Run("verification rejects malformed program", func(t *testing.T) {
+		fsys := fstest.MapFS{
 			"underflow.mvm": &fstest.MapFile{Data: []byte("0000:\tdrop\n")},
 		}
 		var out bytes.Buffer
@@ -78,7 +93,7 @@ func TestNewRunCommand(t *testing.T) {
 
 		err := cmd.ExecuteContext(context.Background())
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "run underflow.mvm")
+		require.Contains(t, err.Error(), "verify underflow.mvm")
 	})
 
 	t.Run("requires exactly one arg", func(t *testing.T) {

@@ -36,7 +36,10 @@ func NewRunCommand(fsys fs.FS) *cobra.Command {
 			return fmt.Errorf("parse %s: %w", path, err)
 		}
 
-		vm := interp.New(prog)
+		vm, err := interp.New(prog, interp.WithVerify(true))
+		if err != nil {
+			return fmt.Errorf("verify %s: %w", path, err)
+		}
 		defer vm.Close()
 
 		if err := vm.Run(cmd.Context()); err != nil {

@@ -101,14 +101,14 @@ func TestExtension_Lower(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		threaded := New(prog, WithRegistry(r), WithThreshold(-1))
+		threaded, _ := New(prog, WithRegistry(r), WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(600), want)
 
-		jit := New(prog, WithRegistry(r), WithTick(1), WithThreshold(1))
+		jit, _ := New(prog, WithRegistry(r), WithTick(1), WithThreshold(1))
 		defer jit.Close()
 		require.NoError(t, jit.Run(context.Background()))
 		got, err := jit.Pop()
@@ -152,7 +152,7 @@ func TestExtension_Lower(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		jit := New(prog, WithRegistry(r), WithTick(1), WithThreshold(1))
+		jit, _ := New(prog, WithRegistry(r), WithTick(1), WithThreshold(1))
 		defer jit.Close()
 		require.NoError(t, jit.Run(context.Background()))
 		got, err := jit.Pop()

@@ -14,6 +14,7 @@ import (
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
+	"github.com/siyul-park/minivm/verify"
 )
 
 type Interpreter struct {
@@ -104,6 +105,7 @@ type option struct {
 	maxHeap int
 	tick    int
 	fuel    uint64
+	verify  bool
 }
 
 var (
@@ -210,7 +212,19 @@ func WithFuel(val uint64) func(*option) {
 	return func(o *option) { o.fuel = val }
 }
 
-func New(prog *program.Program, opts ...func(*option)) *Interpreter {
+// WithVerify enables static verification of prog before execution. When on,
+// New runs verify.Verify and returns the resulting *verify.VerifyError for
+// malformed bytecode instead of constructing an interpreter. It defaults off so
+// trusted first-party programs pay no verification cost; enable it for
+// untrusted or externally loaded bytecode.
+func WithVerify(on bool) func(*option) {
+	return func(o *option) { o.verify = on }
+}
+
+// New builds an interpreter for prog. With WithVerify enabled it first runs
+// verify.Verify and returns a *verify.VerifyError when the bytecode is
+// malformed; otherwise the error is always nil.
+func New(prog *program.Program, opts ...func(*option)) (*Interpreter, error) {
 	opt := option{
 		frame:     128,
 		globals:   128,
@@ -222,6 +236,21 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	for _, o := range opts {
 		o(&opt)
 	}
+
+	if opt.verify {
+		var vopts []verify.Option
+		if opt.registry != nil {
+			ids := make([]uint8, len(opt.registry.exts))
+			for i := range opt.registry.exts {
+				ids[i] = uint8(i)
+			}
+			vopts = append(vopts, verify.WithExtensions(ids...))
+		}
+		if err := verify.Verify(prog, vopts...); err != nil {
+			return nil, err
+		}
+	}
+
 	if opt.frame <= 0 {
 		opt.frame = 1
 	}
@@ -344,7 +373,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		i.cache = nil
 	}
 
-	return i
+	return i, nil
 }
 
 func (e *RuntimeError) Error() string {
