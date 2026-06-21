@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/siyul-park/minivm/debug"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/prof"
@@ -83,7 +84,7 @@ type REPL struct {
 	codeLen   int // byte length of instr.Marshal(instrs); updated incrementally
 	constants []types.Value
 	types     []types.Type
-	debugger  *interp.Debugger // nil until first .break; breakpoint storage only
+	debugger  *debug.Debugger // nil until first .break; breakpoint storage only
 }
 
 // NewREPL returns a new REPL that reads from in and writes to out. fs
@@ -450,7 +451,7 @@ func (r *REPL) doDebug(ctx context.Context, scanner *bufio.Scanner) error {
 		return nil
 	}
 
-	dbg := interp.NewDebugger()
+	dbg := debug.NewDebugger()
 	if r.debugger != nil {
 		for _, bp := range r.debugger.Breakpoints() {
 			if bp.Enabled {
@@ -460,12 +461,12 @@ func (r *REPL) doDebug(ctx context.Context, scanner *bufio.Scanner) error {
 	}
 	dbg.Step()
 
-	vm := interp.New(r.build(), interp.WithDebugger(dbg))
+	vm := interp.New(r.build(), interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
 	defer vm.Close()
 
 	for {
 		err := vm.Run(ctx)
-		if errors.Is(err, interp.ErrStopped) {
+		if errors.Is(err, debug.ErrStopped) {
 			r.printStop(dbg.Stop(), vm)
 			done, loopErr := r.debugLoop(ctx, scanner, vm, dbg)
 			if loopErr != nil {
@@ -486,7 +487,7 @@ func (r *REPL) doDebug(ctx context.Context, scanner *bufio.Scanner) error {
 	return nil
 }
 
-func (r *REPL) debugLoop(ctx context.Context, scanner *bufio.Scanner, vm *interp.Interpreter, dbg *interp.Debugger) (done bool, err error) {
+func (r *REPL) debugLoop(ctx context.Context, scanner *bufio.Scanner, vm *interp.Interpreter, dbg *debug.Debugger) (done bool, err error) {
 	for {
 		fmt.Fprint(r.out, debugPrompt)
 		if !scanner.Scan() {
@@ -561,7 +562,7 @@ func (r *REPL) debugLoop(ctx context.Context, scanner *bufio.Scanner, vm *interp
 	}
 }
 
-func (r *REPL) printStop(stop interp.Stop, vm *interp.Interpreter) {
+func (r *REPL) printStop(stop debug.Stop, vm *interp.Interpreter) {
 	if stop.Breakpoint != 0 {
 		fmt.Fprintf(r.out, "breakpoint %d at func=%d ip=%04d", stop.Breakpoint, stop.Func, stop.IP)
 	} else {
@@ -577,7 +578,7 @@ func (r *REPL) printStop(stop interp.Stop, vm *interp.Interpreter) {
 
 func (r *REPL) ensureDebugger() {
 	if r.debugger == nil {
-		r.debugger = interp.NewDebugger()
+		r.debugger = debug.NewDebugger()
 	}
 }
 

@@ -1,11 +1,11 @@
-package interp
+package debug
 
 import (
 	"errors"
 	"sort"
-)
 
-var ErrStopped = errors.New("debug stopped")
+	"github.com/siyul-park/minivm/interp"
+)
 
 type Stop struct {
 	Func       int
@@ -19,7 +19,7 @@ type Breakpoint struct {
 	IP      int
 	Enabled bool
 	Hits    uint64
-	Cond    func(*Interpreter) bool
+	Cond    func(*interp.Interpreter) bool
 }
 
 type Debugger struct {
@@ -52,16 +52,7 @@ const (
 	debugFinish
 )
 
-func WithDebugger(d *Debugger) func(*option) {
-	return func(o *option) {
-		if d == nil {
-			d = NewDebugger()
-		}
-		o.hook = d.Hook
-		o.tick = 1
-		o.threshold = -1
-	}
-}
+var ErrStopped = errors.New("debug stopped")
 
 func NewDebugger() *Debugger {
 	return &Debugger{
@@ -70,7 +61,7 @@ func NewDebugger() *Debugger {
 	}
 }
 
-func (d *Debugger) Hook(i *Interpreter) error {
+func (d *Debugger) Hook(i *interp.Interpreter) error {
 	fn, ip, fp := i.Func(), i.IP(), i.FP()
 	if s := d.skip; s != nil {
 		d.skip = nil
@@ -132,7 +123,7 @@ func (d *Debugger) Break(fn, ip int) int {
 	return d.BreakIf(fn, ip, nil)
 }
 
-func (d *Debugger) BreakIf(fn, ip int, cond func(*Interpreter) bool) int {
+func (d *Debugger) BreakIf(fn, ip int, cond func(*interp.Interpreter) bool) int {
 	d.init()
 	id := d.next
 	d.next++
@@ -177,7 +168,7 @@ func (d *Debugger) Breakpoints() []Breakpoint {
 	return out
 }
 
-func (d *Debugger) breakpoint(i *Interpreter, fn, ip int) *Breakpoint {
+func (d *Debugger) breakpoint(i *interp.Interpreter, fn, ip int) *Breakpoint {
 	d.init()
 	var hit *Breakpoint
 	for _, bp := range d.breakpoints {
