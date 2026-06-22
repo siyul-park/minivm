@@ -34,16 +34,6 @@ cli → instr, interp, program, types, cobra
 cmd/minivm → cli
 ```
 
-Core paths:
-
-```text
-program → instr → nothing
-interp → program, instr, types, asm, pass, analysis
-asm/arm64 → asm
-optimize → transform → analysis → pass
-cli → instr, interp, program, types, cobra
-```
-
 ## Component Responsibilities
 
 ### `program/`

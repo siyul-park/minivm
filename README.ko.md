@@ -5,6 +5,8 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/siyul-park/minivm.svg)](https://pkg.go.dev/github.com/siyul-park/minivm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+[English](README.md) · **한국어**
+
 **어디에나 손쉽게 내장하는 빠른 바이트코드 VM.**
 
 minivm은 Go 프로그램 안에서 작은 바이트코드 프로그램을 실행하고, 호스트 함수를 호출하며, 스택/힙/fuel/hook 제한 아래에서 동작합니다. 시작은 빠른 스레디드 인터프리터, 핫 함수와 루프는 트레이스 JIT가 네이티브 ARM64 코드로 자동 컴파일합니다.

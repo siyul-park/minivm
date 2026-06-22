@@ -73,26 +73,26 @@ If `codegraph` reports the index is stale or not initialized, fall back to grep/
 
 ## Documentation Index
 
-Read only relevant docs.
+The Task Router above routes by task; this catalogs what each doc covers. Read only relevant docs.
 
-| Document | Read when… |
+| Document | Covers |
 |---|---|
-| `docs/architecture.md` | tracing execution or debugging across packages |
-| `docs/value-representation.md` | modifying boxed values or JIT passing |
-| `docs/memory-model.md` | touching refs, closures, GC, host functions |
-| `docs/profile.md` | modifying profiling or tick cadence |
-| `docs/instruction-set.md` | adding or debugging opcodes |
-| `docs/jit-internals.md` | modifying threaded/JIT compilation |
-| `docs/pass-system.md` | adding optimization or analysis passes |
-| `docs/verification.md` | verifying bytecode or admitting untrusted programs |
-| `docs/coding-patterns.md` | writing new code |
-| `docs/guides/add-opcode.md` | implementing a new instruction |
-| `docs/guides/add-architecture.md` | adding a new JIT backend |
-| `docs/guides/repl.md` | extending or debugging the REPL |
-| `docs/compatibility.md` | Go version, platform support, CGO, build tags |
-| `docs/host-integration.md` | Marshal/Unmarshal, HostFunction, Go↔VM value conversion |
-| `docs/benchmarks.md` | measured performance, cross-runtime comparison, JIT notes |
-| `docs/debugging.md` | debugger hooks, stepping semantics, breakpoint behavior |
+| `docs/architecture.md` | component map, package boundaries, ownership, execution flow |
+| `docs/value-representation.md` | NaN-boxed `Boxed`, kind encoding, I64 heap spilling, dynamic `ref` |
+| `docs/memory-model.md` | heap layout, reference counting, mark-and-sweep GC, invariants |
+| `docs/profile.md` | sampling profiles, tick cadence, JIT thresholds, metrics |
+| `docs/instruction-set.md` | full opcode reference: stack effects, operand widths, JIT status |
+| `docs/jit-internals.md` | trace JIT contracts: tracer, lowerer, frame journal, calls, loops |
+| `docs/pass-system.md` | analysis manager, transform pipeline, optimizer levels |
+| `docs/verification.md` | static bytecode validator: checks, error sentinels, limits |
+| `docs/coding-patterns.md` | style authority: naming, file layout, errors, testing |
+| `docs/guides/add-opcode.md` | end-to-end checklist for adding an instruction |
+| `docs/guides/add-architecture.md` | checklist for adding a JIT backend |
+| `docs/guides/repl.md` | REPL commands, bytecode debugging, branch syntax |
+| `docs/compatibility.md` | Go version, platform matrix, CGO, build tags, `unsafe` usage |
+| `docs/host-integration.md` | `HostFunction`, `Marshal`/`Unmarshal`, host objects, extensions |
+| `docs/benchmarks.md` | measured performance, cross-runtime comparison, methodology |
+| `docs/debugging.md` | debugger API, breakpoints, stepping, inspection |
 
 ## Architecture Overview
 
