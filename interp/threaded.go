@@ -132,11 +132,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			cond := i.stack[i.sp-1].I32()
 			v2 := i.stack[i.sp-2]
 			v1 := i.stack[i.sp-3]
-			var result types.Boxed
+			result := v1
 			if cond == 0 {
 				result = v2
-			} else {
-				result = v1
 			}
 			i.releaseBox(result)
 			i.stack[i.sp-3] = result
@@ -863,10 +861,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxI32(v2 + v1)
+			i.stack[i.sp-1] = i.i32Add(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -876,10 +874,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxI32(v2 - v1)
+			i.stack[i.sp-1] = i.i32Sub(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -889,10 +887,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxI32(v2 * v1)
+			i.stack[i.sp-1] = i.i32Mul(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -902,13 +900,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
-			if v1 == 0 {
-				panic(ErrDivideByZero)
-			}
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
+			result := i.i32DivS(lhs, rhs)
 			i.sp--
-			i.stack[i.sp-1] = types.BoxI32(v2 / v1)
+			i.stack[i.sp-1] = result
 			i.fr.ip++
 		}
 	},
@@ -918,13 +914,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
-			if v1 == 0 {
-				panic(ErrDivideByZero)
-			}
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
+			result := i.i32DivU(lhs, rhs)
 			i.sp--
-			i.stack[i.sp-1] = types.BoxI32(int32(uint32(v2) / uint32(v1)))
+			i.stack[i.sp-1] = result
 			i.fr.ip++
 		}
 	},
@@ -934,13 +928,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
-			if v1 == 0 {
-				panic(ErrDivideByZero)
-			}
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
+			result := i.i32RemS(lhs, rhs)
 			i.sp--
-			i.stack[i.sp-1] = types.BoxI32(v2 % v1)
+			i.stack[i.sp-1] = result
 			i.fr.ip++
 		}
 	},
@@ -950,13 +942,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
-			if v1 == 0 {
-				panic(ErrDivideByZero)
-			}
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
+			result := i.i32RemU(lhs, rhs)
 			i.sp--
-			i.stack[i.sp-1] = types.BoxI32(int32(uint32(v2) % uint32(v1)))
+			i.stack[i.sp-1] = result
 			i.fr.ip++
 		}
 	},
@@ -966,10 +956,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32() & 0x1F
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxI32(v2 << v1)
+			i.stack[i.sp-1] = i.i32Shl(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -979,10 +969,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32() & 0x1F
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxI32(v2 >> v1)
+			i.stack[i.sp-1] = i.i32ShrS(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -992,10 +982,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32() & 0x1F
-			v2 := uint32(i.stack[i.sp-2].I32())
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxI32(int32(v2 >> v1))
+			i.stack[i.sp-1] = i.i32ShrU(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1005,10 +995,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxI32(v1 ^ v2)
+			i.stack[i.sp-1] = i.i32Xor(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1018,10 +1008,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxI32(v1 & v2)
+			i.stack[i.sp-1] = i.i32And(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1031,10 +1021,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxI32(v1 | v2)
+			i.stack[i.sp-1] = i.i32Or(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1044,8 +1034,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			v := uint32(i.stack[i.sp-1].I32())
-			i.stack[i.sp-1] = types.BoxI32(int32(bits.LeadingZeros32(v)))
+			v := i.stack[i.sp-1].I32()
+			i.stack[i.sp-1] = i.i32Clz(v)
 			i.fr.ip++
 		}
 	},
@@ -1055,8 +1045,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			v := uint32(i.stack[i.sp-1].I32())
-			i.stack[i.sp-1] = types.BoxI32(int32(bits.TrailingZeros32(v)))
+			v := i.stack[i.sp-1].I32()
+			i.stack[i.sp-1] = i.i32Ctz(v)
 			i.fr.ip++
 		}
 	},
@@ -1066,8 +1056,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			v := uint32(i.stack[i.sp-1].I32())
-			i.stack[i.sp-1] = types.BoxI32(int32(bits.OnesCount32(v)))
+			v := i.stack[i.sp-1].I32()
+			i.stack[i.sp-1] = i.i32Popcnt(v)
 			i.fr.ip++
 		}
 	},
@@ -1077,10 +1067,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			amount := int(i.stack[i.sp-1].I32())
-			v := uint32(i.stack[i.sp-2].I32())
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxI32(int32(bits.RotateLeft32(v, amount)))
+			i.stack[i.sp-1] = i.i32Rotl(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1090,10 +1080,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			amount := int(i.stack[i.sp-1].I32())
-			v := uint32(i.stack[i.sp-2].I32())
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxI32(int32(bits.RotateLeft32(v, -amount)))
+			i.stack[i.sp-1] = i.i32Rotr(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1104,7 +1094,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(int32(int8(v)))
+			i.stack[i.sp-1] = i.i32Extend8S(v)
 			i.fr.ip++
 		}
 	},
@@ -1115,7 +1105,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(int32(int16(v)))
+			i.stack[i.sp-1] = i.i32Extend16S(v)
 			i.fr.ip++
 		}
 	},
@@ -1125,8 +1115,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			val := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(val == 0)
+			v := i.stack[i.sp-1].I32()
+			i.stack[i.sp-1] = i.i32Eqz(v)
 			i.fr.ip++
 		}
 	},
@@ -1136,10 +1126,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 == v1)
+			i.stack[i.sp-1] = i.i32Eq(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1149,10 +1139,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 != v1)
+			i.stack[i.sp-1] = i.i32Ne(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1162,10 +1152,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 < v1)
+			i.stack[i.sp-1] = i.i32LtS(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1175,10 +1165,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(uint32(v2) < uint32(v1))
+			i.stack[i.sp-1] = i.i32LtU(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1188,10 +1178,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 > v1)
+			i.stack[i.sp-1] = i.i32GtS(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1201,10 +1191,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(uint32(v2) > uint32(v1))
+			i.stack[i.sp-1] = i.i32GtU(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1214,10 +1204,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
+			i.stack[i.sp-1] = i.i32LeS(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1227,10 +1217,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(uint32(v2) <= uint32(v1))
+			i.stack[i.sp-1] = i.i32LeU(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1240,10 +1230,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
+			i.stack[i.sp-1] = i.i32GeS(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1253,10 +1243,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].I32()
-			v2 := i.stack[i.sp-2].I32()
+			rhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-2].I32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(uint32(v2) >= uint32(v1))
+			i.stack[i.sp-1] = i.i32GeU(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1267,7 +1257,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = i.boxI64(int64(v))
+			i.stack[i.sp-1] = i.i32ToI64S(v)
 			i.fr.ip++
 		}
 	},
@@ -1277,8 +1267,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			v := uint32(i.stack[i.sp-1].I32())
-			i.stack[i.sp-1] = i.boxI64(int64(v))
+			v := i.stack[i.sp-1].I32()
+			i.stack[i.sp-1] = i.i32ToI64U(v)
 			i.fr.ip++
 		}
 	},
@@ -1288,8 +1278,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			v := uint32(i.stack[i.sp-1].I32())
-			i.stack[i.sp-1] = types.BoxF32(float32(v))
+			v := i.stack[i.sp-1].I32()
+			i.stack[i.sp-1] = i.i32ToF32U(v)
 			i.fr.ip++
 		}
 	},
@@ -1300,7 +1290,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxF32(float32(v))
+			i.stack[i.sp-1] = i.i32ToF32S(v)
 			i.fr.ip++
 		}
 	},
@@ -1310,8 +1300,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			v := uint32(i.stack[i.sp-1].I32())
-			i.stack[i.sp-1] = types.BoxF64(float64(v))
+			v := i.stack[i.sp-1].I32()
+			i.stack[i.sp-1] = i.i32ToF64U(v)
 			i.fr.ip++
 		}
 	},
@@ -1322,7 +1312,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxF64(float64(v))
+			i.stack[i.sp-1] = i.i32ToF64S(v)
 			i.fr.ip++
 		}
 	},
@@ -1333,7 +1323,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxI32(int32(math.Float32bits(v)))
+			i.stack[i.sp-1] = i.i32ReinterpretF32(v)
 			i.fr.ip++
 		}
 	},
@@ -1370,10 +1360,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = i.boxI64(v2 + v1)
+			i.stack[i.sp-1] = i.i64Add(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1383,10 +1373,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = i.boxI64(v2 - v1)
+			i.stack[i.sp-1] = i.i64Sub(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1396,10 +1386,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = i.boxI64(v2 * v1)
+			i.stack[i.sp-1] = i.i64Mul(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1409,13 +1399,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
-			if v1 == 0 {
-				panic(ErrDivideByZero)
-			}
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
+			result := i.i64DivS(lhs, rhs)
 			i.sp--
-			i.stack[i.sp-1] = i.boxI64(v2 / v1)
+			i.stack[i.sp-1] = result
 			i.fr.ip++
 		}
 	},
@@ -1425,13 +1413,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
-			if v1 == 0 {
-				panic(ErrDivideByZero)
-			}
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
+			result := i.i64DivU(lhs, rhs)
 			i.sp--
-			i.stack[i.sp-1] = i.boxI64(int64(uint64(v2) / uint64(v1)))
+			i.stack[i.sp-1] = result
 			i.fr.ip++
 		}
 	},
@@ -1441,13 +1427,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
-			if v1 == 0 {
-				panic(ErrDivideByZero)
-			}
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
+			result := i.i64RemS(lhs, rhs)
 			i.sp--
-			i.stack[i.sp-1] = i.boxI64(v2 % v1)
+			i.stack[i.sp-1] = result
 			i.fr.ip++
 		}
 	},
@@ -1457,13 +1441,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
-			if v1 == 0 {
-				panic(ErrDivideByZero)
-			}
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
+			result := i.i64RemU(lhs, rhs)
 			i.sp--
-			i.stack[i.sp-1] = i.boxI64(int64(uint64(v2) % uint64(v1)))
+			i.stack[i.sp-1] = result
 			i.fr.ip++
 		}
 	},
@@ -1473,10 +1455,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = i.boxI64(int64(v2 << (v1 & 0x3F)))
+			i.stack[i.sp-1] = i.i64Shl(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1486,10 +1468,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = i.boxI64(v2 >> (v1 & 0x3F))
+			i.stack[i.sp-1] = i.i64ShrS(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1499,10 +1481,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = i.boxI64(int64(uint64(v2) >> (v1 & 0x3F)))
+			i.stack[i.sp-1] = i.i64ShrU(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1512,10 +1494,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = i.boxI64(v1 ^ v2)
+			i.stack[i.sp-1] = i.i64Xor(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1525,10 +1507,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = i.boxI64(v1 & v2)
+			i.stack[i.sp-1] = i.i64And(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1538,10 +1520,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = i.boxI64(v1 | v2)
+			i.stack[i.sp-1] = i.i64Or(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1551,8 +1533,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			v := uint64(i.unboxI64(i.stack[i.sp-1]))
-			i.stack[i.sp-1] = i.boxI64(int64(bits.LeadingZeros64(v)))
+			v := i.unboxI64(i.stack[i.sp-1])
+			i.stack[i.sp-1] = i.i64Clz(v)
 			i.fr.ip++
 		}
 	},
@@ -1562,8 +1544,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			v := uint64(i.unboxI64(i.stack[i.sp-1]))
-			i.stack[i.sp-1] = i.boxI64(int64(bits.TrailingZeros64(v)))
+			v := i.unboxI64(i.stack[i.sp-1])
+			i.stack[i.sp-1] = i.i64Ctz(v)
 			i.fr.ip++
 		}
 	},
@@ -1573,8 +1555,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			v := uint64(i.unboxI64(i.stack[i.sp-1]))
-			i.stack[i.sp-1] = i.boxI64(int64(bits.OnesCount64(v)))
+			v := i.unboxI64(i.stack[i.sp-1])
+			i.stack[i.sp-1] = i.i64Popcnt(v)
 			i.fr.ip++
 		}
 	},
@@ -1584,10 +1566,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			amount := int(i.unboxI64(i.stack[i.sp-1]))
-			v := uint64(i.unboxI64(i.stack[i.sp-2]))
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = i.boxI64(int64(bits.RotateLeft64(v, amount)))
+			i.stack[i.sp-1] = i.i64Rotl(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1597,10 +1579,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			amount := int(i.unboxI64(i.stack[i.sp-1]))
-			v := uint64(i.unboxI64(i.stack[i.sp-2]))
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = i.boxI64(int64(bits.RotateLeft64(v, -amount)))
+			i.stack[i.sp-1] = i.i64Rotr(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1611,7 +1593,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(int64(int8(v)))
+			i.stack[i.sp-1] = i.i64Extend8S(v)
 			i.fr.ip++
 		}
 	},
@@ -1622,7 +1604,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(int64(int16(v)))
+			i.stack[i.sp-1] = i.i64Extend16S(v)
 			i.fr.ip++
 		}
 	},
@@ -1633,7 +1615,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(int64(int32(v)))
+			i.stack[i.sp-1] = i.i64Extend32S(v)
 			i.fr.ip++
 		}
 	},
@@ -1643,8 +1625,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			val := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(val == 0)
+			v := i.unboxI64(i.stack[i.sp-1])
+			i.stack[i.sp-1] = i.i64Eqz(v)
 			i.fr.ip++
 		}
 	},
@@ -1654,10 +1636,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 == v1)
+			i.stack[i.sp-1] = i.i64Eq(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1667,10 +1649,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 != v1)
+			i.stack[i.sp-1] = i.i64Ne(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1680,10 +1662,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 < v1)
+			i.stack[i.sp-1] = i.i64LtS(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1693,10 +1675,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(uint64(v2) < uint64(v1))
+			i.stack[i.sp-1] = i.i64LtU(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1706,10 +1688,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 > v1)
+			i.stack[i.sp-1] = i.i64GtS(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1719,10 +1701,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(uint64(v2) > uint64(v1))
+			i.stack[i.sp-1] = i.i64GtU(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1732,10 +1714,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
+			i.stack[i.sp-1] = i.i64LeS(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1745,10 +1727,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(uint64(v2) <= uint64(v1))
+			i.stack[i.sp-1] = i.i64LeU(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1758,10 +1740,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
+			i.stack[i.sp-1] = i.i64GeS(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1771,10 +1753,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.unboxI64(i.stack[i.sp-1])
-			v2 := i.unboxI64(i.stack[i.sp-2])
+			rhs := i.unboxI64(i.stack[i.sp-1])
+			lhs := i.unboxI64(i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(uint64(v2) >= uint64(v1))
+			i.stack[i.sp-1] = i.i64GeU(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1785,7 +1767,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxI32(int32(v))
+			i.stack[i.sp-1] = i.i64ToI32(v)
 			i.fr.ip++
 		}
 	},
@@ -1796,7 +1778,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxF32(float32(v))
+			i.stack[i.sp-1] = i.i64ToF32S(v)
 			i.fr.ip++
 		}
 	},
@@ -1807,7 +1789,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxF32(float32(uint64(v)))
+			i.stack[i.sp-1] = i.i64ToF32U(v)
 			i.fr.ip++
 		}
 	},
@@ -1818,7 +1800,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxF64(float64(v))
+			i.stack[i.sp-1] = i.i64ToF64S(v)
 			i.fr.ip++
 		}
 	},
@@ -1829,7 +1811,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxF64(float64(uint64(v)))
+			i.stack[i.sp-1] = i.i64ToF64U(v)
 			i.fr.ip++
 		}
 	},
@@ -1840,7 +1822,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = i.boxI64(int64(math.Float64bits(v)))
+			i.stack[i.sp-1] = i.i64ReinterpretF64(v)
 			i.fr.ip++
 		}
 	},
@@ -1866,10 +1848,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F32()
-			v2 := i.stack[i.sp-2].F32()
+			rhs := i.stack[i.sp-1].F32()
+			lhs := i.stack[i.sp-2].F32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxF32(v2 + v1)
+			i.stack[i.sp-1] = i.f32Add(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1879,10 +1861,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F32()
-			v2 := i.stack[i.sp-2].F32()
+			rhs := i.stack[i.sp-1].F32()
+			lhs := i.stack[i.sp-2].F32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxF32(v2 - v1)
+			i.stack[i.sp-1] = i.f32Sub(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1892,10 +1874,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F32()
-			v2 := i.stack[i.sp-2].F32()
+			rhs := i.stack[i.sp-1].F32()
+			lhs := i.stack[i.sp-2].F32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxF32(v1 * v2)
+			i.stack[i.sp-1] = i.f32Mul(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1905,13 +1887,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F32()
-			v2 := i.stack[i.sp-2].F32()
-			if v1 == 0 {
-				panic(ErrDivideByZero)
-			}
+			rhs := i.stack[i.sp-1].F32()
+			lhs := i.stack[i.sp-2].F32()
+			result := i.f32Div(lhs, rhs)
 			i.sp--
-			i.stack[i.sp-1] = types.BoxF32(v2 / v1)
+			i.stack[i.sp-1] = result
 			i.fr.ip++
 		}
 	},
@@ -1922,7 +1902,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(float32(math.Abs(float64(v))))
+			i.stack[i.sp-1] = i.f32Abs(v)
 			i.fr.ip++
 		}
 	},
@@ -1933,7 +1913,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(-v)
+			i.stack[i.sp-1] = i.f32Neg(v)
 			i.fr.ip++
 		}
 	},
@@ -1944,7 +1924,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(float32(math.Sqrt(float64(v))))
+			i.stack[i.sp-1] = i.f32Sqrt(v)
 			i.fr.ip++
 		}
 	},
@@ -1955,7 +1935,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(float32(math.Ceil(float64(v))))
+			i.stack[i.sp-1] = i.f32Ceil(v)
 			i.fr.ip++
 		}
 	},
@@ -1966,7 +1946,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(float32(math.Floor(float64(v))))
+			i.stack[i.sp-1] = i.f32Floor(v)
 			i.fr.ip++
 		}
 	},
@@ -1977,7 +1957,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(float32(math.Trunc(float64(v))))
+			i.stack[i.sp-1] = i.f32Trunc(v)
 			i.fr.ip++
 		}
 	},
@@ -1988,7 +1968,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(float32(math.RoundToEven(float64(v))))
+			i.stack[i.sp-1] = i.f32Nearest(v)
 			i.fr.ip++
 		}
 	},
@@ -1998,10 +1978,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F32()
-			v2 := i.stack[i.sp-2].F32()
+			rhs := i.stack[i.sp-1].F32()
+			lhs := i.stack[i.sp-2].F32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxF32(float32(math.Min(float64(v2), float64(v1))))
+			i.stack[i.sp-1] = i.f32Min(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2011,10 +1991,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F32()
-			v2 := i.stack[i.sp-2].F32()
+			rhs := i.stack[i.sp-1].F32()
+			lhs := i.stack[i.sp-2].F32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxF32(float32(math.Max(float64(v2), float64(v1))))
+			i.stack[i.sp-1] = i.f32Max(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2024,10 +2004,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F32()
-			v2 := i.stack[i.sp-2].F32()
+			rhs := i.stack[i.sp-1].F32()
+			lhs := i.stack[i.sp-2].F32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxF32(float32(math.Copysign(float64(v2), float64(v1))))
+			i.stack[i.sp-1] = i.f32Copysign(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2037,10 +2017,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F32()
-			v2 := i.stack[i.sp-2].F32()
+			rhs := i.stack[i.sp-1].F32()
+			lhs := i.stack[i.sp-2].F32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 == v1)
+			i.stack[i.sp-1] = i.f32Eq(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2050,10 +2030,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F32()
-			v2 := i.stack[i.sp-2].F32()
+			rhs := i.stack[i.sp-1].F32()
+			lhs := i.stack[i.sp-2].F32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 != v1)
+			i.stack[i.sp-1] = i.f32Ne(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2063,10 +2043,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F32()
-			v2 := i.stack[i.sp-2].F32()
+			rhs := i.stack[i.sp-1].F32()
+			lhs := i.stack[i.sp-2].F32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 < v1)
+			i.stack[i.sp-1] = i.f32Lt(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2076,10 +2056,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F32()
-			v2 := i.stack[i.sp-2].F32()
+			rhs := i.stack[i.sp-1].F32()
+			lhs := i.stack[i.sp-2].F32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 > v1)
+			i.stack[i.sp-1] = i.f32Gt(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2089,10 +2069,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F32()
-			v2 := i.stack[i.sp-2].F32()
+			rhs := i.stack[i.sp-1].F32()
+			lhs := i.stack[i.sp-2].F32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
+			i.stack[i.sp-1] = i.f32Le(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2102,10 +2082,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F32()
-			v2 := i.stack[i.sp-2].F32()
+			rhs := i.stack[i.sp-1].F32()
+			lhs := i.stack[i.sp-2].F32()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
+			i.stack[i.sp-1] = i.f32Ge(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2116,7 +2096,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxI32(i.satI32(float64(v)))
+			i.stack[i.sp-1] = i.f32ToI32S(v)
 			i.fr.ip++
 		}
 	},
@@ -2127,7 +2107,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxI32(int32(i.satU32(float64(v))))
+			i.stack[i.sp-1] = i.f32ToI32U(v)
 			i.fr.ip++
 		}
 	},
@@ -2160,7 +2140,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF64(float64(v))
+			i.stack[i.sp-1] = i.f32ToF64(v)
 			i.fr.ip++
 		}
 	},
@@ -2171,7 +2151,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxF32(math.Float32frombits(uint32(v)))
+			i.stack[i.sp-1] = i.f32ReinterpretI32(v)
 			i.fr.ip++
 		}
 	},
@@ -2197,10 +2177,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F64()
-			v2 := i.stack[i.sp-2].F64()
+			rhs := i.stack[i.sp-1].F64()
+			lhs := i.stack[i.sp-2].F64()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxF64(v2 + v1)
+			i.stack[i.sp-1] = i.f64Add(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2210,10 +2190,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F64()
-			v2 := i.stack[i.sp-2].F64()
+			rhs := i.stack[i.sp-1].F64()
+			lhs := i.stack[i.sp-2].F64()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxF64(v2 - v1)
+			i.stack[i.sp-1] = i.f64Sub(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2223,10 +2203,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F64()
-			v2 := i.stack[i.sp-2].F64()
+			rhs := i.stack[i.sp-1].F64()
+			lhs := i.stack[i.sp-2].F64()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxF64(v1 * v2)
+			i.stack[i.sp-1] = i.f64Mul(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2236,13 +2216,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F64()
-			v2 := i.stack[i.sp-2].F64()
-			if v1 == 0 {
-				panic(ErrDivideByZero)
-			}
+			rhs := i.stack[i.sp-1].F64()
+			lhs := i.stack[i.sp-2].F64()
+			result := i.f64Div(lhs, rhs)
 			i.sp--
-			i.stack[i.sp-1] = types.BoxF64(v2 / v1)
+			i.stack[i.sp-1] = result
 			i.fr.ip++
 		}
 	},
@@ -2253,7 +2231,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(math.Abs(v))
+			i.stack[i.sp-1] = i.f64Abs(v)
 			i.fr.ip++
 		}
 	},
@@ -2264,7 +2242,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(-v)
+			i.stack[i.sp-1] = i.f64Neg(v)
 			i.fr.ip++
 		}
 	},
@@ -2275,7 +2253,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(math.Sqrt(v))
+			i.stack[i.sp-1] = i.f64Sqrt(v)
 			i.fr.ip++
 		}
 	},
@@ -2286,7 +2264,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(math.Ceil(v))
+			i.stack[i.sp-1] = i.f64Ceil(v)
 			i.fr.ip++
 		}
 	},
@@ -2297,7 +2275,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(math.Floor(v))
+			i.stack[i.sp-1] = i.f64Floor(v)
 			i.fr.ip++
 		}
 	},
@@ -2308,7 +2286,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(math.Trunc(v))
+			i.stack[i.sp-1] = i.f64Trunc(v)
 			i.fr.ip++
 		}
 	},
@@ -2319,7 +2297,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(math.RoundToEven(v))
+			i.stack[i.sp-1] = i.f64Nearest(v)
 			i.fr.ip++
 		}
 	},
@@ -2329,10 +2307,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F64()
-			v2 := i.stack[i.sp-2].F64()
+			rhs := i.stack[i.sp-1].F64()
+			lhs := i.stack[i.sp-2].F64()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxF64(math.Min(v2, v1))
+			i.stack[i.sp-1] = i.f64Min(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2342,10 +2320,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F64()
-			v2 := i.stack[i.sp-2].F64()
+			rhs := i.stack[i.sp-1].F64()
+			lhs := i.stack[i.sp-2].F64()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxF64(math.Max(v2, v1))
+			i.stack[i.sp-1] = i.f64Max(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2355,10 +2333,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F64()
-			v2 := i.stack[i.sp-2].F64()
+			rhs := i.stack[i.sp-1].F64()
+			lhs := i.stack[i.sp-2].F64()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxF64(math.Copysign(v2, v1))
+			i.stack[i.sp-1] = i.f64Copysign(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2368,10 +2346,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F64()
-			v2 := i.stack[i.sp-2].F64()
+			rhs := i.stack[i.sp-1].F64()
+			lhs := i.stack[i.sp-2].F64()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 == v1)
+			i.stack[i.sp-1] = i.f64Eq(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2381,10 +2359,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F64()
-			v2 := i.stack[i.sp-2].F64()
+			rhs := i.stack[i.sp-1].F64()
+			lhs := i.stack[i.sp-2].F64()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 != v1)
+			i.stack[i.sp-1] = i.f64Ne(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2394,10 +2372,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F64()
-			v2 := i.stack[i.sp-2].F64()
+			rhs := i.stack[i.sp-1].F64()
+			lhs := i.stack[i.sp-2].F64()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 < v1)
+			i.stack[i.sp-1] = i.f64Lt(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2407,10 +2385,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F64()
-			v2 := i.stack[i.sp-2].F64()
+			rhs := i.stack[i.sp-1].F64()
+			lhs := i.stack[i.sp-2].F64()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 > v1)
+			i.stack[i.sp-1] = i.f64Gt(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2420,10 +2398,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F64()
-			v2 := i.stack[i.sp-2].F64()
+			rhs := i.stack[i.sp-1].F64()
+			lhs := i.stack[i.sp-2].F64()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
+			i.stack[i.sp-1] = i.f64Le(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2433,10 +2411,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := i.stack[i.sp-1].F64()
-			v2 := i.stack[i.sp-2].F64()
+			rhs := i.stack[i.sp-1].F64()
+			lhs := i.stack[i.sp-2].F64()
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
+			i.stack[i.sp-1] = i.f64Ge(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -2447,7 +2425,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxI32(i.satI32(v))
+			i.stack[i.sp-1] = i.f64ToI32S(v)
 			i.fr.ip++
 		}
 	},
@@ -2458,7 +2436,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxI32(int32(i.satU32(v)))
+			i.stack[i.sp-1] = i.f64ToI32U(v)
 			i.fr.ip++
 		}
 	},
@@ -2491,7 +2469,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF32(float32(v))
+			i.stack[i.sp-1] = i.f64ToF32(v)
 			i.fr.ip++
 		}
 	},
@@ -2502,7 +2480,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			v := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxF64(math.Float64frombits(uint64(v)))
+			i.stack[i.sp-1] = i.f64ReinterpretI64(v)
 			i.fr.ip++
 		}
 	},
@@ -4318,6 +4296,532 @@ func (i *Interpreter) releaseValue(val types.Value) {
 	case types.Ref:
 		i.release(int(val))
 	}
+}
+
+func (i *Interpreter) i32Add(lhs, rhs int32) types.Boxed {
+	return types.BoxI32(lhs + rhs)
+}
+
+func (i *Interpreter) i32Sub(lhs, rhs int32) types.Boxed {
+	return types.BoxI32(lhs - rhs)
+}
+
+func (i *Interpreter) i32Mul(lhs, rhs int32) types.Boxed {
+	return types.BoxI32(lhs * rhs)
+}
+
+func (i *Interpreter) i32DivS(lhs, rhs int32) types.Boxed {
+	if rhs == 0 {
+		panic(ErrDivideByZero)
+	}
+	return types.BoxI32(lhs / rhs)
+}
+
+func (i *Interpreter) i32DivU(lhs, rhs int32) types.Boxed {
+	if rhs == 0 {
+		panic(ErrDivideByZero)
+	}
+	return types.BoxI32(int32(uint32(lhs) / uint32(rhs)))
+}
+
+func (i *Interpreter) i32RemS(lhs, rhs int32) types.Boxed {
+	if rhs == 0 {
+		panic(ErrDivideByZero)
+	}
+	return types.BoxI32(lhs % rhs)
+}
+
+func (i *Interpreter) i32RemU(lhs, rhs int32) types.Boxed {
+	if rhs == 0 {
+		panic(ErrDivideByZero)
+	}
+	return types.BoxI32(int32(uint32(lhs) % uint32(rhs)))
+}
+
+func (i *Interpreter) i32Shl(lhs, rhs int32) types.Boxed {
+	return types.BoxI32(lhs << (rhs & 0x1F))
+}
+
+func (i *Interpreter) i32ShrS(lhs, rhs int32) types.Boxed {
+	return types.BoxI32(lhs >> (rhs & 0x1F))
+}
+
+func (i *Interpreter) i32ShrU(lhs, rhs int32) types.Boxed {
+	return types.BoxI32(int32(uint32(lhs) >> (rhs & 0x1F)))
+}
+
+func (i *Interpreter) i32Xor(lhs, rhs int32) types.Boxed {
+	return types.BoxI32(lhs ^ rhs)
+}
+
+func (i *Interpreter) i32And(lhs, rhs int32) types.Boxed {
+	return types.BoxI32(lhs & rhs)
+}
+
+func (i *Interpreter) i32Or(lhs, rhs int32) types.Boxed {
+	return types.BoxI32(lhs | rhs)
+}
+
+func (i *Interpreter) i32Clz(v int32) types.Boxed {
+	return types.BoxI32(int32(bits.LeadingZeros32(uint32(v))))
+}
+
+func (i *Interpreter) i32Ctz(v int32) types.Boxed {
+	return types.BoxI32(int32(bits.TrailingZeros32(uint32(v))))
+}
+
+func (i *Interpreter) i32Popcnt(v int32) types.Boxed {
+	return types.BoxI32(int32(bits.OnesCount32(uint32(v))))
+}
+
+func (i *Interpreter) i32Rotl(lhs, rhs int32) types.Boxed {
+	return types.BoxI32(int32(bits.RotateLeft32(uint32(lhs), int(rhs))))
+}
+
+func (i *Interpreter) i32Rotr(lhs, rhs int32) types.Boxed {
+	return types.BoxI32(int32(bits.RotateLeft32(uint32(lhs), -int(rhs))))
+}
+
+func (i *Interpreter) i32Extend8S(v int32) types.Boxed {
+	return types.BoxI32(int32(int8(v)))
+}
+
+func (i *Interpreter) i32Extend16S(v int32) types.Boxed {
+	return types.BoxI32(int32(int16(v)))
+}
+
+func (i *Interpreter) i32Eqz(v int32) types.Boxed {
+	return types.BoxBool(v == 0)
+}
+
+func (i *Interpreter) i32Eq(lhs, rhs int32) types.Boxed {
+	return types.BoxBool(lhs == rhs)
+}
+
+func (i *Interpreter) i32Ne(lhs, rhs int32) types.Boxed {
+	return types.BoxBool(lhs != rhs)
+}
+
+func (i *Interpreter) i32LtS(lhs, rhs int32) types.Boxed {
+	return types.BoxBool(lhs < rhs)
+}
+
+func (i *Interpreter) i32LtU(lhs, rhs int32) types.Boxed {
+	return types.BoxBool(uint32(lhs) < uint32(rhs))
+}
+
+func (i *Interpreter) i32GtS(lhs, rhs int32) types.Boxed {
+	return types.BoxBool(lhs > rhs)
+}
+
+func (i *Interpreter) i32GtU(lhs, rhs int32) types.Boxed {
+	return types.BoxBool(uint32(lhs) > uint32(rhs))
+}
+
+func (i *Interpreter) i32LeS(lhs, rhs int32) types.Boxed {
+	return types.BoxBool(lhs <= rhs)
+}
+
+func (i *Interpreter) i32LeU(lhs, rhs int32) types.Boxed {
+	return types.BoxBool(uint32(lhs) <= uint32(rhs))
+}
+
+func (i *Interpreter) i32GeS(lhs, rhs int32) types.Boxed {
+	return types.BoxBool(lhs >= rhs)
+}
+
+func (i *Interpreter) i32GeU(lhs, rhs int32) types.Boxed {
+	return types.BoxBool(uint32(lhs) >= uint32(rhs))
+}
+
+func (i *Interpreter) i32ToI64S(v int32) types.Boxed {
+	return i.boxI64(int64(v))
+}
+
+func (i *Interpreter) i32ToI64U(v int32) types.Boxed {
+	return i.boxI64(int64(uint32(v)))
+}
+
+func (i *Interpreter) i32ToF32S(v int32) types.Boxed {
+	return types.BoxF32(float32(v))
+}
+
+func (i *Interpreter) i32ToF32U(v int32) types.Boxed {
+	return types.BoxF32(float32(uint32(v)))
+}
+
+func (i *Interpreter) i32ToF64S(v int32) types.Boxed {
+	return types.BoxF64(float64(v))
+}
+
+func (i *Interpreter) i32ToF64U(v int32) types.Boxed {
+	return types.BoxF64(float64(uint32(v)))
+}
+
+func (i *Interpreter) i32ReinterpretF32(v float32) types.Boxed {
+	return types.BoxI32(int32(math.Float32bits(v)))
+}
+
+func (i *Interpreter) i64Add(lhs, rhs int64) types.Boxed {
+	return i.boxI64(lhs + rhs)
+}
+
+func (i *Interpreter) i64Sub(lhs, rhs int64) types.Boxed {
+	return i.boxI64(lhs - rhs)
+}
+
+func (i *Interpreter) i64Mul(lhs, rhs int64) types.Boxed {
+	return i.boxI64(lhs * rhs)
+}
+
+func (i *Interpreter) i64DivS(lhs, rhs int64) types.Boxed {
+	if rhs == 0 {
+		panic(ErrDivideByZero)
+	}
+	return i.boxI64(lhs / rhs)
+}
+
+func (i *Interpreter) i64DivU(lhs, rhs int64) types.Boxed {
+	if rhs == 0 {
+		panic(ErrDivideByZero)
+	}
+	return i.boxI64(int64(uint64(lhs) / uint64(rhs)))
+}
+
+func (i *Interpreter) i64RemS(lhs, rhs int64) types.Boxed {
+	if rhs == 0 {
+		panic(ErrDivideByZero)
+	}
+	return i.boxI64(lhs % rhs)
+}
+
+func (i *Interpreter) i64RemU(lhs, rhs int64) types.Boxed {
+	if rhs == 0 {
+		panic(ErrDivideByZero)
+	}
+	return i.boxI64(int64(uint64(lhs) % uint64(rhs)))
+}
+
+func (i *Interpreter) i64Shl(lhs, rhs int64) types.Boxed {
+	return i.boxI64(lhs << (rhs & 0x3F))
+}
+
+func (i *Interpreter) i64ShrS(lhs, rhs int64) types.Boxed {
+	return i.boxI64(lhs >> (rhs & 0x3F))
+}
+
+func (i *Interpreter) i64ShrU(lhs, rhs int64) types.Boxed {
+	return i.boxI64(int64(uint64(lhs) >> (rhs & 0x3F)))
+}
+
+func (i *Interpreter) i64Xor(lhs, rhs int64) types.Boxed {
+	return i.boxI64(lhs ^ rhs)
+}
+
+func (i *Interpreter) i64And(lhs, rhs int64) types.Boxed {
+	return i.boxI64(lhs & rhs)
+}
+
+func (i *Interpreter) i64Or(lhs, rhs int64) types.Boxed {
+	return i.boxI64(lhs | rhs)
+}
+
+func (i *Interpreter) i64Clz(v int64) types.Boxed {
+	return i.boxI64(int64(bits.LeadingZeros64(uint64(v))))
+}
+
+func (i *Interpreter) i64Ctz(v int64) types.Boxed {
+	return i.boxI64(int64(bits.TrailingZeros64(uint64(v))))
+}
+
+func (i *Interpreter) i64Popcnt(v int64) types.Boxed {
+	return i.boxI64(int64(bits.OnesCount64(uint64(v))))
+}
+
+func (i *Interpreter) i64Rotl(lhs, rhs int64) types.Boxed {
+	return i.boxI64(int64(bits.RotateLeft64(uint64(lhs), int(rhs))))
+}
+
+func (i *Interpreter) i64Rotr(lhs, rhs int64) types.Boxed {
+	return i.boxI64(int64(bits.RotateLeft64(uint64(lhs), -int(rhs))))
+}
+
+func (i *Interpreter) i64Extend8S(v int64) types.Boxed {
+	return i.boxI64(int64(int8(v)))
+}
+
+func (i *Interpreter) i64Extend16S(v int64) types.Boxed {
+	return i.boxI64(int64(int16(v)))
+}
+
+func (i *Interpreter) i64Extend32S(v int64) types.Boxed {
+	return i.boxI64(int64(int32(v)))
+}
+
+func (i *Interpreter) i64Eqz(v int64) types.Boxed {
+	return types.BoxBool(v == 0)
+}
+
+func (i *Interpreter) i64Eq(lhs, rhs int64) types.Boxed {
+	return types.BoxBool(lhs == rhs)
+}
+
+func (i *Interpreter) i64Ne(lhs, rhs int64) types.Boxed {
+	return types.BoxBool(lhs != rhs)
+}
+
+func (i *Interpreter) i64LtS(lhs, rhs int64) types.Boxed {
+	return types.BoxBool(lhs < rhs)
+}
+
+func (i *Interpreter) i64LtU(lhs, rhs int64) types.Boxed {
+	return types.BoxBool(uint64(lhs) < uint64(rhs))
+}
+
+func (i *Interpreter) i64GtS(lhs, rhs int64) types.Boxed {
+	return types.BoxBool(lhs > rhs)
+}
+
+func (i *Interpreter) i64GtU(lhs, rhs int64) types.Boxed {
+	return types.BoxBool(uint64(lhs) > uint64(rhs))
+}
+
+func (i *Interpreter) i64LeS(lhs, rhs int64) types.Boxed {
+	return types.BoxBool(lhs <= rhs)
+}
+
+func (i *Interpreter) i64LeU(lhs, rhs int64) types.Boxed {
+	return types.BoxBool(uint64(lhs) <= uint64(rhs))
+}
+
+func (i *Interpreter) i64GeS(lhs, rhs int64) types.Boxed {
+	return types.BoxBool(lhs >= rhs)
+}
+
+func (i *Interpreter) i64GeU(lhs, rhs int64) types.Boxed {
+	return types.BoxBool(uint64(lhs) >= uint64(rhs))
+}
+
+func (i *Interpreter) i64ToI32(v int64) types.Boxed {
+	return types.BoxI32(int32(v))
+}
+
+func (i *Interpreter) i64ToF32S(v int64) types.Boxed {
+	return types.BoxF32(float32(v))
+}
+
+func (i *Interpreter) i64ToF32U(v int64) types.Boxed {
+	return types.BoxF32(float32(uint64(v)))
+}
+
+func (i *Interpreter) i64ToF64S(v int64) types.Boxed {
+	return types.BoxF64(float64(v))
+}
+
+func (i *Interpreter) i64ToF64U(v int64) types.Boxed {
+	return types.BoxF64(float64(uint64(v)))
+}
+
+func (i *Interpreter) i64ReinterpretF64(v float64) types.Boxed {
+	return i.boxI64(int64(math.Float64bits(v)))
+}
+
+func (i *Interpreter) f32Add(lhs, rhs float32) types.Boxed {
+	return types.BoxF32(lhs + rhs)
+}
+
+func (i *Interpreter) f32Sub(lhs, rhs float32) types.Boxed {
+	return types.BoxF32(lhs - rhs)
+}
+
+func (i *Interpreter) f32Mul(lhs, rhs float32) types.Boxed {
+	return types.BoxF32(lhs * rhs)
+}
+
+func (i *Interpreter) f32Div(lhs, rhs float32) types.Boxed {
+	if rhs == 0 {
+		panic(ErrDivideByZero)
+	}
+	return types.BoxF32(lhs / rhs)
+}
+
+func (i *Interpreter) f32Abs(v float32) types.Boxed {
+	return types.BoxF32(float32(math.Abs(float64(v))))
+}
+
+func (i *Interpreter) f32Neg(v float32) types.Boxed {
+	return types.BoxF32(-v)
+}
+
+func (i *Interpreter) f32Sqrt(v float32) types.Boxed {
+	return types.BoxF32(float32(math.Sqrt(float64(v))))
+}
+
+func (i *Interpreter) f32Ceil(v float32) types.Boxed {
+	return types.BoxF32(float32(math.Ceil(float64(v))))
+}
+
+func (i *Interpreter) f32Floor(v float32) types.Boxed {
+	return types.BoxF32(float32(math.Floor(float64(v))))
+}
+
+func (i *Interpreter) f32Trunc(v float32) types.Boxed {
+	return types.BoxF32(float32(math.Trunc(float64(v))))
+}
+
+func (i *Interpreter) f32Nearest(v float32) types.Boxed {
+	return types.BoxF32(float32(math.RoundToEven(float64(v))))
+}
+
+func (i *Interpreter) f32Min(lhs, rhs float32) types.Boxed {
+	return types.BoxF32(min(lhs, rhs))
+}
+
+func (i *Interpreter) f32Max(lhs, rhs float32) types.Boxed {
+	return types.BoxF32(max(lhs, rhs))
+}
+
+func (i *Interpreter) f32Copysign(lhs, rhs float32) types.Boxed {
+	return types.BoxF32(float32(math.Copysign(float64(lhs), float64(rhs))))
+}
+
+func (i *Interpreter) f32Eq(lhs, rhs float32) types.Boxed {
+	return types.BoxBool(lhs == rhs)
+}
+
+func (i *Interpreter) f32Ne(lhs, rhs float32) types.Boxed {
+	return types.BoxBool(lhs != rhs)
+}
+
+func (i *Interpreter) f32Lt(lhs, rhs float32) types.Boxed {
+	return types.BoxBool(lhs < rhs)
+}
+
+func (i *Interpreter) f32Gt(lhs, rhs float32) types.Boxed {
+	return types.BoxBool(lhs > rhs)
+}
+
+func (i *Interpreter) f32Le(lhs, rhs float32) types.Boxed {
+	return types.BoxBool(lhs <= rhs)
+}
+
+func (i *Interpreter) f32Ge(lhs, rhs float32) types.Boxed {
+	return types.BoxBool(lhs >= rhs)
+}
+
+func (i *Interpreter) f32ToI32S(v float32) types.Boxed {
+	return types.BoxI32(i.satI32(float64(v)))
+}
+
+func (i *Interpreter) f32ToI32U(v float32) types.Boxed {
+	return types.BoxI32(int32(i.satU32(float64(v))))
+}
+
+func (i *Interpreter) f32ToF64(v float32) types.Boxed {
+	return types.BoxF64(float64(v))
+}
+
+func (i *Interpreter) f32ReinterpretI32(v int32) types.Boxed {
+	return types.BoxF32(math.Float32frombits(uint32(v)))
+}
+
+func (i *Interpreter) f64Add(lhs, rhs float64) types.Boxed {
+	return types.BoxF64(lhs + rhs)
+}
+
+func (i *Interpreter) f64Sub(lhs, rhs float64) types.Boxed {
+	return types.BoxF64(lhs - rhs)
+}
+
+func (i *Interpreter) f64Mul(lhs, rhs float64) types.Boxed {
+	return types.BoxF64(lhs * rhs)
+}
+
+func (i *Interpreter) f64Div(lhs, rhs float64) types.Boxed {
+	if rhs == 0 {
+		panic(ErrDivideByZero)
+	}
+	return types.BoxF64(lhs / rhs)
+}
+
+func (i *Interpreter) f64Abs(v float64) types.Boxed {
+	return types.BoxF64(math.Abs(v))
+}
+
+func (i *Interpreter) f64Neg(v float64) types.Boxed {
+	return types.BoxF64(-v)
+}
+
+func (i *Interpreter) f64Sqrt(v float64) types.Boxed {
+	return types.BoxF64(math.Sqrt(v))
+}
+
+func (i *Interpreter) f64Ceil(v float64) types.Boxed {
+	return types.BoxF64(math.Ceil(v))
+}
+
+func (i *Interpreter) f64Floor(v float64) types.Boxed {
+	return types.BoxF64(math.Floor(v))
+}
+
+func (i *Interpreter) f64Trunc(v float64) types.Boxed {
+	return types.BoxF64(math.Trunc(v))
+}
+
+func (i *Interpreter) f64Nearest(v float64) types.Boxed {
+	return types.BoxF64(math.RoundToEven(v))
+}
+
+func (i *Interpreter) f64Min(lhs, rhs float64) types.Boxed {
+	return types.BoxF64(math.Min(lhs, rhs))
+}
+
+func (i *Interpreter) f64Max(lhs, rhs float64) types.Boxed {
+	return types.BoxF64(math.Max(lhs, rhs))
+}
+
+func (i *Interpreter) f64Copysign(lhs, rhs float64) types.Boxed {
+	return types.BoxF64(math.Copysign(lhs, rhs))
+}
+
+func (i *Interpreter) f64Eq(lhs, rhs float64) types.Boxed {
+	return types.BoxBool(lhs == rhs)
+}
+
+func (i *Interpreter) f64Ne(lhs, rhs float64) types.Boxed {
+	return types.BoxBool(lhs != rhs)
+}
+
+func (i *Interpreter) f64Lt(lhs, rhs float64) types.Boxed {
+	return types.BoxBool(lhs < rhs)
+}
+
+func (i *Interpreter) f64Gt(lhs, rhs float64) types.Boxed {
+	return types.BoxBool(lhs > rhs)
+}
+
+func (i *Interpreter) f64Le(lhs, rhs float64) types.Boxed {
+	return types.BoxBool(lhs <= rhs)
+}
+
+func (i *Interpreter) f64Ge(lhs, rhs float64) types.Boxed {
+	return types.BoxBool(lhs >= rhs)
+}
+
+func (i *Interpreter) f64ToI32S(v float64) types.Boxed {
+	return types.BoxI32(i.satI32(v))
+}
+
+func (i *Interpreter) f64ToI32U(v float64) types.Boxed {
+	return types.BoxI32(int32(i.satU32(v)))
+}
+
+func (i *Interpreter) f64ToF32(v float64) types.Boxed {
+	return types.BoxF32(float32(v))
+}
+
+func (i *Interpreter) f64ReinterpretI64(v int64) types.Boxed {
+	return types.BoxF64(math.Float64frombits(uint64(v)))
 }
 
 // satI32 truncates v toward zero into a signed i32, saturating out-of-range

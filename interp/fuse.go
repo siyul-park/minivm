@@ -1,8 +1,6 @@
 package interp
 
 import (
-	"math"
-	"math/bits"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
@@ -469,7 +467,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs + rhs)
+			i.stack[i.sp-1] = i.i32Add(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_SUB:
@@ -479,7 +477,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs - rhs)
+			i.stack[i.sp-1] = i.i32Sub(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_MUL:
@@ -489,7 +487,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs * rhs)
+			i.stack[i.sp-1] = i.i32Mul(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_DIV_S:
@@ -502,7 +500,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 				panic(ErrDivideByZero)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs / rhs)
+			i.stack[i.sp-1] = i.i32DivS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_DIV_U:
@@ -515,7 +513,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 				panic(ErrDivideByZero)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(int32(uint32(lhs) / uint32(rhs)))
+			i.stack[i.sp-1] = i.i32DivU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_REM_S:
@@ -528,7 +526,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 				panic(ErrDivideByZero)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs % rhs)
+			i.stack[i.sp-1] = i.i32RemS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_REM_U:
@@ -541,7 +539,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 				panic(ErrDivideByZero)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(int32(uint32(lhs) % uint32(rhs)))
+			i.stack[i.sp-1] = i.i32RemU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_SHL:
@@ -552,7 +550,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			rhs := rhs(i)
 			rhs &= 0x1F
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs << rhs)
+			i.stack[i.sp-1] = i.i32Shl(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_SHR_S:
@@ -563,7 +561,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			rhs := rhs(i)
 			rhs &= 0x1F
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs >> rhs)
+			i.stack[i.sp-1] = i.i32ShrS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_SHR_U:
@@ -574,7 +572,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			rhs := rhs(i)
 			rhs &= 0x1F
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(int32(uint32(lhs) >> rhs))
+			i.stack[i.sp-1] = i.i32ShrU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_XOR:
@@ -584,7 +582,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs ^ rhs)
+			i.stack[i.sp-1] = i.i32Xor(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_AND:
@@ -594,7 +592,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs & rhs)
+			i.stack[i.sp-1] = i.i32And(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_OR:
@@ -604,7 +602,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs | rhs)
+			i.stack[i.sp-1] = i.i32Or(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_ROTL:
@@ -614,7 +612,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := uint32(i.stack[i.sp-1].I32())
-			i.stack[i.sp-1] = types.BoxI32(int32(bits.RotateLeft32(lhs, int(rhs))))
+			i.stack[i.sp-1] = i.i32Rotl(int32(lhs), rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_ROTR:
@@ -624,7 +622,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := uint32(i.stack[i.sp-1].I32())
-			i.stack[i.sp-1] = types.BoxI32(int32(bits.RotateLeft32(lhs, -int(rhs))))
+			i.stack[i.sp-1] = i.i32Rotr(int32(lhs), rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_EQ:
@@ -634,7 +632,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(lhs == rhs)
+			i.stack[i.sp-1] = i.i32Eq(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_NE:
@@ -644,7 +642,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(lhs != rhs)
+			i.stack[i.sp-1] = i.i32Ne(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_LT_S:
@@ -654,7 +652,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(lhs < rhs)
+			i.stack[i.sp-1] = i.i32LtS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_LT_U:
@@ -664,7 +662,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(uint32(lhs) < uint32(rhs))
+			i.stack[i.sp-1] = i.i32LtU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_GT_S:
@@ -674,7 +672,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(lhs > rhs)
+			i.stack[i.sp-1] = i.i32GtS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_GT_U:
@@ -684,7 +682,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(uint32(lhs) > uint32(rhs))
+			i.stack[i.sp-1] = i.i32GtU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_LE_S:
@@ -694,7 +692,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(lhs <= rhs)
+			i.stack[i.sp-1] = i.i32LeS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_LE_U:
@@ -704,7 +702,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(uint32(lhs) <= uint32(rhs))
+			i.stack[i.sp-1] = i.i32LeU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_GE_S:
@@ -714,7 +712,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(lhs >= rhs)
+			i.stack[i.sp-1] = i.i32GeS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_GE_U:
@@ -724,7 +722,7 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(uint32(lhs) >= uint32(rhs))
+			i.stack[i.sp-1] = i.i32GeU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	}
@@ -742,7 +740,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs + rhs)
+			i.stack[i.sp-1] = i.i32Add(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_SUB:
@@ -751,7 +749,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs - rhs)
+			i.stack[i.sp-1] = i.i32Sub(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_MUL:
@@ -760,7 +758,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs * rhs)
+			i.stack[i.sp-1] = i.i32Mul(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_DIV_S:
@@ -777,7 +775,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs / rhs)
+			i.stack[i.sp-1] = i.i32DivS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_DIV_U:
@@ -794,7 +792,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(int32(uint32(lhs) / uint32(rhs)))
+			i.stack[i.sp-1] = i.i32DivU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_REM_S:
@@ -811,7 +809,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs % rhs)
+			i.stack[i.sp-1] = i.i32RemS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_REM_U:
@@ -828,7 +826,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(int32(uint32(lhs) % uint32(rhs)))
+			i.stack[i.sp-1] = i.i32RemU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_SHL:
@@ -838,7 +836,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs << rhs)
+			i.stack[i.sp-1] = i.i32Shl(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_SHR_S:
@@ -848,7 +846,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs >> rhs)
+			i.stack[i.sp-1] = i.i32ShrS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_SHR_U:
@@ -858,7 +856,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(int32(uint32(lhs) >> rhs))
+			i.stack[i.sp-1] = i.i32ShrU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_XOR:
@@ -867,7 +865,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs ^ rhs)
+			i.stack[i.sp-1] = i.i32Xor(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_AND:
@@ -876,7 +874,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs & rhs)
+			i.stack[i.sp-1] = i.i32And(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_OR:
@@ -885,27 +883,25 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxI32(lhs | rhs)
+			i.stack[i.sp-1] = i.i32Or(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_ROTL:
-		amount := int(rhs)
 		return func(i *Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			lhs := uint32(i.stack[i.sp-1].I32())
-			i.stack[i.sp-1] = types.BoxI32(int32(bits.RotateLeft32(lhs, amount)))
+			lhs := i.stack[i.sp-1].I32()
+			i.stack[i.sp-1] = i.i32Rotl(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_ROTR:
-		amount := -int(rhs)
 		return func(i *Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			lhs := uint32(i.stack[i.sp-1].I32())
-			i.stack[i.sp-1] = types.BoxI32(int32(bits.RotateLeft32(lhs, amount)))
+			lhs := i.stack[i.sp-1].I32()
+			i.stack[i.sp-1] = i.i32Rotr(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_EQ:
@@ -914,7 +910,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(lhs == rhs)
+			i.stack[i.sp-1] = i.i32Eq(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_NE:
@@ -923,7 +919,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(lhs != rhs)
+			i.stack[i.sp-1] = i.i32Ne(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_LT_S:
@@ -932,7 +928,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(lhs < rhs)
+			i.stack[i.sp-1] = i.i32LtS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_LT_U:
@@ -941,7 +937,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(uint32(lhs) < uint32(rhs))
+			i.stack[i.sp-1] = i.i32LtU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_GT_S:
@@ -950,7 +946,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(lhs > rhs)
+			i.stack[i.sp-1] = i.i32GtS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_GT_U:
@@ -959,7 +955,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(uint32(lhs) > uint32(rhs))
+			i.stack[i.sp-1] = i.i32GtU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_LE_S:
@@ -968,7 +964,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(lhs <= rhs)
+			i.stack[i.sp-1] = i.i32LeS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_LE_U:
@@ -977,7 +973,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(uint32(lhs) <= uint32(rhs))
+			i.stack[i.sp-1] = i.i32LeU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_GE_S:
@@ -986,7 +982,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(lhs >= rhs)
+			i.stack[i.sp-1] = i.i32GeS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_GE_U:
@@ -995,7 +991,7 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = types.BoxBool(uint32(lhs) >= uint32(rhs))
+			i.stack[i.sp-1] = i.i32GeU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	}
@@ -1014,7 +1010,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs + rhs)
+			i.stack[i.sp-1] = i.i64Add(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_SUB:
@@ -1024,7 +1020,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs - rhs)
+			i.stack[i.sp-1] = i.i64Sub(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_MUL:
@@ -1034,7 +1030,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs * rhs)
+			i.stack[i.sp-1] = i.i64Mul(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_DIV_S:
@@ -1047,7 +1043,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 				panic(ErrDivideByZero)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs / rhs)
+			i.stack[i.sp-1] = i.i64DivS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_DIV_U:
@@ -1060,7 +1056,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 				panic(ErrDivideByZero)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(int64(uint64(lhs) / uint64(rhs)))
+			i.stack[i.sp-1] = i.i64DivU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_REM_S:
@@ -1073,7 +1069,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 				panic(ErrDivideByZero)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs % rhs)
+			i.stack[i.sp-1] = i.i64RemS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_REM_U:
@@ -1086,7 +1082,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 				panic(ErrDivideByZero)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(int64(uint64(lhs) % uint64(rhs)))
+			i.stack[i.sp-1] = i.i64RemU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_SHL:
@@ -1096,7 +1092,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i) & 0x3F
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs << rhs)
+			i.stack[i.sp-1] = i.i64Shl(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_SHR_S:
@@ -1106,7 +1102,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i) & 0x3F
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs >> rhs)
+			i.stack[i.sp-1] = i.i64ShrS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_SHR_U:
@@ -1116,7 +1112,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i) & 0x3F
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(int64(uint64(lhs) >> rhs))
+			i.stack[i.sp-1] = i.i64ShrU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_XOR:
@@ -1126,7 +1122,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs ^ rhs)
+			i.stack[i.sp-1] = i.i64Xor(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_AND:
@@ -1136,7 +1132,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs & rhs)
+			i.stack[i.sp-1] = i.i64And(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_OR:
@@ -1146,7 +1142,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs | rhs)
+			i.stack[i.sp-1] = i.i64Or(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_ROTL:
@@ -1156,7 +1152,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			amount := int(rhs(i))
 			lhs := uint64(i.unboxI64(i.stack[i.sp-1]))
-			i.stack[i.sp-1] = i.boxI64(int64(bits.RotateLeft64(lhs, amount)))
+			i.stack[i.sp-1] = i.i64Rotl(int64(lhs), int64(amount))
 			i.fr.ip += size + 1
 		}
 	case instr.I64_ROTR:
@@ -1166,7 +1162,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			amount := int(rhs(i))
 			lhs := uint64(i.unboxI64(i.stack[i.sp-1]))
-			i.stack[i.sp-1] = i.boxI64(int64(bits.RotateLeft64(lhs, -amount)))
+			i.stack[i.sp-1] = i.i64Rotr(int64(lhs), int64(amount))
 			i.fr.ip += size + 1
 		}
 	case instr.I64_EQ:
@@ -1176,7 +1172,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(lhs == rhs)
+			i.stack[i.sp-1] = i.i64Eq(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_NE:
@@ -1186,7 +1182,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(lhs != rhs)
+			i.stack[i.sp-1] = i.i64Ne(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_LT_S:
@@ -1196,7 +1192,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(lhs < rhs)
+			i.stack[i.sp-1] = i.i64LtS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_LT_U:
@@ -1206,7 +1202,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(uint64(lhs) < uint64(rhs))
+			i.stack[i.sp-1] = i.i64LtU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_GT_S:
@@ -1216,7 +1212,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(lhs > rhs)
+			i.stack[i.sp-1] = i.i64GtS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_GT_U:
@@ -1226,7 +1222,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(uint64(lhs) > uint64(rhs))
+			i.stack[i.sp-1] = i.i64GtU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_LE_S:
@@ -1236,7 +1232,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(lhs <= rhs)
+			i.stack[i.sp-1] = i.i64LeS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_LE_U:
@@ -1246,7 +1242,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(uint64(lhs) <= uint64(rhs))
+			i.stack[i.sp-1] = i.i64LeU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_GE_S:
@@ -1256,7 +1252,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(lhs >= rhs)
+			i.stack[i.sp-1] = i.i64GeS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_GE_U:
@@ -1266,7 +1262,7 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 			}
 			rhs := rhs(i)
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(uint64(lhs) >= uint64(rhs))
+			i.stack[i.sp-1] = i.i64GeU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	}
@@ -1284,7 +1280,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs + rhs)
+			i.stack[i.sp-1] = i.i64Add(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_SUB:
@@ -1293,7 +1289,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs - rhs)
+			i.stack[i.sp-1] = i.i64Sub(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_MUL:
@@ -1302,7 +1298,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs * rhs)
+			i.stack[i.sp-1] = i.i64Mul(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_DIV_S:
@@ -1319,7 +1315,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs / rhs)
+			i.stack[i.sp-1] = i.i64DivS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_DIV_U:
@@ -1336,7 +1332,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(int64(uint64(lhs) / uint64(rhs)))
+			i.stack[i.sp-1] = i.i64DivU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_REM_S:
@@ -1353,7 +1349,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs % rhs)
+			i.stack[i.sp-1] = i.i64RemS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_REM_U:
@@ -1370,7 +1366,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(int64(uint64(lhs) % uint64(rhs)))
+			i.stack[i.sp-1] = i.i64RemU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_SHL:
@@ -1380,7 +1376,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs << rhs)
+			i.stack[i.sp-1] = i.i64Shl(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_SHR_S:
@@ -1390,7 +1386,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs >> rhs)
+			i.stack[i.sp-1] = i.i64ShrS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_SHR_U:
@@ -1400,7 +1396,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(int64(uint64(lhs) >> rhs))
+			i.stack[i.sp-1] = i.i64ShrU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_XOR:
@@ -1409,7 +1405,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs ^ rhs)
+			i.stack[i.sp-1] = i.i64Xor(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_AND:
@@ -1418,7 +1414,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs & rhs)
+			i.stack[i.sp-1] = i.i64And(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_OR:
@@ -1427,27 +1423,25 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = i.boxI64(lhs | rhs)
+			i.stack[i.sp-1] = i.i64Or(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_ROTL:
-		amount := int(rhs)
 		return func(i *Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			lhs := uint64(i.unboxI64(i.stack[i.sp-1]))
-			i.stack[i.sp-1] = i.boxI64(int64(bits.RotateLeft64(lhs, amount)))
+			lhs := i.unboxI64(i.stack[i.sp-1])
+			i.stack[i.sp-1] = i.i64Rotl(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_ROTR:
-		amount := -int(rhs)
 		return func(i *Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			lhs := uint64(i.unboxI64(i.stack[i.sp-1]))
-			i.stack[i.sp-1] = i.boxI64(int64(bits.RotateLeft64(lhs, amount)))
+			lhs := i.unboxI64(i.stack[i.sp-1])
+			i.stack[i.sp-1] = i.i64Rotr(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_EQ:
@@ -1456,7 +1450,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(lhs == rhs)
+			i.stack[i.sp-1] = i.i64Eq(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_NE:
@@ -1465,7 +1459,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(lhs != rhs)
+			i.stack[i.sp-1] = i.i64Ne(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_LT_S:
@@ -1474,7 +1468,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(lhs < rhs)
+			i.stack[i.sp-1] = i.i64LtS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_LT_U:
@@ -1483,7 +1477,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(uint64(lhs) < uint64(rhs))
+			i.stack[i.sp-1] = i.i64LtU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_GT_S:
@@ -1492,7 +1486,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(lhs > rhs)
+			i.stack[i.sp-1] = i.i64GtS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_GT_U:
@@ -1501,7 +1495,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(uint64(lhs) > uint64(rhs))
+			i.stack[i.sp-1] = i.i64GtU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_LE_S:
@@ -1510,7 +1504,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(lhs <= rhs)
+			i.stack[i.sp-1] = i.i64LeS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_LE_U:
@@ -1519,7 +1513,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(uint64(lhs) <= uint64(rhs))
+			i.stack[i.sp-1] = i.i64LeU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_GE_S:
@@ -1528,7 +1522,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(lhs >= rhs)
+			i.stack[i.sp-1] = i.i64GeS(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I64_GE_U:
@@ -1537,7 +1531,7 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.unboxI64(i.stack[i.sp-1])
-			i.stack[i.sp-1] = types.BoxBool(uint64(lhs) >= uint64(rhs))
+			i.stack[i.sp-1] = i.i64GeU(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	}
@@ -1556,7 +1550,7 @@ func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(lhs + rhs)
+			i.stack[i.sp-1] = i.f32Add(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_SUB:
@@ -1566,7 +1560,7 @@ func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(lhs - rhs)
+			i.stack[i.sp-1] = i.f32Sub(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_MUL:
@@ -1576,7 +1570,7 @@ func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(lhs * rhs)
+			i.stack[i.sp-1] = i.f32Mul(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_DIV:
@@ -1589,7 +1583,7 @@ func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) fun
 				panic(ErrDivideByZero)
 			}
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(lhs / rhs)
+			i.stack[i.sp-1] = i.f32Div(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_MIN:
@@ -1599,7 +1593,7 @@ func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(float32(math.Min(float64(lhs), float64(rhs))))
+			i.stack[i.sp-1] = i.f32Min(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_MAX:
@@ -1609,7 +1603,7 @@ func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(float32(math.Max(float64(lhs), float64(rhs))))
+			i.stack[i.sp-1] = i.f32Max(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_COPYSIGN:
@@ -1619,7 +1613,7 @@ func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(float32(math.Copysign(float64(lhs), float64(rhs))))
+			i.stack[i.sp-1] = i.f32Copysign(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_EQ:
@@ -1629,7 +1623,7 @@ func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxBool(lhs == rhs)
+			i.stack[i.sp-1] = i.f32Eq(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_NE:
@@ -1639,7 +1633,7 @@ func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxBool(lhs != rhs)
+			i.stack[i.sp-1] = i.f32Ne(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_LT:
@@ -1649,7 +1643,7 @@ func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxBool(lhs < rhs)
+			i.stack[i.sp-1] = i.f32Lt(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_GT:
@@ -1659,7 +1653,7 @@ func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxBool(lhs > rhs)
+			i.stack[i.sp-1] = i.f32Gt(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_LE:
@@ -1669,7 +1663,7 @@ func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxBool(lhs <= rhs)
+			i.stack[i.sp-1] = i.f32Le(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_GE:
@@ -1679,7 +1673,7 @@ func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxBool(lhs >= rhs)
+			i.stack[i.sp-1] = i.f32Ge(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	}
@@ -1697,7 +1691,7 @@ func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(lhs + rhs)
+			i.stack[i.sp-1] = i.f32Add(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_SUB:
@@ -1706,7 +1700,7 @@ func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(lhs - rhs)
+			i.stack[i.sp-1] = i.f32Sub(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_MUL:
@@ -1715,7 +1709,7 @@ func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(lhs * rhs)
+			i.stack[i.sp-1] = i.f32Mul(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_DIV:
@@ -1732,7 +1726,7 @@ func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(lhs / rhs)
+			i.stack[i.sp-1] = i.f32Div(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_MIN:
@@ -1741,7 +1735,7 @@ func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(float32(math.Min(float64(lhs), float64(rhs))))
+			i.stack[i.sp-1] = i.f32Min(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_MAX:
@@ -1750,7 +1744,7 @@ func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(float32(math.Max(float64(lhs), float64(rhs))))
+			i.stack[i.sp-1] = i.f32Max(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_COPYSIGN:
@@ -1759,7 +1753,7 @@ func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxF32(float32(math.Copysign(float64(lhs), float64(rhs))))
+			i.stack[i.sp-1] = i.f32Copysign(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_EQ:
@@ -1768,7 +1762,7 @@ func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxBool(lhs == rhs)
+			i.stack[i.sp-1] = i.f32Eq(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_NE:
@@ -1777,7 +1771,7 @@ func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxBool(lhs != rhs)
+			i.stack[i.sp-1] = i.f32Ne(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_LT:
@@ -1786,7 +1780,7 @@ func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxBool(lhs < rhs)
+			i.stack[i.sp-1] = i.f32Lt(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_GT:
@@ -1795,7 +1789,7 @@ func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxBool(lhs > rhs)
+			i.stack[i.sp-1] = i.f32Gt(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_LE:
@@ -1804,7 +1798,7 @@ func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxBool(lhs <= rhs)
+			i.stack[i.sp-1] = i.f32Le(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F32_GE:
@@ -1813,7 +1807,7 @@ func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F32()
-			i.stack[i.sp-1] = types.BoxBool(lhs >= rhs)
+			i.stack[i.sp-1] = i.f32Ge(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	}
@@ -1832,7 +1826,7 @@ func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(lhs + rhs)
+			i.stack[i.sp-1] = i.f64Add(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_SUB:
@@ -1842,7 +1836,7 @@ func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(lhs - rhs)
+			i.stack[i.sp-1] = i.f64Sub(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_MUL:
@@ -1852,7 +1846,7 @@ func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(lhs * rhs)
+			i.stack[i.sp-1] = i.f64Mul(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_DIV:
@@ -1865,7 +1859,7 @@ func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) fun
 				panic(ErrDivideByZero)
 			}
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(lhs / rhs)
+			i.stack[i.sp-1] = i.f64Div(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_MIN:
@@ -1875,7 +1869,7 @@ func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(math.Min(lhs, rhs))
+			i.stack[i.sp-1] = i.f64Min(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_MAX:
@@ -1885,7 +1879,7 @@ func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(math.Max(lhs, rhs))
+			i.stack[i.sp-1] = i.f64Max(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_COPYSIGN:
@@ -1895,7 +1889,7 @@ func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(math.Copysign(lhs, rhs))
+			i.stack[i.sp-1] = i.f64Copysign(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_EQ:
@@ -1905,7 +1899,7 @@ func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxBool(lhs == rhs)
+			i.stack[i.sp-1] = i.f64Eq(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_NE:
@@ -1915,7 +1909,7 @@ func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxBool(lhs != rhs)
+			i.stack[i.sp-1] = i.f64Ne(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_LT:
@@ -1925,7 +1919,7 @@ func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxBool(lhs < rhs)
+			i.stack[i.sp-1] = i.f64Lt(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_GT:
@@ -1935,7 +1929,7 @@ func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxBool(lhs > rhs)
+			i.stack[i.sp-1] = i.f64Gt(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_LE:
@@ -1945,7 +1939,7 @@ func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxBool(lhs <= rhs)
+			i.stack[i.sp-1] = i.f64Le(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_GE:
@@ -1955,7 +1949,7 @@ func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) fun
 			}
 			rhs := rhs(i)
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxBool(lhs >= rhs)
+			i.stack[i.sp-1] = i.f64Ge(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	}
@@ -1973,7 +1967,7 @@ func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(lhs + rhs)
+			i.stack[i.sp-1] = i.f64Add(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_SUB:
@@ -1982,7 +1976,7 @@ func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(lhs - rhs)
+			i.stack[i.sp-1] = i.f64Sub(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_MUL:
@@ -1991,7 +1985,7 @@ func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(lhs * rhs)
+			i.stack[i.sp-1] = i.f64Mul(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_DIV:
@@ -2008,7 +2002,7 @@ func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(lhs / rhs)
+			i.stack[i.sp-1] = i.f64Div(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_MIN:
@@ -2017,7 +2011,7 @@ func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(math.Min(lhs, rhs))
+			i.stack[i.sp-1] = i.f64Min(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_MAX:
@@ -2026,7 +2020,7 @@ func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(math.Max(lhs, rhs))
+			i.stack[i.sp-1] = i.f64Max(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_COPYSIGN:
@@ -2035,7 +2029,7 @@ func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxF64(math.Copysign(lhs, rhs))
+			i.stack[i.sp-1] = i.f64Copysign(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_EQ:
@@ -2044,7 +2038,7 @@ func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxBool(lhs == rhs)
+			i.stack[i.sp-1] = i.f64Eq(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_NE:
@@ -2053,7 +2047,7 @@ func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxBool(lhs != rhs)
+			i.stack[i.sp-1] = i.f64Ne(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_LT:
@@ -2062,7 +2056,7 @@ func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxBool(lhs < rhs)
+			i.stack[i.sp-1] = i.f64Lt(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_GT:
@@ -2071,7 +2065,7 @@ func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxBool(lhs > rhs)
+			i.stack[i.sp-1] = i.f64Gt(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_LE:
@@ -2080,7 +2074,7 @@ func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxBool(lhs <= rhs)
+			i.stack[i.sp-1] = i.f64Le(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_GE:
@@ -2089,7 +2083,7 @@ func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) 
 				panic(ErrStackUnderflow)
 			}
 			lhs := i.stack[i.sp-1].F64()
-			i.stack[i.sp-1] = types.BoxBool(lhs >= rhs)
+			i.stack[i.sp-1] = i.f64Ge(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	}
