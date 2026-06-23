@@ -8013,7 +8013,7 @@ func TestInterpreter_Throw(t *testing.T) {
 		require.Equal(t, types.I32(5), v)
 	})
 
-	t.Run("error.new and error.value round-trip", func(t *testing.T) {
+	t.Run("error.new and error.get round-trip", func(t *testing.T) {
 		b := instr.NewBuilder()
 		start, end, catch := b.Label(), b.Label(), b.Label()
 		b.Bind(start)
@@ -8022,7 +8022,7 @@ func TestInterpreter_Throw(t *testing.T) {
 		b.Emit(instr.THROW)
 		b.Bind(end)
 		b.Bind(catch)
-		b.Emit(instr.ERROR_VALUE)
+		b.Emit(instr.ERROR_GET)
 		b.Try(start, end, catch, 0)
 		instrs, err := b.Assemble()
 		require.NoError(t, err)

@@ -3981,7 +3981,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		}
 	},
 
-	instr.ERROR_VALUE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.ERROR_GET: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {

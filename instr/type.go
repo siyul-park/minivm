@@ -256,8 +256,8 @@ var types = map[Opcode]Type{
 
 	THROW: {"throw", []int{}},
 
-	ERROR_NEW:   {"error.new", []int{}},
-	ERROR_VALUE: {"error.value", []int{}},
+	ERROR_NEW: {"error.new", []int{}},
+	ERROR_GET: {"error.get", []int{}},
 
 	UPVAL_GET: {"upval.get", []int{1}},
 	UPVAL_SET: {"upval.set", []int{1}},

@@ -334,7 +334,7 @@ any other value is wrapped under `ErrUncaughtException`.
 |---|---|---|---|---|
 | `THROW` | `{}` | `value → …` | ⬜ | Pop and raise `value` to the nearest enclosing handler, or escape `Run` as an error when none covers the site. Terminator. Aborts tracing, so handler-bearing functions run threaded. |
 | `ERROR_NEW` | `{}` | `payload → error` | ⬜ | Wrap `payload` in a `types.Error` (message derived from a string payload's contents, else its rendered form); the payload reference transfers into the error. |
-| `ERROR_VALUE` | `{}` | `error → payload` | ⬜ | Push the `types.Error`'s payload and release the error. Traps `ErrTypeMismatch` if the operand is not an error. |
+| `ERROR_GET` | `{}` | `error → payload` | ⬜ | Push the `types.Error`'s payload and release the error. Traps `ErrTypeMismatch` if the operand is not an error. |
 
 ## Extensions
 

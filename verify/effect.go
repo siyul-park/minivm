@@ -20,7 +20,7 @@ func signature(op instr.Opcode) (pops, pushes []types.Kind, ok bool) {
 
 	case instr.ERROR_NEW:
 		return unary(anyKind, types.KindRef)
-	case instr.ERROR_VALUE:
+	case instr.ERROR_GET:
 		return unary(types.KindRef, anyKind)
 
 	case instr.YIELD:

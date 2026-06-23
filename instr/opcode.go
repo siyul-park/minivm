@@ -270,7 +270,7 @@ const (
 	THROW
 
 	ERROR_NEW
-	ERROR_VALUE
+	ERROR_GET
 )
 
 // EXT is the reserved prefix opcode for user-registered extension instructions.
