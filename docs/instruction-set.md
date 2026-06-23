@@ -306,6 +306,36 @@ A function whose body contains `YIELD` is a coroutine-function: its `CALL` alloc
 | `CORO_DONE` | `{}` | `coro → i32` | ◐ | Push `I32(1)` if the coroutine or iterator has finished, else `I32(0)`; does not release the handle. JIT has a native fast path for `*Coroutine` behind an itab guard and falls back for custom iterators. |
 | `CORO_VALUE` | `{}` | `coro → value` | ◐ | Push the coroutine's last yielded/returned value or the iterator's current value, then release the handle. JIT has a native fast path for `*Coroutine` behind an itab guard and falls back for custom iterators. |
 
+## Exceptions
+
+Exception handling uses a per-function exception table rather than block-bracket
+opcodes, matching the JVM/CLR/CPython "zero-cost" model: protected regions are
+metadata on the function (`types.Function.Handlers`, and `program.Program.Handlers`
+for the top-level slot 0), so code that never throws pays nothing — the table is
+consulted only while unwinding.
+
+Each `instr.Handler` is a byte-IP range `[Start, End)` with a `Catch` target and a
+`Depth` (the stack height `sp-bp` at the region's entry). Build regions with
+`Builder.Try(start, end, catch, depth)`; declare inner regions before the outer
+ones that enclose them so the table stays innermost-first.
+
+`THROW` pops a value and unwinds to the nearest enclosing handler: it walks frames
+from the throw site outward (using the call site, `ip-1`, in suspended callers),
+discards the frames and operands above the handler's `Depth`, pushes the thrown
+value, and resumes at `Catch`. Any value may be thrown; `types.Error` is the
+canonical payload and implements Go's `error` interface. Runtime traps (e.g.
+`ErrDivideByZero`) and host-function Go errors are caught the same way: `Run`'s
+recover wraps them in a `types.Error` (preserving the original via `Unwrap` for
+`errors.Is`/`errors.As`) and delivers them to a covering handler. With no handler,
+a thrown `types.Error` surfaces directly through the returned `*RuntimeError`;
+any other value is wrapped under `ErrUncaughtException`.
+
+| Opcode | Widths | Stack | JIT | Description |
+|---|---|---|---|---|
+| `THROW` | `{}` | `value → …` | ⬜ | Pop and raise `value` to the nearest enclosing handler, or escape `Run` as an error when none covers the site. Terminator. Aborts tracing, so handler-bearing functions run threaded. |
+| `ERROR_NEW` | `{}` | `payload → error` | ⬜ | Wrap `payload` in a `types.Error` (message derived from a string payload's contents, else its rendered form); the payload reference transfers into the error. |
+| `ERROR_VALUE` | `{}` | `error → payload` | ⬜ | Push the `types.Error`'s payload and release the error. Traps `ErrTypeMismatch` if the operand is not an error. |
+
 ## Extensions
 
 `EXT` is the reserved prefix opcode (`0xFF`) for user-registered custom

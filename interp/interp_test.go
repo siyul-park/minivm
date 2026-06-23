@@ -7886,3 +7886,180 @@ func TestWithVerify(t *testing.T) {
 		defer i.Close()
 	})
 }
+
+func TestInterpreter_Throw(t *testing.T) {
+	t.Run("explicit throw lands on handler", func(t *testing.T) {
+		b := instr.NewBuilder()
+		start, end, catch := b.Label(), b.Label(), b.Label()
+		b.Bind(start)
+		b.Emit(instr.I32_CONST, 1)
+		b.Emit(instr.THROW)
+		b.Bind(end)
+		b.Bind(catch)
+		b.Try(start, end, catch, 0)
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(instrs, program.WithHandlers(b.Handlers()...))
+
+		i, _ := New(prog)
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1), v)
+	})
+
+	t.Run("runtime trap is caught as an error value", func(t *testing.T) {
+		b := instr.NewBuilder()
+		start, end, catch := b.Label(), b.Label(), b.Label()
+		b.Bind(start)
+		b.Emit(instr.I32_CONST, 10)
+		b.Emit(instr.I32_CONST, 0)
+		b.Emit(instr.I32_DIV_S)
+		b.Bind(end)
+		b.Bind(catch)
+		b.Try(start, end, catch, 0)
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(instrs, program.WithHandlers(b.Handlers()...))
+
+		i, _ := New(prog)
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		e, ok := v.(*types.Error)
+		require.True(t, ok)
+		require.ErrorIs(t, e, ErrDivideByZero)
+	})
+
+	t.Run("host error is caught", func(t *testing.T) {
+		host := NewHostFunction(
+			&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+				return nil, errors.New("boom")
+			},
+		)
+		b := instr.NewBuilder()
+		start, end, catch := b.Label(), b.Label(), b.Label()
+		b.Bind(start)
+		b.Emit(instr.CONST_GET, 0)
+		b.Emit(instr.CALL)
+		b.Bind(end)
+		b.Bind(catch)
+		b.Try(start, end, catch, 0)
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(instrs, program.WithConstants(host), program.WithHandlers(b.Handlers()...))
+
+		i, _ := New(prog)
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		e, ok := v.(*types.Error)
+		require.True(t, ok)
+		require.Contains(t, e.Error(), "boom")
+	})
+
+	t.Run("propagates across call frames", func(t *testing.T) {
+		callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			Emit(instr.New(instr.I32_CONST, 99), instr.New(instr.THROW)).
+			MustBuild()
+		b := instr.NewBuilder()
+		start, end, catch := b.Label(), b.Label(), b.Label()
+		b.Bind(start)
+		b.Emit(instr.CONST_GET, 0)
+		b.Emit(instr.CALL)
+		b.Bind(end)
+		b.Bind(catch)
+		b.Try(start, end, catch, 0)
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(instrs, program.WithConstants(callee), program.WithHandlers(b.Handlers()...))
+
+		i, _ := New(prog)
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(99), v)
+	})
+
+	t.Run("rethrow reaches the enclosing handler", func(t *testing.T) {
+		b := instr.NewBuilder()
+		outerStart, outerEnd, outerCatch := b.Label(), b.Label(), b.Label()
+		innerStart, innerEnd, innerCatch := b.Label(), b.Label(), b.Label()
+		b.Bind(outerStart)
+		b.Bind(innerStart)
+		b.Emit(instr.I32_CONST, 5)
+		b.Emit(instr.THROW)
+		b.Bind(innerEnd)
+		b.Bind(innerCatch)
+		b.Emit(instr.THROW) // rethrow the caught value
+		b.Bind(outerEnd)
+		b.Bind(outerCatch)
+		b.Try(innerStart, innerEnd, innerCatch, 0) // innermost first
+		b.Try(outerStart, outerEnd, outerCatch, 0)
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(instrs, program.WithHandlers(b.Handlers()...))
+
+		i, _ := New(prog)
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), v)
+	})
+
+	t.Run("error.new and error.value round-trip", func(t *testing.T) {
+		b := instr.NewBuilder()
+		start, end, catch := b.Label(), b.Label(), b.Label()
+		b.Bind(start)
+		b.Emit(instr.CONST_GET, 0)
+		b.Emit(instr.ERROR_NEW)
+		b.Emit(instr.THROW)
+		b.Bind(end)
+		b.Bind(catch)
+		b.Emit(instr.ERROR_VALUE)
+		b.Try(start, end, catch, 0)
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(instrs, program.WithConstants(types.String("data")), program.WithHandlers(b.Handlers()...))
+
+		i, _ := New(prog)
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.String("data"), v)
+	})
+
+	t.Run("uncaught throw surfaces as a runtime error", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.THROW),
+		})
+		i, _ := New(prog)
+		defer i.Close()
+		err := i.Run(context.Background())
+		require.ErrorIs(t, err, ErrUncaughtException)
+		var re *RuntimeError
+		require.ErrorAs(t, err, &re)
+	})
+
+	t.Run("uncaught error value preserves its unwrap chain", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.ERROR_NEW),
+			instr.New(instr.THROW),
+		}, program.WithConstants(types.String("kaboom")))
+		i, _ := New(prog)
+		defer i.Close()
+		err := i.Run(context.Background())
+		var e *types.Error
+		require.ErrorAs(t, err, &e)
+		require.Equal(t, "kaboom", e.Error())
+	})
+}

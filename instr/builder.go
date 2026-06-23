@@ -12,9 +12,11 @@ import (
 // 16-bit byte offset the interpreter expects (relative to the end of the
 // branch instruction). Builders are mutable; discard after Assemble.
 type Builder struct {
-	instrs []Instruction
-	labels []int
-	fixups []fixup
+	instrs   []Instruction
+	labels   []int
+	fixups   []fixup
+	handlers []handlerFixup
+	resolved []Handler
 }
 
 // Label is an opaque handle to a branch target. Allocate with Builder.Label
@@ -25,6 +27,15 @@ type fixup struct {
 	branch  int
 	operand int
 	label   Label
+}
+
+// handlerFixup records a protected region declared with symbolic labels.
+// Assemble resolves each label to a byte offset and emits a Handler.
+type handlerFixup struct {
+	start Label
+	end   Label
+	catch Label
+	depth int
 }
 
 var (
@@ -84,9 +95,20 @@ func (b *Builder) BrTable(def Label, targets ...Label) *Builder {
 	return b
 }
 
-// Assemble resolves every branch and returns the patched instructions. It
-// fails when a target label was never bound or a branch displacement does not
-// fit a signed 16-bit operand.
+// Try declares a protected region [start, end) whose throws and traps land on
+// catch, with depth the operand-stack height at the region's entry. Declare
+// inner regions before the outer ones enclosing them so the assembled table
+// stays innermost-first. The labels are resolved by Assemble; read the table
+// back with Handlers.
+func (b *Builder) Try(start, end, catch Label, depth int) *Builder {
+	b.handlers = append(b.handlers, handlerFixup{start: start, end: end, catch: catch, depth: depth})
+	return b
+}
+
+// Assemble resolves every branch and protected region, returning the patched
+// instructions. It fails when a target label was never bound or a branch
+// displacement does not fit a signed 16-bit operand. Read the assembled
+// exception table with Handlers afterwards.
 func (b *Builder) Assemble() ([]Instruction, error) {
 	pos := make([]int, len(b.instrs)+1)
 	for i, inst := range b.instrs {
@@ -104,7 +126,41 @@ func (b *Builder) Assemble() ([]Instruction, error) {
 		}
 		b.instrs[fx.branch].SetOperand(fx.operand, uint64(uint16(int16(offset))))
 	}
+
+	b.resolved = b.resolved[:0]
+	for _, hx := range b.handlers {
+		start, err := b.offset(pos, hx.start)
+		if err != nil {
+			return nil, err
+		}
+		end, err := b.offset(pos, hx.end)
+		if err != nil {
+			return nil, err
+		}
+		catch, err := b.offset(pos, hx.catch)
+		if err != nil {
+			return nil, err
+		}
+		b.resolved = append(b.resolved, Handler{Start: start, End: end, Catch: catch, Depth: hx.depth})
+	}
 	return b.instrs, nil
+}
+
+// Handlers returns the exception table assembled from Try declarations. Call it
+// after Assemble; the result is nil when no protected region was declared.
+func (b *Builder) Handlers() []Handler {
+	if len(b.resolved) == 0 {
+		return nil
+	}
+	return append([]Handler(nil), b.resolved...)
+}
+
+func (b *Builder) offset(pos []int, l Label) (int, error) {
+	target := b.labels[l]
+	if target < 0 {
+		return 0, fmt.Errorf("%w: %d", ErrUnboundLabel, l)
+	}
+	return pos[target], nil
 }
 
 func (b *Builder) branch(op Opcode, l Label) *Builder {

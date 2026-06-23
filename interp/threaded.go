@@ -3950,6 +3950,59 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		}
 	},
 
+	instr.THROW: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			i.sp--
+			exc := i.stack[i.sp]
+			if fp, h, ok := i.findHandler(); ok {
+				i.land(fp, h, exc)
+				return
+			}
+			panic(escape{i.uncaught(exc)})
+		}
+	},
+
+	instr.ERROR_NEW: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			payload := i.stack[i.sp-1]
+			// The payload's reference transfers from the stack slot into the new
+			// Error's value field, so it is overwritten without a release.
+			addr := i.keep(types.NewError(i.message(payload), payload))
+			i.stack[i.sp-1] = types.BoxRef(addr)
+			i.fr.ip++
+		}
+	},
+
+	instr.ERROR_VALUE: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			box := i.stack[i.sp-1]
+			if box.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			e, ok := i.heap[box.Ref()].(*types.Error)
+			if !ok {
+				panic(ErrTypeMismatch)
+			}
+			val := e.Value()
+			i.retainBox(val)
+			i.releaseBox(box)
+			i.stack[i.sp-1] = val
+			i.fr.ip++
+		}
+	},
+
 	instr.EXT: func(c *threadedCompiler) func(i *Interpreter) {
 		inst := instr.Instruction(c.code[c.ip:])
 		width := inst.Width()

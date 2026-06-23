@@ -15,6 +15,13 @@ func signature(op instr.Opcode) (pops, pushes []types.Kind, ok bool) {
 		return consume(anyKind)
 	case instr.BR_IF, instr.BR_TABLE:
 		return consume(types.KindI32)
+	case instr.THROW:
+		return consume(anyKind)
+
+	case instr.ERROR_NEW:
+		return unary(anyKind, types.KindRef)
+	case instr.ERROR_VALUE:
+		return unary(types.KindRef, anyKind)
 
 	case instr.YIELD:
 		return unary(anyKind, anyKind)

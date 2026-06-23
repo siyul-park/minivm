@@ -144,4 +144,35 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, Verify(prog, WithExtensions(1)), ErrUnknownExtension)
 		require.NoError(t, Verify(prog))
 	})
+
+	t.Run("valid protected region", func(t *testing.T) {
+		b := program.NewBuilder()
+		start, end, catch := b.Label(), b.Label(), b.Label()
+		b.Bind(start)
+		b.Emit(instr.I32_CONST, 1)
+		b.Emit(instr.THROW)
+		b.Bind(end)
+		b.Bind(catch)
+		b.Emit(instr.DROP)
+		b.Try(start, end, catch, 0)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.NoError(t, Verify(prog))
+	})
+
+	t.Run("handler target off an instruction boundary", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.THROW),
+		}, program.WithHandlers(instr.Handler{Start: 0, End: 5, Catch: 1}))
+		require.ErrorIs(t, Verify(prog), ErrHandlerTarget)
+	})
+
+	t.Run("handler range out of bounds", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.THROW),
+		}, program.WithHandlers(instr.Handler{Start: 0, End: 99, Catch: 5}))
+		require.ErrorIs(t, Verify(prog), ErrHandlerRange)
+	})
 }

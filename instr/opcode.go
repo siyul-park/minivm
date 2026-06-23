@@ -266,6 +266,11 @@ const (
 	CLOSURE_NEW
 
 	MAP_ITER
+
+	THROW
+
+	ERROR_NEW
+	ERROR_VALUE
 )
 
 // EXT is the reserved prefix opcode for user-registered extension instructions.

@@ -254,6 +254,11 @@ var types = map[Opcode]Type{
 
 	CLOSURE_NEW: {"closure.new", []int{}},
 
+	THROW: {"throw", []int{}},
+
+	ERROR_NEW:   {"error.new", []int{}},
+	ERROR_VALUE: {"error.value", []int{}},
+
 	UPVAL_GET: {"upval.get", []int{1}},
 	UPVAL_SET: {"upval.set", []int{1}},
 

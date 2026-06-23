@@ -27,6 +27,8 @@ func Parse(s string) (Type, error) {
 		return TypeRef, nil
 	case "string":
 		return TypeString, nil
+	case "error":
+		return TypeError, nil
 	}
 	if strings.HasPrefix(s, "[]") {
 		elem, err := Parse(s[2:])

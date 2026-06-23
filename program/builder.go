@@ -62,6 +62,15 @@ func (b *Builder) BrTable(def instr.Label, targets ...instr.Label) *Builder {
 	return b
 }
 
+// Try declares a protected region [start, end) landing on catch, with depth the
+// operand-stack height at the region's entry. Declare inner regions before the
+// outer ones that enclose them. Build resolves the labels into the program's
+// top-level exception table.
+func (b *Builder) Try(start, end, catch instr.Label, depth int) *Builder {
+	b.code.Try(start, end, catch, depth)
+	return b
+}
+
 // Ext emits an extension instruction (EXT) addressed by extID (the registry
 // slot of the owning interp.Extension) and opID (its op index), carrying
 // operands in the variable-length region. The interpreter routes by extID and
@@ -119,6 +128,9 @@ func (b *Builder) Build() (*Program, error) {
 	}
 	if len(b.typs) > 0 {
 		opts = append(opts, WithTypes(b.typs...))
+	}
+	if handlers := b.code.Handlers(); len(handlers) > 0 {
+		opts = append(opts, WithHandlers(handlers...))
 	}
 	return New(instrs, opts...), nil
 }
