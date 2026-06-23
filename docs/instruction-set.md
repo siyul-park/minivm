@@ -336,6 +336,8 @@ any other value is wrapped under `ErrUncaughtException`.
 | `ERROR_NEW` | `{}` | `payload → error` | ⬜ | Wrap `payload` in a `types.Error` (message derived from a string payload's contents, else its rendered form); the payload reference transfers into the error. |
 | `ERROR_GET` | `{}` | `error → payload` | ⬜ | Push the `types.Error`'s payload and release the error. Traps `ErrTypeMismatch` if the operand is not an error. |
 
+These never JIT, so the threaded dispatcher fuses the common idioms instead (non-precise mode only): a constant string load followed by `ERROR_NEW` builds the error in one dispatch, and `ERROR_NEW; THROW` constructs and raises in one.
+
 ## Extensions
 
 `EXT` is the reserved prefix opcode (`0xFF`) for user-registered custom

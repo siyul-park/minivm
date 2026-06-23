@@ -614,6 +614,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			addr := val.Ref()
 			if str, ok := c.heap[addr].(types.String); ok {
 				text := string(str)
+				if fused := c.fuseString(text, 3); fused != nil {
+					return fused
+				}
 				return func(i *Interpreter) {
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
@@ -3968,6 +3971,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 
 	instr.ERROR_NEW: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if fused := c.fuseError(); fused != nil {
+			return fused
+		}
 		return func(i *Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)

@@ -8062,4 +8062,53 @@ func TestInterpreter_Throw(t *testing.T) {
 		require.ErrorAs(t, err, &e)
 		require.Equal(t, "kaboom", e.Error())
 	})
+
+	// Fusion (error.new;throw and string;error.new) is active in non-precise mode
+	// and bypassed under WithTick(1); both must behave identically.
+	for _, mode := range []struct {
+		name string
+		opts []func(*option)
+	}{
+		{name: "fused"},
+		{name: "precise", opts: []func(*option){WithTick(1)}},
+	} {
+		mode := mode
+		t.Run("error.new;throw fusion parity/"+mode.name, func(t *testing.T) {
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.ERROR_NEW),
+				instr.New(instr.THROW),
+			})
+			i, _ := New(prog, mode.opts...)
+			defer i.Close()
+			err := i.Run(context.Background())
+			var e *types.Error
+			require.ErrorAs(t, err, &e)
+			require.Equal(t, "7", e.Error())
+			require.Equal(t, types.BoxI32(7), e.Value())
+		})
+
+		t.Run("string;error.new fusion parity/"+mode.name, func(t *testing.T) {
+			b := instr.NewBuilder()
+			start, end, catch := b.Label(), b.Label(), b.Label()
+			b.Bind(start)
+			b.Emit(instr.CONST_GET, 0)
+			b.Emit(instr.ERROR_NEW)
+			b.Emit(instr.THROW)
+			b.Bind(end)
+			b.Bind(catch)
+			b.Emit(instr.ERROR_GET)
+			b.Try(start, end, catch, 0)
+			instrs, err := b.Assemble()
+			require.NoError(t, err)
+			prog := program.New(instrs, program.WithConstants(types.String("x")), program.WithHandlers(b.Handlers()...))
+
+			i, _ := New(prog, mode.opts...)
+			defer i.Close()
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.String("x"), v)
+		})
+	}
 }

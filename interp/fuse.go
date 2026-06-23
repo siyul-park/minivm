@@ -360,6 +360,55 @@ func (c *threadedCompiler) fuseHostFunction(fn *HostFunction, size int) func(*In
 	return nil
 }
 
+// fuseString tries to fuse a constant string load with a following ERROR_NEW,
+// wrapping the string in an Error in one dispatch. The interned string becomes
+// the error's payload and message. Returns nil if no pattern applies.
+func (c *threadedCompiler) fuseString(text string, size int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	if instr.Opcode(c.code[c.ip]) != instr.ERROR_NEW {
+		return nil
+	}
+	return func(i *Interpreter) {
+		if i.sp == len(i.stack) {
+			panic(ErrStackOverflow)
+		}
+		payload := types.BoxRef(int(i.intern(text)))
+		i.stack[i.sp] = types.BoxRef(i.keep(types.NewError(text, payload)))
+		i.sp++
+		i.fr.ip += size + 1
+	}
+}
+
+// fuseError tries to fuse an ERROR_NEW with a following THROW, building the
+// exception and raising it in one dispatch. As a terminator the fused closure
+// never advances the IP: it lands on a handler or escapes the dispatch loop.
+// Returns nil if no pattern applies.
+func (c *threadedCompiler) fuseError() func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	if instr.Opcode(c.code[c.ip]) != instr.THROW {
+		return nil
+	}
+	return func(i *Interpreter) {
+		if i.sp == 0 {
+			panic(ErrStackUnderflow)
+		}
+		payload := i.stack[i.sp-1]
+		// The payload reference transfers into the new Error's value field, so the
+		// slot is dropped without a release.
+		exc := types.BoxRef(i.keep(types.NewError(i.message(payload), payload)))
+		i.sp--
+		if fp, h, ok := i.handler(); ok {
+			i.land(fp, h, exc)
+			return
+		}
+		panic(escape{i.uncaught(exc)})
+	}
+}
+
 // fuseLocalConst folds LOCAL_GET idx; <kind>.CONST c; <kind binop> into one
 // dispatch: it pushes the typed local as the lhs, then runs the existing
 // const+binop fused closure (fuse*Imm) in the same dispatch, saving a
