@@ -1,6 +1,9 @@
 package types
 
-import "fmt"
+import (
+	"fmt"
+	"unsafe"
+)
 
 // Error is a guest exception value. It carries a human-readable message, an
 // optional payload (any boxed value, traced when it is a ref), and an optional
@@ -13,6 +16,10 @@ type Error struct {
 }
 
 type errorType struct{}
+
+// ErrorValueOffset exposes Error.value's layout to the ARM64 JIT heap-read
+// fast path.
+const ErrorValueOffset = int(unsafe.Offsetof(Error{}.value))
 
 var TypeError = errorType{}
 

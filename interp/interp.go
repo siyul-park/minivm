@@ -33,11 +33,11 @@ type Interpreter struct {
 	types     []types.Type
 	constants []types.Boxed
 	globals   []types.Boxed
-	instrs     [][]byte
-	code       [][]func(*Interpreter)
-	coros      []bool
-	handlers [][]instr.Handler
-	exts       []Extension
+	instrs    [][]byte
+	code      [][]func(*Interpreter)
+	coros     []bool
+	handlers  [][]instr.Handler
+	exts      []Extension
 
 	frames   []frame
 	fr       *frame

@@ -222,12 +222,20 @@ retain/release. If a release might free (`rc == 1`), native deopts so the
 interpreter owns recursive release.
 
 Read-only heap fast paths cover observed scalar `REF_GET`, selected typed
-`ARRAY_LEN`/`ARRAY_GET`, selected `STRUCT_GET` shapes, and the coroutine reads
-`CORO_DONE`/`CORO_VALUE`. They guard the ref, heap itab, element/field kind, and
-index as needed; the coroutine reads guard the handle's itab and load the `done`
-byte or the boxed `value` directly (`CORO_VALUE` retains the value and releases
-the handle, `CORO_DONE` keeps it, matching the threaded handlers). Heap
-allocation and mutation remain threaded.
+`ARRAY_LEN`/`ARRAY_GET`, selected `STRUCT_GET` shapes, `ERROR_GET`, and the
+coroutine reads `CORO_DONE`/`CORO_VALUE`. They guard the ref, heap itab,
+element/field kind, and index as needed; `ERROR_GET` guards `*types.Error`, loads
+the boxed payload, retains a ref payload, and releases the error handle. The
+coroutine reads guard the handle's itab and load the `done` byte or the boxed
+`value` directly (`CORO_VALUE` retains the value and releases the handle,
+`CORO_DONE` keeps it, matching the threaded handlers). Heap allocation and
+mutation remain threaded.
+
+`ERROR_NEW` and `THROW` are terminal fallback boundaries like anchor-frame
+`YIELD`/`RESUME`: the tracer records them without stepping the clone, and native
+code deopts at the opcode's own IP so the threaded handler performs allocation,
+throw unwinding, and handler landing. The trace aborts if either appears in an
+inlined callee frame.
 
 ## Extension Lowering
 

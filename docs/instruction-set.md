@@ -332,11 +332,11 @@ any other value is wrapped under `ErrUncaughtException`.
 
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|
-| `THROW` | `{}` | `value → …` | ⬜ | Pop and raise `value` to the nearest enclosing handler, or escape `Run` as an error when none covers the site. Terminator. Aborts tracing, so handler-bearing functions run threaded. |
-| `ERROR_NEW` | `{}` | `payload → error` | ⬜ | Wrap `payload` in a `types.Error` (message derived from a string payload's contents, else its rendered form); the payload reference transfers into the error. |
-| `ERROR_GET` | `{}` | `error → payload` | ⬜ | Push the `types.Error`'s payload and release the error. Traps `ErrTypeMismatch` if the operand is not an error. |
+| `THROW` | `{}` | `value → …` | ◐ | Pop and raise `value` to the nearest enclosing handler, or escape `Run` as an error when none covers the site. Terminator. JIT records an anchor-frame throw as a terminal deopt and lets the threaded handler land the exception. |
+| `ERROR_NEW` | `{}` | `payload → error` | ◐ | Wrap `payload` in a `types.Error` (message derived from a string payload's contents, else its rendered form); the payload reference transfers into the error. JIT records it as a terminal deopt so allocation stays threaded. |
+| `ERROR_GET` | `{}` | `error → payload` | ◐ | Push the `types.Error`'s payload and release the error. Traps `ErrTypeMismatch` if the operand is not an error. JIT has a native fast path for `*types.Error` behind an itab guard. |
 
-These never JIT, so the threaded dispatcher fuses the common idioms instead (non-precise mode only): a constant string load followed by `ERROR_NEW` builds the error in one dispatch, and `ERROR_NEW; THROW` constructs and raises in one.
+The threaded dispatcher still fuses common idioms in non-precise mode: a constant string load followed by `ERROR_NEW` builds the error in one dispatch, and `ERROR_NEW; THROW` constructs and raises in one.
 
 ## Extensions
 
