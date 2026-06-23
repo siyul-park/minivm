@@ -171,17 +171,6 @@ func (c *checker) starts() map[int]bool {
 	return starts
 }
 
-// blockAt returns the index of the block starting at ip, or -1 when ip is not a
-// block boundary.
-func (c *checker) blockAt(blocks []*analysis.BasicBlock, ip int) int {
-	for i, b := range blocks {
-		if b.Start == ip {
-			return i
-		}
-	}
-	return -1
-}
-
 // structure walks the code once, proving every instruction decodes within
 // bounds, names a defined opcode, and carries in-range pool/local/upval indices.
 func (c *checker) structure() error {
@@ -281,10 +270,6 @@ func (c *checker) flow(blocks []*analysis.BasicBlock) error {
 	// depth (Handler.Depth is sp-bp, so subtract the fixed locals area) plus the
 	// delivered exception value on top.
 	for _, h := range c.fn.Handlers {
-		idx := c.blockAt(blocks, h.Catch)
-		if idx < 0 {
-			continue
-		}
 		operands := h.Depth - len(c.locals)
 		if operands < 0 {
 			operands = 0
@@ -292,6 +277,16 @@ func (c *checker) flow(blocks []*analysis.BasicBlock) error {
 		seed := &stack{}
 		for k := 0; k < operands+1; k++ {
 			seed.push(slot{kind: anyKind})
+		}
+		idx := -1
+		for i, b := range blocks {
+			if b.Start == h.Catch {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			continue
 		}
 		if entries[idx] == nil {
 			entries[idx] = seed

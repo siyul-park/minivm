@@ -3958,7 +3958,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.sp--
 			exc := i.stack[i.sp]
-			if fp, h, ok := i.findHandler(); ok {
+			if fp, h, ok := i.handler(); ok {
 				i.land(fp, h, exc)
 				return
 			}

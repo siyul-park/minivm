@@ -36,7 +36,7 @@ type Interpreter struct {
 	instrs     [][]byte
 	code       [][]func(*Interpreter)
 	coros      []bool
-	exhandlers [][]instr.Handler
+	handlers [][]instr.Handler
 	exts       []Extension
 
 	frames   []frame
@@ -373,11 +373,11 @@ func New(prog *program.Program, opts ...func(*option)) (*Interpreter, error) {
 		i.coros[addr] = containsYield(code)
 	}
 
-	i.exhandlers = make([][]instr.Handler, len(i.instrs))
-	i.exhandlers[0] = prog.Handlers
+	i.handlers = make([][]instr.Handler, len(i.instrs))
+	i.handlers[0] = prog.Handlers
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
-			i.exhandlers[j+1] = fn.Handlers
+			i.handlers[j+1] = fn.Handlers
 		}
 	}
 
@@ -1197,28 +1197,28 @@ func (i *Interpreter) handle(r any) bool {
 	if !ok {
 		return false
 	}
-	fp, h, ok := i.findHandler()
+	fp, h, ok := i.handler()
 	if !ok {
 		return false
 	}
-	i.land(fp, h, i.errorValue(err))
+	i.land(fp, h, i.wrap(err))
 	return true
 }
 
-// findHandler walks frames from innermost outward for the first protected region
+// handler walks frames from innermost outward for the first protected region
 // covering the active instruction: the throwing site in the top frame, the call
 // site (ip-1, CALL/RETURN_CALL are one byte) in each suspended caller.
-func (i *Interpreter) findHandler() (int, instr.Handler, bool) {
+func (i *Interpreter) handler() (int, instr.Handler, bool) {
 	for fp := i.fp; fp >= 1; fp-- {
 		f := &i.frames[fp-1]
 		ip := f.ip
 		if fp != i.fp {
 			ip--
 		}
-		if f.addr < 0 || f.addr >= len(i.exhandlers) {
+		if f.addr < 0 || f.addr >= len(i.handlers) {
 			continue
 		}
-		for _, h := range i.exhandlers[f.addr] {
+		for _, h := range i.handlers[f.addr] {
 			if h.Start <= ip && ip < h.End {
 				return fp, h, true
 			}
@@ -1261,9 +1261,9 @@ func (i *Interpreter) discard(f *frame) {
 	f.coro = 0
 }
 
-// errorValue allocates a heap Error wrapping a Go failure so a recovered trap or
+// wrap allocates a heap Error wrapping a Go failure so a recovered trap or
 // host error becomes a catchable guest value while staying errors.Is/As aware.
-func (i *Interpreter) errorValue(err error) types.Boxed {
+func (i *Interpreter) wrap(err error) types.Boxed {
 	return types.BoxRef(i.keep(types.WrapError(err)))
 }
 

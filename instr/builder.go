@@ -129,15 +129,15 @@ func (b *Builder) Assemble() ([]Instruction, error) {
 
 	b.resolved = b.resolved[:0]
 	for _, hx := range b.handlers {
-		start, err := b.offset(pos, hx.start)
+		start, err := b.resolve(pos, hx.start)
 		if err != nil {
 			return nil, err
 		}
-		end, err := b.offset(pos, hx.end)
+		end, err := b.resolve(pos, hx.end)
 		if err != nil {
 			return nil, err
 		}
-		catch, err := b.offset(pos, hx.catch)
+		catch, err := b.resolve(pos, hx.catch)
 		if err != nil {
 			return nil, err
 		}
@@ -155,7 +155,7 @@ func (b *Builder) Handlers() []Handler {
 	return append([]Handler(nil), b.resolved...)
 }
 
-func (b *Builder) offset(pos []int, l Label) (int, error) {
+func (b *Builder) resolve(pos []int, l Label) (int, error) {
 	target := b.labels[l]
 	if target < 0 {
 		return 0, fmt.Errorf("%w: %d", ErrUnboundLabel, l)
