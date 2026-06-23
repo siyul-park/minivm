@@ -54,6 +54,8 @@ var (
 	ErrStackMismatch    = errors.New("stack mismatch at control-flow merge")
 	ErrTypeMismatch     = errors.New("operand type mismatch")
 	ErrFallThrough      = errors.New("control falls off end of function")
+	ErrHandlerRange     = errors.New("invalid exception handler range")
+	ErrHandlerTarget    = errors.New("invalid exception handler target")
 )
 
 func newChecker(prog *program.Program, cfg *config, slot int, fn *types.Function) *checker {
@@ -88,7 +90,7 @@ func Verify(prog *program.Program, opts ...Option) error {
 		opt(cfg)
 	}
 
-	top := &types.Function{Typ: &types.FunctionType{}, Code: prog.Code}
+	top := &types.Function{Typ: &types.FunctionType{}, Code: prog.Code, Handlers: prog.Handlers}
 	if err := newChecker(prog, cfg, 0, top).run(); err != nil {
 		return err
 	}
@@ -121,6 +123,9 @@ func (c *checker) run() error {
 	if err := c.structure(); err != nil {
 		return err
 	}
+	if err := c.handlers(); err != nil {
+		return err
+	}
 	blocks, err := c.blocks()
 	if err != nil {
 		return err
@@ -129,6 +134,41 @@ func (c *checker) run() error {
 		return err
 	}
 	return c.flow(blocks)
+}
+
+// handlers validates the exception table: each protected region is a non-empty
+// in-bounds range whose start, end, and catch land on instruction boundaries.
+// It runs before the CFG is built so a malformed table cannot split blocks
+// mid-instruction.
+func (c *checker) handlers() error {
+	if len(c.fn.Handlers) == 0 {
+		return nil
+	}
+	starts := c.starts()
+	for _, h := range c.fn.Handlers {
+		if h.Start < 0 || h.End > len(c.code) || h.Start >= h.End || !starts[h.Start] || !starts[h.End] {
+			return c.fail(h.Start, instr.THROW, ErrHandlerRange)
+		}
+		if h.Catch < 0 || h.Catch >= len(c.code) || !starts[h.Catch] {
+			return c.fail(h.Catch, instr.THROW, ErrHandlerTarget)
+		}
+	}
+	return nil
+}
+
+// starts is the set of byte offsets that begin an instruction, plus the
+// past-the-end offset that closes the final protected region.
+func (c *checker) starts() map[int]bool {
+	starts := map[int]bool{len(c.code): true}
+	for ip := 0; ip < len(c.code); {
+		starts[ip] = true
+		w, ok := c.width(ip)
+		if !ok {
+			break
+		}
+		ip += w
+	}
+	return starts
 }
 
 // structure walks the code once, proving every instruction decodes within
@@ -206,7 +246,7 @@ func (c *checker) terminate(blocks []*analysis.BasicBlock) error {
 		}
 		op, ip := c.last(b)
 		switch op {
-		case instr.RETURN, instr.RETURN_CALL, instr.UNREACHABLE:
+		case instr.RETURN, instr.RETURN_CALL, instr.UNREACHABLE, instr.THROW:
 		default:
 			return c.fail(ip, op, ErrFallThrough)
 		}
@@ -224,6 +264,38 @@ func (c *checker) flow(blocks []*analysis.BasicBlock) error {
 	entries := make([]*stack, len(blocks))
 	entries[0] = &stack{}
 	work := []int{0}
+
+	// Catch blocks are reached out of band, not via a CFG edge, so seed each as
+	// its own root: the operand stack restored to the protected region's entry
+	// depth (Handler.Depth is sp-bp, so subtract the fixed locals area) plus the
+	// delivered exception value on top.
+	for _, h := range c.fn.Handlers {
+		operands := h.Depth - len(c.locals)
+		if operands < 0 {
+			operands = 0
+		}
+		seed := &stack{}
+		for k := 0; k < operands+1; k++ {
+			seed.push(slot{kind: anyKind})
+		}
+		idx := -1
+		for i, b := range blocks {
+			if b.Start == h.Catch {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			continue
+		}
+		if entries[idx] == nil {
+			entries[idx] = seed
+			work = append(work, idx)
+		} else if _, balanced := entries[idx].merge(seed); !balanced {
+			return c.fail(h.Catch, instr.THROW, ErrStackMismatch)
+		}
+	}
+
 	for len(work) > 0 {
 		i := work[len(work)-1]
 		work = work[:len(work)-1]
@@ -266,7 +338,7 @@ func (c *checker) exec(b *analysis.BasicBlock, st *stack) (bool, error) {
 		if done {
 			return true, nil
 		}
-		if op == instr.RETURN || op == instr.RETURN_CALL || op == instr.UNREACHABLE {
+		if op == instr.RETURN || op == instr.RETURN_CALL || op == instr.UNREACHABLE || op == instr.THROW {
 			return false, nil
 		}
 		width, _ := c.width(ip)

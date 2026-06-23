@@ -33,7 +33,7 @@ func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*Basic
 		inst := instr.Instruction(fn.Code[ip:])
 		next := ip + inst.Width()
 		switch inst.Opcode() {
-		case instr.UNREACHABLE, instr.RETURN:
+		case instr.UNREACHABLE, instr.RETURN, instr.THROW:
 			if next < len(fn.Code) {
 				offsets = append(offsets, next)
 			}
@@ -66,6 +66,17 @@ func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*Basic
 		ip = next
 	}
 
+	// Protected-region and catch boundaries start their own blocks so the
+	// exception table aligns with the CFG. Throws/traps transfer out of band, so
+	// no explicit edges are added; the verifier seeds catch blocks directly.
+	for _, h := range fn.Handlers {
+		for _, off := range []int{h.Start, h.End, h.Catch} {
+			if off > 0 && off < len(fn.Code) {
+				offsets = append(offsets, off)
+			}
+		}
+	}
+
 	slices.Sort(offsets)
 	offsets = slices.Compact(offsets)
 
@@ -96,7 +107,7 @@ func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*Basic
 
 		inst := instr.Instruction(fn.Code[ip:])
 		switch inst.Opcode() {
-		case instr.UNREACHABLE, instr.RETURN:
+		case instr.UNREACHABLE, instr.RETURN, instr.THROW:
 		case instr.BR, instr.BR_IF:
 			offset := ip + inst.Width() + instr.ReadI16(inst.Operand(0))
 			if !p.link(blocks, j, offset) {

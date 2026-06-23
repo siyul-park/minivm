@@ -13,6 +13,7 @@ type Program struct {
 	Code      []byte
 	Constants []types.Value
 	Types     []types.Type
+	Handlers  []instr.Handler
 }
 
 func WithConstants(consts ...types.Value) func(*Program) {
@@ -24,6 +25,13 @@ func WithConstants(consts ...types.Value) func(*Program) {
 func WithTypes(types ...types.Type) func(*Program) {
 	return func(p *Program) {
 		p.Types = types
+	}
+}
+
+// WithHandlers attaches the exception table for the top-level code (slot 0).
+func WithHandlers(handlers ...instr.Handler) func(*Program) {
+	return func(p *Program) {
+		p.Handlers = handlers
 	}
 }
 

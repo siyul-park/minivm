@@ -164,17 +164,13 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 			r.store(a, t)
 			return t, nil
 		}
-		// YIELD and RESUME are true suspension points whose suspend/resume bodies
-		// a linear trace cannot represent. In the anchor frame, record the op as
-		// the trace's terminal and store kind=returned WITHOUT stepping the clone
-		// (which would unwind it on YIELD or splice the uncompilable resumed-frame
-		// body on RESUME); the JIT lowers this to an unconditional deopt so the
-		// threaded handler performs the real suspend/resume. The deopt only
-		// preserves the coroutine handle on the outermost (anchor) frame — inlined
-		// callee frames are rebuilt without their coro field, so a suspend there
-		// would mis-read. Abort rather than miscompile when the op sits in an
-		// inlined frame.
-		if op == instr.YIELD || op == instr.RESUME {
+		// YIELD/RESUME and exception-producing ops have side effects a linear
+		// trace cannot represent. In the anchor frame, record the op as the
+		// terminal and store kind=returned WITHOUT stepping the clone; the JIT
+		// lowers this to an unconditional deopt so the threaded handler performs
+		// the real work. Abort rather than miscompile when the op sits in an
+		// inlined frame whose runtime-only state may not survive journal deopt.
+		if op == instr.YIELD || op == instr.RESUME || op == instr.ERROR_NEW || op == instr.THROW {
 			if clone.fp != startFP {
 				t.kind = aborted
 				break
@@ -320,7 +316,7 @@ func (r *Tracer) finish(i *Interpreter, st *step, op instr.Opcode) {
 		st.target = i.fr.ip
 	case instr.CALL, instr.RETURN_CALL:
 		st.callee = i.fr.addr
-	case instr.REF_GET, instr.ARRAY_GET, instr.STRUCT_GET, instr.CORO_VALUE:
+	case instr.REF_GET, instr.ARRAY_GET, instr.STRUCT_GET, instr.CORO_VALUE, instr.ERROR_GET:
 		if i.sp > 0 {
 			st.seen = i.stack[i.sp-1]
 		}

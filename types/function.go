@@ -20,6 +20,7 @@ type Function struct {
 	Locals   []Type
 	Captures []Type
 	Code     []byte
+	Handlers []instr.Handler
 }
 
 type FunctionType struct {
@@ -91,6 +92,15 @@ func (b *FunctionBuilder) BrTable(def instr.Label, targets ...instr.Label) *Func
 	return b
 }
 
+// Try declares a protected region [start, end) landing on catch, with depth the
+// operand-stack height at the region's entry. Declare inner regions before the
+// outer ones that enclose them. Build resolves the labels into the function's
+// exception table.
+func (b *FunctionBuilder) Try(start, end, catch instr.Label, depth int) *FunctionBuilder {
+	b.code.Try(start, end, catch, depth)
+	return b
+}
+
 // MustBuild is like Build but panics on failure. Use it only with statically
 // known-good bodies, such as in tests and fixtures.
 func (b *FunctionBuilder) MustBuild() *Function {
@@ -113,6 +123,7 @@ func (b *FunctionBuilder) Build() (*Function, error) {
 		Locals:   b.locals,
 		Captures: b.captures,
 		Code:     instr.Marshal(instrs),
+		Handlers: b.code.Handlers(),
 	}, nil
 }
 

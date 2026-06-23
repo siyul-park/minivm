@@ -36,6 +36,7 @@ type Interpreter struct {
 	instrs    [][]byte
 	code      [][]func(*Interpreter)
 	coros     []bool
+	handlers  [][]instr.Handler
 	exts      []Extension
 
 	frames   []frame
@@ -86,6 +87,13 @@ type frame struct {
 	bp int
 }
 
+// escape carries a guest throw that found no handler out of the dispatch loop.
+// dispatch's recover turns it into the returned error without re-attempting the
+// (already failed) handler search.
+type escape struct {
+	err error
+}
+
 type option struct {
 	hook       func(*Interpreter) error
 	marshaler  Marshaler
@@ -123,6 +131,7 @@ var (
 	ErrHeapExhausted       = errors.New("heap exhausted")
 	ErrYield               = errors.New("yield")
 	ErrCoroutineDone       = errors.New("coroutine done")
+	ErrUncaughtException   = errors.New("uncaught exception")
 )
 
 // errYield is the panic value a root-frame YIELD raises to unwind the Run loop.
@@ -364,6 +373,14 @@ func New(prog *program.Program, opts ...func(*option)) (*Interpreter, error) {
 		i.coros[addr] = containsYield(code)
 	}
 
+	i.handlers = make([][]instr.Handler, len(i.instrs))
+	i.handlers[0] = prog.Handlers
+	for j, v := range prog.Constants {
+		if fn, ok := v.(*types.Function); ok {
+			i.handlers[j+1] = fn.Handlers
+		}
+	}
+
 	i.frames[0].code = i.code[0]
 	i.frames[0].bp = i.sp
 	i.fp = 1
@@ -407,13 +424,34 @@ func (e *RuntimeError) Unwrap() error {
 	return e.Err
 }
 
-func (i *Interpreter) Run(ctx context.Context) (err error) {
+func (i *Interpreter) Run(ctx context.Context) error {
 	i.ctx = ctx
-	defer func() {
+	for {
+		// dispatch's recover absorbs every panic, so nothing escapes it and ctx is
+		// always cleared below; a caught throw/trap loops to resume at the handler.
+		caught, err := i.dispatch()
+		if caught {
+			continue
+		}
 		i.ctx = nil
+		return err
+	}
+}
+
+// dispatch runs the threaded loop until the frame ends, a safepoint stops it, or
+// a panic unwinds it. Its recover delivers a yield, lands a catchable throw/trap
+// on a guest handler (reported via caught so Run re-enters here), or wraps an
+// uncatchable failure as a RuntimeError. The loop body is the interpreter's hot
+// path and is intentionally kept identical regardless of exception support.
+func (i *Interpreter) dispatch() (caught bool, err error) {
+	defer func() {
 		if r := recover(); r != nil {
 			if r == errYield {
 				err = ErrYield
+				return
+			}
+			if i.handle(r) {
+				caught = true
 				return
 			}
 			err = i.runtimeError(r)
@@ -429,7 +467,7 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 		if tick == 0 {
 			tick = i.tick
 			if err := i.safepoint(); err != nil {
-				return err
+				return false, err
 			}
 		}
 
@@ -438,7 +476,7 @@ func (i *Interpreter) Run(ctx context.Context) (err error) {
 		f = i.fr
 		code = f.code
 	}
-	return nil
+	return false, nil
 }
 
 func (i *Interpreter) Marshal(v any) (val types.Value, err error) {
@@ -1138,11 +1176,121 @@ func (i *Interpreter) guard(err *error) {
 
 func (i *Interpreter) cause(r any) error {
 	switch e := r.(type) {
+	case escape:
+		return e.err
 	case error:
 		return e
 	default:
 		return fmt.Errorf("%v", r)
 	}
+}
+
+// handle attempts to deliver a recovered panic to a guest exception handler. An
+// escape is a throw that already failed its handler search, so it stays
+// terminal; any other Go error (a runtime trap or a host-function failure) is
+// converted to an Error value and delivered if a covering handler exists.
+func (i *Interpreter) handle(r any) bool {
+	if _, ok := r.(escape); ok {
+		return false
+	}
+	err, ok := r.(error)
+	if !ok {
+		return false
+	}
+	fp, h, ok := i.handler()
+	if !ok {
+		return false
+	}
+	i.land(fp, h, i.wrap(err))
+	return true
+}
+
+// handler walks frames from innermost outward for the first protected region
+// covering the active instruction: the throwing site in the top frame, the call
+// site (ip-1, CALL/RETURN_CALL are one byte) in each suspended caller.
+func (i *Interpreter) handler() (int, instr.Handler, bool) {
+	for fp := i.fp; fp >= 1; fp-- {
+		f := &i.frames[fp-1]
+		ip := f.ip
+		if fp != i.fp {
+			ip--
+		}
+		if f.addr < 0 || f.addr >= len(i.handlers) {
+			continue
+		}
+		for _, h := range i.handlers[f.addr] {
+			if h.Start <= ip && ip < h.End {
+				return fp, h, true
+			}
+		}
+	}
+	return 0, instr.Handler{}, false
+}
+
+// land unwinds to the handler frame, discarding the frames and operand values
+// above the protected region's entry depth, then delivers exc as the sole
+// operand and resumes at the catch IP. exc keeps the single reference it already
+// owned (popped off the stack by THROW, or freshly allocated for a trap).
+func (i *Interpreter) land(fp int, h instr.Handler, exc types.Boxed) {
+	for i.fp > fp {
+		i.discard(&i.frames[i.fp-1])
+		i.fp--
+	}
+	f := &i.frames[fp-1]
+	base := f.bp + h.Depth
+	for s := i.sp - 1; s >= base; s-- {
+		i.releaseBox(i.stack[s])
+	}
+	i.stack[base] = exc
+	i.sp = base + 1
+	f.ip = h.Catch
+	i.fr = f
+}
+
+// discard releases an unwound frame's activation: its function reference and any
+// in-flight coroutine handle. Operand slots are released by land in one sweep.
+func (i *Interpreter) discard(f *frame) {
+	if f.release {
+		i.release(f.ref)
+	}
+	if f.coro != 0 {
+		i.release(f.coro)
+	}
+	f.code = nil
+	f.upvals = nil
+	f.coro = 0
+}
+
+// wrap allocates a heap Error wrapping a Go failure so a recovered trap or
+// host error becomes a catchable guest value while staying errors.Is/As aware.
+func (i *Interpreter) wrap(err error) types.Boxed {
+	return types.BoxRef(i.keep(types.WrapError(err)))
+}
+
+// uncaught renders an escaped throw as a Go error. A thrown Error surfaces
+// directly (preserving its Unwrap chain); any other value is wrapped with its
+// rendered form under ErrUncaughtException.
+func (i *Interpreter) uncaught(exc types.Boxed) error {
+	if exc.Kind() == types.KindRef {
+		v := i.heap[exc.Ref()]
+		if e, ok := v.(*types.Error); ok {
+			return e
+		}
+		return fmt.Errorf("%w: %s", ErrUncaughtException, v.String())
+	}
+	return fmt.Errorf("%w: %s", ErrUncaughtException, types.Unbox(exc).String())
+}
+
+// message derives an Error message from a payload: a string's contents, else the
+// value's rendered form.
+func (i *Interpreter) message(v types.Boxed) string {
+	if v.Kind() == types.KindRef {
+		if s, ok := i.heap[v.Ref()].(types.String); ok {
+			return string(s)
+		}
+		return i.heap[v.Ref()].String()
+	}
+	return types.Unbox(v).String()
 }
 
 func (i *Interpreter) framesInfo() []FrameInfo {

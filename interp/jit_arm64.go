@@ -43,6 +43,7 @@ const (
 	fieldsSlice = int(unsafe.Offsetof(types.StructType{}.Fields))
 	fieldKind   = int(unsafe.Offsetof(types.StructField{}.Kind))
 	fieldSize   = int(unsafe.Sizeof(types.StructField{}))
+	errorValue  = types.ErrorValueOffset
 	coroValue   = int(unsafe.Offsetof(Coroutine{}.value))
 	coroDone    = int(unsafe.Offsetof(Coroutine{}.done))
 )
@@ -60,6 +61,7 @@ var (
 	heapArrayF64  = valueItab(types.TypedArray[float64](nil))
 	heapArrayRef  = valueItab((*types.Array)(nil))
 	heapStruct    = valueItab((*types.Struct)(nil))
+	heapError     = valueItab((*types.Error)(nil))
 	heapCoroutine = valueItab((*Coroutine)(nil))
 )
 
@@ -465,10 +467,20 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			ok = l.arrayGet(ctx, op)
 		case instr.STRUCT_GET:
 			ok = l.structGet(ctx, op)
+		case instr.ERROR_GET:
+			ok = l.errorGet(ctx, op)
 		case instr.CORO_DONE:
 			ok = l.coroDone(ctx, op)
 		case instr.CORO_VALUE:
 			ok = l.coroValue(ctx, op)
+		case instr.ERROR_NEW, instr.THROW:
+			// Allocation and handler landing stay interpreter-owned. Resume at
+			// op.ip because each threaded handler performs its own IP update or
+			// handler transfer.
+			if !l.exit(ctx, op.ip) {
+				return false
+			}
+			return idx == len(ops)-1
 		case instr.YIELD, instr.RESUME:
 			// True suspension points: deopt to the threaded handler, which runs
 			// the real suspend/resume. Resume at op.ip (not op.ip+1) because the
@@ -2529,6 +2541,63 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 		return false
 	}
 	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: out, raw: out != types.KindRef})
+	return true
+}
+
+// errorGet reads a guest Error's payload. It mirrors the threaded handler:
+// retain a ref payload first, then release the consumed error handle.
+func (l arm64Lowerer) errorGet(ctx *lowering, op step) bool {
+	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
+		return false
+	}
+	pre := append([]value(nil), ctx.values...)
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
+	if !ok {
+		return false
+	}
+	addr, itab, data := l.heapValue(ctx, ref, pre, op.ip)
+
+	hit := ctx.assembler.Label()
+	l.matchItab(ctx, itab, heapError, hit)
+	ctx.values = append(ctx.values[:0], pre...)
+	if !l.exit(ctx, op.ip) {
+		return false
+	}
+	ctx.assembler.Bind(hit)
+
+	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDR(dst, data, int16(errorValue)))
+	kind := op.seen.Kind()
+	switch kind {
+	case types.KindI64:
+		if !l.guardI64(ctx, dst, op.ip) {
+			return false
+		}
+		dst = l.sign64(ctx, dst)
+		l.releaseRef(ctx, addr, pre, op.ip)
+		ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: true})
+	case types.KindRef:
+		base := l.rcBase(ctx)
+		rc := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDRR(rc, base, addr))
+		ctx.assembler.Emit(arm64.CMPI(rc, 1))
+		shared := ctx.assembler.Label()
+		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBGT, shared))
+		ctx.values = append(ctx.values[:0], pre...)
+		if !l.exit(ctx, op.ip) {
+			return false
+		}
+		ctx.assembler.Bind(shared)
+		ctx.values = append(ctx.values[:0], pre...)
+		l.retainBox(ctx, dst)
+		l.releaseRef(ctx, addr, pre, op.ip)
+		ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: false})
+	case types.KindI32, types.KindF32, types.KindF64:
+		l.releaseRef(ctx, addr, pre, op.ip)
+		ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: true})
+	default:
+		return false
+	}
 	return true
 }
 

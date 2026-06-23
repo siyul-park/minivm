@@ -612,6 +612,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			addr := val.Ref()
 			if str, ok := c.heap[addr].(types.String); ok {
 				text := string(str)
+				if fused := c.fuseString(text, 3); fused != nil {
+					return fused
+				}
 				return func(i *Interpreter) {
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
@@ -3924,6 +3927,62 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			caddr := i.keep(cl)
 			i.sp -= n
 			i.stack[i.sp-1] = types.BoxRef(caddr)
+			i.fr.ip++
+		}
+	},
+
+	instr.THROW: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			i.sp--
+			exc := i.stack[i.sp]
+			if fp, h, ok := i.handler(); ok {
+				i.land(fp, h, exc)
+				return
+			}
+			panic(escape{i.uncaught(exc)})
+		}
+	},
+
+	instr.ERROR_NEW: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		if fused := c.fuseError(); fused != nil {
+			return fused
+		}
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			payload := i.stack[i.sp-1]
+			// The payload's reference transfers from the stack slot into the new
+			// Error's value field, so it is overwritten without a release.
+			addr := i.keep(types.NewError(i.message(payload), payload))
+			i.stack[i.sp-1] = types.BoxRef(addr)
+			i.fr.ip++
+		}
+	},
+
+	instr.ERROR_GET: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			box := i.stack[i.sp-1]
+			if box.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			e, ok := i.heap[box.Ref()].(*types.Error)
+			if !ok {
+				panic(ErrTypeMismatch)
+			}
+			val := e.Value()
+			i.retainBox(val)
+			i.releaseBox(box)
+			i.stack[i.sp-1] = val
 			i.fr.ip++
 		}
 	},

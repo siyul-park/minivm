@@ -7886,3 +7886,509 @@ func TestWithVerify(t *testing.T) {
 		defer i.Close()
 	})
 }
+
+func TestInterpreter_Throw(t *testing.T) {
+	t.Run("explicit throw lands on handler", func(t *testing.T) {
+		b := instr.NewBuilder()
+		start, end, catch := b.Label(), b.Label(), b.Label()
+		b.Bind(start)
+		b.Emit(instr.I32_CONST, 1)
+		b.Emit(instr.THROW)
+		b.Bind(end)
+		b.Bind(catch)
+		b.Try(start, end, catch, 0)
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(instrs, program.WithHandlers(b.Handlers()...))
+
+		i, _ := New(prog)
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1), v)
+	})
+
+	t.Run("runtime trap is caught as an error value", func(t *testing.T) {
+		b := instr.NewBuilder()
+		start, end, catch := b.Label(), b.Label(), b.Label()
+		b.Bind(start)
+		b.Emit(instr.I32_CONST, 10)
+		b.Emit(instr.I32_CONST, 0)
+		b.Emit(instr.I32_DIV_S)
+		b.Bind(end)
+		b.Bind(catch)
+		b.Try(start, end, catch, 0)
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(instrs, program.WithHandlers(b.Handlers()...))
+
+		i, _ := New(prog)
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		e, ok := v.(*types.Error)
+		require.True(t, ok)
+		require.ErrorIs(t, e, ErrDivideByZero)
+	})
+
+	t.Run("host error is caught", func(t *testing.T) {
+		host := NewHostFunction(
+			&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+				return nil, errors.New("boom")
+			},
+		)
+		b := instr.NewBuilder()
+		start, end, catch := b.Label(), b.Label(), b.Label()
+		b.Bind(start)
+		b.Emit(instr.CONST_GET, 0)
+		b.Emit(instr.CALL)
+		b.Bind(end)
+		b.Bind(catch)
+		b.Try(start, end, catch, 0)
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(instrs, program.WithConstants(host), program.WithHandlers(b.Handlers()...))
+
+		i, _ := New(prog)
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		e, ok := v.(*types.Error)
+		require.True(t, ok)
+		require.Contains(t, e.Error(), "boom")
+	})
+
+	t.Run("propagates across call frames", func(t *testing.T) {
+		callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			Emit(instr.New(instr.I32_CONST, 99), instr.New(instr.THROW)).
+			MustBuild()
+		b := instr.NewBuilder()
+		start, end, catch := b.Label(), b.Label(), b.Label()
+		b.Bind(start)
+		b.Emit(instr.CONST_GET, 0)
+		b.Emit(instr.CALL)
+		b.Bind(end)
+		b.Bind(catch)
+		b.Try(start, end, catch, 0)
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(instrs, program.WithConstants(callee), program.WithHandlers(b.Handlers()...))
+
+		i, _ := New(prog)
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(99), v)
+	})
+
+	t.Run("rethrow reaches the enclosing handler", func(t *testing.T) {
+		b := instr.NewBuilder()
+		outerStart, outerEnd, outerCatch := b.Label(), b.Label(), b.Label()
+		innerStart, innerEnd, innerCatch := b.Label(), b.Label(), b.Label()
+		b.Bind(outerStart)
+		b.Bind(innerStart)
+		b.Emit(instr.I32_CONST, 5)
+		b.Emit(instr.THROW)
+		b.Bind(innerEnd)
+		b.Bind(innerCatch)
+		b.Emit(instr.THROW) // rethrow the caught value
+		b.Bind(outerEnd)
+		b.Bind(outerCatch)
+		b.Try(innerStart, innerEnd, innerCatch, 0) // innermost first
+		b.Try(outerStart, outerEnd, outerCatch, 0)
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(instrs, program.WithHandlers(b.Handlers()...))
+
+		i, _ := New(prog)
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), v)
+	})
+
+	t.Run("error.new and error.get round-trip", func(t *testing.T) {
+		b := instr.NewBuilder()
+		start, end, catch := b.Label(), b.Label(), b.Label()
+		b.Bind(start)
+		b.Emit(instr.CONST_GET, 0)
+		b.Emit(instr.ERROR_NEW)
+		b.Emit(instr.THROW)
+		b.Bind(end)
+		b.Bind(catch)
+		b.Emit(instr.ERROR_GET)
+		b.Try(start, end, catch, 0)
+		instrs, err := b.Assemble()
+		require.NoError(t, err)
+		prog := program.New(instrs, program.WithConstants(types.String("data")), program.WithHandlers(b.Handlers()...))
+
+		i, _ := New(prog)
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.String("data"), v)
+	})
+
+	t.Run("uncaught throw surfaces as a runtime error", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.THROW),
+		})
+		i, _ := New(prog)
+		defer i.Close()
+		err := i.Run(context.Background())
+		require.ErrorIs(t, err, ErrUncaughtException)
+		var re *RuntimeError
+		require.ErrorAs(t, err, &re)
+	})
+
+	t.Run("uncaught error value preserves its unwrap chain", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.ERROR_NEW),
+			instr.New(instr.THROW),
+		}, program.WithConstants(types.String("kaboom")))
+		i, _ := New(prog)
+		defer i.Close()
+		err := i.Run(context.Background())
+		var e *types.Error
+		require.ErrorAs(t, err, &e)
+		require.Equal(t, "kaboom", e.Error())
+	})
+
+	t.Run("jit lowers error.get in a hot loop", func(t *testing.T) {
+		requireJIT(t)
+
+		b := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeRef, types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).WithLocals(types.TypeI32)
+		header := b.Label()
+		exit := b.Label()
+		sum := b.Emit(
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.LOCAL_SET, 2),
+		).Bind(header).Emit(
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_EQZ),
+		).BrIf(exit).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.ERROR_GET),
+			instr.New(instr.LOCAL_GET, 2),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.LOCAL_SET, 2),
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.LOCAL_SET, 1),
+		).Br(header).Bind(exit).Emit(
+			instr.New(instr.LOCAL_GET, 2),
+			instr.New(instr.RETURN),
+		).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.I32_CONST, 300),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(sum))
+
+		threaded, _ := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		errAddr, err := threaded.Alloc(types.NewError("one", types.BoxI32(1)))
+		require.NoError(t, err)
+		threaded.globals = append(threaded.globals, types.BoxRef(errAddr))
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(300), want)
+
+		jit, _ := New(prog, WithTick(1), WithThreshold(1))
+		defer jit.Close()
+		errAddr, err = jit.Alloc(types.NewError("one", types.BoxI32(1)))
+		require.NoError(t, err)
+		jit.globals = append(jit.globals, types.BoxRef(errAddr))
+		require.NoError(t, jit.Run(context.Background()))
+		got, err := jit.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Greater(t, jit.local.Value("vm_jit_emits_total"), float64(0))
+	})
+
+	t.Run("jit error.get retains ref payloads", func(t *testing.T) {
+		requireJIT(t)
+
+		b := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeRef, types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).WithLocals(types.TypeI32)
+		header := b.Label()
+		exit := b.Label()
+		dropper := b.Emit(
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.LOCAL_SET, 2),
+		).Bind(header).Emit(
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_EQZ),
+		).BrIf(exit).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.ERROR_GET),
+			instr.New(instr.DROP),
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.LOCAL_SET, 1),
+		).Br(header).Bind(exit).Emit(
+			instr.New(instr.LOCAL_GET, 2),
+			instr.New(instr.RETURN),
+		).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.I32_CONST, 300),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(dropper))
+
+		threaded, _ := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		payload, err := threaded.Alloc(types.String("payload"))
+		require.NoError(t, err)
+		errAddr, err := threaded.Alloc(types.NewError("payload", types.BoxRef(payload)))
+		require.NoError(t, err)
+		threaded.globals = append(threaded.globals, types.BoxRef(errAddr))
+		require.NoError(t, threaded.Run(context.Background()))
+		_, err = threaded.Pop()
+		require.NoError(t, err)
+		wantPayloadRC := threaded.rc[payload]
+		wantErrorRC := threaded.rc[errAddr]
+
+		jit, _ := New(prog, WithTick(1), WithThreshold(1))
+		defer jit.Close()
+		payload, err = jit.Alloc(types.String("payload"))
+		require.NoError(t, err)
+		errAddr, err = jit.Alloc(types.NewError("payload", types.BoxRef(payload)))
+		require.NoError(t, err)
+		jit.globals = append(jit.globals, types.BoxRef(errAddr))
+		require.NoError(t, jit.Run(context.Background()))
+		_, err = jit.Pop()
+		require.NoError(t, err)
+		require.Equal(t, wantPayloadRC, jit.rc[payload])
+		require.Equal(t, wantErrorRC, jit.rc[errAddr])
+		require.Greater(t, jit.local.Value("vm_jit_emits_total"), float64(0))
+	})
+
+	t.Run("jit deopts on error.new terminal", func(t *testing.T) {
+		requireJIT(t)
+
+		makeErr := types.NewFunctionBuilder(&types.FunctionType{
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.I32_CONST, 42),
+			instr.New(instr.ERROR_NEW),
+			instr.New(instr.ERROR_GET),
+			instr.New(instr.RETURN),
+		).MustBuild()
+		b := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).WithLocals(types.TypeI32)
+		header := b.Label()
+		exit := b.Label()
+		driver := b.Emit(
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.LOCAL_SET, 1),
+		).Bind(header).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_EQZ),
+		).BrIf(exit).Emit(
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.LOCAL_SET, 0),
+		).Br(header).Bind(exit).Emit(
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.RETURN),
+		).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 200),
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CALL),
+		}, program.WithConstants(makeErr, driver))
+
+		threaded, _ := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(8400), want)
+
+		jit, _ := New(prog, WithTick(1), WithThreshold(1))
+		defer jit.Close()
+		require.NoError(t, jit.Run(context.Background()))
+		got, err := jit.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Greater(t, jit.local.Value("vm_jit_emits_total"), float64(0))
+	})
+
+	t.Run("jit deopts on throw terminal", func(t *testing.T) {
+		requireJIT(t)
+
+		b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}})
+		start, end, catch := b.Label(), b.Label(), b.Label()
+		thrower := b.Bind(start).Emit(
+			instr.New(instr.I32_CONST, 5),
+			instr.New(instr.THROW),
+		).Bind(end).Bind(catch).Emit(
+			instr.New(instr.RETURN),
+		).Try(start, end, catch, 0).MustBuild()
+		db := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).WithLocals(types.TypeI32)
+		header := db.Label()
+		exit := db.Label()
+		driver := db.Emit(
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.LOCAL_SET, 1),
+		).Bind(header).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_EQZ),
+		).BrIf(exit).Emit(
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.LOCAL_SET, 0),
+		).Br(header).Bind(exit).Emit(
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.RETURN),
+		).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 200),
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CALL),
+		}, program.WithConstants(thrower, driver))
+
+		threaded, _ := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1000), want)
+
+		jit, _ := New(prog, WithTick(1), WithThreshold(1))
+		defer jit.Close()
+		require.NoError(t, jit.Run(context.Background()))
+		got, err := jit.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Greater(t, jit.local.Value("vm_jit_emits_total"), float64(0))
+	})
+
+	t.Run("jit deopted arithmetic trap is caught", func(t *testing.T) {
+		requireJIT(t)
+
+		b := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32, types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		})
+		start, end, catch := b.Label(), b.Label(), b.Label()
+		div := b.Bind(start).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_DIV_S),
+			instr.New(instr.RETURN),
+		).Bind(end).Bind(catch).Emit(
+			instr.New(instr.RETURN),
+		).Try(start, end, catch, 2).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.GLOBAL_GET, 1),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(div))
+
+		jit, _ := New(prog, WithTick(1), WithThreshold(1))
+		defer jit.Close()
+		jit.globals = append(jit.globals, types.BoxI32(10), types.BoxI32(2))
+		require.NoError(t, jit.Run(context.Background()))
+		value, err := jit.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), value)
+		require.Greater(t, jit.local.Value("vm_jit_emits_total"), float64(0))
+
+		jit.Reset()
+		jit.globals = append(jit.globals, types.BoxI32(10), types.BoxI32(0))
+		require.NoError(t, jit.Run(context.Background()))
+		value, err = jit.Pop()
+		require.NoError(t, err)
+		exc, ok := value.(*types.Error)
+		require.True(t, ok)
+		require.ErrorIs(t, exc, ErrDivideByZero)
+	})
+
+	// Fusion (error.new;throw and string;error.new) is active in non-precise mode
+	// and bypassed under WithTick(1); both must behave identically.
+	for _, mode := range []struct {
+		name string
+		opts []func(*option)
+	}{
+		{name: "fused"},
+		{name: "precise", opts: []func(*option){WithTick(1)}},
+	} {
+		mode := mode
+		t.Run("error.new;throw fusion parity/"+mode.name, func(t *testing.T) {
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.ERROR_NEW),
+				instr.New(instr.THROW),
+			})
+			i, _ := New(prog, mode.opts...)
+			defer i.Close()
+			err := i.Run(context.Background())
+			var e *types.Error
+			require.ErrorAs(t, err, &e)
+			require.Equal(t, "7", e.Error())
+			require.Equal(t, types.BoxI32(7), e.Value())
+		})
+
+		t.Run("string;error.new fusion parity/"+mode.name, func(t *testing.T) {
+			b := instr.NewBuilder()
+			start, end, catch := b.Label(), b.Label(), b.Label()
+			b.Bind(start)
+			b.Emit(instr.CONST_GET, 0)
+			b.Emit(instr.ERROR_NEW)
+			b.Emit(instr.THROW)
+			b.Bind(end)
+			b.Bind(catch)
+			b.Emit(instr.ERROR_GET)
+			b.Try(start, end, catch, 0)
+			instrs, err := b.Assemble()
+			require.NoError(t, err)
+			prog := program.New(instrs, program.WithConstants(types.String("x")), program.WithHandlers(b.Handlers()...))
+
+			i, _ := New(prog, mode.opts...)
+			defer i.Close()
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.String("x"), v)
+		})
+	}
+}
