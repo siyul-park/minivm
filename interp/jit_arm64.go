@@ -1554,9 +1554,9 @@ func (l arm64Lowerer) brTable(ctx *lowering, op step) bool {
 	return true
 }
 
-// call lowers a recorded CALL. The callee marker must be a compile-time
-// function constant: a self-call becomes a framed native BL into this trace's
-// own head, anything else inlines as a fused frame the deopt path can rebuild.
+// call lowers a recorded CALL. The callee marker must resolve to an observed
+// function ref: a self-call becomes a framed native BL into this trace's own
+// head, anything else inlines as a fused frame the deopt path can rebuild.
 func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 	if ctx.count() < 1 {
 		return false
@@ -2800,9 +2800,9 @@ func (l arm64Lowerer) report(ctx *lowering, vCtrl asm.VReg, trap, nextIP int) {
 	a.Emit(arm64.STR(vIP, vCtrl, int16(journalNextIP*8)))
 }
 
-// box produces the boxed form of v in a fresh register. A marker
-// materializes its function constant and retains it, because the interpreter
-// state being rebuilt will release it through the frame it pushes.
+// box produces the boxed form of v in a fresh register. A marker materializes
+// its function ref and retains it, because the interpreter state being rebuilt
+// will release it through the frame it pushes.
 func (l arm64Lowerer) box(ctx *lowering, v value) (asm.VReg, bool) {
 	a := ctx.assembler
 	switch v.kind {

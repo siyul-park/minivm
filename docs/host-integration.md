@@ -87,6 +87,15 @@ err = vm.Release(addr)        // decrements RC; free when 0
 
 Always `Release` what you `Retain`; leaked refs prevent GC collection.
 
+`Alloc` and `Store` also accept `*types.Function`. Storing a function compiles
+that heap slot as a callable bytecode target, so a host function can construct a
+function body, store it into an existing heap address, and return `BoxRef(addr)`;
+bytecode can then call that ref with `CALL` or `RETURN_CALL`. The function lives
+under the normal heap rules: when no stack, global, closure, object, or host
+retain references the slot, it is reclaimed and its callable dispatch slot is
+removed. With `WithVerify(true)`, dynamic functions are verified before
+`Alloc`/`Store` mutates heap state.
+
 ### Resource limits
 
 `WithHeap(n)` controls initial heap capacity. `WithMaxHeap(n)` sets a hard heap

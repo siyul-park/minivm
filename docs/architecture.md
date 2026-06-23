@@ -48,7 +48,7 @@ type Program struct {
 }
 ```
 
-`Code` holds top-level bytecode. `Constants` hold functions, strings, arrays, and other values. `Types` holds descriptors for `ARRAY_NEW` and `STRUCT_NEW`. `*types.Function` constants have their own `Code []byte`. `interp.New()` compiles function constant `j` into slot `j+1`; slot `0` is program code.
+`Code` holds top-level bytecode. `Constants` hold functions, strings, arrays, and other values. `Types` holds descriptors for `ARRAY_NEW` and `STRUCT_NEW`. `*types.Function` constants have their own `Code []byte`. `interp.New()` compiles function constants into dispatch slots keyed by their heap ref; slot `0` is program code.
 
 `program.Builder` is the high-level way to author a `Program`. It wraps an `instr.Builder` (label-patching assembler: branch to a `Label`, offsets back-patched on `Build`) and interned constant/type pools (`Const`/`ConstGet`/`Type` dedup by `String()` and return a stable index), so authors never hand-compute branch byte offsets or pool indices. `types.FunctionBuilder` carries the same `Label`/`Bind`/`Br`/`BrIf`/`BrTable` methods for function bodies. Branch targets are PC-relative signed-i16 byte offsets relative to the end of the branch instruction (see `interp/threaded.go`); `instr.Builder.Assemble` is the single source of that encoding.
 
@@ -99,6 +99,12 @@ Two layers:
 `compiler` (`jit.go`, `jit_arm64.go`): ARM64 JIT kept private inside `interp`. A hot attempt records the current threaded execution path, then lowers each usable root — the function entry and any hot loop header — through a typed switch. Native code uses a single context pointer in X0, loads VM stack inputs directly from journal-provided scratch registers, keeps operands in registers, and materializes `i.stack`, `sp`, and `ip` only on returns, guards, yields, or deopt exits. Recorded direct calls, recursive calls, guarded indirect function-value calls, closure-body upvalues, scalar globals/locals, selected read-only heap paths including `error.get`, and loops (native back-edge with a safepoint poll) can run natively. Unsupported paths stay threaded through guard fallback; `error.new` and `throw` are terminal deopt boundaries. The JIT does not tier beyond the ARM64 trace backend.
 
 `HostFunction` (`host.go`): wraps `func(i *Interpreter, params []Boxed) ([]Boxed, error)` as `types.Value`. Lives in constants, called by `CONST_GET` + `CALL`. Use `Interpreter.Marshal`/`Unmarshal` to convert Go values; the default converter caches per-type reflection plans, while arbitrary Go function calls still use `reflect.Call`. Go `func` marshals to `HostFunction`, final `error` return propagated as host-call error. `WithMarshaler` replaces the default converter.
+
+Dynamic `*types.Function` values can be installed through `Interpreter.Alloc` or
+`Interpreter.Store`. The interpreter keeps callable dispatch slots keyed by heap
+address in sync with function heap rows, verifies dynamic functions when
+`WithVerify(true)` is enabled, and removes dispatch slots when the heap row is
+overwritten or reclaimed.
 
 `Coroutine` (`coroutine.go`): `yield`/`resume` suspension. A `YIELD` in the entry frame (`fp == 1`) is an **interpreter escape**: it panics the private `errYield`, `Run` recovers it and returns the exported `ErrYield` without wrapping or losing state, and the next `Run` resumes after the `YIELD` (the host swaps the stack-top value to feed the result back in). A `YIELD` inside a called function is an **asymmetric coroutine** yield. A function whose body contains `YIELD` is a coroutine-function (scanned once at `New` into `coros []bool`, parallel to `code`); its `CALL` allocates a `Coroutine` heap handle and tags the new `frame.coro`, so the call always yields a single handle instead of plain returns. `suspend` captures the one frame (its `ip`, function ref, upvals, and `stack[bp:sp]` image, ownership moved to the handle) and unwinds to the caller; `resume` restores the frame above the resumer's stack and delivers the in-value as the pending `YIELD`'s result; `finish` (`RETURN` with `frame.coro != 0`) records the final value, marks the handle done, and delivers it. `coro.done`/`coro.value` read status and last value. The collector roots every active frame's `ref` and `coro`, and the handle's `Refs` keeps the suspended image live. `YIELD`/`RESUME` cannot run natively, so a trace that reaches one in its anchor frame records it as a **terminal** and the JIT lowers it to an unconditional deopt that hands the real suspend/resume to the threaded handler (resume IP is the op itself, since each handler does its own `ip++`); a suspension inside an inlined callee frame still aborts the trace, because deopt rebuilds inlined frames without their `coro` handle and the threaded handler would mis-read. Coroutine-functions' fused `CONST_GET; CALL` superinstruction stays suppressed so the generic coroutine `CALL` path runs. `CORO_DONE`/`CORO_VALUE` are pure heap reads that the JIT lowers natively behind an itab guard, like `STRUCT_GET`/`REF_GET`.
 
@@ -211,8 +217,8 @@ Thin entrypoint around `cli.Root().Execute()`.
 3. interp.New(prog, opts...) → (*Interpreter, error)
    ├─ if WithVerify(true): verify.Verify(prog) → *VerifyError on malformed bytecode
    ├─ threadedCompiler.Compile(prog.Code) → i.code[0]
-   └─ for each *Function constant j:
-      threadedCompiler.Compile(fn.Code) → i.code[j+1]
+   └─ for each *Function constant:
+      threadedCompiler.Compile(fn.Code) → i.code[fn heap ref]
 
 4. interp.Run(ctx)
    ├─ main loop: code[f.ip](i)

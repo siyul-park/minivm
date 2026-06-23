@@ -3331,6 +3331,32 @@ func TestInterpreter_Alloc(t *testing.T) {
 		_, err := i.Alloc(types.NewArray(types.NewArrayType(types.TypeI32)))
 		require.ErrorIs(t, err, ErrHeapExhausted)
 	})
+
+	t.Run("function is callable", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.CALL)})
+		i, _ := New(prog)
+		defer i.Close()
+
+		fn := types.NewFunction(
+			&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			nil,
+			[]instr.Instruction{instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)},
+		)
+		addr, err := i.Alloc(fn)
+		require.NoError(t, err)
+		require.NoError(t, i.Push(types.BoxRef(addr)))
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(7), got)
+
+		i.fr.ip = 0
+		reused, err := i.Alloc(types.I32(9))
+		require.NoError(t, err)
+		require.Equal(t, addr, reused)
+		require.NoError(t, i.Push(types.BoxRef(reused)))
+		require.ErrorIs(t, i.Run(context.Background()), ErrTypeMismatch)
+	})
 }
 
 func TestInterpreter_Load(t *testing.T) {
@@ -3406,6 +3432,119 @@ func TestInterpreter_Store(t *testing.T) {
 		require.NoError(t, err)
 
 		require.ErrorIs(t, i.Store(addr, types.BoxRef(9999)), ErrSegmentationFault)
+	})
+	t.Run("host stores callable function", func(t *testing.T) {
+		host := NewHostFunction(
+			&types.FunctionType{Returns: []types.Type{types.TypeRef}},
+			func(i *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+				addr, err := i.Alloc(types.I32(0))
+				if err != nil {
+					return nil, err
+				}
+				fn := types.NewFunction(
+					&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+					nil,
+					[]instr.Instruction{instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)},
+				)
+				if err := i.Store(addr, fn); err != nil {
+					return nil, err
+				}
+				return []types.Boxed{types.BoxRef(addr)}, nil
+			},
+		)
+		prog := program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(host),
+		)
+		i, _ := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(42), got)
+	})
+	t.Run("replaces function body", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.CALL)})
+		i, _ := New(prog)
+		defer i.Close()
+
+		addr, err := i.Alloc(types.I32(0))
+		require.NoError(t, err)
+		first := types.NewFunction(
+			&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			nil,
+			[]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN)},
+		)
+		require.NoError(t, i.Store(addr, first))
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Push(types.BoxRef(addr)))
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1), got)
+
+		i.fr.ip = 0
+		second := types.NewFunction(
+			&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			nil,
+			[]instr.Instruction{instr.New(instr.I32_CONST, 2), instr.New(instr.RETURN)},
+		)
+		require.NoError(t, i.Store(addr, second))
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Push(types.BoxRef(addr)))
+		require.NoError(t, i.Run(context.Background()))
+		got, err = i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(2), got)
+	})
+	t.Run("non-function replacement is not callable", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.CALL)})
+		i, _ := New(prog)
+		defer i.Close()
+
+		addr, err := i.Alloc(types.I32(0))
+		require.NoError(t, err)
+		fn := types.NewFunction(
+			&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			nil,
+			[]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN)},
+		)
+		require.NoError(t, i.Store(addr, fn))
+		require.NoError(t, i.Store(addr, types.I32(9)))
+		require.NoError(t, i.Push(types.BoxRef(addr)))
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrTypeMismatch)
+	})
+	t.Run("clears stale jit traces", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.CALL)})
+		i, _ := New(prog)
+		defer i.Close()
+
+		addr, err := i.Alloc(types.I32(0))
+		require.NoError(t, err)
+		fn := types.NewFunction(
+			&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			nil,
+			[]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN)},
+		)
+		require.NoError(t, i.Store(addr, fn))
+		a := anchor{addr: addr, ip: 0}
+		i.tracer.trees[a] = &tree{root: &trace{anchor: a, kind: returned}}
+		i.tracer.blacklist[a] = true
+		i.tracer.loops[addr] = []int{0}
+
+		require.NoError(t, i.Store(addr, types.I32(9)))
+
+		require.Nil(t, i.tracer.trees[a])
+		require.False(t, i.tracer.blacklist[a])
+		require.Nil(t, i.tracer.loops[addr])
 	})
 }
 
@@ -7884,6 +8023,42 @@ func TestWithVerify(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, i)
 		defer i.Close()
+	})
+
+	t.Run("store rejects malformed function", func(t *testing.T) {
+		i, err := New(program.New(nil), WithVerify(true))
+		require.NoError(t, err)
+		defer i.Close()
+
+		addr, err := i.Alloc(types.I32(5))
+		require.NoError(t, err)
+		fn := types.NewFunction(
+			&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			nil,
+			[]instr.Instruction{instr.New(instr.I32_ADD), instr.New(instr.RETURN)},
+		)
+		require.ErrorIs(t, i.Store(addr, fn), verify.ErrStackUnderflow)
+		got, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), got)
+	})
+
+	t.Run("off by default stores malformed function", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.CALL)})
+		i, err := New(prog)
+		require.NoError(t, err)
+		defer i.Close()
+
+		addr, err := i.Alloc(types.I32(0))
+		require.NoError(t, err)
+		fn := types.NewFunction(
+			&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			nil,
+			[]instr.Instruction{instr.New(instr.I32_ADD), instr.New(instr.RETURN)},
+		)
+		require.NoError(t, i.Store(addr, fn))
+		require.NoError(t, i.Push(types.BoxRef(addr)))
+		require.ErrorIs(t, i.Run(context.Background()), ErrStackUnderflow)
 	})
 }
 

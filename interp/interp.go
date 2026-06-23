@@ -38,6 +38,7 @@ type Interpreter struct {
 	coros     []bool
 	handlers  [][]instr.Handler
 	exts      []Extension
+	dynamic   map[int]bool
 
 	frames   []frame
 	fr       *frame
@@ -57,6 +58,8 @@ type Interpreter struct {
 	tick      int
 	fuel      int64
 	limit     int
+	verify    bool
+	vopts     []verify.Option
 }
 
 // RuntimeError wraps a guest execution failure with the VM call stack at the
@@ -246,15 +249,15 @@ func New(prog *program.Program, opts ...func(*option)) (*Interpreter, error) {
 		o(&opt)
 	}
 
-	if opt.verify {
-		var vopts []verify.Option
-		if opt.registry != nil {
-			ids := make([]uint8, len(opt.registry.exts))
-			for i := range opt.registry.exts {
-				ids[i] = uint8(i)
-			}
-			vopts = append(vopts, verify.WithExtensions(ids...))
+	var vopts []verify.Option
+	if opt.registry != nil {
+		ids := make([]uint8, len(opt.registry.exts))
+		for i := range opt.registry.exts {
+			ids[i] = uint8(i)
 		}
+		vopts = append(vopts, verify.WithExtensions(ids...))
+	}
+	if opt.verify {
 		if err := verify.Verify(prog, vopts...); err != nil {
 			return nil, err
 		}
@@ -312,6 +315,7 @@ func New(prog *program.Program, opts ...func(*option)) (*Interpreter, error) {
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
 		fallbacks: map[anchor]func(*Interpreter){},
+		dynamic:   map[int]bool{},
 		journal:   make([]uint64, journalHead+journalStride*opt.frame),
 		frames:    make([]frame, opt.frame),
 		stack:     make([]types.Boxed, opt.stack),
@@ -323,6 +327,8 @@ func New(prog *program.Program, opts ...func(*option)) (*Interpreter, error) {
 		fuel:      fuel,
 		gas:       fuel,
 		limit:     opt.maxHeap,
+		verify:    opt.verify,
+		vopts:     vopts,
 	}
 	if opt.registry != nil {
 		i.exts = append([]Extension(nil), opt.registry.exts...)
@@ -363,8 +369,7 @@ func New(prog *program.Program, opts ...func(*option)) (*Interpreter, error) {
 	i.code[0] = c.Compile(prog.Code, nil)
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
-			i.instrs[j+1] = fn.Code
-			i.code[j+1] = c.Compile(fn.Code, fn.LocalKinds())
+			i.bind(i.constants[j].Ref(), fn, false)
 		}
 	}
 
@@ -377,7 +382,7 @@ func New(prog *program.Program, opts ...func(*option)) (*Interpreter, error) {
 	i.handlers[0] = prog.Handlers
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
-			i.handlers[j+1] = fn.Handlers
+			i.handlers[i.constants[j].Ref()] = fn.Handlers
 		}
 	}
 
@@ -593,7 +598,16 @@ func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 			val = types.Unbox(v)
 		}
 	}
+	if err := i.check(val); err != nil {
+		return err
+	}
+	if _, ok := i.heap[addr].(*types.Function); ok {
+		i.remove(addr)
+	}
 	i.heap[addr] = val
+	if fn, ok := val.(*types.Function); ok {
+		i.bind(addr, fn, true)
+	}
 	return nil
 }
 
@@ -608,7 +622,14 @@ func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 	if s, ok := val.(types.String); ok {
 		return int(i.intern(string(s))), nil
 	}
-	return i.keep(val), nil
+	if err := i.check(val); err != nil {
+		return 0, err
+	}
+	addr = i.keep(val)
+	if fn, ok := val.(*types.Function); ok {
+		i.bind(addr, fn, true)
+	}
+	return addr, nil
 }
 
 func (i *Interpreter) Retain(addr int) (types.Value, error) {
@@ -674,6 +695,9 @@ func (i *Interpreter) Close() error {
 }
 
 func (i *Interpreter) Reset() {
+	for addr := range i.dynamic {
+		i.remove(addr)
+	}
 	for i.fp > 1 {
 		i.frames[i.fp] = frame{}
 		i.fp--
@@ -718,7 +742,7 @@ func (i *Interpreter) compile(addr int) error {
 	if _, err := i.tracer.capture(i, anchor{addr: addr, ip: 0}); err != nil {
 		return err
 	}
-	if i.cache != nil {
+	if i.cache != nil && !i.dynamic[addr] {
 		return i.shared(addr)
 	}
 	if i.compiler == nil {
@@ -1424,6 +1448,81 @@ func (i *Interpreter) keep(val types.Value) int {
 	return i.alloc(val)
 }
 
+func (i *Interpreter) check(val types.Value) error {
+	fn, ok := val.(*types.Function)
+	if !ok || !i.verify {
+		return nil
+	}
+	constants := make([]types.Value, 0, len(i.constants)+1)
+	for _, val := range i.constants {
+		if val.Kind() != types.KindRef {
+			constants = append(constants, types.Unbox(val))
+			continue
+		}
+		addr := val.Ref()
+		if addr >= 0 && addr < len(i.heap) && i.rc[addr] > 0 {
+			constants = append(constants, i.heap[addr])
+			continue
+		}
+		constants = append(constants, types.Ref(addr))
+	}
+	constants = append(constants, fn)
+	return verify.Verify(&program.Program{
+		Constants: constants,
+		Types:     i.types,
+	}, i.vopts...)
+}
+
+func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
+	n := addr + 1
+	if addr >= len(i.instrs) {
+		i.instrs = append(i.instrs, make([][]byte, n-len(i.instrs))...)
+	}
+	if addr >= len(i.code) {
+		i.code = append(i.code, make([][]func(*Interpreter), n-len(i.code))...)
+	}
+	if addr >= len(i.handlers) {
+		i.handlers = append(i.handlers, make([][]instr.Handler, n-len(i.handlers))...)
+	}
+	if addr >= len(i.coros) {
+		i.coros = append(i.coros, make([]bool, n-len(i.coros))...)
+	}
+	c := &threadedCompiler{
+		types:     i.types,
+		constants: i.constants,
+		heap:      i.heap,
+		exts:      i.exts,
+		precise:   i.tick == 1,
+	}
+	i.instrs[addr] = fn.Code
+	i.code[addr] = c.Compile(fn.Code, fn.LocalKinds())
+	i.handlers[addr] = fn.Handlers
+	i.coros[addr] = containsYield(fn.Code)
+	if dynamic {
+		i.dynamic[addr] = true
+	}
+}
+
+func (i *Interpreter) remove(addr int) {
+	if addr < 0 || addr >= len(i.instrs) {
+		delete(i.dynamic, addr)
+		return
+	}
+	i.instrs[addr] = nil
+	i.code[addr] = nil
+	i.handlers[addr] = nil
+	i.coros[addr] = false
+	for a := range i.fallbacks {
+		if a.addr == addr {
+			delete(i.fallbacks, a)
+		}
+	}
+	if i.tracer != nil {
+		i.tracer.remove(addr)
+	}
+	delete(i.dynamic, addr)
+}
+
 func (i *Interpreter) retainBox(v types.Boxed) {
 	if v.Kind() == types.KindRef {
 		i.retain(v.Ref())
@@ -1584,6 +1683,9 @@ func (i *Interpreter) sweep() {
 // OS-resource bookkeeping, clears the slot, and returns it to the free list. The
 // caller has already decided addr is dead and settled its referents' counts.
 func (i *Interpreter) reclaim(addr int, v types.Value) {
+	if _, ok := v.(*types.Function); ok {
+		i.remove(addr)
+	}
 	if s, ok := v.(types.String); ok {
 		delete(i.interned, string(s))
 	}

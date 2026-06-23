@@ -14,7 +14,7 @@ Each sample records:
 
 | Field | Meaning |
 |---|---|
-| function index | `0` for top-level; function constants use `constant index + 1` |
+| function index | `0` for top-level; functions use their heap ref |
 | instruction pointer | byte offset in that function bytecode |
 | opcode | raw opcode byte at sampled IP |
 

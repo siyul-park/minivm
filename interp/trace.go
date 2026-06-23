@@ -391,6 +391,22 @@ func (r *Tracer) store(a anchor, t *trace) {
 	tr.root = t
 }
 
+func (r *Tracer) remove(addr int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for a := range r.trees {
+		if a.addr == addr {
+			delete(r.trees, a)
+		}
+	}
+	for a := range r.blacklist {
+		if a.addr == addr {
+			delete(r.blacklist, a)
+		}
+	}
+	delete(r.loops, addr)
+}
+
 func (r *Tracer) tree(a anchor) *tree {
 	tr := r.trees[a]
 	if tr == nil {

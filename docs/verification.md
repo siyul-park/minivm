@@ -37,9 +37,9 @@ vm, err := interp.New(prog, interp.WithVerify(true))       // returns the Verify
 it for untrusted or externally loaded bytecode. `WithVerify` passes the
 installed extension registry's ids through as `verify.WithExtensions`.
 
-`VerifyError` locates the first violation by function slot (0 = top-level code,
-`j+1` = constant `j`, matching the interpreter's compiled layout), instruction
-byte offset, and opcode, and wraps a sentinel (`errors.Is`-compatible):
+`VerifyError` locates the first violation by verifier slot (0 = top-level code,
+`j+1` = constant `j`; runtime dispatch is keyed by heap ref), instruction byte
+offset, and opcode, and wraps a sentinel (`errors.Is`-compatible):
 `ErrTruncated`, `ErrUnknownOpcode`, `ErrUnknownExtension`, `ErrIndexOutOfRange`,
 `ErrStackUnderflow`, `ErrStackMismatch`, `ErrTypeMismatch`, `ErrFallThrough`,
 plus `analysis.ErrInvalidJump` from the CFG pass.
