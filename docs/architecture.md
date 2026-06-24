@@ -13,7 +13,7 @@ Read when a change crosses package boundaries or depends on state ownership.
 | `interp.Tracer` or profile options | `profile.md` |
 | `interp/threaded.go` or `interp/jit*.go` | `jit-internals.md`, `instruction-set.md` |
 | `analysis/`, `transform/`, `optimize/`, `pass/` | `pass-system.md` |
-| `verify/` or admitting untrusted bytecode | `verification.md` |
+| `program/verify.go` or admitting untrusted bytecode | `verification.md` |
 | `cli/` or `cmd/minivm/` | `guides/repl.md` |
 
 Boundary rules: `instr` stays leaf-like, `types` must not import `interp`, and optimizer code flows through `pass.Pipeline` + `pass.Manager`.
@@ -23,9 +23,9 @@ Boundary rules: `instr` stays leaf-like, `types` must not import `interp`, and o
 Import direction: `A → B` means `A` imports `B`.
 
 ```text
-program → instr
-verify  → instr, types, program, analysis, pass
-interp  → program, instr, types, asm, pass, analysis, verify
+types   → instr
+program → instr, types
+interp  → program, instr, types, asm, pass, analysis
 asm/arm64 → asm
 analysis → pass, types, instr
 transform → analysis, pass, types, instr, program
@@ -33,6 +33,10 @@ optimize → transform, analysis, pass, program
 cli → instr, interp, program, types, cobra
 cmd/minivm → cli
 ```
+
+`program/verify.go` (the bytecode verifier) deliberately does **not** import
+`analysis`/`pass`: those packages' tests import `program`, so an edge back would
+cycle. It inlines its own basic-block construction instead.
 
 ## Component Responsibilities
 
@@ -102,9 +106,9 @@ Two layers:
 
 Dynamic `*types.Function` values can be installed through `Interpreter.Alloc` or
 `Interpreter.Store`. The interpreter keeps callable dispatch slots keyed by heap
-address in sync with function heap rows, verifies dynamic functions when
-`WithVerify(true)` is enabled, and removes dispatch slots when the heap row is
-overwritten or reclaimed.
+address in sync with function heap rows, and removes dispatch slots when the heap
+row is overwritten or reclaimed. It trusts installed functions; verify untrusted
+bytecode with `program.Verify` before installing it.
 
 `Coroutine` (`coroutine.go`): `yield`/`resume` suspension. A `YIELD` in the entry frame (`fp == 1`) is an **interpreter escape**: it panics the private `errYield`, `Run` recovers it and returns the exported `ErrYield` without wrapping or losing state, and the next `Run` resumes after the `YIELD` (the host swaps the stack-top value to feed the result back in). A `YIELD` inside a called function is an **asymmetric coroutine** yield. A function whose body contains `YIELD` is a coroutine-function (scanned once at `New` into `coros []bool`, parallel to `code`); its `CALL` allocates a `Coroutine` heap handle and tags the new `frame.coro`, so the call always yields a single handle instead of plain returns. `suspend` captures the one frame (its `ip`, function ref, upvals, and `stack[bp:sp]` image, ownership moved to the handle) and unwinds to the caller; `resume` restores the frame above the resumer's stack and delivers the in-value as the pending `YIELD`'s result; `finish` (`RETURN` with `frame.coro != 0`) records the final value, marks the handle done, and delivers it. `coro.done`/`coro.value` read status and last value. The collector roots every active frame's `ref` and `coro`, and the handle's `Refs` keeps the suspended image live. `YIELD`/`RESUME` cannot run natively, so a trace that reaches one in its anchor frame records it as a **terminal** and the JIT lowers it to an unconditional deopt that hands the real suspend/resume to the threaded handler (resume IP is the op itself, since each handler does its own `ip++`); a suspension inside an inlined callee frame still aborts the trace, because deopt rebuilds inlined frames without their `coro` handle and the threaded handler would mis-read. Coroutine-functions' fused `CONST_GET; CALL` superinstruction stays suppressed so the generic coroutine `CALL` path runs. `CORO_DONE`/`CORO_VALUE` are pure heap reads that the JIT lowers natively behind an itab guard, like `STRUCT_GET`/`REF_GET`.
 
@@ -170,16 +174,18 @@ O2  ConstantFoldingPass → AlgebraicSimplificationPass → ConstantDeduplicatio
 
 Transform passes mutate `*program.Program` in-place: edit `prog.Code` bytes and `prog.Constants`.
 
-### `verify/`
+#### `program/verify.go`
 
-Static pre-execution validator. `verify.Verify(prog, opts...)` proves each
-function slot decodes within bounds, references valid opcodes and in-range
-pool/local/upval indices, has valid branch targets and proper termination, and
-(where statically determinable) keeps the operand stack balanced and
-type-consistent. It reuses `analysis.BasicBlocksAnalysis` through `pass.Manager`
-and keeps `instr`/`types`/`program` leaf-like — its abstract kind lattice reuses
-`types.Kind` rather than defining a parallel enum. `interp.New` runs it when
-`WithVerify(true)` is set. See `verification.md`.
+Static pre-execution validator (a single cohesive file in `program`).
+`program.Verify(prog, opts...)` proves each function slot decodes within bounds,
+references valid opcodes and in-range pool/local/upval indices, has valid branch
+targets and proper termination, and (where statically determinable) keeps the
+operand stack balanced and type-consistent. Per-opcode stack effects live on
+`instr.Type` (`Pop`/`Push`); the abstract kind lattice reuses `types.Kind` (an
+alias of `instr.Kind`) rather than a parallel enum. It builds its own CFG inline
+instead of importing `analysis`/`pass` (which would cycle through `program`).
+Verification is decoupled from `interp.New`; callers run it first. See
+`verification.md`.
 
 ### `cli/`
 
@@ -211,16 +217,18 @@ Thin entrypoint around `cli.Root().Execute()`.
 1. program.New(instrs, options...)
    └─ instr.Marshal(instrs) → prog.Code
 
-2. optimize.Optimize(prog) [optional AOT]
+2. program.Verify(prog, opts...) [optional, for untrusted bytecode]
+   └─ *VerifyError on malformed bytecode, before any interpreter is built
+
+3. optimize.Optimize(prog) [optional AOT]
    └─ CF → (AS) → CD → (DCE), each requesting BasicBlocksAnalysis
 
-3. interp.New(prog, opts...) → (*Interpreter, error)
-   ├─ if WithVerify(true): verify.Verify(prog) → *VerifyError on malformed bytecode
+4. interp.New(prog, opts...) → (*Interpreter, error)
    ├─ threadedCompiler.Compile(prog.Code) → i.code[0]
    └─ for each *Function constant:
       threadedCompiler.Compile(fn.Code) → i.code[fn heap ref]
 
-4. interp.Run(ctx)
+5. interp.Run(ctx)
    ├─ main loop: code[f.ip](i)
    ├─ every 128 instructions:
    │  check ctx, consume fuel, call hook, local.Add(addr, ip, opcode)
@@ -231,7 +239,7 @@ Thin entrypoint around `cli.Root().Execute()`.
          ├─ assembler.Link → primary/internal context-pointer Callables
          └─ i.code[entryIP] = closure(callable) per accepted entry
 
-5. interp.Close()
+6. interp.Close()
    └─ buffer.Free() → munmap
 ```
 

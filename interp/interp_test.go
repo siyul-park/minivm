@@ -15,7 +15,6 @@ import (
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
-	"github.com/siyul-park/minivm/verify"
 	"github.com/stretchr/testify/require"
 )
 
@@ -7997,69 +7996,26 @@ func BenchmarkInterpreter_Unmarshal(b *testing.B) {
 	}
 }
 
-func TestWithVerify(t *testing.T) {
-	t.Run("rejects malformed bytecode", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.I32_ADD)})
-		i, err := New(prog, WithVerify(true))
-		require.Nil(t, i)
-		require.ErrorIs(t, err, verify.ErrStackUnderflow)
-	})
+// Verification is no longer part of the interpreter: New trusts prog and runs
+// malformed bytecode until it traps. Callers reject bad bytecode up front with
+// program.Verify (covered by program's TestVerify). This documents the trusting
+// default — a malformed function stored at runtime executes and traps.
+func TestInterpreter_RunsUnverifiedBytecode(t *testing.T) {
+	prog := program.New([]instr.Instruction{instr.New(instr.CALL)})
+	i, err := New(prog)
+	require.NoError(t, err)
+	defer i.Close()
 
-	t.Run("accepts valid bytecode", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 1),
-			instr.New(instr.I32_CONST, 2),
-			instr.New(instr.I32_ADD),
-		})
-		i, err := New(prog, WithVerify(true))
-		require.NoError(t, err)
-		require.NotNil(t, i)
-		defer i.Close()
-	})
-
-	t.Run("off by default skips verification", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.I32_ADD)})
-		i, err := New(prog)
-		require.NoError(t, err)
-		require.NotNil(t, i)
-		defer i.Close()
-	})
-
-	t.Run("store rejects malformed function", func(t *testing.T) {
-		i, err := New(program.New(nil), WithVerify(true))
-		require.NoError(t, err)
-		defer i.Close()
-
-		addr, err := i.Alloc(types.I32(5))
-		require.NoError(t, err)
-		fn := types.NewFunction(
-			&types.FunctionType{Returns: []types.Type{types.TypeI32}},
-			nil,
-			[]instr.Instruction{instr.New(instr.I32_ADD), instr.New(instr.RETURN)},
-		)
-		require.ErrorIs(t, i.Store(addr, fn), verify.ErrStackUnderflow)
-		got, err := i.Load(addr)
-		require.NoError(t, err)
-		require.Equal(t, types.I32(5), got)
-	})
-
-	t.Run("off by default stores malformed function", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.CALL)})
-		i, err := New(prog)
-		require.NoError(t, err)
-		defer i.Close()
-
-		addr, err := i.Alloc(types.I32(0))
-		require.NoError(t, err)
-		fn := types.NewFunction(
-			&types.FunctionType{Returns: []types.Type{types.TypeI32}},
-			nil,
-			[]instr.Instruction{instr.New(instr.I32_ADD), instr.New(instr.RETURN)},
-		)
-		require.NoError(t, i.Store(addr, fn))
-		require.NoError(t, i.Push(types.BoxRef(addr)))
-		require.ErrorIs(t, i.Run(context.Background()), ErrStackUnderflow)
-	})
+	addr, err := i.Alloc(types.I32(0))
+	require.NoError(t, err)
+	fn := types.NewFunction(
+		&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+		nil,
+		[]instr.Instruction{instr.New(instr.I32_ADD), instr.New(instr.RETURN)},
+	)
+	require.NoError(t, i.Store(addr, fn))
+	require.NoError(t, i.Push(types.BoxRef(addr)))
+	require.ErrorIs(t, i.Run(context.Background()), ErrStackUnderflow)
 }
 
 func TestInterpreter_Throw(t *testing.T) {
