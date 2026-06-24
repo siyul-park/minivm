@@ -1,48 +1,53 @@
 # Verification
 
-Static, pre-execution validation of bytecode. Lives in `verify/`.
+Static, pre-execution validation of bytecode. Lives in `program/verify.go`.
 
 ## Agent Usage
 
 Read when changing the verifier, adding an opcode, or changing how untrusted
 bytecode is admitted.
 
-- Per-opcode stack effects: `verify/effect.go` (`signature`). A new opcode that
-  is not handled case-by-case in `verify/verify.go` `checker.step` must get a
-  row here.
-- Abstract stack lattice: `verify/stack.go`.
-- Driver and passes: `verify/verify.go`.
-- Entry points: `interp.New` with `interp.WithVerify(true)`; `verify.Verify`
-  directly. The `run` CLI subcommand verifies every loaded file.
+- Per-opcode stack effects: the `Pop`/`Push` fields on `instr.Type`
+  (`instr/type.go`). A new opcode with a statically fixed effect gets its kinds
+  there; one whose effect depends on operands, constants, declared types, or the
+  runtime stack leaves `Pop`/`Push` nil and is handled case-by-case in
+  `program/verify.go` `checker.step`.
+- Abstract stack lattice, CFG construction, driver, and passes: all in
+  `program/verify.go` (one cohesive file; it does not depend on `analysis`/`pass`
+  so `program` stays free of an import cycle).
+- Entry points: `program.Verify` directly. The `run` CLI subcommand verifies
+  every loaded file before constructing the interpreter.
 
 ## Why
 
 minivm targets safe plugin / DSL / rules execution. Like WebAssembly and the
 JVM, it must be able to reject malformed or hostile bytecode *before* running
-it. `program.New` and `interp.New` (with verification off) trust the producer;
-the verifier supplies the trust boundary for untrusted bytecode so a bad module
-fails fast with a typed error instead of trapping mid-run, corrupting the
-operand stack, or panicking the host.
+it. `program.New` and `interp.New` trust the producer; `program.Verify` supplies
+the trust boundary for untrusted bytecode so a bad module fails fast with a typed
+error instead of trapping mid-run, corrupting the operand stack, or panicking the
+host.
 
 ## API
 
 ```go
-err := verify.Verify(prog, verify.WithExtensions(ids...)) // nil or *verify.VerifyError
-
-vm, err := interp.New(prog, interp.WithVerify(true))       // returns the VerifyError
+err := program.Verify(prog, program.WithExtensions(ids...)) // nil or *program.VerifyError
+if err != nil {
+    return err
+}
+vm, err := interp.New(prog) // trusts prog; verify first
 ```
 
-`interp.New` always returns `(*Interpreter, error)`. With `WithVerify` off
-(the default) the error is always nil and no verification cost is paid; enable
-it for untrusted or externally loaded bytecode. `WithVerify` passes the
-installed extension registry's ids through as `verify.WithExtensions`.
+Verification is decoupled from the interpreter: `interp.New` never verifies and
+trusts its input. Run `program.Verify` beforehand for untrusted or externally
+loaded bytecode, passing the extension registry's ids through
+`program.WithExtensions` when the program uses `EXT`.
 
 `VerifyError` locates the first violation by verifier slot (0 = top-level code,
 `j+1` = constant `j`; runtime dispatch is keyed by heap ref), instruction byte
 offset, and opcode, and wraps a sentinel (`errors.Is`-compatible):
 `ErrTruncated`, `ErrUnknownOpcode`, `ErrUnknownExtension`, `ErrIndexOutOfRange`,
 `ErrStackUnderflow`, `ErrStackMismatch`, `ErrTypeMismatch`, `ErrFallThrough`,
-plus `analysis.ErrInvalidJump` from the CFG pass.
+`ErrInvalidJump`, `ErrHandlerRange`, and `ErrHandlerTarget`.
 
 ## What it checks
 
@@ -55,7 +60,7 @@ Each function slot is verified in four passes (`checker.run`):
    `ARRAY_NEW*`/`STRUCT_NEW*`/`MAP_NEW*`) into `Types`; `LOCAL_*` into the
    param+local list; `UPVAL_*` into `Captures`; `EXT` against the known
    extension ids when supplied.
-2. **Control flow** — `analysis.BasicBlocksAnalysis` builds the CFG, which also
+2. **Control flow** — `checker.blocks` builds the CFG, which also
    proves every branch target lands on an instruction boundary.
 3. **Termination** — every exit block of a *function body* ends in `RETURN`,
    `RETURN_CALL`, or `UNREACHABLE`. Top-level code (slot 0) is exempt: the

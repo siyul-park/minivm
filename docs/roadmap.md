@@ -12,7 +12,7 @@ minivm: Go-native programmable runtime for scripting, rules, DSLs, and plugin-st
 
 ## Completed
 
-- Added a static bytecode verifier (`verify` package) with `interp.WithVerify` and CLI `run` integration: decode/operand-bounds, branch-target, termination, and best-effort typed operand-stack checks reject malformed bytecode before execution. See `verification.md`.
+- Added a static bytecode verifier (`program.Verify`, in `program/verify.go`) with CLI `run` integration: decode/operand-bounds, branch-target, termination, and best-effort typed operand-stack checks reject malformed bytecode before execution. Per-opcode stack effects live on `instr.Type`; verification runs before `interp.New` rather than inside it. See `verification.md`.
 - Added `WithMaxHeap`, `ErrHeapExhausted`, and heap-limit tests for safer embedded execution.
 - Added `RuntimeError` with VM call frames while preserving `errors.Is` / `errors.As` cause checks.
 - Added shared JIT code cache and aggregate profiling for `interp.Pool`.

@@ -14,7 +14,6 @@ import (
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
-	"github.com/siyul-park/minivm/verify"
 )
 
 type Interpreter struct {
@@ -58,8 +57,6 @@ type Interpreter struct {
 	tick      int
 	fuel      int64
 	limit     int
-	verify    bool
-	vopts     []verify.Option
 }
 
 // RuntimeError wraps a guest execution failure with the VM call stack at the
@@ -116,7 +113,6 @@ type option struct {
 	maxHeap int
 	tick    int
 	fuel    uint64
-	verify  bool
 }
 
 var (
@@ -224,18 +220,8 @@ func WithFuel(val uint64) func(*option) {
 	return func(o *option) { o.fuel = val }
 }
 
-// WithVerify enables static verification of prog before execution. When on,
-// New runs verify.Verify and returns the resulting *verify.VerifyError for
-// malformed bytecode instead of constructing an interpreter. It defaults off so
-// trusted first-party programs pay no verification cost; enable it for
-// untrusted or externally loaded bytecode.
-func WithVerify(on bool) func(*option) {
-	return func(o *option) { o.verify = on }
-}
-
-// New builds an interpreter for prog. With WithVerify enabled it first runs
-// verify.Verify and returns a *verify.VerifyError when the bytecode is
-// malformed; otherwise the error is always nil.
+// New builds an interpreter for prog. It trusts prog to be well-formed; run
+// program.Verify(prog) beforehand to reject malformed or untrusted bytecode.
 func New(prog *program.Program, opts ...func(*option)) (*Interpreter, error) {
 	opt := option{
 		frame:     128,
@@ -247,20 +233,6 @@ func New(prog *program.Program, opts ...func(*option)) (*Interpreter, error) {
 	}
 	for _, o := range opts {
 		o(&opt)
-	}
-
-	var vopts []verify.Option
-	if opt.registry != nil {
-		ids := make([]uint8, len(opt.registry.exts))
-		for i := range opt.registry.exts {
-			ids[i] = uint8(i)
-		}
-		vopts = append(vopts, verify.WithExtensions(ids...))
-	}
-	if opt.verify {
-		if err := verify.Verify(prog, vopts...); err != nil {
-			return nil, err
-		}
 	}
 
 	if opt.frame <= 0 {
@@ -327,8 +299,6 @@ func New(prog *program.Program, opts ...func(*option)) (*Interpreter, error) {
 		fuel:      fuel,
 		gas:       fuel,
 		limit:     opt.maxHeap,
-		verify:    opt.verify,
-		vopts:     vopts,
 	}
 	if opt.registry != nil {
 		i.exts = append([]Extension(nil), opt.registry.exts...)
@@ -598,9 +568,6 @@ func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 			val = types.Unbox(v)
 		}
 	}
-	if err := i.check(val); err != nil {
-		return err
-	}
 	if _, ok := i.heap[addr].(*types.Function); ok {
 		i.remove(addr)
 	}
@@ -621,9 +588,6 @@ func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 	}
 	if s, ok := val.(types.String); ok {
 		return int(i.intern(string(s))), nil
-	}
-	if err := i.check(val); err != nil {
-		return 0, err
 	}
 	addr = i.keep(val)
 	if fn, ok := val.(*types.Function); ok {
@@ -1446,31 +1410,6 @@ func (i *Interpreter) keep(val types.Value) int {
 	roots := i.trace(val)
 	defer i.unroot(roots)
 	return i.alloc(val)
-}
-
-func (i *Interpreter) check(val types.Value) error {
-	fn, ok := val.(*types.Function)
-	if !ok || !i.verify {
-		return nil
-	}
-	constants := make([]types.Value, 0, len(i.constants)+1)
-	for _, val := range i.constants {
-		if val.Kind() != types.KindRef {
-			constants = append(constants, types.Unbox(val))
-			continue
-		}
-		addr := val.Ref()
-		if addr >= 0 && addr < len(i.heap) && i.rc[addr] > 0 {
-			constants = append(constants, i.heap[addr])
-			continue
-		}
-		constants = append(constants, types.Ref(addr))
-	}
-	constants = append(constants, fn)
-	return verify.Verify(&program.Program{
-		Constants: constants,
-		Types:     i.types,
-	}, i.vopts...)
 }
 
 func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {

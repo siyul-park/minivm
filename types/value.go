@@ -1,5 +1,7 @@
 package types
 
+import "github.com/siyul-park/minivm/instr"
+
 type Value interface {
 	Kind() Kind
 	Type() Type
@@ -66,56 +68,15 @@ func Kinds(ts []Type) []Kind {
 	return out
 }
 
-type Kind byte
+// Kind is the operand value classification. It is defined in instr (the lowest
+// package) and aliased here so instruction metadata and the value model share
+// one type; its methods (String, IsNumeric, Size) live on instr.Kind.
+type Kind = instr.Kind
 
 const (
-	KindF64 Kind = iota
-	KindF32
-	KindI64
-	KindI32
-	KindRef
+	KindF64 = instr.KindF64
+	KindF32 = instr.KindF32
+	KindI64 = instr.KindI64
+	KindI32 = instr.KindI32
+	KindRef = instr.KindRef
 )
-
-func (k Kind) String() string {
-	switch k {
-	case KindI32:
-		return "i32"
-	case KindI64:
-		return "i64"
-	case KindF32:
-		return "f32"
-	case KindF64:
-		return "f64"
-	case KindRef:
-		return "ref"
-	default:
-		return "unknown"
-	}
-}
-
-// IsNumeric reports whether k is one of the numeric kinds (i32, i64, f32, f64).
-func (k Kind) IsNumeric() bool {
-	switch k {
-	case KindI32, KindI64, KindF32, KindF64:
-		return true
-	default:
-		return false
-	}
-}
-
-func (k Kind) Size() int {
-	switch k {
-	case KindI32:
-		return 4
-	case KindI64:
-		return 8
-	case KindF32:
-		return 4
-	case KindF64:
-		return 8
-	case KindRef:
-		return 4
-	default:
-		return 0
-	}
-}
