@@ -36,10 +36,12 @@ func TestTypeOf(t *testing.T) {
 		{opcode: GLOBAL_GET},
 		{opcode: GLOBAL_SET},
 		{opcode: GLOBAL_TEE},
+		{opcode: GLOBAL_DELETE},
 
 		{opcode: LOCAL_GET},
 		{opcode: LOCAL_SET},
 		{opcode: LOCAL_TEE},
+		{opcode: LOCAL_DELETE},
 
 		{opcode: CONST_GET},
 
@@ -255,6 +257,7 @@ func TestTypeOf(t *testing.T) {
 
 		{opcode: UPVAL_GET},
 		{opcode: UPVAL_SET},
+		{opcode: UPVAL_DELETE},
 	}
 
 	for _, tt := range tests {

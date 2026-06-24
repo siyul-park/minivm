@@ -104,6 +104,16 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, Verify(prog), ErrIndexOutOfRange)
 	})
 
+	t.Run("local delete index out of range", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.LOCAL_DELETE, 9)})
+		require.ErrorIs(t, Verify(prog), ErrIndexOutOfRange)
+	})
+
+	t.Run("upvalue delete index out of range", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.UPVAL_DELETE, 0)})
+		require.ErrorIs(t, Verify(prog), ErrIndexOutOfRange)
+	})
+
 	t.Run("invalid jump", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.BR, 100)})
 		require.ErrorIs(t, Verify(prog), analysis.ErrInvalidJump)

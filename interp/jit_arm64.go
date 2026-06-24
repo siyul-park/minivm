@@ -175,12 +175,16 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			ok = l.localSet(ctx, op, true)
 		case instr.LOCAL_TEE:
 			ok = l.localSet(ctx, op, false)
+		case instr.LOCAL_DELETE:
+			ok = l.localDelete(ctx, op)
 		case instr.GLOBAL_GET:
 			ok = l.globalGet(ctx, op)
 		case instr.GLOBAL_SET:
 			ok = l.globalSet(ctx, op, true)
 		case instr.GLOBAL_TEE:
 			ok = l.globalSet(ctx, op, false)
+		case instr.GLOBAL_DELETE:
+			ok = l.globalDelete(ctx, op)
 		case instr.DROP:
 			ok = l.drop(ctx, op)
 		case instr.DUP:
@@ -195,6 +199,8 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			ok = l.upvalGet(ctx, op)
 		case instr.UPVAL_SET:
 			ok = l.upvalSet(ctx, op)
+		case instr.UPVAL_DELETE:
+			ok = l.upvalDelete(ctx, op)
 		case instr.I32_ADD:
 			ok = l.i32Binary(ctx, arm64.ADD)
 		case instr.I32_SUB:
@@ -683,6 +689,30 @@ func (l arm64Lowerer) localSet(ctx *lowering, op step, pop bool) bool {
 	return true
 }
 
+// localDelete clears a ref local: it releases the overwritten runtime ref and
+// stores BoxedNull, mirroring localSet's ref path. Non-ref slots hold no heap
+// ref to free, so the trace truncates and the threaded handler runs the delete.
+func (l arm64Lowerer) localDelete(ctx *lowering, op step) bool {
+	f := ctx.frame()
+	idx := int(f.code[op.ip+1])
+	if idx >= len(f.kinds) || f.kinds[idx] != types.KindRef {
+		return false
+	}
+	pre := append([]value(nil), ctx.values...)
+	vStack := ctx.pin(scratchStack)
+	addr := l.base(ctx, vStack)
+	old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDR(old, addr, int16((f.base+idx)*8)))
+	boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(boxed, uint64(types.BoxedNull))...)
+	l.retainBox(ctx, boxed)
+	ctx.assembler.Emit(arm64.STR(boxed, addr, int16((f.base+idx)*8)))
+	l.releaseBox(ctx, old, pre, op.ip)
+	f.locals[idx] = value{reg: boxed, kind: types.KindRef, raw: false}
+	f.loaded[idx] = true
+	return true
+}
+
 // globalGet loads a global directly from the globals base. Scalars push
 // raw; refs stay boxed and retain the stack ownership created by the get.
 func (l arm64Lowerer) globalGet(ctx *lowering, op step) bool {
@@ -739,6 +769,26 @@ func (l arm64Lowerer) globalSet(ctx *lowering, op step, pop bool) bool {
 	if pop {
 		ctx.pop()
 	}
+	return true
+}
+
+// globalDelete clears a ref global: it releases the overwritten runtime ref and
+// stores BoxedNull. Non-ref slots (and indices l.global rejects) truncate the
+// trace so the threaded handler runs the delete.
+func (l arm64Lowerer) globalDelete(ctx *lowering, op step) bool {
+	idx, kind, ok := l.global(ctx, op)
+	if !ok || kind != types.KindRef {
+		return false
+	}
+	base := ctx.pin(scratchGlobals)
+	pre := append([]value(nil), ctx.values...)
+	old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDR(old, base, int16(idx*8)))
+	boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(boxed, uint64(types.BoxedNull))...)
+	l.retainBox(ctx, boxed)
+	ctx.assembler.Emit(arm64.STR(boxed, base, int16(idx*8)))
+	l.releaseBox(ctx, old, pre, op.ip)
 	return true
 }
 
@@ -2199,6 +2249,27 @@ func (l arm64Lowerer) upvalSet(ctx *lowering, op step) bool {
 	}
 	ctx.assembler.Emit(arm64.STR(boxed, base, int16(idx*8)))
 	ctx.pop()
+	return true
+}
+
+// upvalDelete clears a ref upvalue: it releases the overwritten runtime ref and
+// stores BoxedNull, mirroring upvalSet's ref path. Non-ref slots truncate the
+// trace so the threaded handler runs the delete.
+func (l arm64Lowerer) upvalDelete(ctx *lowering, op step) bool {
+	f := ctx.frame()
+	idx := int(f.code[op.ip+1])
+	if idx >= len(f.upvals) || f.upvals[idx] != types.KindRef {
+		return false
+	}
+	base := l.upvalBase(ctx)
+	pre := append([]value(nil), ctx.values...)
+	old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDR(old, base, int16(idx*8)))
+	boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(boxed, uint64(types.BoxedNull))...)
+	l.retainBox(ctx, boxed)
+	ctx.assembler.Emit(arm64.STR(boxed, base, int16(idx*8)))
+	l.releaseBox(ctx, old, pre, op.ip)
 	return true
 }
 

@@ -312,7 +312,7 @@ var tests = []test{
 		),
 		values: []types.Value{types.I32(42)},
 	},
-	// --- globals: GLOBAL_GET, GLOBAL_SET, GLOBAL_TEE ---
+	// --- globals: GLOBAL_GET, GLOBAL_SET, GLOBAL_TEE, GLOBAL_DELETE ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -372,7 +372,30 @@ var tests = []test{
 		),
 		values: []types.Value{types.F64(1.5)},
 	},
-	// --- locals: LOCAL_GET, LOCAL_SET, LOCAL_TEE ---
+	{
+		// GLOBAL_DELETE releases the held ref and resets the slot to Null.
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 5),
+				instr.New(instr.REF_NEW),
+				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.GLOBAL_DELETE, 0),
+				instr.New(instr.GLOBAL_GET, 0),
+			},
+		),
+		values: []types.Value{types.Null},
+	},
+	{
+		// GLOBAL_DELETE on an unassigned global is a no-op.
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.GLOBAL_DELETE, 3),
+				instr.New(instr.I32_CONST, 7),
+			},
+		),
+		values: []types.Value{types.I32(7)},
+	},
+	// --- locals: LOCAL_GET, LOCAL_SET, LOCAL_TEE, LOCAL_DELETE ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -418,6 +441,25 @@ var tests = []test{
 			),
 		),
 		values: []types.Value{types.I32(1)},
+	},
+	{
+		// LOCAL_DELETE releases the held ref and resets the local to Null.
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(
+				types.NewFunctionBuilder(nil).WithLocals(types.TypeRef).Emit(
+					instr.New(instr.I32_CONST, 5),
+					instr.New(instr.REF_NEW),
+					instr.New(instr.LOCAL_SET, 0),
+					instr.New(instr.LOCAL_DELETE, 0),
+					instr.New(instr.LOCAL_GET, 0),
+				).MustBuild(),
+			),
+		),
+		values: []types.Value{types.Null},
 	},
 	{
 		program: program.New(
@@ -2956,7 +2998,29 @@ var tests = []test{
 		),
 		values: []types.Value{types.I64(1 << 50)},
 	},
-	// --- closures: CLOSURE_NEW, UPVAL_GET, UPVAL_SET ---
+	// --- closures: CLOSURE_NEW, UPVAL_GET, UPVAL_SET, UPVAL_DELETE ---
+	{
+		// UPVAL_DELETE releases the captured ref and resets the upvalue to Null.
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 5),
+				instr.New(instr.REF_NEW),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CLOSURE_NEW),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(
+				types.NewFunctionBuilder(&types.FunctionType{
+					Returns: []types.Type{types.TypeRef},
+				}).WithCaptures(types.TypeRef).Emit(
+					instr.New(instr.UPVAL_DELETE, 0),
+					instr.New(instr.UPVAL_GET, 0),
+					instr.New(instr.RETURN),
+				).MustBuild(),
+			),
+		),
+		values: []types.Value{types.Null},
+	},
 	{
 		// no-capture closure: behaves like calling the function directly
 		program: program.New(

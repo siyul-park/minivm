@@ -28,13 +28,15 @@ var types = map[Opcode]Type{
 	CORO_DONE:  {"coro.done", []int{}},
 	CORO_VALUE: {"coro.value", []int{}},
 
-	GLOBAL_GET: {"global.get", []int{2}},
-	GLOBAL_SET: {"global.set", []int{2}},
-	GLOBAL_TEE: {"global.tee", []int{2}},
+	GLOBAL_GET:    {"global.get", []int{2}},
+	GLOBAL_SET:    {"global.set", []int{2}},
+	GLOBAL_TEE:    {"global.tee", []int{2}},
+	GLOBAL_DELETE: {"global.delete", []int{2}},
 
-	LOCAL_GET: {"local.get", []int{1}},
-	LOCAL_SET: {"local.set", []int{1}},
-	LOCAL_TEE: {"local.tee", []int{1}},
+	LOCAL_GET:    {"local.get", []int{1}},
+	LOCAL_SET:    {"local.set", []int{1}},
+	LOCAL_TEE:    {"local.tee", []int{1}},
+	LOCAL_DELETE: {"local.delete", []int{1}},
 
 	CONST_GET: {"const.get", []int{2}},
 
@@ -259,8 +261,9 @@ var types = map[Opcode]Type{
 	ERROR_NEW: {"error.new", []int{}},
 	ERROR_GET: {"error.get", []int{}},
 
-	UPVAL_GET: {"upval.get", []int{1}},
-	UPVAL_SET: {"upval.set", []int{1}},
+	UPVAL_GET:    {"upval.get", []int{1}},
+	UPVAL_SET:    {"upval.set", []int{1}},
+	UPVAL_DELETE: {"upval.delete", []int{1}},
 
 	EXT: {"ext", []int{2, -8}},
 }

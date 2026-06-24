@@ -83,9 +83,11 @@ Offsets are signed 16-bit values encoded little-endian. `BR 5` skips 5 bytes pas
 | `GLOBAL_GET` | `{2}` | `→ x` | ◐ | Push global at u16 index. JIT supports in-range numeric, dynamic `ref`, and guarded ref-counted heap values; heap-promoted `i64` exits to threaded execution. |
 | `GLOBAL_SET` | `{2}` | `x →` | ◐ | Store global at u16 index. JIT supports numeric, dynamic `ref`, and guarded ref-counted heap values. |
 | `GLOBAL_TEE` | `{2}` | `x → x` | ◐ | Store global and keep value. JIT supports the same guarded paths as `GLOBAL_SET`. |
+| `GLOBAL_DELETE` | `{2}` | `→` | ◐ | Release the ref the global at u16 index holds and reset it to `BoxedNull`; an index past the allocated globals is a no-op. JIT lowers `ref` slots natively; other kinds deopt to threaded. |
 | `LOCAL_GET` | `{1}` | `→ x` | ◐ | Push u8 local relative to frame base. JIT supports params/locals including dynamic `ref` slots; heap-promoted `i64` exits to threaded execution. |
 | `LOCAL_SET` | `{1}` | `x →` | ◐ | Store u8 local. JIT supports numeric, dynamic `ref`, and guarded ref-counted heap values. |
 | `LOCAL_TEE` | `{1}` | `x → x` | ◐ | Store local and keep value. JIT supports the same guarded paths as `LOCAL_SET`. |
+| `LOCAL_DELETE` | `{1}` | `→` | ◐ | Release the ref the u8 local holds and reset it to `BoxedNull`; traps `ErrSegmentationFault` past the frame top. JIT lowers `ref` slots natively; other kinds deopt to threaded. |
 | `CONST_GET` | `{2}` | `→ x` | ◐ | Push u16 constant. JIT supports boxed numeric constants and function constants used by direct/indirect calls; ordinary heap ref constants stay threaded. |
 
 ## References
@@ -111,6 +113,7 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `CLOSURE_NEW` | `{}` | `upval1 … upvalN fn → closure` | ◐ | Pop the `*Function` template (top of stack, like `call`), read `N = len(fn.Captures)`, pop N upvalues below it, and push a `*Closure` capturing them. Ownership of `fn` and the upvalues transfers into the closure. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `UPVAL_GET` | `{1}` | `→ x` | ◐ | Push the closure upvalue at u8 index; traps `ErrSegmentationFault` outside a closure frame or out of range. Closure-body JIT supports guarded upvalue loads. |
 | `UPVAL_SET` | `{1}` | `x →` | ◐ | Store into the closure upvalue at u8 index (persists across calls to the same closure); same trap conditions as `UPVAL_GET`. Closure-body JIT supports guarded ref-counted stores. |
+| `UPVAL_DELETE` | `{1}` | `→` | ◐ | Release the ref the closure upvalue at u8 index holds and reset it to `BoxedNull`; same trap conditions as `UPVAL_GET`. Closure-body JIT lowers `ref` slots natively; other kinds deopt to threaded. |
 
 ## i32 Operations
 

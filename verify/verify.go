@@ -205,11 +205,11 @@ func (c *checker) bounds(ip int, op instr.Opcode) error {
 		if int(inst.Operand(0)) >= len(c.prog.Types) {
 			return c.fail(ip, op, ErrIndexOutOfRange)
 		}
-	case instr.LOCAL_GET, instr.LOCAL_SET, instr.LOCAL_TEE:
+	case instr.LOCAL_GET, instr.LOCAL_SET, instr.LOCAL_TEE, instr.LOCAL_DELETE:
 		if int(inst.Operand(0)) >= len(c.locals) {
 			return c.fail(ip, op, ErrIndexOutOfRange)
 		}
-	case instr.UPVAL_GET, instr.UPVAL_SET:
+	case instr.UPVAL_GET, instr.UPVAL_SET, instr.UPVAL_DELETE:
 		if int(inst.Operand(0)) >= len(c.captures) {
 			return c.fail(ip, op, ErrIndexOutOfRange)
 		}
@@ -352,7 +352,9 @@ func (c *checker) exec(b *analysis.BasicBlock, st *stack) (bool, error) {
 // types, the callee signature) or report an indeterminate effect.
 func (c *checker) step(st *stack, inst instr.Instruction, op instr.Opcode, ip int) (bool, error) {
 	switch op {
-	case instr.NOP, instr.UNREACHABLE, instr.BR:
+	case instr.NOP, instr.UNREACHABLE, instr.BR,
+		instr.GLOBAL_DELETE, instr.LOCAL_DELETE, instr.UPVAL_DELETE:
+		// Slot deletes clear a slot in place; they neither pop nor push.
 		return false, nil
 	case instr.LOCAL_TEE, instr.GLOBAL_TEE:
 		if st.len() == 0 {

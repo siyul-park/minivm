@@ -408,6 +408,22 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 3
 		}
 	},
+	instr.GLOBAL_DELETE: func(c *threadedCompiler) func(i *Interpreter) {
+		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+		c.ip += 3
+		return func(i *Interpreter) {
+			// A global never assigned occupies no slot, so deleting it is a no-op.
+			if idx >= len(i.globals) {
+				i.fr.ip += 3
+				return
+			}
+			old := i.globals[idx]
+			i.globals[idx] = types.BoxedNull
+			i.retain(0)
+			i.releaseBox(old)
+			i.fr.ip += 3
+		}
+	},
 	instr.LOCAL_GET: func(c *threadedCompiler) func(i *Interpreter) {
 		idx := int(c.code[c.ip+1])
 		c.ip += 2
@@ -582,6 +598,26 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 2
 		}
 	},
+	instr.LOCAL_DELETE: func(c *threadedCompiler) func(i *Interpreter) {
+		idx := int(c.code[c.ip+1])
+		c.ip += 2
+		if idx < 0 {
+			return func(i *Interpreter) {
+				panic(ErrSegmentationFault)
+			}
+		}
+		return func(i *Interpreter) {
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			old := i.stack[addr]
+			i.stack[addr] = types.BoxedNull
+			i.retain(0)
+			i.releaseBox(old)
+			i.fr.ip += 2
+		}
+	},
 	instr.CONST_GET: func(c *threadedCompiler) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
@@ -680,6 +716,20 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			i.fr.upvals[idx] = val
 			i.sp--
+			i.fr.ip += 2
+		}
+	},
+	instr.UPVAL_DELETE: func(c *threadedCompiler) func(i *Interpreter) {
+		idx := int(c.code[c.ip+1])
+		c.ip += 2
+		return func(i *Interpreter) {
+			if idx >= len(i.fr.upvals) {
+				panic(ErrSegmentationFault)
+			}
+			old := i.fr.upvals[idx]
+			i.fr.upvals[idx] = types.BoxedNull
+			i.retain(0)
+			i.releaseBox(old)
 			i.fr.ip += 2
 		}
 	},
