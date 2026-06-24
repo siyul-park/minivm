@@ -25,9 +25,15 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager, prog *program.Program) (p
 		if err != nil {
 			return pass.PreserveNone(), err
 		}
+		catch := map[int]bool{}
+		for _, h := range fn.Handlers {
+			catch[h.Catch] = true
+		}
 		for i := 1; i < len(blocks); i++ {
 			blk := blocks[i]
-			if len(blk.Preds) == 0 {
+			// Catch blocks are entered out of band, so the CFG gives them no
+			// predecessors; they are live roots, not dead code.
+			if len(blk.Preds) == 0 && !catch[blk.Start] {
 				for j := blk.Start; j < blk.End; j++ {
 					code[j] = byte(instr.UNREACHABLE)
 				}
@@ -95,11 +101,45 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager, prog *program.Program) (p
 			}
 		}
 
+		handlers := p.rehandle(fn.Handlers, offsets, len(code))
+
 		fn.Code = code
+		fn.Handlers = handlers
 		if i == 0 {
 			prog.Code = code
+			prog.Handlers = handlers
 		}
 	}
 
 	return pass.PreserveNone(), nil
+}
+
+// rehandle remaps an exception table through the compaction offset map: each
+// boundary moves to the first surviving instruction at or after its old offset,
+// so a region whose body was removed collapses cleanly. offsets[i] is the new
+// position of the instruction that began at old offset i, or -1 if removed.
+func (p *DeadCodeEliminationPass) rehandle(handlers []instr.Handler, offsets []int, size int) []instr.Handler {
+	if len(handlers) == 0 {
+		return handlers
+	}
+	remapped := make([]instr.Handler, len(handlers))
+	for i, h := range handlers {
+		remapped[i] = instr.Handler{
+			Start: p.relocate(offsets, h.Start, size),
+			End:   p.relocate(offsets, h.End, size),
+			Catch: p.relocate(offsets, h.Catch, size),
+			Depth: h.Depth,
+		}
+	}
+	return remapped
+}
+
+func (p *DeadCodeEliminationPass) relocate(offsets []int, off, size int) int {
+	for off < len(offsets) && offsets[off] == -1 {
+		off++
+	}
+	if off >= len(offsets) {
+		return size
+	}
+	return offsets[off]
 }

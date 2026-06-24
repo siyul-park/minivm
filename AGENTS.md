@@ -169,7 +169,7 @@ Incorrect ordering crashes on Apple Silicon.
 - `ConstantFoldingPass` right-aligns folded instructions, pads left with NOPs.
 - Preserve folded ranges until `DeadCodeEliminationPass` compacts bytecode and rewrites branches.
 - Threaded NOP handlers absorb consecutive gaps with one runtime dispatch.
-- Most passes preserve byte offsets; `CommonSubexpressionEliminationPass` (O3) is the exception. It uses the `transform.rewriter` to grow/shrink code, which re-derives every branch operand and handler offset, bails on int16 branch overflow, and bumps handler `Depth` by the number of locals it allocates (allocating a local shifts the operand-stack base). New local indexes must stay below 256.
+- Most passes preserve byte offsets; `GlobalValueNumberingPass` (O3) and `DeadCodeEliminationPass` are the exceptions. GVN uses the `transform.rewriter` to grow/shrink code, which re-derives every branch operand and handler offset, bails on int16 branch overflow, and bumps handler `Depth` by the number of locals it allocates (allocating a local shifts the operand-stack base). New local indexes must stay below 256. DCE compacts bytecode and likewise remaps branch and handler offsets; both write the root body's repaired code and handlers back to `prog`.
 
 ### Extensions
 

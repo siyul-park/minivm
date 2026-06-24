@@ -110,7 +110,7 @@ transform pipeline for the level. Levels are cumulative:
 O0  no transforms
 O1  ConstantFoldingPass, ConstantDeduplicationPass                          (cheap, local)
 O2  + AlgebraicSimplificationPass, DeadCodeEliminationPass                  (CFG / peephole)
-O3  + CommonSubexpressionEliminationPass                                    (value numbering)
+O3  + GlobalValueNumberingPass (replaces block-local CSE)                   (cross-block value numbering)
 ```
 
 `Optimize(prog)` runs the pipeline; `AddPass(p)` appends a custom transform.
@@ -133,25 +133,34 @@ Block boundaries:
 - byte after `BR`, `BR_IF`, `BR_TABLE`, `UNREACHABLE`, or `RETURN`
 - every branch target offset from `BR`, `BR_IF`, or `BR_TABLE`
 
-## `ValueNumberingAnalysis`
+## `GlobalValueNumberingAnalysis`
 
-Assigns a value number to every value a function computes by abstractly
-interpreting the operand stack one basic block at a time (local value
-numbering), mirroring the `program/verify.go` slot-stack walk. Equal expressions
-hash-cons to the same number; commutative ops canonicalize operand order.
+Assigns every value a function computes a value number by abstractly
+interpreting the operand stack, then finds recomputations that are redundant
+both within and across basic blocks. Equal expressions hash-cons to the same
+number; commutative ops canonicalize operand order.
 
-Input: `*types.Function`. Output: `*ValueNumbering`:
+Input: `*types.Function`. Output: `*GlobalValueNumbering`:
 
-- `Values`: instruction offset → value number of its result (reusable by other
-  passes that reason about value identity)
 - `Redundant`: finalizing-op offset → `Redundancy{Start, End, Kind, Home, Def}`,
-  one per recomputation of a value already produced earlier in the block
+  one per recomputation of a value already produced on every path that reaches it
+- `Defs`: group id → definition offsets that must receive a `LOCAL_TEE` so the
+  value is captured for later reloads (`Home >= 0` uses need no entry)
 
 Only side-effect-free, non-allocating numeric ops (and reference comparisons) are
-candidates. Mutable loads (heap, globals, upvalues) take opaque numbers, so they
-never match. A store or call ends a value's reuse window; numbering resets at
-every block boundary. Cross-block (global) value numbering is not yet
-implemented — see the GVN note below.
+candidates. Each value carries a block-local number (for within-block matching,
+exactly the old local pass) and a function-wide global key. Cross-block identity
+is conservative: only constants, the constant pool, the null reference, and
+locals never reassigned carry a stable global key; values built from a mutable
+load (heap, globals, upvalues) or a reassigned local are opaque across blocks
+(sound — an opaque value never matches) and still match within their own block.
+
+Availability is a forward dataflow over global ids: `AVAIL_in = ⋂ preds
+AVAIL_out`, `AVAIL_out = AVAIL_in ∪ gen`, with an optimistic ⊤ initialization on
+non-entry blocks so the intersection converges through loop back-edges. A pure,
+contiguous recomputation of an available value (at a control-flow merge, or a
+loop-invariant expression recomputed inside the loop) is reported redundant;
+catch and entry blocks have no predecessors, so nothing is available there.
 
 ## `ConstantFoldingPass`
 
@@ -181,31 +190,27 @@ Float identities are intentionally skipped (unsound under IEEE-754: NaN, signed
 zero), as are annihilators such as `x*0` and `x&0` (they would need to drop the
 live left operand).
 
-## `CommonSubexpressionEliminationPass`
+## `GlobalValueNumberingPass`
 
-Uses `ValueNumberingAnalysis` to drop recomputations of a value already produced
-in the same basic block (local CSE). Each redundant expression range is replaced
-by a load:
+Consumes `GlobalValueNumberingAnalysis` and rewrites each redundant
+recomputation to a load. Within-block recomputations load a live local home
+(`Home >= 0`, with `LOCAL_GET Home`) or a freshly captured slot; cross-block
+recomputations capture the value at every definition in `Defs[Def]` with an
+inserted `LOCAL_TEE` into one fresh slot per value and reload it at each use.
+Speculative code motion (inserting computes on edges to make a *partial*
+redundancy full) is out of scope: it needs edge splitting, unsafe under the
+signed-16-bit branch operands.
 
-- when a local still holds the value (`Home >= 0`), with `LOCAL_GET Home`
-- otherwise, for real functions whose locals persist, the value is captured at
-  its first computation with an inserted `LOCAL_TEE` into a freshly allocated
-  slot and each recomputation becomes `LOCAL_GET` of that slot
-
-The top-level body (slot 0) compiles with no locals, so only the existing-home
-case applies there. Unlike the peephole passes, this pass changes code length:
-it uses the `rewriter` (`transform/rewrite.go`) to splice edits and then repair
-every `BR`/`BR_IF`/`BR_TABLE` operand and exception-table boundary for the new
-layout, bailing (leaving the function untouched) if a branch would no longer
-reach within its signed 16-bit operand. Allocating a local shifts the
-operand-stack base, so each handler's `Depth` grows by the number of locals
-added. New local indexes must stay below 256 (the 1-byte `LOCAL` operand).
-
-Cross-block GVN is not yet implemented: it requires available-expression
-dataflow over value numbers (intersection across predecessors, fresh numbers at
-merge points, loop back-edge handling) and is deferred so the proven-correct
-block-local pass ships first. The `rewriter` and `Redundancy` shape are designed
-to be reused by it.
+Unlike the peephole passes, this pass changes code length: it uses the `rewriter`
+(`transform/rewrite.go`) to splice edits and then repair every `BR`/`BR_IF`/
+`BR_TABLE` operand and exception-table boundary for the new layout, bailing
+(leaving the function untouched) if a branch would no longer reach within its
+signed 16-bit operand. Allocating a local shifts the operand-stack base, so each
+handler's `Depth` grows by the number of locals added; new local indexes must
+stay below 256 (the 1-byte `LOCAL` operand). The top-level body (slot 0) compiles
+with no locals and cannot allocate, so only the load-from-home case applies there;
+its repaired code and handlers are written back to `prog.Code` and
+`prog.Handlers`.
 
 ## `ConstantDeduplicationPass`
 
@@ -214,10 +219,14 @@ constants/types to the lowest index, rewrites references, and shrinks the tables
 
 ## `DeadCodeEliminationPass`
 
-1. Mark bytes in basic blocks with no predecessors as `UNREACHABLE`.
+1. Mark bytes in basic blocks with no predecessors as `UNREACHABLE`. Handler
+   `Catch` blocks are entered out of band (no CFG predecessors), so they are
+   treated as live roots and never marked dead.
 2. Compact bytecode by removing NOP runs and unreachable sequences, rewriting
-   branch offsets for the new positions.
+   branch offsets for the new positions and remapping each exception-table
+   boundary to the first surviving instruction at or after its old offset.
 
 Compaction rewrites only branch operands (`BR`, `BR_IF`, `BR_TABLE`). Other
 operands keep meaning because compaction changes instruction positions, not
-constant/type/global/local indexes.
+constant/type/global/local indexes. For the top-level body (slot 0) the repaired
+code and exception table are written back to `prog.Code` and `prog.Handlers`.

@@ -31,7 +31,7 @@ func NewOptimizer(level Level) *Optimizer {
 	}
 
 	pass.Register(o.manager, analysis.NewBasicBlocksAnalysis())
-	pass.Register(o.manager, analysis.NewValueNumberingAnalysis())
+	pass.Register(o.manager, analysis.NewGlobalValueNumberingAnalysis())
 	for _, p := range o.transforms() {
 		o.pipeline.AddPass(p)
 	}
@@ -53,8 +53,8 @@ func (o *Optimizer) AddPass(p pass.Pass[*program.Program]) {
 }
 
 // transforms returns the cumulative transform pipeline for the optimizer level:
-// O1 runs cheap local rewrites, O2 adds CFG-based passes, O3 adds
-// common-subexpression elimination on top.
+// O1 runs cheap local rewrites, O2 adds CFG-based passes, O3 adds cross-block
+// global value numbering (which subsumes block-local CSE) on top.
 func (o *Optimizer) transforms() []pass.Pass[*program.Program] {
 	switch o.level {
 	case O1:
@@ -73,7 +73,7 @@ func (o *Optimizer) transforms() []pass.Pass[*program.Program] {
 		return []pass.Pass[*program.Program]{
 			transform.NewConstantFoldingPass(),
 			transform.NewAlgebraicSimplificationPass(),
-			transform.NewCommonSubexpressionEliminationPass(),
+			transform.NewGlobalValueNumberingPass(),
 			transform.NewConstantDeduplicationPass(),
 			transform.NewDeadCodeEliminationPass(),
 		}
