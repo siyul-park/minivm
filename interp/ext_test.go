@@ -109,7 +109,7 @@ func TestWithRegistry(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		i, _ := New(prog, WithRegistry(r))
+		i := New(prog, WithRegistry(r))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
@@ -126,7 +126,7 @@ func TestWithRegistry(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		i, _ := New(prog, WithRegistry(r))
+		i := New(prog, WithRegistry(r))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
@@ -145,7 +145,7 @@ func TestWithRegistry(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		i, _ := New(prog, WithRegistry(r))
+		i := New(prog, WithRegistry(r))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
@@ -162,7 +162,7 @@ func TestWithRegistry(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		i, _ := New(prog, WithRegistry(r))
+		i := New(prog, WithRegistry(r))
 		defer i.Close()
 		r.exts[id] = extInc{}
 
@@ -190,7 +190,7 @@ func TestWithRegistry(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i, _ := New(prog, WithRegistry(r))
+		i := New(prog, WithRegistry(r))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
@@ -207,7 +207,7 @@ func TestWithRegistry(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		i, _ := New(prog, WithRegistry(r))
+		i := New(prog, WithRegistry(r))
 		defer i.Close()
 		require.ErrorIs(t, i.Run(context.Background()), ErrUnknownOpcode)
 	})
@@ -221,7 +221,7 @@ func TestWithRegistry(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		i, _ := New(prog, WithRegistry(r))
+		i := New(prog, WithRegistry(r))
 		defer i.Close()
 		require.ErrorIs(t, i.Run(context.Background()), errExtFail)
 	})

@@ -65,8 +65,8 @@ func (p *Pool) Get(ctx context.Context) (*Interpreter, error) {
 		return i, err
 	}
 
-	if i, err := p.grow(); i != nil || err != nil {
-		return i, err
+	if i := p.grow(); i != nil {
+		return i, nil
 	}
 
 	return p.wait(ctx)
@@ -144,22 +144,16 @@ func (p *Pool) take() (*Interpreter, error) {
 	}
 }
 
-// grow reserves a slot below the size cap and returns a fresh Interpreter.
-// It returns (nil, nil) when the cap is reached so the caller waits, and
-// releases the reserved slot if construction (e.g. verification) fails.
-func (p *Pool) grow() (*Interpreter, error) {
+// grow reserves a slot below the size cap and returns a fresh Interpreter, or
+// nil when the cap is reached so the caller waits.
+func (p *Pool) grow() *Interpreter {
 	for {
 		live := p.live.Load()
 		if live >= int64(p.size) {
-			return nil, nil
+			return nil
 		}
 		if p.live.CompareAndSwap(live, live+1) {
-			i, err := New(p.prog, p.opts...)
-			if err != nil {
-				p.live.Add(-1)
-				return nil, err
-			}
-			return i, nil
+			return New(p.prog, p.opts...)
 		}
 	}
 }

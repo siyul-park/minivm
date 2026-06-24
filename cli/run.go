@@ -40,10 +40,7 @@ func NewRunCommand(fsys fs.FS) *cobra.Command {
 			return fmt.Errorf("verify %s: %w", path, err)
 		}
 
-		vm, err := interp.New(prog)
-		if err != nil {
-			return fmt.Errorf("run %s: %w", path, err)
-		}
+		vm := interp.New(prog)
 		defer vm.Close()
 
 		if err := vm.Run(cmd.Context()); err != nil {

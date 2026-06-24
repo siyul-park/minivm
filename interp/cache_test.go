@@ -14,7 +14,7 @@ func TestNewCache(t *testing.T) {
 	}))
 	defer cache.Close()
 
-	i, _ := New(program.New([]instr.Instruction{
+	i := New(program.New([]instr.Instruction{
 		instr.New(instr.NOP),
 	}), WithCache(cache))
 	defer i.Close()
@@ -50,7 +50,7 @@ func TestCache_Rearm(t *testing.T) {
 
 func TestCache_Close(t *testing.T) {
 	cache := NewCache(program.New(nil))
-	i, _ := New(program.New(nil), WithCache(cache))
+	i := New(program.New(nil), WithCache(cache))
 
 	require.NoError(t, cache.Close())
 	require.NoError(t, cache.Close())

@@ -3147,7 +3147,7 @@ func requireJIT(t *testing.T) {
 
 func TestInterpreter_Context(t *testing.T) {
 	t.Run("propagates value", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		ctx := context.WithValue(context.Background(), "key", "val")
@@ -3158,14 +3158,14 @@ func TestInterpreter_Context(t *testing.T) {
 
 func TestInterpreter_Push(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I32(42)))
 		require.Equal(t, 1, i.Len())
 	})
 	t.Run("interns strings", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.String("same")))
@@ -3198,7 +3198,7 @@ func TestInterpreter_Push(t *testing.T) {
 		require.Equal(t, 1, i.rc[third.Ref()])
 	})
 	t.Run("overflow", func(t *testing.T) {
-		i, _ := New(program.New(nil), WithStack(1))
+		i := New(program.New(nil), WithStack(1))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I32(1)))
@@ -3206,7 +3206,7 @@ func TestInterpreter_Push(t *testing.T) {
 	})
 
 	t.Run("returns heap exhaustion", func(t *testing.T) {
-		i, _ := New(program.New(nil), WithMaxHeap(1))
+		i := New(program.New(nil), WithMaxHeap(1))
 		defer i.Close()
 
 		require.ErrorIs(t, i.Push(types.String("blocked")), ErrHeapExhausted)
@@ -3215,7 +3215,7 @@ func TestInterpreter_Push(t *testing.T) {
 
 func TestInterpreter_Pop(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I32(42)))
@@ -3224,7 +3224,7 @@ func TestInterpreter_Pop(t *testing.T) {
 		require.Equal(t, types.I32(42), v)
 	})
 	t.Run("underflow", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		_, err := i.Pop()
@@ -3234,7 +3234,7 @@ func TestInterpreter_Pop(t *testing.T) {
 
 func TestInterpreter_Peek(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I32(1)))
@@ -3250,7 +3250,7 @@ func TestInterpreter_Peek(t *testing.T) {
 	})
 
 	t.Run("underflow", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		for _, n := range []int{-1, 0} {
@@ -3261,7 +3261,7 @@ func TestInterpreter_Peek(t *testing.T) {
 }
 
 func TestInterpreter_Len(t *testing.T) {
-	i, _ := New(program.New(nil))
+	i := New(program.New(nil))
 	defer i.Close()
 
 	require.Equal(t, 0, i.Len())
@@ -3273,7 +3273,7 @@ func TestInterpreter_Len(t *testing.T) {
 
 func TestInterpreter_Alloc(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		for _, v := range []types.Value{types.I32(7), types.BoxI32(3)} {
@@ -3284,7 +3284,7 @@ func TestInterpreter_Alloc(t *testing.T) {
 	})
 
 	t.Run("interns strings", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		first, err := i.Alloc(types.String("same"))
@@ -3302,7 +3302,7 @@ func TestInterpreter_Alloc(t *testing.T) {
 	})
 
 	t.Run("collects unreachable cycle when heap fills", func(t *testing.T) {
-		i, _ := New(program.New(nil), WithHeap(2))
+		i := New(program.New(nil), WithHeap(2))
 		defer i.Close()
 
 		array := types.NewArray(types.NewArrayType(types.TypeRef))
@@ -3324,7 +3324,7 @@ func TestInterpreter_Alloc(t *testing.T) {
 	})
 
 	t.Run("returns heap exhaustion", func(t *testing.T) {
-		i, _ := New(program.New(nil), WithMaxHeap(1))
+		i := New(program.New(nil), WithMaxHeap(1))
 		defer i.Close()
 
 		_, err := i.Alloc(types.NewArray(types.NewArrayType(types.TypeI32)))
@@ -3333,7 +3333,7 @@ func TestInterpreter_Alloc(t *testing.T) {
 
 	t.Run("function is callable", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.CALL)})
-		i, _ := New(prog)
+		i := New(prog)
 		defer i.Close()
 
 		fn := types.NewFunction(
@@ -3360,7 +3360,7 @@ func TestInterpreter_Alloc(t *testing.T) {
 
 func TestInterpreter_Load(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		addr, _ := i.Alloc(types.I32(7))
@@ -3369,7 +3369,7 @@ func TestInterpreter_Load(t *testing.T) {
 		require.Equal(t, types.I32(7), v)
 	})
 	t.Run("segfault", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		for _, addr := range []int{-1, 9999} {
@@ -3381,7 +3381,7 @@ func TestInterpreter_Load(t *testing.T) {
 
 func TestInterpreter_Store(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		addr, _ := i.Alloc(types.I32(7))
@@ -3390,7 +3390,7 @@ func TestInterpreter_Store(t *testing.T) {
 		require.Equal(t, types.I64(99), v)
 	})
 	t.Run("boxed ref resolves before storing", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		dst, err := i.Alloc(types.I32(7))
@@ -3404,7 +3404,7 @@ func TestInterpreter_Store(t *testing.T) {
 		require.Equal(t, types.String("value"), v)
 	})
 	t.Run("boxed primitive unboxes before storing", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.I32(0))
@@ -3416,7 +3416,7 @@ func TestInterpreter_Store(t *testing.T) {
 		require.Equal(t, types.I32(5), v)
 	})
 	t.Run("segfault", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		for _, addr := range []int{-1, 9999} {
@@ -3424,7 +3424,7 @@ func TestInterpreter_Store(t *testing.T) {
 		}
 	})
 	t.Run("boxed ref segfault", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.I32(0))
@@ -3459,7 +3459,7 @@ func TestInterpreter_Store(t *testing.T) {
 			},
 			program.WithConstants(host),
 		)
-		i, _ := New(prog)
+		i := New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3469,7 +3469,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 	t.Run("replaces function body", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.CALL)})
-		i, _ := New(prog)
+		i := New(prog)
 		defer i.Close()
 
 		addr, err := i.Alloc(types.I32(0))
@@ -3505,7 +3505,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 	t.Run("non-function replacement is not callable", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.CALL)})
-		i, _ := New(prog)
+		i := New(prog)
 		defer i.Close()
 
 		addr, err := i.Alloc(types.I32(0))
@@ -3523,7 +3523,7 @@ func TestInterpreter_Store(t *testing.T) {
 	})
 	t.Run("clears stale jit traces", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.CALL)})
-		i, _ := New(prog)
+		i := New(prog)
 		defer i.Close()
 
 		addr, err := i.Alloc(types.I32(0))
@@ -3549,7 +3549,7 @@ func TestInterpreter_Store(t *testing.T) {
 
 func TestInterpreter_Retain(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		addr, _ := i.Alloc(types.I32(5))
@@ -3558,7 +3558,7 @@ func TestInterpreter_Retain(t *testing.T) {
 		require.Equal(t, types.I32(5), v)
 	})
 	t.Run("segfault", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		_, err := i.Retain(9999)
@@ -3568,7 +3568,7 @@ func TestInterpreter_Retain(t *testing.T) {
 
 func TestInterpreter_Release(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		addr, _ := i.Alloc(types.I32(5))
@@ -3576,7 +3576,7 @@ func TestInterpreter_Release(t *testing.T) {
 		require.NoError(t, i.Release(addr))
 	})
 	t.Run("segfault", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		require.ErrorIs(t, i.Release(9999), ErrSegmentationFault)
@@ -3604,7 +3604,7 @@ func TestInterpreter_gc(t *testing.T) {
 	}
 
 	t.Run("collects a cycle", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		a, _ := i.Alloc(types.NewStruct(oneRef))
@@ -3629,7 +3629,7 @@ func TestInterpreter_gc(t *testing.T) {
 	})
 
 	t.Run("keeps a rooted cycle", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		a, _ := i.Alloc(types.NewStruct(oneRef))
@@ -3649,7 +3649,7 @@ func TestInterpreter_gc(t *testing.T) {
 	})
 
 	t.Run("interned string in a cycle is re-internable", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		str := i.intern("ghost") // weak-held: only the cycle keeps it live
@@ -3678,7 +3678,7 @@ func TestInterpreter_gc(t *testing.T) {
 	})
 
 	t.Run("does not inflate survivor refcount", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.String("live")))
@@ -3708,7 +3708,7 @@ func TestInterpreter_gc(t *testing.T) {
 	})
 
 	t.Run("finalizes a closer in a dead cycle", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		closed := 0
@@ -3736,7 +3736,7 @@ func TestInterpreter_Global(t *testing.T) {
 				instr.New(instr.GLOBAL_SET, 0),
 			},
 		)
-		i, _ := New(prog, WithGlobals(4))
+		i := New(prog, WithGlobals(4))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3745,7 +3745,7 @@ func TestInterpreter_Global(t *testing.T) {
 		require.Equal(t, int32(42), v.I32())
 	})
 	t.Run("segfault", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		for _, idx := range []int{-1, 9999} {
@@ -3757,7 +3757,7 @@ func TestInterpreter_Global(t *testing.T) {
 
 func TestInterpreter_Local(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I32(42)))
@@ -3767,7 +3767,7 @@ func TestInterpreter_Local(t *testing.T) {
 	})
 
 	t.Run("segfault", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		for _, idx := range []int{-1, 0} {
@@ -3779,7 +3779,7 @@ func TestInterpreter_Local(t *testing.T) {
 
 func TestInterpreter_SetLocal(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.I32(1)))
@@ -3790,7 +3790,7 @@ func TestInterpreter_SetLocal(t *testing.T) {
 	})
 
 	t.Run("releases old ref", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		require.NoError(t, i.Push(types.String("old")))
@@ -3803,7 +3803,7 @@ func TestInterpreter_SetLocal(t *testing.T) {
 	})
 
 	t.Run("segfault", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		for _, idx := range []int{-1, 0} {
@@ -3820,7 +3820,7 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 				instr.New(instr.GLOBAL_SET, 0),
 			},
 		)
-		i, _ := New(prog, WithGlobals(4))
+		i := New(prog, WithGlobals(4))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -3836,7 +3836,7 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 				instr.New(instr.GLOBAL_SET, 0),
 			},
 		)
-		i, _ := New(prog, WithGlobals(1))
+		i := New(prog, WithGlobals(1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 
@@ -3849,13 +3849,13 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 		require.Zero(t, i.rc[addr])
 	})
 	t.Run("segfault negative", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		require.ErrorIs(t, i.SetGlobal(-1, types.BoxI32(0)), ErrSegmentationFault)
 	})
 	t.Run("segfault upper bound", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		require.ErrorIs(t, i.SetGlobal(9999, types.BoxI32(0)), ErrSegmentationFault)
@@ -3865,7 +3865,7 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 func TestInterpreter_Const(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
 		prog := program.New(nil, program.WithConstants(types.I32(42)))
-		i, _ := New(prog)
+		i := New(prog)
 		defer i.Close()
 
 		v, err := i.Const(0)
@@ -3873,7 +3873,7 @@ func TestInterpreter_Const(t *testing.T) {
 		require.Equal(t, int32(42), v.I32())
 	})
 	t.Run("segfault", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		for _, idx := range []int{-1, 9999} {
@@ -3884,12 +3884,12 @@ func TestInterpreter_Const(t *testing.T) {
 }
 
 func TestInterpreter_Close(t *testing.T) {
-	i, _ := New(program.New(nil))
+	i := New(program.New(nil))
 	require.NoError(t, i.Close())
 }
 
 func TestInterpreter_Reset(t *testing.T) {
-	i, _ := New(program.New([]instr.Instruction{
+	i := New(program.New([]instr.Instruction{
 		instr.New(instr.I32_CONST, 7),
 	}))
 	defer i.Close()
@@ -3914,7 +3914,7 @@ func TestInterpreter_Run(t *testing.T) {
 			for _, tt := range tests {
 				tt := tt
 				t.Run(tt.program.String(), func(t *testing.T) {
-					i, _ := New(tt.program, mode.opts...)
+					i := New(tt.program, mode.opts...)
 					defer i.Close()
 					if tt.before != nil {
 						tt.before(t, i)
@@ -3942,7 +3942,7 @@ func TestInterpreter_Run(t *testing.T) {
 					instr.New(instr.I32_CONST, 42),
 					instr.New(instr.YIELD),
 				})
-				i, _ := New(prog, mode.opts...)
+				i := New(prog, mode.opts...)
 				defer i.Close()
 
 				err := i.Run(context.Background())
@@ -3974,7 +3974,7 @@ func TestInterpreter_Run(t *testing.T) {
 					instr.New(instr.CORO_VALUE),
 				}, program.WithConstants(it))
 
-				i, _ := New(prog, mode.opts...)
+				i := New(prog, mode.opts...)
 				defer i.Close()
 				require.NoError(t, i.Run(context.Background()))
 				got, err := i.Pop()
@@ -3997,7 +3997,7 @@ func TestInterpreter_Run(t *testing.T) {
 					instr.New(instr.CORO_DONE),
 				}, program.WithConstants(it))
 
-				i, _ := New(prog, mode.opts...)
+				i := New(prog, mode.opts...)
 				defer i.Close()
 				require.NoError(t, i.Run(context.Background()))
 				got, err := i.Pop()
@@ -4028,7 +4028,7 @@ func TestInterpreter_Run(t *testing.T) {
 					instr.New(instr.CORO_VALUE),
 				}, program.WithConstants(producer))
 
-				i, _ := New(prog, mode.opts...)
+				i := New(prog, mode.opts...)
 				defer i.Close()
 				require.NoError(t, i.Run(context.Background()))
 				got, err := i.Pop()
@@ -4064,7 +4064,7 @@ func TestInterpreter_Run(t *testing.T) {
 					instr.New(instr.CORO_VALUE),
 				}, program.WithConstants(producer))
 
-				i, _ := New(prog, mode.opts...)
+				i := New(prog, mode.opts...)
 				defer i.Close()
 				require.NoError(t, i.Run(context.Background()))
 				got, err := i.Pop()
@@ -4093,7 +4093,7 @@ func TestInterpreter_Run(t *testing.T) {
 					instr.New(instr.CALL),
 					instr.New(instr.CORO_DONE),
 				}, program.WithConstants(producer))
-				i, _ := New(suspended, mode.opts...)
+				i := New(suspended, mode.opts...)
 				defer i.Close()
 				require.NoError(t, i.Run(context.Background()))
 				got, err := i.Pop()
@@ -4107,7 +4107,7 @@ func TestInterpreter_Run(t *testing.T) {
 					instr.New(instr.RESUME),
 					instr.New(instr.CORO_DONE),
 				}, program.WithConstants(producer))
-				j, _ := New(finished, mode.opts...)
+				j := New(finished, mode.opts...)
 				defer j.Close()
 				require.NoError(t, j.Run(context.Background()))
 				got, err = j.Pop()
@@ -4139,7 +4139,7 @@ func TestInterpreter_Run(t *testing.T) {
 					instr.New(instr.RESUME),
 				}, program.WithConstants(producer))
 
-				i, _ := New(prog, mode.opts...)
+				i := New(prog, mode.opts...)
 				defer i.Close()
 				err := i.Run(context.Background())
 				require.ErrorIs(t, err, ErrCoroutineDone)
@@ -4179,7 +4179,7 @@ func TestInterpreter_Run(t *testing.T) {
 					instr.New(instr.CORO_VALUE),
 				}, program.WithConstants(inner, outer))
 
-				i, _ := New(prog, mode.opts...)
+				i := New(prog, mode.opts...)
 				defer i.Close()
 				require.NoError(t, i.Run(context.Background()))
 				got, err := i.Pop()
@@ -4241,14 +4241,14 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(producer, poller))
 
-		threaded, _ := New(prog, WithThreshold(-1))
+		threaded := New(prog, WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(300), want)
 
-		jit, _ := New(prog, WithTick(1), WithThreshold(1))
+		jit := New(prog, WithTick(1), WithThreshold(1))
 		defer jit.Close()
 		require.NoError(t, jit.Run(context.Background()))
 		got, err := jit.Pop()
@@ -4311,14 +4311,14 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(producer, poller))
 
-		threaded, _ := New(prog, WithThreshold(-1))
+		threaded := New(prog, WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(300), want)
 
-		jit, _ := New(prog, WithTick(1), WithThreshold(1))
+		jit := New(prog, WithTick(1), WithThreshold(1))
 		defer jit.Close()
 		require.NoError(t, jit.Run(context.Background()))
 		got, err := jit.Pop()
@@ -4383,14 +4383,14 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(generator, driver))
 
-		threaded, _ := New(prog, WithThreshold(-1))
+		threaded := New(prog, WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(300), want)
 
-		jit, _ := New(prog, WithTick(1), WithThreshold(1))
+		jit := New(prog, WithTick(1), WithThreshold(1))
 		defer jit.Close()
 		require.NoError(t, jit.Run(context.Background()))
 		got, err := jit.Pop()
@@ -4450,14 +4450,14 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(producer, driver))
 
-		threaded, _ := New(prog, WithThreshold(-1))
+		threaded := New(prog, WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(1400), want)
 
-		jit, _ := New(prog, WithTick(1), WithThreshold(1))
+		jit := New(prog, WithTick(1), WithThreshold(1))
 		defer jit.Close()
 		require.NoError(t, jit.Run(context.Background()))
 		got, err := jit.Pop()
@@ -4474,11 +4474,11 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.YIELD),
 		})
 
-		threaded, _ := New(prog, WithThreshold(-1))
+		threaded := New(prog, WithThreshold(-1))
 		defer threaded.Close()
 		require.ErrorIs(t, threaded.Run(context.Background()), ErrYield)
 
-		jit, _ := New(prog, WithTick(1), WithThreshold(1))
+		jit := New(prog, WithTick(1), WithThreshold(1))
 		defer jit.Close()
 		require.ErrorIs(t, jit.Run(context.Background()), ErrYield)
 	})
@@ -4514,7 +4514,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i, _ := New(prog, WithThreshold(-1))
+		i := New(prog, WithThreshold(-1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		got, err := i.Pop()
@@ -4543,7 +4543,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i, _ := New(prog, WithThreshold(-1))
+		i := New(prog, WithThreshold(-1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		got, err := i.Pop()
@@ -4568,7 +4568,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i, _ := New(prog, WithThreshold(-1))
+		i := New(prog, WithThreshold(-1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		got, err := i.Pop()
@@ -4593,7 +4593,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		i, _ := New(prog, WithThreshold(-1))
+		i := New(prog, WithThreshold(-1))
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		got, err := i.Pop()
@@ -4633,13 +4633,13 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn))
 
-		threaded, _ := New(prog, WithThreshold(-1))
+		threaded := New(prog, WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
 		require.NoError(t, err)
 
-		jit, _ := New(prog, WithTick(1), WithThreshold(1))
+		jit := New(prog, WithTick(1), WithThreshold(1))
 		defer jit.Close()
 		require.NoError(t, jit.Run(context.Background()))
 		got, err := jit.Pop()
@@ -4653,7 +4653,7 @@ func TestInterpreter_Run(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		calls := 0
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1<<30),
 			instr.New(instr.GLOBAL_SET, 0),
 			instr.New(instr.GLOBAL_GET, 0), // IP 8 header
@@ -4688,7 +4688,7 @@ func TestInterpreter_Run(t *testing.T) {
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI32)),
 		)
-		i, _ := New(prog, WithMaxHeap(2), WithThreshold(-1))
+		i := New(prog, WithMaxHeap(2), WithThreshold(-1))
 		defer i.Close()
 
 		err := i.Run(context.Background())
@@ -4712,7 +4712,7 @@ func TestInterpreter_Run(t *testing.T) {
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI32)),
 		)
-		i, _ := New(prog, WithMaxHeap(2), WithThreshold(-1))
+		i := New(prog, WithMaxHeap(2), WithThreshold(-1))
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -4740,7 +4740,7 @@ func TestInterpreter_Run(t *testing.T) {
 			},
 			program.WithConstants(outer, inner),
 		)
-		i, _ := New(prog, WithThreshold(-1))
+		i := New(prog, WithThreshold(-1))
 		defer i.Close()
 
 		err := i.Run(context.Background())
@@ -4761,7 +4761,7 @@ func TestInterpreter_Run(t *testing.T) {
 		// A loop in the main body (addr 0) compiles via the non-framed blocks path.
 		// It drains a global from 300 to 0 and pushes the result; a clean 0 proves
 		// the yield/re-entry preserved state across many native safepoints.
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 300),
 			instr.New(instr.GLOBAL_SET, 0),
 			instr.New(instr.GLOBAL_GET, 0), // IP 8 header
@@ -4822,7 +4822,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 		for _, mode := range modes {
 			t.Run(mode.name, func(t *testing.T) {
-				i, _ := New(program.New(
+				i := New(program.New(
 					[]instr.Instruction{
 						instr.New(instr.I64_CONST, depth*step),
 						instr.New(instr.CONST_GET, 0),
@@ -4861,7 +4861,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.RETURN),
 		).MustBuild()
 		p := prof.NewCollector()
-		i, _ := New(program.New(
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.CONST_GET, 0),
@@ -4889,7 +4889,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.RETURN),
 		).MustBuild()
 		p := prof.NewCollector()
-		i, _ := New(program.New(
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.CALL),
@@ -4931,7 +4931,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.RETURN),
 		).MustBuild()
 
-		i, _ := New(program.New(
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 1),
 				instr.New(instr.CALL),
@@ -4950,7 +4950,7 @@ func TestInterpreter_Run(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{}).Emit(
 			instr.New(instr.RETURN),
 		).MustBuild()
-		i, _ := New(program.New(
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.NOP),
@@ -4972,7 +4972,7 @@ func TestInterpreter_Run(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.NOP),
 		}), WithTick(1))
 		defer i.Close()
@@ -5001,7 +5001,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
 		).MustBuild()
-		i, _ := New(program.New(
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.CALL),
@@ -5036,7 +5036,7 @@ func TestInterpreter_Run(t *testing.T) {
 func TestInterpreter_WithHook(t *testing.T) {
 	t.Run("inspects interpreter", func(t *testing.T) {
 		var lens []int
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.NOP),
 		}), WithTick(1), WithHook(func(i *Interpreter) error {
@@ -5050,7 +5050,7 @@ func TestInterpreter_WithHook(t *testing.T) {
 
 	t.Run("returns error", func(t *testing.T) {
 		errHook := errors.New("hook failed")
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.NOP),
 		}), WithTick(1), WithHook(func(i *Interpreter) error {
 			return errHook
@@ -5063,7 +5063,7 @@ func TestInterpreter_WithHook(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		calls := 0
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.NOP),
 			instr.New(instr.I32_CONST, 0),
 		}), WithTick(1), WithHook(func(i *Interpreter) error {
@@ -5080,7 +5080,7 @@ func TestInterpreter_WithHook(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		calls := 0
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.DROP),
 			instr.New(instr.I32_CONST, 2),
@@ -5109,7 +5109,7 @@ func TestInterpreter_WithHook(t *testing.T) {
 func TestInterpreter_WithTick(t *testing.T) {
 	t.Run("normal tick keeps threaded nop fusion", func(t *testing.T) {
 		var ips []int
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.NOP),
 			instr.New(instr.NOP),
 			instr.New(instr.NOP),
@@ -5125,7 +5125,7 @@ func TestInterpreter_WithTick(t *testing.T) {
 
 	t.Run("tick one preserves threaded nop boundaries", func(t *testing.T) {
 		var ips []int
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.NOP),
 			instr.New(instr.NOP),
 			instr.New(instr.NOP),
@@ -5142,7 +5142,7 @@ func TestInterpreter_WithTick(t *testing.T) {
 
 func TestInterpreter_WithThreshold(t *testing.T) {
 	t.Run("precise", func(t *testing.T) {
-		i, _ := New(program.New(
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.I32_CONST, 1),
@@ -5158,7 +5158,7 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 	})
 
 	t.Run("fused outside precise mode", func(t *testing.T) {
-		i, _ := New(program.New(
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.I32_CONST, 1),
@@ -5174,7 +5174,7 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 	})
 
 	t.Run("i64 const fusion returns inline result", func(t *testing.T) {
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, 40),
 			instr.New(instr.I64_CONST, 2),
 			instr.New(instr.I64_ADD),
@@ -5187,7 +5187,7 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 	})
 
 	t.Run("i64 const fusion preserves spilled result", func(t *testing.T) {
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, 1<<50),
 			instr.New(instr.I64_CONST, 1),
 			instr.New(instr.I64_ADD),
@@ -5200,7 +5200,7 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 	})
 
 	t.Run("i64 const fusion preserves divide by zero", func(t *testing.T) {
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, 1),
 			instr.New(instr.I64_CONST, 0),
 			instr.New(instr.I64_DIV_S),
@@ -5210,7 +5210,7 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 	})
 
 	t.Run("precise i64 bypass returns same result", func(t *testing.T) {
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, 40),
 			instr.New(instr.I64_CONST, 2),
 			instr.New(instr.I64_ADD),
@@ -5224,7 +5224,7 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 
 	t.Run("negative disables jit", func(t *testing.T) {
 		p := prof.NewCollector()
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_ADD),
@@ -5237,7 +5237,7 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 	t.Run("zero attempts jit on first sample", func(t *testing.T) {
 		requireJIT(t)
 		p := prof.NewCollector()
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.I32_CONST, 2),
 			instr.New(instr.I32_ADD),
@@ -5251,7 +5251,7 @@ func TestInterpreter_WithThreshold(t *testing.T) {
 func TestInterpreter_withLocal(t *testing.T) {
 	t.Run("records opcode samples", func(t *testing.T) {
 		p := prof.NewCollector()
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.DROP),
 		}), withLocal(p), WithTick(1))
@@ -5276,7 +5276,7 @@ func TestInterpreter_withLocal(t *testing.T) {
 			instr.New(instr.RETURN),
 		).MustBuild()
 		var addr int
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn)), withLocal(p), WithTick(1), WithThreshold(3), WithHook(func(i *Interpreter) error {
@@ -5301,7 +5301,7 @@ func TestInterpreter_withLocal(t *testing.T) {
 	t.Run("samples jit loop", func(t *testing.T) {
 		requireJIT(t)
 		p := prof.NewCollector()
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 256),
 			instr.New(instr.GLOBAL_SET, 0),
 			instr.New(instr.GLOBAL_GET, 0), // IP 8 header
@@ -5323,7 +5323,7 @@ func TestInterpreter_withLocal(t *testing.T) {
 
 func TestInterpreter_WithFuel(t *testing.T) {
 	t.Run("zero is unlimited", func(t *testing.T) {
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.I32_CONST, 8),
 			instr.New(instr.I32_ADD),
@@ -5340,7 +5340,7 @@ func TestInterpreter_WithFuel(t *testing.T) {
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
 		).MustBuild()
-		i, _ := New(program.New(
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.CALL),
@@ -5357,7 +5357,7 @@ func TestInterpreter_WithFuel(t *testing.T) {
 			instr.New(instr.CALL),
 		).MustBuild()
 		calls := 0
-		i, _ := New(program.New(
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.CALL),
@@ -5373,7 +5373,7 @@ func TestInterpreter_WithFuel(t *testing.T) {
 	})
 
 	t.Run("exhausts jit execution", func(t *testing.T) {
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.DROP),
 			instr.New(instr.I32_CONST, 2),
@@ -5397,7 +5397,7 @@ func TestInterpreter_WithFuel(t *testing.T) {
 		requireJIT(t)
 
 		// The loop would run 2^30 iterations; fuel stops it inside the native loop.
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1<<30),
 			instr.New(instr.GLOBAL_SET, 0),
 			instr.New(instr.GLOBAL_GET, 0), // IP 8 header
@@ -5416,7 +5416,7 @@ func TestInterpreter_WithFuel(t *testing.T) {
 	t.Run("reset restores fuel", func(t *testing.T) {
 		// Fuel is sized to complete exactly one run. A second run succeeds only if
 		// Reset restored the budget the first run consumed.
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.NOP),
 			instr.New(instr.I32_CONST, 7),
 		}), WithTick(1), WithFuel(2))
@@ -5430,7 +5430,7 @@ func TestInterpreter_WithFuel(t *testing.T) {
 func TestInterpreter_JIT(t *testing.T) {
 	t.Run("records linear trace before native install", func(t *testing.T) {
 		p := prof.NewCollector()
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.I32_CONST, 5),
 			instr.New(instr.I32_ADD),
@@ -5453,7 +5453,7 @@ func TestInterpreter_JIT(t *testing.T) {
 	})
 
 	t.Run("records branch direction before native install", func(t *testing.T) {
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.BR_IF, 5),
 			instr.New(instr.I32_CONST, 0),
@@ -5478,7 +5478,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			instr.New(instr.I32_CONST, 9),
 			instr.New(instr.RETURN),
 		).MustBuild()
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn)), WithTick(1), WithThreshold(1))
@@ -5507,7 +5507,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			instr.New(instr.RETURN),
 		).MustBuild()
 		closure := types.NewClosure(fn.Typ, 1, []types.Boxed{types.BoxI32(11)})
-		i, _ := New(program.New([]instr.Instruction{
+		i := New(program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 1),
 			instr.New(instr.CALL),
 		}, program.WithConstants(fn, closure)), WithTick(1), WithThreshold(1))
@@ -5551,7 +5551,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			instr.New(instr.I64_CONST, 1),
 			instr.New(instr.RETURN),
 		).MustBuild()
-		i, _ := New(program.New(
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.I64_CONST, 20),
 				instr.New(instr.CONST_GET, 0),
@@ -5596,7 +5596,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			instr.New(instr.RETURN),
 			instr.New(instr.RETURN),
 		).MustBuild()
-		i, _ := New(program.New(
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.GLOBAL_SET, 0),
@@ -5644,7 +5644,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(0))),
 			instr.New(instr.RETURN),
 		).MustBuild()
-		i, _ := New(program.New(
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 20),
 				instr.New(instr.CONST_GET, 0),
@@ -5706,7 +5706,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				Params:  []types.Type{types.TypeI32},
 				Returns: []types.Type{types.TypeI32},
 			}).Emit(body...).MustBuild()
-			i, _ := New(program.New(
+			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.I32_CONST, 200),
 					instr.New(instr.CONST_GET, 0),
@@ -5747,7 +5747,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				Params:  []types.Type{types.TypeI32, types.TypeI32},
 				Returns: []types.Type{types.TypeI32},
 			}).WithLocals(types.TypeI32).Emit(body...).MustBuild()
-			i, _ := New(program.New(
+			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.I32_CONST, 200),
 					instr.New(instr.I32_CONST, 0),
@@ -5786,7 +5786,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				Params:  []types.Type{types.TypeI32},
 				Returns: []types.Type{types.TypeI32},
 			}).Emit(body...).MustBuild()
-			i, _ := New(program.New(
+			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.I32_CONST, 20000),
 					instr.New(instr.CONST_GET, 0),
@@ -5842,7 +5842,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				Params:  []types.Type{types.TypeI32},
 				Returns: []types.Type{types.TypeI32},
 			}).Emit(odd...).MustBuild()
-			i, _ := New(program.New(
+			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.I32_CONST, 200),
 					instr.New(instr.CONST_GET, 0),
@@ -5912,7 +5912,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				Params:  []types.Type{types.TypeI32},
 				Returns: []types.Type{types.TypeI32},
 			}).WithLocals(types.TypeI32, types.TypeI32).Emit(body...).MustBuild()
-			i, _ := New(program.New(
+			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.I32_CONST, 1000),
 					instr.New(instr.CONST_GET, 0),
@@ -5953,7 +5953,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				Params:  []types.Type{types.TypeI32},
 				Returns: []types.Type{types.TypeI32},
 			}).WithLocals(types.TypeI32, types.TypeI32).Emit(body...).MustBuild()
-			i, _ := New(program.New(
+			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.I32_CONST, 1000),
 					instr.New(instr.CONST_GET, 0),
@@ -5989,7 +5989,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				Params:  []types.Type{types.TypeI32},
 				Returns: []types.Type{types.TypeI32},
 			}).WithLocals(types.TypeI32, types.TypeI32).Emit(body...).MustBuild()
-			i, _ := New(program.New(
+			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.I32_CONST, 2000000000),
 					instr.New(instr.CONST_GET, 0),
@@ -6033,7 +6033,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			).MustBuild()
 			closure := types.NewClosure(body.Typ, 1, []types.Boxed{types.BoxI32(41)})
 			var addr int
-			i, _ := New(program.New(
+			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.CONST_GET, 2),
 					instr.New(instr.CALL),
@@ -6088,7 +6088,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				instr.New(instr.RETURN),
 			).MustBuild()
 			var addr int
-			i, _ := New(program.New(
+			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.CONST_GET, 1),
 					instr.New(instr.CALL),
@@ -6143,7 +6143,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				instr.New(instr.RETURN),
 			).MustBuild()
 			var addr int
-			i, _ := New(program.New(
+			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.GLOBAL_GET, 0),
 					instr.New(instr.GLOBAL_GET, 1),
@@ -6203,7 +6203,7 @@ func TestInterpreter_JIT(t *testing.T) {
 				instr.New(instr.RETURN),
 			).MustBuild()
 			var addr int
-			i, _ := New(program.New(
+			i := New(program.New(
 				[]instr.Instruction{
 					instr.New(instr.CONST_GET, 0),
 					instr.New(instr.CALL),
@@ -6253,7 +6253,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			instr.New(instr.RETURN),
 		).MustBuild()
 		p := prof.NewCollector()
-		i, _ := New(program.New(
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 21),
 				instr.New(instr.CONST_GET, 1),
@@ -6277,7 +6277,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			instr.New(instr.NOP),
 			instr.New(instr.RETURN),
 		).MustBuild()
-		i, _ := New(program.New(nil, program.WithConstants(fn)))
+		i := New(program.New(nil, program.WithConstants(fn)))
 		defer i.Close()
 
 		addr := i.constants[0].Ref()
@@ -6307,7 +6307,7 @@ func TestInterpreter_JIT(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{}).WithCaptures(types.TypeI32).Emit(
 			instr.New(instr.RETURN),
 		).MustBuild()
-		i, _ := New(program.New(nil, program.WithConstants(fn)))
+		i := New(program.New(nil, program.WithConstants(fn)))
 		defer i.Close()
 
 		addr := i.constants[0].Ref()
@@ -6358,7 +6358,7 @@ func TestInterpreter_JIT(t *testing.T) {
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
 		).MustBuild()
-		i, _ := New(program.New(
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.CALL),
@@ -6528,13 +6528,13 @@ func TestInterpreter_JIT(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				prog := build(tt.accType, tt.seed, tt.body)
 
-				threaded, _ := New(prog, WithThreshold(-1))
+				threaded := New(prog, WithThreshold(-1))
 				defer threaded.Close()
 				require.NoError(t, threaded.Run(context.Background()))
 				want, err := threaded.Pop()
 				require.NoError(t, err)
 
-				jit, _ := New(prog, WithTick(1), WithThreshold(1))
+				jit := New(prog, WithTick(1), WithThreshold(1))
 				defer jit.Close()
 				require.NoError(t, jit.Run(context.Background()))
 				got, err := jit.Pop()
@@ -6548,7 +6548,7 @@ func TestInterpreter_JIT(t *testing.T) {
 }
 
 func TestWithMarshaler(t *testing.T) {
-	i, _ := New(program.New(nil), WithMarshaler(&recordingMarshaler{}))
+	i := New(program.New(nil), WithMarshaler(&recordingMarshaler{}))
 	defer i.Close()
 
 	m, ok := i.marshaler.(*recordingMarshaler)
@@ -6567,7 +6567,7 @@ func TestWithMarshaler(t *testing.T) {
 
 func TestInterpreter_Marshal(t *testing.T) {
 	t.Run("primitives", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		tests := []struct {
@@ -6591,7 +6591,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("defined primitive with methods marshals as primitive", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(hostUserID(41))
@@ -6600,7 +6600,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("returns heap exhaustion", func(t *testing.T) {
-		i, _ := New(program.New(nil), WithMaxHeap(1))
+		i := New(program.New(nil), WithMaxHeap(1))
 		defer i.Close()
 
 		_, err := i.Marshal([]string{"blocked"})
@@ -6608,7 +6608,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("defined primitive with methods uses primitive opcodes", func(t *testing.T) {
-		i, _ := New(program.New(
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.I64_CONST, 1),
 				instr.New(instr.I64_ADD),
@@ -6628,7 +6628,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 	t.Run("custom marshaler routes marshal calls", func(t *testing.T) {
 		custom := &recordingMarshaler{}
-		i, _ := New(program.New(nil), WithMarshaler(custom))
+		i := New(program.New(nil), WithMarshaler(custom))
 		defer i.Close()
 
 		_, err := i.Marshal(struct{ Count int32 }{Count: 1})
@@ -6637,7 +6637,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("unsigned primitives preserve raw bits", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(uint32(math.MaxUint32))
@@ -6650,7 +6650,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("nil pointer", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		var p *int
@@ -6665,7 +6665,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("primitive slices", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal([]int32{1, 2})
@@ -6714,7 +6714,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("primitive arrays", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal([2]int32{1, 2})
@@ -6727,7 +6727,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("reference slice", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal([]string{"a", "b"})
@@ -6744,7 +6744,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("reference slice survives small heap", func(t *testing.T) {
-		i, _ := New(program.New(nil), WithHeap(1))
+		i := New(program.New(nil), WithHeap(1))
 		defer i.Close()
 
 		got, err := i.Marshal([]string{"a", "b"})
@@ -6764,7 +6764,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("map", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(map[string]int32{"a": 1})
@@ -6788,7 +6788,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("primitive keyed maps", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		i32, err := i.Marshal(map[int32]int32{1: 2})
@@ -6830,7 +6830,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 		type key struct {
 			ID int32
 		}
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(map[key]int32{{ID: 1}: 2})
@@ -6853,7 +6853,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("int map uses i64 value boxes", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(map[string]int{"a": 1})
@@ -6876,7 +6876,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 			Name  string
 			Count int32
 		}
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(sample{Name: "go", Count: 3})
@@ -6910,7 +6910,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 			F64    float64
 			Text   string
 		}
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(sample{
@@ -6962,7 +6962,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 			Count  int32
 			hidden int32
 		}
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(sample{Name: "go", Count: 3, hidden: 9})
@@ -6980,7 +6980,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 		type sample struct {
 			Ref types.Ref
 		}
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(sample{Ref: types.Null})
@@ -6996,7 +6996,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 		type sample struct {
 			Value types.Value
 		}
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(sample{Value: types.I32(7)})
@@ -7014,7 +7014,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("function", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		for _, f := range []any{
@@ -7034,7 +7034,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("function error return", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(func() error {
@@ -7052,7 +7052,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("unsigned function preserves raw bits", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(func(v uint64) uint64 {
@@ -7072,7 +7072,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("boxed ref input", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		addr, err := i.Alloc(types.String("ref"))
@@ -7084,7 +7084,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("unsupported kind", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		_, err := i.Marshal(make(chan int))
@@ -7093,7 +7093,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 	t.Run("recursive struct pointer", func(t *testing.T) {
 		type node struct{ Next *node }
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(node{})
@@ -7114,7 +7114,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 			First  *int32
 			Second *int32
 		}
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		n := int32(7)
@@ -7128,7 +7128,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("interface slice holds mixed dynamic kinds", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal([]any{int32(1), "x", float64(2.5)})
@@ -7158,7 +7158,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 			Value any
 			Tag   int32
 		}
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(box{Value: "hi", Tag: 7})
@@ -7177,7 +7177,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("interface valued map marshals values as ref", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(map[string]any{"a": int32(1)})
@@ -7198,7 +7198,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("nil interface marshals to null", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		var v any
@@ -7210,7 +7210,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("time.Time marshals to i64 nanos", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		ts := time.Date(2026, 6, 14, 1, 2, 3, 4, time.UTC)
@@ -7220,7 +7220,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("time.Duration stays i64", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(3 * time.Second)
@@ -7229,7 +7229,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	})
 
 	t.Run("complex128 marshals to struct", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(complex(1.5, -2.5))
@@ -7243,7 +7243,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 func TestInterpreter_Unmarshal(t *testing.T) {
 	t.Run("primitives", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		var b bool
@@ -7264,7 +7264,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("unsigned primitives preserve raw bits", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		var u32 uint32
@@ -7281,7 +7281,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("non nil pointer destination required", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		require.ErrorIs(t, i.Unmarshal(types.I32(1), nil), ErrInvalidUnmarshalTarget)
@@ -7290,7 +7290,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("slice", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		var out []int32
@@ -7323,7 +7323,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("array", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		var out [2]int32
@@ -7339,7 +7339,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("array", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		var bs [3]byte
@@ -7356,7 +7356,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("map", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(map[string]int32{"a": 1})
@@ -7368,7 +7368,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("primitive keyed maps", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		in := map[int32]int32{1: 2}
@@ -7404,7 +7404,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		type key struct {
 			ID int32
 		}
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		in := map[key]int32{{ID: 1}: 2}
@@ -7420,7 +7420,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 			Count int32
 			Name  string
 		}
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(struct {
@@ -7435,7 +7435,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("pointer target", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		var out *int32
@@ -7445,7 +7445,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("host object pointer target", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		id := hostUserID(41)
@@ -7463,7 +7463,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("value target", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		var out types.Value
@@ -7472,7 +7472,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("interface target yields vm-native value", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		var n any
@@ -7485,7 +7485,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("interface slice round-trip", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal([]any{int32(1), "x", float64(2.5)})
@@ -7497,7 +7497,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("error cases", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		var n int8
@@ -7511,7 +7511,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("time.Time round-trips through i64", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		ts := time.Date(2026, 6, 14, 1, 2, 3, 4, time.UTC)
@@ -7521,7 +7521,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("complex128 round-trips through struct", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		src, err := i.Marshal(complex(1.5, -2.5))
@@ -7533,7 +7533,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	})
 
 	t.Run("complex mismatch errors", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		var out complex128
@@ -7543,7 +7543,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 
 func TestValueMarshaler(t *testing.T) {
 	t.Run("marshals via MarshalVM ahead of struct routing", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(vmPoint{X: 3, Y: 4})
@@ -7552,7 +7552,7 @@ func TestValueMarshaler(t *testing.T) {
 	})
 
 	t.Run("nested element converts through MarshalVM", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal([]vmPoint{{X: 1, Y: 2}})
@@ -7566,7 +7566,7 @@ func TestValueMarshaler(t *testing.T) {
 	})
 
 	t.Run("missing UnmarshalVM errors on unmarshal", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(vmOnlyMarshal{})
@@ -7580,7 +7580,7 @@ func TestValueMarshaler(t *testing.T) {
 
 func TestValueUnmarshaler(t *testing.T) {
 	t.Run("round-trips via UnmarshalVM", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		var out vmPoint
@@ -7589,7 +7589,7 @@ func TestValueUnmarshaler(t *testing.T) {
 	})
 
 	t.Run("pointer receiver mutates destination", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		out := &vmPoint{X: 9, Y: 9}
@@ -7602,7 +7602,7 @@ func TestWithConverter(t *testing.T) {
 	extType := reflect.TypeOf(extPoint{})
 
 	t.Run("marshals and unmarshals an external type", func(t *testing.T) {
-		i, _ := New(program.New(nil), WithConverter(extType, extPointConverter()))
+		i := New(program.New(nil), WithConverter(extType, extPointConverter()))
 		defer i.Close()
 
 		got, err := i.Marshal(extPoint{X: 3, Y: 4})
@@ -7615,7 +7615,7 @@ func TestWithConverter(t *testing.T) {
 	})
 
 	t.Run("applies to a nested struct field", func(t *testing.T) {
-		i, _ := New(program.New(nil), WithConverter(extType, extPointConverter()))
+		i := New(program.New(nil), WithConverter(extType, extPointConverter()))
 		defer i.Close()
 
 		got, err := i.Marshal(struct{ P extPoint }{P: extPoint{X: 1, Y: 2}})
@@ -7635,7 +7635,7 @@ func TestWithConverter(t *testing.T) {
 			},
 		}
 		ts := time.Date(2026, 6, 14, 0, 0, 0, 0, time.UTC)
-		i, _ := New(program.New(nil), WithConverter(reflect.TypeOf(time.Time{}), secs))
+		i := New(program.New(nil), WithConverter(reflect.TypeOf(time.Time{}), secs))
 		defer i.Close()
 
 		got, err := i.Marshal(ts)
@@ -7646,7 +7646,7 @@ func TestWithConverter(t *testing.T) {
 	t.Run("nil direction stays unsupported", func(t *testing.T) {
 		marshalOnly := extPointConverter()
 		marshalOnly.Unmarshal = nil
-		i, _ := New(program.New(nil), WithConverter(extType, marshalOnly))
+		i := New(program.New(nil), WithConverter(extType, marshalOnly))
 		defer i.Close()
 
 		var out extPoint
@@ -7654,7 +7654,7 @@ func TestWithConverter(t *testing.T) {
 	})
 
 	t.Run("ignored when a custom marshaler is set", func(t *testing.T) {
-		i, _ := New(program.New(nil),
+		i := New(program.New(nil),
 			WithMarshaler(&recordingMarshaler{}),
 			WithConverter(extType, extPointConverter()),
 		)
@@ -7673,7 +7673,7 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 				ctx, cancel := context.WithCancel(context.TODO())
 				defer cancel()
 
-				i, _ := New(tt.program)
+				i := New(tt.program)
 				defer i.Close()
 
 				b.ResetTimer()
@@ -7694,7 +7694,7 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 				ctx, cancel := context.WithCancel(context.TODO())
 				defer cancel()
 
-				i, _ := New(tt.program, WithThreshold(-1))
+				i := New(tt.program, WithThreshold(-1))
 				defer i.Close()
 
 				b.ReportAllocs()
@@ -7716,7 +7716,7 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 				ctx, cancel := context.WithCancel(context.TODO())
 				defer cancel()
 
-				i, _ := New(tt.program, WithThreshold(-1))
+				i := New(tt.program, WithThreshold(-1))
 				defer i.Close()
 				for _, constant := range i.constants {
 					if constant.Kind() != types.KindRef {
@@ -7742,7 +7742,7 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 
 func BenchmarkInterpreter_Alloc(b *testing.B) {
 	b.Run("free slot reuse", func(b *testing.B) {
-		i, _ := New(program.New(nil), WithHeap(2))
+		i := New(program.New(nil), WithHeap(2))
 		defer i.Close()
 
 		b.ReportAllocs()
@@ -7765,7 +7765,7 @@ func BenchmarkInterpreter_Alloc(b *testing.B) {
 	})
 
 	b.Run("small heap cyclic gc", func(b *testing.B) {
-		i, _ := New(program.New(nil), WithHeap(2))
+		i := New(program.New(nil), WithHeap(2))
 		defer i.Close()
 		typ := types.NewArrayType(types.TypeRef)
 
@@ -7807,7 +7807,7 @@ func BenchmarkInterpreter_Alloc(b *testing.B) {
 
 func BenchmarkInterpreter_Release(b *testing.B) {
 	b.Run("primitive struct", func(b *testing.B) {
-		i, _ := New(program.New(nil), WithHeap(2))
+		i := New(program.New(nil), WithHeap(2))
 		defer i.Close()
 		typ := types.NewStructType(types.NewStructField(types.TypeI32))
 
@@ -7831,7 +7831,7 @@ func BenchmarkInterpreter_Release(b *testing.B) {
 	})
 
 	b.Run("ref array", func(b *testing.B) {
-		i, _ := New(program.New(nil), WithHeap(3))
+		i := New(program.New(nil), WithHeap(3))
 		defer i.Close()
 		typ := types.NewArrayType(types.TypeRef)
 
@@ -7860,7 +7860,7 @@ func BenchmarkInterpreter_Release(b *testing.B) {
 	})
 
 	b.Run("ref struct", func(b *testing.B) {
-		i, _ := New(program.New(nil), WithHeap(3))
+		i := New(program.New(nil), WithHeap(3))
 		defer i.Close()
 		typ := types.NewStructType(types.NewStructField(types.TypeRef))
 
@@ -7889,7 +7889,7 @@ func BenchmarkInterpreter_Release(b *testing.B) {
 	})
 
 	b.Run("ref valued map", func(b *testing.B) {
-		i, _ := New(program.New(nil), WithHeap(3))
+		i := New(program.New(nil), WithHeap(3))
 		defer i.Close()
 		typ := types.NewMapType(types.TypeI32, types.TypeRef)
 
@@ -7941,7 +7941,7 @@ func BenchmarkInterpreter_Marshal(b *testing.B) {
 	}
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
-			i, _ := New(program.New(nil))
+			i := New(program.New(nil))
 			defer i.Close()
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -7978,7 +7978,7 @@ func BenchmarkInterpreter_Unmarshal(b *testing.B) {
 	}
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
-			i, _ := New(program.New(nil))
+			i := New(program.New(nil))
 			defer i.Close()
 			val, err := i.Marshal(c.src)
 			require.NoError(b, err)
@@ -8002,8 +8002,7 @@ func BenchmarkInterpreter_Unmarshal(b *testing.B) {
 // default — a malformed function stored at runtime executes and traps.
 func TestInterpreter_RunsUnverifiedBytecode(t *testing.T) {
 	prog := program.New([]instr.Instruction{instr.New(instr.CALL)})
-	i, err := New(prog)
-	require.NoError(t, err)
+	i := New(prog)
 	defer i.Close()
 
 	addr, err := i.Alloc(types.I32(0))
@@ -8032,7 +8031,7 @@ func TestInterpreter_Throw(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(instrs, program.WithHandlers(b.Handlers()...))
 
-		i, _ := New(prog)
+		i := New(prog)
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
@@ -8054,7 +8053,7 @@ func TestInterpreter_Throw(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(instrs, program.WithHandlers(b.Handlers()...))
 
-		i, _ := New(prog)
+		i := New(prog)
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
@@ -8083,7 +8082,7 @@ func TestInterpreter_Throw(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(instrs, program.WithConstants(host), program.WithHandlers(b.Handlers()...))
 
-		i, _ := New(prog)
+		i := New(prog)
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
@@ -8109,7 +8108,7 @@ func TestInterpreter_Throw(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(instrs, program.WithConstants(callee), program.WithHandlers(b.Handlers()...))
 
-		i, _ := New(prog)
+		i := New(prog)
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
@@ -8136,7 +8135,7 @@ func TestInterpreter_Throw(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(instrs, program.WithHandlers(b.Handlers()...))
 
-		i, _ := New(prog)
+		i := New(prog)
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
@@ -8159,7 +8158,7 @@ func TestInterpreter_Throw(t *testing.T) {
 		require.NoError(t, err)
 		prog := program.New(instrs, program.WithConstants(types.String("data")), program.WithHandlers(b.Handlers()...))
 
-		i, _ := New(prog)
+		i := New(prog)
 		defer i.Close()
 		require.NoError(t, i.Run(context.Background()))
 		v, err := i.Pop()
@@ -8172,7 +8171,7 @@ func TestInterpreter_Throw(t *testing.T) {
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.THROW),
 		})
-		i, _ := New(prog)
+		i := New(prog)
 		defer i.Close()
 		err := i.Run(context.Background())
 		require.ErrorIs(t, err, ErrUncaughtException)
@@ -8186,7 +8185,7 @@ func TestInterpreter_Throw(t *testing.T) {
 			instr.New(instr.ERROR_NEW),
 			instr.New(instr.THROW),
 		}, program.WithConstants(types.String("kaboom")))
-		i, _ := New(prog)
+		i := New(prog)
 		defer i.Close()
 		err := i.Run(context.Background())
 		var e *types.Error
@@ -8230,7 +8229,7 @@ func TestInterpreter_Throw(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(sum))
 
-		threaded, _ := New(prog, WithThreshold(-1))
+		threaded := New(prog, WithThreshold(-1))
 		defer threaded.Close()
 		errAddr, err := threaded.Alloc(types.NewError("one", types.BoxI32(1)))
 		require.NoError(t, err)
@@ -8240,7 +8239,7 @@ func TestInterpreter_Throw(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(300), want)
 
-		jit, _ := New(prog, WithTick(1), WithThreshold(1))
+		jit := New(prog, WithTick(1), WithThreshold(1))
 		defer jit.Close()
 		errAddr, err = jit.Alloc(types.NewError("one", types.BoxI32(1)))
 		require.NoError(t, err)
@@ -8286,7 +8285,7 @@ func TestInterpreter_Throw(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(dropper))
 
-		threaded, _ := New(prog, WithThreshold(-1))
+		threaded := New(prog, WithThreshold(-1))
 		defer threaded.Close()
 		payload, err := threaded.Alloc(types.String("payload"))
 		require.NoError(t, err)
@@ -8299,7 +8298,7 @@ func TestInterpreter_Throw(t *testing.T) {
 		wantPayloadRC := threaded.rc[payload]
 		wantErrorRC := threaded.rc[errAddr]
 
-		jit, _ := New(prog, WithTick(1), WithThreshold(1))
+		jit := New(prog, WithTick(1), WithThreshold(1))
 		defer jit.Close()
 		payload, err = jit.Alloc(types.String("payload"))
 		require.NoError(t, err)
@@ -8357,14 +8356,14 @@ func TestInterpreter_Throw(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(makeErr, driver))
 
-		threaded, _ := New(prog, WithThreshold(-1))
+		threaded := New(prog, WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(8400), want)
 
-		jit, _ := New(prog, WithTick(1), WithThreshold(1))
+		jit := New(prog, WithTick(1), WithThreshold(1))
 		defer jit.Close()
 		require.NoError(t, jit.Run(context.Background()))
 		got, err := jit.Pop()
@@ -8416,14 +8415,14 @@ func TestInterpreter_Throw(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(thrower, driver))
 
-		threaded, _ := New(prog, WithThreshold(-1))
+		threaded := New(prog, WithThreshold(-1))
 		defer threaded.Close()
 		require.NoError(t, threaded.Run(context.Background()))
 		want, err := threaded.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(1000), want)
 
-		jit, _ := New(prog, WithTick(1), WithThreshold(1))
+		jit := New(prog, WithTick(1), WithThreshold(1))
 		defer jit.Close()
 		require.NoError(t, jit.Run(context.Background()))
 		got, err := jit.Pop()
@@ -8455,7 +8454,7 @@ func TestInterpreter_Throw(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(div))
 
-		jit, _ := New(prog, WithTick(1), WithThreshold(1))
+		jit := New(prog, WithTick(1), WithThreshold(1))
 		defer jit.Close()
 		jit.globals = append(jit.globals, types.BoxI32(10), types.BoxI32(2))
 		require.NoError(t, jit.Run(context.Background()))
@@ -8490,7 +8489,7 @@ func TestInterpreter_Throw(t *testing.T) {
 				instr.New(instr.ERROR_NEW),
 				instr.New(instr.THROW),
 			})
-			i, _ := New(prog, mode.opts...)
+			i := New(prog, mode.opts...)
 			defer i.Close()
 			err := i.Run(context.Background())
 			var e *types.Error
@@ -8514,7 +8513,7 @@ func TestInterpreter_Throw(t *testing.T) {
 			require.NoError(t, err)
 			prog := program.New(instrs, program.WithConstants(types.String("x")), program.WithHandlers(b.Handlers()...))
 
-			i, _ := New(prog, mode.opts...)
+			i := New(prog, mode.opts...)
 			defer i.Close()
 			require.NoError(t, i.Run(context.Background()))
 			v, err := i.Pop()

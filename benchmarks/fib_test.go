@@ -101,12 +101,12 @@ func BenchmarkFib35(b *testing.B) {
 	}
 
 	b.Run("minivm_interp", func(b *testing.B) {
-		vm, _ := interp.New(Fib(fibN), interp.WithThreshold(-1))
+		vm := interp.New(Fib(fibN), interp.WithThreshold(-1))
 		runMiniVM(b, vm)
 	})
 
 	b.Run("minivm_jit", func(b *testing.B) {
-		vm, _ := interp.New(Fib(fibN))
+		vm := interp.New(Fib(fibN))
 		runMiniVM(b, vm)
 	})
 

@@ -69,7 +69,7 @@ func TestNewHostFunction(t *testing.T) {
 			},
 			program.WithConstants(fn),
 		)
-		i, _ := New(prog)
+		i := New(prog)
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -81,7 +81,7 @@ func TestNewHostFunction(t *testing.T) {
 
 func TestHostObject(t *testing.T) {
 	t.Run("kind type and string", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(hostCounter{Count: 1})
@@ -100,7 +100,7 @@ func TestHostObject(t *testing.T) {
 			Visible int32
 			hidden  int32
 		}
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(private{Visible: 1, hidden: 2})
@@ -117,7 +117,7 @@ func TestHostObject(t *testing.T) {
 	})
 
 	t.Run("struct with method routes to HostObject", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(hostCounter{Count: 1})
@@ -131,7 +131,7 @@ func TestHostObject(t *testing.T) {
 	})
 
 	t.Run("method call mutates receiver via pointer", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(hostCounter{Count: 1})
@@ -165,7 +165,7 @@ func TestHostObject(t *testing.T) {
 	})
 
 	t.Run("pointer to named scalar with method routes to HostObject", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		id := hostUserID(41)
@@ -189,7 +189,7 @@ func TestHostObject(t *testing.T) {
 	})
 
 	t.Run("pointer method mutates named scalar receiver", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		id := hostUserID(41)
@@ -212,7 +212,7 @@ func TestHostObject(t *testing.T) {
 	})
 
 	t.Run("SetField updates named scalar receiver", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		id := hostUserID(41)
@@ -226,7 +226,7 @@ func TestHostObject(t *testing.T) {
 
 	t.Run("named scalar value field feeds primitive opcodes", func(t *testing.T) {
 		id := hostUserID(41)
-		i, _ := New(program.New(
+		i := New(program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.STRUCT_GET),
@@ -247,7 +247,7 @@ func TestHostObject(t *testing.T) {
 	})
 
 	t.Run("unmarshal recovers receiver", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		src := hostCounter{Count: 7}
@@ -263,7 +263,7 @@ func TestHostObject(t *testing.T) {
 		type shadow struct {
 			Bump int32
 		}
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		// shadow has no methods so it would normally take the *Struct path;
@@ -287,7 +287,7 @@ func TestHostObject(t *testing.T) {
 	})
 
 	t.Run("SetField writes back to receiver", func(t *testing.T) {
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(hostCounter{Count: 1})
@@ -318,7 +318,7 @@ func TestHostObject(t *testing.T) {
 			Value  types.Value
 			hidden int32
 		}
-		i, _ := New(program.New(nil))
+		i := New(program.New(nil))
 		defer i.Close()
 
 		got, err := i.Marshal(fields{

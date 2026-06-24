@@ -34,7 +34,7 @@ err := program.Verify(prog, program.WithExtensions(ids...)) // nil or *program.V
 if err != nil {
     return err
 }
-vm, err := interp.New(prog) // trusts prog; verify first
+vm := interp.New(prog) // trusts prog; verify first
 ```
 
 Verification is decoupled from the interpreter: `interp.New` never verifies and
