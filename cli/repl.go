@@ -203,10 +203,7 @@ func (r *REPL) command(ctx context.Context, scanner *bufio.Scanner, line string)
 }
 
 func (r *REPL) exec(ctx context.Context, inst instr.Instruction) error {
-	vm, err := interp.New(r.build(inst))
-	if err != nil {
-		return err
-	}
+	vm := interp.New(r.build(inst))
 	defer vm.Close()
 	if err := vm.Run(ctx); err != nil {
 		return err
@@ -362,10 +359,7 @@ func (r *REPL) profile(ctx context.Context) error {
 	}
 
 	p := prof.New()
-	vm, err := interp.New(r.build(), interp.WithProfiler(p), interp.WithTick(1))
-	if err != nil {
-		return err
-	}
+	vm := interp.New(r.build(), interp.WithProfiler(p), interp.WithTick(1))
 	if err := vm.Run(ctx); err != nil {
 		_ = vm.Close()
 		return err
@@ -467,10 +461,7 @@ func (r *REPL) doDebug(ctx context.Context, scanner *bufio.Scanner) error {
 	}
 	dbg.Step()
 
-	vm, err := interp.New(r.build(), interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
-	if err != nil {
-		return err
-	}
+	vm := interp.New(r.build(), interp.WithHook(dbg.Hook), interp.WithTick(1), interp.WithThreshold(-1))
 	defer vm.Close()
 
 	for {

@@ -223,7 +223,7 @@ Thin entrypoint around `cli.Root().Execute()`.
 3. optimize.Optimize(prog) [optional AOT]
    └─ CF → (AS) → CD → (DCE), each requesting BasicBlocksAnalysis
 
-4. interp.New(prog, opts...) → (*Interpreter, error)
+4. interp.New(prog, opts...) → *Interpreter
    ├─ threadedCompiler.Compile(prog.Code) → i.code[0]
    └─ for each *Function constant:
       threadedCompiler.Compile(fn.Code) → i.code[fn heap ref]

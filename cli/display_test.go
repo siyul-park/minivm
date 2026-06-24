@@ -12,7 +12,7 @@ import (
 
 func TestPrintStack(t *testing.T) {
 	t.Run("empty stack produces no output", func(t *testing.T) {
-		vm, _ := interp.New(program.New(nil))
+		vm := interp.New(program.New(nil))
 		defer vm.Close()
 		var out bytes.Buffer
 		printStack(&out, vm)
@@ -20,7 +20,7 @@ func TestPrintStack(t *testing.T) {
 	})
 
 	t.Run("renders top-down with one trailing newline", func(t *testing.T) {
-		vm, _ := interp.New(program.New([]instr.Instruction{
+		vm := interp.New(program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10),
 			instr.New(instr.I32_CONST, 20),
 		}))
@@ -35,7 +35,7 @@ func TestPrintStack(t *testing.T) {
 
 func TestFormatValue(t *testing.T) {
 	t.Run("i32 has no type suffix", func(t *testing.T) {
-		vm, _ := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)}))
+		vm := interp.New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)}))
 		defer vm.Close()
 		require.NoError(t, vm.Run(t.Context()))
 		v, err := vm.Peek(0)
@@ -44,7 +44,7 @@ func TestFormatValue(t *testing.T) {
 	})
 
 	t.Run("i64 carries (i64) suffix", func(t *testing.T) {
-		vm, _ := interp.New(program.New([]instr.Instruction{instr.New(instr.I64_CONST, 42)}))
+		vm := interp.New(program.New([]instr.Instruction{instr.New(instr.I64_CONST, 42)}))
 		defer vm.Close()
 		require.NoError(t, vm.Run(t.Context()))
 		v, err := vm.Peek(0)
