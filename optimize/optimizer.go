@@ -20,6 +20,7 @@ const (
 	O0 Level = iota
 	O1
 	O2
+	O3
 )
 
 func NewOptimizer(level Level) *Optimizer {
@@ -30,6 +31,7 @@ func NewOptimizer(level Level) *Optimizer {
 	}
 
 	pass.Register(o.manager, analysis.NewBasicBlocksAnalysis())
+	pass.Register(o.manager, analysis.NewValueNumberingAnalysis())
 	for _, p := range o.transforms() {
 		o.pipeline.AddPass(p)
 	}
@@ -51,7 +53,8 @@ func (o *Optimizer) AddPass(p pass.Pass[*program.Program]) {
 }
 
 // transforms returns the cumulative transform pipeline for the optimizer level:
-// O1 runs cheap local rewrites, O2 adds CFG-based passes.
+// O1 runs cheap local rewrites, O2 adds CFG-based passes, O3 adds
+// common-subexpression elimination on top.
 func (o *Optimizer) transforms() []pass.Pass[*program.Program] {
 	switch o.level {
 	case O1:
@@ -63,6 +66,14 @@ func (o *Optimizer) transforms() []pass.Pass[*program.Program] {
 		return []pass.Pass[*program.Program]{
 			transform.NewConstantFoldingPass(),
 			transform.NewAlgebraicSimplificationPass(),
+			transform.NewConstantDeduplicationPass(),
+			transform.NewDeadCodeEliminationPass(),
+		}
+	case O3:
+		return []pass.Pass[*program.Program]{
+			transform.NewConstantFoldingPass(),
+			transform.NewAlgebraicSimplificationPass(),
+			transform.NewCommonSubexpressionEliminationPass(),
 			transform.NewConstantDeduplicationPass(),
 			transform.NewDeadCodeEliminationPass(),
 		}
