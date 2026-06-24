@@ -110,6 +110,7 @@ transform pipeline for the level. Levels are cumulative:
 O0  no transforms
 O1  ConstantFoldingPass, ConstantDeduplicationPass                          (cheap, local)
 O2  + AlgebraicSimplificationPass, DeadCodeEliminationPass                  (CFG / peephole)
+O3  + CommonSubexpressionEliminationPass                                    (value numbering)
 ```
 
 `Optimize(prog)` runs the pipeline; `AddPass(p)` appends a custom transform.
@@ -131,6 +132,26 @@ Block boundaries:
 - offset `0`
 - byte after `BR`, `BR_IF`, `BR_TABLE`, `UNREACHABLE`, or `RETURN`
 - every branch target offset from `BR`, `BR_IF`, or `BR_TABLE`
+
+## `ValueNumberingAnalysis`
+
+Assigns a value number to every value a function computes by abstractly
+interpreting the operand stack one basic block at a time (local value
+numbering), mirroring the `program/verify.go` slot-stack walk. Equal expressions
+hash-cons to the same number; commutative ops canonicalize operand order.
+
+Input: `*types.Function`. Output: `*ValueNumbering`:
+
+- `Values`: instruction offset → value number of its result (reusable by other
+  passes that reason about value identity)
+- `Redundant`: finalizing-op offset → `Redundancy{Start, End, Kind, Home, Def}`,
+  one per recomputation of a value already produced earlier in the block
+
+Only side-effect-free, non-allocating numeric ops (and reference comparisons) are
+candidates. Mutable loads (heap, globals, upvalues) take opaque numbers, so they
+never match. A store or call ends a value's reuse window; numbering resets at
+every block boundary. Cross-block (global) value numbering is not yet
+implemented — see the GVN note below.
 
 ## `ConstantFoldingPass`
 
@@ -159,6 +180,32 @@ Integer peepholes whose right operand is a constant, on `I32`/`I64`:
 Float identities are intentionally skipped (unsound under IEEE-754: NaN, signed
 zero), as are annihilators such as `x*0` and `x&0` (they would need to drop the
 live left operand).
+
+## `CommonSubexpressionEliminationPass`
+
+Uses `ValueNumberingAnalysis` to drop recomputations of a value already produced
+in the same basic block (local CSE). Each redundant expression range is replaced
+by a load:
+
+- when a local still holds the value (`Home >= 0`), with `LOCAL_GET Home`
+- otherwise, for real functions whose locals persist, the value is captured at
+  its first computation with an inserted `LOCAL_TEE` into a freshly allocated
+  slot and each recomputation becomes `LOCAL_GET` of that slot
+
+The top-level body (slot 0) compiles with no locals, so only the existing-home
+case applies there. Unlike the peephole passes, this pass changes code length:
+it uses the `rewriter` (`transform/rewrite.go`) to splice edits and then repair
+every `BR`/`BR_IF`/`BR_TABLE` operand and exception-table boundary for the new
+layout, bailing (leaving the function untouched) if a branch would no longer
+reach within its signed 16-bit operand. Allocating a local shifts the
+operand-stack base, so each handler's `Depth` grows by the number of locals
+added. New local indexes must stay below 256 (the 1-byte `LOCAL` operand).
+
+Cross-block GVN is not yet implemented: it requires available-expression
+dataflow over value numbers (intersection across predecessors, fresh numbers at
+merge points, loop back-edge handling) and is deferred so the proven-correct
+block-local pass ships first. The `rewriter` and `Redundancy` shape are designed
+to be reused by it.
 
 ## `ConstantDeduplicationPass`
 

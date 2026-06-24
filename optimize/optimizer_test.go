@@ -1,9 +1,11 @@
 package optimize
 
 import (
+	"context"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/transform"
 	"github.com/siyul-park/minivm/types"
@@ -140,4 +142,92 @@ func TestOptimizer_Optimize(t *testing.T) {
 		_, err := o.Optimize(prog)
 		require.NoError(t, err)
 	})
+
+	t.Run("O3 eliminates a common subexpression and preserves semantics", func(t *testing.T) {
+		build := func() *program.Program {
+			return program.New(
+				[]instr.Instruction{
+					instr.New(instr.I32_CONST, 3),
+					instr.New(instr.I32_CONST, 4),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(
+					types.NewFunctionBuilder(&types.FunctionType{
+						Params:  []types.Type{types.TypeI32, types.TypeI32},
+						Returns: []types.Type{types.TypeI32},
+					}).Emit(
+						instr.New(instr.LOCAL_GET, 0),
+						instr.New(instr.LOCAL_GET, 1),
+						instr.New(instr.I32_ADD),
+						instr.New(instr.LOCAL_GET, 0),
+						instr.New(instr.LOCAL_GET, 1),
+						instr.New(instr.I32_ADD),
+						instr.New(instr.I32_ADD),
+						instr.New(instr.RETURN),
+					).MustBuild(),
+				),
+			)
+		}
+
+		optimized, err := NewOptimizer(O3).Optimize(build())
+		require.NoError(t, err)
+
+		fn := optimized.Constants[0].(*types.Function)
+		require.Len(t, fn.Locals, 1, "common subexpression captured into a fresh local")
+		require.Contains(t, instr.Format(fn.Code), "local.tee")
+
+		require.Equal(t, run(t, build()), run(t, optimized))
+	})
+
+	t.Run("O3 repairs branch offsets after shrinking", func(t *testing.T) {
+		build := func() *program.Program {
+			fb := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32, types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			})
+			l := fb.Label()
+			fb.Emit(
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_GT_S),
+			)
+			fb.BrIf(l)
+			fb.Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
+			fb.Bind(l)
+			fb.Emit(instr.New(instr.RETURN))
+
+			return program.New(
+				[]instr.Instruction{
+					instr.New(instr.I32_CONST, 3),
+					instr.New(instr.I32_CONST, 4),
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				},
+				program.WithConstants(fb.MustBuild()),
+			)
+		}
+
+		optimized, err := NewOptimizer(O3).Optimize(build())
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(optimized))
+		require.Equal(t, run(t, build()), run(t, optimized))
+	})
+}
+
+func run(t *testing.T, prog *program.Program) types.Value {
+	t.Helper()
+	i := interp.New(prog)
+	defer i.Close()
+	require.NoError(t, i.Run(context.Background()))
+	v, err := i.Pop()
+	require.NoError(t, err)
+	return v
 }
