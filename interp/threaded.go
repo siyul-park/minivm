@@ -1001,7 +1001,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			rhs := i.stack[i.sp-1]
 			lhs := i.stack[i.sp-2]
 			i.sp--
-			i.stack[i.sp-1] = i.i32Xor(lhs.I32(), rhs.I32(), bitwiseKind(lhs.Kind(), rhs.Kind()))
+			i.stack[i.sp-1] = i.i32Xor(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1014,7 +1014,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			rhs := i.stack[i.sp-1]
 			lhs := i.stack[i.sp-2]
 			i.sp--
-			i.stack[i.sp-1] = i.i32And(lhs.I32(), rhs.I32(), bitwiseKind(lhs.Kind(), rhs.Kind()))
+			i.stack[i.sp-1] = i.i32And(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -1027,7 +1027,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			rhs := i.stack[i.sp-1]
 			lhs := i.stack[i.sp-2]
 			i.sp--
-			i.stack[i.sp-1] = i.i32Or(lhs.I32(), rhs.I32(), bitwiseKind(lhs.Kind(), rhs.Kind()))
+			i.stack[i.sp-1] = i.i32Or(lhs, rhs)
 			i.fr.ip++
 		}
 	},
@@ -4419,30 +4419,24 @@ func (i *Interpreter) i32ShrU(lhs, rhs int32) types.Boxed {
 	return types.BoxI32(int32(uint32(lhs) >> (rhs & 0x1F)))
 }
 
-// i32Xor, i32And, i32Or are width-closed: the result stays within the value
-// range of the operand kind, so the kind is preserved (i8^i8 → i8, i1&i1 → i1)
-// rather than always widening to i32. The caller passes the result kind it
-// computed from the operand kinds via bitwiseKind.
-func (i *Interpreter) i32Xor(lhs, rhs int32, kind types.Kind) types.Boxed {
-	return types.Box(uint64(uint32(lhs^rhs)), kind)
+// i32Xor, i32And, i32Or are width-closed. The i32/i8/i1 tag layout makes the
+// result kind equal to lhs.kind & rhs.kind, so threaded bitwise ops can combine
+// boxed payloads without calling Kind or rebuilding the box through types.Box.
+func (i *Interpreter) i32Xor(lhs, rhs types.Boxed) types.Boxed {
+	return i.i32Bitwise(lhs, rhs, uint64(lhs)^uint64(rhs))
 }
 
-func (i *Interpreter) i32And(lhs, rhs int32, kind types.Kind) types.Boxed {
-	return types.Box(uint64(uint32(lhs&rhs)), kind)
+func (i *Interpreter) i32And(lhs, rhs types.Boxed) types.Boxed {
+	return types.Boxed(uint64(lhs) & uint64(rhs))
 }
 
-func (i *Interpreter) i32Or(lhs, rhs int32, kind types.Kind) types.Boxed {
-	return types.Box(uint64(uint32(lhs|rhs)), kind)
+func (i *Interpreter) i32Or(lhs, rhs types.Boxed) types.Boxed {
+	return i.i32Bitwise(lhs, rhs, uint64(lhs)|uint64(rhs))
 }
 
-// bitwiseKind selects the result kind of a width-closed bitwise op from its two
-// operand kinds: a shared narrow kind is kept (i8, i1), any other pair computes
-// as i32. Operand boxes always carry a concrete kind at runtime.
-func bitwiseKind(a, b types.Kind) types.Kind {
-	if a == b {
-		return a
-	}
-	return types.KindI32
+func (i *Interpreter) i32Bitwise(lhs, rhs types.Boxed, payload uint64) types.Boxed {
+	tag := uint64(lhs) & uint64(rhs) & ^uint64(types.VMask)
+	return types.Boxed(tag | payload&types.VMask)
 }
 
 func (i *Interpreter) i32Clz(v int32) types.Boxed {

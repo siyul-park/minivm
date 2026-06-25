@@ -837,8 +837,8 @@ func (l arm64Lowerer) i32Binary(ctx *lowering, op func(dst, src1, src2 asm.Reg) 
 // i32Bitwise lowers a width-closed bitwise op (and/or/xor). Operands are
 // accepted by representation, so i1/i8 flow in like i32; the result keeps a
 // shared narrow kind (i8&i8 → i8, i1^i1 → i1) and widens to i32 only for a
-// mixed pair, matching the interpreter's bitwiseKind. The op runs on the full
-// register; the low 32 bits carry the value and box masks the rest.
+// mixed pair. The op runs on the full register; the low 32 bits carry the value
+// and box masks the rest.
 func (l arm64Lowerer) i32Bitwise(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
 	b, a, ok := l.operands(ctx, types.KindI32)
 	if !ok {
@@ -846,7 +846,7 @@ func (l arm64Lowerer) i32Bitwise(ctx *lowering, op func(dst, src1, src2 asm.Reg)
 	}
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(op(dst, a.reg, b.reg))
-	ctx.push(value{reg: dst, kind: bitwiseKind(a.kind, b.kind), raw: true})
+	ctx.push(value{reg: dst, kind: a.kind & b.kind, raw: true})
 	return true
 }
 
