@@ -216,6 +216,16 @@ and `f64` use IEEE bits, and inline `i64` values use the full signed register
 value while guards enforce the boxed 49-bit range before materialization. Heap
 promoted `i64` values deopt on load.
 
+The narrow kinds `i1`/`i8` share the i32 representation, so they ride in the low
+32 bits exactly like `i32` and `loadLocal`/`constGet` materialize them raw. Kind
+checks are by representation (`kinds` compares `Kind.Repr`), so an `i1`/`i8`
+operand flows into any `i32.*` lowering. Result kinds match the interpreter:
+`i32.and`/`or`/`xor` use `i32Bitwise`, which keeps a shared narrow kind
+(`i8 & i8 → i8`, `i1 ^ i1 → i1`) and widens a mixed pair to `i32`; other
+arithmetic widens to `i32`; comparisons/`eqz`/`ref.test`/`ref.eq` go through
+`setBool`, which pushes `KindI1`. `box` then tags each result `i8`/`i1`/`i32`
+after masking the low lane.
+
 `GLOBAL_*`, `LOCAL_*`, and `UPVAL_*` lower for in-range static slots. Scalar
 slots load/store raw values directly; ref-bearing slots use `journalRC` guarded
 retain/release. If a release might free (`rc == 1`), native deopts so the

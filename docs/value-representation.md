@@ -29,15 +29,52 @@ Read before editing `types/boxed.go`, numeric opcode handlers, JIT value passing
 
 ## Kind Encoding
 
-Kinds are `iota` values in `types/value.go`. Non-F64 kinds use bits `51–49`.
+Kinds are `iota` values in `instr/kind.go` (re-exported as `types.Kind`). Non-F64
+kinds use bits `51–49`. The tags are laid out for fast classification, not
+stability: constants round-trip as text, so the numeric values are never
+serialized.
 
 | Kind | iota | Tag | Payload |
 |---|---:|---|---|
-| `KindF64` | `0` | — | raw IEEE-754 `float64` bits |
+| `KindF64` | `0` | `000` | raw IEEE-754 `float64` bits |
 | `KindF32` | `1` | `001` | `float32` bits in `31–0` |
 | `KindI64` | `2` | `010` | 49-bit signed integer, sign-extended from bit `48` |
-| `KindI32` | `3` | `011` | sign-extended `int32` in `31–0` |
-| `KindRef` | `4` | `100` | heap index as `int32` in `31–0` |
+| `KindRef` | `3` | `011` | heap index as `int32` in `31–0` |
+| `KindI32` | `4` | `100` | sign-extended `int32` in `31–0` |
+| `KindI8` | `5` | `101` | `int8` value sign-extended into `31–0` |
+| `KindI1` | `6` | `110` | `0` or `1` in bit `0` |
+
+Tag `111` is reserved. `KindAny` (`0xFF`) is the verifier's top element, not a
+real boxed kind.
+
+### Computational types: i1, i8
+
+`i32`, `i8`, and `i1` form one **representation class**: all three carry tag bit
+`0b100` (`reprI32`), share the 32-bit slot, the same boxed payload encoding, and
+the `i32.*` operators. This mirrors the JVM "computational type" — `boolean`,
+`byte`, and `int` all compute as `int`. `Kind.Repr()` is a single mask that
+folds `i1`/`i8` to `i32`; `Kind.Repr()` equality is how the verifier and JIT
+decide whether two operands are computable together.
+
+The narrow kinds keep their own `Kind`/`Type`/`String` so a value stays
+distinguishable as `i1` or `i8` across push/pop, locals, globals, struct fields,
+boxing, and marshaling — at no extra runtime cost, because the box payload is
+identical to `i32`.
+
+Through arithmetic the kind follows Rust/Swift, not pure JVM:
+
+- **Width-closed bitwise** `i32.and`/`i32.or`/`i32.xor` (and `~x` spelled as
+  `x ^ -1`) **preserve a shared narrow kind**: `i8 & i8 → i8`, `i1 ^ i1 → i1`. A
+  mixed pair (e.g. `i8 & i32`) widens to `i32`. The verifier (`bitwise`) and both
+  engines agree; the interpreter's `bitwiseKind` and the JIT's `i32Bitwise`
+  compute the result kind from the two operand kinds.
+- **Comparisons / `eqz` / `ref.test` / `ref.eq`** produce `i1` (their declared
+  `Push` kind). The threaded engine boxes through `BoxI1`; the JIT's `setBool`
+  pushes `KindI1`. Constant folding of a comparison interns an `i1` constant and
+  emits `CONST_GET`, so a folded `5 < 3` keeps the `i1` kind a dynamic compare
+  would have produced.
+- **Other arithmetic** (`add`/`sub`/`mul`/`shift`/…) is not width-closed and
+  widens to `i32`.
 
 `Boxed.Kind()` detects tagged NaN values:
 
@@ -76,17 +113,22 @@ The JIT only handles inline `KindI64`. Because an i64-typed local/global can hol
 | Function | Input | Boxed Kind |
 |---|---|---|
 | `BoxI32(v int32)` | any `int32` | `KindI32` |
+| `BoxI8(v int8)` | any `int8` (sign-extended payload) | `KindI8` |
+| `BoxI1(b bool)` | returns the `BoxedFalse`/`BoxedTrue` singleton | `KindI1` |
 | `BoxI64(v int64)` | 49-bit range only | `KindI64` |
 | `BoxF32(v float32)` | any `float32` | `KindF32` |
 | `BoxF64(v float64)` | any `float64` | `KindF64` |
 | `BoxRef(v int)` | heap index in int32 range | `KindRef` |
-| `BoxBool(b bool)` | `false`→`BoxI32(0)`, `true`→`BoxI32(1)` | `KindI32` |
 | `Box(v uint64, kind Kind)` | raw payload | any non-F64 kind |
+
+There is no `BoxBool` — `BoxI1` is the single boolean boxer (it returns the
+shared `i1` singletons).
 
 ## Unboxing Methods
 
 ```go
 v.I32() int32
+v.I8()  int8
 v.I64() int64
 v.F32() float32
 v.F64() float64
@@ -96,21 +138,22 @@ v.Bool() bool
 
 Valid kinds:
 
-- `I32()` → `KindI32`
+- `I32()` → `KindI32` (also reads `KindI8`/`KindI1`, since they share the payload)
+- `I8()` → `KindI8`, low byte as `int8`
 - `I64()` → `KindI64`, sign-extends 49 bits
 - `F32()` → `KindF32`
 - `F64()` → `KindF64`
 - `Ref()` → `KindRef`, returns heap index
-- `Bool()` → non-zero payload is true
+- `Bool()` → `KindI1`; non-zero payload is true
 
 Wrong-kind unboxing returns garbage; always check `Kind()` first.
 
 ## Sentinel Values
 
 ```go
-var BoxedNull  = BoxRef(0) // heap index 0; Null object, never freed
-var BoxedFalse = BoxI32(0)
-var BoxedTrue  = BoxI32(1)
+var BoxedNull  = BoxRef(0)   // heap index 0; Null object, never freed
+var BoxedFalse = Box(0, KindI1) // i1 false singleton; BoxI1(false) returns it
+var BoxedTrue  = Box(1, KindI1) // i1 true singleton;  BoxI1(true) returns it
 ```
 
 Use `types.IsNull(v)` when accepting either `types.Null` or `types.BoxedNull`.
@@ -121,6 +164,8 @@ Heap objects implement `types.Value`.
 
 | Go type | `Kind()` | `Type()` | Implements |
 |---|---|---|---|
+| `types.I1` | `KindI1` | `TypeI1` | `Value` |
+| `types.I8` | `KindI8` | `TypeI8` | `Value` |
 | `types.I32` | `KindI32` | `TypeI32` | `Value` |
 | `types.I64` | `KindI64` | `TypeI64` | `Value` |
 | `types.F32` | `KindF32` | `TypeF32` | `Value` |
@@ -166,7 +211,12 @@ Defined scalar values with methods marshal as their underlying primitive unless 
 
 Strings created by interpreter opcodes and the marshaler are interned per `Interpreter`. Equal string contents share one heap ref while live; the intern table drops an entry when the last ref is released.
 
-`TypeI8` is an element-only type: it appears as `ArrayType.Elem` (and as a `Parse("i8")` result) but never as a stack `Boxed` kind. Cells in `[]i8` arrays store raw bytes (`int8`); `ARRAY_GET` zero-extends to `BoxI32(0..255)`, `ARRAY_SET` / `ARRAY_FILL` narrow via low-byte truncation (`int8(val.I32())`). Use `[]i8` for binary blobs; signed interpretation is up to the caller (mask `& 0xFF` is unnecessary because the load already zero-extends).
+`TypeI8` (and `TypeI1`) are first-class stack kinds, not element-only — see
+[Computational types](#computational-types-i1-i8). `[]i8` arrays store raw bytes
+(`int8`); `ARRAY_GET` returns a signed `BoxI8` (`-128..127`), and `ARRAY_SET` /
+`ARRAY_FILL` narrow via low-byte truncation (`int8(val.I32())`, no overflow
+trap). Use `[]i8` for binary blobs; mask `& 0xFF` if you need the unsigned
+`0..255` reading, because the load is now sign-extended.
 
 Use constructors for compound runtime types (`NewStructType`, `NewStruct`, `NewMapType`, `NewMap`, `NewMapWithCapacity`, `NewMapForType`). These constructors initialize cached metadata and internal storage used by interpreter hot paths. `NewMapForType` returns primitive-key specializations for `i32`, `i64`, `f32`, and `f64`; strings and all other ref-typed keys use generic `*types.Map` with heap ref identity keys.
 
@@ -209,6 +259,8 @@ Go `interface{}` bridges to `ref` through the marshaler — see
 `types.Unbox(v Boxed) Value` converts boxed values to concrete `types.Value`:
 
 - `KindI32` → `I32`
+- `KindI8` → `I8`
+- `KindI1` → `I1`
 - `KindI64` → `I64`
 - `KindF32` → `F32`
 - `KindF64` → `F64`

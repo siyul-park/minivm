@@ -44,6 +44,23 @@ Declared in `instr/type.go`.
 
 Examples: `{2}` = one u16; branch opcodes interpret it as i16. `{-2, 2}` = count byte + repeated u16 operands.
 
+## Operand Kinds
+
+`i32`, `i8`, and `i1` share one representation (tag bit `0b100`), the 32-bit
+slot, and the `i32.*` operators — the JVM "computational type" model. See
+[value-representation.md](value-representation.md#computational-types-i1-i8).
+Consequences for the tables below:
+
+- Any opcode that lists an `i32` operand also accepts `i8`/`i1` (matched by
+  representation, in both the verifier and the JIT).
+- Rows that push a boolean — comparisons, `*.eqz`, `ref.is_null`,
+  `ref.eq`/`ref.ne`, `ref.test`, and the `string` comparisons — are written
+  `→ i32` for brevity, but their **runtime kind is `i1`** (the engines box
+  through `BoxI1` / push `KindI1`).
+- `i32.and` / `i32.or` / `i32.xor` are width-closed: when both operands share one
+  narrow kind the result keeps it (`i8 & i8 → i8`, `i1 ^ i1 → i1`); a mixed pair
+  widens to `i32`. All other arithmetic widens narrow operands to `i32`.
+
 ## Branch Offsets
 
 Branch operands are relative to instruction end:
@@ -127,9 +144,9 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `I32_SHL` | `{}` | `a b → i32` | ✅ | Left shift; amount uses low 5 bits. |
 | `I32_SHR_S` | `{}` | `a b → i32` | ✅ | Arithmetic right shift. |
 | `I32_SHR_U` | `{}` | `a b → i32` | ✅ | Logical right shift. |
-| `I32_AND` | `{}` | `a b → i32` | ✅ | Bitwise AND. |
-| `I32_OR` | `{}` | `a b → i32` | ✅ | Bitwise OR. |
-| `I32_XOR` | `{}` | `a b → i32` | ✅ | Bitwise XOR. |
+| `I32_AND` | `{}` | `a b → i32` | ✅ | Bitwise AND. Width-closed: keeps a shared narrow kind (`i8`/`i1`). |
+| `I32_OR` | `{}` | `a b → i32` | ✅ | Bitwise OR. Width-closed: keeps a shared narrow kind (`i8`/`i1`). |
+| `I32_XOR` | `{}` | `a b → i32` | ✅ | Bitwise XOR. Width-closed: keeps a shared narrow kind (`i8`/`i1`). |
 | `I32_CLZ` | `{}` | `x → i32` | ✅ | Count leading zero bits (`32` if `x == 0`). |
 | `I32_CTZ` | `{}` | `x → i32` | ✅ | Count trailing zero bits (`32` if `x == 0`). |
 | `I32_POPCNT` | `{}` | `x → i32` | ✅ | Count set bits. |
@@ -267,7 +284,7 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `ARRAY_FILL` | `{}` | `array offset count value →` | ◐ | Fill range with repeated value. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `ARRAY_COPY` | `{}` | `dst dstOffset src srcOffset count →` | ◐ | Copy elements between arrays. JIT keeps framed entries by exiting locally to the threaded handler. |
 
-`[]i8` arrays (binary blobs) share these opcodes. Stack values are `i32`; `ARRAY_GET` zero-extends a byte to `BoxI32(0..255)`, and `ARRAY_SET`/`ARRAY_FILL` narrow via low-byte truncation (`int8(val.I32())`). No overflow trap on narrowing — the storage cell holds raw bits.
+`[]i8` arrays (binary blobs) share these opcodes. `ARRAY_GET` returns a signed `i8` (`BoxI8`, `-128..127`); `ARRAY_SET`/`ARRAY_FILL` narrow via low-byte truncation (`int8(val.I32())`), accepting any `i32`-representation value. No overflow trap on narrowing — the storage cell holds raw bits. Mask `& 0xFF` for the unsigned `0..255` reading.
 
 ## Struct Operations
 

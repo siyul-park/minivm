@@ -178,6 +178,13 @@ Supported folds: `I32`/`I64`/`F32`/`F64` constant pairs (arithmetic, bitwise,
 comparisons), `I32_CONST × I32_EQZ`, type conversions such as
 `I32_CONST × I32_TO_F32_S`, and string `CONST_GET` ops.
 
+A folded **comparison** yields `i1`, not `i32`, matching the kind a dynamic
+compare produces. Since there is no `i1` immediate, the boolean is interned into
+the constant pool (`types.I1`, deduped to two singletons per run) and emitted as
+`CONST_GET`, e.g. `[I32_CONST 1][I32_CONST 1][I32_EQ]` →
+`[NOP×8][CONST_GET idx]` with `I1(true)` appended to the pool. Arithmetic and
+bitwise folds still emit the inline `*_CONST` for their numeric kind.
+
 ## `AlgebraicSimplificationPass`
 
 Integer peepholes whose right operand is a constant, on `I32`/`I64`:
