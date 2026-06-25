@@ -169,7 +169,9 @@ func (f *Function) String() string {
 
 // LocalKinds returns the kind of each stack slot addressable by LOCAL_*
 // opcodes: first the function's params (in order), then its declared
-// locals. Returns nil when the function has neither.
+// locals. The kinds are the slots' declared kinds (i1/i8 stay narrow); a
+// consumer that computes through a slot reduces it with Kind.Repr at the point
+// of use. Returns nil when the function has neither.
 func (f *Function) LocalKinds() []Kind {
 	if f.Typ == nil {
 		return Kinds(f.Locals)

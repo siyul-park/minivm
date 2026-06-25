@@ -31,6 +31,10 @@ func Zero(kind Kind) Boxed {
 	switch kind {
 	case KindI32:
 		return BoxI32(0)
+	case KindI8:
+		return BoxI8(0)
+	case KindI1:
+		return BoxI1(false)
 	case KindI64:
 		return BoxI64(0)
 	case KindF32:
@@ -78,5 +82,7 @@ const (
 	KindF32 = instr.KindF32
 	KindI64 = instr.KindI64
 	KindI32 = instr.KindI32
+	KindI8  = instr.KindI8
+	KindI1  = instr.KindI1
 	KindRef = instr.KindRef
 )

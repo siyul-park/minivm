@@ -310,8 +310,10 @@ func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*marshalPla
 	}
 	switch t.Kind() {
 	case reflect.Bool:
-		return &marshalPlan{VMType: types.TypeI32, Type: t, marshal: (*marshalState).marshalBool, unmarshal: (*unmarshalState).unmarshalBool}, nil
-	case reflect.Int8, reflect.Int16, reflect.Int32:
+		return &marshalPlan{VMType: types.TypeI1, Type: t, marshal: (*marshalState).marshalBool, unmarshal: (*unmarshalState).unmarshalBool}, nil
+	case reflect.Int8:
+		return &marshalPlan{VMType: types.TypeI8, Type: t, marshal: (*marshalState).marshalI32, unmarshal: (*unmarshalState).unmarshalInt}, nil
+	case reflect.Int16, reflect.Int32:
 		return &marshalPlan{VMType: types.TypeI32, Type: t, marshal: (*marshalState).marshalI32, unmarshal: (*unmarshalState).unmarshalInt}, nil
 	case reflect.Int, reflect.Int64:
 		return &marshalPlan{VMType: types.TypeI64, Type: t, marshal: (*marshalState).marshalI64, unmarshal: (*unmarshalState).unmarshalInt}, nil
@@ -710,6 +712,18 @@ func (s *marshalState) boxed(val types.Value, typ types.Type) (types.Boxed, erro
 			return 0, fmt.Errorf("%w: %d overflows i32", ErrValueOverflow, n)
 		}
 		return types.BoxI32(int32(n)), nil
+	case types.KindI8:
+		n, ok := asInt(val)
+		if !ok {
+			return 0, fmt.Errorf("%w: target=i8", ErrTypeMismatch)
+		}
+		return types.BoxI8(int8(n)), nil
+	case types.KindI1:
+		n, ok := asInt(val)
+		if !ok {
+			return 0, fmt.Errorf("%w: target=i1", ErrTypeMismatch)
+		}
+		return types.BoxI1(n != 0), nil
 	case types.KindI64:
 		n, ok := asInt(val)
 		if !ok {
@@ -847,7 +861,7 @@ func (s *unmarshalState) elems(value types.Value) ([]types.Value, error) {
 }
 
 func (s *marshalState) marshalBool(v reflect.Value) (types.Value, error) {
-	return types.Bool(v.Bool()), nil
+	return types.I1(v.Bool()), nil
 }
 
 func (s *marshalState) marshalI32(v reflect.Value) (types.Value, error) {
@@ -1518,6 +1532,13 @@ func (m *codec) typeOf(k reflect.Kind) types.Type {
 
 func bitsOf(val types.Value) (types.Kind, uint64, bool) {
 	switch v := val.(type) {
+	case types.I1:
+		if v {
+			return types.KindI32, 1, true
+		}
+		return types.KindI32, 0, true
+	case types.I8:
+		return types.KindI32, uint64(uint32(int32(v))), true
 	case types.I32:
 		return types.KindI32, uint64(uint32(v)), true
 	case types.I64:
@@ -1528,7 +1549,7 @@ func bitsOf(val types.Value) (types.Kind, uint64, bool) {
 		return types.KindF64, math.Float64bits(float64(v)), true
 	case types.Boxed:
 		switch v.Kind() {
-		case types.KindI32:
+		case types.KindI32, types.KindI8, types.KindI1:
 			return types.KindI32, uint64(uint32(v.I32())), true
 		case types.KindI64:
 			return types.KindI64, uint64(v.I64()), true

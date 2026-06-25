@@ -18,19 +18,24 @@ type valueWords struct {
 	data uintptr
 }
 
-// Boxing masks and tags used by scalar trace lowering.
+// Boxing masks used by scalar trace lowering.
 const (
-	tagI32  = uint64(0x7FF6_0000_0000_0000)
 	maskI32 = uint64(0xFFFFFFFF)
-
-	tagI64  = uint64(0x7FF4_0000_0000_0000)
 	maskI64 = uint64(0x0001_FFFF_FFFF_FFFF)
 
-	tagF32 = uint64(0x7FF2_0000_0000_0000)
-
-	tagRef = uint64(0x7FF8_0000_0000_0000)
-
 	signI64 = uint8(15)
+)
+
+// Boxing tags used by scalar trace lowering, derived from the canonical Kind
+// tag layout so they track any reordering of the Kind enum. i1/i8 share the i32
+// representation and box through tagI32.
+var (
+	tagI1  = types.Tag(types.KindI1)
+	tagI8  = types.Tag(types.KindI8)
+	tagI32 = types.Tag(types.KindI32)
+	tagI64 = types.Tag(types.KindI64)
+	tagF32 = types.Tag(types.KindF32)
+	tagRef = types.Tag(types.KindRef)
 )
 
 const (
@@ -595,7 +600,7 @@ func (l arm64Lowerer) constGet(ctx *lowering, op step, fused bool) bool {
 	}
 	v := ctx.constants[idx]
 	switch v.Kind() {
-	case types.KindI32, types.KindI64, types.KindF32, types.KindF64:
+	case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
 		dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		if v.Kind() == types.KindI64 {
 			ctx.assembler.Emit(arm64.LDI(dst, uint64(v.I64()))...)
@@ -649,7 +654,7 @@ func (l arm64Lowerer) localSet(ctx *lowering, op step, pop bool) bool {
 		return false
 	}
 	v := ctx.values[len(ctx.values)-1]
-	if v.kind != f.kinds[idx] {
+	if v.kind.Repr() != f.kinds[idx].Repr() {
 		return false
 	}
 	if v.kind == types.KindRef {
@@ -1646,7 +1651,7 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 		ctx.assembler.Emit(arm64.LDI(zero, 0)...)
 		for k := params; k < len(frame.kinds); k++ {
 			switch frame.kinds[k] {
-			case types.KindI32, types.KindF32, types.KindF64, types.KindI64:
+			case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindI64:
 			default:
 				return false
 			}
@@ -1667,7 +1672,7 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 	a := ctx.assembler
 	for _, typ := range target.Typ.Returns {
 		switch typ.Kind() {
-		case types.KindI32, types.KindF32, types.KindF64, types.KindI64:
+		case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindI64:
 		default:
 			return false
 		}
@@ -1839,7 +1844,7 @@ func (l arm64Lowerer) locals(ctx *lowering, f *activation, args []value) bool {
 		ctx.assembler.Emit(arm64.LDI(zero, 0)...)
 		for k := len(args); k < len(f.kinds); k++ {
 			switch f.kinds[k] {
-			case types.KindI32, types.KindF32, types.KindF64, types.KindI64:
+			case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindI64:
 			default:
 				return false
 			}
@@ -2630,7 +2635,7 @@ func (l arm64Lowerer) coroDone(ctx *lowering, op step) bool {
 
 	done := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDRB(done, data, int16(coroDone)))
-	ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: done, kind: types.KindI32, raw: true})
+	ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: done, kind: types.KindI1, raw: true})
 	return true
 }
 
@@ -2813,6 +2818,22 @@ func (l arm64Lowerer) box(ctx *lowering, v value) (asm.VReg, bool) {
 		lo := a.Reg(asm.RegTypeInt, asm.Width64)
 		a.Emit(arm64.ANDI(lo, v.reg, maskI32))
 		a.Emit(arm64.MOVK(lo, uint16(tagI32>>48), 48))
+		return lo, true
+	case types.KindI8:
+		if !v.raw {
+			return v.reg, true
+		}
+		lo := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ANDI(lo, v.reg, maskI32))
+		a.Emit(arm64.MOVK(lo, uint16(tagI8>>48), 48))
+		return lo, true
+	case types.KindI1:
+		if !v.raw {
+			return v.reg, true
+		}
+		lo := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ANDI(lo, v.reg, maskI32))
+		a.Emit(arm64.MOVK(lo, uint16(tagI1>>48), 48))
 		return lo, true
 	case types.KindF32:
 		lo := a.Reg(asm.RegTypeInt, asm.Width64)

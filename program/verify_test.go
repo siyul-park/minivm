@@ -19,6 +19,24 @@ func TestVerify(t *testing.T) {
 		require.NoError(t, Verify(prog))
 	})
 
+	t.Run("valid narrow int operands", func(t *testing.T) {
+		// i8 and i1 share the i32 representation: an i8 param and an i1
+		// comparison result both satisfy i32 operands.
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.TypeI8}, Returns: []types.Type{types.TypeI32}},
+			Code: instr.Marshal([]instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_LT_S),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.RETURN),
+			}),
+		}
+		prog := New([]instr.Instruction{instr.New(instr.NOP)}, WithConstants(fn))
+		require.NoError(t, Verify(prog))
+	})
+
 	t.Run("valid function returns", func(t *testing.T) {
 		fn := &types.Function{
 			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},

@@ -13,6 +13,8 @@ import (
 func Parse(s string) (Type, error) {
 	s = strings.TrimSpace(s)
 	switch s {
+	case "i1":
+		return TypeI1, nil
 	case "i8":
 		return TypeI8, nil
 	case "i32":

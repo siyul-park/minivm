@@ -279,7 +279,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			default:
 				panic(ErrTypeMismatch)
 			}
-			i.stack[i.sp-1] = types.BoxI32(done)
+			i.stack[i.sp-1] = types.BoxBool(done != 0)
 			i.fr.ip++
 		}
 	},
@@ -416,7 +416,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrSegmentationFault)
 			}
 		}
-		switch c.locals[idx] {
+		switch c.locals[idx].Repr() {
 		case types.KindI32:
 			if fused := c.fuseI32(func(i *Interpreter) int32 {
 				addr := i.fr.bp + idx
@@ -464,7 +464,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		}
 		// I32/F32/F64 locals never hold a heap ref, so retain is a no-op; skip
 		// it and the Kind branch. I64 may box to a ref, so it keeps retainBox.
-		switch c.locals[idx] {
+		switch c.locals[idx].Repr() {
 		case types.KindI32, types.KindF32, types.KindF64:
 			return func(i *Interpreter) {
 				if i.sp == len(i.stack) {
@@ -505,7 +505,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		// I32/F32/F64 locals never hold a heap ref, so the old value can never
 		// be a ref; skip the release. I64 may box to a ref, so it keeps it.
 		if idx < len(c.locals) {
-			switch c.locals[idx] {
+			switch c.locals[idx].Repr() {
 			case types.KindI32, types.KindF32, types.KindF64:
 				return func(i *Interpreter) {
 					if i.sp == 0 {
@@ -550,7 +550,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		// I32/F32/F64 locals never hold a heap ref, so the old value can never
 		// be a ref; skip the release. I64 may box to a ref, so it keeps it.
 		if idx < len(c.locals) {
-			switch c.locals[idx] {
+			switch c.locals[idx].Repr() {
 			case types.KindI32, types.KindF32, types.KindF64:
 				return func(i *Interpreter) {
 					if i.sp == 0 {
@@ -2625,7 +2625,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrTypeMismatch)
 			}
 		}
-		if typ.Elem == types.TypeI8 {
+		switch typ.ElemKind {
+		case types.KindI8:
 			return func(i *Interpreter) {
 				if i.sp < 1 {
 					panic(ErrStackUnderflow)
@@ -2642,8 +2643,6 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
 				i.fr.ip += 3
 			}
-		}
-		switch typ.ElemKind {
 		case types.KindI32:
 			return func(i *Interpreter) {
 				if i.sp < 1 {
@@ -2746,7 +2745,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrTypeMismatch)
 			}
 		}
-		if typ.Elem == types.TypeI8 {
+		switch typ.ElemKind {
+		case types.KindI8:
 			return func(i *Interpreter) {
 				if i.sp < 1 {
 					panic(ErrStackUnderflow)
@@ -2756,8 +2756,6 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
 				i.fr.ip += 3
 			}
-		}
-		switch typ.ElemKind {
 		case types.KindI32:
 			return func(i *Interpreter) {
 				if i.sp < 1 {
@@ -2858,7 +2856,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				if idx < 0 || idx >= len(arr) {
 					panic(ErrIndexOutOfRange)
 				}
-				val = types.BoxI32(int32(uint8(arr[idx])))
+				val = types.BoxI8(arr[idx])
 			case types.TypedArray[int32]:
 				if idx < 0 || idx >= len(arr) {
 					panic(ErrIndexOutOfRange)
@@ -3107,7 +3105,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			for j, f := range typ.Fields {
 				val := i.stack[i.sp-size-j]
 				switch f.Kind {
-				case types.KindI32, types.KindF32, types.KindF64, types.KindRef:
+				case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64, types.KindRef:
 					s.SetField(j, val)
 				case types.KindI64:
 					s.SetRaw(j, uint64(i.unboxI64(val)))
@@ -3163,6 +3161,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				switch field.Kind {
 				case types.KindI32:
 					val = types.BoxI32(int32(uint32(s.Data[idx])))
+				case types.KindI8:
+					val = types.BoxI8(int8(uint32(s.Data[idx])))
+				case types.KindI1:
+					val = types.BoxI1(s.Data[idx] != 0)
 				case types.KindI64:
 					val = i.boxI64(int64(s.Data[idx]))
 				case types.KindF32:
@@ -3182,7 +3184,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				field := typ.Fields[idx]
 				switch field.Kind {
-				case types.KindI32, types.KindF32, types.KindF64:
+				case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
 					val = s.Field(idx)
 				case types.KindI64:
 					val = i.boxI64(int64(s.Raw(idx)))
@@ -3224,6 +3226,14 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				switch field.Kind {
 				case types.KindI32:
 					s.Data[idx] = uint64(uint32(val.I32()))
+				case types.KindI8:
+					s.Data[idx] = uint64(uint32(int32(val.I8())))
+				case types.KindI1:
+					if val.Bool() {
+						s.Data[idx] = 1
+					} else {
+						s.Data[idx] = 0
+					}
 				case types.KindI64:
 					s.Data[idx] = uint64(i.unboxI64(val))
 				case types.KindF32:
@@ -3244,7 +3254,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				field := typ.Fields[idx]
 				switch field.Kind {
-				case types.KindI32, types.KindF32, types.KindF64:
+				case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
 					s.SetField(idx, val)
 				case types.KindI64:
 					s.SetRaw(idx, uint64(i.unboxI64(val)))

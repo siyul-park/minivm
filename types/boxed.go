@@ -9,8 +9,8 @@ type Boxed uint64
 
 var (
 	BoxedNull  = BoxRef(0)
-	BoxedFalse = BoxI32(0)
-	BoxedTrue  = BoxI32(1)
+	BoxedFalse = BoxI1(false)
+	BoxedTrue  = BoxI1(true)
 )
 
 const (
@@ -36,6 +36,22 @@ func IsBoxable(v int64) bool {
 
 func BoxI32(v int32) Boxed {
 	return Box(uint64(uint32(v)), KindI32)
+}
+
+// BoxI8 boxes an i8 value. i8 shares the i32 representation; the kind tag keeps
+// the value distinguishable as i8 (Kind, Type, String) while the payload is the
+// sign-extended i32 the operators read.
+func BoxI8(v int8) Boxed {
+	return Box(uint64(uint32(int32(v))), KindI8)
+}
+
+// BoxI1 boxes a boolean. i1 shares the i32 representation; the payload is 0 or 1.
+func BoxI1(b bool) Boxed {
+	var v uint64
+	if b {
+		v = 1
+	}
+	return Box(v, KindI1)
 }
 
 func BoxI64(v int64) Boxed {
@@ -71,6 +87,10 @@ func Unbox(v Boxed) Value {
 	switch v.Kind() {
 	case KindI32:
 		return I32(v.I32())
+	case KindI8:
+		return I8(v.I8())
+	case KindI1:
+		return I1(v.Bool())
 	case KindI64:
 		return I64(v.I64())
 	case KindF32:
@@ -96,6 +116,10 @@ func (v Boxed) Type() Type {
 	switch v.Kind() {
 	case KindI32:
 		return TypeI32
+	case KindI8:
+		return TypeI8
+	case KindI1:
+		return TypeI1
 	case KindI64:
 		return TypeI64
 	case KindF32:
@@ -111,6 +135,10 @@ func (v Boxed) Type() Type {
 
 func (v Boxed) I32() int32 {
 	return int32(v & VMask)
+}
+
+func (v Boxed) I8() int8 {
+	return int8(v & VMask)
 }
 
 func (v Boxed) I64() int64 {
@@ -139,8 +167,13 @@ func (v Boxed) Ref() int {
 
 func (v Boxed) String() string {
 	switch v.Kind() {
-	case KindI32:
+	case KindI32, KindI8:
 		return fmt.Sprintf("%d", v.I32())
+	case KindI1:
+		if v.Bool() {
+			return "true"
+		}
+		return "false"
 	case KindI64:
 		return fmt.Sprintf("%d", v.I64())
 	case KindF32:

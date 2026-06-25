@@ -684,8 +684,10 @@ func signatureOf(t types.Type) *types.FunctionType {
 // accepts reports whether an actual stack slot of kind got satisfies a required
 // operand kind want. anyKind on either side unifies: the verifier stays
 // permissive about unknowns and strict only about concrete disagreement.
+// Kinds are compared by representation (Repr), so a narrow integer (i1, i8)
+// satisfies an i32 operand — they share the i32 representation.
 func accepts(got, want types.Kind) bool {
-	return got == anyKind || want == anyKind || got == want
+	return got == anyKind || want == anyKind || got.Repr() == want.Repr()
 }
 
 // unify folds two slot kinds at a control-flow join: equal kinds survive,

@@ -14,6 +14,7 @@ func TestParse(t *testing.T) {
 		want    Type
 		wantErr bool
 	}{
+		{"i1", TypeI1, false},
 		{"i8", TypeI8, false},
 		{"i32", TypeI32, false},
 		{"i64", TypeI64, false},

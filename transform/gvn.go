@@ -152,6 +152,10 @@ func (p *GlobalValueNumberingPass) kindType(k instr.Kind) types.Type {
 	switch k {
 	case instr.KindI32:
 		return types.TypeI32
+	case instr.KindI8:
+		return types.TypeI8
+	case instr.KindI1:
+		return types.TypeI1
 	case instr.KindI64:
 		return types.TypeI64
 	case instr.KindF32:

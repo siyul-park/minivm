@@ -32,6 +32,13 @@ func formatValue(v types.Boxed, vm *interp.Interpreter) string {
 	switch v.Kind() {
 	case types.KindI32:
 		return fmt.Sprintf("%d", v.I32())
+	case types.KindI8:
+		return fmt.Sprintf("%d (i8)", v.I8())
+	case types.KindI1:
+		if v.Bool() {
+			return "true"
+		}
+		return "false"
 	case types.KindI64:
 		return fmt.Sprintf("%d (i64)", v.I64())
 	case types.KindF32:
