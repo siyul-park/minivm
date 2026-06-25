@@ -279,7 +279,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			default:
 				panic(ErrTypeMismatch)
 			}
-			i.stack[i.sp-1] = types.BoxBool(done != 0)
+			i.stack[i.sp-1] = types.BoxI1(done != 0)
 			i.fr.ip++
 		}
 	},
@@ -769,9 +769,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			switch kind := val.Kind(); kind {
 			case types.KindRef:
 				ref := i.heap[val.Ref()]
-				cond = types.BoxBool(typ.Equals(ref.Type()))
+				cond = types.BoxI1(typ.Equals(ref.Type()))
 			default:
-				cond = types.BoxBool(typ.Kind() == kind)
+				cond = types.BoxI1(typ.Kind() == kind)
 			}
 			i.stack[i.sp-1] = cond
 			i.fr.ip += 3
@@ -812,7 +812,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			val := i.stack[i.sp-1]
-			i.stack[i.sp-1] = types.BoxBool(val.Ref() == 0)
+			i.stack[i.sp-1] = types.BoxI1(val.Ref() == 0)
 			i.fr.ip++
 		}
 	},
@@ -825,7 +825,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v1 := i.stack[i.sp-1]
 			v2 := i.stack[i.sp-2]
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 == v1)
+			i.stack[i.sp-1] = types.BoxI1(v2 == v1)
 			i.fr.ip++
 		}
 	},
@@ -838,7 +838,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v1 := i.stack[i.sp-1]
 			v2 := i.stack[i.sp-2]
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 != v1)
+			i.stack[i.sp-1] = types.BoxI1(v2 != v1)
 			i.fr.ip++
 		}
 	},
@@ -2531,7 +2531,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v1 := unboxRef[types.String](i, i.stack[i.sp-1])
 			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 == v1)
+			i.stack[i.sp-1] = types.BoxI1(v2 == v1)
 			i.fr.ip++
 		}
 	},
@@ -2544,7 +2544,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v1 := unboxRef[types.String](i, i.stack[i.sp-1])
 			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 != v1)
+			i.stack[i.sp-1] = types.BoxI1(v2 != v1)
 			i.fr.ip++
 		}
 	},
@@ -2557,7 +2557,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v1 := unboxRef[types.String](i, i.stack[i.sp-1])
 			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 < v1)
+			i.stack[i.sp-1] = types.BoxI1(v2 < v1)
 			i.fr.ip++
 		}
 	},
@@ -2570,7 +2570,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v1 := unboxRef[types.String](i, i.stack[i.sp-1])
 			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 > v1)
+			i.stack[i.sp-1] = types.BoxI1(v2 > v1)
 			i.fr.ip++
 		}
 	},
@@ -2583,7 +2583,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v1 := unboxRef[types.String](i, i.stack[i.sp-1])
 			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 <= v1)
+			i.stack[i.sp-1] = types.BoxI1(v2 <= v1)
 			i.fr.ip++
 		}
 	},
@@ -2596,7 +2596,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v1 := unboxRef[types.String](i, i.stack[i.sp-1])
 			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
 			i.sp--
-			i.stack[i.sp-1] = types.BoxBool(v2 >= v1)
+			i.stack[i.sp-1] = types.BoxI1(v2 >= v1)
 			i.fr.ip++
 		}
 	},
@@ -3617,7 +3617,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.retainBox(result)
 			i.release(addr)
 			i.stack[i.sp-2] = result
-			i.stack[i.sp-1] = types.BoxBool(found)
+			i.stack[i.sp-1] = types.BoxI1(found)
 			i.fr.ip++
 		}
 	},
@@ -4474,47 +4474,47 @@ func (i *Interpreter) i32Extend16S(v int32) types.Boxed {
 }
 
 func (i *Interpreter) i32Eqz(v int32) types.Boxed {
-	return types.BoxBool(v == 0)
+	return types.BoxI1(v == 0)
 }
 
 func (i *Interpreter) i32Eq(lhs, rhs int32) types.Boxed {
-	return types.BoxBool(lhs == rhs)
+	return types.BoxI1(lhs == rhs)
 }
 
 func (i *Interpreter) i32Ne(lhs, rhs int32) types.Boxed {
-	return types.BoxBool(lhs != rhs)
+	return types.BoxI1(lhs != rhs)
 }
 
 func (i *Interpreter) i32LtS(lhs, rhs int32) types.Boxed {
-	return types.BoxBool(lhs < rhs)
+	return types.BoxI1(lhs < rhs)
 }
 
 func (i *Interpreter) i32LtU(lhs, rhs int32) types.Boxed {
-	return types.BoxBool(uint32(lhs) < uint32(rhs))
+	return types.BoxI1(uint32(lhs) < uint32(rhs))
 }
 
 func (i *Interpreter) i32GtS(lhs, rhs int32) types.Boxed {
-	return types.BoxBool(lhs > rhs)
+	return types.BoxI1(lhs > rhs)
 }
 
 func (i *Interpreter) i32GtU(lhs, rhs int32) types.Boxed {
-	return types.BoxBool(uint32(lhs) > uint32(rhs))
+	return types.BoxI1(uint32(lhs) > uint32(rhs))
 }
 
 func (i *Interpreter) i32LeS(lhs, rhs int32) types.Boxed {
-	return types.BoxBool(lhs <= rhs)
+	return types.BoxI1(lhs <= rhs)
 }
 
 func (i *Interpreter) i32LeU(lhs, rhs int32) types.Boxed {
-	return types.BoxBool(uint32(lhs) <= uint32(rhs))
+	return types.BoxI1(uint32(lhs) <= uint32(rhs))
 }
 
 func (i *Interpreter) i32GeS(lhs, rhs int32) types.Boxed {
-	return types.BoxBool(lhs >= rhs)
+	return types.BoxI1(lhs >= rhs)
 }
 
 func (i *Interpreter) i32GeU(lhs, rhs int32) types.Boxed {
-	return types.BoxBool(uint32(lhs) >= uint32(rhs))
+	return types.BoxI1(uint32(lhs) >= uint32(rhs))
 }
 
 func (i *Interpreter) i32ToI64S(v int32) types.Boxed {
@@ -4642,47 +4642,47 @@ func (i *Interpreter) i64Extend32S(v int64) types.Boxed {
 }
 
 func (i *Interpreter) i64Eqz(v int64) types.Boxed {
-	return types.BoxBool(v == 0)
+	return types.BoxI1(v == 0)
 }
 
 func (i *Interpreter) i64Eq(lhs, rhs int64) types.Boxed {
-	return types.BoxBool(lhs == rhs)
+	return types.BoxI1(lhs == rhs)
 }
 
 func (i *Interpreter) i64Ne(lhs, rhs int64) types.Boxed {
-	return types.BoxBool(lhs != rhs)
+	return types.BoxI1(lhs != rhs)
 }
 
 func (i *Interpreter) i64LtS(lhs, rhs int64) types.Boxed {
-	return types.BoxBool(lhs < rhs)
+	return types.BoxI1(lhs < rhs)
 }
 
 func (i *Interpreter) i64LtU(lhs, rhs int64) types.Boxed {
-	return types.BoxBool(uint64(lhs) < uint64(rhs))
+	return types.BoxI1(uint64(lhs) < uint64(rhs))
 }
 
 func (i *Interpreter) i64GtS(lhs, rhs int64) types.Boxed {
-	return types.BoxBool(lhs > rhs)
+	return types.BoxI1(lhs > rhs)
 }
 
 func (i *Interpreter) i64GtU(lhs, rhs int64) types.Boxed {
-	return types.BoxBool(uint64(lhs) > uint64(rhs))
+	return types.BoxI1(uint64(lhs) > uint64(rhs))
 }
 
 func (i *Interpreter) i64LeS(lhs, rhs int64) types.Boxed {
-	return types.BoxBool(lhs <= rhs)
+	return types.BoxI1(lhs <= rhs)
 }
 
 func (i *Interpreter) i64LeU(lhs, rhs int64) types.Boxed {
-	return types.BoxBool(uint64(lhs) <= uint64(rhs))
+	return types.BoxI1(uint64(lhs) <= uint64(rhs))
 }
 
 func (i *Interpreter) i64GeS(lhs, rhs int64) types.Boxed {
-	return types.BoxBool(lhs >= rhs)
+	return types.BoxI1(lhs >= rhs)
 }
 
 func (i *Interpreter) i64GeU(lhs, rhs int64) types.Boxed {
-	return types.BoxBool(uint64(lhs) >= uint64(rhs))
+	return types.BoxI1(uint64(lhs) >= uint64(rhs))
 }
 
 func (i *Interpreter) i64ToI32(v int64) types.Boxed {
@@ -4769,27 +4769,27 @@ func (i *Interpreter) f32Copysign(lhs, rhs float32) types.Boxed {
 }
 
 func (i *Interpreter) f32Eq(lhs, rhs float32) types.Boxed {
-	return types.BoxBool(lhs == rhs)
+	return types.BoxI1(lhs == rhs)
 }
 
 func (i *Interpreter) f32Ne(lhs, rhs float32) types.Boxed {
-	return types.BoxBool(lhs != rhs)
+	return types.BoxI1(lhs != rhs)
 }
 
 func (i *Interpreter) f32Lt(lhs, rhs float32) types.Boxed {
-	return types.BoxBool(lhs < rhs)
+	return types.BoxI1(lhs < rhs)
 }
 
 func (i *Interpreter) f32Gt(lhs, rhs float32) types.Boxed {
-	return types.BoxBool(lhs > rhs)
+	return types.BoxI1(lhs > rhs)
 }
 
 func (i *Interpreter) f32Le(lhs, rhs float32) types.Boxed {
-	return types.BoxBool(lhs <= rhs)
+	return types.BoxI1(lhs <= rhs)
 }
 
 func (i *Interpreter) f32Ge(lhs, rhs float32) types.Boxed {
-	return types.BoxBool(lhs >= rhs)
+	return types.BoxI1(lhs >= rhs)
 }
 
 func (i *Interpreter) f32ToI32S(v float32) types.Boxed {
@@ -4868,27 +4868,27 @@ func (i *Interpreter) f64Copysign(lhs, rhs float64) types.Boxed {
 }
 
 func (i *Interpreter) f64Eq(lhs, rhs float64) types.Boxed {
-	return types.BoxBool(lhs == rhs)
+	return types.BoxI1(lhs == rhs)
 }
 
 func (i *Interpreter) f64Ne(lhs, rhs float64) types.Boxed {
-	return types.BoxBool(lhs != rhs)
+	return types.BoxI1(lhs != rhs)
 }
 
 func (i *Interpreter) f64Lt(lhs, rhs float64) types.Boxed {
-	return types.BoxBool(lhs < rhs)
+	return types.BoxI1(lhs < rhs)
 }
 
 func (i *Interpreter) f64Gt(lhs, rhs float64) types.Boxed {
-	return types.BoxBool(lhs > rhs)
+	return types.BoxI1(lhs > rhs)
 }
 
 func (i *Interpreter) f64Le(lhs, rhs float64) types.Boxed {
-	return types.BoxBool(lhs <= rhs)
+	return types.BoxI1(lhs <= rhs)
 }
 
 func (i *Interpreter) f64Ge(lhs, rhs float64) types.Boxed {
-	return types.BoxBool(lhs >= rhs)
+	return types.BoxI1(lhs >= rhs)
 }
 
 func (i *Interpreter) f64ToI32S(v float64) types.Boxed {

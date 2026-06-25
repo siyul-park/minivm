@@ -3045,7 +3045,7 @@ func (l arm64Lowerer) marked(ctx *lowering) bool {
 // setBool pushes the condition flags as a raw 0/1 i32.
 // setBool pushes a comparison/test result as i1: every caller is an
 // eqz/eq/lt/.../is_null/test whose result kind is i1 (matching the interpreter,
-// which boxes these through BoxBool). The 0/1 flag still satisfies any later
+// which boxes these through BoxI1). The 0/1 flag still satisfies any later
 // i32 operand because kinds compares by representation.
 func (l arm64Lowerer) setBool(ctx *lowering, cond uint8) {
 	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)

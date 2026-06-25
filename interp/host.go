@@ -162,7 +162,7 @@ func (h *HostObject) field(s hostSlot) types.Boxed {
 	ptr := h.fieldPtr(s)
 	switch s.kind {
 	case reflect.Bool:
-		return types.BoxBool(*(*bool)(ptr))
+		return types.BoxI1(*(*bool)(ptr))
 	case reflect.Int8:
 		return types.BoxI32(int32(*(*int8)(ptr)))
 	case reflect.Int16:

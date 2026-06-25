@@ -158,6 +158,8 @@ func TestBoxI1(t *testing.T) {
 	require.Equal(t, "false", BoxI1(false).String())
 	require.Equal(t, I1(true), Unbox(BoxI1(true)))
 	require.Equal(t, I1(false), Unbox(BoxI1(false)))
+	require.Equal(t, BoxedTrue, BoxI1(true))
+	require.Equal(t, BoxedFalse, BoxI1(false))
 }
 
 func TestBoxI64(t *testing.T) {
@@ -349,11 +351,6 @@ func TestBoxed_String(t *testing.T) {
 			require.Equal(t, tt.str, tt.val.String())
 		})
 	}
-}
-
-func TestBoxBool(t *testing.T) {
-	require.Equal(t, BoxedTrue, BoxBool(true))
-	require.Equal(t, BoxedFalse, BoxBool(false))
 }
 
 func TestBoxed_Bool(t *testing.T) {

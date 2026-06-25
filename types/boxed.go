@@ -9,8 +9,8 @@ type Boxed uint64
 
 var (
 	BoxedNull  = BoxRef(0)
-	BoxedFalse = BoxI1(false)
-	BoxedTrue  = BoxI1(true)
+	BoxedFalse = Box(0, KindI1)
+	BoxedTrue  = Box(1, KindI1)
 )
 
 const (
@@ -45,13 +45,13 @@ func BoxI8(v int8) Boxed {
 	return Box(uint64(uint32(int32(v))), KindI8)
 }
 
-// BoxI1 boxes a boolean. i1 shares the i32 representation; the payload is 0 or 1.
+// BoxI1 boxes a boolean as i1 (payload 0 or 1), returning the shared singleton
+// for each value. i1 shares the i32 representation.
 func BoxI1(b bool) Boxed {
-	var v uint64
 	if b {
-		v = 1
+		return BoxedTrue
 	}
-	return Box(v, KindI1)
+	return BoxedFalse
 }
 
 func BoxI64(v int64) Boxed {
@@ -68,13 +68,6 @@ func BoxF64(v float64) Boxed {
 
 func BoxRef(v int) Boxed {
 	return Box(uint64(v), KindRef)
-}
-
-func BoxBool(b bool) Boxed {
-	if b {
-		return BoxedTrue
-	}
-	return BoxedFalse
 }
 
 func Box(v uint64, kind Kind) Boxed {
