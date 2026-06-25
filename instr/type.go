@@ -7,6 +7,11 @@ package instr
 // Push are nil the opcode has no statically fixed effect (its effect depends on
 // operands, constants, declared types, or the runtime stack) and a verifier
 // must resolve it from context.
+//
+// Boolean-producing opcodes (comparisons, *.eqz, ref.test/is_null/eq/ne, and
+// the string comparisons) push KindI1 so the verifier tracks the boolean type;
+// i1 shares the i32 representation, so the result is still usable wherever an
+// i32 operand is expected.
 type Type struct {
 	Mnemonic string
 	Widths   []int
@@ -34,7 +39,7 @@ var types = map[Opcode]Type{
 
 	YIELD:      {Mnemonic: "yield", Pop: []Kind{KindAny}, Push: []Kind{KindAny}},
 	RESUME:     {Mnemonic: "resume", Pop: []Kind{KindAny, KindRef}, Push: []Kind{KindRef}},
-	CORO_DONE:  {Mnemonic: "coro.done", Pop: []Kind{KindRef}, Push: []Kind{KindI32}},
+	CORO_DONE:  {Mnemonic: "coro.done", Pop: []Kind{KindRef}, Push: []Kind{KindI1}},
 	CORO_VALUE: {Mnemonic: "coro.value", Pop: []Kind{KindRef}, Push: []Kind{KindAny}},
 
 	GLOBAL_GET: {Mnemonic: "global.get", Widths: []int{2}, Push: []Kind{KindAny}},
@@ -49,12 +54,12 @@ var types = map[Opcode]Type{
 
 	REF_NULL: {Mnemonic: "ref.null", Push: []Kind{KindRef}},
 
-	REF_TEST: {Mnemonic: "ref.test", Widths: []int{2}, Pop: []Kind{KindAny}, Push: []Kind{KindI32}},
+	REF_TEST: {Mnemonic: "ref.test", Widths: []int{2}, Pop: []Kind{KindAny}, Push: []Kind{KindI1}},
 	REF_CAST: {Mnemonic: "ref.cast", Widths: []int{2}, Pop: []Kind{KindAny}, Push: []Kind{KindAny}},
 
-	REF_IS_NULL: {Mnemonic: "ref.is_null", Pop: []Kind{KindRef}, Push: []Kind{KindI32}},
-	REF_EQ:      {Mnemonic: "ref.eq", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI32}},
-	REF_NE:      {Mnemonic: "ref.ne", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI32}},
+	REF_IS_NULL: {Mnemonic: "ref.is_null", Pop: []Kind{KindRef}, Push: []Kind{KindI1}},
+	REF_EQ:      {Mnemonic: "ref.eq", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
+	REF_NE:      {Mnemonic: "ref.ne", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
 
 	I32_CONST: {Mnemonic: "i32.const", Widths: []int{4}, Push: []Kind{KindI32}},
 
@@ -82,17 +87,17 @@ var types = map[Opcode]Type{
 	I32_SHR_S: {Mnemonic: "i32.shr_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
 	I32_SHR_U: {Mnemonic: "i32.shr_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
 
-	I32_EQZ:  {Mnemonic: "i32.eqz", Pop: []Kind{KindI32}, Push: []Kind{KindI32}},
-	I32_EQ:   {Mnemonic: "i32.eq", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
-	I32_NE:   {Mnemonic: "i32.ne", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
-	I32_LT_S: {Mnemonic: "i32.lt_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
-	I32_LT_U: {Mnemonic: "i32.lt_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
-	I32_GT_S: {Mnemonic: "i32.gt_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
-	I32_GT_U: {Mnemonic: "i32.gt_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
-	I32_LE_S: {Mnemonic: "i32.le_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
-	I32_LE_U: {Mnemonic: "i32.le_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
-	I32_GE_S: {Mnemonic: "i32.ge_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
-	I32_GE_U: {Mnemonic: "i32.ge_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI32}},
+	I32_EQZ:  {Mnemonic: "i32.eqz", Pop: []Kind{KindI32}, Push: []Kind{KindI1}},
+	I32_EQ:   {Mnemonic: "i32.eq", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI1}},
+	I32_NE:   {Mnemonic: "i32.ne", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI1}},
+	I32_LT_S: {Mnemonic: "i32.lt_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI1}},
+	I32_LT_U: {Mnemonic: "i32.lt_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI1}},
+	I32_GT_S: {Mnemonic: "i32.gt_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI1}},
+	I32_GT_U: {Mnemonic: "i32.gt_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI1}},
+	I32_LE_S: {Mnemonic: "i32.le_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI1}},
+	I32_LE_U: {Mnemonic: "i32.le_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI1}},
+	I32_GE_S: {Mnemonic: "i32.ge_s", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI1}},
+	I32_GE_U: {Mnemonic: "i32.ge_u", Pop: []Kind{KindI32, KindI32}, Push: []Kind{KindI1}},
 
 	I32_TO_I64_S: {Mnemonic: "i32.to_i64_s", Pop: []Kind{KindI32}, Push: []Kind{KindI64}},
 	I32_TO_I64_U: {Mnemonic: "i32.to_i64_u", Pop: []Kind{KindI32}, Push: []Kind{KindI64}},
@@ -130,17 +135,17 @@ var types = map[Opcode]Type{
 	I64_EXTEND16_S: {Mnemonic: "i64.extend16_s", Pop: []Kind{KindI64}, Push: []Kind{KindI64}},
 	I64_EXTEND32_S: {Mnemonic: "i64.extend32_s", Pop: []Kind{KindI64}, Push: []Kind{KindI64}},
 
-	I64_EQZ:  {Mnemonic: "i64.eqz", Pop: []Kind{KindI64}, Push: []Kind{KindI32}},
-	I64_EQ:   {Mnemonic: "i64.eq", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI32}},
-	I64_NE:   {Mnemonic: "i64.ne", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI32}},
-	I64_LT_S: {Mnemonic: "i64.lt_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI32}},
-	I64_LT_U: {Mnemonic: "i64.lt_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI32}},
-	I64_GT_S: {Mnemonic: "i64.gt_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI32}},
-	I64_GT_U: {Mnemonic: "i64.gt_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI32}},
-	I64_LE_S: {Mnemonic: "i64.le_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI32}},
-	I64_LE_U: {Mnemonic: "i64.le_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI32}},
-	I64_GE_S: {Mnemonic: "i64.ge_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI32}},
-	I64_GE_U: {Mnemonic: "i64.ge_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI32}},
+	I64_EQZ:  {Mnemonic: "i64.eqz", Pop: []Kind{KindI64}, Push: []Kind{KindI1}},
+	I64_EQ:   {Mnemonic: "i64.eq", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI1}},
+	I64_NE:   {Mnemonic: "i64.ne", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI1}},
+	I64_LT_S: {Mnemonic: "i64.lt_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI1}},
+	I64_LT_U: {Mnemonic: "i64.lt_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI1}},
+	I64_GT_S: {Mnemonic: "i64.gt_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI1}},
+	I64_GT_U: {Mnemonic: "i64.gt_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI1}},
+	I64_LE_S: {Mnemonic: "i64.le_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI1}},
+	I64_LE_U: {Mnemonic: "i64.le_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI1}},
+	I64_GE_S: {Mnemonic: "i64.ge_s", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI1}},
+	I64_GE_U: {Mnemonic: "i64.ge_u", Pop: []Kind{KindI64, KindI64}, Push: []Kind{KindI1}},
 
 	I64_TO_I32:   {Mnemonic: "i64.to_i32", Pop: []Kind{KindI64}, Push: []Kind{KindI32}},
 	I64_TO_F32_S: {Mnemonic: "i64.to_f32_s", Pop: []Kind{KindI64}, Push: []Kind{KindF32}},
@@ -168,12 +173,12 @@ var types = map[Opcode]Type{
 	F32_MAX:      {Mnemonic: "f32.max", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindF32}},
 	F32_COPYSIGN: {Mnemonic: "f32.copysign", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindF32}},
 
-	F32_EQ: {Mnemonic: "f32.eq", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindI32}},
-	F32_NE: {Mnemonic: "f32.ne", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindI32}},
-	F32_LT: {Mnemonic: "f32.lt", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindI32}},
-	F32_GT: {Mnemonic: "f32.gt", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindI32}},
-	F32_LE: {Mnemonic: "f32.le", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindI32}},
-	F32_GE: {Mnemonic: "f32.ge", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindI32}},
+	F32_EQ: {Mnemonic: "f32.eq", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindI1}},
+	F32_NE: {Mnemonic: "f32.ne", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindI1}},
+	F32_LT: {Mnemonic: "f32.lt", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindI1}},
+	F32_GT: {Mnemonic: "f32.gt", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindI1}},
+	F32_LE: {Mnemonic: "f32.le", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindI1}},
+	F32_GE: {Mnemonic: "f32.ge", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindI1}},
 
 	F32_TO_I32_S: {Mnemonic: "f32.to_i32_s", Pop: []Kind{KindF32}, Push: []Kind{KindI32}},
 	F32_TO_I32_U: {Mnemonic: "f32.to_i32_u", Pop: []Kind{KindF32}, Push: []Kind{KindI32}},
@@ -201,12 +206,12 @@ var types = map[Opcode]Type{
 	F64_MAX:      {Mnemonic: "f64.max", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindF64}},
 	F64_COPYSIGN: {Mnemonic: "f64.copysign", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindF64}},
 
-	F64_EQ: {Mnemonic: "f64.eq", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindI32}},
-	F64_NE: {Mnemonic: "f64.ne", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindI32}},
-	F64_LT: {Mnemonic: "f64.lt", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindI32}},
-	F64_GT: {Mnemonic: "f64.gt", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindI32}},
-	F64_LE: {Mnemonic: "f64.le", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindI32}},
-	F64_GE: {Mnemonic: "f64.ge", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindI32}},
+	F64_EQ: {Mnemonic: "f64.eq", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindI1}},
+	F64_NE: {Mnemonic: "f64.ne", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindI1}},
+	F64_LT: {Mnemonic: "f64.lt", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindI1}},
+	F64_GT: {Mnemonic: "f64.gt", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindI1}},
+	F64_LE: {Mnemonic: "f64.le", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindI1}},
+	F64_GE: {Mnemonic: "f64.ge", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindI1}},
 
 	F64_TO_I32_S: {Mnemonic: "f64.to_i32_s", Pop: []Kind{KindF64}, Push: []Kind{KindI32}},
 	F64_TO_I32_U: {Mnemonic: "f64.to_i32_u", Pop: []Kind{KindF64}, Push: []Kind{KindI32}},
@@ -221,12 +226,12 @@ var types = map[Opcode]Type{
 	STRING_LEN:    {Mnemonic: "string.len", Pop: []Kind{KindRef}, Push: []Kind{KindI32}},
 	STRING_CONCAT: {Mnemonic: "string.concat", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindRef}},
 
-	STRING_EQ: {Mnemonic: "string.eq", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI32}},
-	STRING_NE: {Mnemonic: "string.ne", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI32}},
-	STRING_LT: {Mnemonic: "string.lt", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI32}},
-	STRING_GT: {Mnemonic: "string.gt", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI32}},
-	STRING_LE: {Mnemonic: "string.le", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI32}},
-	STRING_GE: {Mnemonic: "string.ge", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI32}},
+	STRING_EQ: {Mnemonic: "string.eq", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
+	STRING_NE: {Mnemonic: "string.ne", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
+	STRING_LT: {Mnemonic: "string.lt", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
+	STRING_GT: {Mnemonic: "string.gt", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
+	STRING_LE: {Mnemonic: "string.le", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
+	STRING_GE: {Mnemonic: "string.ge", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
 
 	STRING_ENCODE_UTF32: {Mnemonic: "string.encode_utf32", Pop: []Kind{KindRef}, Push: []Kind{KindRef}},
 
@@ -250,7 +255,7 @@ var types = map[Opcode]Type{
 
 	MAP_LEN:    {Mnemonic: "map.len", Pop: []Kind{KindRef}, Push: []Kind{KindI32}},
 	MAP_GET:    {Mnemonic: "map.get", Pop: []Kind{KindAny, KindRef}, Push: []Kind{KindAny}},
-	MAP_LOOKUP: {Mnemonic: "map.lookup", Pop: []Kind{KindAny, KindRef}, Push: []Kind{KindAny, KindI32}},
+	MAP_LOOKUP: {Mnemonic: "map.lookup", Pop: []Kind{KindAny, KindRef}, Push: []Kind{KindAny, KindI1}},
 	MAP_SET:    {Mnemonic: "map.set", Pop: []Kind{KindAny, KindAny, KindRef}},
 	MAP_DELETE: {Mnemonic: "map.delete", Pop: []Kind{KindAny, KindRef}},
 	MAP_CLEAR:  {Mnemonic: "map.clear", Pop: []Kind{KindRef}},

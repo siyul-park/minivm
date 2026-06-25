@@ -19,6 +19,22 @@ func NewConstantFoldingPass() *ConstantFoldingPass {
 }
 
 func (p *ConstantFoldingPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
+	// A folded comparison yields i1 (its dynamic kind), not i32. There is no i1
+	// immediate, so the boolean is interned into the constant pool and read with
+	// CONST_GET; the two singletons are appended at most once per run.
+	trueIdx, falseIdx := -1, -1
+	boolConst := func(b bool) uint64 {
+		slot := &falseIdx
+		if b {
+			slot = &trueIdx
+		}
+		if *slot < 0 {
+			*slot = len(prog.Constants)
+			prog.Constants = append(prog.Constants, types.I1(b))
+		}
+		return uint64(*slot)
+	}
+
 	for _, fn := range functions(prog) {
 		blocks, err := pass.GetResult[[]*analysis.BasicBlock](m, fn)
 		if err != nil {
@@ -100,39 +116,39 @@ func (p *ConstantFoldingPass) Run(m *pass.Manager, prog *program.Program) (pass.
 							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(v0|v1)))
 							continue
 						case instr.I32_EQ:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 == v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 == v1)))
 							continue
 						case instr.I32_NE:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 != v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 != v1)))
 							continue
 						case instr.I32_LT_S:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 < v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 < v1)))
 							continue
 						case instr.I32_LT_U:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(uint32(v0) < uint32(v1)))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(uint32(v0) < uint32(v1))))
 							continue
 						case instr.I32_GT_S:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 > v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 > v1)))
 							continue
 						case instr.I32_GT_U:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(uint32(v0) > uint32(v1)))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(uint32(v0) > uint32(v1))))
 							continue
 						case instr.I32_LE_S:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 <= v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 <= v1)))
 							continue
 						case instr.I32_LE_U:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(uint32(v0) <= uint32(v1)))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(uint32(v0) <= uint32(v1))))
 							continue
 						case instr.I32_GE_S:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 >= v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 >= v1)))
 							continue
 						case instr.I32_GE_U:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(uint32(v0) >= uint32(v1)))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(uint32(v0) >= uint32(v1))))
 							continue
 						default:
 						}
 					case instr.I32_EQZ:
-						ip = p.replace(fn.Code, ip, i0.Width()+i1.Width(), instr.New(instr.I32_CONST, uint64(types.Bool(v0 == 0))))
+						ip = p.replace(fn.Code, ip, i0.Width()+i1.Width(), instr.New(instr.CONST_GET, boolConst(v0 == 0)))
 						continue
 					case instr.I32_TO_F32_S:
 						ip = p.replace(fn.Code, ip, i0.Width()+i1.Width(), instr.New(instr.F32_CONST, uint64(math.Float32bits(float32(v0)))))
@@ -204,39 +220,39 @@ func (p *ConstantFoldingPass) Run(m *pass.Manager, prog *program.Program) (pass.
 							ip = p.replace(fn.Code, ip, w, instr.New(instr.I64_CONST, uint64(v0)>>(uint64(v1)&0x3F)))
 							continue
 						case instr.I64_EQ:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 == v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 == v1)))
 							continue
 						case instr.I64_NE:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 != v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 != v1)))
 							continue
 						case instr.I64_LT_S:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 < v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 < v1)))
 							continue
 						case instr.I64_LT_U:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(uint64(v0) < uint64(v1)))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(uint64(v0) < uint64(v1))))
 							continue
 						case instr.I64_GT_S:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 > v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 > v1)))
 							continue
 						case instr.I64_GT_U:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(uint64(v0) > uint64(v1)))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(uint64(v0) > uint64(v1))))
 							continue
 						case instr.I64_LE_S:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 <= v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 <= v1)))
 							continue
 						case instr.I64_LE_U:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(uint64(v0) <= uint64(v1)))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(uint64(v0) <= uint64(v1))))
 							continue
 						case instr.I64_GE_S:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 >= v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 >= v1)))
 							continue
 						case instr.I64_GE_U:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(uint64(v0) >= uint64(v1)))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(uint64(v0) >= uint64(v1))))
 							continue
 						default:
 						}
 					case instr.I64_EQZ:
-						ip = p.replace(fn.Code, ip, i0.Width()+i1.Width(), instr.New(instr.I32_CONST, uint64(types.Bool(v0 == 0))))
+						ip = p.replace(fn.Code, ip, i0.Width()+i1.Width(), instr.New(instr.CONST_GET, boolConst(v0 == 0)))
 						continue
 					case instr.I64_TO_I32:
 						ip = p.replace(fn.Code, ip, i0.Width()+i1.Width(), instr.New(instr.I32_CONST, uint64(int32(v0))))
@@ -287,22 +303,22 @@ func (p *ConstantFoldingPass) Run(m *pass.Manager, prog *program.Program) (pass.
 							ip = p.replace(fn.Code, ip, w, instr.New(instr.F32_CONST, uint64(math.Float32bits(v0/v1))))
 							continue
 						case instr.F32_EQ:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 == v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 == v1)))
 							continue
 						case instr.F32_NE:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 != v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 != v1)))
 							continue
 						case instr.F32_LT:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 < v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 < v1)))
 							continue
 						case instr.F32_GT:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 > v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 > v1)))
 							continue
 						case instr.F32_LE:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 <= v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 <= v1)))
 							continue
 						case instr.F32_GE:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 >= v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 >= v1)))
 							continue
 						default:
 						}
@@ -346,22 +362,22 @@ func (p *ConstantFoldingPass) Run(m *pass.Manager, prog *program.Program) (pass.
 							ip = p.replace(fn.Code, ip, w, instr.New(instr.F64_CONST, math.Float64bits(v0/v1)))
 							continue
 						case instr.F64_EQ:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 == v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 == v1)))
 							continue
 						case instr.F64_NE:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 != v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 != v1)))
 							continue
 						case instr.F64_LT:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 < v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 < v1)))
 							continue
 						case instr.F64_GT:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 > v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 > v1)))
 							continue
 						case instr.F64_LE:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 <= v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 <= v1)))
 							continue
 						case instr.F64_GE:
-							ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 >= v1))))
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 >= v1)))
 							continue
 						default:
 						}
@@ -406,22 +422,22 @@ func (p *ConstantFoldingPass) Run(m *pass.Manager, prog *program.Program) (pass.
 									ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, uint64(len(prog.Constants)-1)))
 									continue
 								case instr.STRING_EQ:
-									ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 == v1))))
+									ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 == v1)))
 									continue
 								case instr.STRING_NE:
-									ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 != v1))))
+									ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 != v1)))
 									continue
 								case instr.STRING_LT:
-									ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 < v1))))
+									ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 < v1)))
 									continue
 								case instr.STRING_GT:
-									ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 > v1))))
+									ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 > v1)))
 									continue
 								case instr.STRING_LE:
-									ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 <= v1))))
+									ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 <= v1)))
 									continue
 								case instr.STRING_GE:
-									ip = p.replace(fn.Code, ip, w, instr.New(instr.I32_CONST, uint64(types.Bool(v0 >= v1))))
+									ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 >= v1)))
 									continue
 								default:
 								}

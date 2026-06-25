@@ -18,19 +18,24 @@ type valueWords struct {
 	data uintptr
 }
 
-// Boxing masks and tags used by scalar trace lowering.
+// Boxing masks used by scalar trace lowering.
 const (
-	tagI32  = uint64(0x7FF6_0000_0000_0000)
 	maskI32 = uint64(0xFFFFFFFF)
-
-	tagI64  = uint64(0x7FF4_0000_0000_0000)
 	maskI64 = uint64(0x0001_FFFF_FFFF_FFFF)
 
-	tagF32 = uint64(0x7FF2_0000_0000_0000)
-
-	tagRef = uint64(0x7FF8_0000_0000_0000)
-
 	signI64 = uint8(15)
+)
+
+// Boxing tags used by scalar trace lowering, derived from the canonical Kind
+// tag layout so they track any reordering of the Kind enum. i1/i8 share the i32
+// representation and box through tagI32.
+var (
+	tagI1  = types.Tag(types.KindI1)
+	tagI8  = types.Tag(types.KindI8)
+	tagI32 = types.Tag(types.KindI32)
+	tagI64 = types.Tag(types.KindI64)
+	tagF32 = types.Tag(types.KindF32)
+	tagRef = types.Tag(types.KindRef)
 )
 
 const (
@@ -202,11 +207,11 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 		case instr.I32_MUL:
 			ok = l.i32Binary(ctx, arm64.MUL)
 		case instr.I32_AND:
-			ok = l.i32Binary(ctx, arm64.AND)
+			ok = l.i32Bitwise(ctx, arm64.AND)
 		case instr.I32_OR:
-			ok = l.i32Binary(ctx, arm64.ORR)
+			ok = l.i32Bitwise(ctx, arm64.ORR)
 		case instr.I32_XOR:
-			ok = l.i32Binary(ctx, arm64.EOR)
+			ok = l.i32Bitwise(ctx, arm64.EOR)
 		case instr.I32_DIV_S:
 			ok = l.i32Divide(ctx, op, arm64.SDIV, l.sign32, false)
 		case instr.I32_DIV_U:
@@ -595,7 +600,7 @@ func (l arm64Lowerer) constGet(ctx *lowering, op step, fused bool) bool {
 	}
 	v := ctx.constants[idx]
 	switch v.Kind() {
-	case types.KindI32, types.KindI64, types.KindF32, types.KindF64:
+	case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
 		dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		if v.Kind() == types.KindI64 {
 			ctx.assembler.Emit(arm64.LDI(dst, uint64(v.I64()))...)
@@ -649,7 +654,7 @@ func (l arm64Lowerer) localSet(ctx *lowering, op step, pop bool) bool {
 		return false
 	}
 	v := ctx.values[len(ctx.values)-1]
-	if v.kind != f.kinds[idx] {
+	if v.kind.Repr() != f.kinds[idx].Repr() {
 		return false
 	}
 	if v.kind == types.KindRef {
@@ -826,6 +831,22 @@ func (l arm64Lowerer) i32Binary(ctx *lowering, op func(dst, src1, src2 asm.Reg) 
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(op(dst, a.reg, b.reg))
 	ctx.push(value{reg: dst, kind: types.KindI32, raw: true})
+	return true
+}
+
+// i32Bitwise lowers a width-closed bitwise op (and/or/xor). Operands are
+// accepted by representation, so i1/i8 flow in like i32; the result keeps a
+// shared narrow kind (i8&i8 → i8, i1^i1 → i1) and widens to i32 only for a
+// mixed pair. The op runs on the full register; the low 32 bits carry the value
+// and box masks the rest.
+func (l arm64Lowerer) i32Bitwise(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
+	b, a, ok := l.operands(ctx, types.KindI32)
+	if !ok {
+		return false
+	}
+	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(op(dst, a.reg, b.reg))
+	ctx.push(value{reg: dst, kind: a.kind & b.kind, raw: true})
 	return true
 }
 
@@ -1646,7 +1667,7 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 		ctx.assembler.Emit(arm64.LDI(zero, 0)...)
 		for k := params; k < len(frame.kinds); k++ {
 			switch frame.kinds[k] {
-			case types.KindI32, types.KindF32, types.KindF64, types.KindI64:
+			case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindI64:
 			default:
 				return false
 			}
@@ -1667,7 +1688,7 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 	a := ctx.assembler
 	for _, typ := range target.Typ.Returns {
 		switch typ.Kind() {
-		case types.KindI32, types.KindF32, types.KindF64, types.KindI64:
+		case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindI64:
 		default:
 			return false
 		}
@@ -1839,7 +1860,7 @@ func (l arm64Lowerer) locals(ctx *lowering, f *activation, args []value) bool {
 		ctx.assembler.Emit(arm64.LDI(zero, 0)...)
 		for k := len(args); k < len(f.kinds); k++ {
 			switch f.kinds[k] {
-			case types.KindI32, types.KindF32, types.KindF64, types.KindI64:
+			case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindI64:
 			default:
 				return false
 			}
@@ -2120,14 +2141,16 @@ func (l arm64Lowerer) reload(ctx *lowering) {
 
 // loadLocal materializes local idx from the VM stack on first use. A
 // declared i32 or f64 local is unboxed for free: the boxed i32 keeps its
-// value in the low lane and a boxed f64 is its own bit pattern.
+// value in the low lane and a boxed f64 is its own bit pattern. The narrow
+// integer locals (i8, i1) share the i32 representation, so they load the same
+// way and keep their kind.
 func (l arm64Lowerer) loadLocal(ctx *lowering, f *activation, idx, ip int) bool {
 	if f.loaded[idx] {
 		return true
 	}
 	kind := f.kinds[idx]
 	switch kind {
-	case types.KindI32, types.KindF32, types.KindF64, types.KindI64, types.KindRef:
+	case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindI64, types.KindRef:
 	default:
 		return false
 	}
@@ -2630,7 +2653,7 @@ func (l arm64Lowerer) coroDone(ctx *lowering, op step) bool {
 
 	done := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDRB(done, data, int16(coroDone)))
-	ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: done, kind: types.KindI32, raw: true})
+	ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: done, kind: types.KindI1, raw: true})
 	return true
 }
 
@@ -2814,6 +2837,22 @@ func (l arm64Lowerer) box(ctx *lowering, v value) (asm.VReg, bool) {
 		a.Emit(arm64.ANDI(lo, v.reg, maskI32))
 		a.Emit(arm64.MOVK(lo, uint16(tagI32>>48), 48))
 		return lo, true
+	case types.KindI8:
+		if !v.raw {
+			return v.reg, true
+		}
+		lo := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ANDI(lo, v.reg, maskI32))
+		a.Emit(arm64.MOVK(lo, uint16(tagI8>>48), 48))
+		return lo, true
+	case types.KindI1:
+		if !v.raw {
+			return v.reg, true
+		}
+		lo := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ANDI(lo, v.reg, maskI32))
+		a.Emit(arm64.MOVK(lo, uint16(tagI1>>48), 48))
+		return lo, true
 	case types.KindF32:
 		lo := a.Reg(asm.RegTypeInt, asm.Width64)
 		a.Emit(arm64.ANDI(lo, v.reg, maskI32))
@@ -2962,11 +3001,14 @@ func (l arm64Lowerer) operands(ctx *lowering, kind types.Kind) (value, value, bo
 	return b, a, true
 }
 
-// kinds reports whether the top n operands all carry kind raw.
+// kinds reports whether the top n operands are all raw and computable as kind.
+// The match is by representation, so the narrow integer kinds (i1, i8) satisfy
+// an i32 operand exactly as they do in the interpreter; for every other kind
+// Repr is the identity, so the check stays exact.
 func (l arm64Lowerer) kinds(ctx *lowering, kind types.Kind, n int) bool {
 	for k := 0; k < n; k++ {
 		v := ctx.values[len(ctx.values)-1-k]
-		if v.kind != kind || !v.raw {
+		if v.kind.Repr() != kind.Repr() || !v.raw {
 			return false
 		}
 	}
@@ -3001,10 +3043,14 @@ func (l arm64Lowerer) marked(ctx *lowering) bool {
 }
 
 // setBool pushes the condition flags as a raw 0/1 i32.
+// setBool pushes a comparison/test result as i1: every caller is an
+// eqz/eq/lt/.../is_null/test whose result kind is i1 (matching the interpreter,
+// which boxes these through BoxI1). The 0/1 flag still satisfies any later
+// i32 operand because kinds compares by representation.
 func (l arm64Lowerer) setBool(ctx *lowering, cond uint8) {
 	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.CSET(flag, cond))
-	ctx.push(value{reg: flag, kind: types.KindI32, raw: true})
+	ctx.push(value{reg: flag, kind: types.KindI1, raw: true})
 }
 
 // sign32 sign-extends a raw i32's low lane for signed division and

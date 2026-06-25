@@ -504,7 +504,7 @@ func (c *threadedCompiler) fuseLocalConst(idx int) func(*Interpreter) {
 	}
 }
 
-func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(*Interpreter) {
+func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, kind types.Kind, size int) func(*Interpreter) {
 	if c.precise || c.ip >= len(c.code) {
 		return nil
 	}
@@ -629,8 +629,8 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			rhs := rhs(i)
-			lhs := i.stack[i.sp-1].I32()
+			rhs := types.Box(uint64(uint32(rhs(i))), kind)
+			lhs := i.stack[i.sp-1]
 			i.stack[i.sp-1] = i.i32Xor(lhs, rhs)
 			i.fr.ip += size + 1
 		}
@@ -639,8 +639,8 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			rhs := rhs(i)
-			lhs := i.stack[i.sp-1].I32()
+			rhs := types.Box(uint64(uint32(rhs(i))), kind)
+			lhs := i.stack[i.sp-1]
 			i.stack[i.sp-1] = i.i32And(lhs, rhs)
 			i.fr.ip += size + 1
 		}
@@ -649,8 +649,8 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			rhs := rhs(i)
-			lhs := i.stack[i.sp-1].I32()
+			rhs := types.Box(uint64(uint32(rhs(i))), kind)
+			lhs := i.stack[i.sp-1]
 			i.stack[i.sp-1] = i.i32Or(lhs, rhs)
 			i.fr.ip += size + 1
 		}
@@ -909,29 +909,32 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 			i.fr.ip += size + 1
 		}
 	case instr.I32_XOR:
+		rhs := types.BoxI32(rhs)
 		return func(i *Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			lhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-1]
 			i.stack[i.sp-1] = i.i32Xor(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_AND:
+		rhs := types.BoxI32(rhs)
 		return func(i *Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			lhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-1]
 			i.stack[i.sp-1] = i.i32And(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.I32_OR:
+		rhs := types.BoxI32(rhs)
 		return func(i *Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			lhs := i.stack[i.sp-1].I32()
+			lhs := i.stack[i.sp-1]
 			i.stack[i.sp-1] = i.i32Or(lhs, rhs)
 			i.fr.ip += size + 1
 		}

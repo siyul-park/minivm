@@ -268,6 +268,10 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		switch v := v.(type) {
 		case types.Boxed:
 			val = v
+		case types.I1:
+			val = types.BoxI1(bool(v))
+		case types.I8:
+			val = types.BoxI8(int8(v))
 		case types.I32:
 			val = types.BoxI32(int32(v))
 		case types.I64:
@@ -1253,6 +1257,10 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 	switch v := val.(type) {
 	case types.Boxed:
 		return v
+	case types.I1:
+		return types.BoxI1(bool(v))
+	case types.I8:
+		return types.BoxI8(int8(v))
 	case types.I32:
 		return types.BoxI32(int32(v))
 	case types.I64:

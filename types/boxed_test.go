@@ -129,6 +129,39 @@ func TestBoxI32(t *testing.T) {
 	}
 }
 
+func TestBoxI8(t *testing.T) {
+	tests := []struct {
+		val int8
+	}{
+		{val: -1},
+		{val: 0},
+		{val: int8(math.MinInt8)},
+		{val: int8(math.MaxInt8)},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
+			val := BoxI8(tt.val)
+			require.Equal(t, KindI8, val.Kind())
+			require.Equal(t, TypeI8, val.Type())
+			require.Equal(t, tt.val, val.I8())
+			require.Equal(t, I8(tt.val), Unbox(val))
+		})
+	}
+}
+
+func TestBoxI1(t *testing.T) {
+	require.Equal(t, KindI1, BoxI1(true).Kind())
+	require.Equal(t, TypeI1, BoxI1(true).Type())
+	require.True(t, BoxI1(true).Bool())
+	require.False(t, BoxI1(false).Bool())
+	require.Equal(t, "true", BoxI1(true).String())
+	require.Equal(t, "false", BoxI1(false).String())
+	require.Equal(t, I1(true), Unbox(BoxI1(true)))
+	require.Equal(t, I1(false), Unbox(BoxI1(false)))
+	require.Equal(t, BoxedTrue, BoxI1(true))
+	require.Equal(t, BoxedFalse, BoxI1(false))
+}
+
 func TestBoxI64(t *testing.T) {
 	tests := []struct {
 		val int64
@@ -318,11 +351,6 @@ func TestBoxed_String(t *testing.T) {
 			require.Equal(t, tt.str, tt.val.String())
 		})
 	}
-}
-
-func TestBoxBool(t *testing.T) {
-	require.Equal(t, BoxedTrue, BoxBool(true))
-	require.Equal(t, BoxedFalse, BoxBool(false))
 }
 
 func TestBoxed_Bool(t *testing.T) {

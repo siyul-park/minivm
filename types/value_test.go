@@ -57,6 +57,8 @@ func TestKind_String(t *testing.T) {
 		kind Kind
 		str  string
 	}{
+		{KindI1, "i1"},
+		{KindI8, "i8"},
 		{KindI32, "i32"},
 		{KindI64, "i64"},
 		{KindF32, "f32"},
@@ -76,6 +78,8 @@ func TestKind_IsNumeric(t *testing.T) {
 		kind Kind
 		want bool
 	}{
+		{KindI1, true},
+		{KindI8, true},
 		{KindI32, true},
 		{KindI64, true},
 		{KindF32, true},
@@ -95,6 +99,8 @@ func TestKind_Size(t *testing.T) {
 		kind Kind
 		size int
 	}{
+		{KindI1, 1},
+		{KindI8, 1},
 		{KindI32, 4},
 		{KindI64, 8},
 		{KindF32, 4},
@@ -105,6 +111,26 @@ func TestKind_Size(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.kind.String(), func(t *testing.T) {
 			require.Equal(t, tt.size, tt.kind.Size())
+		})
+	}
+}
+
+func TestKind_Repr(t *testing.T) {
+	tests := []struct {
+		kind Kind
+		want Kind
+	}{
+		{KindI1, KindI32},
+		{KindI8, KindI32},
+		{KindI32, KindI32},
+		{KindI64, KindI64},
+		{KindF32, KindF32},
+		{KindF64, KindF64},
+		{KindRef, KindRef},
+	}
+	for _, tt := range tests {
+		t.Run(tt.kind.String(), func(t *testing.T) {
+			require.Equal(t, tt.want, tt.kind.Repr())
 		})
 	}
 }

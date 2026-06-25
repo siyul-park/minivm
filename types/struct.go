@@ -68,6 +68,14 @@ func (s *Struct) SetField(i int, val Boxed) {
 	switch s.Typ.Fields[i].Kind {
 	case KindI32:
 		s.Data[i] = uint64(uint32(val.I32()))
+	case KindI8:
+		s.Data[i] = uint64(uint32(int32(val.I8())))
+	case KindI1:
+		if val.Bool() {
+			s.Data[i] = 1
+		} else {
+			s.Data[i] = 0
+		}
 	case KindI64:
 		s.Data[i] = uint64(val.I64())
 	case KindF32:
@@ -133,6 +141,10 @@ func (s *Struct) field(i int, f StructField) Boxed {
 	switch f.Kind {
 	case KindI32:
 		return BoxI32(int32(uint32(bits)))
+	case KindI8:
+		return BoxI8(int8(uint32(bits)))
+	case KindI1:
+		return BoxI1(bits != 0)
 	case KindI64:
 		return BoxI64(int64(bits))
 	case KindF32:

@@ -70,6 +70,12 @@ Each function slot is verified in four passes (`checker.run`):
    at control-flow merges. Kinds reuse `types.Kind` plus a top element
    (`anyKind`) for statically-unknown values; merges widen to `anyKind`, so the
    verifier rejects only on a *definite* concrete mismatch, never on an unknown.
+   Operand kinds are compared by **representation** (`accepts` uses `Kind.Repr`),
+   so the narrow kinds `i1`/`i8` satisfy an `i32` operand — they share the i32
+   representation. Most ops push their declared `Push` kind, but the width-closed
+   bitwise ops (`i32.and`/`or`/`xor`) are special-cased: `bitwise` keeps a shared
+   narrow operand kind (`i8 & i8 → i8`, `i1 ^ i1 → i1`) and widens a mixed pair
+   to `i32`, matching what the interpreter and JIT compute at runtime.
 
 ## Limits (by design)
 

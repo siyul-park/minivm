@@ -467,7 +467,7 @@ var tests = []test{
 			},
 			program.WithTypes(types.TypeI32),
 		),
-		values: []types.Value{types.True},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -489,7 +489,7 @@ var tests = []test{
 			program.WithConstants(types.String("foo")),
 			program.WithTypes(types.TypeString),
 		),
-		values: []types.Value{types.True},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		// ref.test rejects a heap value against a mismatching type.
@@ -501,7 +501,7 @@ var tests = []test{
 			program.WithConstants(types.String("foo")),
 			program.WithTypes(types.TypeI32),
 		),
-		values: []types.Value{types.False},
+		values: []types.Value{types.I1(false)},
 	},
 	{
 		// ref.test rejects a primitive (any holding a scalar) against a mismatching type.
@@ -512,7 +512,7 @@ var tests = []test{
 			},
 			program.WithTypes(types.TypeF64),
 		),
-		values: []types.Value{types.False},
+		values: []types.Value{types.I1(false)},
 	},
 	{
 		// A ref-typed (any) global round-trips a primitive and discriminates it.
@@ -525,7 +525,7 @@ var tests = []test{
 			},
 			program.WithTypes(types.TypeI32),
 		),
-		values: []types.Value{types.True},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		// A ref-typed (any) global round-trips a heap reference and discriminates it.
@@ -539,7 +539,7 @@ var tests = []test{
 			program.WithConstants(types.String("foo")),
 			program.WithTypes(types.TypeString),
 		),
-		values: []types.Value{types.True},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		// Overwriting a heap ref in an any-slot with a primitive releases the ref
@@ -556,7 +556,7 @@ var tests = []test{
 			program.WithConstants(types.String("foo")),
 			program.WithTypes(types.TypeI32),
 		),
-		values: []types.Value{types.True},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -566,7 +566,7 @@ var tests = []test{
 			},
 			program.WithConstants(types.String("foo")),
 		),
-		values: []types.Value{types.I32(0)},
+		values: []types.Value{types.I1(false)},
 	},
 	{
 		program: program.New(
@@ -577,7 +577,7 @@ var tests = []test{
 			},
 			program.WithConstants(types.String("foo")),
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -588,7 +588,7 @@ var tests = []test{
 			},
 			program.WithConstants(types.String("foo")),
 		),
-		values: []types.Value{types.I32(0)},
+		values: []types.Value{types.I1(false)},
 	},
 	// --- i32: I32_CONST, arithmetic, bitwise, comparison, conversions ---
 	{
@@ -759,6 +759,52 @@ var tests = []test{
 		),
 		values: []types.Value{types.I32(1)},
 	},
+	// width-closed bitwise ops preserve a shared narrow kind (Rust/Swift):
+	// i8&i8 → i8, i1^i1 → i1, i1|i1 → i1; a mixed pair widens to i32.
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.I32_AND),
+			},
+			program.WithConstants(types.I8(127), types.I8(15)),
+		),
+		values: []types.Value{types.I8(15)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.I32_XOR),
+			},
+			program.WithConstants(types.I1(true), types.I1(false)),
+		),
+		values: []types.Value{types.I1(true)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.I32_OR),
+			},
+			program.WithConstants(types.I1(false), types.I1(true)),
+		),
+		values: []types.Value{types.I1(true)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.I32_CONST, 15),
+				instr.New(instr.I32_AND),
+			},
+			program.WithConstants(types.I8(127)),
+		),
+		values: []types.Value{types.I32(15)},
+	},
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -831,7 +877,7 @@ var tests = []test{
 				instr.New(instr.I32_EQZ),
 			},
 		),
-		values: []types.Value{types.I32(0)},
+		values: []types.Value{types.I1(false)},
 	},
 	{
 		program: program.New(
@@ -841,7 +887,7 @@ var tests = []test{
 				instr.New(instr.I32_EQ),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -851,7 +897,7 @@ var tests = []test{
 				instr.New(instr.I32_NE),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -861,7 +907,7 @@ var tests = []test{
 				instr.New(instr.I32_LT_S),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -871,7 +917,7 @@ var tests = []test{
 				instr.New(instr.I32_LT_S),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -881,7 +927,7 @@ var tests = []test{
 				instr.New(instr.I32_LT_U),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -891,7 +937,7 @@ var tests = []test{
 				instr.New(instr.I32_GT_S),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -901,7 +947,7 @@ var tests = []test{
 				instr.New(instr.I32_GT_U),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -911,7 +957,7 @@ var tests = []test{
 				instr.New(instr.I32_LE_S),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -921,7 +967,7 @@ var tests = []test{
 				instr.New(instr.I32_LE_U),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -931,7 +977,7 @@ var tests = []test{
 				instr.New(instr.I32_GE_S),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -941,7 +987,7 @@ var tests = []test{
 				instr.New(instr.I32_GE_U),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1217,7 +1263,7 @@ var tests = []test{
 				instr.New(instr.I64_EQZ),
 			},
 		),
-		values: []types.Value{types.I32(0)},
+		values: []types.Value{types.I1(false)},
 	},
 	{
 		program: program.New(
@@ -1227,7 +1273,7 @@ var tests = []test{
 				instr.New(instr.I64_EQ),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1237,7 +1283,7 @@ var tests = []test{
 				instr.New(instr.I64_NE),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1247,7 +1293,7 @@ var tests = []test{
 				instr.New(instr.I64_LT_S),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1257,7 +1303,7 @@ var tests = []test{
 				instr.New(instr.I64_LT_U),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1267,7 +1313,7 @@ var tests = []test{
 				instr.New(instr.I64_GT_S),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1277,7 +1323,7 @@ var tests = []test{
 				instr.New(instr.I64_GT_U),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1287,7 +1333,7 @@ var tests = []test{
 				instr.New(instr.I64_LE_S),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1297,7 +1343,7 @@ var tests = []test{
 				instr.New(instr.I64_LE_U),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1307,7 +1353,7 @@ var tests = []test{
 				instr.New(instr.I64_GE_S),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1317,7 +1363,7 @@ var tests = []test{
 				instr.New(instr.I64_GE_U),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1514,7 +1560,7 @@ var tests = []test{
 				instr.New(instr.F32_EQ),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1524,7 +1570,7 @@ var tests = []test{
 				instr.New(instr.F32_NE),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1534,7 +1580,7 @@ var tests = []test{
 				instr.New(instr.F32_LT),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1544,7 +1590,7 @@ var tests = []test{
 				instr.New(instr.F32_GT),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1554,7 +1600,7 @@ var tests = []test{
 				instr.New(instr.F32_LE),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1564,7 +1610,7 @@ var tests = []test{
 				instr.New(instr.F32_GE),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1761,7 +1807,7 @@ var tests = []test{
 				instr.New(instr.F64_EQ),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1771,7 +1817,7 @@ var tests = []test{
 				instr.New(instr.F64_NE),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1781,7 +1827,7 @@ var tests = []test{
 				instr.New(instr.F64_LT),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1791,7 +1837,7 @@ var tests = []test{
 				instr.New(instr.F64_GT),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1801,7 +1847,7 @@ var tests = []test{
 				instr.New(instr.F64_LE),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -1811,7 +1857,7 @@ var tests = []test{
 				instr.New(instr.F64_GE),
 			},
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -2008,7 +2054,7 @@ var tests = []test{
 			},
 			program.WithConstants(types.String("foo")),
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -2019,7 +2065,7 @@ var tests = []test{
 			},
 			program.WithConstants(types.String("foo")),
 		),
-		values: []types.Value{types.I32(0)},
+		values: []types.Value{types.I1(false)},
 	},
 	{
 		program: program.New(
@@ -2030,7 +2076,7 @@ var tests = []test{
 			},
 			program.WithConstants(types.String("foo"), types.String("bar")),
 		),
-		values: []types.Value{types.I32(0)},
+		values: []types.Value{types.I1(false)},
 	},
 	{
 		program: program.New(
@@ -2041,7 +2087,7 @@ var tests = []test{
 			},
 			program.WithConstants(types.String("foo"), types.String("bar")),
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -2052,7 +2098,7 @@ var tests = []test{
 			},
 			program.WithConstants(types.String("foo"), types.String("bar")),
 		),
-		values: []types.Value{types.I32(0)},
+		values: []types.Value{types.I1(false)},
 	},
 	{
 		program: program.New(
@@ -2063,7 +2109,7 @@ var tests = []test{
 			},
 			program.WithConstants(types.String("foo"), types.String("bar")),
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -2422,7 +2468,7 @@ var tests = []test{
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI8)),
 		),
-		values: []types.Value{types.I32(0xFF)},
+		values: []types.Value{types.I8(-1)},
 	},
 	{
 		program: program.New(
@@ -2782,7 +2828,7 @@ var tests = []test{
 			},
 			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
 		),
-		values: []types.Value{types.I32(1)},
+		values: []types.Value{types.I1(true)},
 	},
 	{
 		program: program.New(
@@ -2865,7 +2911,7 @@ var tests = []test{
 			},
 			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
 		),
-		values: []types.Value{types.I32(1), types.I32(42)},
+		values: []types.Value{types.I1(true), types.I32(42)},
 	},
 	{
 		program: program.New(
@@ -2895,7 +2941,7 @@ var tests = []test{
 			},
 			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32)),
 		),
-		values: []types.Value{types.I32(0), types.I32(0)},
+		values: []types.Value{types.I1(false), types.I32(0)},
 	},
 	{
 		program: program.New(
@@ -4002,7 +4048,7 @@ func TestInterpreter_Run(t *testing.T) {
 				require.NoError(t, i.Run(context.Background()))
 				got, err := i.Pop()
 				require.NoError(t, err)
-				require.Equal(t, types.I32(1), got)
+				require.Equal(t, types.I1(true), got)
 			})
 		}
 	})
@@ -4098,7 +4144,7 @@ func TestInterpreter_Run(t *testing.T) {
 				require.NoError(t, i.Run(context.Background()))
 				got, err := i.Pop()
 				require.NoError(t, err)
-				require.Equal(t, types.I32(0), got)
+				require.Equal(t, types.I1(false), got)
 
 				finished := program.New([]instr.Instruction{
 					instr.New(instr.CONST_GET, 0),
@@ -4112,7 +4158,7 @@ func TestInterpreter_Run(t *testing.T) {
 				require.NoError(t, j.Run(context.Background()))
 				got, err = j.Pop()
 				require.NoError(t, err)
-				require.Equal(t, types.I32(1), got)
+				require.Equal(t, types.I1(true), got)
 			})
 		}
 	})
@@ -4317,6 +4363,60 @@ func TestInterpreter_Run(t *testing.T) {
 		want, err := threaded.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(300), want)
+
+		jit := New(prog, WithTick(1), WithThreshold(1))
+		defer jit.Close()
+		require.NoError(t, jit.Run(context.Background()))
+		got, err := jit.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		require.Greater(t, jit.local.Value("vm_jit_emits_total"), float64(0))
+	})
+
+	t.Run("jit lowers narrow bitwise in a hot loop", func(t *testing.T) {
+		requireJIT(t)
+
+		// A hot loop masks an i8 accumulator with an i8 constant each iteration.
+		// The trace must lower i32.and natively while keeping the i8 kind, so the
+		// result round-trips as i8 (0x7F & 0x3F == 0x3F), not i32.
+		fb := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI8},
+			Returns: []types.Type{types.TypeI8},
+		}).WithLocals(types.TypeI32)
+		header := fb.Label()
+		exit := fb.Label()
+		fn := fb.Emit(
+			instr.New(instr.I32_CONST, 300),
+			instr.New(instr.LOCAL_SET, 1),
+		).Bind(header).Emit(
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_EQZ),
+		).BrIf(exit).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.CONST_GET, 2),
+			instr.New(instr.I32_AND),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_SUB),
+			instr.New(instr.LOCAL_SET, 1),
+		).Br(header).Bind(exit).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.RETURN),
+		).MustBuild()
+
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn, types.I8(0x7F), types.I8(0x3F)))
+
+		threaded := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I8(0x3F), want)
 
 		jit := New(prog, WithTick(1), WithThreshold(1))
 		defer jit.Close()
@@ -6574,7 +6674,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 			in   any
 			want types.Value
 		}{
-			{true, types.True},
+			{true, types.I1(true)},
 			{int32(7), types.I32(7)},
 			{int64(8), types.I64(8)},
 			{float32(1.5), types.F32(1.5)},
@@ -6935,7 +7035,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 		s, ok := got.(*types.Struct)
 		require.True(t, ok)
 		require.Equal(t, types.BoxedTrue, s.FieldByName("Bool"))
-		require.Equal(t, types.BoxI32(-8), s.FieldByName("I8"))
+		require.Equal(t, types.BoxI8(-8), s.FieldByName("I8"))
 		require.Equal(t, types.BoxI32(-16), s.FieldByName("I16"))
 		require.Equal(t, types.BoxI32(-32), s.FieldByName("I32"))
 		require.Equal(t, types.BoxI64(-64), s.FieldByName("I"))
