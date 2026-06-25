@@ -504,7 +504,7 @@ func (c *threadedCompiler) fuseLocalConst(idx int) func(*Interpreter) {
 	}
 }
 
-func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(*Interpreter) {
+func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, kind types.Kind, size int) func(*Interpreter) {
 	if c.precise || c.ip >= len(c.code) {
 		return nil
 	}
@@ -630,8 +630,8 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 				panic(ErrStackUnderflow)
 			}
 			rhs := rhs(i)
-			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = i.i32Xor(lhs, rhs)
+			lhs := i.stack[i.sp-1]
+			i.stack[i.sp-1] = i.i32Xor(lhs.I32(), rhs, bitwiseKind(lhs.Kind(), kind))
 			i.fr.ip += size + 1
 		}
 	case instr.I32_AND:
@@ -640,8 +640,8 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 				panic(ErrStackUnderflow)
 			}
 			rhs := rhs(i)
-			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = i.i32And(lhs, rhs)
+			lhs := i.stack[i.sp-1]
+			i.stack[i.sp-1] = i.i32And(lhs.I32(), rhs, bitwiseKind(lhs.Kind(), kind))
 			i.fr.ip += size + 1
 		}
 	case instr.I32_OR:
@@ -650,8 +650,8 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, size int) func(
 				panic(ErrStackUnderflow)
 			}
 			rhs := rhs(i)
-			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = i.i32Or(lhs, rhs)
+			lhs := i.stack[i.sp-1]
+			i.stack[i.sp-1] = i.i32Or(lhs.I32(), rhs, bitwiseKind(lhs.Kind(), kind))
 			i.fr.ip += size + 1
 		}
 	case instr.I32_ROTL:
@@ -913,8 +913,8 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = i.i32Xor(lhs, rhs)
+			lhs := i.stack[i.sp-1]
+			i.stack[i.sp-1] = i.i32Xor(lhs.I32(), rhs, bitwiseKind(lhs.Kind(), types.KindI32))
 			i.fr.ip += size + 1
 		}
 	case instr.I32_AND:
@@ -922,8 +922,8 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = i.i32And(lhs, rhs)
+			lhs := i.stack[i.sp-1]
+			i.stack[i.sp-1] = i.i32And(lhs.I32(), rhs, bitwiseKind(lhs.Kind(), types.KindI32))
 			i.fr.ip += size + 1
 		}
 	case instr.I32_OR:
@@ -931,8 +931,8 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			lhs := i.stack[i.sp-1].I32()
-			i.stack[i.sp-1] = i.i32Or(lhs, rhs)
+			lhs := i.stack[i.sp-1]
+			i.stack[i.sp-1] = i.i32Or(lhs.I32(), rhs, bitwiseKind(lhs.Kind(), types.KindI32))
 			i.fr.ip += size + 1
 		}
 	case instr.I32_ROTL:

@@ -37,6 +37,25 @@ func TestVerify(t *testing.T) {
 		require.NoError(t, Verify(prog))
 	})
 
+	t.Run("valid narrow bitwise operands", func(t *testing.T) {
+		// Width-closed bitwise ops on a shared narrow kind keep that kind
+		// (i8 & i8 → i8); the result still satisfies an i32 operand, so chaining
+		// another i32 op on it verifies.
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{types.TypeI8}, Returns: []types.Type{types.TypeI32}},
+			Code: instr.Marshal([]instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_AND),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_OR),
+				instr.New(instr.RETURN),
+			}),
+		}
+		prog := New([]instr.Instruction{instr.New(instr.NOP)}, WithConstants(fn))
+		require.NoError(t, Verify(prog))
+	})
+
 	t.Run("valid function returns", func(t *testing.T) {
 		fn := &types.Function{
 			Typ:  &types.FunctionType{Returns: []types.Type{types.TypeI32}},

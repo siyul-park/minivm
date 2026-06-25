@@ -521,6 +521,17 @@ func (c *checker) step(st *stack, inst instr.Instruction, op instr.Opcode, ip in
 		a := st.pop()
 		st.push(slot{kind: unify(a.kind, b.kind)})
 		return false, nil
+	case instr.I32_AND, instr.I32_OR, instr.I32_XOR:
+		if st.len() < 2 {
+			return false, c.fail(ip, op, ErrStackUnderflow)
+		}
+		b := st.pop()
+		a := st.pop()
+		if !accepts(a.kind, types.KindI32) || !accepts(b.kind, types.KindI32) {
+			return false, c.fail(ip, op, ErrTypeMismatch)
+		}
+		st.push(slot{kind: bitwise(a.kind, b.kind)})
+		return false, nil
 	case instr.CALL:
 		return c.call(st, ip, op, false)
 	case instr.RETURN_CALL:
@@ -697,4 +708,20 @@ func unify(a, b types.Kind) types.Kind {
 		return a
 	}
 	return anyKind
+}
+
+// bitwise computes the result kind of a width-closed integer op (and/or/xor):
+// when both operands share one narrow kind the result keeps it (i8&i8 → i8,
+// i1&i1 → i1, matching Rust/Swift), since the operation cannot escape that
+// kind's value range. A mixed pair widens to the i32 representation they
+// compute in; an unknown operand yields anyKind because narrowness cannot be
+// proven.
+func bitwise(a, b types.Kind) types.Kind {
+	if a == b {
+		return a
+	}
+	if a == anyKind || b == anyKind {
+		return anyKind
+	}
+	return types.KindI32
 }
