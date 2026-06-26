@@ -172,6 +172,7 @@ Heap objects implement `types.Value`.
 | `types.F64` | `KindF64` | `TypeF64` | `Value` |
 | `types.Ref` | `KindRef` | `TypeRef` | `Value` |
 | `types.String` | `KindRef` | `TypeString` | `Value` |
+| `types.TypedArray[bool]` | `KindRef` | `TypeI1Array` | `Value` |
 | `types.TypedArray[int8]` | `KindRef` | `TypeI8Array` | `Value` |
 | `*types.Array` | `KindRef` | `*ArrayType` | `Value`, `Traceable` |
 | `*types.Struct` | `KindRef` | `*StructType` | `Value`, `Traceable` |
@@ -216,9 +217,11 @@ Strings created by interpreter opcodes and the marshaler are interned per `Inter
 (`int8`); `ARRAY_GET` returns a signed `BoxI8` (`-128..127`), and `ARRAY_SET` /
 `ARRAY_FILL` narrow via low-byte truncation (`int8(val.I32())`, no overflow
 trap). Use `[]i8` for binary blobs; mask `& 0xFF` if you need the unsigned
-`0..255` reading, because the load is now sign-extended.
+`0..255` reading, because the load is now sign-extended. `[]i1` arrays use
+`TypedArray[bool]` (raw 1-byte cells); `ARRAY_GET` returns `BoxI1`, and
+`ARRAY_SET` / `ARRAY_FILL` store `val.Bool()` (non-zero ⇒ true).
 
-Use constructors for compound runtime types (`NewStructType`, `NewStruct`, `NewMapType`, `NewMap`, `NewMapWithCapacity`, `NewMapForType`). These constructors initialize cached metadata and internal storage used by interpreter hot paths. `NewMapForType` returns primitive-key specializations for `i32`, `i64`, `f32`, and `f64`; strings and all other ref-typed keys use generic `*types.Map` with heap ref identity keys.
+Use constructors for compound runtime types (`NewStructType`, `NewStruct`, `NewMapType`, `NewMap`, `NewMapWithCapacity`, `NewMapForType`). These constructors initialize cached metadata and internal storage used by interpreter hot paths. `NewMapForType` returns primitive-key specializations for `i1`, `i8`, `i32`, `i64`, `f32`, and `f64` (`i1`/`i8` use `TypedMap[bool]`/`TypedMap[int8]`); strings and all other ref-typed keys use generic `*types.Map` with heap ref identity keys.
 
 ## Dynamic (any) values
 

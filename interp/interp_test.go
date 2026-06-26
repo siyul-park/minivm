@@ -2743,6 +2743,106 @@ var tests = []test{
 		),
 		values: []types.Value{types.I32(4)},
 	},
+	// --- array: i1 typed elements ---
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_NEW, 0),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI1)),
+		),
+		values: []types.Value{types.TypedArray[bool]{true}},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI1)),
+		),
+		values: []types.Value{make(types.TypedArray[bool], 1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_NEW, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI1)),
+		),
+		values: []types.Value{types.I1(true)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.DUP),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_SET),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI1)),
+		),
+		values: []types.Value{types.I1(true)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.ARRAY_LEN),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI1)),
+		),
+		values: []types.Value{types.I32(3)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.DUP),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.ARRAY_FILL),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI1)),
+		),
+		values: []types.Value{types.I1(true)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.DUP),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_SET),
+				instr.New(instr.DUP),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_COPY),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI1)),
+		),
+		values: []types.Value{types.I1(true)},
+	},
 	// --- map: MAP_NEW, MAP_NEW_DEFAULT, MAP_LEN, MAP_GET, MAP_LOOKUP, MAP_SET, MAP_DELETE, MAP_CLEAR ---
 	{
 		program: program.New(
@@ -3000,6 +3100,154 @@ var tests = []test{
 			program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI64)),
 		),
 		values: []types.Value{types.I64(1 << 50)},
+	},
+	// --- map: i8 / i1 typed keys ---
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.MAP_GET),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI8, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, uint64(0xFFFFFFFF)),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.I32_CONST, uint64(0xFFFFFFFF)),
+				instr.New(instr.MAP_GET),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI8, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, uint64(0xFFFFFFFF)),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.MAP_KEYS),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI8, types.TypeI32)),
+		),
+		values: []types.Value{types.I8(-1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 9),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.MAP_ITER),
+				instr.New(instr.CORO_VALUE),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI8, types.TypeI32)),
+		),
+		values: []types.Value{types.I8(9)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.MAP_NEW_DEFAULT, 0),
+				instr.New(instr.DUP),
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.MAP_SET),
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.MAP_GET),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI8, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.DUP),
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.MAP_DELETE),
+				instr.New(instr.MAP_LEN),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI8, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_GET),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI1, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(42)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 10),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 20),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.MAP_LEN),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI1, types.TypeI32)),
+		),
+		values: []types.Value{types.I32(2)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.MAP_KEYS),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI1, types.TypeI32)),
+		),
+		values: []types.Value{types.I1(true)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 42),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.MAP_ITER),
+				instr.New(instr.CORO_VALUE),
+			},
+			program.WithTypes(types.NewMapType(types.TypeI1, types.TypeI32)),
+		),
+		values: []types.Value{types.I1(true)},
 	},
 	// --- closures: CLOSURE_NEW, UPVAL_GET, UPVAL_SET ---
 	{
@@ -6788,6 +7036,10 @@ func TestInterpreter_Marshal(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.TypedArray[int8]{1, -1}, got)
 
+		got, err = i.Marshal([]bool{true, false})
+		require.NoError(t, err)
+		require.Equal(t, types.TypedArray[bool]{true, false}, got)
+
 		got, err = i.Marshal([]int16{1, -1})
 		require.NoError(t, err)
 		require.Equal(t, types.TypedArray[int32]{1, -1}, got)
@@ -6924,6 +7176,22 @@ func TestInterpreter_Marshal(t *testing.T) {
 		gotF32, ok := mF32.Get(1.5)
 		require.True(t, ok)
 		require.Equal(t, types.BoxI32(2), gotF32)
+
+		i8, err := i.Marshal(map[int8]int32{-1: 2})
+		require.NoError(t, err)
+		mI8, ok := i8.(*types.TypedMap[int8])
+		require.True(t, ok)
+		gotI8, ok := mI8.Get(-1)
+		require.True(t, ok)
+		require.Equal(t, types.BoxI32(2), gotI8)
+
+		i1, err := i.Marshal(map[bool]int32{true: 2})
+		require.NoError(t, err)
+		mI1, ok := i1.(*types.TypedMap[bool])
+		require.True(t, ok)
+		gotI1, ok := mI1.Get(true)
+		require.True(t, ok)
+		require.Equal(t, types.BoxI32(2), gotI1)
 	})
 
 	t.Run("ref identity map keys", func(t *testing.T) {
@@ -7413,6 +7681,10 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		require.NoError(t, i.Unmarshal(types.TypedArray[int8]{-1, 0x7F}, &i8s))
 		require.Equal(t, []int8{-1, 0x7F}, i8s)
 
+		var bools []bool
+		require.NoError(t, i.Unmarshal(types.TypedArray[bool]{true, false}, &bools))
+		require.Equal(t, []bool{true, false}, bools)
+
 		var f32s []float32
 		require.NoError(t, i.Unmarshal(types.TypedArray[float32]{1.5}, &f32s))
 		require.Equal(t, []float32{1.5}, f32s)
@@ -7498,6 +7770,20 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		var outFloat32s map[float32]int32
 		require.NoError(t, i.Unmarshal(got, &outFloat32s))
 		require.Equal(t, float32s, outFloat32s)
+
+		i8s := map[int8]int32{-1: 2, 0x7F: 3}
+		got, err = i.Marshal(i8s)
+		require.NoError(t, err)
+		var outI8s map[int8]int32
+		require.NoError(t, i.Unmarshal(got, &outI8s))
+		require.Equal(t, i8s, outI8s)
+
+		bools := map[bool]int32{true: 2, false: 3}
+		got, err = i.Marshal(bools)
+		require.NoError(t, err)
+		var outBools map[bool]int32
+		require.NoError(t, i.Unmarshal(got, &outBools))
+		require.Equal(t, bools, outBools)
 	})
 
 	t.Run("ref identity map keys", func(t *testing.T) {

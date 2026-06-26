@@ -129,6 +129,7 @@ v, err := vm.Marshal(myGoValue)
 | `float32` | `F32` | |
 | `float64` | `F64` | |
 | `string` | `String` (ref) | heap-allocated |
+| `[]bool` | `I1Array` (`TypedArray[bool]`) | one byte per element |
 | `[]int8`, `[]uint8`, `[]byte` | `I8Array` (`TypedArray[int8]`) | one byte per element; raw bits preserved |
 | `[]int16`, `[]int32` | `I32Array` | no heap allocation |
 | `[]uint16`, `[]uint32` | `I32Array` | preserves raw unsigned bits |

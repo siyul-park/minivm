@@ -59,6 +59,7 @@ var (
 	heapI32       = valueItab(types.I32(0))
 	heapF32       = valueItab(types.F32(0))
 	heapF64       = valueItab(types.F64(0))
+	heapArrayI1   = valueItab(types.TypedArray[bool](nil))
 	heapArrayI8   = valueItab(types.TypedArray[int8](nil))
 	heapArrayI32  = valueItab(types.TypedArray[int32](nil))
 	heapArrayI64  = valueItab(types.TypedArray[int64](nil))
@@ -2355,6 +2356,7 @@ func (l arm64Lowerer) arrayLen(ctx *lowering, op step) bool {
 
 	typed := ctx.assembler.Label()
 	generic := ctx.assembler.Label()
+	l.matchItab(ctx, itab, heapArrayI1, typed)
 	l.matchItab(ctx, itab, heapArrayI8, typed)
 	l.matchItab(ctx, itab, heapArrayI32, typed)
 	l.matchItab(ctx, itab, heapArrayI64, typed)
@@ -2402,6 +2404,7 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 	hitF32 := ctx.assembler.Label()
 	hitF64 := ctx.assembler.Label()
 	hitRef := ctx.assembler.Label()
+	l.matchItab(ctx, itab, heapArrayI1, hitI8)
 	l.matchItab(ctx, itab, heapArrayI8, hitI8)
 	l.matchItab(ctx, itab, heapArrayI32, hitI32)
 	l.matchItab(ctx, itab, heapArrayF32, hitF32)

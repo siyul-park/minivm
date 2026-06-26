@@ -51,6 +51,8 @@ type mapIteratorKind byte
 
 const (
 	mapIteratorInvalid mapIteratorKind = iota
+	mapIteratorI8
+	mapIteratorI1
 	mapIteratorI32
 	mapIteratorI64
 	mapIteratorF32
@@ -60,6 +62,8 @@ const (
 
 var (
 	_ Traceable = (*Map)(nil)
+	_ Traceable = (*TypedMap[int8])(nil)
+	_ Traceable = (*TypedMap[bool])(nil)
 	_ Traceable = (*TypedMap[int32])(nil)
 	_ Traceable = (*TypedMap[int64])(nil)
 	_ Traceable = (*TypedMap[float32])(nil)
@@ -87,6 +91,10 @@ func NewMapWithCapacity(typ *MapType, capacity int) *Map {
 
 func NewMapForType(typ *MapType, capacity int) Value {
 	switch typ.KeyKind {
+	case KindI8:
+		return NewTypedMap[int8](typ, capacity)
+	case KindI1:
+		return NewTypedMap[bool](typ, capacity)
 	case KindI32:
 		return NewTypedMap[int32](typ, capacity)
 	case KindI64:
@@ -103,6 +111,12 @@ func NewMapForType(typ *MapType, capacity int) Value {
 func NewMapIterator(ref Ref, val Value) *MapIterator {
 	it := &MapIterator{ref: ref, done: true, current: BoxedNull}
 	switch m := val.(type) {
+	case *TypedMap[int8]:
+		it.kind = mapIteratorI8
+		it.iter = reflect.ValueOf(m.entries).MapRange()
+	case *TypedMap[bool]:
+		it.kind = mapIteratorI1
+		it.iter = reflect.ValueOf(m.entries).MapRange()
 	case *TypedMap[int32]:
 		it.kind = mapIteratorI32
 		it.iter = reflect.ValueOf(m.entries).MapRange()
@@ -281,6 +295,10 @@ func (it *MapIterator) Next() bool {
 	}
 	it.done = false
 	switch it.kind {
+	case mapIteratorI8:
+		it.current = I8(int8(it.iter.Key().Int()))
+	case mapIteratorI1:
+		it.current = I1(it.iter.Key().Bool())
 	case mapIteratorI32:
 		it.current = I32(int32(it.iter.Key().Int()))
 	case mapIteratorI64:
@@ -381,6 +399,10 @@ func (t *MapType) Equals(other Type) bool {
 // formatKey renders a native map key through its boxed value's String form.
 func formatKey(k any) string {
 	switch v := k.(type) {
+	case int8:
+		return I8(v).String()
+	case bool:
+		return I1(v).String()
 	case int32:
 		return I32(v).String()
 	case int64:

@@ -815,6 +815,12 @@ func (s *unmarshalState) value(val types.Value, dst reflect.Value) error {
 
 func (s *unmarshalState) elems(value types.Value) ([]types.Value, error) {
 	switch v := value.(type) {
+	case types.TypedArray[bool]:
+		out := make([]types.Value, len(v))
+		for idx, elem := range v {
+			out[idx] = types.I1(elem)
+		}
+		return out, nil
 	case types.TypedArray[int8]:
 		out := make([]types.Value, len(v))
 		for idx, elem := range v {
@@ -966,6 +972,12 @@ func (m *codec) marshalArray(elem *marshalPlan) marshaler {
 	arrayType := types.NewArrayType(elemVM)
 	return func(s *marshalState, v reflect.Value) (types.Value, error) {
 		switch elemKind {
+		case reflect.Bool:
+			out := make(types.TypedArray[bool], v.Len())
+			for idx := range out {
+				out[idx] = v.Index(idx).Bool()
+			}
+			return out, nil
 		case reflect.Int8:
 			out := make(types.TypedArray[int8], v.Len())
 			for idx := range out {
@@ -1031,6 +1043,32 @@ func (m *codec) marshalMap(mt *types.MapType) marshaler {
 	return func(s *marshalState, v reflect.Value) (types.Value, error) {
 		out := types.NewMapForType(mt, v.Len())
 		switch m := out.(type) {
+		case *types.TypedMap[int8]:
+			iter := v.MapRange()
+			for iter.Next() {
+				key, err := s.boxAs(iter.Key(), mt.Key)
+				if err != nil {
+					return nil, fmt.Errorf("map key: %w", err)
+				}
+				value, err := s.boxAs(iter.Value(), mt.Elem)
+				if err != nil {
+					return nil, fmt.Errorf("map value: %w", err)
+				}
+				m.Set(key.I8(), value)
+			}
+		case *types.TypedMap[bool]:
+			iter := v.MapRange()
+			for iter.Next() {
+				key, err := s.boxAs(iter.Key(), mt.Key)
+				if err != nil {
+					return nil, fmt.Errorf("map key: %w", err)
+				}
+				value, err := s.boxAs(iter.Value(), mt.Elem)
+				if err != nil {
+					return nil, fmt.Errorf("map value: %w", err)
+				}
+				m.Set(key.Bool(), value)
+			}
 		case *types.TypedMap[int32]:
 			iter := v.MapRange()
 			for iter.Next() {
@@ -1387,6 +1425,10 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 	return func(s *unmarshalState, src types.Value, dst reflect.Value) error {
 		size := 0
 		switch m := src.(type) {
+		case *types.TypedMap[int8]:
+			size = m.Len()
+		case *types.TypedMap[bool]:
+			size = m.Len()
 		case *types.TypedMap[int32]:
 			size = m.Len()
 		case *types.TypedMap[int64]:
@@ -1419,6 +1461,24 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 			out.SetMapIndex(k, v)
 		}
 		switch m := src.(type) {
+		case *types.TypedMap[int8]:
+			m.Range(func(key int8, value types.Boxed) {
+				elemValue, err := s.m.resolve(s.i, value)
+				if err != nil {
+					mapErr = fmt.Errorf("map value: %w", err)
+					return
+				}
+				set(types.I8(key), elemValue)
+			})
+		case *types.TypedMap[bool]:
+			m.Range(func(key bool, value types.Boxed) {
+				elemValue, err := s.m.resolve(s.i, value)
+				if err != nil {
+					mapErr = fmt.Errorf("map value: %w", err)
+					return
+				}
+				set(types.I1(key), elemValue)
+			})
 		case *types.TypedMap[int32]:
 			m.Range(func(key int32, value types.Boxed) {
 				elemValue, err := s.m.resolve(s.i, value)

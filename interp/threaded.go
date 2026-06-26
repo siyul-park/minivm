@@ -2626,6 +2626,23 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 		}
 		switch typ.ElemKind {
+		case types.KindI1:
+			return func(i *Interpreter) {
+				if i.sp < 1 {
+					panic(ErrStackUnderflow)
+				}
+				size := int(i.stack[i.sp-1].I32())
+				if i.sp < size+1 {
+					panic(ErrStackUnderflow)
+				}
+				val := make(types.TypedArray[bool], size)
+				for j := 0; j < size; j++ {
+					val[j] = i.stack[i.sp-size-j-1].Bool()
+				}
+				i.sp -= size
+				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
+				i.fr.ip += 3
+			}
 		case types.KindI8:
 			return func(i *Interpreter) {
 				if i.sp < 1 {
@@ -2746,6 +2763,16 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 		}
 		switch typ.ElemKind {
+		case types.KindI1:
+			return func(i *Interpreter) {
+				if i.sp < 1 {
+					panic(ErrStackUnderflow)
+				}
+				size := i.stack[i.sp-1].I32()
+				val := make(types.TypedArray[bool], size)
+				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
+				i.fr.ip += 3
+			}
 		case types.KindI8:
 			return func(i *Interpreter) {
 				if i.sp < 1 {
@@ -2819,6 +2846,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			var n int32
 			switch arr := i.unbox(i.stack[i.sp-1]).(type) {
+			case types.TypedArray[bool]:
+				n = int32(len(arr))
 			case types.TypedArray[int8]:
 				n = int32(len(arr))
 			case types.TypedArray[int32]:
@@ -2852,6 +2881,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			addr := ref.Ref()
 			var val types.Boxed
 			switch arr := i.heap[addr].(type) {
+			case types.TypedArray[bool]:
+				if idx < 0 || idx >= len(arr) {
+					panic(ErrIndexOutOfRange)
+				}
+				val = types.BoxI1(arr[idx])
 			case types.TypedArray[int8]:
 				if idx < 0 || idx >= len(arr) {
 					panic(ErrIndexOutOfRange)
@@ -2907,6 +2941,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			addr := ref.Ref()
 			switch arr := i.heap[addr].(type) {
+			case types.TypedArray[bool]:
+				if idx < 0 || idx >= len(arr) {
+					panic(ErrIndexOutOfRange)
+				}
+				arr[idx] = val.Bool()
 			case types.TypedArray[int8]:
 				if idx < 0 || idx >= len(arr) {
 					panic(ErrIndexOutOfRange)
@@ -2962,6 +3001,14 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			addr := ref.Ref()
 			switch arr := i.heap[addr].(type) {
+			case types.TypedArray[bool]:
+				if idx < 0 || idx+size > len(arr) {
+					panic(ErrIndexOutOfRange)
+				}
+				v := val.Bool()
+				for k := idx; k < idx+size; k++ {
+					arr[k] = v
+				}
 			case types.TypedArray[int8]:
 				if idx < 0 || idx+size > len(arr) {
 					panic(ErrIndexOutOfRange)
@@ -3037,6 +3084,11 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			addr := ref.Ref()
 			switch arr := i.heap[addr].(type) {
+			case types.TypedArray[bool]:
+				if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
+					panic(ErrIndexOutOfRange)
+				}
+				copy(arr[dst:dst+size], arr[src:src+size])
 			case types.TypedArray[int8]:
 				if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
 					panic(ErrIndexOutOfRange)
@@ -3304,6 +3356,16 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				key := i.stack[base+j*2]
 				value := i.stack[base+j*2+1]
 				switch m := m.(type) {
+				case *types.TypedMap[int8]:
+					old, ok := m.Set(key.I8(), value)
+					if ok {
+						i.releaseBox(old)
+					}
+				case *types.TypedMap[bool]:
+					old, ok := m.Set(key.Bool(), value)
+					if ok {
+						i.releaseBox(old)
+					}
 				case *types.TypedMap[int32]:
 					old, ok := m.Set(key.I32(), value)
 					if ok {
@@ -3423,6 +3485,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			addr := ref.Ref()
 			n := 0
 			switch m := i.heap[addr].(type) {
+			case *types.TypedMap[int8]:
+				n = m.Len()
+			case *types.TypedMap[bool]:
+				n = m.Len()
 			case *types.TypedMap[int32]:
 				n = m.Len()
 			case *types.TypedMap[int64]:
@@ -3455,6 +3521,20 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			addr := ref.Ref()
 			var result types.Boxed
 			switch m := i.heap[addr].(type) {
+			case *types.TypedMap[int8]:
+				value, ok := m.Get(key.I8())
+				if ok {
+					result = value
+				} else {
+					result = m.Zero
+				}
+			case *types.TypedMap[bool]:
+				value, ok := m.Get(key.Bool())
+				if ok {
+					result = value
+				} else {
+					result = m.Zero
+				}
 			case *types.TypedMap[int32]:
 				value, ok := m.Get(key.I32())
 				if ok {
@@ -3549,6 +3629,16 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			var result types.Boxed
 			var found bool
 			switch m := i.heap[addr].(type) {
+			case *types.TypedMap[int8]:
+				result, found = m.Get(key.I8())
+				if !found {
+					result = m.Zero
+				}
+			case *types.TypedMap[bool]:
+				result, found = m.Get(key.Bool())
+				if !found {
+					result = m.Zero
+				}
 			case *types.TypedMap[int32]:
 				result, found = m.Get(key.I32())
 				if !found {
@@ -3635,6 +3725,16 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			addr := ref.Ref()
 			switch m := i.heap[addr].(type) {
+			case *types.TypedMap[int8]:
+				old, ok := m.Set(key.I8(), value)
+				if ok {
+					i.releaseBox(old)
+				}
+			case *types.TypedMap[bool]:
+				old, ok := m.Set(key.Bool(), value)
+				if ok {
+					i.releaseBox(old)
+				}
 			case *types.TypedMap[int32]:
 				old, ok := m.Set(key.I32(), value)
 				if ok {
@@ -3721,6 +3821,16 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			addr := ref.Ref()
 			switch m := i.heap[addr].(type) {
+			case *types.TypedMap[int8]:
+				old, ok := m.Delete(key.I8())
+				if ok {
+					i.releaseBox(old)
+				}
+			case *types.TypedMap[bool]:
+				old, ok := m.Delete(key.Bool())
+				if ok {
+					i.releaseBox(old)
+				}
 			case *types.TypedMap[int32]:
 				old, ok := m.Delete(key.I32())
 				if ok {
@@ -3801,6 +3911,14 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			addr := ref.Ref()
 			switch m := i.heap[addr].(type) {
+			case *types.TypedMap[int8]:
+				m.Clear(func(value types.Boxed) {
+					i.releaseBox(value)
+				})
+			case *types.TypedMap[bool]:
+				m.Clear(func(value types.Boxed) {
+					i.releaseBox(value)
+				})
 			case *types.TypedMap[int32]:
 				m.Clear(func(value types.Boxed) {
 					i.releaseBox(value)
@@ -3844,6 +3962,18 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			var keyType types.Type
 			var elems []types.Boxed
 			switch m := i.heap[addr].(type) {
+			case *types.TypedMap[int8]:
+				keyType = m.Typ.Key
+				elems = make([]types.Boxed, 0, m.Len())
+				m.Range(func(k int8, _ types.Boxed) {
+					elems = append(elems, types.BoxI8(k))
+				})
+			case *types.TypedMap[bool]:
+				keyType = m.Typ.Key
+				elems = make([]types.Boxed, 0, m.Len())
+				m.Range(func(k bool, _ types.Boxed) {
+					elems = append(elems, types.BoxI1(k))
+				})
 			case *types.TypedMap[int32]:
 				keyType = m.Typ.Key
 				elems = make([]types.Boxed, 0, m.Len())
@@ -3897,7 +4027,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			addr := ref.Ref()
 			switch i.heap[addr].(type) {
-			case *types.TypedMap[int32],
+			case *types.TypedMap[int8],
+				*types.TypedMap[bool],
+				*types.TypedMap[int32],
 				*types.TypedMap[int64],
 				*types.TypedMap[float32],
 				*types.TypedMap[float64],

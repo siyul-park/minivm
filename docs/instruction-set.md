@@ -279,12 +279,12 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `ARRAY_NEW` | `{2}` | `value count → array` | ◐ | Create typed array filled with `value`. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `ARRAY_NEW_DEFAULT` | `{2}` | `count → array` | ◐ | Create zero-initialized typed array. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `ARRAY_LEN` | `{}` | `array → i32` | ◐ | Push element count. JIT has native fast paths for VM arrays. |
-| `ARRAY_GET` | `{}` | `array index → value` | ◐ | Load element; trap `ErrIndexOutOfRange` on invalid index. JIT has native fast paths for `[]i8`, `[]i32`, `[]f32`, `[]f64`, and generic `[]ref`; `[]i64` falls back when boxing would be needed. |
+| `ARRAY_GET` | `{}` | `array index → value` | ◐ | Load element; trap `ErrIndexOutOfRange` on invalid index. JIT has native fast paths for `[]i1`, `[]i8`, `[]i32`, `[]f32`, `[]f64`, and generic `[]ref`; `[]i64` falls back when boxing would be needed. |
 | `ARRAY_SET` | `{}` | `array index value →` | ◐ | Store element. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `ARRAY_FILL` | `{}` | `array offset count value →` | ◐ | Fill range with repeated value. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `ARRAY_COPY` | `{}` | `dst dstOffset src srcOffset count →` | ◐ | Copy elements between arrays. JIT keeps framed entries by exiting locally to the threaded handler. |
 
-`[]i8` arrays (binary blobs) share these opcodes. `ARRAY_GET` returns a signed `i8` (`BoxI8`, `-128..127`); `ARRAY_SET`/`ARRAY_FILL` narrow via low-byte truncation (`int8(val.I32())`), accepting any `i32`-representation value. No overflow trap on narrowing — the storage cell holds raw bits. Mask `& 0xFF` for the unsigned `0..255` reading.
+`[]i8` arrays (binary blobs) share these opcodes. `ARRAY_GET` returns a signed `i8` (`BoxI8`, `-128..127`); `ARRAY_SET`/`ARRAY_FILL` narrow via low-byte truncation (`int8(val.I32())`), accepting any `i32`-representation value. No overflow trap on narrowing — the storage cell holds raw bits. Mask `& 0xFF` for the unsigned `0..255` reading. `[]i1` arrays use raw 1-byte `bool` cells: `ARRAY_GET` returns `BoxI1`; `ARRAY_SET`/`ARRAY_FILL` store `val.Bool()` (non-zero ⇒ true).
 
 ## Struct Operations
 
@@ -297,7 +297,7 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 
 ## Map Operations
 
-Map keys use primitive value identity for `i32`, `i64`, `f32`, and `f64`; all ref-typed keys use heap ref identity. Missing keys read as element zero value. `MAP_LOOKUP` also returns `I32(1)` for present and `I32(0)` for missing.
+Map keys use primitive value identity for `i1`, `i8`, `i32`, `i64`, `f32`, and `f64` (each with a dedicated `TypedMap`); all ref-typed keys use heap ref identity. Missing keys read as element zero value. `MAP_LOOKUP` also returns `I32(1)` for present and `I32(0)` for missing.
 
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|
