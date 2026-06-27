@@ -323,7 +323,8 @@ a round-trip: a direction the type does not implement returns
 Custom producer types can marshal to a heap value implementing
 `types.Iterator`. Bytecode consumes that value with `RESUME`, `CORO_DONE`, and
 `CORO_VALUE`, the same opcodes used for coroutine handles. An iterator yields
-one `types.Value` at a time from `Current`; if it retains heap refs, implement
+one `types.Value` at a time from `Current`; prefer an `iterator[T]` descriptor
+from `types.NewIteratorType` for its `Type()`. If it retains heap refs, implement
 `types.Traceable` so the collector can see its backing state and current value.
 
 ### External types — `WithConverter`

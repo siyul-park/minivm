@@ -41,7 +41,7 @@ var _ types.Iterator = (*testIterator)(nil)
 
 func (it *testIterator) Kind() types.Kind { return types.KindRef }
 
-func (it *testIterator) Type() types.Type { return types.TypeRef }
+func (it *testIterator) Type() types.Type { return types.NewIteratorType(types.TypeI32) }
 
 func (it *testIterator) String() string { return "test.iterator" }
 
@@ -2120,6 +2120,55 @@ var tests = []test{
 			program.WithConstants(types.String("foo")),
 		),
 		values: []types.Value{types.TypedArray[int32]("foo")},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.STRING_ITER),
+				instr.New(instr.CORO_VALUE),
+			},
+			program.WithConstants(types.String("a한")),
+		),
+		values: []types.Value{types.I32('a')},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.STRING_ITER),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.RESUME),
+				instr.New(instr.CORO_VALUE),
+			},
+			program.WithConstants(types.String("a한")),
+		),
+		values: []types.Value{types.I32('한')},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.STRING_ITER),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.RESUME),
+				instr.New(instr.CORO_DONE),
+			},
+			program.WithConstants(types.String("a")),
+		),
+		values: []types.Value{types.I1(true)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.STRING_ITER),
+				instr.New(instr.REF_TEST, 0),
+			},
+			program.WithConstants(types.String("a")),
+			program.WithTypes(types.NewIteratorType(types.TypeI32)),
+		),
+		values: []types.Value{types.I1(true)},
 	},
 	// --- array: ARRAY_NEW, ARRAY_NEW_DEFAULT, ARRAY_LEN, ARRAY_GET, ARRAY_SET, ARRAY_FILL ---
 	{

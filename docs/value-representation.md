@@ -178,7 +178,8 @@ Heap objects implement `types.Value`.
 | `*types.Struct` | `KindRef` | `*StructType` | `Value`, `Traceable` |
 | `*types.Map` | `KindRef` | `*MapType` | `Value`, `Traceable` |
 | `*types.MapI32`, `*types.MapI64`, `*types.MapF32`, `*types.MapF64` | `KindRef` | `*MapType` | `Value`, `Traceable` |
-| `*types.MapIterator` | `KindRef` | `TypeRef` | `Value`, `Traceable`, `Iterator` |
+| `*types.MapIterator` | `KindRef` | `iterator[K]` | `Value`, `Traceable`, `Iterator` |
+| `*types.StringIterator` | `KindRef` | `iterator[i32]` | `Value`, `Traceable`, `Iterator` |
 | `*types.Function` | `KindRef` | `*FunctionType` | `Value` |
 | `*types.Closure` | `KindRef` | `*FunctionType` | `Value`, `Traceable` |
 | `*interp.HostFunction` | `KindRef` | `*FunctionType` | `Value` |
@@ -204,7 +205,9 @@ slice to `1 + len(Upvals)` and never takes the lazy-nil path.
 VM value, and `Done()` reports exhaustion. Iterators that hold refs must also
 implement `Traceable` and report retained backing refs plus any current ref.
 `MapIterator` keeps its source map and current ref key live while it traverses
-without building a key array; it yields keys only.
+without building a key array; it yields keys only. `StringIterator` keeps its
+source string live and decodes one UTF-8 rune per step as `i32` without
+allocating a UTF-32 array.
 
 User-defined heap types add no new `Kind`: a custom value implements `types.Value` / `types.Type` and is `KindRef` like every heap object (implement `Traceable` if it holds refs, `io.Closer` to release native resources). `Zero` returns `BoxedNull` for `KindRef`, so a custom type's default is null until an opcode constructs it. Reference the type programmatically via `b.Type(t)` and marshal Go values with `WithConverter` / `ValueMarshaler`; reconstructing a custom type from a textual type string is not yet supported.
 
@@ -221,7 +224,7 @@ trap). Use `[]i8` for binary blobs; mask `& 0xFF` if you need the unsigned
 `TypedArray[bool]` (raw 1-byte cells); `ARRAY_GET` returns `BoxI1`, and
 `ARRAY_SET` / `ARRAY_FILL` store `val.Bool()` (non-zero ⇒ true).
 
-Use constructors for compound runtime types (`NewStructType`, `NewStruct`, `NewMapType`, `NewMap`, `NewMapWithCapacity`, `NewMapForType`). These constructors initialize cached metadata and internal storage used by interpreter hot paths. `NewMapForType` returns primitive-key specializations for `i1`, `i8`, `i32`, `i64`, `f32`, and `f64` (`i1`/`i8` use `TypedMap[bool]`/`TypedMap[int8]`); strings and all other ref-typed keys use generic `*types.Map` with heap ref identity keys.
+Use constructors for compound runtime types (`NewStructType`, `NewStruct`, `NewMapType`, `NewMap`, `NewMapWithCapacity`, `NewMapForType`, `NewIteratorType`). These constructors initialize cached metadata and internal storage used by interpreter hot paths. `NewMapForType` returns primitive-key specializations for `i1`, `i8`, `i32`, `i64`, `f32`, and `f64` (`i1`/`i8` use `TypedMap[bool]`/`TypedMap[int8]`); strings and all other ref-typed keys use generic `*types.Map` with heap ref identity keys.
 
 ## Dynamic (any) values
 

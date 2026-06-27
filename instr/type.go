@@ -234,6 +234,7 @@ var types = map[Opcode]Type{
 	STRING_GE: {Mnemonic: "string.ge", Pop: []Kind{KindRef, KindRef}, Push: []Kind{KindI1}},
 
 	STRING_ENCODE_UTF32: {Mnemonic: "string.encode_utf32", Pop: []Kind{KindRef}, Push: []Kind{KindRef}},
+	STRING_ITER:         {Mnemonic: "string.iter", Pop: []Kind{KindRef}, Push: []Kind{KindRef}},
 
 	ARRAY_NEW:         {Mnemonic: "array.new", Widths: []int{2}, Pop: []Kind{KindI32, KindAny}, Push: []Kind{KindRef}},
 	ARRAY_NEW_DEFAULT: {Mnemonic: "array.new_default", Widths: []int{2}, Pop: []Kind{KindI32}, Push: []Kind{KindRef}},

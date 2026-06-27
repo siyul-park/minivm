@@ -219,6 +219,7 @@ func TestTypeOf(t *testing.T) {
 		{opcode: STRING_GE},
 
 		{opcode: STRING_ENCODE_UTF32},
+		{opcode: STRING_ITER},
 
 		{opcode: ARRAY_NEW},
 		{opcode: ARRAY_NEW_DEFAULT},

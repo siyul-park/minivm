@@ -91,6 +91,11 @@ func TestParse(t *testing.T) {
 			want: New(REF_NEW),
 		},
 		{
+			name: "string.iter",
+			line: "string.iter",
+			want: New(STRING_ITER),
+		},
+		{
 			name: "br_table",
 			line: "br_table 0x02 0x0000 0x0001 0x0000",
 			want: New(BR_TABLE, 2, 0, 1, 0),

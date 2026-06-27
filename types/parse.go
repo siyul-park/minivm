@@ -9,7 +9,7 @@ import (
 
 // Parse parses a type string produced by Type.String().
 // Supported: "i32", "i64", "f32", "f64", "ref", "[]<elem>",
-// "map[key]elem", "func(params) returns", "struct {fields}".
+// "iterator[elem]", "map[key]elem", "func(params) returns", "struct {fields}".
 func Parse(s string) (Type, error) {
 	s = strings.TrimSpace(s)
 	switch s {
@@ -39,6 +39,9 @@ func Parse(s string) (Type, error) {
 		}
 		return NewArrayType(elem), nil
 	}
+	if strings.HasPrefix(s, "iterator[") {
+		return parseIteratorType(s)
+	}
 	if strings.HasPrefix(s, "map[") {
 		return parseMapType(s)
 	}
@@ -49,6 +52,17 @@ func Parse(s string) (Type, error) {
 		return parseStructType(s)
 	}
 	return nil, fmt.Errorf("unknown type: %q", s)
+}
+
+func parseIteratorType(s string) (*IteratorType, error) {
+	if !strings.HasSuffix(s, "]") || len(s) == len("iterator[]") {
+		return nil, fmt.Errorf("invalid iterator type: %q", s)
+	}
+	elem, err := Parse(s[len("iterator[") : len(s)-1])
+	if err != nil {
+		return nil, fmt.Errorf("iterator elem type: %w", err)
+	}
+	return NewIteratorType(elem), nil
 }
 
 func parseMapType(s string) (*MapType, error) {

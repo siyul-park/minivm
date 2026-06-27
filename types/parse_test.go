@@ -28,6 +28,8 @@ func TestParse(t *testing.T) {
 		{"map[i32]string", NewMapType(TypeI32, TypeString), false},
 		{"map[string][]i32", NewMapType(TypeString, NewArrayType(TypeI32)), false},
 		{"map[[]i32]f64", NewMapType(NewArrayType(TypeI32), TypeF64), false},
+		{"iterator[i32]", NewIteratorType(TypeI32), false},
+		{"iterator[map[string]i32]", NewIteratorType(NewMapType(TypeString, TypeI32)), false},
 		{"func()", &FunctionType{}, false},
 		{"func(i32) i64", &FunctionType{Params: []Type{TypeI32}, Returns: []Type{TypeI64}}, false},
 		{"func(i32, f64) i32", &FunctionType{Params: []Type{TypeI32, TypeF64}, Returns: []Type{TypeI32}}, false},
@@ -35,6 +37,8 @@ func TestParse(t *testing.T) {
 		{"struct {i32; f64}", NewStructType(NewStructField(TypeI32), NewStructField(TypeF64)), false},
 		{"map[]i32", nil, true},
 		{"map[i32]", nil, true},
+		{"iterator[]", nil, true},
+		{"iterator[i32", nil, true},
 		{"bad", nil, true},
 	}
 

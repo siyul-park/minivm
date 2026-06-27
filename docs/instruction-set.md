@@ -273,6 +273,7 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `STRING_CONCAT` | `{}` | `a b → string` | ⬜ | Concatenate strings. |
 | `STRING_EQ` … `STRING_GE` | `{}` | `a b → i32` | ⬜ | Lexicographic comparisons. |
 | `STRING_ENCODE_UTF32` | `{}` | `string → array` | ⬜ | Encode string as UTF-32 codepoints. |
+| `STRING_ITER` | `{}` | `string → iterator[i32]` | ⬜ | Create a lazy codepoint iterator over the string, advance it to the first rune, and transfer string ownership into the iterator. Invalid UTF-8 yields U+FFFD following Go UTF-8 decoding. |
 
 ## Array Operations
 
@@ -317,11 +318,11 @@ Map keys use primitive value identity for `i1`, `i8`, `i32`, `i64`, `f32`, and `
 | `MAP_DELETE` | `{}` | `map key →` | ◐ | Delete entry; missing key is a no-op. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `MAP_CLEAR` | `{}` | `map →` | ◐ | Delete all entries. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `MAP_KEYS` | `{}` | `map → array` | ⬜ | Snapshot keys into a new `[]K` array (`K` = map key type), in unspecified order. Enables guest map iteration with `ARRAY_LEN`/`ARRAY_GET` + `MAP_GET`. |
-| `MAP_ITER` | `{}` | `map → iterator` | ⬜ | Create a `types.MapIterator` over the map without snapshotting keys, advance it to the first key, and transfer map ownership into the iterator. The iterator yields keys only; use `MAP_GET` when the value is needed. Iteration order and mutation visibility are unspecified, matching Go map range semantics. |
+| `MAP_ITER` | `{}` | `map[K]V → iterator[K]` | ⬜ | Create a `types.MapIterator` over the map without snapshotting keys, advance it to the first key, and transfer map ownership into the iterator. The iterator yields keys only; use `MAP_GET` when the value is needed. Iteration order and mutation visibility are unspecified, matching Go map range semantics. |
 
 ## Coroutines
 
-A function whose body contains `YIELD` is a coroutine-function: its `CALL` allocates a `Coroutine` handle and runs the body until the first `YIELD` (suspend) or `RETURN` (finish), yielding the handle instead of plain returns. `RESUME` re-enters a suspended handle. A `YIELD` in the entry frame (`fp == 1`) is an interpreter escape: it panics the private `errYield`, `Run` returns the exported `ErrYield` without losing state, and the next `Run` resumes after the `YIELD`. `RESUME`, `CORO_DONE`, and `CORO_VALUE` also accept custom `types.Iterator` heap values; iterators are single-value producers whose `Current` value is read with `CORO_VALUE`.
+A function whose body contains `YIELD` is a coroutine-function: its `CALL` allocates a `Coroutine` handle and runs the body until the first `YIELD` (suspend) or `RETURN` (finish), yielding the handle instead of plain returns. `RESUME` re-enters a suspended handle. A `YIELD` in the entry frame (`fp == 1`) is an interpreter escape: it panics the private `errYield`, `Run` returns the exported `ErrYield` without losing state, and the next `Run` resumes after the `YIELD`. `RESUME`, `CORO_DONE`, and `CORO_VALUE` also accept custom `types.Iterator` heap values; iterators are single-value producers whose `Current` value is read with `CORO_VALUE`. Native iterator types use `iterator[T]` descriptors, where `T` is the produced value type.
 
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|

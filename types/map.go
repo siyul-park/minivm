@@ -42,6 +42,7 @@ type MapType struct {
 type MapIterator struct {
 	iter    *reflect.MapIter
 	current Value
+	typ     Type
 	ref     Ref
 	kind    mapIteratorKind
 	done    bool
@@ -109,27 +110,34 @@ func NewMapForType(typ *MapType, capacity int) Value {
 }
 
 func NewMapIterator(ref Ref, val Value) *MapIterator {
-	it := &MapIterator{ref: ref, done: true, current: BoxedNull}
+	it := &MapIterator{typ: NewIteratorType(TypeRef), ref: ref, done: true, current: BoxedNull}
 	switch m := val.(type) {
 	case *TypedMap[int8]:
+		it.typ = NewIteratorType(m.Typ.Key)
 		it.kind = mapIteratorI8
 		it.iter = reflect.ValueOf(m.entries).MapRange()
 	case *TypedMap[bool]:
+		it.typ = NewIteratorType(m.Typ.Key)
 		it.kind = mapIteratorI1
 		it.iter = reflect.ValueOf(m.entries).MapRange()
 	case *TypedMap[int32]:
+		it.typ = NewIteratorType(m.Typ.Key)
 		it.kind = mapIteratorI32
 		it.iter = reflect.ValueOf(m.entries).MapRange()
 	case *TypedMap[int64]:
+		it.typ = NewIteratorType(m.Typ.Key)
 		it.kind = mapIteratorI64
 		it.iter = reflect.ValueOf(m.entries).MapRange()
 	case *TypedMap[float32]:
+		it.typ = NewIteratorType(m.Typ.Key)
 		it.kind = mapIteratorF32
 		it.iter = reflect.ValueOf(m.entries).MapRange()
 	case *TypedMap[float64]:
+		it.typ = NewIteratorType(m.Typ.Key)
 		it.kind = mapIteratorF64
 		it.iter = reflect.ValueOf(m.entries).MapRange()
 	case *Map:
+		it.typ = NewIteratorType(m.Typ.Key)
 		it.kind = mapIteratorGeneric
 		it.iter = reflect.ValueOf(m.entries).MapRange()
 	}
@@ -283,7 +291,7 @@ func (m *Map) Refs() []Ref {
 
 func (it *MapIterator) Kind() Kind { return KindRef }
 
-func (it *MapIterator) Type() Type { return TypeRef }
+func (it *MapIterator) Type() Type { return it.typ }
 
 func (it *MapIterator) String() string { return "map.iterator" }
 

@@ -2,6 +2,7 @@ package types
 
 import (
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 )
@@ -29,6 +30,45 @@ func TestString_String(t *testing.T) {
 			require.Equal(t, tt.str, tt.val.String())
 		})
 	}
+}
+
+func TestStringIterator(t *testing.T) {
+	t.Run("ascii and multibyte", func(t *testing.T) {
+		iter := NewStringIterator(Ref(3), String("a한"))
+
+		require.True(t, iter.Done())
+		require.Equal(t, NewIteratorType(TypeI32), iter.Type())
+		require.True(t, iter.Next())
+		require.Equal(t, I32('a'), iter.Current())
+		require.True(t, iter.Next())
+		require.Equal(t, I32('한'), iter.Current())
+		require.False(t, iter.Next())
+		require.True(t, iter.Done())
+		require.Equal(t, BoxedNull, iter.Current())
+	})
+
+	t.Run("empty", func(t *testing.T) {
+		iter := NewStringIterator(Ref(3), String(""))
+
+		require.False(t, iter.Next())
+		require.True(t, iter.Done())
+		require.Equal(t, BoxedNull, iter.Current())
+	})
+
+	t.Run("invalid utf8", func(t *testing.T) {
+		iter := NewStringIterator(Ref(3), String(string([]byte{0xff, 'a'})))
+
+		require.True(t, iter.Next())
+		require.Equal(t, I32(utf8.RuneError), iter.Current())
+		require.True(t, iter.Next())
+		require.Equal(t, I32('a'), iter.Current())
+	})
+
+	t.Run("refs", func(t *testing.T) {
+		iter := NewStringIterator(Ref(3), String("a"))
+
+		require.Equal(t, []Ref{3}, iter.Refs())
+	})
 }
 
 func TestStringType_Cast(t *testing.T) {

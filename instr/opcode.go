@@ -275,6 +275,8 @@ const (
 	ERROR_NEW
 	ERROR_GET
 	ERROR_CODE
+
+	STRING_ITER
 )
 
 // EXT is the reserved prefix opcode for user-registered extension instructions.

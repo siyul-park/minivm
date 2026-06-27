@@ -528,6 +528,7 @@ func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
 	// are pure heap reads (handle in, value out) and stay recordable like
 	// ARRAY_GET/STRUCT_GET; the JIT lowers them directly.
 	case instr.STRING_NEW_UTF32,
+		instr.STRING_ITER,
 		instr.ARRAY_NEW,
 		instr.ARRAY_NEW_DEFAULT,
 		instr.ARRAY_SET,

@@ -125,6 +125,7 @@ func TestMapIterator(t *testing.T) {
 
 		iter := NewMapIterator(Ref(7), m)
 		require.True(t, iter.Done())
+		require.Equal(t, NewIteratorType(TypeI64), iter.Type())
 		require.True(t, iter.Next())
 		require.Equal(t, I64(1<<50), iter.Current())
 		require.False(t, iter.Next())
@@ -137,6 +138,7 @@ func TestMapIterator(t *testing.T) {
 		m.Set(MapKey{Kind: KindRef, Bits: 9}, MapEntry{Key: BoxRef(9), Value: BoxI32(2)})
 
 		iter := NewMapIterator(Ref(7), m)
+		require.Equal(t, NewIteratorType(TypeString), iter.Type())
 		require.True(t, iter.Next())
 		require.Equal(t, BoxRef(9), iter.Current())
 		require.Equal(t, []Ref{7, 9}, iter.Refs())

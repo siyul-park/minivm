@@ -2611,6 +2611,27 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
+	instr.STRING_ITER: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			ref := i.stack[i.sp-1]
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			val, ok := i.heap[addr].(types.String)
+			if !ok {
+				panic(ErrTypeMismatch)
+			}
+			iter := types.NewStringIterator(types.Ref(addr), val)
+			iter.Next()
+			i.stack[i.sp-1] = types.BoxRef(i.keep(iter))
+			i.fr.ip++
+		}
+	},
 	instr.ARRAY_NEW: func(c *threadedCompiler) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
