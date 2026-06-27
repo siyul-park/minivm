@@ -26,3 +26,10 @@ func TestWithTypes(t *testing.T) {
 	require.Equal(t, types.TypeI32, prog.Types[0])
 	require.Equal(t, types.TypeI64, prog.Types[1])
 }
+
+func TestWithLocals(t *testing.T) {
+	prog := New(nil, WithLocals(types.TypeI32, types.TypeI64))
+	require.Len(t, prog.Locals, 2)
+	require.Equal(t, types.TypeI32, prog.Locals[0])
+	require.Equal(t, types.TypeI64, prog.Locals[1])
+}

@@ -105,6 +105,24 @@ func TestVerify(t *testing.T) {
 		require.NoError(t, Verify(prog))
 	})
 
+	t.Run("valid top-level locals", func(t *testing.T) {
+		prog := New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.DROP),
+		}, WithLocals(types.TypeI32))
+		require.NoError(t, Verify(prog))
+	})
+
+	t.Run("top-level local out of range", func(t *testing.T) {
+		prog := New([]instr.Instruction{
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.DROP),
+		})
+		require.ErrorIs(t, Verify(prog), ErrIndexOutOfRange)
+	})
+
 	t.Run("stack underflow", func(t *testing.T) {
 		prog := New([]instr.Instruction{instr.New(instr.I32_ADD)})
 		require.ErrorIs(t, Verify(prog), ErrStackUnderflow)

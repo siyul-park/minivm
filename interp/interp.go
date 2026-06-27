@@ -35,6 +35,7 @@ type Interpreter struct {
 	code      [][]func(*Interpreter)
 	coros     []bool
 	handlers  [][]instr.Handler
+	module    *types.Function
 	exts      []Extension
 	dynamic   map[int]bool
 
@@ -296,8 +297,10 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		precise:   opt.tick == 1,
 	}
 
+	i.module = &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
+
 	i.instrs[0] = prog.Code
-	i.code[0] = c.Compile(prog.Code, nil)
+	i.code[0] = c.Compile(prog.Code, i.module.LocalKinds())
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
 			i.bind(i.constants[j].Ref(), fn, false)
@@ -319,6 +322,10 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 
 	i.frames[0].code = i.code[0]
 	i.frames[0].bp = i.sp
+	if locals := len(prog.Locals); locals > 0 {
+		clear(i.stack[i.sp : i.sp+locals])
+		i.sp += locals
+	}
 	i.fp = 1
 	i.fr = &i.frames[0]
 	i.retain(0)
@@ -777,7 +784,7 @@ func (i *Interpreter) hot(addr int) []int {
 // addr does not point at a function.
 func (i *Interpreter) function(addr int) (*types.Function, bool) {
 	if addr == 0 {
-		return &types.Function{Code: i.instrs[0]}, true
+		return i.module, true
 	}
 	if addr <= 0 || addr >= len(i.heap) {
 		return nil, false

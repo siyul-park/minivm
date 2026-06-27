@@ -95,6 +95,8 @@ Offsets are signed 16-bit values encoded little-endian. `BR 5` skips 5 bytes pas
 
 ## Variables
 
+`LOCAL_*` address the current frame's slots by u8 index. The entry (module) frame has slots too when the program declares `Program.Locals` (`program.WithLocals` / `Builder.Locals`): top-level code then uses frame locals for scratch instead of reserving globals, and interpreter, fusion, and JIT treat them identically to function locals.
+
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|
 | `GLOBAL_GET` | `{2}` | `→ x` | ◐ | Push global at u16 index. JIT supports in-range numeric, dynamic `ref`, and guarded ref-counted heap values; heap-promoted `i64` exits to threaded execution. |

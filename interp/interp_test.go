@@ -4255,6 +4255,73 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("top-level locals round-trip", func(t *testing.T) {
+		// The entry frame carries declared local slots, so module-level code reads
+		// and writes i32, i64 (heap-boxed), and ref locals without any global.
+		for _, mode := range modes {
+			mode := mode
+			t.Run(mode.name, func(t *testing.T) {
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 7),
+					instr.New(instr.LOCAL_SET, 0),
+					instr.New(instr.I64_CONST, 42),
+					instr.New(instr.LOCAL_SET, 1),
+					instr.New(instr.REF_NULL),
+					instr.New(instr.LOCAL_SET, 2),
+					instr.New(instr.LOCAL_GET, 2),
+					instr.New(instr.REF_IS_NULL),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I32_ADD),
+					instr.New(instr.LOCAL_GET, 1),
+				}, program.WithLocals(types.TypeI32, types.TypeI64, types.TypeRef))
+				require.NoError(t, program.Verify(prog))
+
+				i := New(prog, mode.opts...)
+				defer i.Close()
+
+				require.NoError(t, i.Run(context.Background()))
+				hi, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I64(42), hi)
+				lo, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I32(8), lo)
+			})
+		}
+	})
+
+	t.Run("top-level local loop", func(t *testing.T) {
+		// A hot module loop accumulating into entry-frame locals exercises the
+		// threaded LOCAL_* fusion and the JIT's OSR over the entry root; both must
+		// reach the same sum 0+1+...+99 = 4950.
+		for _, mode := range modes {
+			mode := mode
+			t.Run(mode.name, func(t *testing.T) {
+				b := program.NewBuilder()
+				b.Locals(types.TypeI32, types.TypeI32)
+				loop := b.Label()
+				b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0).
+					Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1).
+					Bind(loop).
+					Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0).
+					Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1).
+					Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 100).Emit(instr.I32_LT_S).BrIf(loop).
+					Emit(instr.LOCAL_GET, 0)
+				prog, err := b.Build()
+				require.NoError(t, err)
+				require.NoError(t, program.Verify(prog))
+
+				i := New(prog, mode.opts...)
+				defer i.Close()
+
+				require.NoError(t, i.Run(context.Background()))
+				v, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I32(4950), v)
+			})
+		}
+	})
+
 	t.Run("custom iterator resumes through coroutine opcodes", func(t *testing.T) {
 		for _, mode := range modes {
 			mode := mode

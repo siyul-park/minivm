@@ -214,10 +214,10 @@ Unlike the peephole passes, this pass changes code length: it uses the `rewriter
 (leaving the function untouched) if a branch would no longer reach within its
 signed 16-bit operand. Allocating a local shifts the operand-stack base, so each
 handler's `Depth` grows by the number of locals added; new local indexes must
-stay below 256 (the 1-byte `LOCAL` operand). The top-level body (slot 0) compiles
-with no locals and cannot allocate, so only the load-from-home case applies there;
-its repaired code and handlers are written back to `prog.Code` and
-`prog.Handlers`.
+stay below 256 (the 1-byte `LOCAL` operand). The top-level body (slot 0) may read
+its declared `Program.Locals` but cannot allocate fresh ones — the write-back
+persists only code and handlers (`prog.Code`, `prog.Handlers`), not `prog.Locals` —
+so only the load-from-home case applies there.
 
 ## `ConstantDeduplicationPass`
 

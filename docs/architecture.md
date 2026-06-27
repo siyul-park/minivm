@@ -47,12 +47,13 @@ cycle. It inlines its own basic-block construction instead.
 ```go
 type Program struct {
     Code      []byte
+    Locals    []types.Type
     Constants []types.Value
     Types     []types.Type
 }
 ```
 
-`Code` holds top-level bytecode. `Constants` hold functions, strings, arrays, and other values. `Types` holds descriptors for `ARRAY_NEW` and `STRUCT_NEW`. `*types.Function` constants have their own `Code []byte`. `interp.New()` compiles function constants into dispatch slots keyed by their heap ref; slot `0` is program code.
+`Code` holds top-level bytecode. `Locals` declares the entry frame's local scratch slots, so module-level code addresses temporaries with `LOCAL_*` exactly as a function does — a compiler keeps top-level temporaries in frame locals instead of reserving globals. `Constants` hold functions, strings, arrays, and other values. `Types` holds descriptors for `ARRAY_NEW` and `STRUCT_NEW`. `*types.Function` constants have their own `Code []byte`. `interp.New()` compiles function constants into dispatch slots keyed by their heap ref; slot `0` is program code, framed with `Locals` reserved on the stack at entry.
 
 `program.Builder` is the high-level way to author a `Program`. It wraps an `instr.Builder` (label-patching assembler: branch to a `Label`, offsets back-patched on `Build`) and interned constant/type pools (`Const`/`ConstGet`/`Type` dedup by `String()` and return a stable index), so authors never hand-compute branch byte offsets or pool indices. `types.FunctionBuilder` carries the same `Label`/`Bind`/`Br`/`BrIf`/`BrTable` methods for function bodies. Branch targets are PC-relative signed-i16 byte offsets relative to the end of the branch instruction (see `interp/threaded.go`); `instr.Builder.Assemble` is the single source of that encoding.
 

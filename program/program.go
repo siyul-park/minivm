@@ -11,6 +11,7 @@ import (
 
 type Program struct {
 	Code      []byte
+	Locals    []types.Type
 	Constants []types.Value
 	Types     []types.Type
 	Handlers  []instr.Handler
@@ -25,6 +26,15 @@ func WithConstants(consts ...types.Value) func(*Program) {
 func WithTypes(types ...types.Type) func(*Program) {
 	return func(p *Program) {
 		p.Types = types
+	}
+}
+
+// WithLocals declares the entry frame's local scratch slots, addressable by
+// LOCAL_* at the top level just as a function's locals are. It lets a compiler
+// hold module-level temporaries in frame locals instead of reserving globals.
+func WithLocals(locals ...types.Type) func(*Program) {
+	return func(p *Program) {
+		p.Locals = locals
 	}
 }
 
@@ -46,6 +56,10 @@ func New(instrs []instr.Instruction, options ...func(*Program)) *Program {
 func (p *Program) String() string {
 	var sb strings.Builder
 	sb.WriteString(instr.Format(p.Code))
+	if len(p.Locals) > 0 {
+		sb.WriteString("\n")
+		writeIndexed(&sb, p.Locals)
+	}
 	if len(p.Constants) > 0 {
 		sb.WriteString("\n")
 		writeIndexed(&sb, p.Constants)

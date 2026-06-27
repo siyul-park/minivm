@@ -17,7 +17,8 @@ import (
 // replaced by a load of a live local home or a freshly captured slot, and
 // cross-block recomputations (at control-flow merges and inside loops) are
 // captured at every definition with LOCAL_TEE and reloaded at each use. The
-// top-level body (slot 0) compiles with no locals and cannot allocate, so only
+// top-level body (slot 0) may read its declared Program.Locals but cannot
+// allocate fresh ones (the write-back persists only code and handlers), so only
 // the load-from-existing-home case applies there.
 type GlobalValueNumberingPass struct{}
 

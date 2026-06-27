@@ -105,7 +105,7 @@ func Verify(prog *Program, opts ...Option) error {
 		opt(cfg)
 	}
 
-	top := &types.Function{Typ: &types.FunctionType{}, Code: prog.Code, Handlers: prog.Handlers}
+	top := &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
 	if err := newChecker(prog, cfg, 0, top).run(); err != nil {
 		return err
 	}

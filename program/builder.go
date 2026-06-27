@@ -14,6 +14,7 @@ type Builder struct {
 	code      *instr.Builder
 	constants []types.Value
 	typs      []types.Type
+	locals    []types.Type
 
 	constIndex map[string]int
 	typeIndex  map[string]int
@@ -114,6 +115,13 @@ func (b *Builder) Type(t types.Type) int {
 	return idx
 }
 
+// Locals declares the entry frame's local scratch slots in order; their
+// positions are the indices used by LOCAL_* at the top level.
+func (b *Builder) Locals(ts ...types.Type) *Builder {
+	b.locals = append(b.locals, ts...)
+	return b
+}
+
 // Build resolves every branch and returns the assembled program with its
 // constant and type pools.
 func (b *Builder) Build() (*Program, error) {
@@ -123,6 +131,9 @@ func (b *Builder) Build() (*Program, error) {
 	}
 
 	var opts []func(*Program)
+	if len(b.locals) > 0 {
+		opts = append(opts, WithLocals(b.locals...))
+	}
 	if len(b.constants) > 0 {
 		opts = append(opts, WithConstants(b.constants...))
 	}
