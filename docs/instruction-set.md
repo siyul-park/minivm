@@ -347,20 +347,24 @@ ones that enclose them so the table stays innermost-first.
 from the throw site outward (using the call site, `ip-1`, in suspended callers),
 discards the frames and operands above the handler's `Depth`, pushes the thrown
 value, and resumes at `Catch`. Any value may be thrown; `types.Error` is the
-canonical payload and implements Go's `error` interface. Runtime traps (e.g.
-`ErrDivideByZero`) and host-function Go errors are caught the same way: `Run`'s
-recover wraps them in a `types.Error` (preserving the original via `Unwrap` for
-`errors.Is`/`errors.As`) and delivers them to a covering handler. With no handler,
-a thrown `types.Error` surfaces directly through the returned `*RuntimeError`;
-any other value is wrapped under `ErrUncaughtException`.
+canonical payload and implements Go's `error` interface. It carries a numeric
+code, message, payload, and optional wrapped Go cause. Code `0` is unclassified;
+source-language codes should use `types.ErrorCodeUserBase` and above; VM traps
+use negative `interp.TrapCode*` codes. Runtime traps (e.g. `ErrDivideByZero`) and
+host-function Go errors are caught the same way: `Run`'s recover wraps them in a
+`types.Error` (preserving the original via `Unwrap` for `errors.Is`/`errors.As`)
+and delivers them to a covering handler. With no handler, a thrown `types.Error`
+surfaces directly through the returned `*RuntimeError`; any other value is
+wrapped under `ErrUncaughtException`.
 
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|
 | `THROW` | `{}` | `value → …` | ◐ | Pop and raise `value` to the nearest enclosing handler, or escape `Run` as an error when none covers the site. Terminator. JIT records an anchor-frame throw as a terminal deopt and lets the threaded handler land the exception. |
-| `ERROR_NEW` | `{}` | `payload → error` | ◐ | Wrap `payload` in a `types.Error` (message derived from a string payload's contents, else its rendered form); the payload reference transfers into the error. JIT records it as a terminal deopt so allocation stays threaded. |
+| `ERROR_NEW` | `{}` | `payload code → error` | ◐ | Wrap `payload` in a `types.Error` with `i32` code (message derived from a string payload's contents, else its rendered form); the payload reference transfers into the error. JIT records it as a terminal deopt so allocation stays threaded. |
 | `ERROR_GET` | `{}` | `error → payload` | ◐ | Push the `types.Error`'s payload and release the error. Traps `ErrTypeMismatch` if the operand is not an error. JIT has a native fast path for `*types.Error` behind an itab guard. |
+| `ERROR_CODE` | `{}` | `error → i32` | ◐ | Push the `types.Error`'s numeric code and release the error. Traps `ErrTypeMismatch` if the operand is not an error. JIT records it as a terminal deopt for now. |
 
-The threaded dispatcher still fuses common idioms in non-precise mode: a constant string load followed by `ERROR_NEW` builds the error in one dispatch, and `ERROR_NEW; THROW` constructs and raises in one.
+The threaded dispatcher still fuses common idioms in non-precise mode: a constant string load followed by `i32.const code; ERROR_NEW` builds the error in one dispatch, and `ERROR_NEW; THROW` constructs and raises in one.
 
 ## Extensions
 

@@ -440,6 +440,7 @@ register the same extensions in the same order (or share the `Registry`). The
 | Error | When |
 |---|---|
 | `RuntimeError` | guest execution failed; unwraps to the cause and carries innermost-first `Frames` |
+| `types.Error` | guest exception value with numeric code, message, payload, and optional wrapped Go cause |
 | `ErrHeapExhausted` | heap allocation cannot stay within `WithMaxHeap` |
 | `ErrMarshalCycle` | pointer graph contains a cycle |
 | `ErrUnsupportedMarshalType` | Go type cannot be converted (e.g. `chan`), or a custom type implements only one of `ValueMarshaler` / `ValueUnmarshaler` |
@@ -450,4 +451,7 @@ register the same extensions in the same order (or share the `Registry`). The
 Use `errors.Is(err, interp.ErrDivideByZero)` or `errors.Is(err,
 interp.ErrHeapExhausted)` for categories. Use `errors.As(err, &runtimeErr)` to
 read `RuntimeError.Frames`; each frame reports the function index and IP at the
-failure point.
+failure point. Use `interp.TrapCode(err)` or `errors.As(err, &typesErr)` with
+`typesErr.Code()` to map traps to source-language exceptions without matching
+rendered messages. Code `0` is unclassified; source-language codes should use
+`types.ErrorCodeUserBase` and above.

@@ -8804,6 +8804,7 @@ func TestInterpreter_Throw(t *testing.T) {
 		e, ok := v.(*types.Error)
 		require.True(t, ok)
 		require.ErrorIs(t, e, ErrDivideByZero)
+		require.Equal(t, TrapCodeDivideByZero, e.Code())
 	})
 
 	t.Run("host error is caught", func(t *testing.T) {
@@ -8833,6 +8834,7 @@ func TestInterpreter_Throw(t *testing.T) {
 		e, ok := v.(*types.Error)
 		require.True(t, ok)
 		require.Contains(t, e.Error(), "boom")
+		require.Equal(t, TrapCodeHostError, e.Code())
 	})
 
 	t.Run("propagates across call frames", func(t *testing.T) {
@@ -8891,6 +8893,7 @@ func TestInterpreter_Throw(t *testing.T) {
 		start, end, catch := b.Label(), b.Label(), b.Label()
 		b.Bind(start)
 		b.Emit(instr.CONST_GET, 0)
+		b.Emit(instr.I32_CONST, 0)
 		b.Emit(instr.ERROR_NEW)
 		b.Emit(instr.THROW)
 		b.Bind(end)
@@ -8909,6 +8912,23 @@ func TestInterpreter_Throw(t *testing.T) {
 		require.Equal(t, types.String("data"), v)
 	})
 
+	t.Run("error.code reads numeric code", func(t *testing.T) {
+		code := types.ErrorCodeUserBase + 7
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.I32_CONST, uint64(uint32(code))),
+			instr.New(instr.ERROR_NEW),
+			instr.New(instr.ERROR_CODE),
+		}, program.WithConstants(types.String("data")))
+
+		i := New(prog)
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(code), v)
+	})
+
 	t.Run("uncaught throw surfaces as a runtime error", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
@@ -8920,11 +8940,14 @@ func TestInterpreter_Throw(t *testing.T) {
 		require.ErrorIs(t, err, ErrUncaughtException)
 		var re *RuntimeError
 		require.ErrorAs(t, err, &re)
+		require.Equal(t, TrapCodeUncaughtException, TrapCode(err))
 	})
 
 	t.Run("uncaught error value preserves its unwrap chain", func(t *testing.T) {
+		code := types.ErrorCodeUserBase + 9
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.I32_CONST, uint64(uint32(code))),
 			instr.New(instr.ERROR_NEW),
 			instr.New(instr.THROW),
 		}, program.WithConstants(types.String("kaboom")))
@@ -8934,6 +8957,8 @@ func TestInterpreter_Throw(t *testing.T) {
 		var e *types.Error
 		require.ErrorAs(t, err, &e)
 		require.Equal(t, "kaboom", e.Error())
+		require.Equal(t, code, e.Code())
+		require.Equal(t, code, TrapCode(err))
 	})
 
 	t.Run("jit lowers error.get in a hot loop", func(t *testing.T) {
@@ -8974,7 +8999,7 @@ func TestInterpreter_Throw(t *testing.T) {
 
 		threaded := New(prog, WithThreshold(-1))
 		defer threaded.Close()
-		errAddr, err := threaded.Alloc(types.NewError("one", types.BoxI32(1)))
+		errAddr, err := threaded.Alloc(types.NewError(types.ErrorCodeNone, "one", types.BoxI32(1)))
 		require.NoError(t, err)
 		threaded.globals = append(threaded.globals, types.BoxRef(errAddr))
 		require.NoError(t, threaded.Run(context.Background()))
@@ -8984,7 +9009,7 @@ func TestInterpreter_Throw(t *testing.T) {
 
 		jit := New(prog, WithTick(1), WithThreshold(1))
 		defer jit.Close()
-		errAddr, err = jit.Alloc(types.NewError("one", types.BoxI32(1)))
+		errAddr, err = jit.Alloc(types.NewError(types.ErrorCodeNone, "one", types.BoxI32(1)))
 		require.NoError(t, err)
 		jit.globals = append(jit.globals, types.BoxRef(errAddr))
 		require.NoError(t, jit.Run(context.Background()))
@@ -9032,7 +9057,7 @@ func TestInterpreter_Throw(t *testing.T) {
 		defer threaded.Close()
 		payload, err := threaded.Alloc(types.String("payload"))
 		require.NoError(t, err)
-		errAddr, err := threaded.Alloc(types.NewError("payload", types.BoxRef(payload)))
+		errAddr, err := threaded.Alloc(types.NewError(types.ErrorCodeNone, "payload", types.BoxRef(payload)))
 		require.NoError(t, err)
 		threaded.globals = append(threaded.globals, types.BoxRef(errAddr))
 		require.NoError(t, threaded.Run(context.Background()))
@@ -9045,7 +9070,7 @@ func TestInterpreter_Throw(t *testing.T) {
 		defer jit.Close()
 		payload, err = jit.Alloc(types.String("payload"))
 		require.NoError(t, err)
-		errAddr, err = jit.Alloc(types.NewError("payload", types.BoxRef(payload)))
+		errAddr, err = jit.Alloc(types.NewError(types.ErrorCodeNone, "payload", types.BoxRef(payload)))
 		require.NoError(t, err)
 		jit.globals = append(jit.globals, types.BoxRef(errAddr))
 		require.NoError(t, jit.Run(context.Background()))
@@ -9063,6 +9088,7 @@ func TestInterpreter_Throw(t *testing.T) {
 			Returns: []types.Type{types.TypeI32},
 		}).Emit(
 			instr.New(instr.I32_CONST, 42),
+			instr.New(instr.I32_CONST, 0),
 			instr.New(instr.ERROR_NEW),
 			instr.New(instr.ERROR_GET),
 			instr.New(instr.RETURN),
@@ -9229,6 +9255,7 @@ func TestInterpreter_Throw(t *testing.T) {
 		t.Run("error.new;throw fusion parity/"+mode.name, func(t *testing.T) {
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.I32_CONST, uint64(uint32(types.ErrorCodeUserBase+1))),
 				instr.New(instr.ERROR_NEW),
 				instr.New(instr.THROW),
 			})
@@ -9239,6 +9266,7 @@ func TestInterpreter_Throw(t *testing.T) {
 			require.ErrorAs(t, err, &e)
 			require.Equal(t, "7", e.Error())
 			require.Equal(t, types.BoxI32(7), e.Value())
+			require.Equal(t, types.ErrorCodeUserBase+1, e.Code())
 		})
 
 		t.Run("string;error.new fusion parity/"+mode.name, func(t *testing.T) {
@@ -9246,6 +9274,7 @@ func TestInterpreter_Throw(t *testing.T) {
 			start, end, catch := b.Label(), b.Label(), b.Label()
 			b.Bind(start)
 			b.Emit(instr.CONST_GET, 0)
+			b.Emit(instr.I32_CONST, uint64(uint32(types.ErrorCodeUserBase+2)))
 			b.Emit(instr.ERROR_NEW)
 			b.Emit(instr.THROW)
 			b.Bind(end)
@@ -9264,4 +9293,26 @@ func TestInterpreter_Throw(t *testing.T) {
 			require.Equal(t, types.String("x"), v)
 		})
 	}
+}
+
+func TestTrapCode(t *testing.T) {
+	t.Run("nil and control flow are unclassified", func(t *testing.T) {
+		require.Equal(t, types.ErrorCodeNone, TrapCode(nil))
+		require.Equal(t, types.ErrorCodeNone, TrapCode(ErrYield))
+	})
+
+	t.Run("maps interpreter sentinels", func(t *testing.T) {
+		require.Equal(t, TrapCodeDivideByZero, TrapCode(ErrDivideByZero))
+		require.Equal(t, TrapCodeHeapExhausted, TrapCode(fmt.Errorf("alloc: %w", ErrHeapExhausted)))
+	})
+
+	t.Run("prefers explicit error code", func(t *testing.T) {
+		code := types.ErrorCodeUserBase + 3
+		err := &RuntimeError{Err: types.NewError(code, "custom", types.BoxedNull)}
+		require.Equal(t, code, TrapCode(err))
+	})
+
+	t.Run("unknown error is host error", func(t *testing.T) {
+		require.Equal(t, TrapCodeHostError, TrapCode(errors.New("host")))
+	})
 }

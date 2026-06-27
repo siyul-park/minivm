@@ -479,7 +479,7 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			ok = l.coroDone(ctx, op)
 		case instr.CORO_VALUE:
 			ok = l.coroValue(ctx, op)
-		case instr.ERROR_NEW, instr.THROW:
+		case instr.ERROR_NEW, instr.ERROR_CODE, instr.THROW:
 			// Allocation and handler landing stay interpreter-owned. Resume at
 			// op.ip because each threaded handler performs its own IP update or
 			// handler transfer.

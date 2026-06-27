@@ -1189,7 +1189,7 @@ func (i *Interpreter) discard(f *frame) {
 // wrap allocates a heap Error wrapping a Go failure so a recovered trap or
 // host error becomes a catchable guest value while staying errors.Is/As aware.
 func (i *Interpreter) wrap(err error) types.Boxed {
-	return types.BoxRef(i.keep(types.WrapError(err)))
+	return types.BoxRef(i.keep(types.WrapError(TrapCode(err), err)))
 }
 
 // uncaught renders an escaped throw as a Go error. A thrown Error surfaces

@@ -4303,13 +4303,19 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			return fused
 		}
 		return func(i *Interpreter) {
-			if i.sp == 0 {
+			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			payload := i.stack[i.sp-1]
+			code := i.stack[i.sp-1]
+			if code.Kind() != types.KindI32 {
+				panic(ErrTypeMismatch)
+			}
+			payload := i.stack[i.sp-2]
 			// The payload's reference transfers from the stack slot into the new
-			// Error's value field, so it is overwritten without a release.
-			addr := i.keep(types.NewError(i.message(payload), payload))
+			// Error's value field, so it is overwritten without a release. The
+			// i32 code slot is dropped.
+			addr := i.keep(types.NewError(types.ErrorCode(code.I32()), i.message(payload), payload))
+			i.sp--
 			i.stack[i.sp-1] = types.BoxRef(addr)
 			i.fr.ip++
 		}
@@ -4333,6 +4339,26 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.retainBox(val)
 			i.releaseBox(box)
 			i.stack[i.sp-1] = val
+			i.fr.ip++
+		}
+	},
+	instr.ERROR_CODE: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			box := i.stack[i.sp-1]
+			if box.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			e, ok := i.heap[box.Ref()].(*types.Error)
+			if !ok {
+				panic(ErrTypeMismatch)
+			}
+			code := e.Code()
+			i.releaseBox(box)
+			i.stack[i.sp-1] = types.BoxI32(int32(code))
 			i.fr.ip++
 		}
 	},

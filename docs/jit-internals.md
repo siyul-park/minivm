@@ -241,11 +241,11 @@ coroutine reads guard the handle's itab and load the `done` byte or the boxed
 `CORO_DONE` keeps it, matching the threaded handlers). Heap allocation and
 mutation remain threaded.
 
-`ERROR_NEW` and `THROW` are terminal fallback boundaries like anchor-frame
-`YIELD`/`RESUME`: the tracer records them without stepping the clone, and native
-code deopts at the opcode's own IP so the threaded handler performs allocation,
-throw unwinding, and handler landing. The trace aborts if either appears in an
-inlined callee frame.
+`ERROR_NEW`, `ERROR_CODE`, and `THROW` are terminal fallback boundaries like
+anchor-frame `YIELD`/`RESUME`: the tracer records them without stepping the
+clone, and native code deopts at the opcode's own IP so the threaded handler
+performs allocation, code extraction, throw unwinding, and handler landing. The
+trace aborts if any appears in an inlined callee frame.
 
 ## Extension Lowering
 

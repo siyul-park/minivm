@@ -358,24 +358,26 @@ func (c *threadedCompiler) fuseHostFunction(fn *HostFunction, size int) func(*In
 	return nil
 }
 
-// fuseString tries to fuse a constant string load with a following ERROR_NEW,
-// wrapping the string in an Error in one dispatch. The interned string becomes
-// the error's payload and message. Returns nil if no pattern applies.
+// fuseString tries to fuse a constant string load with a following I32_CONST
+// code and ERROR_NEW, wrapping the string in an Error in one dispatch. The
+// interned string becomes the error's payload and message. Returns nil if no
+// pattern applies.
 func (c *threadedCompiler) fuseString(text string, size int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+	if c.precise || c.ip+5 >= len(c.code) {
 		return nil
 	}
-	if instr.Opcode(c.code[c.ip]) != instr.ERROR_NEW {
+	if instr.Opcode(c.code[c.ip]) != instr.I32_CONST || instr.Opcode(c.code[c.ip+5]) != instr.ERROR_NEW {
 		return nil
 	}
+	code := int32(*(*int32)(unsafe.Pointer(&c.code[c.ip+1])))
 	return func(i *Interpreter) {
 		if i.sp == len(i.stack) {
 			panic(ErrStackOverflow)
 		}
 		payload := types.BoxRef(int(i.intern(text)))
-		i.stack[i.sp] = types.BoxRef(i.keep(types.NewError(text, payload)))
+		i.stack[i.sp] = types.BoxRef(i.keep(types.NewError(types.ErrorCode(code), text, payload)))
 		i.sp++
-		i.fr.ip += size + 1
+		i.fr.ip += size + 6
 	}
 }
 
@@ -391,14 +393,18 @@ func (c *threadedCompiler) fuseError() func(*Interpreter) {
 		return nil
 	}
 	return func(i *Interpreter) {
-		if i.sp == 0 {
+		if i.sp < 2 {
 			panic(ErrStackUnderflow)
 		}
-		payload := i.stack[i.sp-1]
+		code := i.stack[i.sp-1]
+		if code.Kind() != types.KindI32 {
+			panic(ErrTypeMismatch)
+		}
+		payload := i.stack[i.sp-2]
 		// The payload reference transfers into the new Error's value field, so the
-		// slot is dropped without a release.
-		exc := types.BoxRef(i.keep(types.NewError(i.message(payload), payload)))
-		i.sp--
+		// slot is dropped without a release. The i32 code slot is discarded.
+		exc := types.BoxRef(i.keep(types.NewError(types.ErrorCode(code.I32()), i.message(payload), payload)))
+		i.sp -= 2
 		if fp, h, ok := i.handler(); ok {
 			i.land(fp, h, exc)
 			return

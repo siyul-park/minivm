@@ -273,8 +273,9 @@ var types = map[Opcode]Type{
 
 	THROW: {Mnemonic: "throw", Pop: []Kind{KindAny}},
 
-	ERROR_NEW: {Mnemonic: "error.new", Pop: []Kind{KindAny}, Push: []Kind{KindRef}},
-	ERROR_GET: {Mnemonic: "error.get", Pop: []Kind{KindRef}, Push: []Kind{KindAny}},
+	ERROR_NEW:  {Mnemonic: "error.new", Pop: []Kind{KindI32, KindAny}, Push: []Kind{KindRef}},
+	ERROR_GET:  {Mnemonic: "error.get", Pop: []Kind{KindRef}, Push: []Kind{KindAny}},
+	ERROR_CODE: {Mnemonic: "error.code", Pop: []Kind{KindRef}, Push: []Kind{KindI32}},
 
 	UPVAL_GET: {Mnemonic: "upval.get", Widths: []int{1}},
 	UPVAL_SET: {Mnemonic: "upval.set", Widths: []int{1}, Pop: []Kind{KindAny}},

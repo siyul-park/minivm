@@ -170,7 +170,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		// lowers this to an unconditional deopt so the threaded handler performs
 		// the real work. Abort rather than miscompile when the op sits in an
 		// inlined frame whose runtime-only state may not survive journal deopt.
-		if op == instr.YIELD || op == instr.RESUME || op == instr.ERROR_NEW || op == instr.THROW {
+		if op == instr.YIELD || op == instr.RESUME || op == instr.ERROR_NEW || op == instr.ERROR_CODE || op == instr.THROW {
 			if clone.fp != startFP {
 				t.kind = aborted
 				break

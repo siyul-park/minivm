@@ -253,6 +253,11 @@ func TestTypeOf(t *testing.T) {
 
 		{opcode: CLOSURE_NEW},
 
+		{opcode: THROW},
+		{opcode: ERROR_NEW},
+		{opcode: ERROR_GET},
+		{opcode: ERROR_CODE},
+
 		{opcode: UPVAL_GET},
 		{opcode: UPVAL_SET},
 	}
