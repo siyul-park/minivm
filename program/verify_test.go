@@ -128,6 +128,31 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, Verify(prog), ErrStackUnderflow)
 	})
 
+	t.Run("valid array mutation", func(t *testing.T) {
+		// ARRAY_APPEND is variable-arity, so the verifier treats it as
+		// indeterminate (stopping dataflow); ARRAY_DELETE/ARRAY_SLICE verify by
+		// their fixed operand kinds.
+		prog := New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.I32_CONST, 10),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.ARRAY_APPEND),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.ARRAY_SLICE),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.ARRAY_DELETE),
+			instr.New(instr.DROP),
+		}, WithTypes(types.NewArrayType(types.TypeI32)))
+		require.NoError(t, Verify(prog))
+	})
+
+	t.Run("array delete underflow", func(t *testing.T) {
+		prog := New([]instr.Instruction{instr.New(instr.ARRAY_DELETE)})
+		require.ErrorIs(t, Verify(prog), ErrStackUnderflow)
+	})
+
 	t.Run("operand type mismatch", func(t *testing.T) {
 		prog := New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))),

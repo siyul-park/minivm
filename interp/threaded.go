@@ -3134,6 +3134,214 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
+	instr.ARRAY_APPEND: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 1 {
+				panic(ErrStackUnderflow)
+			}
+			n := int(i.stack[i.sp-1].I32())
+			if n < 0 || i.sp < n+2 {
+				panic(ErrStackUnderflow)
+			}
+			ref := i.stack[i.sp-n-2]
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			base := i.sp - n - 1
+			switch arr := i.heap[addr].(type) {
+			case types.TypedArray[bool]:
+				for k := 0; k < n; k++ {
+					arr = append(arr, i.stack[base+k].Bool())
+				}
+				i.heap[addr] = arr
+			case types.TypedArray[int8]:
+				for k := 0; k < n; k++ {
+					arr = append(arr, int8(i.stack[base+k].I32()))
+				}
+				i.heap[addr] = arr
+			case types.TypedArray[int32]:
+				for k := 0; k < n; k++ {
+					arr = append(arr, i.stack[base+k].I32())
+				}
+				i.heap[addr] = arr
+			case types.TypedArray[int64]:
+				for k := 0; k < n; k++ {
+					arr = append(arr, i.unboxI64(i.stack[base+k]))
+				}
+				i.heap[addr] = arr
+			case types.TypedArray[float32]:
+				for k := 0; k < n; k++ {
+					arr = append(arr, i.stack[base+k].F32())
+				}
+				i.heap[addr] = arr
+			case types.TypedArray[float64]:
+				for k := 0; k < n; k++ {
+					arr = append(arr, i.stack[base+k].F64())
+				}
+				i.heap[addr] = arr
+			case *types.Array:
+				for k := 0; k < n; k++ {
+					arr.Elems = append(arr.Elems, i.stack[base+k])
+				}
+			default:
+				panic(ErrTypeMismatch)
+			}
+			i.sp -= n + 1
+			i.fr.ip++
+		}
+	},
+	instr.ARRAY_DELETE: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			idx := int(i.stack[i.sp-1].I32())
+			ref := i.stack[i.sp-2]
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			var val types.Boxed
+			switch arr := i.heap[addr].(type) {
+			case types.TypedArray[bool]:
+				if idx < 0 || idx >= len(arr) {
+					panic(ErrIndexOutOfRange)
+				}
+				val = types.BoxI1(arr[idx])
+				copy(arr[idx:], arr[idx+1:])
+				i.heap[addr] = arr[:len(arr)-1]
+			case types.TypedArray[int8]:
+				if idx < 0 || idx >= len(arr) {
+					panic(ErrIndexOutOfRange)
+				}
+				val = types.BoxI8(arr[idx])
+				copy(arr[idx:], arr[idx+1:])
+				i.heap[addr] = arr[:len(arr)-1]
+			case types.TypedArray[int32]:
+				if idx < 0 || idx >= len(arr) {
+					panic(ErrIndexOutOfRange)
+				}
+				val = types.BoxI32(int32(arr[idx]))
+				copy(arr[idx:], arr[idx+1:])
+				i.heap[addr] = arr[:len(arr)-1]
+			case types.TypedArray[int64]:
+				if idx < 0 || idx >= len(arr) {
+					panic(ErrIndexOutOfRange)
+				}
+				val = i.boxI64(int64(arr[idx]))
+				copy(arr[idx:], arr[idx+1:])
+				i.heap[addr] = arr[:len(arr)-1]
+			case types.TypedArray[float32]:
+				if idx < 0 || idx >= len(arr) {
+					panic(ErrIndexOutOfRange)
+				}
+				val = types.BoxF32(float32(arr[idx]))
+				copy(arr[idx:], arr[idx+1:])
+				i.heap[addr] = arr[:len(arr)-1]
+			case types.TypedArray[float64]:
+				if idx < 0 || idx >= len(arr) {
+					panic(ErrIndexOutOfRange)
+				}
+				val = types.BoxF64(float64(arr[idx]))
+				copy(arr[idx:], arr[idx+1:])
+				i.heap[addr] = arr[:len(arr)-1]
+			case *types.Array:
+				if idx < 0 || idx >= len(arr.Elems) {
+					panic(ErrIndexOutOfRange)
+				}
+				val = arr.Elems[idx]
+				copy(arr.Elems[idx:], arr.Elems[idx+1:])
+				arr.Elems[len(arr.Elems)-1] = types.BoxedNull
+				arr.Elems = arr.Elems[:len(arr.Elems)-1]
+			default:
+				panic(ErrTypeMismatch)
+			}
+			i.release(addr)
+			i.sp--
+			i.stack[i.sp-1] = val
+			i.fr.ip++
+		}
+	},
+	instr.ARRAY_SLICE: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 3 {
+				panic(ErrStackUnderflow)
+			}
+			end := int(i.stack[i.sp-1].I32())
+			start := int(i.stack[i.sp-2].I32())
+			ref := i.stack[i.sp-3]
+			if ref.Kind() != types.KindRef {
+				panic(ErrTypeMismatch)
+			}
+			addr := ref.Ref()
+			var out types.Value
+			switch arr := i.heap[addr].(type) {
+			case types.TypedArray[bool]:
+				if start < 0 || end > len(arr) || start > end {
+					panic(ErrIndexOutOfRange)
+				}
+				dst := make(types.TypedArray[bool], end-start)
+				copy(dst, arr[start:end])
+				out = dst
+			case types.TypedArray[int8]:
+				if start < 0 || end > len(arr) || start > end {
+					panic(ErrIndexOutOfRange)
+				}
+				dst := make(types.TypedArray[int8], end-start)
+				copy(dst, arr[start:end])
+				out = dst
+			case types.TypedArray[int32]:
+				if start < 0 || end > len(arr) || start > end {
+					panic(ErrIndexOutOfRange)
+				}
+				dst := make(types.TypedArray[int32], end-start)
+				copy(dst, arr[start:end])
+				out = dst
+			case types.TypedArray[int64]:
+				if start < 0 || end > len(arr) || start > end {
+					panic(ErrIndexOutOfRange)
+				}
+				dst := make(types.TypedArray[int64], end-start)
+				copy(dst, arr[start:end])
+				out = dst
+			case types.TypedArray[float32]:
+				if start < 0 || end > len(arr) || start > end {
+					panic(ErrIndexOutOfRange)
+				}
+				dst := make(types.TypedArray[float32], end-start)
+				copy(dst, arr[start:end])
+				out = dst
+			case types.TypedArray[float64]:
+				if start < 0 || end > len(arr) || start > end {
+					panic(ErrIndexOutOfRange)
+				}
+				dst := make(types.TypedArray[float64], end-start)
+				copy(dst, arr[start:end])
+				out = dst
+			case *types.Array:
+				if start < 0 || end > len(arr.Elems) || start > end {
+					panic(ErrIndexOutOfRange)
+				}
+				elems := make([]types.Boxed, end-start)
+				copy(elems, arr.Elems[start:end])
+				for _, v := range elems {
+					i.retainBox(v)
+				}
+				out = &types.Array{Typ: arr.Typ, Elems: elems}
+			default:
+				panic(ErrTypeMismatch)
+			}
+			newAddr := i.alloc(out)
+			i.release(addr)
+			i.sp -= 2
+			i.stack[i.sp-1] = types.BoxRef(newAddr)
+			i.fr.ip++
+		}
+	},
 	instr.STRUCT_NEW: func(c *threadedCompiler) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3

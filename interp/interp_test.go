@@ -2121,7 +2121,7 @@ var tests = []test{
 		),
 		values: []types.Value{types.TypedArray[int32]("foo")},
 	},
-	// --- array: ARRAY_NEW, ARRAY_NEW_DEFAULT, ARRAY_GET, ARRAY_SET, ARRAY_FILL ---
+	// --- array: ARRAY_NEW, ARRAY_NEW_DEFAULT, ARRAY_LEN, ARRAY_GET, ARRAY_SET, ARRAY_FILL ---
 	{
 		program: program.New(
 			[]instr.Instruction{
@@ -2447,15 +2447,13 @@ var tests = []test{
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 3),
 				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-				instr.New(instr.I32_CONST, 0),
-				instr.New(instr.I32_CONST, 0x1FF),
-				instr.New(instr.ARRAY_SET),
+				instr.New(instr.ARRAY_LEN),
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI8)),
 		),
-		values: nil,
+		values: []types.Value{types.I32(3)},
 	},
 	{
 		program: program.New(
@@ -2469,6 +2467,19 @@ var tests = []test{
 			program.WithTypes(types.NewArrayType(types.TypeI8)),
 		),
 		values: []types.Value{types.I8(-1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 0x1FF),
+				instr.New(instr.ARRAY_SET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI8)),
+		),
+		values: nil,
 	},
 	{
 		program: program.New(
@@ -2498,16 +2509,244 @@ var tests = []test{
 		),
 		values: nil,
 	},
+	// --- array: ARRAY_APPEND, ARRAY_DELETE, ARRAY_SLICE ---
 	{
 		program: program.New(
 			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
-				instr.New(instr.ARRAY_LEN),
+				instr.New(instr.I32_CONST, 10),
+				instr.New(instr.I32_CONST, 20),
+				instr.New(instr.I32_CONST, 30),
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.ARRAY_APPEND),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI32)),
+		),
+		values: []types.Value{types.TypedArray[int32]{10, 20, 30}},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_APPEND),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI32)),
+		),
+		values: []types.Value{make(types.TypedArray[int32], 1)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I64_CONST, 5),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_APPEND),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI64)),
+		),
+		values: []types.Value{types.TypedArray[int64]{5}},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.F64_CONST, math.Float64bits(42)),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_APPEND),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeF64)),
+		),
+		values: []types.Value{types.TypedArray[float64]{42}},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_APPEND),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI1)),
+		),
+		values: []types.Value{types.TypedArray[bool]{true}},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_APPEND),
 			},
 			program.WithTypes(types.NewArrayType(types.TypeI8)),
 		),
-		values: []types.Value{types.I32(3)},
+		values: []types.Value{types.TypedArray[int8]{7}},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_APPEND),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeRef)),
+		),
+		values: []types.Value{types.I32(7)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I32_CONST, 10),
+				instr.New(instr.I32_CONST, 20),
+				instr.New(instr.I32_CONST, 30),
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.ARRAY_APPEND),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_DELETE),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI32)),
+		),
+		values: []types.Value{types.I32(20)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I32_CONST, 10),
+				instr.New(instr.I32_CONST, 20),
+				instr.New(instr.I32_CONST, 30),
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.ARRAY_APPEND),
+				instr.New(instr.DUP),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_DELETE),
+				instr.New(instr.DROP),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI32)),
+		),
+		values: []types.Value{types.I32(30)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I32_CONST, 10),
+				instr.New(instr.I32_CONST, 20),
+				instr.New(instr.I32_CONST, 30),
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.ARRAY_APPEND),
+				instr.New(instr.DUP),
+				instr.New(instr.ARRAY_LEN),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_SUB),
+				instr.New(instr.ARRAY_DELETE),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI32)),
+		),
+		values: []types.Value{types.I32(30)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I64_CONST, 5),
+				instr.New(instr.I64_CONST, 6),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.ARRAY_APPEND),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_DELETE),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI64)),
+		),
+		values: []types.Value{types.I64(6)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.I32_CONST, 8),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.ARRAY_APPEND),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_DELETE),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeRef)),
+		),
+		values: []types.Value{types.I32(7)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I32_CONST, 10),
+				instr.New(instr.I32_CONST, 20),
+				instr.New(instr.I32_CONST, 30),
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.ARRAY_APPEND),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.ARRAY_SLICE),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI32)),
+		),
+		values: []types.Value{types.TypedArray[int32]{10, 20}},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I32_CONST, 10),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_APPEND),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_SLICE),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeI32)),
+		),
+		values: []types.Value{make(types.TypedArray[int32], 0)},
+	},
+	{
+		program: program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.I32_CONST, 8),
+				instr.New(instr.I32_CONST, 9),
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.ARRAY_APPEND),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 3),
+				instr.New(instr.ARRAY_SLICE),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_GET),
+			},
+			program.WithTypes(types.NewArrayType(types.TypeRef)),
+		),
+		values: []types.Value{types.I32(8)},
 	},
 	// --- struct: STRUCT_NEW, STRUCT_NEW_DEFAULT, STRUCT_GET, STRUCT_SET ---
 	{
@@ -4224,6 +4463,57 @@ func TestInterpreter_Run(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("array mutation traps out of range", func(t *testing.T) {
+		// ARRAY_DELETE and ARRAY_SLICE bounds-check before mutating, so an
+		// invalid index traps with ErrIndexOutOfRange in both modes.
+		cases := []struct {
+			name string
+			code []instr.Instruction
+		}{
+			{
+				name: "delete out of range",
+				code: []instr.Instruction{
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+					instr.New(instr.I32_CONST, 5),
+					instr.New(instr.ARRAY_DELETE),
+				},
+			},
+			{
+				name: "slice end past length",
+				code: []instr.Instruction{
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.ARRAY_SLICE),
+				},
+			},
+			{
+				name: "slice start after end",
+				code: []instr.Instruction{
+					instr.New(instr.I32_CONST, 3),
+					instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.ARRAY_SLICE),
+				},
+			},
+		}
+		for _, mode := range modes {
+			mode := mode
+			for _, tc := range cases {
+				tc := tc
+				t.Run(mode.name+"/"+tc.name, func(t *testing.T) {
+					prog := program.New(tc.code, program.WithTypes(types.NewArrayType(types.TypeI32)))
+					i := New(prog, mode.opts...)
+					defer i.Close()
+					require.ErrorIs(t, i.Run(context.Background()), ErrIndexOutOfRange)
+				})
+			}
+		}
+	})
 
 	t.Run("yield from root frame escapes to host", func(t *testing.T) {
 		// A YIELD in the entry frame suspends the whole interpreter: Run returns

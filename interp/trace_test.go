@@ -54,4 +54,18 @@ func TestTracer_Capture(t *testing.T) {
 		require.NotEmpty(t, tr.ops)
 		require.Equal(t, instr.YIELD, tr.ops[len(tr.ops)-1].op)
 	})
+
+	t.Run("rejects array mutators like existing threaded-only array ops", func(t *testing.T) {
+		tracer := NewTracer()
+		for _, op := range []instr.Opcode{
+			instr.ARRAY_SET,
+			instr.ARRAY_FILL,
+			instr.ARRAY_COPY,
+			instr.ARRAY_APPEND,
+			instr.ARRAY_DELETE,
+			instr.ARRAY_SLICE,
+		} {
+			require.True(t, tracer.unrecordable(nil, op))
+		}
+	})
 }
