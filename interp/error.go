@@ -63,7 +63,7 @@ const (
 	TrapCodeHostError           types.ErrorCode = -15
 )
 
-var trapCodes = []struct {
+var errorCodes = []struct {
 	err  error
 	code types.ErrorCode
 }{
@@ -88,7 +88,7 @@ var trapCodes = []struct {
 // the next Run call resumes exactly after the YIELD.
 var errYield = errors.New("yield")
 
-func TrapCode(err error) types.ErrorCode {
+func ErrorCode(err error) types.ErrorCode {
 	if err == nil {
 		return types.ErrorCodeNone
 	}
@@ -103,9 +103,9 @@ func TrapCode(err error) types.ErrorCode {
 	if errors.As(err, &runtimeErr) {
 		err = runtimeErr.Err
 	}
-	for _, trap := range trapCodes {
-		if errors.Is(err, trap.err) {
-			return trap.code
+	for _, ec := range errorCodes {
+		if errors.Is(err, ec.err) {
+			return ec.code
 		}
 	}
 	return TrapCodeHostError

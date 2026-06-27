@@ -620,6 +620,22 @@ t.Run("valid token", func(t *testing.T) { ctx := context.WithValue(...); ... })
 t.Run("expired token", func(t *testing.T) { ctx := context.WithValue(...); ... })
 ```
 
+For `interp.Interpreter.Run`, opcode examples live in a package-level
+`runTests` table (`var runTests = []struct{ program *program.Program; values
+[]types.Value; err error }`): one representative program per opcode, showing
+the bytecode, constants/types/locals it needs, and the final stack values or
+expected error. `TestInterpreter_Run` iterates the
+table with `t.Run(fmt.Sprint(tt.program), ...)`; `program.Program.String()`
+renders its disassembly, so the subtest name is generated from the program
+itself with no `name` field. Other tests that exercise `Run` against many
+programs (e.g. pool tests) reuse the same `runTests` table instead of building
+a parallel one.
+
+A runtime behavior that cannot fit one table row — the entry-frame `YIELD`
+escape, where `Run` returns `ErrYield` and a second `Run` call resumes — is a
+separate explicit `t.Run` subtest placed after the table loop in
+`TestInterpreter_Run`, not folded into the table.
+
 ### 6.5 Assertions
 
 Always use `require`; never use `assert`.

@@ -28,7 +28,7 @@ type and unit identity. Generics carry the types; the only reflection is
 
 ```go
 type Manager struct {
-    analyses map[reflect.Type]func(any, *Manager) (any, error) // result type → runner
+    analyses map[reflect.Type]func(*Manager, any) (any, error) // result type → runner
     cache    map[cacheKey]any                                  // (result type, unit) → result
 }
 ```

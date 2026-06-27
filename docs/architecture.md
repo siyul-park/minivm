@@ -25,12 +25,15 @@ Import direction: `A → B` means `A` imports `B`.
 ```text
 types   → instr
 program → instr, types
-interp  → program, instr, types, asm, pass, analysis
+prof → instr
+asm/amd64 → asm
 asm/arm64 → asm
+interp  → program, instr, types, asm, asm/arm64, pass, analysis, prof
+debug → interp
 analysis → pass, types, instr
 transform → analysis, pass, types, instr, program
 optimize → transform, analysis, pass, program
-cli → instr, interp, program, types, cobra
+cli → debug, instr, interp, prof, program, types, cobra
 cmd/minivm → cli
 ```
 
@@ -117,7 +120,23 @@ bytecode with `program.Verify` before installing it.
 
 `Extension` / `Registry` (`ext.go`): user-registered custom instructions dispatched through the `EXT` opcode (`0xFF`). A `Registry` is an ordered `[]Extension` snapshotted by `WithRegistry`; each extension's slot is its `extID`. An `EXT` operand encodes `extID<<8 | opID`, so the threaded factory and JIT route by the high byte and the extension self-resolves the op from the low byte. `program` stays free of `interp`: the builder emits self-contained `[extID][opID]`-encoded bytecode (`Builder.Ext`) and the `instr` `{2,-8}` encoding keeps `analysis`/`pass` generic with no special cases. Threaded execution runs the extension's `Compile` handler; the JIT calls `Lower` (via the `Emitter` seam) and otherwise deopts to threaded.
 
-`Pool` (`pool.go`): multi-goroutine entry point. `Interpreter` is single-goroutine; `NewPool(prog, size, opts...)` lazily lends up to `size` interpreters that share one `Cache`. The cache aggregates JIT trigger samples, compiles each hot function once, publishes immutable native modules, and exposes `Pool.Profile()` from member profiles flushed on `Put`/`Close`. Use `Get`/`Put` or `Run(ctx, fn)` to borrow one interpreter per goroutine. `Put` flushes profile samples, calls `Reset`, and returns the interpreter to idle storage. `Close` releases idle interpreters and drops the cache owner reference; executable buffers are freed only after the cache owner and all outstanding interpreters are closed. Heap refs from a borrowed interpreter are invalid after `Put` because `Reset` wipes the heap.
+`Pool` (`pool.go`): multi-goroutine entry point. `Interpreter` is single-goroutine; `NewPool(prog, size, opts...)` lazily lends up to `size` interpreters that share one `Cache`. The cache aggregates JIT trigger samples, compiles each hot function once, publishes immutable native modules, and exposes `Pool.Profile()` from member profiles flushed on `Put`/`Close`. Use `Get`/`Put` or `Run(ctx, fn)` to borrow one interpreter per goroutine. `Get` checks the closed state, takes an idle interpreter, and grows under the pool read lock; only the blocking wait runs unlocked and observes `Close` through the closed idle channel. `Put` flushes profile samples, calls `Reset`, and returns the interpreter to idle storage. `Close` releases idle interpreters and drops the cache owner reference; executable buffers are freed only after the cache owner and all outstanding interpreters are closed. Heap refs from a borrowed interpreter are invalid after `Put` because `Reset` wipes the heap.
+
+### `debug/`
+
+`Debugger` is the instruction-accurate control layer over `interp`. It owns
+breakpoints and stepping state, installs through `interp.WithDebugger`, and
+forces `WithTick(1)` plus JIT disablement so `Step`, `Next`, and `Finish` stop on
+bytecode boundaries rather than trace exits. Keep debugger policy out of the
+interpreter's hot threaded handlers; the interpreter only calls into debugger
+hooks at tick/dispatch boundaries.
+
+### `prof/`
+
+`prof.Collector` stores local samples and named metrics. `prof.Profiler` is the
+locked aggregate used by shared tracers and pools. Function/IP/opcode samples are
+plain counters; JIT activity is exported through the same metric list, so CLI and
+embedding code read one reporting surface.
 
 ### `asm/`
 
@@ -149,6 +168,12 @@ Exposes the `asm.Arch` singleton and encoder/caller, with unexported adapters im
 
 The native trampoline uses `abi_arm64.go`/`abi_arm64.s` behind `//go:build arm64`; `abi_stub.go` with `//go:build !arm64` keeps other platforms compilable.
 
+### `asm/amd64/`
+
+Exposes an `asm.Arch` placeholder only. Register metadata exists so the generic
+`asm` surface stays portable, but the encoder and ABI return
+`asm.ErrNotImplemented`; no minivm JIT path emits amd64 native code yet.
+
 ### `pass/`
 
 Generics-based, modeled on LLVM's new pass manager (see `pass-system.md`):
@@ -156,7 +181,7 @@ Generics-based, modeled on LLVM's new pass manager (see `pass-system.md`):
 - `pass.Manager`: lazy analysis cache. `Register[U,R]` adds an `Analysis[U,R]`;
   `GetResult[R](m, unit)` runs/caches by result type and unit; `Invalidate` drops
   non-preserved results. Only reflection is `reflect.TypeFor[R]()` as a map key.
-- `pass.Pipeline[U]`: ordered transform sequence. `AddPass` appends; `Run(unit, m)`
+- `pass.Pipeline[U]`: ordered transform sequence. `AddPass` appends; `Run(m, unit)`
   runs each `Pass[U]` and invalidates between them by its returned `Preserved`.
 
 Transforms request analyses through the manager; analyses are recomputed after a
@@ -171,6 +196,7 @@ transform mutates code.
 ```text
 O1  ConstantFoldingPass → ConstantDeduplicationPass
 O2  ConstantFoldingPass → AlgebraicSimplificationPass → ConstantDeduplicationPass → DeadCodeEliminationPass
+O3  ConstantFoldingPass → AlgebraicSimplificationPass → GlobalValueNumberingPass → ConstantDeduplicationPass → DeadCodeEliminationPass
 ```
 
 Transform passes mutate `*program.Program` in-place: edit `prog.Code` bytes and `prog.Constants`.
@@ -222,7 +248,7 @@ Thin entrypoint around `cli.Root().Execute()`.
    └─ *VerifyError on malformed bytecode, before any interpreter is built
 
 3. optimize.Optimize(prog) [optional AOT]
-   └─ CF → (AS) → CD → (DCE), each requesting BasicBlocksAnalysis
+   └─ CF → (AS) → (GVN) → CD → (DCE), each CFG pass requesting BasicBlocksAnalysis
 
 4. interp.New(prog, opts...) → *Interpreter
    ├─ threadedCompiler.Compile(prog.Code) → i.code[0]
@@ -251,7 +277,7 @@ Thin entrypoint around `cli.Root().Execute()`.
 | Area | Direction |
 |---|---|
 | JIT coverage | recorded numeric traces, direct calls, small function-value indirect dispatches, closure-body upvalues, guarded ref slots/upvalues, selected heap reads including `error.get`, and exception terminal fallbacks compile or deopt cleanly; host calls, heap allocation/mutation, maps, and unsupported heap shapes fall back |
-| Architecture support | ARM64 optimized; x86-64 can follow once users + benchmarks clear |
+| Architecture support | ARM64 optimized; `asm/amd64` is a placeholder until users + benchmarks justify x86-64 JIT |
 | Benchmarks | broaden numeric loops, host calls, heap-object workloads |
 | Program format | keep `instr`/`program` as compact Go-native bytecode surface |
 | Host integration | keep `interp.NewHostFunction` as primary call bridge; use `Marshal`/`Unmarshal` for Go value conversion |

@@ -53,7 +53,7 @@ func (c *Collector) Metrics() []Metric {
 		}
 		out = append(out, Metric{
 			Name:   "vm_opcode_samples_total",
-			Labels: []Label{{Key: "opcode", Value: opcodeLabel(byte(code))}},
+			Labels: []Label{{Key: "opcode", Value: c.opcodeLabel(byte(code))}},
 			Value:  float64(n),
 		})
 	}
@@ -181,7 +181,7 @@ func (c *Collector) reset() {
 	c.metrics = nil
 }
 
-func opcodeLabel(code byte) string {
+func (c *Collector) opcodeLabel(code byte) string {
 	if typ := instr.TypeOf(instr.Opcode(code)); typ.Mnemonic != "" {
 		return typ.Mnemonic
 	}

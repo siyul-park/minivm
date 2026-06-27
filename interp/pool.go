@@ -57,17 +57,24 @@ func NewPool(prog *program.Program, size int, opts ...func(*option)) *Pool {
 // another goroutine calls Put or ctx is canceled. Returns ErrPoolClosed once
 // the pool is closed.
 func (p *Pool) Get(ctx context.Context) (*Interpreter, error) {
-	if p.dead() {
+	p.mu.RLock()
+	if p.closed {
+		p.mu.RUnlock()
 		return nil, ErrPoolClosed
 	}
 
-	if i, err := p.take(); i != nil || err != nil {
-		return i, err
+	select {
+	case i := <-p.idle:
+		p.mu.RUnlock()
+		return i, nil
+	default:
 	}
 
 	if i := p.grow(); i != nil {
+		p.mu.RUnlock()
 		return i, nil
 	}
+	p.mu.RUnlock()
 
 	return p.wait(ctx)
 }
@@ -122,26 +129,6 @@ func (p *Pool) Close() error {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
-}
-
-func (p *Pool) dead() bool {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.closed
-}
-
-// take returns an idle Interpreter without blocking, (nil, nil) if none is
-// ready, or (nil, ErrPoolClosed) if Close raced ahead of the dead check.
-func (p *Pool) take() (*Interpreter, error) {
-	select {
-	case i, ok := <-p.idle:
-		if !ok {
-			return nil, ErrPoolClosed
-		}
-		return i, nil
-	default:
-		return nil, nil
-	}
 }
 
 // grow reserves a slot below the size cap and returns a fresh Interpreter, or

@@ -18,7 +18,7 @@ Declared in `go.mod`. VM core uses only Go standard library. CLI and tests pull 
 | Darwin / x86-64 | ✅ | ✅ | — |
 | Linux / x86-64 | ✅ | ✅ | — |
 
-On non-ARM64 platforms, only threaded interpreter and optimizer are active. JIT stubs compile without error but produce no native code.
+On non-ARM64 platforms, only threaded interpreter and optimizer are active. JIT stubs compile without error but produce no native code. The `asm/amd64` package is a placeholder: it exposes the generic `asm.Arch` shape, but its encoder and ABI return `asm.ErrNotImplemented`.
 
 ## CGO
 
@@ -43,6 +43,8 @@ To build without CGO on Darwin/ARM64, set `CGO_ENABLED=0`. This compiles cleanly
 | `!arm64` | stubs out `asm/arm64/` with zero-value returns; `interp/jit_arm64.go` not compiled |
 | `darwin && arm64 && cgo` | real icache flush in `asm/icache_darwin_arm64.go` |
 | `!darwin \|\| !arm64 \|\| !cgo` | no-op icache stub in `asm/icache_noop.go` |
+| `darwin \|\| linux` | real executable-memory mapping in `asm/memory.go` |
+| `!darwin && !linux` | executable-memory allocation returns `ErrMmapFailed` through `asm/memory_stub.go` |
 
 No manual build tags required for normal use. The Go toolchain selects correct files automatically based on `GOOS` and `GOARCH`.
 
@@ -50,7 +52,7 @@ No manual build tags required for normal use. The Go toolchain selects correct f
 
 `unsafe` is used in a few low-level packages:
 
-- `asm/memory.go`: `mmap`/`mprotect` syscalls and pointer access to executable memory
+- `asm/memory.go`: `mmap`/`mprotect` syscalls and pointer access to executable memory on Darwin/Linux
 - `asm/buffer.go`, `asm/link.go`, `asm/arch.go`, `asm/arm64/abi.go`: pointer arithmetic for native code patching and callable entry binding
 - `instr/instr.go`, `interp/threaded.go`: fixed-width bytecode operand loads
 - `interp/interp.go`: scratch pointers passed to native JIT code
@@ -60,18 +62,18 @@ No `unsafe` in `types/`, `program/`, `pass/`, `analysis/`, `transform/`, or `opt
 
 ## Executable Memory
 
-JIT uses `syscall.Mmap` + `syscall.SYS_MPROTECT` directly:
+JIT uses `syscall.Mmap` + `syscall.SYS_MPROTECT` directly on Darwin/Linux:
 
 - **Darwin/Linux**: `MAP_ANON | MAP_PRIVATE`, toggle between `PROT_READ|PROT_WRITE` and `PROT_READ|PROT_EXEC`
 
-Platforms without `mmap` (e.g. Windows, plan9) cannot use JIT. Threaded interpreter and optimizer work on all platforms Go standard library supports.
+Platforms without the Darwin/Linux mapping path (e.g. Windows, plan9) cannot use JIT. `asm.NewBuffer` returns `ErrMmapFailed` there, while threaded interpreter and optimizer code still compile with the non-ARM64 JIT stub.
 
 ## Windows / Plan9
 
-JIT not supported. `asm/memory.go` uses `syscall.Mmap` which is unavailable on Windows and plan9. Threaded interpreter and full optimizer pipeline work without restriction.
+JIT not supported. `asm/memory_stub.go` keeps packages that import `asm` buildable, but executable buffer allocation fails with `ErrMmapFailed`. Threaded interpreter and full optimizer pipeline work without restriction.
 
 Build normally — JIT stubs compile cleanly and interpreter runs. `WithThreshold(-1)` effectively applies when no JIT backend is registered.
 
 ## Module Stability
 
-`interp`, `types`, `instr`, `program`, `pass`, `analysis`, `transform`, and `optimize` packages follow semantic versioning. `asm/` and `asm/arm64/` are internal; APIs may change without major version bump.
+`interp`, `types`, `instr`, `program`, `pass`, `analysis`, `transform`, and `optimize` packages follow semantic versioning. `asm/`, `asm/arm64/`, and `asm/amd64/` are internal; APIs may change without major version bump.

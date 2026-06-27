@@ -55,7 +55,7 @@ func (c *threadedCompiler) fuseFunction(fn *types.Function, addr int) func(*Inte
 			if i.sp < params {
 				panic(ErrStackUnderflow)
 			}
-			if i.sp+locals >= len(i.stack) {
+			if i.sp+locals > len(i.stack) {
 				panic(ErrStackOverflow)
 			}
 			if locals > 0 {
@@ -91,7 +91,7 @@ func (c *threadedCompiler) fuseFunction(fn *types.Function, addr int) func(*Inte
 				if i.fp == len(i.frames) {
 					panic(ErrFrameOverflow)
 				}
-				if i.sp+locals >= len(i.stack) {
+				if i.sp+locals > len(i.stack) {
 					panic(ErrStackOverflow)
 				}
 				if locals > 0 {
@@ -184,7 +184,7 @@ func (c *threadedCompiler) fuseClosure(fn *types.Closure, addr int) func(*Interp
 			if i.sp < params {
 				panic(ErrStackUnderflow)
 			}
-			if i.sp+locals >= len(i.stack) {
+			if i.sp+locals > len(i.stack) {
 				panic(ErrStackOverflow)
 			}
 			if locals > 0 {
@@ -224,7 +224,7 @@ func (c *threadedCompiler) fuseClosure(fn *types.Closure, addr int) func(*Interp
 				if i.fp == len(i.frames) {
 					panic(ErrFrameOverflow)
 				}
-				if i.sp+locals >= len(i.stack) {
+				if i.sp+locals > len(i.stack) {
 					panic(ErrStackOverflow)
 				}
 				if locals > 0 {
@@ -289,7 +289,7 @@ func (c *threadedCompiler) fuseHostFunction(fn *HostFunction, size int) func(*In
 			if i.sp < params {
 				panic(ErrStackUnderflow)
 			}
-			if i.sp+delta >= len(i.stack) {
+			if i.sp+delta > len(i.stack) {
 				panic(ErrStackOverflow)
 			}
 			args := i.stack[i.sp-params : i.sp]
@@ -324,7 +324,7 @@ func (c *threadedCompiler) fuseHostFunction(fn *HostFunction, size int) func(*In
 			if i.sp < params {
 				panic(ErrStackUnderflow)
 			}
-			if i.sp+delta >= len(i.stack) {
+			if i.sp+delta > len(i.stack) {
 				panic(ErrStackOverflow)
 			}
 			args := i.stack[i.sp-params : i.sp]

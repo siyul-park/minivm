@@ -142,17 +142,18 @@ factorial := types.NewFunctionBuilder(&types.FunctionType{
 
 ### AOT 최적화
 
-VM에 넘기기 전에 상수 연산을 접고 불필요한 분기를 지웁니다:
+VM에 넘기기 전에 상수 연산을 접습니다:
 
 ```go
 prog, err := optimize.NewOptimizer(optimize.O1).Optimize(prog)
 ```
 
-`O1`이 모든 함수에 적용하는 세 가지 패스:
+`O1`이 모든 함수에 적용하는 두 가지 저비용 로컬 패스:
 
 - **상수 폴딩** — `I32_CONST 3, I32_CONST 4, I32_ADD` → `I32_CONST 7`
 - **상수 중복 제거** — 동일한 값은 하나의 슬롯으로 통합
-- **데드 코드 제거** — 도달 불가능한 기본 블록 삭제
+
+대수 단순화와 데드 코드 제거까지 원하면 `O2`, 블록 사이 전역 값 번호화까지 원하면 `O3`를 사용하세요.
 
 ## JIT 동작 방식
 
@@ -219,10 +220,10 @@ vm := interp.New(prog,
 | 기능 | |
 |---|---|
 | 스레디드 인터프리터 | ✅ |
-| AOT 최적화 (O1) | ✅ |
+| AOT 최적화 (O1-O3) | ✅ |
 | ARM64 트레이스 JIT — 숫자 연산, 로컬, 글로벌, 분기 | ✅ |
 | ARM64 트레이스 JIT — 호출, 업밸류, 레퍼런스, 힙 읽기, 루프 | ✅ |
-| x86-64 JIT | 🔲 계획 중 |
+| x86-64 JIT | 🔲 계획 중 (`asm/amd64`는 아직 코드를 내보내지 않는 placeholder) |
 
 로드맵: [docs/roadmap.md](docs/roadmap.md)
 

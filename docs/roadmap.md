@@ -27,7 +27,7 @@ minivm: Go-native programmable runtime for scripting, rules, DSLs, and plugin-st
 | P0 | Clarify positioning and safety boundaries | align expectations with Go-native embedding use cases |
 | P1 | Broaden benchmark scenarios | validate JIT defaults across host calls, objects, and numeric loops |
 | P2 | Expand host API examples | lower Go service adoption cost |
-| P2 | Decide x86-64 JIT strategy | clarify performance expectations on common server targets |
+| P2 | Decide x86-64 JIT strategy | `asm/amd64` is only a placeholder today; real backend work needs target users and benchmarks |
 
 ## Future Expansion
 

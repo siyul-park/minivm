@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestConstantDeduplicationPassPass_Run(t *testing.T) {
+func TestConstantDeduplicationPass_Run(t *testing.T) {
 	tests := []struct {
 		program  *program.Program
 		expected *program.Program

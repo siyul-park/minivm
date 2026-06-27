@@ -160,7 +160,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				if i.sp <= params {
 					panic(ErrStackUnderflow)
 				}
-				if i.sp+locals-1 >= len(i.stack) {
+				if i.sp+locals-1 > len(i.stack) {
 					panic(ErrStackOverflow)
 				}
 				if locals > 0 {
@@ -194,7 +194,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				if i.sp <= params {
 					panic(ErrStackUnderflow)
 				}
-				if i.sp+locals-1 >= len(i.stack) {
+				if i.sp+locals-1 > len(i.stack) {
 					panic(ErrStackOverflow)
 				}
 				if locals > 0 {
@@ -2658,7 +2658,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				val := make(types.TypedArray[bool], size)
 				for j := 0; j < size; j++ {
-					val[j] = i.stack[i.sp-size-j-1].Bool()
+					val[j] = i.stack[i.sp-size-1+j].Bool()
 				}
 				i.sp -= size
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
@@ -2675,7 +2675,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				val := make(types.TypedArray[int8], size)
 				for j := 0; j < size; j++ {
-					val[j] = int8(i.stack[i.sp-size-j-1].I32())
+					val[j] = int8(i.stack[i.sp-size-1+j].I32())
 				}
 				i.sp -= size
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
@@ -2692,7 +2692,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				val := make(types.TypedArray[int32], size)
 				for j := 0; j < size; j++ {
-					val[j] = i.stack[i.sp-size-j-1].I32()
+					val[j] = i.stack[i.sp-size-1+j].I32()
 				}
 				i.sp -= size
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
@@ -2709,7 +2709,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				val := make(types.TypedArray[int64], size)
 				for j := 0; j < size; j++ {
-					val[j] = i.unboxI64(i.stack[i.sp-size-j-1])
+					val[j] = i.unboxI64(i.stack[i.sp-size-1+j])
 				}
 				i.sp -= size
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
@@ -2726,7 +2726,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				val := make(types.TypedArray[float32], size)
 				for j := 0; j < size; j++ {
-					val[j] = i.stack[i.sp-size-j-1].F32()
+					val[j] = i.stack[i.sp-size-1+j].F32()
 				}
 				i.sp -= size
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
@@ -2743,7 +2743,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				}
 				val := make(types.TypedArray[float64], size)
 				for j := 0; j < size; j++ {
-					val[j] = i.stack[i.sp-size-j-1].F64()
+					val[j] = i.stack[i.sp-size-1+j].F64()
 				}
 				i.sp -= size
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
@@ -3093,65 +3093,95 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.ARRAY_COPY: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
-			if i.sp < 4 {
+			if i.sp < 5 {
 				panic(ErrStackUnderflow)
 			}
 			size := int(i.stack[i.sp-1].I32())
-			src := int(i.stack[i.sp-2].I32())
-			dst := int(i.stack[i.sp-3].I32())
-			ref := i.stack[i.sp-4]
-			if ref.Kind() != types.KindRef {
+			srcOffset := int(i.stack[i.sp-2].I32())
+			srcRef := i.stack[i.sp-3]
+			dstOffset := int(i.stack[i.sp-4].I32())
+			dstRef := i.stack[i.sp-5]
+			if srcRef.Kind() != types.KindRef || dstRef.Kind() != types.KindRef {
 				panic(ErrTypeMismatch)
 			}
-			addr := ref.Ref()
-			switch arr := i.heap[addr].(type) {
+			srcAddr := srcRef.Ref()
+			dstAddr := dstRef.Ref()
+			switch dst := i.heap[dstAddr].(type) {
 			case types.TypedArray[bool]:
-				if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
+				src, ok := i.heap[srcAddr].(types.TypedArray[bool])
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+				if srcOffset < 0 || dstOffset < 0 || srcOffset+size > len(src) || dstOffset+size > len(dst) {
 					panic(ErrIndexOutOfRange)
 				}
-				copy(arr[dst:dst+size], arr[src:src+size])
+				copy(dst[dstOffset:dstOffset+size], src[srcOffset:srcOffset+size])
 			case types.TypedArray[int8]:
-				if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
+				src, ok := i.heap[srcAddr].(types.TypedArray[int8])
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+				if srcOffset < 0 || dstOffset < 0 || srcOffset+size > len(src) || dstOffset+size > len(dst) {
 					panic(ErrIndexOutOfRange)
 				}
-				copy(arr[dst:dst+size], arr[src:src+size])
+				copy(dst[dstOffset:dstOffset+size], src[srcOffset:srcOffset+size])
 			case types.TypedArray[int32]:
-				if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
+				src, ok := i.heap[srcAddr].(types.TypedArray[int32])
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+				if srcOffset < 0 || dstOffset < 0 || srcOffset+size > len(src) || dstOffset+size > len(dst) {
 					panic(ErrIndexOutOfRange)
 				}
-				copy(arr[dst:dst+size], arr[src:src+size])
+				copy(dst[dstOffset:dstOffset+size], src[srcOffset:srcOffset+size])
 			case types.TypedArray[int64]:
-				if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
+				src, ok := i.heap[srcAddr].(types.TypedArray[int64])
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+				if srcOffset < 0 || dstOffset < 0 || srcOffset+size > len(src) || dstOffset+size > len(dst) {
 					panic(ErrIndexOutOfRange)
 				}
-				copy(arr[dst:dst+size], arr[src:src+size])
+				copy(dst[dstOffset:dstOffset+size], src[srcOffset:srcOffset+size])
 			case types.TypedArray[float32]:
-				if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
+				src, ok := i.heap[srcAddr].(types.TypedArray[float32])
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+				if srcOffset < 0 || dstOffset < 0 || srcOffset+size > len(src) || dstOffset+size > len(dst) {
 					panic(ErrIndexOutOfRange)
 				}
-				copy(arr[dst:dst+size], arr[src:src+size])
+				copy(dst[dstOffset:dstOffset+size], src[srcOffset:srcOffset+size])
 			case types.TypedArray[float64]:
-				if src < 0 || dst < 0 || src+size > len(arr) || dst+size > len(arr) {
+				src, ok := i.heap[srcAddr].(types.TypedArray[float64])
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+				if srcOffset < 0 || dstOffset < 0 || srcOffset+size > len(src) || dstOffset+size > len(dst) {
 					panic(ErrIndexOutOfRange)
 				}
-				copy(arr[dst:dst+size], arr[src:src+size])
+				copy(dst[dstOffset:dstOffset+size], src[srcOffset:srcOffset+size])
 			case *types.Array:
-				if src < 0 || dst < 0 || src+size > len(arr.Elems) || dst+size > len(arr.Elems) {
+				src, ok := i.heap[srcAddr].(*types.Array)
+				if !ok {
+					panic(ErrTypeMismatch)
+				}
+				if srcOffset < 0 || dstOffset < 0 || srcOffset+size > len(src.Elems) || dstOffset+size > len(dst.Elems) {
 					panic(ErrIndexOutOfRange)
 				}
-				elems := arr.Elems
-				for _, v := range elems[src : src+size] {
+				for _, v := range src.Elems[srcOffset : srcOffset+size] {
 					i.retainBox(v)
 				}
-				for _, v := range elems[dst : dst+size] {
+				for _, v := range dst.Elems[dstOffset : dstOffset+size] {
 					i.releaseBox(v)
 				}
-				copy(elems[dst:dst+size], elems[src:src+size])
+				copy(dst.Elems[dstOffset:dstOffset+size], src.Elems[srcOffset:srcOffset+size])
 			default:
 				panic(ErrTypeMismatch)
 			}
-			i.release(addr)
-			i.sp -= 4
+			i.release(srcAddr)
+			i.release(dstAddr)
+			i.sp -= 5
 			i.fr.ip++
 		}
 	},
@@ -3384,7 +3414,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			s := types.NewStruct(typ)
 			for j, f := range typ.Fields {
-				val := i.stack[i.sp-size-j]
+				val := i.stack[i.sp-size+j]
 				switch f.Kind {
 				case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64, types.KindRef:
 					s.SetField(j, val)
@@ -4447,7 +4477,7 @@ func (i *Interpreter) callHost(fn *HostFunction) {
 	if i.sp <= params {
 		panic(ErrStackUnderflow)
 	}
-	if i.sp+returns-params-1 >= len(i.stack) {
+	if i.sp+returns-params-1 > len(i.stack) {
 		panic(ErrStackOverflow)
 	}
 	args := i.stack[i.sp-params-1 : i.sp-1]
@@ -4511,7 +4541,7 @@ func (i *Interpreter) tail(code, ref int, upvals []types.Boxed, params, returns,
 		if i.fp == len(i.frames) {
 			panic(ErrFrameOverflow)
 		}
-		if i.sp+locals-1 >= len(i.stack) {
+		if i.sp+locals-1 > len(i.stack) {
 			panic(ErrStackOverflow)
 		}
 		if locals > 0 {

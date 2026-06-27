@@ -142,17 +142,18 @@ factorial := types.NewFunctionBuilder(&types.FunctionType{
 
 ### Optimize before running
 
-Fold constants and strip dead branches before the VM sees them:
+Fold constants before the VM sees them:
 
 ```go
 prog, err := optimize.NewOptimizer(optimize.O1).Optimize(prog)
 ```
 
-`O1` applies three passes across every function:
+`O1` applies two cheap local passes across every function:
 
 - **Constant folding** — `I32_CONST 3, I32_CONST 4, I32_ADD` → `I32_CONST 7`
 - **Constant deduplication** — identical values share a single constant slot
-- **Dead code elimination** — unreachable basic blocks are removed
+
+Use `O2` when you also want algebraic simplification and dead-code elimination, or `O3` for cross-block global value numbering.
 
 ## How the JIT works
 
@@ -221,10 +222,10 @@ For profile snapshots and JIT counters, see [`docs/profile.md`](docs/profile.md)
 | Feature | |
 |---|---|
 | Threaded interpreter | ✅ |
-| AOT optimizer (O1) | ✅ |
+| AOT optimizer (O1-O3) | ✅ |
 | ARM64 trace JIT — numerics, locals, globals, branches | ✅ |
 | ARM64 trace JIT — calls, upvalues, refs, heap reads, loops | ✅ |
-| x86-64 JIT | 🔲 planned |
+| x86-64 JIT | 🔲 planned (`asm/amd64` is a non-emitting placeholder) |
 
 See [docs/roadmap.md](docs/roadmap.md) for priorities and future direction.
 
