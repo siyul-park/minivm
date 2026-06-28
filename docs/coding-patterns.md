@@ -175,6 +175,16 @@ Split when abstraction level changes, naming hard, comments explain sections, or
 
 Do not split tiny single-use helpers out of nearby logic unless the helper names a meaningful behavior. A short helper that only hides one switch, loop, or predicate usually makes code harder to maintain because readers must chase another symbol.
 
+Do not re-state a callee's precondition at the call site to pick between it and
+a fallback. When a helper already returns "ineligible/failed", let one helper
+own the whole decision rather than guarding every caller with the helper's own
+condition. The JIT branch lowering does this: `brIf` and `brTable` call a single
+`branchOrExit`, which tries `continuation` (the eligibility gate) and falls back
+to `exit` on failure — instead of each call site repeating
+`branches[ip] != nil && len(frames) == 1 && !marked(...)` before deciding. The
+fallback stays correct because both paths flush the same live state first, so a
+flush failure aborts the compile either way.
+
 ### 1.5 Methods vs package-level functions
 
 Behavior belongs with the type owning required context. Receiver syntax marks ownership even when the receiver itself is unused.
@@ -678,6 +688,16 @@ operates on. If so, refine it into a method/function on that type (following
 the existing method-design conventions for the package, e.g. naming and
 return shape of sibling methods) instead of a test-only helper, and call the
 new method directly from the test.
+
+This holds for white-box introspection too. A JIT test that builds a program,
+runs it, then scans tracer internals (`tracer.rootAt`, `tree.branches`,
+`tree.hits`, a trace's `ops`) inlines all three steps into each `t.Run`. Do not
+extract a `branchTreeProgram()` builder, a `runEvalI32()` run wrapper, or a
+`traceReturnsConst()` scan — even when the scan is several nested loops and
+recurs across subtests. The duplicated build/run/scan is the documentation of
+what the JIT actually does; adding production API on tracer types purely to
+shorten a test trades a real surface cost (§0.5) for test brevity and is not
+allowed.
 
 ## 7. Git & PR Workflow
 

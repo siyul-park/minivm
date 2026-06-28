@@ -1683,6 +1683,207 @@ func TestWithThreshold(t *testing.T) {
 		require.True(t, looped)
 		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
 	})
+
+	t.Run("jits learned br_if continuations", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		b := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32)
+		neg := b.Label()
+		small := b.Label()
+		tiny := b.Label()
+		b.Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.I32_LT_S)).
+			BrIf(neg).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 10)).
+			Emit(instr.New(instr.I32_LT_S)).
+			BrIf(small).
+			Emit(instr.New(instr.I32_CONST, 2)).
+			Emit(instr.New(instr.RETURN)).
+			Bind(neg).
+			Emit(instr.New(instr.I32_CONST, i32operand(-1))).
+			Emit(instr.New(instr.RETURN)).
+			Bind(small).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 5)).
+			Emit(instr.New(instr.I32_LT_S)).
+			BrIf(tiny).
+			Emit(instr.New(instr.I32_CONST, 1)).
+			Emit(instr.New(instr.RETURN)).
+			Bind(tiny).
+			Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.RETURN))
+		eval, err := b.Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(eval))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+
+		// Record the root trace through two distinct paths before warming a side exit.
+		i.Reset()
+		require.NoError(t, i.Push(types.I32(20)))
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(2), v)
+
+		i.Reset()
+		require.NoError(t, i.Push(types.I32(7)))
+		require.NoError(t, i.Run(context.Background()))
+		v, err = i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1), v)
+
+		// Warm the arg=3 side exit until its learned continuation is compiled. The
+		// branch is identified by the i32.const its captured trace returns; once it
+		// runs native the journal stops counting it, so its hit counter freezes at
+		// the exit threshold.
+		id := -1
+		for range exitThreshold * 4 {
+			i.Reset()
+			require.NoError(t, i.Push(types.I32(3)))
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(0), v)
+
+			tree := i.tracer.rootAt(root)
+			require.NotNil(t, tree)
+			for bid, branch := range tree.branches {
+				if branch == nil {
+					continue
+				}
+				for _, op := range branch.ops {
+					if op.op != instr.I32_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
+						continue
+					}
+					code := i.instrs[op.fn]
+					if op.ip+5 <= len(code) && int32(instr.ParseI32(code, op.ip+1)) == 0 {
+						id = bid
+					}
+				}
+			}
+			if id >= 0 && tree.hits[id] >= exitThreshold {
+				break
+			}
+		}
+		require.GreaterOrEqual(t, id, 0, "no branch returning i32.const 0 was learned")
+		hits := i.tracer.rootAt(root).hits[id]
+		require.Equal(t, int64(exitThreshold), hits)
+
+		for range 3 {
+			i.Reset()
+			require.NoError(t, i.Push(types.I32(3)))
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(0), v)
+		}
+		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
+	})
+
+	t.Run("jits learned br_table continuations", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		b := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32)
+		zero := b.Label()
+		one := b.Label()
+		two := b.Label()
+		def := b.Label()
+		b.Emit(instr.New(instr.LOCAL_GET, 0)).
+			BrTable(def, zero, one, two).
+			Bind(zero).
+			Emit(instr.New(instr.I32_CONST, 10)).
+			Emit(instr.New(instr.RETURN)).
+			Bind(one).
+			Emit(instr.New(instr.I32_CONST, 11)).
+			Emit(instr.New(instr.RETURN)).
+			Bind(two).
+			Emit(instr.New(instr.I32_CONST, 12)).
+			Emit(instr.New(instr.RETURN)).
+			Bind(def).
+			Emit(instr.New(instr.I32_CONST, 99)).
+			Emit(instr.New(instr.RETURN))
+		eval, err := b.Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(eval))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+
+		// Record the root trace through table index 0 before warming index 1.
+		i.Reset()
+		require.NoError(t, i.Push(types.I32(0)))
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(10), v)
+
+		// Warm the index=1 side exit until its learned continuation is compiled;
+		// once native, the journal stops counting it and its hit counter freezes.
+		id := -1
+		for range exitThreshold * 4 {
+			i.Reset()
+			require.NoError(t, i.Push(types.I32(1)))
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(11), v)
+
+			tree := i.tracer.rootAt(root)
+			require.NotNil(t, tree)
+			for bid, branch := range tree.branches {
+				if branch == nil {
+					continue
+				}
+				for _, op := range branch.ops {
+					if op.op != instr.I32_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
+						continue
+					}
+					code := i.instrs[op.fn]
+					if op.ip+5 <= len(code) && int32(instr.ParseI32(code, op.ip+1)) == 11 {
+						id = bid
+					}
+				}
+			}
+			if id >= 0 && tree.hits[id] >= exitThreshold {
+				break
+			}
+		}
+		require.GreaterOrEqual(t, id, 0, "no branch returning i32.const 11 was learned")
+		hits := i.tracer.rootAt(root).hits[id]
+		require.Equal(t, int64(exitThreshold), hits)
+
+		for range 3 {
+			i.Reset()
+			require.NoError(t, i.Push(types.I32(1)))
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(11), v)
+		}
+		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
+
+		// The default target still deopts correctly after index 1 is learned.
+		i.Reset()
+		require.NoError(t, i.Push(types.I32(4)))
+		require.NoError(t, i.Run(context.Background()))
+		v, err = i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(99), v)
+	})
 }
 
 func TestWithFuel(t *testing.T) {

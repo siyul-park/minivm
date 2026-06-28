@@ -8,6 +8,19 @@ Before changing code, read `docs/coding-patterns.md` and any task-relevant docs 
 
 Follow `docs/coding-patterns.md` unless the task or repository context requires a narrower rule.
 
+## Coding Style Summary
+
+`docs/coding-patterns.md` is the authority; this is the short form.
+
+- **Layout** — declarations follow the fixed 11-slot order (§2.4); callers above callees, `New` above `With*` (§1.3).
+- **Methods over functions** — a private function used by one type becomes a method on it, even with an unused receiver (§1.5); but a single-use ≤~15-line helper stays inline (§1.4).
+- **One abstraction level** — entry points read as a narrative; push mechanics into intent-named helpers (§1.1).
+- **Struct fields** — layered policy → infrastructure → program data → runtime state → counters → read-only config → mutex (§2.5).
+- **Errors** — explicit, wrapped with `%w`, sentinels preserved; panic only in interpreter-threaded paths recovered by `Run` (§4).
+- **Tests** — one test per public symbol (§6.3); inline setup/run/scan with no test helpers (§6.1, §6.8); assert behavior, never write unexported fields (§6.1).
+- **No duplication** — collapse repeated cleanup or a repeated branch-or-fallback decision into one helper (§1.4).
+- **Docs** — a new convention is incomplete without the matching `docs/` + `AGENTS.md`/`CLAUDE.md` update (§8).
+
 ## Pre-finish Self-Review
 
 Re-read every new or modified file against this checklist before reporting a change as done. Each item maps to a `docs/coding-patterns.md` rule that has been missed on a first pass.
@@ -21,5 +34,6 @@ Re-read every new or modified file against this checklist before reporting a cha
 - **Cross-package boundary uses value-type structs (§0.5 + §1.5)** — when package B integrates package A's output, do NOT expose package B's internals through a `View`-style interface for A to call back into. Package A defines plain-value input/output structs (e.g. `Call`/`Outcome`); B fills the input, hands them to a single A entry point, applies the output itself. The contract is two structs, never an interface shaped around B's storage.
 - **One test per public symbol (§6.3)** — a behavior that exercises an existing public method belongs in that method's `Test<Type>_<Method>` as a `t.Run`. Do not add a parallel top-level test for the same symbol.
 - **Tests assert behavior (§6.1)** — never mutate unexported fields (`p.live.Add(1)`, etc.) to fabricate a state unreachable from the public API. That is testing defensive dead code, not behavior. White-box reads of unexported fields are fine; white-box writes are not.
-- **No duplicated cleanup (§1.4)** — the same `_ = x.Close(); counter.Add(-1)` pair in multiple branches signals an extractable private helper.
+- **No test helpers (§6.1 + §6.8)** — inline program construction, the run sequence, and any tracer-state scan into each `t.Run`. Do not extract a `branchTreeProgram()`, a `runEvalI32()` run wrapper, or a `traceReturnsConst()` scan, even for JIT white-box introspection that nests loops or repeats across subtests. Do not add production API to a type purely to shorten a test (§0.5).
+- **No duplicated cleanup or fallback decision (§1.4)** — the same `_ = x.Close(); counter.Add(-1)` pair across branches, or re-stating a callee's precondition at every call site to pick between it and a fallback, signals an extractable helper. JIT branch lowering routes through one `branchOrExit` rather than guarding each target with `continuation`'s own eligibility condition.
 - **No skipped phases without recording why** — when a refactor plan lists a step you cannot apply (e.g. "extract shared tail from `whole`/`blocks`" but the middles diverge enough that the param list explodes), record the reason in the final summary. Do not silently drop the step; future passes will reach the same conclusion and waste the same effort.

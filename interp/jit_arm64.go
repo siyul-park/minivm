@@ -1471,10 +1471,9 @@ func (l arm64Lowerer) sign64(ctx *lowering, v asm.VReg) asm.VReg {
 	return out
 }
 
-// brIf guards the recorded branch direction. The diverging side either
-// continues into a recorded branch trace — state is flushed at the guard and
-// the body emitted later from a clean reload — or exits to the interpreter at
-// the diverging target with the condition already consumed.
+// brIf guards the recorded branch direction: the recorded side falls through
+// inline and the diverging side branches into a learned trace or exits to the
+// interpreter (see branchOrExit), with the condition already consumed.
 func (l arm64Lowerer) brIf(ctx *lowering, op step) bool {
 	if ctx.count() < 1 || !l.kinds(ctx, types.KindI32, 1) {
 		return false
@@ -1486,35 +1485,16 @@ func (l arm64Lowerer) brIf(ctx *lowering, op step) bool {
 		diverge = op.ip + 3
 	}
 
-	branch := ctx.branches[diverge]
-	if branch != nil && len(ctx.frames) == 1 && !l.marked(ctx) {
-		cont := ctx.assembler.Label()
-		if taken {
-			ctx.assembler.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), cont))
-		} else {
-			ctx.assembler.Emit(arm64.CBZLabel(l.narrow32(cond.reg), cont))
-		}
-		if !l.flush(ctx, false) {
-			return false
-		}
-		p := pending{label: ctx.assembler.Label(), ops: branch.ops}
-		p.values, p.frames = ctx.snapshot()
-		ctx.assembler.Emit(arm64.BLabel(p.label))
-		ctx.pending = append(ctx.pending, p)
-		ctx.assembler.Bind(cont)
-		return true
-	}
-
-	ok := ctx.assembler.Label()
+	cont := ctx.assembler.Label()
 	if taken {
-		ctx.assembler.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), ok))
+		ctx.assembler.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), cont))
 	} else {
-		ctx.assembler.Emit(arm64.CBZLabel(l.narrow32(cond.reg), ok))
+		ctx.assembler.Emit(arm64.CBZLabel(l.narrow32(cond.reg), cont))
 	}
-	if !l.exit(ctx, diverge) {
+	if !l.branchOrExit(ctx, diverge) {
 		return false
 	}
-	ctx.assembler.Bind(ok)
+	ctx.assembler.Bind(cont)
 	return true
 }
 
@@ -1545,18 +1525,54 @@ func (l arm64Lowerer) brTable(ctx *lowering, op step) bool {
 		skip := ctx.assembler.Label()
 		ctx.assembler.Emit(arm64.CMPI(condI32, uint16(idx)))
 		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, skip))
-		if !l.exit(ctx, targets[idx]) {
+		if !l.branchOrExit(ctx, targets[idx]) {
 			return false
 		}
 		ctx.assembler.Bind(skip)
 	}
 	if targets[count] != op.target {
-		if !l.exit(ctx, targets[count]) {
+		if !l.branchOrExit(ctx, targets[count]) {
 			return false
 		}
 	}
 	ctx.assembler.Bind(next)
 	return true
+}
+
+// branchOrExit lowers one recorded branch target: it continues into a learned
+// branch trace when the target is eligible, otherwise exits to the interpreter
+// at that target. Both paths flush live state, so a flush failure aborts the
+// compile either way.
+func (l arm64Lowerer) branchOrExit(ctx *lowering, ip int) bool {
+	if label, ok := l.continuation(ctx, ip); ok {
+		ctx.assembler.Emit(arm64.BLabel(label))
+		return true
+	}
+	return l.exit(ctx, ip)
+}
+
+// continuation materializes the current symbolic state and returns a native
+// label for a learned branch target, or false when the target is not eligible
+// (no learned trace, an inlined frame, or a marked trace). The branch body
+// starts from a reload, so every predecessor writes the same VM stack homes
+// before jumping to it.
+func (l arm64Lowerer) continuation(ctx *lowering, ip int) (asm.Label, bool) {
+	branch := ctx.branches[ip]
+	if branch == nil || len(ctx.frames) != 1 || l.marked(ctx) {
+		return 0, false
+	}
+	if !l.flush(ctx, false) {
+		return 0, false
+	}
+	if label, ok := ctx.queued[ip]; ok {
+		return label, true
+	}
+	label := ctx.assembler.Label()
+	ctx.queued[ip] = label
+	p := pending{label: label, ops: branch.ops}
+	p.values, p.frames = ctx.snapshot()
+	ctx.pending = append(ctx.pending, p)
+	return label, true
 }
 
 // call lowers a recorded CALL. The callee marker must resolve to an observed

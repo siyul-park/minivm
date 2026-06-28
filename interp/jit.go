@@ -48,6 +48,7 @@ type lowering struct {
 	values  []value
 	frames  []activation
 	pending []pending
+	queued  map[int]asm.Label
 
 	addr    int
 	returns int
@@ -238,6 +239,7 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 		tree:      tree,
 		branches:  tree.branchIPs(),
 		funcs:     c.funcs(i),
+		queued:    map[int]asm.Label{},
 		constants: i.constants,
 		globals:   i.globals,
 		heap:      i.heap,

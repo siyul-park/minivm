@@ -168,9 +168,15 @@ the caller's symbolic stack.
 ## Branches And Loops
 
 Recorded forward branches become guarded exits or pending branch continuations.
-`BR_IF` emits the recorded path and deopts on the unrecorded path unless a branch
-trace has been learned. `BR_TABLE` emits the observed target and deopts on other
-targets.
+`BR_IF` and `BR_TABLE` emit the recorded path and deopt on unrecorded targets.
+When a side exit reaches the exit threshold, the tracer records that target and a
+later compile folds the learned continuation into the same native callable as a
+straight-line pending block. Pending blocks reload from VM stack homes written at
+the branch, can enqueue further learned continuations, and reuse one native label
+per learned target IP in the root. Targets that are still unknown, have unsafe
+stack/frame shape, or touch unsupported operations continue to deopt through the
+journal. This progressively widens branch-heavy traces without adding a separate
+static method compiler.
 
 A loop is anchored at its header — the target of a backward `BR`/`BR_IF`. The
 safepoint discovers headers statically (`Tracer.headers` scans for back-edge
