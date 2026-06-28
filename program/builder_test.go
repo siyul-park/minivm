@@ -47,29 +47,6 @@ func TestBuilder_ConstGet(t *testing.T) {
 	require.Equal(t, uint64(0), instrs[1].Operand(0))
 }
 
-func TestBuilder_Ext(t *testing.T) {
-	b := NewBuilder()
-	b.Ext(1, 2)
-	b.Ext(3, 4, 7, 9)
-
-	prog, err := b.Build()
-	require.NoError(t, err)
-
-	instrs := instr.Unmarshal(prog.Code)
-
-	require.Equal(t, instr.EXT, instrs[0].Opcode())
-	require.Equal(t, uint64(1<<8|2), instrs[0].Operand(0))
-	require.Equal(t, uint64(0), instrs[0].Operand(1))
-	require.Len(t, instrs[0], 4)
-
-	require.Equal(t, instr.EXT, instrs[1].Opcode())
-	require.Equal(t, uint64(3<<8|4), instrs[1].Operand(0))
-	require.Equal(t, uint64(2), instrs[1].Operand(1))
-	require.Equal(t, uint64(7), instrs[1].Operand(2))
-	require.Equal(t, uint64(9), instrs[1].Operand(3))
-	require.Len(t, instrs[1], 20)
-}
-
 func TestBuilder_Build(t *testing.T) {
 	t.Run("resolves branch to label", func(t *testing.T) {
 		b := NewBuilder()

@@ -1,7 +1,6 @@
 package interp
 
 import (
-	"fmt"
 	"math"
 	"math/bits"
 	"unsafe"
@@ -14,7 +13,6 @@ type threadedCompiler struct {
 	types     []types.Type
 	constants []types.Boxed
 	heap      []types.Value
-	exts      []Extension
 	locals    []types.Kind
 	code      []byte
 	ip        int
@@ -4467,25 +4465,6 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.releaseBox(box)
 			i.stack[i.sp-1] = types.BoxI32(int32(code))
 			i.fr.ip++
-		}
-	},
-
-	instr.EXT: func(c *threadedCompiler) func(i *Interpreter) {
-		inst := instr.Instruction(c.code[c.ip:])
-		width := inst.Width()
-		extID := int(inst.Operand(0) >> 8)
-		c.ip += width
-		if extID >= len(c.exts) || c.exts[extID] == nil {
-			return func(i *Interpreter) {
-				panic(fmt.Errorf("%w: ext %d", ErrUnknownOpcode, extID))
-			}
-		}
-		run := c.exts[extID].Compile(inst[:width])
-		return func(i *Interpreter) {
-			if err := run(i); err != nil {
-				panic(err)
-			}
-			i.fr.ip += width
 		}
 	},
 }

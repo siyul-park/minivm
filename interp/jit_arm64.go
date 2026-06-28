@@ -495,26 +495,6 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 				return false
 			}
 			return idx == len(ops)-1
-		case instr.EXT:
-			// Let the extension emit native code; if it declines (or none is
-			// registered), deopt to the threaded handler at op.ip, which runs the
-			// extension's Compile handler and performs its own ip advance.
-			inst := instr.Instruction(f.code[op.ip:])
-			extID := int(inst.Operand(0) >> 8)
-			if extID < len(ctx.exts) && ctx.exts[extID] != nil {
-				values := append([]value(nil), ctx.values...)
-				e := &Emitter{ctx: ctx}
-				if ctx.exts[extID].Lower(inst[:inst.Width()], e) {
-					ctx.assembler.Emit(e.insts...)
-					ok = true
-					break
-				}
-				ctx.values = values
-			}
-			if !l.exit(ctx, op.ip) {
-				return false
-			}
-			return idx == len(ops)-1
 		case instr.BR_IF:
 			ok = l.brIf(ctx, op)
 		case instr.CALL:

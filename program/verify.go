@@ -22,9 +22,7 @@ type VerifyError struct {
 // Option configures verification context not carried by the Program itself.
 type Option func(*config)
 
-type config struct {
-	extensions map[uint8]bool
-}
+type config struct{}
 
 // checker verifies one function slot: it proves structural integrity (decode,
 // operand bounds, control flow, termination) and then, where the bytecode is
@@ -74,17 +72,16 @@ type stack struct {
 const anyKind = instr.KindAny
 
 var (
-	ErrTruncated        = errors.New("truncated instruction")
-	ErrUnknownOpcode    = errors.New("unknown opcode")
-	ErrUnknownExtension = errors.New("unknown extension")
-	ErrIndexOutOfRange  = errors.New("operand index out of range")
-	ErrStackUnderflow   = errors.New("stack underflow")
-	ErrStackMismatch    = errors.New("stack mismatch at control-flow merge")
-	ErrTypeMismatch     = errors.New("operand type mismatch")
-	ErrFallThrough      = errors.New("control falls off end of function")
-	ErrInvalidJump      = errors.New("invalid jump")
-	ErrHandlerRange     = errors.New("invalid exception handler range")
-	ErrHandlerTarget    = errors.New("invalid exception handler target")
+	ErrTruncated       = errors.New("truncated instruction")
+	ErrUnknownOpcode   = errors.New("unknown opcode")
+	ErrIndexOutOfRange = errors.New("operand index out of range")
+	ErrStackUnderflow  = errors.New("stack underflow")
+	ErrStackMismatch   = errors.New("stack mismatch at control-flow merge")
+	ErrTypeMismatch    = errors.New("operand type mismatch")
+	ErrFallThrough     = errors.New("control falls off end of function")
+	ErrInvalidJump     = errors.New("invalid jump")
+	ErrHandlerRange    = errors.New("invalid exception handler range")
+	ErrHandlerTarget   = errors.New("invalid exception handler target")
 )
 
 func newChecker(prog *Program, cfg *config, slot int, fn *types.Function) *checker {
@@ -119,20 +116,6 @@ func Verify(prog *Program, opts ...Option) error {
 		}
 	}
 	return nil
-}
-
-// WithExtensions registers the extension ids the program may invoke via EXT.
-// When set, an EXT to an unregistered id is rejected; when unset, EXT ids are
-// not checked because the registry is unknown to the verifier.
-func WithExtensions(ids ...uint8) Option {
-	return func(c *config) {
-		if c.extensions == nil {
-			c.extensions = make(map[uint8]bool, len(ids))
-		}
-		for _, id := range ids {
-			c.extensions[id] = true
-		}
-	}
 }
 
 func (e *VerifyError) Error() string {
@@ -241,10 +224,6 @@ func (c *checker) bounds(ip int, op instr.Opcode) error {
 	case instr.UPVAL_GET, instr.UPVAL_SET:
 		if int(inst.Operand(0)) >= len(c.captures) {
 			return c.fail(ip, op, ErrIndexOutOfRange)
-		}
-	case instr.EXT:
-		if id := uint8(inst.Operand(0) >> 8); c.cfg.extensions != nil && !c.cfg.extensions[id] {
-			return c.fail(ip, op, ErrUnknownExtension)
 		}
 	}
 	return nil
@@ -552,7 +531,7 @@ func (c *checker) step(st *stack, inst instr.Instruction, op instr.Opcode, ip in
 		st.drop(len(t.Fields))
 		st.push(slot{kind: types.KindRef})
 		return false, nil
-	case instr.MAP_NEW, instr.CLOSURE_NEW, instr.EXT:
+	case instr.MAP_NEW, instr.CLOSURE_NEW:
 		return true, nil
 	}
 

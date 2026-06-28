@@ -282,10 +282,3 @@ const (
 
 	STRING_ITER
 )
-
-// EXT is the reserved prefix opcode for user-registered extension instructions.
-// It is pinned to 0xFF (the top of the opcode space) so the builtin opcodes
-// above keep their iota values stable. Its operand is a uint16 code split as
-// [extID:1][opID:1]: the high byte routes to a registered Extension, the low
-// byte selects the op within it. See interp.Registry / interp.Extension.
-const EXT Opcode = 0xFF

@@ -284,8 +284,6 @@ var types = map[Opcode]Type{
 
 	UPVAL_GET: {Mnemonic: "upval.get", Widths: []int{1}},
 	UPVAL_SET: {Mnemonic: "upval.set", Widths: []int{1}, Pop: []Kind{KindAny}},
-
-	EXT: {Mnemonic: "ext", Widths: []int{2, -8}},
 }
 
 func TypeOf(op Opcode) Type {

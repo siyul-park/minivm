@@ -40,7 +40,6 @@ type lowering struct {
 	constants []types.Boxed
 	globals   []types.Boxed
 	heap      []types.Value
-	exts      []Extension
 	scratch   []asm.PReg
 	entry     asm.Label
 	head      asm.Label
@@ -242,7 +241,6 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 		constants: i.constants,
 		globals:   i.globals,
 		heap:      i.heap,
-		exts:      i.exts,
 		scratch:   scratch,
 		entry:     entry,
 		head:      asmb.Label(),

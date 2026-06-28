@@ -357,7 +357,7 @@ func (g *gnumbering) step(ip int, inst instr.Instruction) bool {
 		return true
 
 	case instr.CALL, instr.RETURN_CALL, instr.RETURN, instr.THROW,
-		instr.STRUCT_NEW, instr.MAP_NEW, instr.CLOSURE_NEW, instr.EXT,
+		instr.STRUCT_NEW, instr.MAP_NEW, instr.CLOSURE_NEW,
 		instr.YIELD, instr.RESUME:
 		return false
 	}

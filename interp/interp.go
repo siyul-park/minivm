@@ -36,7 +36,6 @@ type Interpreter struct {
 	coros     []bool
 	handlers  [][]instr.Handler
 	module    *types.Function
-	exts      []Extension
 	dynamic   map[int]bool
 
 	frames   []frame
@@ -83,7 +82,6 @@ type option struct {
 	tracer     *Tracer
 	profiler   *prof.Profiler
 	local      *prof.Collector
-	registry   *Registry
 	threshold  int
 	cutoff     int
 
@@ -131,13 +129,6 @@ func WithTracer(t *Tracer) func(*option) {
 // pooled interpreter shares it.
 func WithProfiler(p *prof.Profiler) func(*option) {
 	return func(o *option) { o.profiler = p }
-}
-
-// WithRegistry installs the extension registry that resolves EXT instructions.
-// An EXT operand's high byte selects the registered Extension by its slot; an
-// out-of-range or absent slot traps ErrUnknownOpcode at run time.
-func WithRegistry(r *Registry) func(*option) {
-	return func(o *option) { o.registry = r }
 }
 
 // withLocal injects a pre-seeded sample collector. Tests use it to drive hot-IP
@@ -258,10 +249,6 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		gas:       fuel,
 		limit:     opt.maxHeap,
 	}
-	if opt.registry != nil {
-		i.exts = append([]Extension(nil), opt.registry.exts...)
-	}
-
 	i.alloc(types.Null)
 
 	for j, v := range prog.Constants {
@@ -293,7 +280,6 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		types:     i.types,
 		constants: i.constants,
 		heap:      i.heap,
-		exts:      i.exts,
 		precise:   opt.tick == 1,
 	}
 
@@ -1371,7 +1357,6 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 		types:     i.types,
 		constants: i.constants,
 		heap:      i.heap,
-		exts:      i.exts,
 		precise:   i.tick == 1,
 	}
 	i.instrs[addr] = fn.Code

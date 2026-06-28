@@ -217,12 +217,6 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, Verify(prog), ErrStackMismatch)
 	})
 
-	t.Run("unknown extension rejected when registry known", func(t *testing.T) {
-		prog := New([]instr.Instruction{instr.New(instr.EXT, uint64(3)<<8, 0)})
-		require.ErrorIs(t, Verify(prog, WithExtensions(1)), ErrUnknownExtension)
-		require.NoError(t, Verify(prog))
-	})
-
 	t.Run("valid protected region", func(t *testing.T) {
 		b := NewBuilder()
 		start, end, catch := b.Label(), b.Label(), b.Label()

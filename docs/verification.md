@@ -30,7 +30,7 @@ host.
 ## API
 
 ```go
-err := program.Verify(prog, program.WithExtensions(ids...)) // nil or *program.VerifyError
+err := program.Verify(prog) // nil or *program.VerifyError
 if err != nil {
     return err
 }
@@ -39,13 +39,12 @@ vm := interp.New(prog) // trusts prog; verify first
 
 Verification is decoupled from the interpreter: `interp.New` never verifies and
 trusts its input. Run `program.Verify` beforehand for untrusted or externally
-loaded bytecode, passing the extension registry's ids through
-`program.WithExtensions` when the program uses `EXT`.
+loaded bytecode.
 
 `VerifyError` locates the first violation by verifier slot (0 = top-level code,
 `j+1` = constant `j`; runtime dispatch is keyed by heap ref), instruction byte
 offset, and opcode, and wraps a sentinel (`errors.Is`-compatible):
-`ErrTruncated`, `ErrUnknownOpcode`, `ErrUnknownExtension`, `ErrIndexOutOfRange`,
+`ErrTruncated`, `ErrUnknownOpcode`, `ErrIndexOutOfRange`,
 `ErrStackUnderflow`, `ErrStackMismatch`, `ErrTypeMismatch`, `ErrFallThrough`,
 `ErrInvalidJump`, `ErrHandlerRange`, and `ErrHandlerTarget`.
 
@@ -58,8 +57,7 @@ Each function slot is verified in four passes (`checker.run`):
    defined opcode (`instr.Valid`), and carries in-range operand indices:
    `CONST_GET` into `Constants`; type-index ops (`REF_TEST`/`REF_CAST`,
    `ARRAY_NEW*`/`STRUCT_NEW*`/`MAP_NEW*`) into `Types`; `LOCAL_*` into the
-   param+local list; `UPVAL_*` into `Captures`; `EXT` against the known
-   extension ids when supplied.
+   param+local list; `UPVAL_*` into `Captures`.
 2. **Control flow** — `checker.blocks` builds the CFG, which also
    proves every branch target lands on an instruction boundary.
 3. **Termination** — every exit block of a *function body* ends in `RETURN`,
