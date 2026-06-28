@@ -57,6 +57,7 @@ const (
 	linear outcome = iota
 	loop
 	returned
+	completed
 	aborted
 )
 
@@ -194,6 +195,9 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 			r.store(a, t)
 			return t, nil
 		case clone.fr.addr >= 0 && clone.fr.addr < len(clone.instrs) && clone.fr.ip >= len(clone.instrs[clone.fr.addr]):
+			if clone.fr.addr == 0 {
+				t.kind = completed
+			}
 			r.store(a, t)
 			return t, nil
 		case clone.fr.addr == a.addr && clone.fr.ip == a.ip:

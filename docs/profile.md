@@ -75,16 +75,17 @@ JIT activity is exported as ordinary named metrics.
 ## Profile-Guided JIT
 
 JIT activates when `Samples(fn)` reaches configured threshold rounded up to tick
-cadence. Default: `4096 / 128 = 32` samples. `WithThreshold(0)` activates on
+cadence. Function index `0` (top-level module code) is eligible, as are function
+heap refs. Default: `4096 / 128 = 32` samples. `WithThreshold(0)` activates on
 first sample; negative thresholds disable JIT. Each hot attempt records a runtime
 trace before native compilation. Pool members use the same rounded threshold;
 when a shared `Cache` is supplied, the trigger count is aggregated there so only
-one member wins native compilation for each function. Trace trees themselves are
-currently interpreter-local.
+one member wins native compilation for each module/function slot. Trace trees
+themselves are currently interpreter-local.
 
-At compile time, the `Tracer` supplies the entry trace tree for the hot function.
-Profile samples still drive when a function becomes due, while recorded branch
-exits can request a later recompile after the exit counter reaches its threshold.
+At compile time, the `Tracer` supplies the entry trace tree for the hot slot.
+Profile samples still drive when a slot becomes due, while recorded branch exits
+can request a later recompile after the exit counter reaches its threshold.
 
 JIT does not currently tier-up beyond the ARM64 trace backend.
 

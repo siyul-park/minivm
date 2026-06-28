@@ -524,6 +524,9 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			return false
 		}
 	}
+	if ctx.tree.root.kind == completed {
+		return l.complete(ctx)
+	}
 	return false
 }
 
@@ -1947,6 +1950,27 @@ func (l arm64Lowerer) ret(ctx *lowering) bool {
 			a.Emit(arm64.MOV(ret, boxed))
 		}
 	}
+	a.Emit(
+		arm64.LDR(arm64.LR, arm64.SP, 0),
+		arm64.ADDI(arm64.SP, arm64.SP, 16),
+		arm64.RET(),
+	)
+	return true
+}
+
+// complete finishes top-level module code: live locals and operands are boxed
+// back to the VM stack, SP is published, and the wrapper marks the frame done.
+func (l arm64Lowerer) complete(ctx *lowering) bool {
+	if !l.flush(ctx, false) {
+		return false
+	}
+	a := ctx.assembler
+	vCtrl := ctx.pin(scratchCtrl)
+	vBP := ctx.pin(scratchBP)
+	sp := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ADDI(sp, vBP, uint16(ctx.sp())))
+	a.Emit(arm64.STR(sp, vCtrl, int16(journalSP*8)))
+	l.report(ctx, vCtrl, trapNone, len(ctx.frame().code))
 	a.Emit(
 		arm64.LDR(arm64.LR, arm64.SP, 0),
 		arm64.ADDI(arm64.SP, arm64.SP, 16),

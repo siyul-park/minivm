@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1617,14 +1618,71 @@ func TestWithTick(t *testing.T) {
 }
 
 func TestWithThreshold(t *testing.T) {
-	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7)})
-	i := New(prog, WithThreshold(-1))
-	defer i.Close()
+	t.Run("disabled", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7)})
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
 
-	require.NoError(t, i.Run(context.Background()))
-	v, err := i.Pop()
-	require.NoError(t, err)
-	require.Equal(t, types.I32(7), v)
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(7), v)
+	})
+
+	t.Run("jits top-level entry", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+		})
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(3), v)
+		if runtime.GOARCH != "arm64" {
+			return
+		}
+		require.NotNil(t, i.fallbacks[anchor{addr: 0, ip: 0}])
+		require.Equal(t, float64(1), i.local.Value("vm_jit_emits_total"))
+	})
+
+	t.Run("jits top-level loop", func(t *testing.T) {
+		b := program.NewBuilder()
+		loop := b.Label()
+		b.Locals(types.TypeI32).
+			Emit(instr.I32_CONST, 0).
+			Emit(instr.LOCAL_SET, 0).
+			Bind(loop).
+			Emit(instr.LOCAL_GET, 0).
+			Emit(instr.I32_CONST, 1).
+			Emit(instr.I32_ADD).
+			Emit(instr.LOCAL_TEE, 0).
+			Emit(instr.I32_CONST, 1100).
+			Emit(instr.I32_LT_S).
+			BrIf(loop).
+			Emit(instr.LOCAL_GET, 0)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1100), v)
+		if runtime.GOARCH != "arm64" {
+			return
+		}
+		var looped bool
+		for _, ip := range i.tracer.anchors(0) {
+			looped = looped || ip > 0
+		}
+		require.True(t, looped)
+		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+	})
 }
 
 func TestWithFuel(t *testing.T) {

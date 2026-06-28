@@ -26,11 +26,13 @@ program.Program
 The threaded compiler and native backend read the same bytecode. `i.code[addr][ip]`
 is the primary dispatch table. A hot JIT attempt first records a runtime trace
 from the current interpreter state, then the ARM64 backend publishes a native
-callable for each usable root: the function entry (`ip == 0`) and any hot loop
-header (`ip > 0`). The entry callable installs at `i.code[addr][0]` and tears the
-frame down on return; a loop callable installs at `i.code[addr][header]` and
-re-enters the live frame without unwinding it. Rejected traces emit nothing and
-threaded dispatch remains installed.
+callable for each usable root: the module or function entry (`ip == 0`) and any
+hot loop header (`ip > 0`). A function entry callable installs at
+`i.code[addr][0]` and tears the frame down on return; the top-level module entry
+installs at `i.code[0][0]`, preserves its frame, and completes by advancing to
+the end of the program code. A loop callable installs at `i.code[addr][header]`
+and re-enters the live frame without unwinding it. Rejected traces emit nothing
+and threaded dispatch remains installed.
 
 Solo interpreters compile into a private `compiler` and private `asm.Buffer`.
 Pool interpreters use a shared `Cache`: trigger counts live in atomics, the
@@ -44,8 +46,9 @@ own threaded closure table at a safepoint.
 is trace-only and emits every usable root anchored at `addr` (`emitRoot` per
 anchor):
 
-1. find the `Tracer` trace tree for each `(addr, ip)` anchor — entry plus loop
-   headers — skipping aborted roots, side-exit branches, and entry-anchored loops
+1. find the `Tracer` trace tree for each `(addr, ip)` anchor — module/function
+   entry plus loop headers — skipping aborted roots, side-exit branches, and
+   entry-anchored loops
 2. build a `lowering` with typed symbolic operands, frames, constants,
    globals, heap view, and scratch registers (`loop` set for loop roots)
 3. ask the architecture `lowerer` to emit the trace
@@ -156,8 +159,11 @@ callee/caller appends enough frame state for the Go wrapper to rebuild the VM
 call chain before threaded resume. Frame overflow reports `trapOverflow`, and the
 wrapper panics with `ErrFrameOverflow`.
 
-`RETURN` closes the entry trace only when it returns from the outer recorded
-frame. Inlined callee returns stitch values back into the caller's symbolic stack.
+`RETURN` closes a function entry trace only when it returns from the outer
+recorded frame. Top-level module code has no synthetic `RETURN`; falling off the
+end of slot `0` closes the trace as a completed module entry and writes every
+live operand back to the VM stack. Inlined callee returns stitch values back into
+the caller's symbolic stack.
 
 ## Branches And Loops
 
@@ -168,8 +174,9 @@ targets.
 
 A loop is anchored at its header — the target of a backward `BR`/`BR_IF`. The
 safepoint discovers headers statically (`Tracer.headers` scans for back-edge
-targets) and, once the function is hot, records one iteration from the live state
-at the header (a stack-consistent point); the recorded trace's kind is `loop`.
+targets) and, once the module or function is hot, records one iteration from the
+live state at the header (a stack-consistent point); the recorded trace's kind is
+`loop`.
 `emitRoot` lowers it with `loop` set: after the prologue it binds a back-edge
 label, walks the body, and at the recorded back-edge commits loop-carried locals
 to the VM stack, decrements `journalBudget`, and branches back while budget

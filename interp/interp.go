@@ -718,7 +718,7 @@ func (i *Interpreter) install(mod *module, account bool) {
 		i.local.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
 	}
 	for a, callable := range mod.entries {
-		if a.addr <= 0 || a.addr >= len(i.code) || a.ip < 0 || a.ip >= len(i.code[a.addr]) || callable == nil {
+		if a.addr < 0 || a.addr >= len(i.code) || a.ip < 0 || a.ip >= len(i.code[a.addr]) || callable == nil {
 			continue
 		}
 		// Save the original threaded handler once so deopt always resumes in the
@@ -732,6 +732,8 @@ func (i *Interpreter) install(mod *module, account bool) {
 		}
 		if mod.loops[a] {
 			i.code[a.addr][a.ip] = i.loop(callable)
+		} else if a.addr == 0 {
+			i.code[a.addr][a.ip] = i.moduleEntry(callable)
 		} else {
 			i.code[a.addr][a.ip] = i.entry(callable)
 		}
@@ -807,7 +809,7 @@ func (i *Interpreter) safepoint() error {
 	}
 
 	i.local.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
-	if f.addr > 0 && f.ip == 0 && !i.tracer.hasEntry(f.addr) {
+	if f.ip == 0 && !i.tracer.hasEntry(f.addr) {
 		if _, err := i.tracer.capture(i, anchor{addr: f.addr, ip: 0}); err != nil {
 			return err
 		}
@@ -819,7 +821,7 @@ func (i *Interpreter) safepoint() error {
 	// installs anything; compile here, once the function is hot and the loop
 	// trace first appears, so the loop header gets its own native. The hotness
 	// gate keeps WithThreshold(-1) a pure interpreter.
-	if i.threshold >= 0 && f.addr > 0 && f.ip > 0 &&
+	if i.threshold >= 0 && f.ip > 0 &&
 		i.local.Samples(f.addr) >= uint64(i.threshold) &&
 		!i.tracer.hasLoop(f.addr, f.ip) {
 		for _, h := range i.tracer.headers(i, f.addr) {
@@ -905,6 +907,43 @@ func (i *Interpreter) entry(callable asm.Callable) func(*Interpreter) {
 			// IP 0 now dispatches to the native entry; run the handler it shadows once
 			// so we make progress instead of re-entering native and re-trapping. Any
 			// later IP is an untouched threaded handler the Run loop dispatches next.
+			if i.fr.ip == 0 {
+				i.fallbacks[anchor{addr: i.fr.addr, ip: 0}](i)
+			}
+		}
+	}
+}
+
+// moduleEntry wraps a native trace for top-level code. Unlike function entries,
+// top-level completion does not tear down its frame; it preserves the operand
+// stack and marks the module frame as exhausted so dispatch returns normally.
+func (i *Interpreter) moduleEntry(callable asm.Callable) func(*Interpreter) {
+	return func(i *Interpreter) {
+		ctx := i.context()
+		i.fr.code = nil
+		i.fr.upvals = nil
+		i.journal[journalBudget] = loopBudget
+		if err := callable.Call(ctx); err != nil {
+			panic(err)
+		}
+
+		i.sp = int(i.journal[journalSP])
+		if i.journal[journalTrap] == trapNone {
+			i.fr.ip = len(i.code[i.fr.addr])
+			i.fr.code = i.code[i.fr.addr]
+			return
+		}
+
+		i.deopt()
+		switch i.journal[journalTrap] {
+		case trapOverflow:
+			panic(ErrFrameOverflow)
+		case trapYield:
+			if err := i.safepoint(); err != nil {
+				panic(err)
+			}
+		default:
+			i.exit(anchor{addr: i.fr.addr, ip: 0})
 			if i.fr.ip == 0 {
 				i.fallbacks[anchor{addr: i.fr.addr, ip: 0}](i)
 			}
