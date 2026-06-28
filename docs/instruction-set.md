@@ -219,6 +219,8 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `F32_SUB` | `{}` | `a b → f32` | ✅ | Floating-point subtraction. |
 | `F32_MUL` | `{}` | `a b → f32` | ✅ | Floating-point multiplication. |
 | `F32_DIV` | `{}` | `a b → f32` | ✅ | Floating-point division. |
+| `F32_REM` | `{}` | `a b → f32` | ⬜ | Truncated remainder (sign follows `a`); trap `ErrDivideByZero` if divisor is zero. |
+| `F32_MOD` | `{}` | `a b → f32` | ⬜ | Floored modulo (sign follows `b`); trap `ErrDivideByZero` if divisor is zero. |
 | `F32_ABS` | `{}` | `x → f32` | ✅ | Absolute value (clears sign bit). |
 | `F32_NEG` | `{}` | `x → f32` | ✅ | Negate (flips sign bit, incl. NaN). |
 | `F32_SQRT` | `{}` | `x → f32` | ✅ | Square root. |
@@ -246,6 +248,8 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `F64_SUB` | `{}` | `a b → f64` | ✅ | Floating-point subtraction. |
 | `F64_MUL` | `{}` | `a b → f64` | ✅ | Floating-point multiplication. |
 | `F64_DIV` | `{}` | `a b → f64` | ✅ | Floating-point division. |
+| `F64_REM` | `{}` | `a b → f64` | ⬜ | Truncated remainder (sign follows `a`); trap `ErrDivideByZero` if divisor is zero. |
+| `F64_MOD` | `{}` | `a b → f64` | ⬜ | Floored modulo (sign follows `b`); trap `ErrDivideByZero` if divisor is zero. |
 | `F64_ABS` | `{}` | `x → f64` | ✅ | Absolute value (clears sign bit). |
 | `F64_NEG` | `{}` | `x → f64` | ✅ | Negate (flips sign bit, incl. NaN). |
 | `F64_SQRT` | `{}` | `x → f64` | ✅ | Square root. |

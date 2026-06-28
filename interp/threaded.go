@@ -1898,6 +1898,34 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
+	instr.F32_REM: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := i.stack[i.sp-1].F32()
+			lhs := i.stack[i.sp-2].F32()
+			result := i.f32Rem(lhs, rhs)
+			i.sp--
+			i.stack[i.sp-1] = result
+			i.fr.ip++
+		}
+	},
+	instr.F32_MOD: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := i.stack[i.sp-1].F32()
+			lhs := i.stack[i.sp-2].F32()
+			result := i.f32Mod(lhs, rhs)
+			i.sp--
+			i.stack[i.sp-1] = result
+			i.fr.ip++
+		}
+	},
 	instr.F32_ABS: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
@@ -2222,6 +2250,34 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			rhs := i.stack[i.sp-1].F64()
 			lhs := i.stack[i.sp-2].F64()
 			result := i.f64Div(lhs, rhs)
+			i.sp--
+			i.stack[i.sp-1] = result
+			i.fr.ip++
+		}
+	},
+	instr.F64_REM: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := i.stack[i.sp-1].F64()
+			lhs := i.stack[i.sp-2].F64()
+			result := i.f64Rem(lhs, rhs)
+			i.sp--
+			i.stack[i.sp-1] = result
+			i.fr.ip++
+		}
+	},
+	instr.F64_MOD: func(c *threadedCompiler) func(i *Interpreter) {
+		c.ip++
+		return func(i *Interpreter) {
+			if i.sp < 2 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := i.stack[i.sp-1].F64()
+			lhs := i.stack[i.sp-2].F64()
+			result := i.f64Mod(lhs, rhs)
 			i.sp--
 			i.stack[i.sp-1] = result
 			i.fr.ip++
@@ -5139,6 +5195,24 @@ func (i *Interpreter) f32Div(lhs, rhs float32) types.Boxed {
 	return types.BoxF32(lhs / rhs)
 }
 
+func (i *Interpreter) f32Rem(lhs, rhs float32) types.Boxed {
+	if rhs == 0 {
+		panic(ErrDivideByZero)
+	}
+	return types.BoxF32(float32(math.Mod(float64(lhs), float64(rhs))))
+}
+
+func (i *Interpreter) f32Mod(lhs, rhs float32) types.Boxed {
+	if rhs == 0 {
+		panic(ErrDivideByZero)
+	}
+	m := math.Mod(float64(lhs), float64(rhs))
+	if m != 0 && (m < 0) != (rhs < 0) {
+		m += float64(rhs)
+	}
+	return types.BoxF32(float32(m))
+}
+
 func (i *Interpreter) f32Abs(v float32) types.Boxed {
 	return types.BoxF32(float32(math.Abs(float64(v))))
 }
@@ -5236,6 +5310,24 @@ func (i *Interpreter) f64Div(lhs, rhs float64) types.Boxed {
 		panic(ErrDivideByZero)
 	}
 	return types.BoxF64(lhs / rhs)
+}
+
+func (i *Interpreter) f64Rem(lhs, rhs float64) types.Boxed {
+	if rhs == 0 {
+		panic(ErrDivideByZero)
+	}
+	return types.BoxF64(math.Mod(lhs, rhs))
+}
+
+func (i *Interpreter) f64Mod(lhs, rhs float64) types.Boxed {
+	if rhs == 0 {
+		panic(ErrDivideByZero)
+	}
+	m := math.Mod(lhs, rhs)
+	if m != 0 && (m < 0) != (rhs < 0) {
+		m += rhs
+	}
+	return types.BoxF64(m)
 }
 
 func (i *Interpreter) f64Abs(v float64) types.Boxed {

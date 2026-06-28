@@ -1265,6 +1265,46 @@ func TestConstantFoldingPass_Run(t *testing.T) {
 		{
 			program: program.New(
 				[]instr.Instruction{
+					instr.New(instr.F32_CONST, uint64(math.Float32bits(-7.0))),
+					instr.New(instr.F32_CONST, uint64(math.Float32bits(3.0))),
+					instr.New(instr.F32_REM),
+				},
+			),
+			expected: program.New(
+				[]instr.Instruction{
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.F32_CONST, uint64(math.Float32bits(-1.0))),
+				},
+			),
+		},
+		{
+			program: program.New(
+				[]instr.Instruction{
+					instr.New(instr.F32_CONST, uint64(math.Float32bits(-7.0))),
+					instr.New(instr.F32_CONST, uint64(math.Float32bits(3.0))),
+					instr.New(instr.F32_MOD),
+				},
+			),
+			expected: program.New(
+				[]instr.Instruction{
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.F32_CONST, uint64(math.Float32bits(2.0))),
+				},
+			),
+		},
+		{
+			program: program.New(
+				[]instr.Instruction{
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
 					instr.New(instr.F32_CONST, uint64(math.Float32bits(1.0))),
 					instr.New(instr.F32_EQ),
@@ -1521,6 +1561,54 @@ func TestConstantFoldingPass_Run(t *testing.T) {
 					instr.New(instr.NOP),
 					instr.New(instr.NOP),
 					instr.New(instr.F64_CONST, math.Float64bits(5.0)),
+				},
+			),
+		},
+		{
+			program: program.New(
+				[]instr.Instruction{
+					instr.New(instr.F64_CONST, math.Float64bits(-7.0)),
+					instr.New(instr.F64_CONST, math.Float64bits(3.0)),
+					instr.New(instr.F64_REM),
+				},
+			),
+			expected: program.New(
+				[]instr.Instruction{
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.F64_CONST, math.Float64bits(-1.0)),
+				},
+			),
+		},
+		{
+			program: program.New(
+				[]instr.Instruction{
+					instr.New(instr.F64_CONST, math.Float64bits(-7.0)),
+					instr.New(instr.F64_CONST, math.Float64bits(3.0)),
+					instr.New(instr.F64_MOD),
+				},
+			),
+			expected: program.New(
+				[]instr.Instruction{
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.NOP),
+					instr.New(instr.F64_CONST, math.Float64bits(2.0)),
 				},
 			),
 		},

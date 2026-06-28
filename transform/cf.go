@@ -302,6 +302,24 @@ func (p *ConstantFoldingPass) Run(m *pass.Manager, prog *program.Program) (pass.
 							}
 							ip = p.replace(fn.Code, ip, w, instr.New(instr.F32_CONST, uint64(math.Float32bits(v0/v1))))
 							continue
+						case instr.F32_REM:
+							if v1 == 0 {
+								ip += i0.Width()
+								continue
+							}
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.F32_CONST, uint64(math.Float32bits(float32(math.Mod(float64(v0), float64(v1)))))))
+							continue
+						case instr.F32_MOD:
+							if v1 == 0 {
+								ip += i0.Width()
+								continue
+							}
+							m := math.Mod(float64(v0), float64(v1))
+							if m != 0 && (m < 0) != (v1 < 0) {
+								m += float64(v1)
+							}
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.F32_CONST, uint64(math.Float32bits(float32(m)))))
+							continue
 						case instr.F32_EQ:
 							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 == v1)))
 							continue
@@ -360,6 +378,24 @@ func (p *ConstantFoldingPass) Run(m *pass.Manager, prog *program.Program) (pass.
 								continue
 							}
 							ip = p.replace(fn.Code, ip, w, instr.New(instr.F64_CONST, math.Float64bits(v0/v1)))
+							continue
+						case instr.F64_REM:
+							if v1 == 0 {
+								ip += i0.Width()
+								continue
+							}
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.F64_CONST, math.Float64bits(math.Mod(v0, v1))))
+							continue
+						case instr.F64_MOD:
+							if v1 == 0 {
+								ip += i0.Width()
+								continue
+							}
+							m := math.Mod(v0, v1)
+							if m != 0 && (m < 0) != (v1 < 0) {
+								m += v1
+							}
+							ip = p.replace(fn.Code, ip, w, instr.New(instr.F64_CONST, math.Float64bits(m)))
 							continue
 						case instr.F64_EQ:
 							ip = p.replace(fn.Code, ip, w, instr.New(instr.CONST_GET, boolConst(v0 == v1)))

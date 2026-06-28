@@ -152,6 +152,8 @@ func TestTypeOf(t *testing.T) {
 		{opcode: F32_SUB},
 		{opcode: F32_MUL},
 		{opcode: F32_DIV},
+		{opcode: F32_REM},
+		{opcode: F32_MOD},
 
 		{opcode: F32_ABS},
 		{opcode: F32_NEG},
@@ -185,6 +187,8 @@ func TestTypeOf(t *testing.T) {
 		{opcode: F64_SUB},
 		{opcode: F64_MUL},
 		{opcode: F64_DIV},
+		{opcode: F64_REM},
+		{opcode: F64_MOD},
 
 		{opcode: F64_ABS},
 		{opcode: F64_NEG},

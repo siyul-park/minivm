@@ -617,6 +617,30 @@ var runTests = []struct {
 		values: []types.Value{types.F32(2.5)},
 	},
 	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(-7))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_REM),
+		}),
+		values: []types.Value{types.F32(-1)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(-7))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_MOD),
+		}),
+		values: []types.Value{types.F32(2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))), instr.New(instr.F32_CONST, 0), instr.New(instr.F32_REM),
+		}),
+		err: ErrDivideByZero,
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))), instr.New(instr.F32_CONST, 0), instr.New(instr.F32_MOD),
+		}),
+		err: ErrDivideByZero,
+	},
+	{
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.5))), instr.New(instr.F32_ABS)}),
 		values:  []types.Value{types.F32(3.5)},
 	},
@@ -749,6 +773,30 @@ var runTests = []struct {
 			instr.New(instr.F64_CONST, math.Float64bits(10)), instr.New(instr.F64_CONST, math.Float64bits(4)), instr.New(instr.F64_DIV),
 		}),
 		values: []types.Value{types.F64(2.5)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.F64_CONST, math.Float64bits(-7)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_REM),
+		}),
+		values: []types.Value{types.F64(-1)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.F64_CONST, math.Float64bits(-7)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_MOD),
+		}),
+		values: []types.Value{types.F64(2)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.F64_CONST, math.Float64bits(1)), instr.New(instr.F64_CONST, 0), instr.New(instr.F64_REM),
+		}),
+		err: ErrDivideByZero,
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.F64_CONST, math.Float64bits(1)), instr.New(instr.F64_CONST, 0), instr.New(instr.F64_MOD),
+		}),
+		err: ErrDivideByZero,
 	},
 	{
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-3.5)), instr.New(instr.F64_ABS)}),

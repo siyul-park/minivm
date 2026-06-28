@@ -161,6 +161,8 @@ var types = map[Opcode]Type{
 	F32_SUB: {Mnemonic: "f32.sub", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindF32}},
 	F32_MUL: {Mnemonic: "f32.mul", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindF32}},
 	F32_DIV: {Mnemonic: "f32.div", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindF32}},
+	F32_REM: {Mnemonic: "f32.rem", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindF32}},
+	F32_MOD: {Mnemonic: "f32.mod", Pop: []Kind{KindF32, KindF32}, Push: []Kind{KindF32}},
 
 	F32_ABS:      {Mnemonic: "f32.abs", Pop: []Kind{KindF32}, Push: []Kind{KindF32}},
 	F32_NEG:      {Mnemonic: "f32.neg", Pop: []Kind{KindF32}, Push: []Kind{KindF32}},
@@ -194,6 +196,8 @@ var types = map[Opcode]Type{
 	F64_SUB: {Mnemonic: "f64.sub", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindF64}},
 	F64_MUL: {Mnemonic: "f64.mul", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindF64}},
 	F64_DIV: {Mnemonic: "f64.div", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindF64}},
+	F64_REM: {Mnemonic: "f64.rem", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindF64}},
+	F64_MOD: {Mnemonic: "f64.mod", Pop: []Kind{KindF64, KindF64}, Push: []Kind{KindF64}},
 
 	F64_ABS:      {Mnemonic: "f64.abs", Pop: []Kind{KindF64}, Push: []Kind{KindF64}},
 	F64_NEG:      {Mnemonic: "f64.neg", Pop: []Kind{KindF64}, Push: []Kind{KindF64}},

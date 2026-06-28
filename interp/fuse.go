@@ -1644,6 +1644,32 @@ func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) fun
 			i.stack[i.sp-1] = i.f32Div(lhs, rhs)
 			i.fr.ip += size + 1
 		}
+	case instr.F32_REM:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			lhs := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = i.f32Rem(lhs, rhs)
+			i.fr.ip += size + 1
+		}
+	case instr.F32_MOD:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			lhs := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = i.f32Mod(lhs, rhs)
+			i.fr.ip += size + 1
+		}
 	case instr.F32_MIN:
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1787,6 +1813,40 @@ func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) 
 			i.stack[i.sp-1] = i.f32Div(lhs, rhs)
 			i.fr.ip += size + 1
 		}
+	case instr.F32_REM:
+		if rhs == 0 {
+			return func(i *Interpreter) {
+				if i.sp == 0 {
+					panic(ErrStackUnderflow)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = i.f32Rem(lhs, rhs)
+			i.fr.ip += size + 1
+		}
+	case instr.F32_MOD:
+		if rhs == 0 {
+			return func(i *Interpreter) {
+				if i.sp == 0 {
+					panic(ErrStackUnderflow)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := i.stack[i.sp-1].F32()
+			i.stack[i.sp-1] = i.f32Mod(lhs, rhs)
+			i.fr.ip += size + 1
+		}
 	case instr.F32_MIN:
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1918,6 +1978,32 @@ func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) fun
 			}
 			lhs := i.stack[i.sp-1].F64()
 			i.stack[i.sp-1] = i.f64Div(lhs, rhs)
+			i.fr.ip += size + 1
+		}
+	case instr.F64_REM:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			lhs := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = i.f64Rem(lhs, rhs)
+			i.fr.ip += size + 1
+		}
+	case instr.F64_MOD:
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			rhs := rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			lhs := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = i.f64Mod(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_MIN:
@@ -2061,6 +2147,40 @@ func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) 
 			}
 			lhs := i.stack[i.sp-1].F64()
 			i.stack[i.sp-1] = i.f64Div(lhs, rhs)
+			i.fr.ip += size + 1
+		}
+	case instr.F64_REM:
+		if rhs == 0 {
+			return func(i *Interpreter) {
+				if i.sp == 0 {
+					panic(ErrStackUnderflow)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = i.f64Rem(lhs, rhs)
+			i.fr.ip += size + 1
+		}
+	case instr.F64_MOD:
+		if rhs == 0 {
+			return func(i *Interpreter) {
+				if i.sp == 0 {
+					panic(ErrStackUnderflow)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == 0 {
+				panic(ErrStackUnderflow)
+			}
+			lhs := i.stack[i.sp-1].F64()
+			i.stack[i.sp-1] = i.f64Mod(lhs, rhs)
 			i.fr.ip += size + 1
 		}
 	case instr.F64_MIN:

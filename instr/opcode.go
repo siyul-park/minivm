@@ -163,6 +163,8 @@ const (
 	F32_SUB
 	F32_MUL
 	F32_DIV
+	F32_REM
+	F32_MOD
 
 	F32_ABS
 	F32_NEG
@@ -196,6 +198,8 @@ const (
 	F64_SUB
 	F64_MUL
 	F64_DIV
+	F64_REM
+	F64_MOD
 
 	F64_ABS
 	F64_NEG
