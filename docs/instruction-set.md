@@ -286,7 +286,7 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `ARRAY_NEW` | `{2}` | `value count → array` | ◐ | Create typed array filled with `value`. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `ARRAY_NEW_DEFAULT` | `{2}` | `count → array` | ◐ | Create zero-initialized typed array. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `ARRAY_LEN` | `{}` | `array → i32` | ◐ | Push element count. JIT has native fast paths for VM arrays. |
-| `ARRAY_GET` | `{}` | `array index → value` | ◐ | Load element; trap `ErrIndexOutOfRange` on invalid index. JIT has native fast paths for `[]i1`, `[]i8`, `[]i32`, `[]f32`, `[]f64`, and generic `[]ref`; `[]i64` falls back when boxing would be needed. |
+| `ARRAY_GET` | `{}` | `array index → value` | ◐ | Load element; trap `ErrIndexOutOfRange` on invalid index. JIT has full-trace native fast paths for `[]i1`, `[]i8`, `[]i32`, `[]f32`, `[]f64`, and generic `[]ref`; `[]i64` uses a terminal fast path and falls back when boxing would be needed. |
 | `ARRAY_SET` | `{}` | `array index value →` | ◐ | Store element. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `ARRAY_FILL` | `{}` | `array offset count value →` | ◐ | Fill range with repeated value. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `ARRAY_COPY` | `{}` | `dst dstOffset src srcOffset count →` | ◐ | Copy elements between arrays. JIT keeps framed entries by exiting locally to the threaded handler. |
@@ -304,7 +304,7 @@ Arrays are **growable**: `ARRAY_NEW`/`ARRAY_NEW_DEFAULT` set the initial length,
 |---|---|---|---|---|
 | `STRUCT_NEW` | `{2}` | `fields → struct` | ◐ | Create struct from field values. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `STRUCT_NEW_DEFAULT` | `{2}` | `→ struct` | ◐ | Create zero-initialized struct. JIT keeps framed entries by exiting locally to the threaded handler. |
-| `STRUCT_GET` | `{}` | `struct index → value` | ◐ | Load struct field. JIT has native fast paths for VM `*types.Struct` fields that are `i32`, `f32`, `f64`, or `ref`; `i64` boxing and `HostObject` fall back. |
+| `STRUCT_GET` | `{}` | `struct index → value` | ◐ | Load struct field. JIT has full-trace native fast paths for VM `*types.Struct` fields that are `i1`, `i8`, `i32`, `f32`, `f64`, or `ref`; `i64` uses a terminal fast path, while heap-promoted `i64` boxing and `HostObject` fall back. |
 | `STRUCT_SET` | `{}` | `struct index value →` | ◐ | Store struct field. JIT keeps framed entries by exiting locally to the threaded handler. |
 
 ## Map Operations

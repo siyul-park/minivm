@@ -1,6 +1,8 @@
 package interp
 
 import (
+	"errors"
+
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/types"
 )
@@ -48,6 +50,7 @@ type lowering struct {
 	values  []value
 	frames  []activation
 	pending []pending
+	exits   []sideExit
 	queued  map[int]asm.Label
 
 	addr    int
@@ -97,6 +100,13 @@ type pending struct {
 	ops    []step
 	values []value
 	frames []activation
+}
+
+type sideExit struct {
+	label  asm.Label
+	values []value
+	frames []activation
+	resume int
 }
 
 const (
@@ -258,6 +268,9 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 	}
 	code, err := asmb.Build()
 	if err != nil {
+		if errors.Is(err, asm.ErrNoRegistersAvailable) {
+			return false, nil
+		}
 		return false, err
 	}
 	linked, err := asm.Link(c.buffer, c.arch, []*asm.Code{code}, nil)

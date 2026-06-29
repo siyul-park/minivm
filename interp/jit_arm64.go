@@ -113,6 +113,12 @@ func (l arm64Lowerer) lower(ctx *lowering) bool {
 			return false
 		}
 	}
+	for _, e := range ctx.exits {
+		ctx.values = e.values
+		ctx.frames = e.frames
+		ctx.assembler.Bind(e.label)
+		l.trapFlushed(ctx, trapFallback, e.resume)
+	}
 	return true
 }
 
@@ -469,7 +475,10 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			if !l.arrayGet(ctx, op) {
 				return false
 			}
-			return idx == len(ops)-1
+			if op.seen.Kind() == types.KindI64 {
+				return idx == len(ops)-1
+			}
+			ok = true
 		case instr.ARRAY_SET:
 			if !l.arraySet(ctx, op) {
 				return false
@@ -479,7 +488,10 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			if !l.structGet(ctx, op) {
 				return false
 			}
-			return idx == len(ops)-1
+			if op.seen.Kind() == types.KindI64 {
+				return idx == len(ops)-1
+			}
+			ok = true
 		case instr.STRUCT_SET:
 			if !l.structSet(ctx, op) {
 				return false
@@ -614,15 +626,15 @@ func (l arm64Lowerer) constGet(ctx *lowering, op step, fused bool) bool {
 		if cl, ok := ctx.heap[fn].(*types.Closure); ok {
 			fn = int(cl.Fn)
 		}
-		if ctx.funcs[fn] == nil {
-			return false
-		}
 		if !fused {
 			boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 			ctx.assembler.Emit(arm64.LDI(boxed, uint64(v))...)
 			l.retain(ctx, ref)
 			ctx.push(value{reg: boxed, kind: types.KindRef, raw: false})
 			return true
+		}
+		if ctx.funcs[fn] == nil {
+			return false
 		}
 		ctx.push(value{kind: types.KindRef, raw: true, fn: fn, ref: ref})
 		return true
@@ -2018,6 +2030,11 @@ func (l arm64Lowerer) trap(ctx *lowering, kind, resume int) bool {
 	if !l.flush(ctx, false) {
 		return false
 	}
+	l.trapFlushed(ctx, kind, resume)
+	return true
+}
+
+func (l arm64Lowerer) trapFlushed(ctx *lowering, kind, resume int) {
 	a := ctx.assembler
 	vCtrl := ctx.pin(scratchCtrl)
 	vBP := ctx.pin(scratchBP)
@@ -2029,7 +2046,21 @@ func (l arm64Lowerer) trap(ctx *lowering, kind, resume int) bool {
 	a.Emit(
 		arm64.RET(),
 	)
-	return true
+}
+
+func (l arm64Lowerer) sideExit(ctx *lowering, pre []value, resume int) (asm.Label, bool) {
+	if len(ctx.frames) != 1 {
+		return 0, false
+	}
+	ctx.values = append(ctx.values[:0], pre...)
+	if !l.flush(ctx, false) {
+		return 0, false
+	}
+	label := ctx.assembler.Label()
+	values, frames := ctx.snapshot()
+	ctx.exits = append(ctx.exits, sideExit{label: label, values: values, frames: frames, resume: resume})
+	ctx.values = append(ctx.values[:0], pre...)
+	return label, true
 }
 
 // backedge closes one loop iteration at a header-targeted branch. An
@@ -2457,7 +2488,10 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 		return false
 	}
 	a := ctx.assembler
-	fail := a.Label()
+	fail, ok := l.sideExit(ctx, pre, op.ip)
+	if !ok {
+		return false
+	}
 	tag := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LSRI(tag, ref, uint8(types.VBits)))
 	wantRef := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -2538,13 +2572,8 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 		l.retainBox(ctx, result)
 	}
 	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: kind, raw: raw})
-	if !l.exit(ctx, op.ip+1) {
-		return false
-	}
-	a.Bind(fail)
-	ctx.values = append(ctx.values[:0], pre...)
-	if !l.exit(ctx, op.ip) {
-		return false
+	if kind == types.KindI64 {
+		return l.exit(ctx, op.ip+1)
 	}
 	return true
 }
@@ -2584,7 +2613,10 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 		return false
 	}
 	a := ctx.assembler
-	fail := a.Label()
+	fail, ok := l.sideExit(ctx, pre, op.ip)
+	if !ok {
+		return false
+	}
 	tag := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LSRI(tag, ref, uint8(types.VBits)))
 	wantRef := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -2641,15 +2673,7 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 	a.Emit(arm64.STRR(rc, rcBase, addr))
 
 	ctx.values = pre[: len(pre)-3 : len(pre)-3]
-	if !l.exit(ctx, op.ip+1) {
-		return false
-	}
-	a.Bind(fail)
-	ctx.values = append(ctx.values[:0], pre...)
-	if !l.exit(ctx, op.ip) {
-		return false
-	}
-	return true
+	return l.exit(ctx, op.ip+1)
 }
 
 func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
@@ -2669,7 +2693,10 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 		return false
 	}
 	a := ctx.assembler
-	fail := a.Label()
+	fail, ok := l.sideExit(ctx, pre, op.ip)
+	if !ok {
+		return false
+	}
 	tag := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LSRI(tag, ref, uint8(types.VBits)))
 	wantRef := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -2736,13 +2763,8 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 	a.Emit(arm64.SUBI(rc, rc, 1))
 	a.Emit(arm64.STRR(rc, rcBase, addr))
 	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: out, raw: out != types.KindRef})
-	if !l.exit(ctx, op.ip+1) {
-		return false
-	}
-	a.Bind(fail)
-	ctx.values = append(ctx.values[:0], pre...)
-	if !l.exit(ctx, op.ip) {
-		return false
+	if out == types.KindI64 {
+		return l.exit(ctx, op.ip+1)
 	}
 	return true
 }
@@ -2765,7 +2787,10 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 		return false
 	}
 	a := ctx.assembler
-	fail := a.Label()
+	fail, ok := l.sideExit(ctx, pre, op.ip)
+	if !ok {
+		return false
+	}
 	tag := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LSRI(tag, ref, uint8(types.VBits)))
 	wantRef := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -2830,15 +2855,7 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 	a.Emit(arm64.STRR(rc, rcBase, addr))
 
 	ctx.values = pre[: len(pre)-3 : len(pre)-3]
-	if !l.exit(ctx, op.ip+1) {
-		return false
-	}
-	a.Bind(fail)
-	ctx.values = append(ctx.values[:0], pre...)
-	if !l.exit(ctx, op.ip) {
-		return false
-	}
-	return true
+	return l.exit(ctx, op.ip+1)
 }
 
 // errorGet reads a guest Error's payload. It mirrors the threaded handler:

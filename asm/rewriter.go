@@ -5,6 +5,8 @@ import (
 	"fmt"
 )
 
+const maxSpillSlots = 512
+
 // rewriter transforms an instruction list whose operands reference virtual
 // registers into one whose operands reference physical registers. It owns
 // the linear-scan policy: bind each vreg as it is used or defined, release
@@ -25,6 +27,7 @@ type rewriter struct {
 	assigned map[int32]PReg
 	spilled  map[int32]bool
 	slotOf   map[int32]int
+	free     []int
 	slots    int
 
 	out []Instruction
@@ -166,7 +169,9 @@ func (r *rewriter) obtain(v VReg, protected map[int32]bool) (PReg, error) {
 	if !ok {
 		return PReg{}, err
 	}
-	r.spill(victim)
+	if err := r.spill(victim); err != nil {
+		return PReg{}, err
+	}
 	pr, err = r.pool.alloc(v)
 	if err == nil {
 		r.assigned[v.ID()] = pr
@@ -203,24 +208,37 @@ func (r *rewriter) victim(protected map[int32]bool) (int32, bool) {
 
 // spill writes the victim's live value to its stack slot and frees the
 // register it held.
-func (r *rewriter) spill(id int32) {
+func (r *rewriter) spill(id int32) error {
 	pr := r.pool.bindings[id]
-	slot := r.slotFor(id)
+	slot, ok := r.slotFor(id)
+	if !ok {
+		return ErrNoRegistersAvailable
+	}
 	r.out = append(r.out, r.frame.Store(slot, pr))
 	r.pool.free(NewVReg(id, pr.Type(), pr.Width()))
 	r.spilled[id] = true
+	return nil
 }
 
 // slotFor returns id's stable spill slot, assigning a fresh one on first
 // spill.
-func (r *rewriter) slotFor(id int32) int {
+func (r *rewriter) slotFor(id int32) (int, bool) {
 	if s, ok := r.slotOf[id]; ok {
-		return s
+		return s, true
 	}
-	s := r.slots
-	r.slots++
+	var s int
+	if n := len(r.free); n > 0 {
+		s = r.free[n-1]
+		r.free = r.free[:n-1]
+	} else {
+		if r.slots >= maxSpillSlots {
+			return 0, false
+		}
+		s = r.slots
+		r.slots++
+	}
 	r.slotOf[id] = s
-	return s
+	return s, true
 }
 
 // release returns v's register to the pool at its last use and clears any
@@ -230,6 +248,10 @@ func (r *rewriter) release(v VReg) {
 		r.pool.free(v)
 	}
 	delete(r.spilled, v.ID())
+	if s, ok := r.slotOf[v.ID()]; ok {
+		r.free = append(r.free, s)
+		delete(r.slotOf, v.ID())
+	}
 }
 
 // note records v's declared width the first time it is seen so operands

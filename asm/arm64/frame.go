@@ -16,22 +16,46 @@ type frame struct{}
 
 var _ asm.Frame = frame{}
 
-const spillSlotBytes = 8
+const (
+	spillSlotBytes = 8
+	maxFrameAdjust = 4080
+)
 
-// Enter reserves the spill area: SUB SP, SP, #frameBytes(slots).
+// Enter reserves the spill area. SP updates stay within ARM64's unshifted
+// add/sub immediate range while preserving 16-byte alignment after every step.
 func (frame) Enter(slots int) []asm.Instruction {
 	if slots <= 0 {
 		return nil
 	}
-	return []asm.Instruction{SUBI(SP, SP, frameBytes(slots))}
+	n := frameBytes(slots)
+	out := make([]asm.Instruction, 0, (n+maxFrameAdjust-1)/maxFrameAdjust)
+	for n > 0 {
+		chunk := n
+		if chunk > maxFrameAdjust {
+			chunk = maxFrameAdjust
+		}
+		out = append(out, SUBI(SP, SP, uint16(chunk)))
+		n -= chunk
+	}
+	return out
 }
 
-// Leave releases the spill area: ADD SP, SP, #frameBytes(slots).
+// Leave releases the spill area with the same chunking as Enter.
 func (frame) Leave(slots int) []asm.Instruction {
 	if slots <= 0 {
 		return nil
 	}
-	return []asm.Instruction{ADDI(SP, SP, frameBytes(slots))}
+	n := frameBytes(slots)
+	out := make([]asm.Instruction, 0, (n+maxFrameAdjust-1)/maxFrameAdjust)
+	for n > 0 {
+		chunk := n
+		if chunk > maxFrameAdjust {
+			chunk = maxFrameAdjust
+		}
+		out = append(out, ADDI(SP, SP, uint16(chunk)))
+		n -= chunk
+	}
+	return out
 }
 
 // Store spills reg to slot: STR reg, [SP, #slot*8].
@@ -56,8 +80,8 @@ func spillReg(reg asm.PReg) asm.PReg {
 }
 
 // frameBytes rounds the slot area up to the 16-byte SP alignment.
-func frameBytes(slots int) uint16 {
+func frameBytes(slots int) int {
 	b := slots * spillSlotBytes
 	b = (b + 15) &^ 15
-	return uint16(b)
+	return b
 }

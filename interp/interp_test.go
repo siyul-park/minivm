@@ -1684,6 +1684,95 @@ func TestWithThreshold(t *testing.T) {
 		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
 	})
 
+	t.Run("jits top-level loop-free branch tree over constant f64 array", func(t *testing.T) {
+		row := make([]float64, 8)
+		b := program.NewBuilder()
+		featIdx := b.Const(types.TypedArray[float64](row))
+		b.Emit(instr.F64_CONST, math.Float64bits(0))
+		for split := range 16 {
+			b.Emit(instr.CONST_GET, uint64(featIdx))
+			b.Emit(instr.I32_CONST, uint64(uint32(split%8)))
+			b.Emit(instr.ARRAY_GET)
+			b.Emit(instr.F64_CONST, math.Float64bits(0.5))
+			b.Emit(instr.F64_LE)
+			left, end := b.Label(), b.Label()
+			b.BrIf(left)
+			b.Emit(instr.F64_CONST, math.Float64bits(0.02))
+			b.Emit(instr.F64_ADD)
+			b.Br(end)
+			b.Bind(left)
+			b.Emit(instr.F64_CONST, math.Float64bits(0.01))
+			b.Emit(instr.F64_ADD)
+			b.Bind(end)
+		}
+		prog, err := b.Build()
+		require.NoError(t, err)
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+
+		for range 256 {
+			i.Reset()
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.InDelta(t, 0.16, float64(got.(types.F64)), 1e-9)
+		}
+		if runtime.GOARCH != "arm64" {
+			return
+		}
+		require.NotNil(t, i.fallbacks[anchor{addr: 0, ip: 0}])
+		require.GreaterOrEqual(t, i.local.Value("vm_jit_attempts_total"), float64(1))
+		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+	})
+
+	t.Run("jits called loop-free branch tree over constant f64 array", func(t *testing.T) {
+		row := make([]float64, 8)
+		b := program.NewBuilder()
+		featIdx := b.Const(types.TypedArray[float64](row))
+		fb := types.NewFunctionBuilder(nil).WithReturns(types.TypeF64)
+		fb.Emit(instr.New(instr.F64_CONST, math.Float64bits(0)))
+		for split := range 16 {
+			fb.Emit(instr.New(instr.CONST_GET, uint64(featIdx)))
+			fb.Emit(instr.New(instr.I32_CONST, uint64(uint32(split%8))))
+			fb.Emit(instr.New(instr.ARRAY_GET))
+			fb.Emit(instr.New(instr.F64_CONST, math.Float64bits(0.5)))
+			fb.Emit(instr.New(instr.F64_LE))
+			left, end := fb.Label(), fb.Label()
+			fb.BrIf(left)
+			fb.Emit(instr.New(instr.F64_CONST, math.Float64bits(0.02)))
+			fb.Emit(instr.New(instr.F64_ADD))
+			fb.Br(end)
+			fb.Bind(left)
+			fb.Emit(instr.New(instr.F64_CONST, math.Float64bits(0.01)))
+			fb.Emit(instr.New(instr.F64_ADD))
+			fb.Bind(end)
+		}
+		fn, err := fb.Emit(instr.New(instr.RETURN)).Build()
+		require.NoError(t, err)
+		fnIdx := b.Const(fn)
+		b.ConstGet(fn)
+		b.Emit(instr.CALL)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		fnAddr := i.constants[fnIdx].Ref()
+
+		for range 256 {
+			i.Reset()
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.InDelta(t, 0.16, float64(got.(types.F64)), 1e-9)
+		}
+		if runtime.GOARCH != "arm64" {
+			return
+		}
+		require.NotNil(t, i.fallbacks[anchor{addr: fnAddr, ip: 0}])
+		require.GreaterOrEqual(t, i.local.Value("vm_jit_attempts_total"), float64(1))
+		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+	})
+
 	t.Run("jits array get from host-pushed f64 array argument", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")

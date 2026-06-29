@@ -232,18 +232,21 @@ and `f64` use IEEE bits, and inline `i64` values use the full signed register
 value while guards enforce the boxed 49-bit range before materialization. Heap
 promoted `i64` values deopt on load.
 
-`ARRAY_GET`, primitive `ARRAY_SET`, `STRUCT_GET`, and primitive `STRUCT_SET`
-lower on ARM64 as terminal heap accesses for the observed shape. Native code
-guards the heap itab for that single typed primitive-array, generic ref-array, or
-guest struct shape, checks the index and field kind, performs the load/store,
-flushes the result state, and resumes threaded dispatch at the next instruction.
-Primitive array fast paths cover `i1`, `i8`, `i32`, boxable `i64`, `f32`, and
-`f64`; an `i64` element outside the inline boxed range deopts at the opcode so
-the interpreter can allocate the promoted heap value. Shape, bounds, field-kind,
-or refcount-release failures likewise deopt at the opcode so the interpreter
-owns the full handler semantics. These paths do not fan out across every heap
-itab in one trace, so register spills remain valid across the native control
-flow.
+`ARRAY_GET` and `STRUCT_GET` lower on ARM64 as full-trace heap reads for the
+observed shape, so scalar/ref reads can feed later native ops instead of forcing
+an immediate threaded resume. Native code guards the heap itab for that single
+typed primitive-array, generic ref-array, or guest struct shape, checks the
+index and field kind, performs the load, and continues through the trace.
+Guard failures branch to an out-of-line side exit that resumes threaded dispatch
+at the original opcode with the pre-op stack state flushed. Primitive array read
+fast paths cover `i1`, `i8`, `i32`, `f32`, and `f64`; `ref` array/field reads
+retain the loaded ref. `i64` reads remain terminal because heap-promoted i64
+fallback needs the interpreter-owned boxing path.
+
+Primitive `ARRAY_SET` and `STRUCT_SET` still lower as terminal heap mutations:
+the hot path performs the store, flushes the result state, and resumes threaded
+dispatch at the next instruction. Shape, bounds, field-kind, or refcount-release
+failures deopt at the opcode so the interpreter owns the full handler semantics.
 
 The narrow kinds `i1`/`i8` share the i32 representation, so they ride in the low
 32 bits exactly like `i32` and `loadLocal`/`constGet` materialize them raw. Kind

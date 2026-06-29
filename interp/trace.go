@@ -188,11 +188,11 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 
 		r.finish(&clone, &st, op)
 		t.ops = append(t.ops, st)
-		// Heap access ops with mutation or shape-sensitive reads lower as
-		// terminal native fast paths. The hot path performs the access and
-		// resumes at the next threaded instruction; guard failures resume at the
-		// opcode so the interpreter owns the full handler semantics.
-		if op == instr.ARRAY_GET || op == instr.ARRAY_SET || op == instr.STRUCT_GET || op == instr.STRUCT_SET {
+		// Heap mutations still lower as terminal native fast paths: the hot
+		// path performs the store and resumes at the next threaded instruction;
+		// guard failures resume at the opcode so the interpreter owns the full
+		// handler semantics.
+		if op == instr.ARRAY_SET || op == instr.STRUCT_SET {
 			if clone.fp != startFP {
 				t.kind = aborted
 				break
@@ -201,7 +201,15 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 			r.store(a, t)
 			return t, nil
 		}
-
+		if (op == instr.ARRAY_GET || op == instr.STRUCT_GET) && st.seen.Kind() == types.KindI64 {
+			if clone.fp != startFP {
+				t.kind = aborted
+				break
+			}
+			t.kind = returned
+			r.store(a, t)
+			return t, nil
+		}
 		switch {
 		case op == instr.RETURN && st.depth == 0:
 			t.kind = returned
