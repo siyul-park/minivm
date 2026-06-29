@@ -1684,6 +1684,480 @@ func TestWithThreshold(t *testing.T) {
 		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
 	})
 
+	t.Run("jits array get from host-pushed f64 array argument", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		eval := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeF64Array).
+			WithReturns(types.TypeF64)
+		eval.Emit(instr.New(instr.F64_CONST, math.Float64bits(0)))
+		for idx := range 64 {
+			eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+				Emit(instr.New(instr.I32_CONST, uint64(uint32(idx%8)))).
+				Emit(instr.New(instr.ARRAY_GET)).
+				Emit(instr.New(instr.F64_ADD))
+		}
+		fn, err := eval.Emit(instr.New(instr.RETURN)).Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		row := make([]float64, 8)
+		arr := types.TypedArray[float64](row)
+		for n := range 50000 {
+			i.Reset()
+			var sum float64
+			for idx := range row {
+				row[idx] = float64((n+idx)%10) / 10
+				sum += row[idx]
+			}
+			require.NoError(t, i.Push(arr))
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.InDelta(t, 8*sum, float64(got.(types.F64)), 1e-9)
+		}
+		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+	})
+
+	t.Run("jits array get from host-pushed i1 array argument", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		eval := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeI1Array).
+			WithReturns(types.TypeI32)
+		eval.Emit(instr.New(instr.I32_CONST, 0))
+		for idx := range 64 {
+			eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+				Emit(instr.New(instr.I32_CONST, uint64(uint32(idx%8)))).
+				Emit(instr.New(instr.ARRAY_GET)).
+				Emit(instr.New(instr.I32_ADD))
+		}
+		fn, err := eval.Emit(instr.New(instr.RETURN)).Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		row := make([]bool, 8)
+		arr := types.TypedArray[bool](row)
+		for n := range 5000 {
+			i.Reset()
+			var sum int32
+			for idx := range row {
+				row[idx] = (n+idx)%3 == 0
+				if row[idx] {
+					sum++
+				}
+			}
+			require.NoError(t, i.Push(arr))
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(8*sum), got)
+		}
+		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+	})
+
+	t.Run("jits array get from host-pushed i8 array argument", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		eval := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeI8Array).
+			WithReturns(types.TypeI32)
+		eval.Emit(instr.New(instr.I32_CONST, 0))
+		for idx := range 64 {
+			eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+				Emit(instr.New(instr.I32_CONST, uint64(uint32(idx%8)))).
+				Emit(instr.New(instr.ARRAY_GET)).
+				Emit(instr.New(instr.I32_ADD))
+		}
+		fn, err := eval.Emit(instr.New(instr.RETURN)).Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		row := make([]int8, 8)
+		arr := types.TypedArray[int8](row)
+		for n := range 5000 {
+			i.Reset()
+			var sum int32
+			for idx := range row {
+				row[idx] = int8((n+idx)%9 - 4)
+				sum += int32(row[idx])
+			}
+			require.NoError(t, i.Push(arr))
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(8*sum), got)
+		}
+		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+	})
+
+	t.Run("jits array get from host-pushed i32 array argument", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		eval := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeI32Array).
+			WithReturns(types.TypeI32)
+		eval.Emit(instr.New(instr.I32_CONST, 0))
+		for idx := range 64 {
+			eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+				Emit(instr.New(instr.I32_CONST, uint64(uint32(idx%8)))).
+				Emit(instr.New(instr.ARRAY_GET)).
+				Emit(instr.New(instr.I32_ADD))
+		}
+		fn, err := eval.Emit(instr.New(instr.RETURN)).Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		row := make([]int32, 8)
+		arr := types.TypedArray[int32](row)
+		for n := range 5000 {
+			i.Reset()
+			var sum int32
+			for idx := range row {
+				row[idx] = int32((n+idx)%17 - 8)
+				sum += row[idx]
+			}
+			require.NoError(t, i.Push(arr))
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(8*sum), got)
+		}
+		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+	})
+
+	t.Run("jits array get from host-pushed i64 array argument", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		eval := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeI64Array).
+			WithReturns(types.TypeI64)
+		eval.Emit(instr.New(instr.I64_CONST, 0))
+		for idx := range 64 {
+			eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+				Emit(instr.New(instr.I32_CONST, uint64(uint32(idx%8)))).
+				Emit(instr.New(instr.ARRAY_GET)).
+				Emit(instr.New(instr.I64_ADD))
+		}
+		fn, err := eval.Emit(instr.New(instr.RETURN)).Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		row := make([]int64, 8)
+		arr := types.TypedArray[int64](row)
+		for n := range 5000 {
+			i.Reset()
+			var sum int64
+			for idx := range row {
+				row[idx] = int64((n+idx)%17 - 8)
+				sum += row[idx]
+			}
+			require.NoError(t, i.Push(arr))
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I64(8*sum), got)
+		}
+		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+	})
+
+	t.Run("jits array get from host-pushed f32 array argument", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		eval := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeF32Array).
+			WithReturns(types.TypeF32)
+		eval.Emit(instr.New(instr.F32_CONST, uint64(math.Float32bits(0))))
+		for idx := range 64 {
+			eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+				Emit(instr.New(instr.I32_CONST, uint64(uint32(idx%8)))).
+				Emit(instr.New(instr.ARRAY_GET)).
+				Emit(instr.New(instr.F32_ADD))
+		}
+		fn, err := eval.Emit(instr.New(instr.RETURN)).Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		row := make([]float32, 8)
+		arr := types.TypedArray[float32](row)
+		for n := range 5000 {
+			i.Reset()
+			var sum float64
+			for idx := range row {
+				row[idx] = float32((n+idx)%10) / 10
+				sum += float64(row[idx])
+			}
+			require.NoError(t, i.Push(arr))
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.InDelta(t, 8*sum, float64(got.(types.F32)), 1e-5)
+		}
+		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+	})
+
+	t.Run("jits array set for host-pushed primitive array arguments", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		for _, tt := range []struct {
+			name  string
+			typ   types.Type
+			value types.Value
+			array types.Value
+		}{
+			{
+				name:  "i1",
+				typ:   types.TypeI1Array,
+				value: types.I1(true),
+				array: types.TypedArray[bool](make([]bool, 8)),
+			},
+			{
+				name:  "i8",
+				typ:   types.TypeI8Array,
+				value: types.I8(-3),
+				array: types.TypedArray[int8](make([]int8, 8)),
+			},
+			{
+				name:  "i32",
+				typ:   types.TypeI32Array,
+				value: types.I32(-33),
+				array: types.TypedArray[int32](make([]int32, 8)),
+			},
+			{
+				name:  "i64",
+				typ:   types.TypeI64Array,
+				value: types.I64(-55),
+				array: types.TypedArray[int64](make([]int64, 8)),
+			},
+			{
+				name:  "f32",
+				typ:   types.TypeF32Array,
+				value: types.F32(1.25),
+				array: types.TypedArray[float32](make([]float32, 8)),
+			},
+			{
+				name:  "f64",
+				typ:   types.TypeF64Array,
+				value: types.F64(2.5),
+				array: types.TypedArray[float64](make([]float64, 8)),
+			},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				eval := types.NewFunctionBuilder(nil).
+					WithParams(tt.typ).
+					WithReturns(types.TypeI32)
+				for idx := range 64 {
+					eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+						Emit(instr.New(instr.I32_CONST, uint64(uint32(idx%8)))).
+						Emit(instr.New(instr.CONST_GET, 1)).
+						Emit(instr.New(instr.ARRAY_SET))
+				}
+				fn, err := eval.Emit(instr.New(instr.I32_CONST, 7)).
+					Emit(instr.New(instr.RETURN)).
+					Build()
+				require.NoError(t, err)
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				}, program.WithConstants(fn, tt.value))
+
+				i := New(prog, WithTick(1), WithThreshold(0))
+				defer i.Close()
+				for range 5000 {
+					i.Reset()
+					require.NoError(t, i.Push(tt.array))
+					require.NoError(t, i.Run(context.Background()))
+					got, err := i.Pop()
+					require.NoError(t, err)
+					require.Equal(t, types.I32(7), got)
+				}
+				switch row := tt.array.(type) {
+				case types.TypedArray[bool]:
+					for _, got := range row {
+						require.True(t, got)
+					}
+				case types.TypedArray[int8]:
+					for _, got := range row {
+						require.Equal(t, int8(-3), got)
+					}
+				case types.TypedArray[int32]:
+					for _, got := range row {
+						require.Equal(t, int32(-33), got)
+					}
+				case types.TypedArray[int64]:
+					for _, got := range row {
+						require.Equal(t, int64(-55), got)
+					}
+				case types.TypedArray[float32]:
+					for _, got := range row {
+						require.Equal(t, float32(1.25), got)
+					}
+				case types.TypedArray[float64]:
+					for _, got := range row {
+						require.Equal(t, 2.5, got)
+					}
+				}
+				require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+			})
+		}
+	})
+
+	t.Run("jits struct get from host-pushed primitive struct argument", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		typ := types.NewStructType(
+			types.NewStructField(types.TypeI1),
+			types.NewStructField(types.TypeI8),
+			types.NewStructField(types.TypeI32),
+			types.NewStructField(types.TypeI64),
+			types.NewStructField(types.TypeF32),
+			types.NewStructField(types.TypeF64),
+		)
+		for _, tt := range []struct {
+			name  string
+			idx   uint32
+			typ   types.Type
+			value types.Boxed
+			want  types.Value
+		}{
+			{name: "i1", idx: 0, typ: types.TypeI1, value: types.BoxI1(true), want: types.I1(true)},
+			{name: "i8", idx: 1, typ: types.TypeI8, value: types.BoxI8(-3), want: types.I8(-3)},
+			{name: "i32", idx: 2, typ: types.TypeI32, value: types.BoxI32(-33), want: types.I32(-33)},
+			{name: "i64", idx: 3, typ: types.TypeI64, value: types.BoxI64(-55), want: types.I64(-55)},
+			{name: "f32", idx: 4, typ: types.TypeF32, value: types.BoxF32(1.25), want: types.F32(1.25)},
+			{name: "f64", idx: 5, typ: types.TypeF64, value: types.BoxF64(2.5), want: types.F64(2.5)},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				eval := types.NewFunctionBuilder(nil).
+					WithParams(typ).
+					WithReturns(tt.typ)
+				eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+					Emit(instr.New(instr.I32_CONST, uint64(tt.idx))).
+					Emit(instr.New(instr.STRUCT_GET)).
+					Emit(instr.New(instr.RETURN))
+				fn, err := eval.Build()
+				require.NoError(t, err)
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				}, program.WithConstants(fn))
+
+				i := New(prog, WithTick(1), WithThreshold(0))
+				defer i.Close()
+				s := types.NewStruct(typ)
+				for range 5000 {
+					i.Reset()
+					s.SetField(int(tt.idx), tt.value)
+					require.NoError(t, i.Push(s))
+					require.NoError(t, i.Run(context.Background()))
+					got, err := i.Pop()
+					require.NoError(t, err)
+					require.Equal(t, tt.want, got)
+				}
+				require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+			})
+		}
+	})
+
+	t.Run("jits struct set for host-pushed primitive struct argument", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		typ := types.NewStructType(
+			types.NewStructField(types.TypeI1),
+			types.NewStructField(types.TypeI8),
+			types.NewStructField(types.TypeI32),
+			types.NewStructField(types.TypeI64),
+			types.NewStructField(types.TypeF32),
+			types.NewStructField(types.TypeF64),
+		)
+		for _, tt := range []struct {
+			name  string
+			idx   uint32
+			value types.Value
+			want  types.Boxed
+		}{
+			{name: "i1", idx: 0, value: types.I1(true), want: types.BoxI1(true)},
+			{name: "i8", idx: 1, value: types.I8(-3), want: types.BoxI8(-3)},
+			{name: "i32", idx: 2, value: types.I32(-33), want: types.BoxI32(-33)},
+			{name: "i64", idx: 3, value: types.I64(-55), want: types.BoxI64(-55)},
+			{name: "f32", idx: 4, value: types.F32(1.25), want: types.BoxF32(1.25)},
+			{name: "f64", idx: 5, value: types.F64(2.5), want: types.BoxF64(2.5)},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				eval := types.NewFunctionBuilder(nil).
+					WithParams(typ).
+					WithReturns(types.TypeI32)
+				for range 64 {
+					eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+						Emit(instr.New(instr.I32_CONST, uint64(tt.idx))).
+						Emit(instr.New(instr.CONST_GET, 1)).
+						Emit(instr.New(instr.STRUCT_SET))
+				}
+				fn, err := eval.Emit(instr.New(instr.I32_CONST, 7)).
+					Emit(instr.New(instr.RETURN)).
+					Build()
+				require.NoError(t, err)
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				}, program.WithConstants(fn, tt.value))
+
+				i := New(prog, WithTick(1), WithThreshold(0))
+				defer i.Close()
+				s := types.NewStruct(typ)
+				for range 5000 {
+					i.Reset()
+					require.NoError(t, i.Push(s))
+					require.NoError(t, i.Run(context.Background()))
+					got, err := i.Pop()
+					require.NoError(t, err)
+					require.Equal(t, types.I32(7), got)
+					require.Equal(t, tt.want, s.Field(int(tt.idx)))
+				}
+				require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+			})
+		}
+	})
+
 	t.Run("jits learned br_if continuations", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")

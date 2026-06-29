@@ -167,6 +167,7 @@ var storeOpcodes = map[Op]struct {
 	OpSTR:  {0xF9000000, 8},
 	OpSTRB: {0x39000000, 1},
 	OpSTRH: {0x79000000, 2},
+	OpSTRW: {0xB9000000, 4},
 }
 
 // cvtOpcodes maps each int↔float convert opcode to its base word and whether
@@ -482,7 +483,7 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		ld := loadOpcodes[op]
 		return e.encodeLoad(ld.base, ld.scale, inst)
 
-	case OpSTR, OpSTRB, OpSTRH:
+	case OpSTR, OpSTRB, OpSTRH, OpSTRW:
 		st := storeOpcodes[op]
 		return e.encodeStore(st.base, st.scale, inst)
 

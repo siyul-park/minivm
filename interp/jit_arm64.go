@@ -131,10 +131,6 @@ func (l arm64Lowerer) enter(ctx *lowering) {
 	active := ctx.pinTo(arm64.X15)
 	a.Emit(arm64.LDR(active, vCtrl, int16(journalActive*8)))
 	a.Bind(ctx.head)
-	a.Emit(
-		arm64.SUBI(arm64.SP, arm64.SP, 16),
-		arm64.STR(arm64.LR, arm64.SP, 0),
-	)
 }
 
 // walk emits the recorded opcode sequence. An entry trace is fully unrolled —
@@ -470,9 +466,25 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 		case instr.ARRAY_LEN:
 			ok = l.arrayLen(ctx, op)
 		case instr.ARRAY_GET:
-			ok = l.arrayGet(ctx, op)
+			if !l.arrayGet(ctx, op) {
+				return false
+			}
+			return idx == len(ops)-1
+		case instr.ARRAY_SET:
+			if !l.arraySet(ctx, op) {
+				return false
+			}
+			return idx == len(ops)-1
 		case instr.STRUCT_GET:
-			ok = l.structGet(ctx, op)
+			if !l.structGet(ctx, op) {
+				return false
+			}
+			return idx == len(ops)-1
+		case instr.STRUCT_SET:
+			if !l.structSet(ctx, op) {
+				return false
+			}
+			return idx == len(ops)-1
 		case instr.ERROR_GET:
 			ok = l.errorGet(ctx, op)
 		case instr.CORO_DONE:
@@ -1718,8 +1730,9 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 	oldBP := ctx.scratch[scratchBP]
 	oldSP := ctx.scratch[scratchSP]
 	a.Emit(
-		arm64.SUBI(arm64.SP, arm64.SP, 16),
+		arm64.SUBI(arm64.SP, arm64.SP, 32),
 		arm64.STP(oldBP, oldSP, arm64.SP, 0),
+		arm64.STR(arm64.LR, arm64.SP, 16),
 	)
 	calleeBP := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.SUBI(calleeBP, nextSP, uint16(params)))
@@ -1747,9 +1760,8 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 	)
 	l.unwind(ctx, vCtrl, op.ip+1)
 	a.Emit(
-		arm64.ADDI(arm64.SP, arm64.SP, 16),
-		arm64.LDR(arm64.LR, arm64.SP, 0),
-		arm64.ADDI(arm64.SP, arm64.SP, 16),
+		arm64.LDR(arm64.LR, arm64.SP, 16),
+		arm64.ADDI(arm64.SP, arm64.SP, 32),
 		arm64.RET(),
 	)
 	a.Bind(normal)
@@ -1759,7 +1771,8 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 	a.Emit(arm64.STR(active, vCtrl, int16(journalActive*8)))
 	a.Emit(
 		arm64.LDP(oldBP, oldSP, arm64.SP, 0),
-		arm64.ADDI(arm64.SP, arm64.SP, 16),
+		arm64.LDR(arm64.LR, arm64.SP, 16),
+		arm64.ADDI(arm64.SP, arm64.SP, 32),
 	)
 
 	// Capture returns before any reload can claim the ABI registers.
@@ -1967,8 +1980,6 @@ func (l arm64Lowerer) ret(ctx *lowering) bool {
 		}
 	}
 	a.Emit(
-		arm64.LDR(arm64.LR, arm64.SP, 0),
-		arm64.ADDI(arm64.SP, arm64.SP, 16),
 		arm64.RET(),
 	)
 	return true
@@ -1988,8 +1999,6 @@ func (l arm64Lowerer) complete(ctx *lowering) bool {
 	a.Emit(arm64.STR(sp, vCtrl, int16(journalSP*8)))
 	l.report(ctx, vCtrl, trapNone, len(ctx.frame().code))
 	a.Emit(
-		arm64.LDR(arm64.LR, arm64.SP, 0),
-		arm64.ADDI(arm64.SP, arm64.SP, 16),
 		arm64.RET(),
 	)
 	return true
@@ -2018,8 +2027,6 @@ func (l arm64Lowerer) trap(ctx *lowering, kind, resume int) bool {
 	l.unwind(ctx, vCtrl, resume)
 	l.report(ctx, vCtrl, kind, resume)
 	a.Emit(
-		arm64.LDR(arm64.LR, arm64.SP, 0),
-		arm64.ADDI(arm64.SP, arm64.SP, 16),
 		arm64.RET(),
 	)
 	return true
@@ -2095,8 +2102,6 @@ func (l arm64Lowerer) overflow(ctx *lowering, op step) {
 	l.unwind(ctx, vCtrl, op.ip)
 	l.report(ctx, vCtrl, trapOverflow, op.ip)
 	a.Emit(
-		arm64.LDR(arm64.LR, arm64.SP, 0),
-		arm64.ADDI(arm64.SP, arm64.SP, 16),
 		arm64.RET(),
 	)
 }
@@ -2411,100 +2416,239 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 	if ctx.count() < 2 || ctx.values[len(ctx.values)-1].kind != types.KindI32 || ctx.values[len(ctx.values)-2].kind != types.KindRef {
 		return false
 	}
+	kind := op.seen.Kind()
+	var want uintptr
+	var base int16
+	var scale uint8
+	var raw bool
+	switch kind {
+	case types.KindI1:
+		want = heapArrayI1
+		raw = true
+	case types.KindI8:
+		want = heapArrayI8
+		raw = true
+	case types.KindI32:
+		want = heapArrayI32
+		scale = 2
+		raw = true
+	case types.KindI64:
+		want = heapArrayI64
+		scale = 3
+		raw = true
+	case types.KindF32:
+		want = heapArrayF32
+		scale = 2
+		raw = true
+	case types.KindF64:
+		want = heapArrayF64
+		scale = 3
+		raw = true
+	case types.KindRef:
+		want = heapArrayRef
+		base = int16(arrayElems)
+	default:
+		return false
+	}
 	pre := append([]value(nil), ctx.values...)
 	idx := l.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
 	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-2])
 	if !ok {
 		return false
 	}
-	addr, itab, data := l.heapValue(ctx, ref, pre, op.ip)
+	a := ctx.assembler
+	fail := a.Label()
+	tag := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LSRI(tag, ref, uint8(types.VBits)))
+	wantRef := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDI(wantRef, tagRef>>types.VBits)...)
+	a.Emit(arm64.CMP(tag, wantRef))
+	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 
-	hitI8 := ctx.assembler.Label()
-	hitI32 := ctx.assembler.Label()
-	hitF32 := ctx.assembler.Label()
-	hitF64 := ctx.assembler.Label()
-	hitRef := ctx.assembler.Label()
-	l.matchItab(ctx, itab, heapArrayI1, hitI8)
-	l.matchItab(ctx, itab, heapArrayI8, hitI8)
-	l.matchItab(ctx, itab, heapArrayI32, hitI32)
-	l.matchItab(ctx, itab, heapArrayF32, hitF32)
-	l.matchItab(ctx, itab, heapArrayF64, hitF64)
-	l.matchItab(ctx, itab, heapArrayRef, hitRef)
+	addr := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ANDI(addr, ref, maskI32))
+	heap := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journalHeap*8)))
+	off := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LSLI(off, addr, 4))
+	cell := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ADD(cell, heap, off))
+	itab := a.Reg(asm.RegTypeInt, asm.Width64)
+	data := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(
+		arm64.LDR(itab, cell, 0),
+		arm64.LDR(data, cell, 8),
+	)
+	wantItab := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDI(wantItab, uint64(want))...)
+	a.Emit(arm64.CMP(itab, wantItab))
+	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+
+	dataPtr, n := l.sliceHeader(ctx, data, base)
+	a.Emit(arm64.CMPI(idx, 0))
+	a.Emit(arm64.BCondLabel(arm64.OpBLT, fail))
+	a.Emit(arm64.CMP(idx, n))
+	a.Emit(arm64.BCondLabel(arm64.OpBGE, fail))
+
+	result := a.Reg(asm.RegTypeInt, asm.Width64)
+	switch kind {
+	case types.KindI1:
+		elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ADD(elemAddr, dataPtr, idx))
+		a.Emit(arm64.LDRB(result, elemAddr, 0))
+	case types.KindI8:
+		elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
+		elem := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ADD(elemAddr, dataPtr, idx))
+		a.Emit(arm64.LDRB(elem, elemAddr, 0))
+		a.Emit(arm64.SXTB(result, elem))
+	case types.KindI32, types.KindF32:
+		elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
+		off := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LSLI(off, idx, scale))
+		a.Emit(arm64.ADD(elemAddr, dataPtr, off))
+		a.Emit(arm64.LDRSW(result, elemAddr, 0))
+	case types.KindI64, types.KindF64, types.KindRef:
+		if scale != 0 {
+			off := a.Reg(asm.RegTypeInt, asm.Width64)
+			elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
+			a.Emit(arm64.LSLI(off, idx, scale))
+			a.Emit(arm64.ADD(elemAddr, dataPtr, off))
+			a.Emit(arm64.LDR(result, elemAddr, 0))
+		} else {
+			a.Emit(arm64.LDRR(result, dataPtr, idx))
+		}
+	}
+	if kind == types.KindI64 {
+		shifted := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LSLI(shifted, result, signI64))
+		ext := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ASRI(ext, shifted, signI64))
+		a.Emit(arm64.CMP(ext, result))
+		a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+	}
+	rcBase := l.rcBase(ctx)
+	rc := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDRR(rc, rcBase, addr))
+	a.Emit(arm64.CMPI(rc, 1))
+	a.Emit(arm64.BCondLabel(arm64.OpBLE, fail))
+	a.Emit(arm64.SUBI(rc, rc, 1))
+	a.Emit(arm64.STRR(rc, rcBase, addr))
+	if kind == types.KindRef {
+		l.retainBox(ctx, result)
+	}
+	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: kind, raw: raw})
+	if !l.exit(ctx, op.ip+1) {
+		return false
+	}
+	a.Bind(fail)
 	ctx.values = append(ctx.values[:0], pre...)
 	if !l.exit(ctx, op.ip) {
 		return false
 	}
+	return true
+}
 
-	result := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	done := ctx.assembler.Label()
+func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
+	if ctx.count() < 3 || ctx.values[len(ctx.values)-2].kind != types.KindI32 || ctx.values[len(ctx.values)-3].kind != types.KindRef {
+		return false
+	}
+	kind := ctx.values[len(ctx.values)-1].kind
+	var want uintptr
+	var scale uint8
+	switch kind {
+	case types.KindI1:
+		want = heapArrayI1
+	case types.KindI8:
+		want = heapArrayI8
+	case types.KindI32:
+		want = heapArrayI32
+		scale = 2
+	case types.KindI64:
+		want = heapArrayI64
+		scale = 3
+	case types.KindF32:
+		want = heapArrayF32
+		scale = 2
+	case types.KindF64:
+		want = heapArrayF64
+		scale = 3
+	default:
+		return false
+	}
+	pre := append([]value(nil), ctx.values...)
+	val := ctx.values[len(ctx.values)-1]
+	idx := l.sign32(ctx, ctx.values[len(ctx.values)-2].reg)
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-3])
+	if !ok {
+		return false
+	}
+	a := ctx.assembler
+	fail := a.Label()
+	tag := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LSRI(tag, ref, uint8(types.VBits)))
+	wantRef := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDI(wantRef, tagRef>>types.VBits)...)
+	a.Emit(arm64.CMP(tag, wantRef))
+	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 
-	ctx.assembler.Bind(hitI8)
+	addr := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ANDI(addr, ref, maskI32))
+	heap := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journalHeap*8)))
+	off := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LSLI(off, addr, 4))
+	cell := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ADD(cell, heap, off))
+	itab := a.Reg(asm.RegTypeInt, asm.Width64)
+	data := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(
+		arm64.LDR(itab, cell, 0),
+		arm64.LDR(data, cell, 8),
+	)
+	wantItab := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDI(wantItab, uint64(want))...)
+	a.Emit(arm64.CMP(itab, wantItab))
+	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+
 	dataPtr, n := l.sliceHeader(ctx, data, 0)
-	if !l.guardIndex(ctx, idx, n, pre, op.ip) {
-		return false
-	}
-	elemI8 := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	elemAddr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ADD(elemAddr, dataPtr, idx))
-	ctx.assembler.Emit(arm64.LDRB(elemI8, elemAddr, 0))
-	ctx.assembler.Emit(arm64.MOV(result, elemI8))
-	l.releaseRef(ctx, addr, pre, op.ip)
-	ctx.assembler.Emit(arm64.BLabel(done))
+	a.Emit(arm64.CMPI(idx, 0))
+	a.Emit(arm64.BCondLabel(arm64.OpBLT, fail))
+	a.Emit(arm64.CMP(idx, n))
+	a.Emit(arm64.BCondLabel(arm64.OpBGE, fail))
 
-	ctx.assembler.Bind(hitI32)
-	dataPtr, n = l.sliceHeader(ctx, data, 0)
-	if !l.guardIndex(ctx, idx, n, pre, op.ip) {
-		return false
-	}
-	elemI32 := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	elemAddr = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	idx4 := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LSLI(idx4, idx, 2))
-	ctx.assembler.Emit(arm64.ADD(elemAddr, dataPtr, idx4))
-	ctx.assembler.Emit(arm64.LDRSW(elemI32, elemAddr, 0))
-	ctx.assembler.Emit(arm64.MOV(result, elemI32))
-	l.releaseRef(ctx, addr, pre, op.ip)
-	ctx.assembler.Emit(arm64.BLabel(done))
+	rcBase := l.rcBase(ctx)
+	rc := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDRR(rc, rcBase, addr))
+	a.Emit(arm64.CMPI(rc, 1))
+	a.Emit(arm64.BCondLabel(arm64.OpBLE, fail))
 
-	ctx.assembler.Bind(hitF32)
-	dataPtr, n = l.sliceHeader(ctx, data, 0)
-	if !l.guardIndex(ctx, idx, n, pre, op.ip) {
-		return false
+	switch kind {
+	case types.KindI1, types.KindI8:
+		elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ADD(elemAddr, dataPtr, idx))
+		a.Emit(arm64.STRB(val.reg, elemAddr, 0))
+	case types.KindI32, types.KindF32:
+		elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
+		off := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LSLI(off, idx, scale))
+		a.Emit(arm64.ADD(elemAddr, dataPtr, off))
+		a.Emit(arm64.STRW(val.reg, elemAddr, 0))
+	case types.KindI64, types.KindF64:
+		a.Emit(arm64.STRR(val.reg, dataPtr, idx))
 	}
-	elemF32 := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	elemAddr = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	idx4 = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LSLI(idx4, idx, 2))
-	ctx.assembler.Emit(arm64.ADD(elemAddr, dataPtr, idx4))
-	ctx.assembler.Emit(arm64.LDRSW(elemF32, elemAddr, 0))
-	ctx.assembler.Emit(arm64.MOV(result, elemF32))
-	l.releaseRef(ctx, addr, pre, op.ip)
-	ctx.assembler.Emit(arm64.BLabel(done))
+	a.Emit(arm64.SUBI(rc, rc, 1))
+	a.Emit(arm64.STRR(rc, rcBase, addr))
 
-	ctx.assembler.Bind(hitF64)
-	dataPtr, n = l.sliceHeader(ctx, data, 0)
-	if !l.guardIndex(ctx, idx, n, pre, op.ip) {
+	ctx.values = pre[: len(pre)-3 : len(pre)-3]
+	if !l.exit(ctx, op.ip+1) {
 		return false
 	}
-	ctx.assembler.Emit(arm64.LDRR(result, dataPtr, idx))
-	l.releaseRef(ctx, addr, pre, op.ip)
-	ctx.assembler.Emit(arm64.BLabel(done))
-
-	ctx.assembler.Bind(hitRef)
-	dataPtr, n = l.sliceHeader(ctx, data, int16(arrayElems))
-	if !l.guardIndex(ctx, idx, n, pre, op.ip) {
+	a.Bind(fail)
+	ctx.values = append(ctx.values[:0], pre...)
+	if !l.exit(ctx, op.ip) {
 		return false
 	}
-	ctx.assembler.Emit(arm64.LDRR(result, dataPtr, idx))
-	l.releaseRef(ctx, addr, pre, op.ip)
-	l.retainBox(ctx, result)
-
-	ctx.assembler.Bind(done)
-	kind := op.seen.Kind()
-	if kind != types.KindI32 && kind != types.KindF32 && kind != types.KindF64 && kind != types.KindRef {
-		return false
-	}
-	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: kind, raw: kind != types.KindRef})
 	return true
 }
 
@@ -2512,81 +2656,188 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 	if ctx.count() < 2 || ctx.values[len(ctx.values)-1].kind != types.KindI32 || ctx.values[len(ctx.values)-2].kind != types.KindRef {
 		return false
 	}
+	out := op.seen.Kind()
+	switch out {
+	case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64, types.KindRef:
+	default:
+		return false
+	}
 	pre := append([]value(nil), ctx.values...)
 	idx := l.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
 	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-2])
 	if !ok {
 		return false
 	}
-	addr, itab, data := l.heapValue(ctx, ref, pre, op.ip)
+	a := ctx.assembler
+	fail := a.Label()
+	tag := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LSRI(tag, ref, uint8(types.VBits)))
+	wantRef := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDI(wantRef, tagRef>>types.VBits)...)
+	a.Emit(arm64.CMP(tag, wantRef))
+	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 
-	hit := ctx.assembler.Label()
-	l.matchItab(ctx, itab, heapStruct, hit)
-	ctx.values = append(ctx.values[:0], pre...)
-	if !l.exit(ctx, op.ip) {
-		return false
-	}
-	ctx.assembler.Bind(hit)
+	addr := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ANDI(addr, ref, maskI32))
+	heap := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journalHeap*8)))
+	off := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LSLI(off, addr, 4))
+	cell := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ADD(cell, heap, off))
+	itab := a.Reg(asm.RegTypeInt, asm.Width64)
+	data := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(
+		arm64.LDR(itab, cell, 0),
+		arm64.LDR(data, cell, 8),
+	)
+	wantItab := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDI(wantItab, uint64(heapStruct))...)
+	a.Emit(arm64.CMP(itab, wantItab))
+	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 
-	typ := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDR(typ, data, int16(structTyp)))
+	typ := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(typ, data, int16(structTyp)))
 	fields, n := l.sliceHeader(ctx, typ, int16(fieldsSlice))
-	if !l.guardIndex(ctx, idx, n, pre, op.ip) {
-		return false
-	}
-	fieldOff := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDI(fieldOff, uint64(fieldSize))...)
-	ctx.assembler.Emit(arm64.MUL(fieldOff, idx, fieldOff))
-	field := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ADD(field, fields, fieldOff))
-	kind := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDRB(kind, field, int16(fieldKind)))
+	a.Emit(arm64.CMPI(idx, 0))
+	a.Emit(arm64.BCondLabel(arm64.OpBLT, fail))
+	a.Emit(arm64.CMP(idx, n))
+	a.Emit(arm64.BCondLabel(arm64.OpBGE, fail))
+
+	fieldOff := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDI(fieldOff, uint64(fieldSize))...)
+	a.Emit(arm64.MUL(fieldOff, idx, fieldOff))
+	field := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ADD(field, fields, fieldOff))
+	fieldKindReg := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDRB(fieldKindReg, field, int16(fieldKind)))
+	a.Emit(arm64.CMPI(fieldKindReg, uint16(out)))
+	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 
 	dataPtr, _ := l.sliceHeader(ctx, data, int16(structData))
-	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDRR(raw, dataPtr, idx))
-
-	hitI32 := ctx.assembler.Label()
-	hitF32 := ctx.assembler.Label()
-	hitF64 := ctx.assembler.Label()
-	hitRef := ctx.assembler.Label()
-	l.matchKind(ctx, kind, types.KindI32, hitI32)
-	l.matchKind(ctx, kind, types.KindF32, hitF32)
-	l.matchKind(ctx, kind, types.KindF64, hitF64)
-	l.matchKind(ctx, kind, types.KindRef, hitRef)
+	result := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDRR(result, dataPtr, idx))
+	if out == types.KindI64 {
+		shifted := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LSLI(shifted, result, signI64))
+		ext := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ASRI(ext, shifted, signI64))
+		a.Emit(arm64.CMP(ext, result))
+		a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+	}
+	rcBase := l.rcBase(ctx)
+	rc := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDRR(rc, rcBase, addr))
+	a.Emit(arm64.CMPI(rc, 1))
+	a.Emit(arm64.BCondLabel(arm64.OpBLE, fail))
+	if out == types.KindRef {
+		l.retainBox(ctx, result)
+	}
+	a.Emit(arm64.SUBI(rc, rc, 1))
+	a.Emit(arm64.STRR(rc, rcBase, addr))
+	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: out, raw: out != types.KindRef})
+	if !l.exit(ctx, op.ip+1) {
+		return false
+	}
+	a.Bind(fail)
 	ctx.values = append(ctx.values[:0], pre...)
 	if !l.exit(ctx, op.ip) {
 		return false
 	}
+	return true
+}
 
-	result := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	done := ctx.assembler.Label()
-	ctx.assembler.Bind(hitI32)
-	ctx.assembler.Emit(arm64.MOV(result, raw))
-	l.releaseRef(ctx, addr, pre, op.ip)
-	ctx.assembler.Emit(arm64.BLabel(done))
-
-	ctx.assembler.Bind(hitF32)
-	ctx.assembler.Emit(arm64.MOV(result, raw))
-	l.releaseRef(ctx, addr, pre, op.ip)
-	ctx.assembler.Emit(arm64.BLabel(done))
-
-	ctx.assembler.Bind(hitF64)
-	ctx.assembler.Emit(arm64.MOV(result, raw))
-	l.releaseRef(ctx, addr, pre, op.ip)
-	ctx.assembler.Emit(arm64.BLabel(done))
-
-	ctx.assembler.Bind(hitRef)
-	ctx.assembler.Emit(arm64.MOV(result, raw))
-	l.releaseRef(ctx, addr, pre, op.ip)
-	l.retainBox(ctx, result)
-
-	ctx.assembler.Bind(done)
-	out := op.seen.Kind()
-	if out != types.KindI32 && out != types.KindF32 && out != types.KindF64 && out != types.KindRef {
+func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
+	if ctx.count() < 3 || ctx.values[len(ctx.values)-2].kind != types.KindI32 || ctx.values[len(ctx.values)-3].kind != types.KindRef {
 		return false
 	}
-	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: out, raw: out != types.KindRef})
+	kind := ctx.values[len(ctx.values)-1].kind
+	switch kind {
+	case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
+	default:
+		return false
+	}
+	pre := append([]value(nil), ctx.values...)
+	val := ctx.values[len(ctx.values)-1]
+	idx := l.sign32(ctx, ctx.values[len(ctx.values)-2].reg)
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-3])
+	if !ok {
+		return false
+	}
+	a := ctx.assembler
+	fail := a.Label()
+	tag := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LSRI(tag, ref, uint8(types.VBits)))
+	wantRef := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDI(wantRef, tagRef>>types.VBits)...)
+	a.Emit(arm64.CMP(tag, wantRef))
+	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+
+	addr := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ANDI(addr, ref, maskI32))
+	heap := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journalHeap*8)))
+	off := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LSLI(off, addr, 4))
+	cell := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ADD(cell, heap, off))
+	itab := a.Reg(asm.RegTypeInt, asm.Width64)
+	data := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(
+		arm64.LDR(itab, cell, 0),
+		arm64.LDR(data, cell, 8),
+	)
+	wantItab := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDI(wantItab, uint64(heapStruct))...)
+	a.Emit(arm64.CMP(itab, wantItab))
+	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+
+	typ := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(typ, data, int16(structTyp)))
+	fields, n := l.sliceHeader(ctx, typ, int16(fieldsSlice))
+	a.Emit(arm64.CMPI(idx, 0))
+	a.Emit(arm64.BCondLabel(arm64.OpBLT, fail))
+	a.Emit(arm64.CMP(idx, n))
+	a.Emit(arm64.BCondLabel(arm64.OpBGE, fail))
+
+	fieldOff := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDI(fieldOff, uint64(fieldSize))...)
+	a.Emit(arm64.MUL(fieldOff, idx, fieldOff))
+	field := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ADD(field, fields, fieldOff))
+	fieldKindReg := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDRB(fieldKindReg, field, int16(fieldKind)))
+	a.Emit(arm64.CMPI(fieldKindReg, uint16(kind)))
+	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+
+	rcBase := l.rcBase(ctx)
+	rc := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDRR(rc, rcBase, addr))
+	a.Emit(arm64.CMPI(rc, 1))
+	a.Emit(arm64.BCondLabel(arm64.OpBLE, fail))
+
+	dataPtr, _ := l.sliceHeader(ctx, data, int16(structData))
+	var stored asm.VReg
+	switch kind {
+	case types.KindI1, types.KindI8, types.KindI32, types.KindF32:
+		stored = a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ANDI(stored, val.reg, maskI32))
+	case types.KindI64, types.KindF64:
+		stored = val.reg
+	}
+	a.Emit(arm64.STRR(stored, dataPtr, idx))
+	a.Emit(arm64.SUBI(rc, rc, 1))
+	a.Emit(arm64.STRR(rc, rcBase, addr))
+
+	ctx.values = pre[: len(pre)-3 : len(pre)-3]
+	if !l.exit(ctx, op.ip+1) {
+		return false
+	}
+	a.Bind(fail)
+	ctx.values = append(ctx.values[:0], pre...)
+	if !l.exit(ctx, op.ip) {
+		return false
+	}
 	return true
 }
 

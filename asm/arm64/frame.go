@@ -3,11 +3,9 @@ package arm64
 import "github.com/siyul-park/minivm/asm"
 
 // frame implements asm.Frame so the shared register allocator can spill to a
-// stack-pointer-relative frame. The native body is a leaf (it makes no
-// calls and never triggers GC), so reserving space below SP for the
-// duration of one invocation is safe: nothing else reads or writes the
-// frame, and the VM garbage collector never runs while native code holds
-// the stack.
+// stack-pointer-relative frame. Native code may make framed self-calls, but
+// those calls save and restore SP around the branch. The VM garbage collector
+// never runs while native code holds the stack.
 //
 // The load/store and add/subtract-immediate forms used here read register
 // field 31 as SP, so they emit against the SP alias rather than SP (same

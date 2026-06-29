@@ -188,6 +188,19 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 
 		r.finish(&clone, &st, op)
 		t.ops = append(t.ops, st)
+		// Heap access ops with mutation or shape-sensitive reads lower as
+		// terminal native fast paths. The hot path performs the access and
+		// resumes at the next threaded instruction; guard failures resume at the
+		// opcode so the interpreter owns the full handler semantics.
+		if op == instr.ARRAY_GET || op == instr.ARRAY_SET || op == instr.STRUCT_GET || op == instr.STRUCT_SET {
+			if clone.fp != startFP {
+				t.kind = aborted
+				break
+			}
+			t.kind = returned
+			r.store(a, t)
+			return t, nil
+		}
 
 		switch {
 		case op == instr.RETURN && st.depth == 0:
@@ -527,14 +540,13 @@ func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
 	// YIELD and RESUME suspend or rebuild a frame, so a linear trace cannot
 	// span them; capture records them as terminal deopt boundaries instead of
 	// aborting, and the JIT lowers each to an unconditional deopt that hands the
-	// real suspend/resume back to the threaded handler. CORO_DONE and CORO_VALUE
-	// are pure heap reads (handle in, value out) and stay recordable like
-	// ARRAY_GET/STRUCT_GET; the JIT lowers them directly.
+	// real suspend/resume back to the threaded handler. CORO_DONE and
+	// CORO_VALUE are pure heap reads (handle in, value out) and stay recordable
+	// like ARRAY_GET and STRUCT_GET; the JIT lowers them directly.
 	case instr.STRING_NEW_UTF32,
 		instr.STRING_ITER,
 		instr.ARRAY_NEW,
 		instr.ARRAY_NEW_DEFAULT,
-		instr.ARRAY_SET,
 		instr.ARRAY_FILL,
 		instr.ARRAY_COPY,
 		instr.ARRAY_APPEND,
@@ -542,7 +554,6 @@ func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
 		instr.ARRAY_SLICE,
 		instr.STRUCT_NEW,
 		instr.STRUCT_NEW_DEFAULT,
-		instr.STRUCT_SET,
 		instr.MAP_NEW,
 		instr.MAP_NEW_DEFAULT,
 		instr.MAP_SET,

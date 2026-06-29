@@ -94,8 +94,9 @@ const (
 	OpLDRSH
 	OpSTRH
 
-	// Load / Store (32-bit sign-extended)
+	// Load / Store (32-bit)
 	OpLDRSW
+	OpSTRW
 
 	// Load / Store register-offset
 	OpLDRR
@@ -449,6 +450,9 @@ func STRH(src, base asm.Reg, offset int16) asm.Instruction {
 // 32-bit sign-extended to 64-bit
 func LDRSW(dst, base asm.Reg, offset int16) asm.Instruction {
 	return newRegMem(OpLDRSW, dst, base, int64(offset))
+}
+func STRW(src, base asm.Reg, offset int16) asm.Instruction {
+	return newMemReg(OpSTRW, src, base, int64(offset))
 }
 
 // Register-offset variants: LDR Xt, [Xbase, Xoffset]

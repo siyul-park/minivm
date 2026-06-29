@@ -101,7 +101,10 @@ nil `compiler`, so JIT is unavailable.
 Native callables use a standard AAPCS64-shaped entry: `Callable.Call(ctx)` passes
 `&i.journal[0]` in X0. External entries copy journal cells into pinned scratch
 registers; recursive trace calls branch to an internal label after that reload
-and keep the registers live.
+and keep the registers live. The Go trampoline preserves X19-X26 for native
+register allocation. Native entry/return does not reserve its own SP frame; only
+native self-calls save LR and the caller BP/SP around their internal `BL`, so the
+assembler spill frame keeps a stable SP-relative base.
 
 | Constant | ARM64 | Purpose |
 | --- | --- | --- |
@@ -229,6 +232,19 @@ and `f64` use IEEE bits, and inline `i64` values use the full signed register
 value while guards enforce the boxed 49-bit range before materialization. Heap
 promoted `i64` values deopt on load.
 
+`ARRAY_GET`, primitive `ARRAY_SET`, `STRUCT_GET`, and primitive `STRUCT_SET`
+lower on ARM64 as terminal heap accesses for the observed shape. Native code
+guards the heap itab for that single typed primitive-array, generic ref-array, or
+guest struct shape, checks the index and field kind, performs the load/store,
+flushes the result state, and resumes threaded dispatch at the next instruction.
+Primitive array fast paths cover `i1`, `i8`, `i32`, boxable `i64`, `f32`, and
+`f64`; an `i64` element outside the inline boxed range deopts at the opcode so
+the interpreter can allocate the promoted heap value. Shape, bounds, field-kind,
+or refcount-release failures likewise deopt at the opcode so the interpreter
+owns the full handler semantics. These paths do not fan out across every heap
+itab in one trace, so register spills remain valid across the native control
+flow.
+
 The narrow kinds `i1`/`i8` share the i32 representation, so they ride in the low
 32 bits exactly like `i32` and `loadLocal`/`constGet` materialize them raw. Kind
 checks are by representation (`kinds` compares `Kind.Repr`), so an `i1`/`i8`
@@ -244,15 +260,15 @@ slots load/store raw values directly; ref-bearing slots use `journalRC` guarded
 retain/release. If a release might free (`rc == 1`), native deopts so the
 interpreter owns recursive release.
 
-Read-only heap fast paths cover observed scalar `REF_GET`, selected typed
-`ARRAY_LEN`/`ARRAY_GET`, selected `STRUCT_GET` shapes, `ERROR_GET`, and the
-coroutine reads `CORO_DONE`/`CORO_VALUE`. They guard the ref, heap itab,
-element/field kind, and index as needed; `ERROR_GET` guards `*types.Error`, loads
-the boxed payload, retains a ref payload, and releases the error handle. The
-coroutine reads guard the handle's itab and load the `done` byte or the boxed
-`value` directly (`CORO_VALUE` retains the value and releases the handle,
-`CORO_DONE` keeps it, matching the threaded handlers). Heap allocation and
-mutation remain threaded.
+Heap fast paths cover observed scalar `REF_GET`, selected typed
+`ARRAY_LEN`/`ARRAY_GET`/`ARRAY_SET`, selected `STRUCT_GET`/`STRUCT_SET` shapes,
+`ERROR_GET`, and the coroutine reads `CORO_DONE`/`CORO_VALUE`. They guard the
+ref, heap itab, element/field kind, index, and release safety as needed;
+`ERROR_GET` guards `*types.Error`, loads the boxed payload, retains a ref
+payload, and releases the error handle. The coroutine reads guard the handle's
+itab and load the `done` byte or the boxed `value` directly (`CORO_VALUE` retains
+the value and releases the handle, `CORO_DONE` keeps it, matching the threaded
+handlers). Heap allocation and complex ref-bearing mutations remain threaded.
 
 `ERROR_NEW`, `ERROR_CODE`, and `THROW` are terminal fallback boundaries like
 anchor-frame `YIELD`/`RESUME`: the tracer records them without stepping the

@@ -77,6 +77,7 @@ func TestEncoder_Encode(t *testing.T) {
 			{"STR X1,[X2,#8]", STR(X1, X2, 8), 0xF9000441},
 			{"STRB X1,[X2,#1]", STRB(X1, X2, 1), 0x39000441},
 			{"STRH X1,[X2,#2]", STRH(X1, X2, 2), 0x79000441},
+			{"STRW X1,[X2,#4]", STRW(X1, X2, 4), 0xB9000441},
 			{"FADD D1,D2,D3", FADD(D1, D2, D3), 0x1E632841},
 			{"FADD S1,S2,S3", FADD(S1, S2, S3), 0x1E232841},
 			{"FSUB D1,D2,D3", FSUB(D1, D2, D3), 0x1E633841},

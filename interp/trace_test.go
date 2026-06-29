@@ -51,10 +51,11 @@ func TestTracer_Capture(t *testing.T) {
 		require.Equal(t, instr.YIELD, tr.ops[len(tr.ops)-1].op)
 	})
 
-	t.Run("rejects array mutators like existing threaded-only array ops", func(t *testing.T) {
+	t.Run("records terminal set fast paths and rejects remaining array mutators", func(t *testing.T) {
 		tracer := NewTracer()
+		require.False(t, tracer.unrecordable(nil, instr.ARRAY_SET))
+		require.False(t, tracer.unrecordable(nil, instr.STRUCT_SET))
 		for _, op := range []instr.Opcode{
-			instr.ARRAY_SET,
 			instr.ARRAY_FILL,
 			instr.ARRAY_COPY,
 			instr.ARRAY_APPEND,
