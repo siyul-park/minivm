@@ -4,14 +4,15 @@ Claude-specific workflows only. Read `AGENTS.md` first.
 
 ## Code Changes
 
-Before changing code, read `docs/coding-patterns.md` and any task-relevant docs listed in `AGENTS.md`.
+Before changing code or tests, read `docs/coding-patterns.md` and any task-relevant docs listed in `AGENTS.md`. Treat that read as mandatory for each editing task, not optional background context.
 
-Follow `docs/coding-patterns.md` unless the task or repository context requires a narrower rule.
+Follow `docs/coding-patterns.md` unless the task or repository context requires a narrower rule. Before reporting done, re-read touched files against the checklist below and the relevant `docs/coding-patterns.md` sections.
 
 ## Coding Style Summary
 
 `docs/coding-patterns.md` is the authority; this is the short form.
 
+- **Always consult style docs before editing** — read `docs/coding-patterns.md` before any code/test modification, then apply the task-relevant sections during self-review.
 - **Layout** — declarations follow the fixed 11-slot order (§2.4); callers above callees, `New` above `With*` (§1.3).
 - **Methods over functions** — a private function used by one type becomes a method on it, even with an unused receiver (§1.5); but a single-use ≤~15-line helper stays inline (§1.4).
 - **One abstraction level** — entry points read as a narrative; push mechanics into intent-named helpers (§1.1).
