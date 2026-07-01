@@ -177,6 +177,46 @@ func typedArraySum(size int32) *program.Program {
 	return build(b)
 }
 
+// batchTreeEvaluation returns a batch-prediction-shaped program: a top-level
+// accumulator calls many tiny tree-score functions over one stable feature row.
+func batchTreeEvaluation(trees int) (*program.Program, types.Value) {
+	features := []int32{15, 35, 75, 125, 175, 225, 275, 325}
+	fns := make([]types.Value, 0, trees)
+	var want int32
+
+	for tree := range trees {
+		feature := tree % len(features)
+		weight := int32(tree%7 + 1)
+		bias := -int32(tree%5 + 1)
+		want += features[feature]*weight + bias
+
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		})
+		fn.Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, uint64(uint32(weight))),
+			instr.New(instr.I32_MUL),
+			instr.New(instr.I32_CONST, uint64(uint32(bias))),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+		)
+		fns = append(fns, fn.MustBuild())
+	}
+
+	b := program.NewBuilder()
+	b.Emit(instr.I32_CONST, 0)
+	for tree, fn := range fns {
+		feature := tree % len(features)
+		b.Emit(instr.I32_CONST, uint64(uint32(features[feature]))).
+			ConstGet(fn).
+			Emit(instr.CALL).
+			Emit(instr.I32_ADD)
+	}
+	return build(b), types.I32(want)
+}
+
 func build(b *program.Builder) *program.Program {
 	prog, err := b.Build()
 	if err != nil {

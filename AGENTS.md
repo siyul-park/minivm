@@ -24,7 +24,7 @@ go test -race -run 'TestInterpreter_WithDebugger|TestDebugger_Breakpoints' ./int
 1. `git status --short`; don't overwrite unrelated changes.
 2. **For code exploration, prefer `codegraph` MCP tools over grep/read** (see Code Exploration below).
 3. **Read task-relevant docs from Documentation Index before writing code or tests.**
-4. **Before modifying code, read `docs/coding-patterns.md` and follow relevant sections.**
+4. **Before modifying code or tests, read `docs/coding-patterns.md` and apply the task-relevant sections. No code change is complete until the touched files pass that checklist.**
 5. Mirror nearby tests; follow Test Conventions (one func per exported symbol, sub-cases as `t.Run`).
 6. Update docs when behavior, invariants, commands, or pitfalls change.
 7. On a fresh environment or CI-like run, start with `make init`; CI does this before lint/coverage.
@@ -173,7 +173,7 @@ Incorrect ordering crashes on Apple Silicon.
 
 ## Coding Expectations
 
-- Apply `docs/coding-patterns.md` for every code change.
+- Apply `docs/coding-patterns.md` for every code or test change; re-read it before editing when context has shifted.
 - Error design: explicit errors with context, preserve sentinels for `errors.Is`, panic only in interpreter-threaded paths recovered by `Run`.
 - Test design: describe behavior, cover error paths + boundaries, organize under exported symbol.
 - Match existing package structure and naming.
@@ -182,6 +182,19 @@ Incorrect ordering crashes on Apple Silicon.
 - Keep opcode handlers explicit and predictable.
 - Preserve interpreter/JIT behavioral parity.
 - Avoid hidden control flow.
+
+### Coding Convention Core
+
+`docs/coding-patterns.md` is the style authority. In practice:
+
+- Keep entry points top-down: orchestration first, mechanics below, callers above callees.
+- Prefer clear inline code over tiny single-use helpers; extract only real repeated decisions or named domain steps.
+- Private package functions used by one type become methods on that type; constructors remain package functions.
+- Use role-based private names; do not repeat package/subsystem prefixes already supplied by file, package, or receiver.
+- Preserve declaration order: types, consts, vars, constructors, public funcs/methods, private methods, private funcs.
+- Keep struct fields layered: policy, infrastructure, program data, runtime state, counters, read-only config, mutexes.
+- Tests target public behavior, use one test function per exported symbol, inline setup/run/assertions, and avoid test helpers.
+- Record non-viable refactor steps in the final summary instead of silently dropping them.
 
 ### Frequent Style Traps
 

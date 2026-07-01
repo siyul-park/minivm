@@ -809,7 +809,7 @@ func (i *Interpreter) safepoint() error {
 	}
 
 	i.local.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
-	if f.ip == 0 && !i.tracer.hasEntry(f.addr) {
+	if f.ip == 0 && i.fallbacks[anchor{addr: f.addr, ip: 0}] == nil && !i.tracer.hasEntry(f.addr) {
 		if _, err := i.tracer.capture(i, anchor{addr: f.addr, ip: 0}); err != nil {
 			return err
 		}
@@ -821,19 +821,23 @@ func (i *Interpreter) safepoint() error {
 	// installs anything; compile here, once the function is hot and the loop
 	// trace first appears, so the loop header gets its own native. The hotness
 	// gate keeps WithThreshold(-1) a pure interpreter.
+	samples := i.local.Samples(f.addr)
 	if i.threshold >= 0 && f.ip > 0 &&
-		i.local.Samples(f.addr) >= uint64(i.threshold) &&
-		!i.tracer.hasLoop(f.addr, f.ip) {
+		samples >= uint64(i.threshold) &&
+		i.fallbacks[anchor{addr: f.addr, ip: 0}] == nil &&
+		i.fallbacks[anchor{addr: f.addr, ip: f.ip}] == nil {
 		for _, h := range i.tracer.headers(i, f.addr) {
 			if h != f.ip {
 				continue
 			}
-			if _, err := i.tracer.capture(i, anchor{addr: f.addr, ip: f.ip}); err != nil {
-				return err
-			}
-			if i.tracer.hasLoop(f.addr, f.ip) {
-				if err := i.compile(f.addr); err != nil {
+			if !i.tracer.hasLoop(f.addr, f.ip) {
+				if _, err := i.tracer.capture(i, anchor{addr: f.addr, ip: f.ip}); err != nil {
 					return err
+				}
+				if i.tracer.hasLoop(f.addr, f.ip) {
+					if err := i.compile(f.addr); err != nil {
+						return err
+					}
 				}
 			}
 			break
@@ -848,7 +852,7 @@ func (i *Interpreter) safepoint() error {
 		i.sync()
 		return nil
 	}
-	if i.threshold >= 0 && i.local.Samples(f.addr) == uint64(i.threshold) {
+	if i.threshold >= 0 && samples == uint64(i.threshold) {
 		if err := i.compile(f.addr); err != nil {
 			return err
 		}
