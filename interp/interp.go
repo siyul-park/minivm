@@ -589,16 +589,27 @@ func (i *Interpreter) Reset() {
 		i.fp--
 		i.frames[i.fp] = frame{}
 	}
-	i.frames[i.fp-1].bp = i.sp
-	i.frames[i.fp-1].ip = 0
-	i.fr = &i.frames[i.fp-1]
+	i.sp = 0
+	f := &i.frames[i.fp-1]
+	f.addr = 0
+	f.ref = 0
+	f.release = false
+	f.bp = i.sp
+	f.ip = 0
+	f.returns = 0
+	f.code = i.code[0]
+	f.upvals = nil
+	i.fr = f
+	if locals := len(i.module.Locals); locals > 0 {
+		clear(i.stack[i.sp : i.sp+locals])
+		i.sp += locals
+	}
 
 	for idx := range i.globals {
 		i.globals[idx] = 0
 	}
 	i.globals = i.globals[:0]
 
-	i.sp = 0
 	i.gas = i.fuel
 	i.roots = i.roots[:0]
 	clear(i.interned)

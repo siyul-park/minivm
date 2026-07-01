@@ -15,4 +15,12 @@ func BenchmarkJITIssue101(b *testing.B) {
 		vm := interp.New(prog, interp.WithThreshold(-1))
 		runMiniVMProgram(b, vm, want)
 	})
+	b.Run("jit", func(b *testing.B) {
+		vm := interp.New(
+			prog,
+			interp.WithTick(1),
+			interp.WithThreshold(1),
+		)
+		runMiniVMProgram(b, vm, want)
+	})
 }

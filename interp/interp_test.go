@@ -1468,12 +1468,33 @@ func TestInterpreter_Close(t *testing.T) {
 }
 
 func TestInterpreter_Reset(t *testing.T) {
-	i := New(program.New(nil))
-	defer i.Close()
+	t.Run("clears pushed values", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
 
-	require.NoError(t, i.Push(types.I32(1)))
-	i.Reset()
-	require.Equal(t, 0, i.Len())
+		require.NoError(t, i.Push(types.I32(1)))
+		i.Reset()
+		require.Equal(t, 0, i.Len())
+	})
+
+	t.Run("restarts module after unpopped result", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7)})
+		i := New(prog)
+		defer i.Close()
+
+		for range 64 {
+			require.NoError(t, i.Run(context.Background()))
+			require.Equal(t, 1, i.Len())
+			i.Reset()
+			require.Equal(t, 0, i.frames[0].bp)
+			require.Equal(t, 0, i.frames[0].ip)
+			require.Same(t, &i.frames[0], i.fr)
+		}
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(7), v)
+	})
 }
 
 func TestNew(t *testing.T) {
@@ -1829,6 +1850,55 @@ func TestWithThreshold(t *testing.T) {
 			return
 		}
 		require.NotNil(t, i.fallbacks[anchor{addr: fnAddr, ip: 0}])
+		require.GreaterOrEqual(t, i.local.Value("vm_jit_attempts_total"), float64(1))
+		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+	})
+
+	t.Run("jits top-level accumulator over many scalar calls", func(t *testing.T) {
+		b := program.NewBuilder()
+		b.Emit(instr.I32_CONST, 0)
+		var want int32
+		for idx := range 12 {
+			weight := int32(idx%5 + 1)
+			bias := -int32(idx%3 + 1)
+			arg := int32(idx*7 + 3)
+			want += arg*weight + bias
+
+			fn := types.NewFunctionBuilder(&types.FunctionType{
+				Params:  []types.Type{types.TypeI32},
+				Returns: []types.Type{types.TypeI32},
+			})
+			fn.Emit(
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, uint64(uint32(weight))),
+				instr.New(instr.I32_MUL),
+				instr.New(instr.I32_CONST, uint64(uint32(bias))),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.RETURN),
+			)
+			built, err := fn.Build()
+			require.NoError(t, err)
+			b.Emit(instr.I32_CONST, uint64(uint32(arg))).
+				ConstGet(built).
+				Emit(instr.CALL).
+				Emit(instr.I32_ADD)
+		}
+		prog, err := b.Build()
+		require.NoError(t, err)
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+
+		for range 64 {
+			i.Reset()
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(want), got)
+		}
+		if runtime.GOARCH != "arm64" {
+			return
+		}
+		require.NotNil(t, i.fallbacks[anchor{addr: 0, ip: 0}])
 		require.GreaterOrEqual(t, i.local.Value("vm_jit_attempts_total"), float64(1))
 		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
 	})
