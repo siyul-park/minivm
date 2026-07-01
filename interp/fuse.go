@@ -28,6 +28,27 @@ func (c *threadedCompiler) fuseRefImm(addr int, size int) func(*Interpreter) {
 			return fused
 		}
 	}
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	if instr.Opcode(c.code[c.ip]) == instr.REF_GET {
+		switch c.heap[addr].(type) {
+		case types.I32, types.I64, types.F32, types.F64:
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				switch i.heap[addr].(type) {
+				case types.I32, types.I64, types.F32, types.F64:
+				default:
+					panic(ErrTypeMismatch)
+				}
+				i.stack[i.sp] = i.box(i.heap[addr])
+				i.sp++
+				i.fr.ip += size + 1
+			}
+		}
+	}
 	return nil
 }
 
@@ -1050,6 +1071,20 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 			}
 			lhs := i.stack[i.sp-1].I32()
 			i.stack[i.sp-1] = i.i32GeU(lhs, rhs)
+			i.fr.ip += size + 1
+		}
+	case instr.ARRAY_GET:
+		return func(i *Interpreter) {
+			val := i.arrayGetAt(int(rhs))
+			i.stack[i.sp] = val
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.STRUCT_GET:
+		return func(i *Interpreter) {
+			val := i.structGetAt(int(rhs))
+			i.stack[i.sp] = val
+			i.sp++
 			i.fr.ip += size + 1
 		}
 	}

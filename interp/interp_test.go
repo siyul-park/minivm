@@ -1163,6 +1163,29 @@ var runTests = []struct {
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_ITER), instr.New(instr.CORO_VALUE)}, program.WithConstants(types.String("Hi"))),
 		values:  []types.Value{types.I32(72)},
 	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.ARRAY_GET),
+		}, program.WithConstants(types.TypedArray[int32]{3, 5})),
+		values: []types.Value{types.I32(5)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.STRUCT_GET),
+		}, program.WithConstants(types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32)), types.BoxI32(7)))),
+		values: []types.Value{types.I32(7)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.REF_GET),
+		}, program.WithConstants(types.I64(math.MaxInt64))),
+		values: []types.Value{types.I64(math.MaxInt64)},
+	},
 }
 
 func TestInterpreter_Run(t *testing.T) {
@@ -1647,6 +1670,43 @@ func TestWithThreshold(t *testing.T) {
 		}
 		require.NotNil(t, i.fallbacks[anchor{addr: 0, ip: 0}])
 		require.Equal(t, float64(1), i.local.Value("vm_jit_emits_total"))
+	})
+
+	t.Run("jits prefix before f64 rem terminal", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.F64_CONST, math.Float64bits(7.5)),
+			instr.New(instr.F64_CONST, math.Float64bits(2)),
+			instr.New(instr.F64_REM),
+		})
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.F64(1.5), got)
+		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+	})
+
+	t.Run("jits prefix before string read terminal", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.STRING_LEN),
+		}, program.WithConstants(types.String("hello")))
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), got)
+		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
 	})
 
 	t.Run("jits top-level loop", func(t *testing.T) {

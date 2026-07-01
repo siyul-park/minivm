@@ -219,8 +219,8 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `F32_SUB` | `{}` | `a b → f32` | ✅ | Floating-point subtraction. |
 | `F32_MUL` | `{}` | `a b → f32` | ✅ | Floating-point multiplication. |
 | `F32_DIV` | `{}` | `a b → f32` | ✅ | Floating-point division. |
-| `F32_REM` | `{}` | `a b → f32` | ⬜ | Truncated remainder (sign follows `a`); trap `ErrDivideByZero` if divisor is zero. |
-| `F32_MOD` | `{}` | `a b → f32` | ⬜ | Floored modulo (sign follows `b`); trap `ErrDivideByZero` if divisor is zero. |
+| `F32_REM` | `{}` | `a b → f32` | ◐ | Truncated remainder (sign follows `a`); trap `ErrDivideByZero` if divisor is zero. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `F32_MOD` | `{}` | `a b → f32` | ◐ | Floored modulo (sign follows `b`); trap `ErrDivideByZero` if divisor is zero. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `F32_ABS` | `{}` | `x → f32` | ✅ | Absolute value (clears sign bit). |
 | `F32_NEG` | `{}` | `x → f32` | ✅ | Negate (flips sign bit, incl. NaN). |
 | `F32_SQRT` | `{}` | `x → f32` | ✅ | Square root. |
@@ -248,8 +248,8 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | `F64_SUB` | `{}` | `a b → f64` | ✅ | Floating-point subtraction. |
 | `F64_MUL` | `{}` | `a b → f64` | ✅ | Floating-point multiplication. |
 | `F64_DIV` | `{}` | `a b → f64` | ✅ | Floating-point division. |
-| `F64_REM` | `{}` | `a b → f64` | ⬜ | Truncated remainder (sign follows `a`); trap `ErrDivideByZero` if divisor is zero. |
-| `F64_MOD` | `{}` | `a b → f64` | ⬜ | Floored modulo (sign follows `b`); trap `ErrDivideByZero` if divisor is zero. |
+| `F64_REM` | `{}` | `a b → f64` | ◐ | Truncated remainder (sign follows `a`); trap `ErrDivideByZero` if divisor is zero. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `F64_MOD` | `{}` | `a b → f64` | ◐ | Floored modulo (sign follows `b`); trap `ErrDivideByZero` if divisor is zero. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `F64_ABS` | `{}` | `x → f64` | ✅ | Absolute value (clears sign bit). |
 | `F64_NEG` | `{}` | `x → f64` | ✅ | Negate (flips sign bit, incl. NaN). |
 | `F64_SQRT` | `{}` | `x → f64` | ✅ | Square root. |
@@ -273,11 +273,11 @@ A `ref`-typed slot is the VM's dynamic ("any") type: it holds any `Boxed` — an
 | Opcode | Widths | Stack | JIT | Description |
 |---|---|---|---|---|
 | `STRING_NEW_UTF32` | `{}` | `array → string` | ⬜ | Create `types.String` from UTF-32 codepoints. |
-| `STRING_LEN` | `{}` | `string → i32` | ⬜ | Push string length in codepoints. |
+| `STRING_LEN` | `{}` | `string → i32` | ◐ | Push string length in codepoints. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `STRING_CONCAT` | `{}` | `a b → string` | ⬜ | Concatenate strings. |
 | `STRING_EQ` … `STRING_GE` | `{}` | `a b → i32` | ⬜ | Lexicographic comparisons. |
-| `STRING_ENCODE_UTF32` | `{}` | `string → array` | ⬜ | Encode string as UTF-32 codepoints. |
-| `STRING_ITER` | `{}` | `string → iterator[i32]` | ⬜ | Create a lazy codepoint iterator over the string, advance it to the first rune, and transfer string ownership into the iterator. Invalid UTF-8 yields U+FFFD following Go UTF-8 decoding. |
+| `STRING_ENCODE_UTF32` | `{}` | `string → array` | ◐ | Encode string as UTF-32 codepoints. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `STRING_ITER` | `{}` | `string → iterator[i32]` | ◐ | Create a lazy codepoint iterator over the string, advance it to the first rune, and transfer string ownership into the iterator. Invalid UTF-8 yields U+FFFD following Go UTF-8 decoding. JIT keeps framed entries by exiting locally to the threaded handler. |
 
 ## Array Operations
 
@@ -321,8 +321,8 @@ Map keys use primitive value identity for `i1`, `i8`, `i32`, `i64`, `f32`, and `
 | `MAP_SET` | `{}` | `map key value →` | ◐ | Insert or replace entry. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `MAP_DELETE` | `{}` | `map key →` | ◐ | Delete entry; missing key is a no-op. JIT keeps framed entries by exiting locally to the threaded handler. |
 | `MAP_CLEAR` | `{}` | `map →` | ◐ | Delete all entries. JIT keeps framed entries by exiting locally to the threaded handler. |
-| `MAP_KEYS` | `{}` | `map → array` | ⬜ | Snapshot keys into a new `[]K` array (`K` = map key type), in unspecified order. Enables guest map iteration with `ARRAY_LEN`/`ARRAY_GET` + `MAP_GET`. |
-| `MAP_ITER` | `{}` | `map[K]V → iterator[K]` | ⬜ | Create a `types.MapIterator` over the map without snapshotting keys, advance it to the first key, and transfer map ownership into the iterator. The iterator yields keys only; use `MAP_GET` when the value is needed. Iteration order and mutation visibility are unspecified, matching Go map range semantics. |
+| `MAP_KEYS` | `{}` | `map → array` | ◐ | Snapshot keys into a new `[]K` array (`K` = map key type), in unspecified order. Enables guest map iteration with `ARRAY_LEN`/`ARRAY_GET` + `MAP_GET`. JIT keeps framed entries by exiting locally to the threaded handler. |
+| `MAP_ITER` | `{}` | `map[K]V → iterator[K]` | ◐ | Create a `types.MapIterator` over the map without snapshotting keys, advance it to the first key, and transfer map ownership into the iterator. The iterator yields keys only; use `MAP_GET` when the value is needed. Iteration order and mutation visibility are unspecified, matching Go map range semantics. JIT keeps framed entries by exiting locally to the threaded handler. |
 
 ## Coroutines
 
@@ -369,4 +369,4 @@ wrapped under `ErrUncaughtException`.
 | `ERROR_GET` | `{}` | `error → payload` | ◐ | Push the `types.Error`'s payload and release the error. Traps `ErrTypeMismatch` if the operand is not an error. JIT has a native fast path for `*types.Error` behind an itab guard. |
 | `ERROR_CODE` | `{}` | `error → i32` | ◐ | Push the `types.Error`'s numeric code and release the error. Traps `ErrTypeMismatch` if the operand is not an error. JIT records it as a terminal deopt for now. |
 
-The threaded dispatcher still fuses common idioms in non-precise mode: a constant string load followed by `i32.const code; ERROR_NEW` builds the error in one dispatch, and `ERROR_NEW; THROW` constructs and raises in one.
+The threaded dispatcher still fuses common idioms in non-precise mode: primitive constants and typed locals can feed primitive binary operations in one dispatch, typed locals can absorb a following primitive constant plus binary operation, and constant `i32` indexes can feed `array.get`/`struct.get`. A constant ref cell followed by `ref.get` loads the cell in one dispatch. A constant string load followed by `i32.const code; ERROR_NEW` builds the error in one dispatch, and `ERROR_NEW; THROW` constructs and raises in one.

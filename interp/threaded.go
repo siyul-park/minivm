@@ -698,21 +698,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.REF_GET: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
-			if i.sp == 0 {
-				panic(ErrStackUnderflow)
-			}
-			ref := i.stack[i.sp-1]
-			if ref.Kind() != types.KindRef {
-				panic(ErrTypeMismatch)
-			}
-			addr := ref.Ref()
-			switch i.heap[addr].(type) {
-			case types.I32, types.I64, types.F32, types.F64:
-			default:
-				panic(ErrTypeMismatch)
-			}
-			i.stack[i.sp-1] = i.box(i.heap[addr])
-			i.release(addr)
+			i.stack[i.sp] = i.refGet()
+			i.sp++
 			i.fr.ip++
 		}
 	},
@@ -2945,60 +2932,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.ARRAY_GET: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
-			if i.sp < 2 {
-				panic(ErrStackUnderflow)
-			}
-			idx := int(i.stack[i.sp-1].I32())
-			ref := i.stack[i.sp-2]
-			if ref.Kind() != types.KindRef {
-				panic(ErrTypeMismatch)
-			}
-			addr := ref.Ref()
-			var val types.Boxed
-			switch arr := i.heap[addr].(type) {
-			case types.TypedArray[bool]:
-				if idx < 0 || idx >= len(arr) {
-					panic(ErrIndexOutOfRange)
-				}
-				val = types.BoxI1(arr[idx])
-			case types.TypedArray[int8]:
-				if idx < 0 || idx >= len(arr) {
-					panic(ErrIndexOutOfRange)
-				}
-				val = types.BoxI8(arr[idx])
-			case types.TypedArray[int32]:
-				if idx < 0 || idx >= len(arr) {
-					panic(ErrIndexOutOfRange)
-				}
-				val = types.BoxI32(int32(arr[idx]))
-			case types.TypedArray[int64]:
-				if idx < 0 || idx >= len(arr) {
-					panic(ErrIndexOutOfRange)
-				}
-				val = i.boxI64(int64(arr[idx]))
-			case types.TypedArray[float32]:
-				if idx < 0 || idx >= len(arr) {
-					panic(ErrIndexOutOfRange)
-				}
-				val = types.BoxF32(float32(arr[idx]))
-			case types.TypedArray[float64]:
-				if idx < 0 || idx >= len(arr) {
-					panic(ErrIndexOutOfRange)
-				}
-				val = types.BoxF64(float64(arr[idx]))
-			case *types.Array:
-				if idx < 0 || idx >= len(arr.Elems) {
-					panic(ErrIndexOutOfRange)
-				}
-				elem := arr.Elems[idx]
-				i.retainBox(elem)
-				val = elem
-			default:
-				panic(ErrTypeMismatch)
-			}
-			i.release(addr)
-			i.sp--
-			i.stack[i.sp-1] = val
+			i.stack[i.sp] = i.arrayGet()
+			i.sp++
 			i.fr.ip++
 		}
 	},
@@ -3507,64 +3442,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.STRUCT_GET: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
-			if i.sp < 2 {
-				panic(ErrStackUnderflow)
-			}
-			idx := int(i.stack[i.sp-1].I32())
-			ref := i.stack[i.sp-2]
-			if ref.Kind() != types.KindRef {
-				panic(ErrTypeMismatch)
-			}
-			addr := ref.Ref()
-			var val types.Boxed
-			switch s := i.heap[addr].(type) {
-			case *types.Struct:
-				if idx < 0 || idx >= len(s.Typ.Fields) {
-					panic(ErrSegmentationFault)
-				}
-				field := s.Typ.Fields[idx]
-				switch field.Kind {
-				case types.KindI32:
-					val = types.BoxI32(int32(uint32(s.Data[idx])))
-				case types.KindI8:
-					val = types.BoxI8(int8(uint32(s.Data[idx])))
-				case types.KindI1:
-					val = types.BoxI1(s.Data[idx] != 0)
-				case types.KindI64:
-					val = i.boxI64(int64(s.Data[idx]))
-				case types.KindF32:
-					val = types.BoxF32(math.Float32frombits(uint32(s.Data[idx])))
-				case types.KindF64:
-					val = types.BoxF64(math.Float64frombits(s.Data[idx]))
-				case types.KindRef:
-					val = types.Boxed(s.Data[idx])
-					i.retainBox(val)
-				default:
-					panic(ErrTypeMismatch)
-				}
-			case *HostObject:
-				typ := s.Typ
-				if idx < 0 || idx >= len(typ.Fields) {
-					panic(ErrSegmentationFault)
-				}
-				field := typ.Fields[idx]
-				switch field.Kind {
-				case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-					val = s.Field(idx)
-				case types.KindI64:
-					val = i.boxI64(int64(s.Raw(idx)))
-				case types.KindRef:
-					val = types.Boxed(s.Raw(idx))
-					i.retainBox(val)
-				default:
-					panic(ErrTypeMismatch)
-				}
-			default:
-				panic(ErrTypeMismatch)
-			}
-			i.release(addr)
-			i.sp--
-			i.stack[i.sp-1] = val
+			i.stack[i.sp] = i.structGet()
+			i.sp++
 			i.fr.ip++
 		}
 	},
@@ -4817,6 +4696,166 @@ func (i *Interpreter) releaseValue(val types.Value) {
 	case types.Ref:
 		i.release(int(val))
 	}
+}
+
+func (i *Interpreter) refGet() types.Boxed {
+	if i.sp == 0 {
+		panic(ErrStackUnderflow)
+	}
+	ref := i.stack[i.sp-1]
+	if ref.Kind() != types.KindRef {
+		panic(ErrTypeMismatch)
+	}
+	addr := ref.Ref()
+	switch i.heap[addr].(type) {
+	case types.I32, types.I64, types.F32, types.F64:
+	default:
+		panic(ErrTypeMismatch)
+	}
+	val := i.box(i.heap[addr])
+	i.release(addr)
+	i.sp--
+	return val
+}
+
+func (i *Interpreter) arrayGet() types.Boxed {
+	if i.sp < 2 {
+		panic(ErrStackUnderflow)
+	}
+	idx := int(i.stack[i.sp-1].I32())
+	i.sp--
+	return i.arrayGetAt(idx)
+}
+
+func (i *Interpreter) arrayGetAt(idx int) types.Boxed {
+	if i.sp == 0 {
+		panic(ErrStackUnderflow)
+	}
+	ref := i.stack[i.sp-1]
+	if ref.Kind() != types.KindRef {
+		panic(ErrTypeMismatch)
+	}
+	addr := ref.Ref()
+	var val types.Boxed
+	switch arr := i.heap[addr].(type) {
+	case types.TypedArray[bool]:
+		if idx < 0 || idx >= len(arr) {
+			panic(ErrIndexOutOfRange)
+		}
+		val = types.BoxI1(arr[idx])
+	case types.TypedArray[int8]:
+		if idx < 0 || idx >= len(arr) {
+			panic(ErrIndexOutOfRange)
+		}
+		val = types.BoxI8(arr[idx])
+	case types.TypedArray[int32]:
+		if idx < 0 || idx >= len(arr) {
+			panic(ErrIndexOutOfRange)
+		}
+		val = types.BoxI32(int32(arr[idx]))
+	case types.TypedArray[int64]:
+		if idx < 0 || idx >= len(arr) {
+			panic(ErrIndexOutOfRange)
+		}
+		val = i.boxI64(int64(arr[idx]))
+	case types.TypedArray[float32]:
+		if idx < 0 || idx >= len(arr) {
+			panic(ErrIndexOutOfRange)
+		}
+		val = types.BoxF32(float32(arr[idx]))
+	case types.TypedArray[float64]:
+		if idx < 0 || idx >= len(arr) {
+			panic(ErrIndexOutOfRange)
+		}
+		val = types.BoxF64(float64(arr[idx]))
+	case *types.Array:
+		if idx < 0 || idx >= len(arr.Elems) {
+			panic(ErrIndexOutOfRange)
+		}
+		elem := arr.Elems[idx]
+		i.retainBox(elem)
+		val = elem
+	default:
+		panic(ErrTypeMismatch)
+	}
+	i.release(addr)
+	i.sp--
+	return val
+}
+
+func (i *Interpreter) structGet() types.Boxed {
+	if i.sp < 2 {
+		panic(ErrStackUnderflow)
+	}
+	idx := int(i.stack[i.sp-1].I32())
+	i.sp--
+	return i.structGetAt(idx)
+}
+
+func (i *Interpreter) structGetAt(idx int) types.Boxed {
+	if i.sp == 0 {
+		panic(ErrStackUnderflow)
+	}
+	ref := i.stack[i.sp-1]
+	if ref.Kind() != types.KindRef {
+		panic(ErrTypeMismatch)
+	}
+	addr := ref.Ref()
+	var val types.Boxed
+	switch s := i.heap[addr].(type) {
+	case *types.Struct:
+		if idx < 0 || idx >= len(s.Typ.Fields) {
+			panic(ErrSegmentationFault)
+		}
+		field := s.Typ.Fields[idx]
+		switch field.Kind {
+		case types.KindI32:
+			val = types.BoxI32(int32(uint32(s.Data[idx])))
+		case types.KindI8:
+			val = types.BoxI8(int8(uint32(s.Data[idx])))
+		case types.KindI1:
+			val = types.BoxI1(s.Data[idx] != 0)
+		case types.KindI64:
+			val = i.boxI64(int64(s.Data[idx]))
+		case types.KindF32:
+			val = types.BoxF32(math.Float32frombits(uint32(s.Data[idx])))
+		case types.KindF64:
+			val = types.BoxF64(math.Float64frombits(s.Data[idx]))
+		case types.KindRef:
+			val = types.Boxed(s.Data[idx])
+			i.retainBox(val)
+		default:
+			panic(ErrTypeMismatch)
+		}
+	case *HostObject:
+		typ := s.Typ
+		if idx < 0 || idx >= len(typ.Fields) {
+			panic(ErrSegmentationFault)
+		}
+		field := typ.Fields[idx]
+		switch field.Kind {
+		case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
+			val = s.Field(idx)
+		case types.KindI64:
+			val = i.boxI64(int64(s.Raw(idx)))
+		case types.KindRef:
+			val = types.Boxed(s.Raw(idx))
+			i.retainBox(val)
+		default:
+			panic(ErrTypeMismatch)
+		}
+	default:
+		panic(ErrTypeMismatch)
+	}
+	i.release(addr)
+	i.sp--
+	return val
+}
+
+func (i *Interpreter) i64Operands(lhs, rhs types.Boxed) (int64, int64) {
+	r := i.unboxI64(rhs)
+	l := i.unboxI64(lhs)
+	return l, r
 }
 
 func (i *Interpreter) i32Add(lhs, rhs int32) types.Boxed {

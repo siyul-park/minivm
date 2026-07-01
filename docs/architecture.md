@@ -274,7 +274,7 @@ Thin entrypoint around `cli.Root().Execute()`.
 
 | Area | Direction |
 |---|---|
-| JIT coverage | recorded numeric traces, direct calls, small function-value indirect dispatches, closure-body upvalues, guarded ref slots/upvalues, selected heap reads including `error.get`, and exception terminal fallbacks compile or deopt cleanly; host calls, heap allocation/mutation, maps, and unsupported heap shapes fall back |
+| JIT coverage | recorded numeric traces, direct calls, small function-value indirect dispatches, closure-body upvalues, guarded ref slots/upvalues, selected heap reads including `error.get`, map/string read terminal fallbacks, and exception terminal fallbacks compile or deopt cleanly; host calls, heap allocation/mutation, and unsupported heap shapes fall back |
 | Architecture support | ARM64 optimized; `asm/amd64` is a placeholder until users + benchmarks justify x86-64 JIT |
 | Benchmarks | broaden numeric loops, host calls, heap-object workloads |
 | Program format | keep `instr`/`program` as compact Go-native bytecode surface |

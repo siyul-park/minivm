@@ -259,6 +259,11 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			ok = l.f64Binary(ctx, arm64.FMUL)
 		case instr.F64_DIV:
 			ok = l.f64Binary(ctx, arm64.FDIV)
+		case instr.F64_REM, instr.F64_MOD:
+			if !l.exit(ctx, op.ip) {
+				return false
+			}
+			return idx == len(ops)-1
 		case instr.F64_EQ:
 			ok = l.f64Cmp(ctx, arm64.CondEQ)
 		case instr.F64_NE:
@@ -279,6 +284,11 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			ok = l.f32Binary(ctx, arm64.FMUL)
 		case instr.F32_DIV:
 			ok = l.f32Binary(ctx, arm64.FDIV)
+		case instr.F32_REM, instr.F32_MOD:
+			if !l.exit(ctx, op.ip) {
+				return false
+			}
+			return idx == len(ops)-1
 		case instr.F32_EQ:
 			ok = l.f32Cmp(ctx, arm64.CondEQ)
 		case instr.F32_NE:
@@ -503,6 +513,18 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			ok = l.coroDone(ctx, op)
 		case instr.CORO_VALUE:
 			ok = l.coroValue(ctx, op)
+		case instr.STRING_LEN,
+			instr.STRING_ENCODE_UTF32,
+			instr.STRING_ITER,
+			instr.MAP_LEN,
+			instr.MAP_GET,
+			instr.MAP_LOOKUP,
+			instr.MAP_KEYS,
+			instr.MAP_ITER:
+			if !l.exit(ctx, op.ip) {
+				return false
+			}
+			return idx == len(ops)-1
 		case instr.ERROR_NEW, instr.ERROR_CODE, instr.THROW:
 			// Allocation and handler landing stay interpreter-owned. Resume at
 			// op.ip because each threaded handler performs its own IP update or

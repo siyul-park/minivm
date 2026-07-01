@@ -552,7 +552,6 @@ func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
 	// CORO_VALUE are pure heap reads (handle in, value out) and stay recordable
 	// like ARRAY_GET and STRUCT_GET; the JIT lowers them directly.
 	case instr.STRING_NEW_UTF32,
-		instr.STRING_ITER,
 		instr.ARRAY_NEW,
 		instr.ARRAY_NEW_DEFAULT,
 		instr.ARRAY_FILL,
@@ -567,8 +566,6 @@ func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
 		instr.MAP_SET,
 		instr.MAP_DELETE,
 		instr.MAP_CLEAR,
-		instr.MAP_KEYS,
-		instr.MAP_ITER,
 		instr.REF_NEW,
 		instr.REF_SET,
 		instr.CLOSURE_NEW:
