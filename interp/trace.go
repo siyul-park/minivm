@@ -469,7 +469,7 @@ func (r *Tracer) rootAt(a anchor) *tree {
 	if t == nil || t.root == nil || t.root.kind == aborted {
 		return nil
 	}
-	return t
+	return t.snapshot()
 }
 
 func (r *Tracer) hasEntry(addr int) bool {
@@ -577,6 +577,23 @@ func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
 		return true
 	}
 	return false
+}
+
+// snapshot returns a compile-time-stable copy of the fields readers consume off
+// a tree (root pointer, branches, hits). Published *trace values are immutable,
+// so sharing the pointers is safe; copying the container lets the trace compiler
+// lower a root without holding r.mu while the recorder keeps mutating the live
+// tree under lock — the concurrent map read/write that races a pooled Tracer.
+func (t *tree) snapshot() *tree {
+	branches := make(map[int]*trace, len(t.branches))
+	for id, tr := range t.branches {
+		branches[id] = tr
+	}
+	return &tree{
+		root:     t.root,
+		branches: branches,
+		hits:     append([]int64(nil), t.hits...),
+	}
 }
 
 func (t *tree) branchIPs() map[branch]*trace {

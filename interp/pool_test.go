@@ -3,11 +3,13 @@ package interp
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
+	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -78,6 +80,81 @@ func TestPool_Get(t *testing.T) {
 
 		_, err := p.Get(context.Background())
 		require.ErrorIs(t, err, ErrPoolClosed)
+	})
+
+	t.Run("compiles a shared branch tree concurrently without racing", func(t *testing.T) {
+		// A called function with a branch tree: members share one Tracer, so one
+		// interpreter warming a side exit (Tracer.exit mutating tree.branches/hits)
+		// runs concurrently with another lowering the same root (rootAt reading it).
+		// Before the fix that races the shared tree; the snapshot isolates the reader.
+		b := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32)
+		neg := b.Label()
+		small := b.Label()
+		tiny := b.Label()
+		b.Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.I32_LT_S)).
+			BrIf(neg).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 10)).
+			Emit(instr.New(instr.I32_LT_S)).
+			BrIf(small).
+			Emit(instr.New(instr.I32_CONST, 2)).
+			Emit(instr.New(instr.RETURN)).
+			Bind(neg).
+			Emit(instr.New(instr.I32_CONST, i32operand(-1))).
+			Emit(instr.New(instr.RETURN)).
+			Bind(small).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 5)).
+			Emit(instr.New(instr.I32_LT_S)).
+			BrIf(tiny).
+			Emit(instr.New(instr.I32_CONST, 1)).
+			Emit(instr.New(instr.RETURN)).
+			Bind(tiny).
+			Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.RETURN))
+		eval, err := b.Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(eval))
+
+		p := NewPool(prog, 4, WithTick(1), WithThreshold(0))
+		defer p.Close()
+
+		var wg sync.WaitGroup
+		errs := make(chan error, 8)
+		for range 8 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for range exitThreshold * 4 {
+					i, err := p.Get(context.Background())
+					if err != nil {
+						errs <- err
+						return
+					}
+					if err := i.Push(types.I32(3)); err != nil {
+						p.Put(i)
+						errs <- err
+						return
+					}
+					if err := i.Run(context.Background()); err != nil {
+						p.Put(i)
+						errs <- err
+						return
+					}
+					p.Put(i)
+				}
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			require.NoError(t, err)
+		}
 	})
 }
 

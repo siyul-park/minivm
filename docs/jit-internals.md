@@ -82,6 +82,14 @@ live deopt state back to the local trace tree; after an exit counter reaches the
 threshold, a solo interpreter recompiles the entry trace with the new branch
 continuation.
 
+One `Tracer` is shared across a pool, and every tree mutation — `store` on the
+root, `exit` growing `branches`/`hits` — happens under `r.mu`. The compiler must
+never read the live tree while another member records into it: `rootAt` returns
+`tree.snapshot()`, a shallow copy taken under the lock (root pointer plus copied
+`branches`/`hits`), so `emitRoot` lowers from immutable data without holding
+`r.mu`. Published `*trace` values are built to completion before `store`/`exit`
+install them, so sharing the pointers across the snapshot boundary is safe.
+
 ## JIT Lowerer (`lowerer`)
 
 `jit.go` is architecture-neutral. Its `lowerer` interface has one operation:
