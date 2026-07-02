@@ -2,12 +2,54 @@ package bench
 
 import (
 	"context"
+	"fmt"
+	"runtime"
 	"testing"
 
 	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestJITIssue101Correctness(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+	for _, trees := range []int{2, 30} {
+		t.Run(fmt.Sprintf("trees_%d", trees), func(t *testing.T) {
+			prog, row, score := branchyBatchTreeEvaluation(trees)
+			vm := interp.New(
+				prog,
+				interp.WithTick(1),
+				interp.WithThreshold(1),
+			)
+			defer vm.Close()
+			ctx := context.Background()
+
+			for n := 0; n < 256; n++ {
+				for idx := range row {
+					row[idx] = float64((n*13+idx*7)%19) / 19
+				}
+				require.NoError(t, vm.Run(ctx))
+				got, err := vm.Pop()
+				require.NoError(t, err)
+				require.InDelta(t, score(row), float64(got.(types.F64)), 1e-9, "warmup row %d", n)
+				vm.Reset()
+			}
+
+			for n := 0; n < 128; n++ {
+				for idx := range row {
+					row[idx] = float64(((n+256)*13+idx*7)%19) / 19
+				}
+				require.NoError(t, vm.Run(ctx))
+				got, err := vm.Pop()
+				require.NoError(t, err)
+				require.InDelta(t, score(row), float64(got.(types.F64)), 1e-9, "check row %d", n)
+				vm.Reset()
+			}
+		})
+	}
+}
 
 // BenchmarkJITIssue101 tracks a LightGBM-style branchy batch path: many tiny
 // tree-score functions called over one mutable f64 feature row.

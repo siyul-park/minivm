@@ -198,7 +198,7 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step) bool {
 		case instr.SELECT:
 			ok = l.selectOp(ctx)
 		case instr.BR_TABLE:
-			ok = l.brTable(ctx, op, l.callerTail(ops, idx))
+			ok = l.brTable(ctx, op, l.callerTail(ops, idx, tail))
 		case instr.UPVAL_GET:
 			ok = l.upvalGet(ctx, op)
 		case instr.UPVAL_SET:
@@ -542,7 +542,7 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step) bool {
 			}
 			return idx == len(ops)-1
 		case instr.BR_IF:
-			ok = l.brIf(ctx, op, l.callerTail(ops, idx))
+			ok = l.brIf(ctx, op, l.callerTail(ops, idx, tail))
 		case instr.CALL:
 			ok = l.call(ctx, op)
 		case instr.RETURN_CALL:
@@ -670,7 +670,13 @@ func (l arm64Lowerer) constGet(ctx *lowering, op step, fused bool) bool {
 func (l arm64Lowerer) localGet(ctx *lowering, op step) bool {
 	f := ctx.frame()
 	idx := int(f.code[op.ip+1])
-	if idx >= len(f.kinds) || !l.loadLocal(ctx, f, idx, op.ip) {
+	if idx >= len(f.kinds) {
+		return false
+	}
+	if f.kinds[idx] == types.KindRef {
+		f.loaded[idx] = false
+	}
+	if !l.loadLocal(ctx, f, idx, op.ip) {
 		return false
 	}
 	if f.locals[idx].kind == types.KindRef {
@@ -1521,16 +1527,26 @@ func (l arm64Lowerer) sign64(ctx *lowering, v asm.VReg) asm.VReg {
 }
 
 // callerTail returns the remaining recorded caller path after the current
-// inlined frame returns. A learned callee branch uses it to stitch back into the
-// caller instead of ending at the callee RETURN.
-func (l arm64Lowerer) callerTail(ops []step, idx int) []step {
+// inlined frame returns. A non-empty tail marks the branch as caller-dependent,
+// so it falls back instead of ending at the callee RETURN.
+//
+// ops is only the fragment being walked; tail is that fragment's own
+// continuation — the caller path a pending leg still owes. When the current
+// frame's return is not represented inside ops (every remaining step sits at the
+// branch's depth or deeper), the resume point lives in tail, so a branch nested
+// inside a learned leg must inherit tail rather than truncate at the leg's end.
+// Chaining the within-ops suffix onto tail keeps that caller path whole.
+func (l arm64Lowerer) callerTail(ops []step, idx int, tail []step) []step {
 	depth := ops[idx].depth
 	for at := idx + 1; at < len(ops); at++ {
 		if ops[at].depth < depth {
-			return ops[at:]
+			if len(tail) == 0 {
+				return ops[at:]
+			}
+			return append(append([]step(nil), ops[at:]...), tail...)
 		}
 	}
-	return nil
+	return tail
 }
 
 // brIf guards the recorded branch direction: the recorded side falls through
@@ -1615,13 +1631,13 @@ func (l arm64Lowerer) branchOrExit(ctx *lowering, ip int, tail []step) bool {
 
 // continuation materializes the current symbolic state and returns a native
 // label for a learned branch target, or false when the target is not eligible
-// (no learned trace, a marked stack, or too many pending continuations). The
-// branch body starts from a reload, so every predecessor writes the same VM
-// stack homes before jumping to it.
+// (no learned trace, a caller tail, a marked stack, or too many pending
+// continuations). The branch body starts from a reload, so every predecessor
+// writes the same VM stack homes before jumping to it.
 func (l arm64Lowerer) continuation(ctx *lowering, ip int, tail []step) (asm.Label, bool) {
 	target := branch{fn: ctx.frame().addr, ip: ip}
 	tr := ctx.branches[target]
-	if tr == nil || l.marked(ctx) || len(ctx.pending) >= pendingLimit {
+	if tr == nil || len(tail) > 0 || l.marked(ctx) || len(ctx.pending) >= pendingLimit {
 		return 0, false
 	}
 	if !l.flush(ctx, false) {
@@ -1717,15 +1733,20 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 	}
 
 	base := ctx.sp() - params
+	vStack := ctx.pin(scratchStack)
+	addr := l.base(ctx, vStack)
+	for k := 0; k < params; k++ {
+		boxed, ok := l.box(ctx, ctx.values[len(ctx.values)-params+k])
+		if !ok {
+			return false
+		}
+		ctx.assembler.Emit(arm64.STR(boxed, addr, int16((base+k)*8)))
+	}
+
 	f := ctx.frame()
 	f.resume = op.ip + 1
 	frame := newFrame(op.callee, target, base, len(ctx.values)-params)
 	frame.upvalRef = closureRef
-	for k := 0; k < params; k++ {
-		frame.locals[k] = ctx.values[len(ctx.values)-params+k]
-		frame.loaded[k] = true
-		frame.dirty[k] = true
-	}
 	ctx.values = ctx.values[:len(ctx.values)-params]
 	if len(frame.kinds) > params {
 		zero := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)

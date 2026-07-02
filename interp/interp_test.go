@@ -2607,7 +2607,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 	})
 
-	t.Run("continues learned callee branch through caller tail", func(t *testing.T) {
+	t.Run("falls back learned callee branch through caller tail", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
@@ -2726,7 +2726,159 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(21), v)
 		}
-		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
+		require.Greater(t, i.tracer.rootAt(root).hits[id], hits)
+	})
+
+	t.Run("keeps inlined callee params across nested learned branch deopt", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		row := make([]float64, 2)
+		first := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeF64Array).
+			WithReturns(types.TypeF64)
+		firstLeft := first.Label()
+		first.Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.ARRAY_GET)).
+			Emit(instr.New(instr.F64_CONST, math.Float64bits(0.5))).
+			Emit(instr.New(instr.F64_LE)).
+			BrIf(firstLeft).
+			Emit(instr.New(instr.F64_CONST, math.Float64bits(2))).
+			Emit(instr.New(instr.RETURN)).
+			Bind(firstLeft).
+			Emit(instr.New(instr.F64_CONST, math.Float64bits(1))).
+			Emit(instr.New(instr.RETURN))
+		firstFn, err := first.Build()
+		require.NoError(t, err)
+
+		second := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeF64Array).
+			WithReturns(types.TypeF64)
+		secondLeft := second.Label()
+		secondLeftLow := second.Label()
+		secondRightLow := second.Label()
+		second.Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 1)).
+			Emit(instr.New(instr.ARRAY_GET)).
+			Emit(instr.New(instr.F64_CONST, math.Float64bits(0.5))).
+			Emit(instr.New(instr.F64_LE)).
+			BrIf(secondLeft).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.ARRAY_GET)).
+			Emit(instr.New(instr.F64_CONST, math.Float64bits(0.25))).
+			Emit(instr.New(instr.F64_LE)).
+			BrIf(secondRightLow).
+			Emit(instr.New(instr.F64_CONST, math.Float64bits(20))).
+			Emit(instr.New(instr.RETURN)).
+			Bind(secondRightLow).
+			Emit(instr.New(instr.F64_CONST, math.Float64bits(30))).
+			Emit(instr.New(instr.RETURN)).
+			Bind(secondLeft).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.ARRAY_GET)).
+			Emit(instr.New(instr.F64_CONST, math.Float64bits(0.25))).
+			Emit(instr.New(instr.F64_LE)).
+			BrIf(secondLeftLow).
+			Emit(instr.New(instr.F64_CONST, math.Float64bits(10))).
+			Emit(instr.New(instr.RETURN)).
+			Bind(secondLeftLow).
+			Emit(instr.New(instr.F64_CONST, math.Float64bits(-10))).
+			Emit(instr.New(instr.RETURN))
+		secondFn, err := second.Build()
+		require.NoError(t, err)
+
+		eval := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeF64Array).
+			WithReturns(types.TypeF64)
+		eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.CONST_GET, 1)).
+			Emit(instr.New(instr.CALL)).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.CONST_GET, 2)).
+			Emit(instr.New(instr.CALL)).
+			Emit(instr.New(instr.F64_ADD)).
+			Emit(instr.New(instr.RETURN))
+		evalFn, err := eval.Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CONST_GET, 3),
+			instr.New(instr.CALL),
+		}, program.WithConstants(types.TypedArray[float64](row), firstFn, secondFn, evalFn))
+
+		i := New(prog, WithTick(1), WithThreshold(1))
+		defer i.Close()
+		root := anchor{addr: 0, ip: 0}
+
+		var v types.Value
+		for range 4 {
+			i.Reset()
+			row[0], row[1] = 0.8, 0.8
+			require.NoError(t, i.Run(context.Background()))
+			v, err = i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.F64(22), v)
+			if i.fallbacks[root] != nil {
+				break
+			}
+		}
+		require.NotNil(t, i.fallbacks[root])
+
+		id := -1
+		for range exitThreshold * 4 {
+			i.Reset()
+			row[0], row[1] = 0.2, 0.8
+			require.NoError(t, i.Run(context.Background()))
+			v, err = i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.F64(31), v)
+
+			tree := i.tracer.rootAt(root)
+			require.NotNil(t, tree)
+			for bid, branch := range tree.branches {
+				if branch == nil || tree.hits[bid] < exitThreshold {
+					continue
+				}
+				for _, op := range branch.ops {
+					if op.op != instr.F64_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
+						continue
+					}
+					code := i.instrs[op.fn]
+					if op.ip+9 <= len(code) && math.Float64frombits(binary.LittleEndian.Uint64(code[op.ip+1:op.ip+9])) == 1 {
+						id = bid
+					}
+				}
+			}
+			if id >= 0 {
+				break
+			}
+		}
+		require.GreaterOrEqual(t, id, 0, "no first callee branch returning f64.const 1 was learned")
+		hits := i.tracer.rootAt(root).hits[id]
+		require.Equal(t, int64(exitThreshold), hits)
+
+		for range 3 {
+			i.Reset()
+			row[0], row[1] = 0.2, 0.8
+			require.NoError(t, i.Run(context.Background()))
+			v, err = i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.F64(31), v)
+		}
+		require.Greater(t, i.tracer.rootAt(root).hits[id], hits)
+
+		for range 3 {
+			i.Reset()
+			row[0], row[1] = 0.2, 0.1
+			require.NoError(t, i.Run(context.Background()))
+			v, err = i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.F64(-9), v)
+		}
+		require.Greater(t, i.tracer.rootAt(root).hits[id], hits)
 	})
 
 	t.Run("jits learned br_table continuations", func(t *testing.T) {
