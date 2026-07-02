@@ -31,7 +31,7 @@ go test -race -run 'TestInterpreter_WithDebugger|TestDebugger_Breakpoints' ./int
 8. Run narrow tests first, then `go test ./...`; use `make coverage` when you want the same broad validation CI runs.
 9. `make benchmark` also runs the separate `benchmarks/` Go module. Use `make benchmark test-options="-count=2"` to match CI's comparison workflow.
 10. For debugger, stepping, or breakpoint work, read `docs/debugging.md` and verify in `./interp`; `interp.WithDebugger` forces `WithTick(1)` and disables JIT.
-11. Before reporting done, re-read every new/modified file against the pre-finish checklist in `.claude/CLAUDE.md` (or the equivalent in your agent's instruction file).
+11. **Before reporting done, perform a strict coding-convention review:** re-read every new/modified code or test file against `docs/coding-patterns.md` and the pre-finish checklist in `.claude/CLAUDE.md` (or the equivalent in your agent's instruction file), fix any violations, and mention any intentionally non-viable convention-driven refactor in the final summary.
 
 ## Code Exploration
 
@@ -174,6 +174,7 @@ Incorrect ordering crashes on Apple Silicon.
 ## Coding Expectations
 
 - Apply `docs/coding-patterns.md` for every code or test change; re-read it before editing when context has shifted.
+- Treat coding-convention compliance as a required review gate, not guidance: every touched code/test file must pass the relevant `docs/coding-patterns.md` sections before the task is done.
 - Error design: explicit errors with context, preserve sentinels for `errors.Is`, panic only in interpreter-threaded paths recovered by `Run`.
 - Test design: describe behavior, cover error paths + boundaries, organize under exported symbol.
 - Match existing package structure and naming.

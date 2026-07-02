@@ -100,7 +100,7 @@ func (l arm64Lowerer) lower(ctx *lowering) bool {
 	// label is harmless when no back-edge references it.
 	ctx.back = ctx.assembler.Label()
 	ctx.assembler.Bind(ctx.back)
-	if !l.walk(ctx, ctx.tree.root.ops) {
+	if !l.walk(ctx, ctx.tree.root.ops, nil) {
 		return false
 	}
 	for n := 0; n < len(ctx.pending); n++ {
@@ -109,7 +109,7 @@ func (l arm64Lowerer) lower(ctx *lowering) bool {
 		ctx.frames = p.frames
 		ctx.assembler.Bind(p.label)
 		l.reload(ctx)
-		if !l.walk(ctx, p.ops) {
+		if !l.walk(ctx, p.ops, p.tail) {
 			return false
 		}
 	}
@@ -144,7 +144,7 @@ func (l arm64Lowerer) enter(ctx *lowering) {
 // only when the recorded path ends in the entry frame's RETURN. A loop trace
 // additionally closes one back-edge: a BR or BR_IF whose target is the loop
 // header becomes the native back-edge (see backedge).
-func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
+func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step) bool {
 	for idx := 0; idx < len(ops); idx++ {
 		op := ops[idx]
 		f := ctx.frame()
@@ -198,7 +198,7 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 		case instr.SELECT:
 			ok = l.selectOp(ctx)
 		case instr.BR_TABLE:
-			ok = l.brTable(ctx, op)
+			ok = l.brTable(ctx, op, l.callerTail(ops, idx))
 		case instr.UPVAL_GET:
 			ok = l.upvalGet(ctx, op)
 		case instr.UPVAL_SET:
@@ -542,7 +542,7 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 			}
 			return idx == len(ops)-1
 		case instr.BR_IF:
-			ok = l.brIf(ctx, op)
+			ok = l.brIf(ctx, op, l.callerTail(ops, idx))
 		case instr.CALL:
 			ok = l.call(ctx, op)
 		case instr.RETURN_CALL:
@@ -569,6 +569,9 @@ func (l arm64Lowerer) walk(ctx *lowering, ops []step) bool {
 		if !ok {
 			return false
 		}
+	}
+	if len(tail) > 0 {
+		return l.walk(ctx, tail, nil)
 	}
 	if ctx.tree.root.kind == completed {
 		return l.complete(ctx)
@@ -1517,10 +1520,23 @@ func (l arm64Lowerer) sign64(ctx *lowering, v asm.VReg) asm.VReg {
 	return out
 }
 
+// callerTail returns the remaining recorded caller path after the current
+// inlined frame returns. A learned callee branch uses it to stitch back into the
+// caller instead of ending at the callee RETURN.
+func (l arm64Lowerer) callerTail(ops []step, idx int) []step {
+	depth := ops[idx].depth
+	for at := idx + 1; at < len(ops); at++ {
+		if ops[at].depth < depth {
+			return ops[at:]
+		}
+	}
+	return nil
+}
+
 // brIf guards the recorded branch direction: the recorded side falls through
 // inline and the diverging side branches into a learned trace or exits to the
 // interpreter (see branchOrExit), with the condition already consumed.
-func (l arm64Lowerer) brIf(ctx *lowering, op step) bool {
+func (l arm64Lowerer) brIf(ctx *lowering, op step, tail []step) bool {
 	if ctx.count() < 1 || !l.kinds(ctx, types.KindI32, 1) {
 		return false
 	}
@@ -1537,14 +1553,14 @@ func (l arm64Lowerer) brIf(ctx *lowering, op step) bool {
 	} else {
 		ctx.assembler.Emit(arm64.CBZLabel(l.narrow32(cond.reg), cont))
 	}
-	if !l.branchOrExit(ctx, diverge) {
+	if !l.branchOrExit(ctx, diverge, tail) {
 		return false
 	}
 	ctx.assembler.Bind(cont)
 	return true
 }
 
-func (l arm64Lowerer) brTable(ctx *lowering, op step) bool {
+func (l arm64Lowerer) brTable(ctx *lowering, op step, tail []step) bool {
 	if ctx.count() < 1 || !l.kinds(ctx, types.KindI32, 1) {
 		return false
 	}
@@ -1571,13 +1587,13 @@ func (l arm64Lowerer) brTable(ctx *lowering, op step) bool {
 		skip := ctx.assembler.Label()
 		ctx.assembler.Emit(arm64.CMPI(condI32, uint16(idx)))
 		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, skip))
-		if !l.branchOrExit(ctx, targets[idx]) {
+		if !l.branchOrExit(ctx, targets[idx], tail) {
 			return false
 		}
 		ctx.assembler.Bind(skip)
 	}
 	if targets[count] != op.target {
-		if !l.branchOrExit(ctx, targets[count]) {
+		if !l.branchOrExit(ctx, targets[count], tail) {
 			return false
 		}
 	}
@@ -1589,8 +1605,8 @@ func (l arm64Lowerer) brTable(ctx *lowering, op step) bool {
 // branch trace when the target is eligible, otherwise exits to the interpreter
 // at that target. Both paths flush live state, so a flush failure aborts the
 // compile either way.
-func (l arm64Lowerer) branchOrExit(ctx *lowering, ip int) bool {
-	if label, ok := l.continuation(ctx, ip); ok {
+func (l arm64Lowerer) branchOrExit(ctx *lowering, ip int, tail []step) bool {
+	if label, ok := l.continuation(ctx, ip, tail); ok {
 		ctx.assembler.Emit(arm64.BLabel(label))
 		return true
 	}
@@ -1599,23 +1615,26 @@ func (l arm64Lowerer) branchOrExit(ctx *lowering, ip int) bool {
 
 // continuation materializes the current symbolic state and returns a native
 // label for a learned branch target, or false when the target is not eligible
-// (no learned trace, an inlined frame, or a marked trace). The branch body
-// starts from a reload, so every predecessor writes the same VM stack homes
-// before jumping to it.
-func (l arm64Lowerer) continuation(ctx *lowering, ip int) (asm.Label, bool) {
-	branch := ctx.branches[ip]
-	if branch == nil || len(ctx.frames) != 1 || l.marked(ctx) {
+// (no learned trace, a marked stack, or too many pending continuations). The
+// branch body starts from a reload, so every predecessor writes the same VM
+// stack homes before jumping to it.
+func (l arm64Lowerer) continuation(ctx *lowering, ip int, tail []step) (asm.Label, bool) {
+	target := branch{fn: ctx.frame().addr, ip: ip}
+	tr := ctx.branches[target]
+	if tr == nil || l.marked(ctx) || len(ctx.pending) >= pendingLimit {
 		return 0, false
 	}
 	if !l.flush(ctx, false) {
 		return 0, false
 	}
-	if label, ok := ctx.queued[ip]; ok {
-		return label, true
-	}
 	label := ctx.assembler.Label()
-	ctx.queued[ip] = label
-	p := pending{label: label, ops: branch.ops}
+	if len(tail) == 0 {
+		if label, ok := ctx.queued[target]; ok {
+			return label, true
+		}
+		ctx.queued[target] = label
+	}
+	p := pending{label: label, ops: tr.ops, tail: tail}
 	p.values, p.frames = ctx.snapshot()
 	ctx.pending = append(ctx.pending, p)
 	return label, true
@@ -1623,7 +1642,7 @@ func (l arm64Lowerer) continuation(ctx *lowering, ip int) (asm.Label, bool) {
 
 // call lowers a recorded CALL. The callee marker must resolve to an observed
 // function ref: a self-call becomes a framed native BL into this trace's own
-// head, anything else inlines as a fused frame the deopt path can rebuild.
+// head, and non-self callees inline as fused frames the deopt path can rebuild.
 func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 	if ctx.count() < 1 {
 		return false
@@ -2070,10 +2089,10 @@ func (l arm64Lowerer) trapFlushed(ctx *lowering, kind, resume int) {
 	)
 }
 
+// sideExit snapshots a guard fallback from the pre-op stack shape. The snapshot
+// may include inlined frames; trapFlushed records the frame chain so the Go
+// wrapper can rebuild the same threaded resume shape.
 func (l arm64Lowerer) sideExit(ctx *lowering, pre []value, resume int) (asm.Label, bool) {
-	if len(ctx.frames) != 1 {
-		return 0, false
-	}
 	ctx.values = append(ctx.values[:0], pre...)
 	if !l.flush(ctx, false) {
 		return 0, false
@@ -3337,7 +3356,16 @@ func (l arm64Lowerer) args(ctx *lowering, target *types.Function, params int) bo
 	}
 	for k := 0; k < params; k++ {
 		v := ctx.values[len(ctx.values)-params+k]
-		if v.kind != kinds[k] || !v.raw || v.kind == types.KindRef {
+		if v.kind != kinds[k] {
+			return false
+		}
+		if v.kind == types.KindRef {
+			if v.raw {
+				return false
+			}
+			continue
+		}
+		if !v.raw {
 			return false
 		}
 	}

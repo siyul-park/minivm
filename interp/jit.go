@@ -21,6 +21,10 @@ type compiler struct {
 	scratchRegs []asm.PReg
 }
 
+// pendingLimit caps learned branch continuations emitted into one native
+// callable; beyond this the guard keeps the old deopt fallback.
+const pendingLimit = 256
+
 type module struct {
 	entries map[anchor]asm.Callable
 	loops   map[anchor]bool
@@ -37,7 +41,7 @@ type module struct {
 type lowering struct {
 	assembler *asm.Assembler
 	tree      *tree
-	branches  map[int]*trace
+	branches  map[branch]*trace
 	funcs     map[int]*types.Function
 	constants []types.Boxed
 	globals   []types.Boxed
@@ -51,7 +55,7 @@ type lowering struct {
 	frames  []activation
 	pending []pending
 	exits   []sideExit
-	queued  map[int]asm.Label
+	queued  map[branch]asm.Label
 
 	addr    int
 	returns int
@@ -98,6 +102,7 @@ type activation struct {
 type pending struct {
 	label  asm.Label
 	ops    []step
+	tail   []step
 	values []value
 	frames []activation
 }
@@ -249,7 +254,7 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 		tree:      tree,
 		branches:  tree.branchIPs(),
 		funcs:     c.funcs(i),
-		queued:    map[int]asm.Label{},
+		queued:    map[branch]asm.Label{},
 		constants: i.constants,
 		globals:   i.globals,
 		heap:      i.heap,

@@ -26,6 +26,7 @@ type Interpreter struct {
 	profiler  *prof.Profiler
 	local     *prof.Collector
 	fallbacks map[anchor]func(*Interpreter)
+	jitted    map[int]bool
 	journal   []uint64
 
 	types     []types.Type
@@ -236,6 +237,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
 		fallbacks: map[anchor]func(*Interpreter){},
+		jitted:    map[int]bool{},
 		dynamic:   map[int]bool{},
 		journal:   make([]uint64, journalHead+journalStride*opt.frame),
 		frames:    make([]frame, opt.frame),
@@ -744,9 +746,9 @@ func (i *Interpreter) install(mod *module, account bool) {
 		if mod.loops[a] {
 			i.code[a.addr][a.ip] = i.loop(callable)
 		} else if a.addr == 0 {
-			i.code[a.addr][a.ip] = i.moduleEntry(callable)
+			i.code[a.addr][a.ip] = i.moduleEntry(a, callable)
 		} else {
-			i.code[a.addr][a.ip] = i.entry(callable)
+			i.code[a.addr][a.ip] = i.entry(a, callable)
 		}
 	}
 }
@@ -863,7 +865,8 @@ func (i *Interpreter) safepoint() error {
 		i.sync()
 		return nil
 	}
-	if i.threshold >= 0 && samples == uint64(i.threshold) {
+	if i.threshold >= 0 && samples >= uint64(i.threshold) && !i.jitted[f.addr] {
+		i.jitted[f.addr] = true
 		if err := i.compile(f.addr); err != nil {
 			return err
 		}
@@ -877,7 +880,7 @@ func (i *Interpreter) safepoint() error {
 // this closure performs the frame teardown that RETURN would do in the threaded
 // interpreter, and on a trap it rebuilds the native call chain into real VM
 // frames before resuming threaded execution at the fallback IP.
-func (i *Interpreter) entry(callable asm.Callable) func(*Interpreter) {
+func (i *Interpreter) entry(root anchor, callable asm.Callable) func(*Interpreter) {
 	return func(i *Interpreter) {
 		ctx := i.context()
 		i.fr.code = nil
@@ -918,12 +921,13 @@ func (i *Interpreter) entry(callable asm.Callable) func(*Interpreter) {
 				panic(err)
 			}
 		default:
-			i.exit(anchor{addr: i.fr.addr, ip: 0})
-			// IP 0 now dispatches to the native entry; run the handler it shadows once
+			i.exit(root)
+			// IP 0 may dispatch to a native entry; run the handler it shadows once
 			// so we make progress instead of re-entering native and re-trapping. Any
 			// later IP is an untouched threaded handler the Run loop dispatches next.
-			if i.fr.ip == 0 {
-				i.fallbacks[anchor{addr: i.fr.addr, ip: 0}](i)
+			fallback := anchor{addr: i.fr.addr, ip: 0}
+			if i.fr.ip == 0 && i.fallbacks[fallback] != nil {
+				i.fallbacks[fallback](i)
 			}
 		}
 	}
@@ -932,7 +936,7 @@ func (i *Interpreter) entry(callable asm.Callable) func(*Interpreter) {
 // moduleEntry wraps a native trace for top-level code. Unlike function entries,
 // top-level completion does not tear down its frame; it preserves the operand
 // stack and marks the module frame as exhausted so dispatch returns normally.
-func (i *Interpreter) moduleEntry(callable asm.Callable) func(*Interpreter) {
+func (i *Interpreter) moduleEntry(root anchor, callable asm.Callable) func(*Interpreter) {
 	return func(i *Interpreter) {
 		ctx := i.context()
 		i.fr.code = nil
@@ -958,9 +962,10 @@ func (i *Interpreter) moduleEntry(callable asm.Callable) func(*Interpreter) {
 				panic(err)
 			}
 		default:
-			i.exit(anchor{addr: i.fr.addr, ip: 0})
-			if i.fr.ip == 0 {
-				i.fallbacks[anchor{addr: i.fr.addr, ip: 0}](i)
+			i.exit(root)
+			fallback := anchor{addr: i.fr.addr, ip: 0}
+			if i.fr.ip == 0 && i.fallbacks[fallback] != nil {
+				i.fallbacks[fallback](i)
 			}
 		}
 	}
@@ -997,7 +1002,7 @@ func (i *Interpreter) loop(callable asm.Callable) func(*Interpreter) {
 }
 
 func (i *Interpreter) exit(root anchor) {
-	hits, err := i.tracer.exit(i, root, i.fr.ip)
+	hits, err := i.tracer.exit(i, root, branch{fn: i.fr.addr, ip: i.fr.ip})
 	if err != nil {
 		panic(err)
 	}
@@ -1436,6 +1441,7 @@ func (i *Interpreter) remove(addr int) {
 			delete(i.fallbacks, a)
 		}
 	}
+	delete(i.jitted, addr)
 	if i.tracer != nil {
 		i.tracer.remove(addr)
 	}

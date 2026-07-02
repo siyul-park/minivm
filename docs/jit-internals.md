@@ -152,7 +152,10 @@ Recorded `CONST_GET function; CALL` and guarded function-value `CALL` sites can
 lower to native `BL` when the observed target is a JIT-eligible `*types.Function`
 with matching arity. Closure body calls can lower when the `Tracer` observed the
 closure and the trace can recover its upvalue base. Host calls, allocation, heap
-mutation, maps, and unsupported targets stay threaded through deopt.
+mutation, maps, and unsupported targets stay threaded through deopt. Non-self
+callees inline as fused frames when the trace shape is safe; if an inlined callee
+branches into a learned continuation, the continuation can stitch through the
+callee `RETURN` and continue the caller tail inside the same native callable.
 
 Native calls are frame-aware. The call lowering checks frame budget against
 `journalActive`, increments native depth, saves caller bp/sp on the host stack,
@@ -175,11 +178,12 @@ Recorded forward branches become guarded exits or pending branch continuations.
 When a side exit reaches the exit threshold, the tracer records that target and a
 later compile folds the learned continuation into the same native callable as a
 straight-line pending block. Pending blocks reload from VM stack homes written at
-the branch, can enqueue further learned continuations, and reuse one native label
-per learned target IP in the root. Targets that are still unknown, have unsafe
-stack/frame shape, or touch unsupported operations continue to deopt through the
-journal. This progressively widens branch-heavy traces without adding a separate
-static method compiler.
+the branch, can enqueue further learned continuations up to a bounded pending
+cap, and reuse one native label per learned `(function, IP)` target when no
+caller tail is attached. Targets that are still unknown, have unsafe stack/frame
+shape, or touch unsupported operations continue to deopt through the journal.
+This progressively widens branch-heavy traces without adding a separate static
+method compiler.
 
 A loop is anchored at its header — the target of a backward `BR`/`BR_IF`. The
 safepoint discovers headers statically (`Tracer.headers` scans for back-edge

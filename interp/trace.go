@@ -24,6 +24,11 @@ type anchor struct {
 	ip   int
 }
 
+type branch struct {
+	fn int
+	ip int
+}
+
 type outcome int
 
 type step struct {
@@ -48,7 +53,7 @@ type tree struct {
 	root     *trace
 	branches map[int]*trace
 	hits     []int64
-	exits    map[int]int
+	exits    map[branch]int
 
 	attempts int
 }
@@ -75,10 +80,10 @@ func NewTracer() *Tracer {
 	}
 }
 
-func (r *Tracer) exit(i *Interpreter, root anchor, ip int) (int64, error) {
+func (r *Tracer) exit(i *Interpreter, root anchor, target branch) (int64, error) {
 	r.mu.Lock()
 	tree := r.tree(root)
-	id := r.exitIndex(tree, ip)
+	id := r.exitIndex(tree, target)
 	tree.hits[id]++
 	hits := tree.hits[id]
 	if tree.branches[id] != nil {
@@ -87,7 +92,7 @@ func (r *Tracer) exit(i *Interpreter, root anchor, ip int) (int64, error) {
 	}
 	r.mu.Unlock()
 
-	t, err := r.capture(i, anchor{addr: i.fr.addr, ip: ip})
+	t, err := r.capture(i, anchor{addr: target.fn, ip: target.ip})
 	if err != nil {
 		return hits, err
 	}
@@ -436,7 +441,7 @@ func (r *Tracer) tree(a anchor) *tree {
 	if tr == nil {
 		tr = &tree{
 			branches: map[int]*trace{},
-			exits:    map[int]int{},
+			exits:    map[branch]int{},
 		}
 		r.trees[a] = tr
 	}
@@ -513,12 +518,12 @@ func (r *Tracer) headers(i *Interpreter, addr int) []int {
 	return hs
 }
 
-func (r *Tracer) exitIndex(tree *tree, ip int) int {
-	if idx, ok := tree.exits[ip]; ok {
+func (r *Tracer) exitIndex(tree *tree, target branch) int {
+	if idx, ok := tree.exits[target]; ok {
 		return idx
 	}
 	idx := len(tree.hits)
-	tree.exits[ip] = idx
+	tree.exits[target] = idx
 	tree.hits = append(tree.hits, 0)
 	return idx
 }
@@ -574,11 +579,11 @@ func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
 	return false
 }
 
-func (t *tree) branchIPs() map[int]*trace {
-	out := map[int]*trace{}
-	for _, branch := range t.branches {
-		if branch != nil {
-			out[branch.anchor.ip] = branch
+func (t *tree) branchIPs() map[branch]*trace {
+	out := map[branch]*trace{}
+	for _, tr := range t.branches {
+		if tr != nil {
+			out[branch{fn: tr.anchor.addr, ip: tr.anchor.ip}] = tr
 		}
 	}
 	return out
