@@ -1443,6 +1443,44 @@ func TestInterpreter_Pop(t *testing.T) {
 	require.Equal(t, types.I32(4), v)
 }
 
+func TestInterpreter_PopBoxed(t *testing.T) {
+	t.Run("scalar f64 returns raw box without allocation", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		require.NoError(t, i.Push(types.F64(3.5)))
+		v, err := i.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, types.KindF64, v.Kind())
+		require.Equal(t, 3.5, v.F64())
+		require.Equal(t, 0, i.Len())
+	})
+
+	t.Run("ref kind transfers the reference to the caller", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		require.NoError(t, i.Push(types.String("hello")))
+		v, err := i.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, types.KindRef, v.Kind())
+		require.Equal(t, 0, i.Len())
+
+		val, err := i.Load(v.Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.String("hello"), val)
+		require.NoError(t, i.Release(v.Ref()))
+	})
+
+	t.Run("stack underflow", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		_, err := i.PopBoxed()
+		require.ErrorIs(t, err, ErrStackUnderflow)
+	})
+}
+
 func TestInterpreter_Peek(t *testing.T) {
 	i := New(program.New(nil))
 	defer i.Close()
@@ -1692,6 +1730,54 @@ func TestWithThreshold(t *testing.T) {
 		}
 		require.NotNil(t, i.fallbacks[anchor{addr: 0, ip: 0}])
 		require.Equal(t, float64(1), i.local.Value("vm_jit_emits_total"))
+	})
+
+	t.Run("warm entry skips sampling", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		eval, err := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 1)).
+			Emit(instr.New(instr.I32_ADD)).
+			Emit(instr.New(instr.RETURN)).
+			Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(eval))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		addr := i.constants[0].Ref()
+
+		// Warm the callee entry: run until its native entry installs.
+		for range 8 {
+			i.Reset()
+			require.NoError(t, i.Push(types.I32(41)))
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(42), v)
+			if i.fallbacks[anchor{addr: addr, ip: 0}] != nil {
+				break
+			}
+		}
+		require.NotNil(t, i.fallbacks[anchor{addr: addr, ip: 0}], "callee entry never warmed")
+
+		// Once warm, the entry dispatches natively and the threaded safepoint no
+		// longer samples it: the sample count must not grow across further runs.
+		warm := i.local.Samples(addr)
+		for range 32 {
+			i.Reset()
+			require.NoError(t, i.Push(types.I32(41)))
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(42), v)
+		}
+		require.Equal(t, warm, i.local.Samples(addr))
 	})
 
 	t.Run("jits prefix before f64 rem terminal", func(t *testing.T) {

@@ -1,10 +1,12 @@
 package interp
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
+	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -63,6 +65,48 @@ func TestTracer_Capture(t *testing.T) {
 			instr.ARRAY_SLICE,
 		} {
 			require.True(t, tracer.unrecordable(nil, op))
+		}
+	})
+}
+
+func TestTracer_Headers(t *testing.T) {
+	t.Run("concurrent calls return identical memoized headers", func(t *testing.T) {
+		b := program.NewBuilder()
+		loop := b.Label()
+		b.Locals(types.TypeI32).
+			Emit(instr.I32_CONST, 0).
+			Emit(instr.LOCAL_SET, 0).
+			Bind(loop).
+			Emit(instr.LOCAL_GET, 0).
+			Emit(instr.I32_CONST, 1).
+			Emit(instr.I32_ADD).
+			Emit(instr.LOCAL_TEE, 0).
+			Emit(instr.I32_CONST, 4).
+			Emit(instr.I32_LT_S).
+			BrIf(loop).
+			Emit(instr.LOCAL_GET, 0)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		tracer := NewTracer()
+		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		defer i.Close()
+
+		const workers = 16
+		results := make([][]int, workers)
+		var wg sync.WaitGroup
+		wg.Add(workers)
+		for w := range workers {
+			go func() {
+				defer wg.Done()
+				results[w] = tracer.headers(i, 0)
+			}()
+		}
+		wg.Wait()
+
+		want := results[0]
+		require.NotEmpty(t, want)
+		for _, got := range results {
+			require.Equal(t, want, got)
 		}
 	})
 }

@@ -555,6 +555,21 @@ func (i *Interpreter) Pop() (types.Value, error) {
 	return i.unbox(i.stack[i.sp]), nil
 }
 
+// PopBoxed consumes the top-of-stack value and returns its raw NaN-boxed word
+// without constructing a types.Value, so scalar results incur no allocation
+// (read them with Boxed.F64/I32/...). It is the zero-alloc counterpart to Pop.
+// For a KindRef result the stack's reference is transferred to the caller
+// unchanged: resolve it with Load and balance it with Release, or Retain to keep
+// an extra reference. Pop instead detaches the heap value and releases the
+// stack's reference, so the two stay symmetric on the consumed slot.
+func (i *Interpreter) PopBoxed() (types.Boxed, error) {
+	if i.sp == 0 {
+		return 0, ErrStackUnderflow
+	}
+	i.sp--
+	return i.stack[i.sp], nil
+}
+
 // Peek returns the raw NaN-boxed value at position n from the top of the stack
 // (n=0 is TOS) without consuming it or modifying reference counts.
 func (i *Interpreter) Peek(n int) (types.Boxed, error) {
@@ -821,8 +836,41 @@ func (i *Interpreter) safepoint() error {
 		}
 	}
 
-	i.local.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
-	if f.ip == 0 && i.fallbacks[anchor{addr: f.addr, ip: 0}] == nil && !i.tracer.hasEntry(f.addr) {
+	// A warm function already has its entry trace installed. Its sampling and
+	// entry/loop capture are dead (those gates require the entry fallback nil)
+	// and its one-shot compile trigger has already fired, so the warm path pays
+	// only one map lookup here. A user profiler still needs per-tick samples.
+	if i.fallbacks[anchor{addr: f.addr, ip: 0}] == nil {
+		if err := i.observe(f); err != nil {
+			return err
+		}
+	} else if i.profiler != nil {
+		i.sample(f)
+	}
+
+	// Pooled recompilation is driven by exit thresholds, not sampling, so
+	// cache.due/sync run every tick regardless of warmth: they adopt modules a
+	// peer published and rearm after a hot side exit. Both are ~1 atomic when idle.
+	if i.cache != nil {
+		if i.cache.due(f.addr, i.threshold) {
+			if err := i.compile(f.addr); err != nil {
+				return err
+			}
+		}
+		i.sync()
+	}
+	return nil
+}
+
+// observe samples the current tick for a not-yet-warm function: it feeds the
+// profile collector, captures the entry trace on the first hot entry tick, and
+// captures a hot loop header sampled mid-function. A solo interpreter also fires
+// its one-shot entry compile here once the sample count crosses the threshold.
+// The caller guarantees the entry fallback is still nil, so the gates that the
+// threaded safepoint used to repeat on that lookup are already satisfied.
+func (i *Interpreter) observe(f *frame) error {
+	i.sample(f)
+	if f.ip == 0 && !i.tracer.hasEntry(f.addr) {
 		if _, err := i.tracer.capture(i, anchor{addr: f.addr, ip: 0}); err != nil {
 			return err
 		}
@@ -837,7 +885,6 @@ func (i *Interpreter) safepoint() error {
 	samples := i.local.Samples(f.addr)
 	if i.threshold >= 0 && f.ip > 0 &&
 		samples >= uint64(i.threshold) &&
-		i.fallbacks[anchor{addr: f.addr, ip: 0}] == nil &&
 		i.fallbacks[anchor{addr: f.addr, ip: f.ip}] == nil {
 		for _, h := range i.tracer.headers(i, f.addr) {
 			if h != f.ip {
@@ -856,22 +903,18 @@ func (i *Interpreter) safepoint() error {
 			break
 		}
 	}
-	if i.cache != nil {
-		if i.cache.due(f.addr, i.threshold) {
-			if err := i.compile(f.addr); err != nil {
-				return err
-			}
-		}
-		i.sync()
-		return nil
-	}
-	if i.threshold >= 0 && samples >= uint64(i.threshold) && !i.jitted[f.addr] {
+	if i.cache == nil && i.threshold >= 0 && samples >= uint64(i.threshold) && !i.jitted[f.addr] {
 		i.jitted[f.addr] = true
 		if err := i.compile(f.addr); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// sample records one profile hit for the frame's current instruction.
+func (i *Interpreter) sample(f *frame) {
+	i.local.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
 }
 
 // entry wraps a native trace Entry Callable. The CALL handler has already

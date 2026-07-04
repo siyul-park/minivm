@@ -490,11 +490,16 @@ func (r *Tracer) hasLoop(addr, ip int) bool {
 // memoized per address.
 func (r *Tracer) headers(i *Interpreter, addr int) []int {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if hs, ok := r.loops[addr]; ok {
+	hs, ok := r.loops[addr]
+	r.mu.Unlock()
+	if ok {
 		return hs
 	}
-	var hs []int
+
+	// Scan the bytecode without the lock: i.instrs is immutable program data, so
+	// the scan reads no shared tracer state and never blocks a concurrent record.
+	// Only the memo write below needs the lock.
+	hs = nil
 	if addr >= 0 && addr < len(i.instrs) {
 		code := i.instrs[addr]
 		seen := map[int]bool{}
@@ -513,6 +518,14 @@ func (r *Tracer) headers(i *Interpreter, addr int) []int {
 			}
 			ip += w
 		}
+	}
+
+	// Double-check: a peer may have memoized the same addr while we scanned. The
+	// scan is deterministic, so return the stored slice for identity stability.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if cached, ok := r.loops[addr]; ok {
+		return cached
 	}
 	r.loops[addr] = hs
 	return hs

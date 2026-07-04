@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/siyul-park/minivm/interp"
-	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,9 +30,9 @@ func TestJITIssue101Correctness(t *testing.T) {
 					row[idx] = float64((n*13+idx*7)%19) / 19
 				}
 				require.NoError(t, vm.Run(ctx))
-				got, err := vm.Pop()
+				got, err := vm.PopBoxed()
 				require.NoError(t, err)
-				require.InDelta(t, score(row), float64(got.(types.F64)), 1e-9, "warmup row %d", n)
+				require.InDelta(t, score(row), got.F64(), 1e-9, "warmup row %d", n)
 				vm.Reset()
 			}
 
@@ -42,9 +41,9 @@ func TestJITIssue101Correctness(t *testing.T) {
 					row[idx] = float64(((n+256)*13+idx*7)%19) / 19
 				}
 				require.NoError(t, vm.Run(ctx))
-				got, err := vm.Pop()
+				got, err := vm.PopBoxed()
 				require.NoError(t, err)
-				require.InDelta(t, score(row), float64(got.(types.F64)), 1e-9, "check row %d", n)
+				require.InDelta(t, score(row), got.F64(), 1e-9, "check row %d", n)
 				vm.Reset()
 			}
 		})
@@ -65,9 +64,9 @@ func BenchmarkJITIssue101(b *testing.B) {
 			row[idx] = float64((1+idx*5)%17) / 16
 		}
 		require.NoError(b, vm.Run(ctx))
-		got, err := vm.Pop()
+		got, err := vm.PopBoxed()
 		require.NoError(b, err)
-		require.InDelta(b, score(row), float64(got.(types.F64)), 1e-9)
+		require.InDelta(b, score(row), got.F64(), 1e-9)
 		vm.Reset()
 
 		for n := 0; n < 512; n++ {
@@ -96,9 +95,9 @@ func BenchmarkJITIssue101(b *testing.B) {
 			row[idx] = float64((b.N+17+idx*5)%17) / 16
 		}
 		require.NoError(b, vm.Run(ctx))
-		got, err = vm.Pop()
+		got, err = vm.PopBoxed()
 		require.NoError(b, err)
-		require.InDelta(b, score(row), float64(got.(types.F64)), 1e-9)
+		require.InDelta(b, score(row), got.F64(), 1e-9)
 	})
 
 	b.Run("jit", func(b *testing.B) {
@@ -114,9 +113,9 @@ func BenchmarkJITIssue101(b *testing.B) {
 			row[idx] = float64((1+idx*5)%17) / 16
 		}
 		require.NoError(b, vm.Run(ctx))
-		got, err := vm.Pop()
+		got, err := vm.PopBoxed()
 		require.NoError(b, err)
-		require.InDelta(b, score(row), float64(got.(types.F64)), 1e-9)
+		require.InDelta(b, score(row), got.F64(), 1e-9)
 		vm.Reset()
 
 		for n := 0; n < 512; n++ {
@@ -145,8 +144,8 @@ func BenchmarkJITIssue101(b *testing.B) {
 			row[idx] = float64((b.N+17+idx*5)%17) / 16
 		}
 		require.NoError(b, vm.Run(ctx))
-		got, err = vm.Pop()
+		got, err = vm.PopBoxed()
 		require.NoError(b, err)
-		require.InDelta(b, score(row), float64(got.(types.F64)), 1e-9)
+		require.InDelta(b, score(row), got.F64(), 1e-9)
 	})
 }

@@ -68,6 +68,26 @@ case types.KindRef:
 
 Wrong-kind unboxing returns garbage. Always check `Kind()` first.
 
+### Reading results without allocation
+
+`Pop` wraps the result in a `types.Value` interface, which costs one allocation
+per scalar read — measurable when a host drains one result per row over a large
+batch. `PopBoxed` consumes the top of stack and returns the raw `types.Boxed`
+word instead, so a scalar read is allocation-free:
+
+```go
+v, err := vm.PopBoxed()
+if err != nil {
+    return err
+}
+score := v.F64() // no types.Value, no allocation
+```
+
+For a `KindRef` result `PopBoxed` transfers the stack's reference to the caller
+unchanged: resolve it with `Load`, then `Release` it (or `Retain` to keep an
+extra reference). `Pop` instead detaches the heap value and releases the stack
+reference itself, so pick `PopBoxed` only when you take over that ownership.
+
 ### Heap access from host functions
 
 ```go
