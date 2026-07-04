@@ -304,9 +304,6 @@ func (c *threadedCompiler) fuseHostFunction(fn *HostFunction, size int) func(*In
 		returns := len(fn.Typ.Returns)
 		delta := returns - params
 		return func(i *Interpreter) {
-			if i.fp == len(i.frames) {
-				panic(ErrFrameOverflow)
-			}
 			if i.sp < params {
 				panic(ErrStackUnderflow)
 			}

@@ -808,7 +808,7 @@ func (l arm64Lowerer) globalSet(ctx *lowering, op step, pop bool) bool {
 func (l arm64Lowerer) global(ctx *lowering, op step) (int, types.Kind, bool) {
 	f := ctx.frame()
 	idx := int(uint16(f.code[op.ip+1]) | uint16(f.code[op.ip+2])<<8)
-	if idx < 0 || idx >= len(ctx.globals) || idx > 4095 {
+	if idx >= len(ctx.globals) || idx > 4095 {
 		return 0, 0, false
 	}
 	kind := ctx.globals[idx].Kind()

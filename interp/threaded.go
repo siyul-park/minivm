@@ -148,12 +148,12 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			if i.fp == len(i.frames) {
-				panic(ErrFrameOverflow)
-			}
 			addr := i.stack[i.sp-1].Ref()
 			switch fn := i.heap[addr].(type) {
 			case *types.Function:
+				if i.fp == len(i.frames) {
+					panic(ErrFrameOverflow)
+				}
 				params := len(fn.Typ.Params)
 				returns := len(fn.Typ.Returns)
 				locals := len(fn.Locals)
@@ -184,6 +184,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				i.fp++
 				i.fr = f
 			case *types.Closure:
+				if i.fp == len(i.frames) {
+					panic(ErrFrameOverflow)
+				}
 				tmpl, ok := i.heap[fn.Fn].(*types.Function)
 				if !ok {
 					panic(ErrTypeMismatch)
@@ -341,7 +344,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
 			}
-			if idx < 0 || idx >= len(i.globals) {
+			if idx >= len(i.globals) {
 				panic(ErrSegmentationFault)
 			}
 			val := i.globals[idx]
@@ -357,9 +360,6 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		return func(i *Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
-			}
-			if idx < 0 {
-				panic(ErrSegmentationFault)
 			}
 			val := i.stack[i.sp-1]
 			if idx >= len(i.globals) {
@@ -387,9 +387,6 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
-			if idx < 0 {
-				panic(ErrSegmentationFault)
-			}
 			val := i.stack[i.sp-1]
 			if idx >= len(i.globals) {
 				if cap(i.globals) > idx {
@@ -412,11 +409,6 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.LOCAL_GET: func(c *threadedCompiler) func(i *Interpreter) {
 		idx := int(c.code[c.ip+1])
 		c.ip += 2
-		if idx < 0 {
-			return func(i *Interpreter) {
-				panic(ErrSegmentationFault)
-			}
-		}
 		switch c.locals[idx].Repr() {
 		case types.KindI32:
 			if fused := c.fuseI32(func(i *Interpreter) int32 {
@@ -498,11 +490,6 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.LOCAL_SET: func(c *threadedCompiler) func(i *Interpreter) {
 		idx := int(c.code[c.ip+1])
 		c.ip += 2
-		if idx < 0 {
-			return func(i *Interpreter) {
-				panic(ErrSegmentationFault)
-			}
-		}
 		// I32/F32/F64 locals never hold a heap ref, so the old value can never
 		// be a ref; skip the release. I64 may box to a ref, so it keeps it.
 		if idx < len(c.locals) {
@@ -543,11 +530,6 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.LOCAL_TEE: func(c *threadedCompiler) func(i *Interpreter) {
 		idx := int(c.code[c.ip+1])
 		c.ip += 2
-		if idx < 0 {
-			return func(i *Interpreter) {
-				panic(ErrSegmentationFault)
-			}
-		}
 		// I32/F32/F64 locals never hold a heap ref, so the old value can never
 		// be a ref; skip the release. I64 may box to a ref, so it keeps it.
 		if idx < len(c.locals) {
@@ -587,7 +569,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.CONST_GET: func(c *threadedCompiler) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
-		if idx < 0 || idx >= len(c.constants) {
+		if idx >= len(c.constants) {
 			return func(i *Interpreter) {
 				panic(ErrSegmentationFault)
 			}
@@ -743,7 +725,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.REF_TEST: func(c *threadedCompiler) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
-		if idx < 0 || idx >= len(c.types) {
+		if idx >= len(c.types) {
 			return func(i *Interpreter) {
 				panic(ErrSegmentationFault)
 			}
@@ -770,7 +752,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.REF_CAST: func(c *threadedCompiler) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
-		if idx < 0 || idx >= len(c.types) {
+		if idx >= len(c.types) {
 			return func(i *Interpreter) {
 				panic(ErrSegmentationFault)
 			}
@@ -2690,7 +2672,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.ARRAY_NEW: func(c *threadedCompiler) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
-		if idx < 0 || idx >= len(c.types) {
+		if idx >= len(c.types) {
 			return func(i *Interpreter) {
 				panic(ErrSegmentationFault)
 			}
@@ -2827,7 +2809,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.ARRAY_NEW_DEFAULT: func(c *threadedCompiler) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
-		if idx < 0 || idx >= len(c.types) {
+		if idx >= len(c.types) {
 			return func(i *Interpreter) {
 				panic(ErrSegmentationFault)
 			}
@@ -3405,7 +3387,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.STRUCT_NEW: func(c *threadedCompiler) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
-		if idx < 0 || idx >= len(c.types) {
+		if idx >= len(c.types) {
 			return func(i *Interpreter) {
 				panic(ErrSegmentationFault)
 			}
@@ -3441,7 +3423,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.STRUCT_NEW_DEFAULT: func(c *threadedCompiler) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
-		if idx < 0 || idx >= len(c.types) {
+		if idx >= len(c.types) {
 			return func(i *Interpreter) {
 				panic(ErrSegmentationFault)
 			}
@@ -3540,7 +3522,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.MAP_NEW: func(c *threadedCompiler) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
-		if idx < 0 || idx >= len(c.types) {
+		if idx >= len(c.types) {
 			return func(i *Interpreter) {
 				panic(ErrSegmentationFault)
 			}
@@ -3661,7 +3643,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.MAP_NEW_DEFAULT: func(c *threadedCompiler) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
-		if idx < 0 || idx >= len(c.types) {
+		if idx >= len(c.types) {
 			return func(i *Interpreter) {
 				panic(ErrSegmentationFault)
 			}

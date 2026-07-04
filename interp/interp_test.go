@@ -1765,16 +1765,38 @@ func TestWithProfiler(t *testing.T) {
 }
 
 func TestWithFrame(t *testing.T) {
-	selfFn := types.NewFunctionBuilder(&types.FunctionType{}).Emit(
-		instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-	).MustBuild()
-	prog := program.New([]instr.Instruction{
-		instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
-	}, program.WithConstants(selfFn))
-	i := New(prog, WithFrame(3))
-	defer i.Close()
+	t.Run("function call overflows once frames are exhausted", func(t *testing.T) {
+		selfFn := types.NewFunctionBuilder(&types.FunctionType{}).Emit(
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		}, program.WithConstants(selfFn))
+		i := New(prog, WithFrame(3))
+		defer i.Close()
 
-	require.ErrorIs(t, i.Run(context.Background()), ErrFrameOverflow)
+		require.ErrorIs(t, i.Run(context.Background()), ErrFrameOverflow)
+	})
+
+	t.Run("host call succeeds once frames are exhausted", func(t *testing.T) {
+		hostFn := NewHostFunction(&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+			func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+				return []types.Boxed{types.BoxI32(1)}, nil
+			})
+		fillFn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+			instr.New(instr.CONST_GET, 1), instr.New(instr.CALL), instr.New(instr.RETURN),
+		).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		}, program.WithConstants(fillFn, hostFn))
+		i := New(prog, WithFrame(2))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1), v)
+	})
 }
 
 func TestWithGlobals(t *testing.T) {
