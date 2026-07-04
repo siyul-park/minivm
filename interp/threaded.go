@@ -130,12 +130,14 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			cond := i.stack[i.sp-1].I32()
 			v2 := i.stack[i.sp-2]
 			v1 := i.stack[i.sp-3]
-			result := v1
+			selected := v1
+			discarded := v2
 			if cond == 0 {
-				result = v2
+				selected = v2
+				discarded = v1
 			}
-			i.releaseBox(result)
-			i.stack[i.sp-3] = result
+			i.releaseBox(discarded)
+			i.stack[i.sp-3] = selected
 			i.sp -= 2
 			i.fr.ip++
 		}
@@ -400,6 +402,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			old := i.globals[idx]
 			if old != val {
+				i.retainBox(val)
 				i.releaseBox(old)
 			}
 			i.globals[idx] = val
@@ -574,6 +577,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			val := i.stack[i.sp-1]
 			old := i.stack[addr]
 			if old != val {
+				i.retainBox(val)
 				i.releaseBox(old)
 			}
 			i.stack[addr] = val
@@ -758,6 +762,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			default:
 				cond = types.BoxI1(typ.Kind() == kind)
 			}
+			i.releaseBox(val)
 			i.stack[i.sp-1] = cond
 			i.fr.ip += 3
 		}
@@ -798,6 +803,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 			val := i.stack[i.sp-1]
 			i.stack[i.sp-1] = types.BoxI1(val.Ref() == 0)
+			i.releaseBox(val)
 			i.fr.ip++
 		}
 	},
@@ -811,6 +817,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2]
 			i.sp--
 			i.stack[i.sp-1] = types.BoxI1(v2 == v1)
+			i.releaseBox(v1)
+			i.releaseBox(v2)
 			i.fr.ip++
 		}
 	},
@@ -824,6 +832,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			v2 := i.stack[i.sp-2]
 			i.sp--
 			i.stack[i.sp-1] = types.BoxI1(v2 != v1)
+			i.releaseBox(v1)
+			i.releaseBox(v2)
 			i.fr.ip++
 		}
 	},
@@ -3063,14 +3073,20 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				if idx < 0 || idx+size > len(arr.Elems) {
 					panic(ErrIndexOutOfRange)
 				}
-				elem := arr.Elems[idx]
-				for k := idx; k < idx+size; k++ {
-					arr.Elems[k] = val
-				}
-				if val.Kind() == types.KindRef {
+				// The stack transfers one reference to val; each filled slot needs
+				// its own. Retain the extras before overwriting so releasing an old
+				// element cannot free val when it aliases that element.
+				if val.Kind() == types.KindRef && size > 1 {
 					i.retains(val.Ref(), size-1)
 				}
-				i.releaseBox(elem)
+				for k := idx; k < idx+size; k++ {
+					old := arr.Elems[k]
+					arr.Elems[k] = val
+					i.releaseBox(old)
+				}
+				if size <= 0 {
+					i.releaseBox(val)
+				}
 			default:
 				panic(ErrTypeMismatch)
 			}

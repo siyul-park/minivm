@@ -472,11 +472,12 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step) bool {
 		case instr.REF_NULL:
 			ok = l.refNull(ctx)
 		case instr.REF_IS_NULL:
-			ok = l.refIsNull(ctx)
-		case instr.REF_EQ:
-			ok = l.refCmp(ctx, arm64.CondEQ)
-		case instr.REF_NE:
-			ok = l.refCmp(ctx, arm64.CondNE)
+			ok = l.refIsNull(ctx, op)
+		case instr.REF_EQ, instr.REF_NE:
+			// REF_EQ/REF_NE consume two refs. Releasing both natively risks a
+			// double release if the second release deopts after the first already
+			// decremented a refcount inline; the interpreter releases both safely.
+			ok = false
 		case instr.REF_GET:
 			ok = l.refGet(ctx, op)
 		case instr.ARRAY_LEN:
@@ -706,7 +707,15 @@ func (l arm64Lowerer) localSet(ctx *lowering, op step, pop bool) bool {
 		addr := l.base(ctx, vStack)
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(old, addr, int16((f.base+idx)*8)))
+		// Release the overwritten ref first: it is the only deopt point, so no
+		// refcount is mutated before it. TEE then retains the stored ref because
+		// it keeps the stack copy alongside the slot; the retain runs only on the
+		// non-deopt path, so a re-run in the interpreter cannot double-apply it.
+		// SET transfers the stack's reference and skips the retain.
 		l.releaseBoxUnlessEqual(ctx, old, boxed, pre, op.ip)
+		if !pop {
+			l.retainBoxUnlessEqual(ctx, old, boxed)
+		}
 		ctx.assembler.Emit(arm64.STR(boxed, addr, int16((f.base+idx)*8)))
 		f.locals[idx] = value{reg: boxed, kind: types.KindRef, raw: false}
 		f.loaded[idx] = true
@@ -777,7 +786,15 @@ func (l arm64Lowerer) globalSet(ctx *lowering, op step, pop bool) bool {
 		pre := append([]value(nil), ctx.values...)
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(old, base, int16(idx*8)))
+		// Release the overwritten ref first: it is the only deopt point, so no
+		// refcount is mutated before it. TEE then retains the stored ref because
+		// it keeps the stack copy alongside the slot; the retain runs only on the
+		// non-deopt path, so a re-run in the interpreter cannot double-apply it.
+		// SET transfers the stack's reference and skips the retain.
 		l.releaseBoxUnlessEqual(ctx, old, boxed, pre, op.ip)
+		if !pop {
+			l.retainBoxUnlessEqual(ctx, old, boxed)
+		}
 	}
 	ctx.assembler.Emit(arm64.STR(boxed, base, int16(idx*8)))
 	if pop {
@@ -2373,40 +2390,25 @@ func (l arm64Lowerer) refNull(ctx *lowering) bool {
 	return true
 }
 
-func (l arm64Lowerer) refIsNull(ctx *lowering) bool {
+func (l arm64Lowerer) refIsNull(ctx *lowering, op step) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
 		return false
 	}
-	ref, ok := l.box(ctx, ctx.pop())
+	pre := append([]value(nil), ctx.values...)
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
 	}
 	vNull := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDI(vNull, uint64(types.BoxedNull))...)
 	ctx.assembler.Emit(arm64.CMP(ref, vNull))
-	l.setBool(ctx, arm64.CondEQ)
-	return true
-}
-
-func (l arm64Lowerer) refCmp(ctx *lowering, cond uint8) bool {
-	if ctx.count() < 2 {
-		return false
-	}
-	b := ctx.pop()
-	a := ctx.pop()
-	if a.kind != types.KindRef || b.kind != types.KindRef {
-		return false
-	}
-	left, ok := l.box(ctx, a)
-	if !ok {
-		return false
-	}
-	right, ok := l.box(ctx, b)
-	if !ok {
-		return false
-	}
-	ctx.assembler.Emit(arm64.CMP(left, right))
-	l.setBool(ctx, cond)
+	// Capture the flags before release clobbers them, then release the consumed
+	// ref so the bool result leaves no leaked reference on the stack.
+	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.CSET(flag, arm64.CondEQ))
+	l.releaseBox(ctx, ref, pre, op.ip)
+	ctx.pop()
+	ctx.push(value{reg: flag, kind: types.KindI1, raw: true})
 	return true
 }
 
@@ -3276,6 +3278,14 @@ func (l arm64Lowerer) releaseBoxUnlessEqual(ctx *lowering, old, val asm.VReg, pr
 	l.releaseBox(ctx, old, pre, ip)
 	ctx.assembler.Bind(done)
 	ctx.values = append(ctx.values[:0], pre...)
+}
+
+func (l arm64Lowerer) retainBoxUnlessEqual(ctx *lowering, old, val asm.VReg) {
+	done := ctx.assembler.Label()
+	ctx.assembler.Emit(arm64.CMP(old, val))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, done))
+	l.retainBox(ctx, val)
+	ctx.assembler.Bind(done)
 }
 
 func (l arm64Lowerer) releaseRef(ctx *lowering, addr asm.VReg, pre []value, ip int) {

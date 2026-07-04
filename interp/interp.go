@@ -435,6 +435,10 @@ func (i *Interpreter) Global(idx int) (types.Boxed, error) {
 	return val, nil
 }
 
+// SetGlobal writes val into global slot idx, releasing the reference the slot
+// previously held. Ownership of a KindRef val transfers into the slot: the
+// caller must not release it afterward, and should Retain first to keep an
+// independent reference.
 func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
 	if idx < 0 || idx >= len(i.globals) {
 		return ErrSegmentationFault
@@ -456,6 +460,10 @@ func (i *Interpreter) Local(idx int) (types.Boxed, error) {
 	return i.stack[addr], nil
 }
 
+// SetLocal writes val into local slot idx, releasing the reference the slot
+// previously held. Ownership of a KindRef val transfers into the slot: the
+// caller must not release it afterward, and should Retain first to keep an
+// independent reference.
 func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
 	f := i.fr
 	addr := f.bp + idx

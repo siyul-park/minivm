@@ -107,6 +107,14 @@ err = vm.Release(addr)        // decrements RC; free when 0
 
 Always `Release` what you `Retain`; leaked refs prevent GC collection.
 
+### Writing global and local slots
+
+`SetGlobal(idx, val)` and `SetLocal(idx, val)` overwrite a slot, releasing the
+reference the slot previously held. Ownership of a `KindRef` `val` transfers into
+the slot: the caller must not `Release` it afterward. To keep an independent
+reference, `Retain` it before the call. This mirrors the `GLOBAL_SET` / `LOCAL_SET`
+opcodes, which consume the stack reference into the slot.
+
 `Alloc` and `Store` also accept `*types.Function`. Storing a function compiles
 that heap slot as a callable bytecode target, so a host function can construct a
 function body, store it into an existing heap address, and return `BoxRef(addr)`;

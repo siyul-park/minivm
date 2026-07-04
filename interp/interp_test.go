@@ -1225,6 +1225,142 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(3), v)
 	})
+
+	t.Run("SELECT keeps the selected ref and releases the discarded ref", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
+			instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW), // heap[2]
+			instr.New(instr.I32_CONST, 1), // cond != 0 selects the deeper operand
+			instr.New(instr.SELECT),
+		})
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+
+		top, err := i.Peek(0)
+		require.NoError(t, err)
+		require.Equal(t, 1, top.Ref())
+		require.Equal(t, 1, i.rc[1]) // selected ref survives on the stack
+		require.Equal(t, 0, i.rc[2]) // discarded ref released to zero
+	})
+
+	t.Run("GLOBAL_TEE retains the ref stored into the global slot", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
+			instr.New(instr.GLOBAL_TEE, 0), // duplicates ownership: stack + global
+			instr.New(instr.DROP),          // drop stack copy; global still owns
+		})
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+
+		g, err := i.Global(0)
+		require.NoError(t, err)
+		require.Equal(t, 1, g.Ref())
+		require.Equal(t, 1, i.rc[1]) // global slot keeps the ref alive
+	})
+
+	t.Run("LOCAL_TEE retains the ref stored into the local slot", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
+			instr.New(instr.LOCAL_TEE, 0), // duplicates ownership: stack + local
+			instr.New(instr.DROP),         // drop stack copy; local still owns
+		}, program.WithLocals(types.TypeI32Array))
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+
+		l, err := i.Local(0)
+		require.NoError(t, err)
+		require.Equal(t, 1, l.Ref())
+		require.Equal(t, 1, i.rc[1]) // local slot keeps the ref alive
+	})
+
+	t.Run("REF_EQ releases both consumed refs", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
+			instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW), // heap[2]
+			instr.New(instr.REF_EQ),
+		})
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+
+		require.Equal(t, 0, i.rc[1])
+		require.Equal(t, 0, i.rc[2])
+	})
+
+	t.Run("REF_NE releases both consumed refs", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
+			instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW), // heap[2]
+			instr.New(instr.REF_NE),
+		})
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+
+		require.Equal(t, 0, i.rc[1])
+		require.Equal(t, 0, i.rc[2])
+	})
+
+	t.Run("REF_TEST releases the consumed ref", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
+			instr.New(instr.REF_TEST, 0),
+		}, program.WithTypes(types.TypeI32))
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+
+		require.Equal(t, 0, i.rc[1])
+	})
+
+	t.Run("REF_IS_NULL releases the consumed ref", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
+			instr.New(instr.REF_IS_NULL),
+		})
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+
+		require.Equal(t, 0, i.rc[1])
+	})
+
+	t.Run("ARRAY_FILL releases every overwritten ref element", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 1), // outer heap[1]
+			instr.New(instr.DUP), instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0), // inner heap[2]
+			instr.New(instr.ARRAY_SET),
+			instr.New(instr.DUP), instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0), // inner heap[3]
+			instr.New(instr.ARRAY_SET),
+			instr.New(instr.DUP), instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0), // inner heap[4]
+			instr.New(instr.ARRAY_SET),
+			instr.New(instr.DUP), instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0), // fill value heap[5]
+			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_FILL),
+		}, program.WithTypes(types.TypeI32Array, types.NewArrayType(types.TypeI32Array)))
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+
+		require.Equal(t, 0, i.rc[2]) // every overwritten element is released,
+		require.Equal(t, 0, i.rc[3]) // not just the first one
+		require.Equal(t, 0, i.rc[4])
+		require.Equal(t, 3, i.rc[5]) // fill value owned once per filled slot
+	})
 }
 
 func TestInterpreter_Marshal(t *testing.T) {
