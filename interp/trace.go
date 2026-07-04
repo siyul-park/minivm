@@ -302,8 +302,10 @@ func (r *Tracer) codes(i *Interpreter) [][]func(*Interpreter) {
 			continue
 		}
 		var locals []types.Kind
+		var captures []types.Kind
 		if fn, ok := i.function(addr); ok {
 			locals = fn.LocalKinds()
+			captures = types.Kinds(fn.Captures)
 		}
 		tc := &threadedCompiler{
 			types:     i.types,
@@ -311,7 +313,7 @@ func (r *Tracer) codes(i *Interpreter) [][]func(*Interpreter) {
 			heap:      i.heap,
 			precise:   true,
 		}
-		r.precise[addr] = tc.Compile(code, locals)
+		r.precise[addr] = tc.Compile(code, locals, captures)
 	}
 	return r.precise
 }

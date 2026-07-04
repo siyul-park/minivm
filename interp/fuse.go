@@ -298,11 +298,41 @@ func (c *threadedCompiler) fuseHostFunction(fn *HostFunction, size int) func(*In
 	if c.precise || c.ip >= len(c.code) {
 		return nil
 	}
+	params := len(fn.Typ.Params)
+	returns := len(fn.Typ.Returns)
+	delta := returns - params
+	// A param whose declared kind can never be a heap ref (I32/I1/I8/F32/F64,
+	// via Repr()) needs no cleanup scan; I64 is excluded because it can be
+	// promoted to a ref when out of the boxable range. An all-scalar signature
+	// skips the scan entirely instead of calling releaseArgs.
+	scalar := true
+	for _, p := range fn.Typ.Params {
+		switch p.Kind().Repr() {
+		case types.KindI32, types.KindF32, types.KindF64:
+		default:
+			scalar = false
+		}
+	}
 	switch instr.Opcode(c.code[c.ip]) {
 	case instr.CALL:
-		params := len(fn.Typ.Params)
-		returns := len(fn.Typ.Returns)
-		delta := returns - params
+		if scalar {
+			return func(i *Interpreter) {
+				if i.sp < params {
+					panic(ErrStackUnderflow)
+				}
+				if i.sp+delta > len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				args := i.stack[i.sp-params : i.sp]
+				rets, err := fn.Fn(i, args)
+				if err != nil {
+					panic(err)
+				}
+				i.sp += delta
+				copy(i.stack[i.sp-returns:i.sp], rets)
+				i.fr.ip += size + 1
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < params {
 				panic(ErrStackUnderflow)
@@ -315,29 +345,33 @@ func (c *threadedCompiler) fuseHostFunction(fn *HostFunction, size int) func(*In
 			if err != nil {
 				panic(err)
 			}
-			for _, val := range args {
-				if val.Kind() != types.KindRef {
-					continue
-				}
-				keep := false
-				for _, ret := range rets {
-					if ret == val {
-						keep = true
-						break
-					}
-				}
-				if !keep {
-					i.release(val.Ref())
-				}
-			}
+			i.releaseArgs(args, rets)
 			i.sp += delta
 			copy(i.stack[i.sp-returns:i.sp], rets)
 			i.fr.ip += size + 1
 		}
 	case instr.RETURN_CALL:
-		params := len(fn.Typ.Params)
-		returns := len(fn.Typ.Returns)
-		delta := returns - params
+		if scalar {
+			return func(i *Interpreter) {
+				if i.sp < params {
+					panic(ErrStackUnderflow)
+				}
+				if i.sp+delta > len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				args := i.stack[i.sp-params : i.sp]
+				rets, err := fn.Fn(i, args)
+				if err != nil {
+					panic(err)
+				}
+				i.sp += delta
+				copy(i.stack[i.sp-returns:i.sp], rets)
+				i.fr.ip += size + 1
+				if i.fp > 1 {
+					i.ret()
+				}
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < params {
 				panic(ErrStackUnderflow)
@@ -350,21 +384,7 @@ func (c *threadedCompiler) fuseHostFunction(fn *HostFunction, size int) func(*In
 			if err != nil {
 				panic(err)
 			}
-			for _, val := range args {
-				if val.Kind() != types.KindRef {
-					continue
-				}
-				keep := false
-				for _, ret := range rets {
-					if ret == val {
-						keep = true
-						break
-					}
-				}
-				if !keep {
-					i.release(val.Ref())
-				}
-			}
+			i.releaseArgs(args, rets)
 			i.sp += delta
 			copy(i.stack[i.sp-returns:i.sp], rets)
 			i.fr.ip += size + 1

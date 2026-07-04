@@ -297,7 +297,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	i.module = &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
 
 	i.instrs[0] = prog.Code
-	i.code[0] = c.Compile(prog.Code, i.module.LocalKinds())
+	i.code[0] = c.Compile(prog.Code, i.module.LocalKinds(), types.Kinds(i.module.Captures))
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
 			i.bind(i.constants[j].Ref(), fn, false)
@@ -1472,7 +1472,7 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 		precise:   i.tick == 1,
 	}
 	i.instrs[addr] = fn.Code
-	i.code[addr] = c.Compile(fn.Code, fn.LocalKinds())
+	i.code[addr] = c.Compile(fn.Code, fn.LocalKinds(), types.Kinds(fn.Captures))
 	i.handlers[addr] = fn.Handlers
 	i.coros[addr] = containsYield(fn.Code)
 	if dynamic {

@@ -1187,6 +1187,56 @@ var runTests = []struct {
 		}, program.WithConstants(types.I64(math.MaxInt64))),
 		values: []types.Value{types.I64(math.MaxInt64)},
 	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		}, program.WithConstants(NewHostFunction(
+			&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+			func(_ *Interpreter, args []types.Boxed) ([]types.Boxed, error) {
+				return []types.Boxed{types.BoxI32(args[0].I32() + args[1].I32())}, nil
+			},
+		))),
+		values: []types.Value{types.I32(7)},
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_GET),
+		}, program.WithTypes(types.TypeI32Array)),
+		err: ErrIndexOutOfRange,
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 9), instr.New(instr.ARRAY_SET),
+		}, program.WithTypes(types.TypeI32Array)),
+		err: ErrIndexOutOfRange,
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 7), instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_FILL),
+		}, program.WithTypes(types.TypeI32Array)),
+		err: ErrIndexOutOfRange,
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_DELETE),
+		}, program.WithTypes(types.TypeI32Array)),
+		err: ErrIndexOutOfRange,
+	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 5),
+			instr.New(instr.ARRAY_COPY),
+		}, program.WithTypes(types.TypeI32Array)),
+		err: ErrIndexOutOfRange,
+	},
 }
 
 func TestInterpreter_Run(t *testing.T) {
@@ -1360,6 +1410,116 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 0, i.rc[3]) // not just the first one
 		require.Equal(t, 0, i.rc[4])
 		require.Equal(t, 3, i.rc[5]) // fill value owned once per filled slot
+	})
+
+	t.Run("host call with an all-scalar signature works through the generic path (precise, fusion disabled)", func(t *testing.T) {
+		hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+			func(_ *Interpreter, args []types.Boxed) ([]types.Boxed, error) {
+				return []types.Boxed{types.BoxI32(args[0].I32() * args[1].I32())}, nil
+			})
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 6), instr.New(instr.I32_CONST, 7),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		}, program.WithConstants(hostFn))
+		i := New(prog, WithTick(1)) // precise: disables fusion, forcing the generic callHost path
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(42), v)
+	})
+
+	t.Run("host call releases a ref param the callee does not return (fused)", func(t *testing.T) {
+		hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeRef}, Returns: []types.Type{types.TypeI32}},
+			func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+				return []types.Boxed{types.BoxI32(1)}, nil
+			})
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 9), instr.New(instr.REF_NEW), // heap[1] is hostFn; heap[2] is this ref
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		}, program.WithConstants(hostFn))
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 0, i.rc[2]) // arg not returned: host cleanup released it
+	})
+
+	t.Run("host call releases a ref param the callee does not return (generic, precise)", func(t *testing.T) {
+		hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeRef}, Returns: []types.Type{types.TypeI32}},
+			func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+				return []types.Boxed{types.BoxI32(1)}, nil
+			})
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 9), instr.New(instr.REF_NEW),
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		}, program.WithConstants(hostFn))
+		i := New(prog, WithTick(1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 0, i.rc[2])
+	})
+
+	t.Run("host call releases a promoted i64 param even though I64 is declared (not the scalar fast path)", func(t *testing.T) {
+		huge := int64(1) << 50
+		hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI64}, Returns: []types.Type{types.TypeI32}},
+			func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+				return []types.Boxed{types.BoxI32(1)}, nil
+			})
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I64_CONST, i64operand(huge)), // heap[1] is hostFn; heap[2] is this promoted i64
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		}, program.WithConstants(hostFn))
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 0, i.rc[2]) // promoted i64 arg released: I64 params keep the generic scanning path
+	})
+
+	t.Run("UPVAL_SET releases a ref capture when overwritten (generic path)", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			WithCaptures(types.TypeRef).Emit(
+			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
+			instr.New(instr.UPVAL_SET, 0),
+			instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN),
+		).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 5), instr.New(instr.REF_NEW), // heap[1] is fn; heap[2] is this capture
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CLOSURE_NEW),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 0, i.rc[2]) // old ref capture released on overwrite
+	})
+
+	t.Run("UPVAL_SET releases a promoted i64 capture even though I64 is declared (not the scalar fast path)", func(t *testing.T) {
+		oldHuge := int64(1) << 50
+		newHuge := int64(1) << 51
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64}}).
+			WithCaptures(types.TypeI64).Emit(
+			instr.New(instr.I64_CONST, i64operand(newHuge)),
+			instr.New(instr.UPVAL_SET, 0),
+			instr.New(instr.UPVAL_GET, 0),
+			instr.New(instr.RETURN),
+		).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I64_CONST, i64operand(oldHuge)), // heap[1] is fn; heap[2] is the old promoted capture
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CLOSURE_NEW),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 0, i.rc[2]) // old promoted capture released: I64 captures keep the generic ref-aware path
 	})
 }
 
