@@ -76,10 +76,10 @@ func TestArray_Refs(t *testing.T) {
 	t.Run("primitive elements", func(t *testing.T) {
 		a := NewArray(NewArrayType(TypeI32), BoxI32(1), BoxI32(2))
 
-		require.Empty(t, a.Refs())
+		require.Empty(t, a.Refs(nil))
 		var refs []Ref
 		allocs := testing.AllocsPerRun(100, func() {
-			refs = a.Refs()
+			refs = a.Refs(nil)
 		})
 		require.Empty(t, refs)
 		require.Zero(t, allocs)
@@ -88,7 +88,7 @@ func TestArray_Refs(t *testing.T) {
 	t.Run("reference elements", func(t *testing.T) {
 		a := NewArray(NewArrayType(TypeRef), BoxRef(1), BoxI32(2), BoxRef(3))
 
-		require.Equal(t, []Ref{1, 3}, a.Refs())
+		require.Equal(t, []Ref{1, 3}, a.Refs(nil))
 	})
 }
 
@@ -125,7 +125,7 @@ func BenchmarkTypedArray_Refs(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for n := 0; n < b.N; n++ {
-			refs = a.Refs()
+			refs = a.Refs(nil)
 		}
 		b.StopTimer()
 		require.Empty(b, refs)
@@ -138,7 +138,7 @@ func BenchmarkTypedArray_Refs(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for n := 0; n < b.N; n++ {
-			refs = a.Refs()
+			refs = a.Refs(refs[:0])
 		}
 		b.StopTimer()
 		require.Len(b, refs, 2)

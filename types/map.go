@@ -3,7 +3,6 @@ package types
 import (
 	"fmt"
 	"math"
-	"reflect"
 	"sort"
 	"strings"
 )
@@ -39,27 +38,18 @@ type MapType struct {
 	TraceValues bool
 }
 
+// MapIterator walks a map's keys in a snapshot taken once at construction, so
+// Next never touches reflect: values holds each key already boxed into its
+// yielded Value form (or, for a generic *Map, the resolved key/entry value),
+// and idx just advances through it.
 type MapIterator struct {
-	iter    *reflect.MapIter
+	values  []Value
+	idx     int
 	current Value
 	typ     Type
 	ref     Ref
-	kind    mapIteratorKind
 	done    bool
 }
-
-type mapIteratorKind byte
-
-const (
-	mapIteratorInvalid mapIteratorKind = iota
-	mapIteratorI8
-	mapIteratorI1
-	mapIteratorI32
-	mapIteratorI64
-	mapIteratorF32
-	mapIteratorF64
-	mapIteratorGeneric
-)
 
 var (
 	_ Traceable = (*Map)(nil)
@@ -114,32 +104,46 @@ func NewMapIterator(ref Ref, val Value) *MapIterator {
 	switch m := val.(type) {
 	case *TypedMap[int8]:
 		it.typ = NewIteratorType(m.Typ.Key)
-		it.kind = mapIteratorI8
-		it.iter = reflect.ValueOf(m.entries).MapRange()
+		it.values = make([]Value, 0, len(m.entries))
+		for k := range m.entries {
+			it.values = append(it.values, I8(k))
+		}
 	case *TypedMap[bool]:
 		it.typ = NewIteratorType(m.Typ.Key)
-		it.kind = mapIteratorI1
-		it.iter = reflect.ValueOf(m.entries).MapRange()
+		it.values = make([]Value, 0, len(m.entries))
+		for k := range m.entries {
+			it.values = append(it.values, I1(k))
+		}
 	case *TypedMap[int32]:
 		it.typ = NewIteratorType(m.Typ.Key)
-		it.kind = mapIteratorI32
-		it.iter = reflect.ValueOf(m.entries).MapRange()
+		it.values = make([]Value, 0, len(m.entries))
+		for k := range m.entries {
+			it.values = append(it.values, I32(k))
+		}
 	case *TypedMap[int64]:
 		it.typ = NewIteratorType(m.Typ.Key)
-		it.kind = mapIteratorI64
-		it.iter = reflect.ValueOf(m.entries).MapRange()
+		it.values = make([]Value, 0, len(m.entries))
+		for k := range m.entries {
+			it.values = append(it.values, I64(k))
+		}
 	case *TypedMap[float32]:
 		it.typ = NewIteratorType(m.Typ.Key)
-		it.kind = mapIteratorF32
-		it.iter = reflect.ValueOf(m.entries).MapRange()
+		it.values = make([]Value, 0, len(m.entries))
+		for k := range m.entries {
+			it.values = append(it.values, F32(k))
+		}
 	case *TypedMap[float64]:
 		it.typ = NewIteratorType(m.Typ.Key)
-		it.kind = mapIteratorF64
-		it.iter = reflect.ValueOf(m.entries).MapRange()
+		it.values = make([]Value, 0, len(m.entries))
+		for k := range m.entries {
+			it.values = append(it.values, F64(k))
+		}
 	case *Map:
 		it.typ = NewIteratorType(m.Typ.Key)
-		it.kind = mapIteratorGeneric
-		it.iter = reflect.ValueOf(m.entries).MapRange()
+		it.values = make([]Value, 0, len(m.entries))
+		for k, entry := range m.entries {
+			it.values = append(it.values, k.value(entry))
+		}
 	}
 	return it
 }
@@ -202,20 +206,16 @@ func (m *TypedMap[K]) String() string {
 	return fmt.Sprintf("%s{%s}", m.Typ, strings.Join(parts, ", "))
 }
 
-func (m *TypedMap[K]) Refs() []Ref {
+func (m *TypedMap[K]) Refs(dst []Ref) []Ref {
 	if !m.Typ.TraceValues {
-		return nil
+		return dst
 	}
-	var refs []Ref
 	for _, value := range m.entries {
 		if value.Kind() == KindRef {
-			if refs == nil {
-				refs = make([]Ref, 0, m.Len())
-			}
-			refs = append(refs, Ref(value.Ref()))
+			dst = append(dst, Ref(value.Ref()))
 		}
 	}
-	return refs
+	return dst
 }
 
 func (m *Map) Kind() Kind { return KindRef }
@@ -265,28 +265,21 @@ func (m *Map) String() string {
 	return fmt.Sprintf("%s{%s}", m.Typ, strings.Join(parts, ", "))
 }
 
-func (m *Map) Refs() []Ref {
+func (m *Map) Refs(dst []Ref) []Ref {
 	traceKeys := m.Typ.TraceKeys
 	traceValues := m.Typ.TraceValues
 	if !traceKeys && !traceValues {
-		return nil
+		return dst
 	}
-	var refs []Ref
 	for _, entry := range m.entries {
 		if traceKeys && entry.Key.Kind() == KindRef {
-			if refs == nil {
-				refs = make([]Ref, 0, m.Len()*2)
-			}
-			refs = append(refs, Ref(entry.Key.Ref()))
+			dst = append(dst, Ref(entry.Key.Ref()))
 		}
 		if traceValues && entry.Value.Kind() == KindRef {
-			if refs == nil {
-				refs = make([]Ref, 0, m.Len()*2)
-			}
-			refs = append(refs, Ref(entry.Value.Ref()))
+			dst = append(dst, Ref(entry.Value.Ref()))
 		}
 	}
-	return refs
+	return dst
 }
 
 func (it *MapIterator) Kind() Kind { return KindRef }
@@ -296,34 +289,14 @@ func (it *MapIterator) Type() Type { return it.typ }
 func (it *MapIterator) String() string { return "map.iterator" }
 
 func (it *MapIterator) Next() bool {
-	if it.iter == nil || !it.iter.Next() {
+	if it.idx >= len(it.values) {
 		it.current = BoxedNull
 		it.done = true
 		return false
 	}
+	it.current = it.values[it.idx]
+	it.idx++
 	it.done = false
-	switch it.kind {
-	case mapIteratorI8:
-		it.current = I8(int8(it.iter.Key().Int()))
-	case mapIteratorI1:
-		it.current = I1(it.iter.Key().Bool())
-	case mapIteratorI32:
-		it.current = I32(int32(it.iter.Key().Int()))
-	case mapIteratorI64:
-		it.current = I64(it.iter.Key().Int())
-	case mapIteratorF32:
-		it.current = F32(float32(it.iter.Key().Float()))
-	case mapIteratorF64:
-		it.current = F64(it.iter.Key().Float())
-	case mapIteratorGeneric:
-		key := it.iter.Key().Interface().(MapKey)
-		entry := it.iter.Value().Interface().(MapEntry)
-		it.current = key.value(entry)
-	default:
-		it.current = BoxedNull
-		it.done = true
-		return false
-	}
 	return true
 }
 
@@ -331,19 +304,19 @@ func (it *MapIterator) Current() Value { return it.current }
 
 func (it *MapIterator) Done() bool { return it.done }
 
-func (it *MapIterator) Refs() []Ref {
-	refs := []Ref{it.ref}
+func (it *MapIterator) Refs(dst []Ref) []Ref {
+	dst = append(dst, it.ref)
 	if !it.done {
 		switch current := it.current.(type) {
 		case Boxed:
 			if current.Kind() == KindRef {
-				refs = append(refs, Ref(current.Ref()))
+				dst = append(dst, Ref(current.Ref()))
 			}
 		case Ref:
-			refs = append(refs, current)
+			dst = append(dst, current)
 		}
 	}
-	return refs
+	return dst
 }
 
 func (k MapKey) String() string {

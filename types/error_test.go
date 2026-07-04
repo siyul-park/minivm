@@ -47,8 +47,8 @@ func TestError_Code(t *testing.T) {
 }
 
 func TestError_Refs(t *testing.T) {
-	require.Nil(t, NewError(ErrorCodeNone, "", BoxI32(7)).Refs())
-	require.Equal(t, []Ref{Ref(3)}, NewError(ErrorCodeNone, "", BoxRef(3)).Refs())
+	require.Nil(t, NewError(ErrorCodeNone, "", BoxI32(7)).Refs(nil))
+	require.Equal(t, []Ref{Ref(3)}, NewError(ErrorCodeNone, "", BoxRef(3)).Refs(nil))
 }
 
 func TestErrorType_String(t *testing.T) {

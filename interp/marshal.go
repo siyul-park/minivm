@@ -588,19 +588,27 @@ func (s *marshalState) value(v reflect.Value) (types.Value, error) {
 
 func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *HostFunction {
 	m := s.m
+	fnType := fn.Type()
+	// in and seen are call-scoped scratch reused across every invocation of the
+	// returned closure: this HostFunction is created fresh per marshaled Go
+	// value (never cached/shared across Interpreters or goroutines - see
+	// docs/host-integration.md's ban on recursive vm.Run from a host function),
+	// so calls against it are always sequential and never reentrant.
+	in := make([]reflect.Value, fnType.NumIn())
+	for idx := range in {
+		in[idx] = reflect.New(fnType.In(idx)).Elem()
+	}
+	seen := make(map[uintptr]bool)
 	return NewHostFunction(typ, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
-		fnType := fn.Type()
 		if len(params) != fnType.NumIn() {
 			return nil, fmt.Errorf("%w: got %d params, want %d", ErrTypeMismatch, len(params), fnType.NumIn())
 		}
-		in := make([]reflect.Value, fnType.NumIn())
 		unmarshal := &unmarshalState{m: m, i: i}
 		for idx := range in {
-			arg := reflect.New(fnType.In(idx)).Elem()
-			if err := unmarshal.value(params[idx], arg); err != nil {
+			in[idx].Set(reflect.Zero(fnType.In(idx)))
+			if err := unmarshal.value(params[idx], in[idx]); err != nil {
 				return nil, fmt.Errorf("function param %d: %w", idx, err)
 			}
-			in[idx] = arg
 		}
 
 		out := fn.Call(in)
@@ -618,7 +626,8 @@ func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *Host
 		}
 
 		returns := make([]types.Boxed, len(out))
-		marshal := &marshalState{m: m, i: i, seen: make(map[uintptr]bool)}
+		clear(seen)
+		marshal := &marshalState{m: m, i: i, seen: seen}
 		defer marshal.close()
 		for idx := range out {
 			boxed, err := marshal.boxAs(out[idx], typ.Returns[idx])

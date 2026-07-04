@@ -68,7 +68,7 @@ func (it *StringIterator) Current() Value { return it.current }
 
 func (it *StringIterator) Done() bool { return it.done }
 
-func (it *StringIterator) Refs() []Ref { return []Ref{it.ref} }
+func (it *StringIterator) Refs(dst []Ref) []Ref { return append(dst, it.ref) }
 
 func (stringType) Kind() Kind {
 	return KindRef

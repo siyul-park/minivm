@@ -85,11 +85,11 @@ func (e *Error) String() string {
 	return fmt.Sprintf("error(%q)", e.message)
 }
 
-func (e *Error) Refs() []Ref {
+func (e *Error) Refs(dst []Ref) []Ref {
 	if e.value.Kind() == KindRef {
-		return []Ref{Ref(e.value.Ref())}
+		dst = append(dst, Ref(e.value.Ref()))
 	}
-	return nil
+	return dst
 }
 
 func (errorType) Kind() Kind {

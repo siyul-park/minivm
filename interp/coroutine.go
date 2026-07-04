@@ -40,23 +40,22 @@ func (c *Coroutine) String() string {
 	return "coroutine"
 }
 
-func (c *Coroutine) Refs() []types.Ref {
-	refs := make([]types.Ref, 0, len(c.image)+len(c.upvals)+2)
+func (c *Coroutine) Refs(dst []types.Ref) []types.Ref {
 	if c.ref > 0 {
-		refs = append(refs, types.Ref(c.ref))
+		dst = append(dst, types.Ref(c.ref))
 	}
 	for _, v := range c.image {
 		if v.Kind() == types.KindRef {
-			refs = append(refs, types.Ref(v.Ref()))
+			dst = append(dst, types.Ref(v.Ref()))
 		}
 	}
 	for _, v := range c.upvals {
 		if v.Kind() == types.KindRef {
-			refs = append(refs, types.Ref(v.Ref()))
+			dst = append(dst, types.Ref(v.Ref()))
 		}
 	}
 	if c.value.Kind() == types.KindRef {
-		refs = append(refs, types.Ref(c.value.Ref()))
+		dst = append(dst, types.Ref(c.value.Ref()))
 	}
-	return refs
+	return dst
 }

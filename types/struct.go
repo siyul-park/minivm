@@ -119,21 +119,17 @@ func (s *Struct) String() string {
 	})
 }
 
-func (s *Struct) Refs() []Ref {
-	var refs []Ref
+func (s *Struct) Refs(dst []Ref) []Ref {
 	for i, f := range s.Typ.Fields {
 		if f.Kind != KindRef {
 			continue
 		}
 		val := Boxed(s.Data[i])
 		if val.Kind() == KindRef {
-			if refs == nil {
-				refs = make([]Ref, 0, len(s.Typ.Fields))
-			}
-			refs = append(refs, Ref(val.Ref()))
+			dst = append(dst, Ref(val.Ref()))
 		}
 	}
-	return refs
+	return dst
 }
 
 func (s *Struct) field(i int, f StructField) Boxed {
