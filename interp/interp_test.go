@@ -1479,6 +1479,32 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 0, i.rc[2]) // promoted i64 arg released: I64 params keep the generic scanning path
 	})
 
+	t.Run("UPVAL_GET retains a ref capture (generic path)", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{}).
+			WithCaptures(types.TypeRef).Emit(
+			instr.New(instr.UPVAL_GET, 0), instr.New(instr.DROP),
+			instr.New(instr.RETURN),
+		).MustBuild()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 5), instr.New(instr.REF_NEW), // heap[1] is fn; heap[2] is this capture
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CLOSURE_NEW),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		maxRC := 0
+		i := New(prog, WithTick(1), WithHook(func(i *Interpreter) error {
+			if len(i.heap) > 2 && i.rc[2] > maxRC {
+				maxRC = i.rc[2]
+			}
+			return nil
+		}))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 2, maxRC) // UPVAL_GET's retainBox held the capture live alongside its pushed copy
+	})
+
 	t.Run("UPVAL_SET releases a ref capture when overwritten (generic path)", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
 			WithCaptures(types.TypeRef).Emit(
