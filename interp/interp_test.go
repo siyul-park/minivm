@@ -1547,6 +1547,370 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, i.Run(context.Background()))
 		require.Equal(t, 0, i.rc[2]) // old promoted capture released: I64 captures keep the generic ref-aware path
 	})
+
+	t.Run("fused LOCAL_GET+CONST binop computes correctly for i32 (interp-only)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.I32_ADD),
+		}, program.WithLocals(types.TypeI32))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(8), v)
+	})
+
+	t.Run("fused LOCAL_GET+CONST binop computes correctly for i64 (interp-only)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I64_CONST, i64operand(5)), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_CONST, i64operand(3)), instr.New(instr.I64_ADD),
+		}, program.WithLocals(types.TypeI64))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64(8), v)
+	})
+
+	t.Run("fused LOCAL_GET+CONST binop computes correctly for f32 (interp-only)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_ADD),
+		}, program.WithLocals(types.TypeF32))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.F32(8), v)
+	})
+
+	t.Run("fused LOCAL_GET+CONST binop computes correctly for f64 (interp-only)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_ADD),
+		}, program.WithLocals(types.TypeF64))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.F64(8), v)
+	})
+
+	t.Run("fused LOCAL_GET+LOCAL_GET binop computes correctly for i32 (interp-only)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD),
+		}, program.WithLocals(types.TypeI32, types.TypeI32))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(8), v)
+	})
+
+	t.Run("fused LOCAL_GET+LOCAL_GET binop computes correctly for i64 (interp-only)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I64_CONST, i64operand(5)), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.I64_CONST, i64operand(3)), instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I64_ADD),
+		}, program.WithLocals(types.TypeI64, types.TypeI64))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64(8), v)
+	})
+
+	t.Run("fused LOCAL_GET+LOCAL_GET binop computes correctly for f32 (interp-only)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.F32_ADD),
+		}, program.WithLocals(types.TypeF32, types.TypeF32))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.F32(8), v)
+	})
+
+	t.Run("fused LOCAL_GET+LOCAL_GET binop computes correctly for f64 (interp-only)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.F64_ADD),
+		}, program.WithLocals(types.TypeF64, types.TypeF64))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.F64(8), v)
+	})
+
+	t.Run("promoted I64 local keeps a balanced refcount across fused const-binop and local-local binop", func(t *testing.T) {
+		huge := int64(1) << 50
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I64_CONST, i64operand(huge)), instr.New(instr.LOCAL_SET, 0), // heap[1] owned by local0
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.I64_ADD), instr.New(instr.DROP),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
+		}, program.WithLocals(types.TypeI64))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 1, i.rc[1]) // local slot still owns exactly one reference after both fused reads
+	})
+
+	t.Run("I32_EQ; BR_IF fuses without materializing a boxed bool (taken)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.NOP), // keeps fuseLocalLocal from absorbing I32_EQ, isolating the bare cmp+BR_IF fusion under test
+			instr.New(instr.I32_EQ),
+			instr.New(instr.BR_IF, 8),
+			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
+			instr.New(instr.I32_CONST, i32operand(200)),
+		}, program.WithLocals(types.TypeI32, types.TypeI32))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(200), v) // 3 == 3: branch taken
+	})
+
+	t.Run("I32_EQ; BR_IF fuses without materializing a boxed bool (not taken)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.I32_CONST, i32operand(4)), instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.NOP),
+			instr.New(instr.I32_EQ),
+			instr.New(instr.BR_IF, 8),
+			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
+			instr.New(instr.I32_CONST, i32operand(200)),
+		}, program.WithLocals(types.TypeI32, types.TypeI32))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(100), v) // 3 != 4: branch not taken
+	})
+
+	t.Run("I64_EQ; BR_IF fuses without materializing a boxed bool (taken)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I64_CONST, i64operand(3)), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.I64_CONST, i64operand(3)), instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.NOP), // keeps fuseLocalLocal from absorbing I64_EQ, isolating the bare cmp+BR_IF fusion under test
+			instr.New(instr.I64_EQ),
+			instr.New(instr.BR_IF, 8),
+			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
+			instr.New(instr.I32_CONST, i32operand(200)),
+		}, program.WithLocals(types.TypeI64, types.TypeI64))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(200), v) // 3 == 3: branch taken
+	})
+
+	t.Run("I64_EQ; BR_IF fuses without materializing a boxed bool (not taken)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I64_CONST, i64operand(3)), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.I64_CONST, i64operand(4)), instr.New(instr.LOCAL_SET, 1),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.NOP),
+			instr.New(instr.I64_EQ),
+			instr.New(instr.BR_IF, 8),
+			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
+			instr.New(instr.I32_CONST, i32operand(200)),
+		}, program.WithLocals(types.TypeI64, types.TypeI64))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(100), v) // 3 != 4: branch not taken
+	})
+
+	t.Run("I32_EQZ; BR_IF fuses without materializing a boxed bool (taken)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, i32operand(0)), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.NOP), // keeps any leftward fusion from absorbing I32_EQZ, isolating the bare cmp+BR_IF fusion under test
+			instr.New(instr.I32_EQZ),
+			instr.New(instr.BR_IF, 8),
+			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
+			instr.New(instr.I32_CONST, i32operand(200)),
+		}, program.WithLocals(types.TypeI32))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(200), v) // 0 == 0: branch taken
+	})
+
+	t.Run("I32_EQZ; BR_IF fuses without materializing a boxed bool (not taken)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.NOP),
+			instr.New(instr.I32_EQZ),
+			instr.New(instr.BR_IF, 8),
+			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
+			instr.New(instr.I32_CONST, i32operand(200)),
+		}, program.WithLocals(types.TypeI32))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(100), v) // 5 != 0: branch not taken
+	})
+
+	t.Run("I32_CONST; BR_IF fuses a compile-time-known branch condition (taken)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, i32operand(1)),
+			instr.New(instr.BR_IF, 8),
+			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
+			instr.New(instr.I32_CONST, i32operand(200)),
+		})
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(200), v)
+	})
+
+	t.Run("I32_CONST; BR_IF fuses a compile-time-known branch condition (not taken)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, i32operand(0)),
+			instr.New(instr.BR_IF, 8),
+			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
+			instr.New(instr.I32_CONST, i32operand(200)),
+		})
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(100), v)
+	})
+
+	t.Run("LOCAL_GET+CONST+cmp+BR_IF collapses into one fused dispatch (taken)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, i32operand(2)), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.I32_LT_S),
+			instr.New(instr.BR_IF, 8),
+			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
+			instr.New(instr.I32_CONST, i32operand(200)),
+		}, program.WithLocals(types.TypeI32))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(200), v) // 2 < 5: branch taken
+	})
+
+	t.Run("LOCAL_GET+CONST+cmp+BR_IF collapses into one fused dispatch (not taken)", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, i32operand(10)), instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, i32operand(5)), instr.New(instr.I32_LT_S),
+			instr.New(instr.BR_IF, 8),
+			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
+			instr.New(instr.I32_CONST, i32operand(200)),
+		}, program.WithLocals(types.TypeI32))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(100), v) // 10 < 5 is false: branch not taken
+	})
+
+	t.Run("a BR landing on the byte offset fuseLocalConst's CONST consumed still executes the standalone CONST+binop correctly", func(t *testing.T) {
+		// Mirrors "fused LOCAL_GET+CONST binop computes correctly for i32" (the
+		// fused fast-path case, (a)) but jumps directly into the middle of the
+		// LOCAL_GET;CONST;binop window, landing exactly on the CONST's own byte
+		// offset that the fused closure at LOCAL_GET's start would otherwise have
+		// consumed at runtime -- proving (b): the compile loop still emitted a
+		// correct, independent standalone closure there.
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, i32operand(10)), // manual lhs for the branched-in, unfused I32_ADD
+			instr.New(instr.BR, 2),                     // jumps past LOCAL_GET straight to the CONST below
+			instr.New(instr.LOCAL_GET, 0),              // never executed at runtime; still compiled standalone
+			instr.New(instr.I32_CONST, i32operand(3)),  // BR's target: the offset fuseLocalConst would have skipped
+			instr.New(instr.I32_ADD),
+		}, program.WithLocals(types.TypeI32))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(13), v)
+	})
+
+	t.Run("a BR landing on the comparison opcode inside a LOCAL_GET+CONST+cmp+BR_IF window still executes correctly", func(t *testing.T) {
+		// Jumps directly onto I32_LT_S's own byte offset, which the 4-instruction
+		// LOCAL_GET+CONST+cmp+BR_IF composition (installed at LOCAL_GET's start)
+		// would otherwise have consumed at runtime. Proves the standalone closure
+		// the compile loop independently installs at that offset -- itself the new
+		// bare cmp+BR_IF fusion, since BR_IF genuinely follows in the bytecode --
+		// is correct even when reached without going through LOCAL_GET at all.
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, i32operand(2)),  // manual lhs
+			instr.New(instr.I32_CONST, i32operand(10)), // manual rhs
+			instr.New(instr.BR, 7),                     // jumps past LOCAL_GET+CONST straight to I32_LT_S below
+			instr.New(instr.LOCAL_GET, 0),              // never executed at runtime; still compiled standalone
+			instr.New(instr.I32_CONST, i32operand(5)),  // never executed at runtime; still compiled standalone
+			instr.New(instr.I32_LT_S),                  // BR's target
+			instr.New(instr.BR_IF, 8),
+			instr.New(instr.I32_CONST, i32operand(100)), instr.New(instr.BR, 5),
+			instr.New(instr.I32_CONST, i32operand(200)),
+		}, program.WithLocals(types.TypeI32))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(200), v) // 2 < 10: branch taken
+	})
 }
 
 func TestInterpreter_Marshal(t *testing.T) {

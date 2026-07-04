@@ -456,6 +456,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		if fused := c.fuseLocalConst(idx); fused != nil {
 			return fused
 		}
+		// Superinstruction: LOCAL_GET idxA; LOCAL_GET idxB; <kind binop>.
+		if fused := c.fuseLocalLocal(idx); fused != nil {
+			return fused
+		}
 		// I32/F32/F64 locals never hold a heap ref, so retain is a no-op; skip
 		// it and the Kind branch. I64 may box to a ref, so it keeps retainBox.
 		switch c.locals[idx].Repr() {
@@ -863,6 +867,14 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		if fused := c.fuseI32Imm(raw, 5); fused != nil {
 			return fused
 		}
+		// Superinstruction: I32_CONST c; BR_IF fuses a compile-time-known
+		// branch condition, skipping the push/pop of the boxed boolean
+		// entirely.
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				i.branchIf(raw != 0, offset, 8)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
@@ -1128,6 +1140,16 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I32_EQZ: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp == 0 {
+					panic(ErrStackUnderflow)
+				}
+				v := i.stack[i.sp-1].I32()
+				i.sp--
+				i.branchIf(v == 0, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
@@ -1139,6 +1161,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I32_EQ: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].I32()
+				lhs := i.stack[i.sp-2].I32()
+				i.sp -= 2
+				i.branchIf(lhs == rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1152,6 +1185,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I32_NE: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].I32()
+				lhs := i.stack[i.sp-2].I32()
+				i.sp -= 2
+				i.branchIf(lhs != rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1165,6 +1209,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I32_LT_S: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].I32()
+				lhs := i.stack[i.sp-2].I32()
+				i.sp -= 2
+				i.branchIf(lhs < rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1178,6 +1233,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I32_LT_U: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].I32()
+				lhs := i.stack[i.sp-2].I32()
+				i.sp -= 2
+				i.branchIf(uint32(lhs) < uint32(rhs), offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1191,6 +1257,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I32_GT_S: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].I32()
+				lhs := i.stack[i.sp-2].I32()
+				i.sp -= 2
+				i.branchIf(lhs > rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1204,6 +1281,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I32_GT_U: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].I32()
+				lhs := i.stack[i.sp-2].I32()
+				i.sp -= 2
+				i.branchIf(uint32(lhs) > uint32(rhs), offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1217,6 +1305,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I32_LE_S: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].I32()
+				lhs := i.stack[i.sp-2].I32()
+				i.sp -= 2
+				i.branchIf(lhs <= rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1230,6 +1329,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I32_LE_U: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].I32()
+				lhs := i.stack[i.sp-2].I32()
+				i.sp -= 2
+				i.branchIf(uint32(lhs) <= uint32(rhs), offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1243,6 +1353,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I32_GE_S: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].I32()
+				lhs := i.stack[i.sp-2].I32()
+				i.sp -= 2
+				i.branchIf(lhs >= rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1256,6 +1377,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I32_GE_U: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].I32()
+				lhs := i.stack[i.sp-2].I32()
+				i.sp -= 2
+				i.branchIf(uint32(lhs) >= uint32(rhs), offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1638,6 +1770,16 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I64_EQZ: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp == 0 {
+					panic(ErrStackUnderflow)
+				}
+				v := i.unboxI64(i.stack[i.sp-1])
+				i.sp--
+				i.branchIf(v == 0, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
@@ -1649,6 +1791,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I64_EQ: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.unboxI64(i.stack[i.sp-1])
+				lhs := i.unboxI64(i.stack[i.sp-2])
+				i.sp -= 2
+				i.branchIf(lhs == rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1662,6 +1815,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I64_NE: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.unboxI64(i.stack[i.sp-1])
+				lhs := i.unboxI64(i.stack[i.sp-2])
+				i.sp -= 2
+				i.branchIf(lhs != rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1675,6 +1839,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I64_LT_S: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.unboxI64(i.stack[i.sp-1])
+				lhs := i.unboxI64(i.stack[i.sp-2])
+				i.sp -= 2
+				i.branchIf(lhs < rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1688,6 +1863,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I64_LT_U: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.unboxI64(i.stack[i.sp-1])
+				lhs := i.unboxI64(i.stack[i.sp-2])
+				i.sp -= 2
+				i.branchIf(uint64(lhs) < uint64(rhs), offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1701,6 +1887,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I64_GT_S: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.unboxI64(i.stack[i.sp-1])
+				lhs := i.unboxI64(i.stack[i.sp-2])
+				i.sp -= 2
+				i.branchIf(lhs > rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1714,6 +1911,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I64_GT_U: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.unboxI64(i.stack[i.sp-1])
+				lhs := i.unboxI64(i.stack[i.sp-2])
+				i.sp -= 2
+				i.branchIf(uint64(lhs) > uint64(rhs), offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1727,6 +1935,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I64_LE_S: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.unboxI64(i.stack[i.sp-1])
+				lhs := i.unboxI64(i.stack[i.sp-2])
+				i.sp -= 2
+				i.branchIf(lhs <= rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1740,6 +1959,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I64_LE_U: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.unboxI64(i.stack[i.sp-1])
+				lhs := i.unboxI64(i.stack[i.sp-2])
+				i.sp -= 2
+				i.branchIf(uint64(lhs) <= uint64(rhs), offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1753,6 +1983,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I64_GE_S: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.unboxI64(i.stack[i.sp-1])
+				lhs := i.unboxI64(i.stack[i.sp-2])
+				i.sp -= 2
+				i.branchIf(lhs >= rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1766,6 +2007,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.I64_GE_U: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.unboxI64(i.stack[i.sp-1])
+				lhs := i.unboxI64(i.stack[i.sp-2])
+				i.sp -= 2
+				i.branchIf(uint64(lhs) >= uint64(rhs), offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2058,6 +2310,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.F32_EQ: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].F32()
+				lhs := i.stack[i.sp-2].F32()
+				i.sp -= 2
+				i.branchIf(lhs == rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2071,6 +2334,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.F32_NE: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].F32()
+				lhs := i.stack[i.sp-2].F32()
+				i.sp -= 2
+				i.branchIf(lhs != rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2084,6 +2358,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.F32_LT: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].F32()
+				lhs := i.stack[i.sp-2].F32()
+				i.sp -= 2
+				i.branchIf(lhs < rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2097,6 +2382,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.F32_GT: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].F32()
+				lhs := i.stack[i.sp-2].F32()
+				i.sp -= 2
+				i.branchIf(lhs > rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2110,6 +2406,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.F32_LE: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].F32()
+				lhs := i.stack[i.sp-2].F32()
+				i.sp -= 2
+				i.branchIf(lhs <= rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2123,6 +2430,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.F32_GE: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].F32()
+				lhs := i.stack[i.sp-2].F32()
+				i.sp -= 2
+				i.branchIf(lhs >= rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2415,6 +2733,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.F64_EQ: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].F64()
+				lhs := i.stack[i.sp-2].F64()
+				i.sp -= 2
+				i.branchIf(lhs == rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2428,6 +2757,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.F64_NE: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].F64()
+				lhs := i.stack[i.sp-2].F64()
+				i.sp -= 2
+				i.branchIf(lhs != rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2441,6 +2781,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.F64_LT: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].F64()
+				lhs := i.stack[i.sp-2].F64()
+				i.sp -= 2
+				i.branchIf(lhs < rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2454,6 +2805,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.F64_GT: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].F64()
+				lhs := i.stack[i.sp-2].F64()
+				i.sp -= 2
+				i.branchIf(lhs > rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2467,6 +2829,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.F64_LE: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].F64()
+				lhs := i.stack[i.sp-2].F64()
+				i.sp -= 2
+				i.branchIf(lhs <= rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2480,6 +2853,17 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 	instr.F64_GE: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
+		if offset, ok := c.peekBrIf(c.ip); ok {
+			return func(i *Interpreter) {
+				if i.sp < 2 {
+					panic(ErrStackUnderflow)
+				}
+				rhs := i.stack[i.sp-1].F64()
+				lhs := i.stack[i.sp-2].F64()
+				i.sp -= 2
+				i.branchIf(lhs >= rhs, offset, 4)
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -4857,6 +5241,19 @@ func (i *Interpreter) i64Operands(lhs, rhs types.Boxed) (int64, int64) {
 	r := i.unboxI64(rhs)
 	l := i.unboxI64(lhs)
 	return l, r
+}
+
+// branchIf applies a fused comparison+BR_IF's branch decision: taken selects
+// whether to add BR_IF's parsed jump offset before advancing i.fr.ip by the
+// fused instruction's total consumed width. Every comparison+BR_IF fusion
+// (and the CONST+BR_IF fusion) calls this instead of each duplicating the
+// offset arithmetic, matching how the standalone BR_IF closure itself adds
+// the offset before the instruction width.
+func (i *Interpreter) branchIf(taken bool, offset, width int) {
+	if taken {
+		i.fr.ip += offset
+	}
+	i.fr.ip += width
 }
 
 func (i *Interpreter) i32Add(lhs, rhs int32) types.Boxed {
