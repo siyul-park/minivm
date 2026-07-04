@@ -2579,8 +2579,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := unboxRef[types.String](i, i.stack[i.sp-1])
-			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
+			v1 := i.stack[i.sp-1]
+			v2 := i.stack[i.sp-2]
+			i.releaseBox(v1)
+			i.releaseBox(v2)
 			i.sp--
 			i.stack[i.sp-1] = types.BoxI1(v2 == v1)
 			i.fr.ip++
@@ -2592,8 +2594,10 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
 			}
-			v1 := unboxRef[types.String](i, i.stack[i.sp-1])
-			v2 := unboxRef[types.String](i, i.stack[i.sp-2])
+			v1 := i.stack[i.sp-1]
+			v2 := i.stack[i.sp-2]
+			i.releaseBox(v1)
+			i.releaseBox(v2)
 			i.sp--
 			i.stack[i.sp-1] = types.BoxI1(v2 != v1)
 			i.fr.ip++
