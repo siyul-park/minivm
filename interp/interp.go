@@ -39,15 +39,14 @@ type Interpreter struct {
 	module    *types.Function
 	dynamic   map[int]bool
 
-	frames   []frame
-	fr       *frame
-	stack    []types.Boxed
-	roots    []types.Boxed
-	heap     []types.Value
-	interned map[string]types.Ref
-	free     []int
-	rc       []int
-
+	frames      []frame
+	fr          *frame
+	stack       []types.Boxed
+	roots       []types.Boxed
+	heap        []types.Value
+	interned    map[string]types.Ref
+	free        []int
+	rc          []int
 	refsScratch []types.Ref
 
 	fp  int

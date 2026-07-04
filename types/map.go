@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"math"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -38,18 +39,33 @@ type MapType struct {
 	TraceValues bool
 }
 
-// MapIterator walks a map's keys in a snapshot taken once at construction, so
-// Next never touches reflect: values holds each key already boxed into its
-// yielded Value form (or, for a generic *Map, the resolved key/entry value),
-// and idx just advances through it.
+// MapIterator walks the live map via reflect.MapIter rather than a
+// construction-time snapshot: a snapshot of ref-typed keys/values would not be
+// refcount-protected, so a MAP_DELETE on an entry still queued in the snapshot
+// could free it before the iterator reached it. Ranging over the live map has
+// no such hazard - Go guarantees a key deleted mid-range is simply never
+// produced.
 type MapIterator struct {
-	values  []Value
-	idx     int
+	iter    *reflect.MapIter
 	current Value
 	typ     Type
 	ref     Ref
+	kind    mapIteratorKind
 	done    bool
 }
+
+type mapIteratorKind byte
+
+const (
+	mapIteratorInvalid mapIteratorKind = iota
+	mapIteratorI8
+	mapIteratorI1
+	mapIteratorI32
+	mapIteratorI64
+	mapIteratorF32
+	mapIteratorF64
+	mapIteratorGeneric
+)
 
 var (
 	_ Traceable = (*Map)(nil)
@@ -104,46 +120,32 @@ func NewMapIterator(ref Ref, val Value) *MapIterator {
 	switch m := val.(type) {
 	case *TypedMap[int8]:
 		it.typ = NewIteratorType(m.Typ.Key)
-		it.values = make([]Value, 0, len(m.entries))
-		for k := range m.entries {
-			it.values = append(it.values, I8(k))
-		}
+		it.kind = mapIteratorI8
+		it.iter = reflect.ValueOf(m.entries).MapRange()
 	case *TypedMap[bool]:
 		it.typ = NewIteratorType(m.Typ.Key)
-		it.values = make([]Value, 0, len(m.entries))
-		for k := range m.entries {
-			it.values = append(it.values, I1(k))
-		}
+		it.kind = mapIteratorI1
+		it.iter = reflect.ValueOf(m.entries).MapRange()
 	case *TypedMap[int32]:
 		it.typ = NewIteratorType(m.Typ.Key)
-		it.values = make([]Value, 0, len(m.entries))
-		for k := range m.entries {
-			it.values = append(it.values, I32(k))
-		}
+		it.kind = mapIteratorI32
+		it.iter = reflect.ValueOf(m.entries).MapRange()
 	case *TypedMap[int64]:
 		it.typ = NewIteratorType(m.Typ.Key)
-		it.values = make([]Value, 0, len(m.entries))
-		for k := range m.entries {
-			it.values = append(it.values, I64(k))
-		}
+		it.kind = mapIteratorI64
+		it.iter = reflect.ValueOf(m.entries).MapRange()
 	case *TypedMap[float32]:
 		it.typ = NewIteratorType(m.Typ.Key)
-		it.values = make([]Value, 0, len(m.entries))
-		for k := range m.entries {
-			it.values = append(it.values, F32(k))
-		}
+		it.kind = mapIteratorF32
+		it.iter = reflect.ValueOf(m.entries).MapRange()
 	case *TypedMap[float64]:
 		it.typ = NewIteratorType(m.Typ.Key)
-		it.values = make([]Value, 0, len(m.entries))
-		for k := range m.entries {
-			it.values = append(it.values, F64(k))
-		}
+		it.kind = mapIteratorF64
+		it.iter = reflect.ValueOf(m.entries).MapRange()
 	case *Map:
 		it.typ = NewIteratorType(m.Typ.Key)
-		it.values = make([]Value, 0, len(m.entries))
-		for k, entry := range m.entries {
-			it.values = append(it.values, k.value(entry))
-		}
+		it.kind = mapIteratorGeneric
+		it.iter = reflect.ValueOf(m.entries).MapRange()
 	}
 	return it
 }
@@ -289,14 +291,34 @@ func (it *MapIterator) Type() Type { return it.typ }
 func (it *MapIterator) String() string { return "map.iterator" }
 
 func (it *MapIterator) Next() bool {
-	if it.idx >= len(it.values) {
+	if it.iter == nil || !it.iter.Next() {
 		it.current = BoxedNull
 		it.done = true
 		return false
 	}
-	it.current = it.values[it.idx]
-	it.idx++
 	it.done = false
+	switch it.kind {
+	case mapIteratorI8:
+		it.current = I8(int8(it.iter.Key().Int()))
+	case mapIteratorI1:
+		it.current = I1(it.iter.Key().Bool())
+	case mapIteratorI32:
+		it.current = I32(int32(it.iter.Key().Int()))
+	case mapIteratorI64:
+		it.current = I64(it.iter.Key().Int())
+	case mapIteratorF32:
+		it.current = F32(float32(it.iter.Key().Float()))
+	case mapIteratorF64:
+		it.current = F64(it.iter.Key().Float())
+	case mapIteratorGeneric:
+		key := it.iter.Key().Interface().(MapKey)
+		entry := it.iter.Value().Interface().(MapEntry)
+		it.current = key.value(entry)
+	default:
+		it.current = BoxedNull
+		it.done = true
+		return false
+	}
 	return true
 }
 
