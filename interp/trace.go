@@ -502,6 +502,7 @@ func (r *Tracer) remove(addr int) {
 		}
 	}
 	delete(r.loops, addr)
+	r.precise = nil
 }
 
 func (r *Tracer) tree(a anchor) *tree {

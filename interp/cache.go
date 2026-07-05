@@ -77,14 +77,13 @@ func (c *Cache) due(addr int, threshold int64) bool {
 	return c.hits[addr].Add(1) >= threshold && c.state[addr].CompareAndSwap(cacheCold, cacheBuild)
 }
 
-// rearm returns a ready function to the build state so a later safepoint can
-// republish a recompiled module — used when a hot side exit grows the trace
-// tree.
-func (c *Cache) rearm(addr int) bool {
+// rearm returns a ready function to cold so due owns the next build transition
+// after a hot side exit grows the trace tree.
+func (c *Cache) rearm(addr int) {
 	if addr < 0 || addr >= len(c.state) {
-		return false
+		return
 	}
-	return c.state[addr].CompareAndSwap(cacheReady, cacheBuild)
+	c.state[addr].CompareAndSwap(cacheReady, cacheCold)
 }
 
 func (c *Cache) fail(addr int) {
@@ -94,6 +93,8 @@ func (c *Cache) fail(addr int) {
 }
 
 func (c *Cache) publish(addr int, mod *module, buf *asm.Buffer) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if buf != nil {
 		c.buffers = append(c.buffers, buf)
 	}

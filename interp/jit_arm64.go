@@ -108,7 +108,7 @@ func (l arm64Lowerer) lower(ctx *lowering) bool {
 		ctx.frames = p.frames
 		ctx.assembler.Bind(p.label)
 		l.reload(ctx)
-		if !l.walk(ctx, p.ops, p.tail) {
+		if !l.walk(ctx, p.ops, nil) {
 			return false
 		}
 	}
@@ -1747,14 +1747,12 @@ func (l arm64Lowerer) continuation(ctx *lowering, ip int, tail []step, flush boo
 	if flush && !l.flush(ctx, false) {
 		return 0, false
 	}
-	label := ctx.assembler.Label()
-	if len(tail) == 0 {
-		if label, ok := ctx.queued[target]; ok {
-			return label, true
-		}
-		ctx.queued[target] = label
+	if label, ok := ctx.queued[target]; ok {
+		return label, true
 	}
-	p := pending{label: label, ops: leg.trace.ops, tail: tail, hits: leg.hits}
+	label := ctx.assembler.Label()
+	ctx.queued[target] = label
+	p := pending{label: label, ops: leg.trace.ops, hits: leg.hits}
 	p.values, p.frames = ctx.snapshot()
 	ctx.pending = append(ctx.pending, p)
 	return label, true

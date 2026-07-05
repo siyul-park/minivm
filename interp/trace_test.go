@@ -110,3 +110,26 @@ func TestTracer_Headers(t *testing.T) {
 		}
 	})
 }
+
+func TestTracer_Remove(t *testing.T) {
+	tracer := NewTracer()
+	first := program.New([]instr.Instruction{
+		instr.New(instr.I32_CONST, 1),
+	}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+		Emit(instr.New(instr.I32_CONST, 2), instr.New(instr.RETURN)).MustBuild()))
+	i := New(first, WithTracer(tracer), WithThreshold(-1))
+	defer i.Close()
+
+	precise := tracer.codes(i)
+	require.NotNil(t, precise[1])
+	tracer.remove(1)
+	require.Nil(t, tracer.precise)
+
+	second, err := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+		Emit(instr.New(instr.I32_CONST, 3), instr.New(instr.RETURN)).
+		Build()
+	require.NoError(t, err)
+	i.bind(1, second, true)
+	rebuilt := tracer.codes(i)
+	require.NotSame(t, &precise[1][0], &rebuilt[1][0])
+}

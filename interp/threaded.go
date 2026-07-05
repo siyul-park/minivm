@@ -363,15 +363,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			val := i.stack[i.sp-1]
-			if idx >= len(i.globals) {
-				if cap(i.globals) > idx {
-					i.globals = i.globals[:idx+1]
-				} else {
-					global := make([]types.Boxed, idx*2)
-					copy(global, i.globals)
-					i.globals = global[:idx+1]
-				}
-			}
+			i.growGlobals(idx)
 			old := i.globals[idx]
 			if old != val {
 				i.releaseBox(old)
@@ -389,15 +381,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			val := i.stack[i.sp-1]
-			if idx >= len(i.globals) {
-				if cap(i.globals) > idx {
-					i.globals = i.globals[:idx+1]
-				} else {
-					global := make([]types.Boxed, idx*2)
-					copy(global, i.globals)
-					i.globals = global[:idx+1]
-				}
-			}
+			i.growGlobals(idx)
 			old := i.globals[idx]
 			if old != val {
 				i.retainBox(val)
@@ -414,7 +398,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		case types.KindI32:
 			if fused := c.fuseI32(func(i *Interpreter) int32 {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				return i.stack[addr].I32()
@@ -424,7 +408,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		case types.KindI64:
 			if fused := c.fuseI64(func(i *Interpreter) int64 {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				return i.unboxI64(i.stack[addr])
@@ -434,7 +418,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		case types.KindF32:
 			if fused := c.fuseF32(func(i *Interpreter) float32 {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				return i.stack[addr].F32()
@@ -444,7 +428,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		case types.KindF64:
 			if fused := c.fuseF64(func(i *Interpreter) float64 {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				return i.stack[addr].F64()
@@ -469,7 +453,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					panic(ErrStackOverflow)
 				}
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				i.stack[i.sp] = i.stack[addr]
@@ -482,7 +466,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -505,7 +489,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 						panic(ErrStackUnderflow)
 					}
 					addr := i.fr.bp + idx
-					if addr > i.sp {
+					if addr >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i.stack[addr] = i.stack[i.sp-1]
@@ -519,7 +503,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[i.sp-1]
@@ -545,7 +529,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 						panic(ErrStackUnderflow)
 					}
 					addr := i.fr.bp + idx
-					if addr > i.sp {
+					if addr >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i.stack[addr] = i.stack[i.sp-1]
@@ -558,7 +542,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[i.sp-1]
@@ -725,7 +709,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.REF_GET: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
-			i.stack[i.sp] = i.refGet()
+			val := i.refGet()
+			i.stack[i.sp] = val
 			i.sp++
 			i.fr.ip++
 		}
@@ -3248,6 +3233,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					panic(ErrStackUnderflow)
 				}
 				size := i.stack[i.sp-1].I32()
+				if size < 0 {
+					panic(ErrSegmentationFault)
+				}
 				val := make(types.TypedArray[bool], size)
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
 				i.fr.ip += 3
@@ -3258,6 +3246,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					panic(ErrStackUnderflow)
 				}
 				size := i.stack[i.sp-1].I32()
+				if size < 0 {
+					panic(ErrSegmentationFault)
+				}
 				val := make(types.TypedArray[int8], size)
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
 				i.fr.ip += 3
@@ -3268,6 +3259,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					panic(ErrStackUnderflow)
 				}
 				size := i.stack[i.sp-1].I32()
+				if size < 0 {
+					panic(ErrSegmentationFault)
+				}
 				val := make(types.TypedArray[int32], size)
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
 				i.fr.ip += 3
@@ -3278,6 +3272,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					panic(ErrStackUnderflow)
 				}
 				size := i.stack[i.sp-1].I32()
+				if size < 0 {
+					panic(ErrSegmentationFault)
+				}
 				val := make(types.TypedArray[int64], size)
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
 				i.fr.ip += 3
@@ -3288,6 +3285,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					panic(ErrStackUnderflow)
 				}
 				size := i.stack[i.sp-1].I32()
+				if size < 0 {
+					panic(ErrSegmentationFault)
+				}
 				val := make(types.TypedArray[float32], size)
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
 				i.fr.ip += 3
@@ -3298,6 +3298,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					panic(ErrStackUnderflow)
 				}
 				size := i.stack[i.sp-1].I32()
+				if size < 0 {
+					panic(ErrSegmentationFault)
+				}
 				val := make(types.TypedArray[float64], size)
 				i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
 				i.fr.ip += 3
@@ -3308,6 +3311,9 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 					panic(ErrStackUnderflow)
 				}
 				size := i.stack[i.sp-1].I32()
+				if size < 0 {
+					panic(ErrSegmentationFault)
+				}
 				val := &types.Array{
 					Typ:   typ,
 					Elems: make([]types.Boxed, size),
@@ -3349,7 +3355,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	instr.ARRAY_GET: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
-			i.stack[i.sp] = i.arrayGet()
+			val := i.arrayGet()
+			i.stack[i.sp] = val
 			i.sp++
 			i.fr.ip++
 		}
@@ -3807,16 +3814,20 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 		}
 		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
 			s := types.NewStruct(typ)
+			i.stack[i.sp] = types.BoxRef(i.alloc(s))
 			i.sp++
-			i.stack[i.sp-1] = types.BoxRef(i.alloc(s))
 			i.fr.ip += 3
 		}
 	},
 	instr.STRUCT_GET: func(c *threadedCompiler) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
-			i.stack[i.sp] = i.structGet()
+			val := i.structGet()
+			i.stack[i.sp] = val
 			i.sp++
 			i.fr.ip++
 		}
@@ -5235,12 +5246,6 @@ func (i *Interpreter) structGetAt(idx int) types.Boxed {
 	i.release(addr)
 	i.sp--
 	return val
-}
-
-func (i *Interpreter) i64Operands(lhs, rhs types.Boxed) (int64, int64) {
-	r := i.unboxI64(rhs)
-	l := i.unboxI64(lhs)
-	return l, r
 }
 
 // branchIf applies a fused comparison+BR_IF's branch decision: taken selects

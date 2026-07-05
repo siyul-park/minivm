@@ -190,6 +190,15 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	if opt.frame <= 0 {
 		opt.frame = 1
 	}
+	if opt.globals < 0 {
+		opt.globals = 0
+	}
+	if opt.stack <= 0 {
+		opt.stack = 1
+	}
+	if opt.heap < 0 {
+		opt.heap = 0
+	}
 	if opt.tick <= 0 {
 		opt.tick = 1
 	}
@@ -701,9 +710,6 @@ func (i *Interpreter) shared(addr int) error {
 		return nil
 	}
 
-	i.cache.mu.Lock()
-	defer i.cache.mu.Unlock()
-
 	compiler, err := newCompiler()
 	if err != nil {
 		i.local.AddMetric("vm_jit_errors_total", 1)
@@ -727,8 +733,6 @@ func (i *Interpreter) shared(addr int) error {
 		mod = &module{}
 	}
 	i.local.AddMetric("vm_jit_emits_total", float64(mod.emits))
-	i.local.AddMetric("vm_jit_links_total", float64(mod.links))
-	i.local.AddMetric("vm_jit_skips_total", float64(mod.skips))
 	i.local.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
 	var buf *asm.Buffer
 	if mod.emits > 0 {
@@ -746,8 +750,6 @@ func (i *Interpreter) shared(addr int) error {
 func (i *Interpreter) install(mod *module, account bool) {
 	if account {
 		i.local.AddMetric("vm_jit_emits_total", float64(mod.emits))
-		i.local.AddMetric("vm_jit_links_total", float64(mod.links))
-		i.local.AddMetric("vm_jit_skips_total", float64(mod.skips))
 		i.local.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
 	}
 	for a, callable := range mod.entries {
@@ -791,6 +793,21 @@ func (i *Interpreter) flush() {
 	if i.profiler != nil {
 		i.profiler.Flush(i.local)
 	}
+}
+
+func (i *Interpreter) growGlobals(idx int) {
+	if idx < len(i.globals) {
+		return
+	}
+	if cap(i.globals) > idx {
+		i.globals = i.globals[:idx+1]
+		return
+	}
+	newLen := idx + 1
+	newCap := max(newLen, cap(i.globals)*2, 1)
+	globals := make([]types.Boxed, newLen, newCap)
+	copy(globals, i.globals)
+	i.globals = globals
 }
 
 func (i *Interpreter) hot(addr int) []int {
@@ -1054,7 +1071,7 @@ func (i *Interpreter) exit(root anchor) {
 	if err != nil {
 		panic(err)
 	}
-	if hits != exitThreshold {
+	if hits < exitThreshold || hits%exitThreshold != 0 {
 		return
 	}
 	if i.cache != nil {
@@ -1348,7 +1365,10 @@ func (i *Interpreter) unboxI64(val types.Boxed) int64 {
 		return val.I64()
 	}
 	addr := val.Ref()
-	v, _ := i.heap[addr].(types.I64)
+	v, ok := i.heap[addr].(types.I64)
+	if !ok {
+		panic(ErrTypeMismatch)
+	}
 	i.release(addr)
 	return int64(v)
 }

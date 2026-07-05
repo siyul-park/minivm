@@ -156,6 +156,28 @@ func TestPool_Get(t *testing.T) {
 			require.NoError(t, err)
 		}
 	})
+
+	t.Run("rearms shared cache after missed side-exit threshold", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+		p := NewPool(prog, 1, WithThreshold(-1))
+		defer p.Close()
+		i, err := p.Get(context.Background())
+		require.NoError(t, err)
+		defer p.Put(i)
+		root := anchor{addr: 0, ip: 0}
+		target := branch{fn: 0, ip: 0}
+
+		for range exitThreshold*2 - 1 {
+			_, err := i.tracer.exit(i, root, target)
+			require.NoError(t, err)
+		}
+		p.cache.ready(0)
+		i.fr.ip = 0
+		i.exit(root)
+
+		require.Equal(t, cacheCold, p.cache.state[0].Load())
+		require.True(t, p.cache.due(0, 1))
+	})
 }
 
 func TestPool_Put(t *testing.T) {

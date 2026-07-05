@@ -597,7 +597,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -611,7 +611,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -625,7 +625,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -640,7 +640,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 					panic(ErrStackOverflow)
 				}
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				panic(ErrDivideByZero)
@@ -651,7 +651,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -666,7 +666,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 					panic(ErrStackOverflow)
 				}
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				panic(ErrDivideByZero)
@@ -677,7 +677,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -692,7 +692,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 					panic(ErrStackOverflow)
 				}
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				panic(ErrDivideByZero)
@@ -703,7 +703,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -718,7 +718,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 					panic(ErrStackOverflow)
 				}
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				panic(ErrDivideByZero)
@@ -729,7 +729,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -744,7 +744,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -759,7 +759,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -774,7 +774,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -789,7 +789,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr]
@@ -804,7 +804,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr]
@@ -819,7 +819,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr]
@@ -833,7 +833,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -847,7 +847,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -862,7 +862,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].I32()
@@ -874,7 +874,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -889,7 +889,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].I32()
@@ -901,7 +901,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -916,7 +916,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].I32()
@@ -928,7 +928,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -943,7 +943,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].I32()
@@ -955,7 +955,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -970,7 +970,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].I32()
@@ -982,7 +982,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -997,7 +997,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].I32()
@@ -1009,7 +1009,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -1024,7 +1024,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].I32()
@@ -1036,7 +1036,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -1051,7 +1051,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].I32()
@@ -1063,7 +1063,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -1078,7 +1078,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].I32()
@@ -1090,7 +1090,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -1105,7 +1105,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].I32()
@@ -1117,7 +1117,7 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].I32()
@@ -1148,7 +1148,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1164,7 +1164,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1180,7 +1180,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1197,7 +1197,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 					panic(ErrStackOverflow)
 				}
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				panic(ErrDivideByZero)
@@ -1208,7 +1208,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1225,7 +1225,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 					panic(ErrStackOverflow)
 				}
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				panic(ErrDivideByZero)
@@ -1236,7 +1236,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1253,7 +1253,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 					panic(ErrStackOverflow)
 				}
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				panic(ErrDivideByZero)
@@ -1264,7 +1264,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1281,7 +1281,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 					panic(ErrStackOverflow)
 				}
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				panic(ErrDivideByZero)
@@ -1292,7 +1292,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1309,7 +1309,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1326,7 +1326,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1343,7 +1343,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1359,7 +1359,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1375,7 +1375,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1391,7 +1391,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1407,7 +1407,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1423,7 +1423,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1442,7 +1442,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				val := i.stack[addr]
@@ -1456,7 +1456,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1475,7 +1475,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				val := i.stack[addr]
@@ -1489,7 +1489,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1508,7 +1508,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				val := i.stack[addr]
@@ -1522,7 +1522,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1541,7 +1541,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				val := i.stack[addr]
@@ -1555,7 +1555,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1574,7 +1574,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				val := i.stack[addr]
@@ -1588,7 +1588,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1607,7 +1607,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				val := i.stack[addr]
@@ -1621,7 +1621,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1640,7 +1640,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				val := i.stack[addr]
@@ -1654,7 +1654,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1673,7 +1673,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				val := i.stack[addr]
@@ -1687,7 +1687,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1706,7 +1706,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				val := i.stack[addr]
@@ -1720,7 +1720,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1739,7 +1739,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				val := i.stack[addr]
@@ -1753,7 +1753,7 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			val := i.stack[addr]
@@ -1783,7 +1783,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F32()
@@ -1797,7 +1797,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F32()
@@ -1811,7 +1811,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F32()
@@ -1826,7 +1826,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 					panic(ErrStackOverflow)
 				}
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				panic(ErrDivideByZero)
@@ -1837,7 +1837,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F32()
@@ -1852,7 +1852,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 					panic(ErrStackOverflow)
 				}
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				panic(ErrDivideByZero)
@@ -1863,7 +1863,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F32()
@@ -1878,7 +1878,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 					panic(ErrStackOverflow)
 				}
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				panic(ErrDivideByZero)
@@ -1889,7 +1889,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F32()
@@ -1903,7 +1903,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F32()
@@ -1917,7 +1917,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F32()
@@ -1931,7 +1931,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F32()
@@ -1946,7 +1946,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].F32()
@@ -1958,7 +1958,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F32()
@@ -1973,7 +1973,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].F32()
@@ -1985,7 +1985,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F32()
@@ -2000,7 +2000,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].F32()
@@ -2012,7 +2012,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F32()
@@ -2027,7 +2027,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].F32()
@@ -2039,7 +2039,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F32()
@@ -2054,7 +2054,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].F32()
@@ -2066,7 +2066,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F32()
@@ -2081,7 +2081,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].F32()
@@ -2093,7 +2093,7 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F32()
@@ -2121,7 +2121,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F64()
@@ -2135,7 +2135,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F64()
@@ -2149,7 +2149,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F64()
@@ -2164,7 +2164,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 					panic(ErrStackOverflow)
 				}
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				panic(ErrDivideByZero)
@@ -2175,7 +2175,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F64()
@@ -2190,7 +2190,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 					panic(ErrStackOverflow)
 				}
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				panic(ErrDivideByZero)
@@ -2201,7 +2201,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F64()
@@ -2216,7 +2216,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 					panic(ErrStackOverflow)
 				}
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				panic(ErrDivideByZero)
@@ -2227,7 +2227,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F64()
@@ -2241,7 +2241,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F64()
@@ -2255,7 +2255,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F64()
@@ -2269,7 +2269,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F64()
@@ -2284,7 +2284,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].F64()
@@ -2296,7 +2296,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F64()
@@ -2311,7 +2311,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].F64()
@@ -2323,7 +2323,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F64()
@@ -2338,7 +2338,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].F64()
@@ -2350,7 +2350,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F64()
@@ -2365,7 +2365,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].F64()
@@ -2377,7 +2377,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F64()
@@ -2392,7 +2392,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].F64()
@@ -2404,7 +2404,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F64()
@@ -2419,7 +2419,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 		if offset, ok := c.peekBrIf(c.ip + 1); ok {
 			return func(i *Interpreter) {
 				addr := i.fr.bp + idx
-				if addr > i.sp {
+				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
 				lhs := i.stack[addr].F64()
@@ -2431,7 +2431,7 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 				panic(ErrStackOverflow)
 			}
 			addr := i.fr.bp + idx
-			if addr > i.sp {
+			if addr >= i.sp {
 				panic(ErrSegmentationFault)
 			}
 			lhs := i.stack[addr].F64()

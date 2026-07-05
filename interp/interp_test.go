@@ -1386,6 +1386,94 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 0, i.rc[1])
 	})
 
+	t.Run("STRUCT_NEW_DEFAULT reports stack overflow before mutating sp", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.STRUCT_NEW_DEFAULT, 0),
+		}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32))))
+		i := New(prog, WithStack(1))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrStackOverflow)
+		require.Equal(t, 1, i.sp)
+	})
+
+	t.Run("LOCAL_GET rejects one-past-current local slot", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.DROP),
+			instr.New(instr.LOCAL_GET, 0),
+		}, program.WithLocals(types.TypeI32))
+		i := New(prog, WithTick(1))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+	})
+
+	t.Run("LOCAL_SET rejects one-past-current local slot", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.DROP),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.LOCAL_SET, 1),
+		}, program.WithLocals(types.TypeI32, types.TypeI32))
+		i := New(prog, WithTick(1))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+	})
+
+	t.Run("LOCAL_TEE rejects one-past-current local slot", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.DROP),
+			instr.New(instr.DROP),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.LOCAL_TEE, 1),
+		}, program.WithLocals(types.TypeI32, types.TypeI32))
+		i := New(prog, WithTick(1))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+	})
+
+	t.Run("fused LOCAL_GET rejects one-past-current local slot", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.DROP),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, i32operand(1)),
+			instr.New(instr.I32_ADD),
+		}, program.WithLocals(types.TypeI32))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+	})
+
+	t.Run("I64 local rejects non-I64 heap refs", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.REF_NEW),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I64_CONST, i64operand(1)),
+			instr.New(instr.I64_ADD),
+		}, program.WithLocals(types.TypeI64))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrTypeMismatch)
+	})
+
+	t.Run("ARRAY_NEW_DEFAULT rejects negative size with VM error", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, i32operand(-1)),
+			instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+		}, program.WithTypes(types.TypeI32Array))
+		i := New(prog)
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+	})
+
 	t.Run("ARRAY_FILL releases every overwritten ref element", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 1), // outer heap[1]
@@ -2427,39 +2515,108 @@ func TestWithFrame(t *testing.T) {
 }
 
 func TestWithGlobals(t *testing.T) {
-	prog := program.New([]instr.Instruction{
-		instr.New(instr.I32_CONST, 9), instr.New(instr.GLOBAL_SET, 5), instr.New(instr.GLOBAL_GET, 5),
-	})
-	i := New(prog, WithGlobals(1))
-	defer i.Close()
+	t.Run("initial capacity grows", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 9), instr.New(instr.GLOBAL_SET, 5), instr.New(instr.GLOBAL_GET, 5),
+		})
+		i := New(prog, WithGlobals(1))
+		defer i.Close()
 
-	require.NoError(t, i.Run(context.Background()))
-	v, err := i.Pop()
-	require.NoError(t, err)
-	require.Equal(t, types.I32(9), v)
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(9), v)
+	})
+
+	t.Run("zero capacity GLOBAL_SET grows slot zero", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 9), instr.New(instr.GLOBAL_SET, 0), instr.New(instr.GLOBAL_GET, 0),
+		})
+		i := New(prog, WithGlobals(0))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(9), v)
+	})
+
+	t.Run("zero capacity GLOBAL_TEE grows slot zero", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 9), instr.New(instr.GLOBAL_TEE, 0),
+		})
+		i := New(prog, WithGlobals(0))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(9), v)
+	})
+
+	t.Run("negative capacity normalizes to lazy growth", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 9), instr.New(instr.GLOBAL_SET, 0), instr.New(instr.GLOBAL_GET, 0),
+		})
+		i := New(prog, WithGlobals(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(9), v)
+	})
 }
 
 func TestWithStack(t *testing.T) {
-	prog := program.New([]instr.Instruction{
-		instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3),
-	})
-	i := New(prog, WithStack(2))
-	defer i.Close()
+	t.Run("reports overflow", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3),
+		})
+		i := New(prog, WithStack(2))
+		defer i.Close()
 
-	require.ErrorIs(t, i.Run(context.Background()), ErrStackOverflow)
+		require.ErrorIs(t, i.Run(context.Background()), ErrStackOverflow)
+	})
+
+	t.Run("zero normalizes to one slot", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+		})
+		i := New(prog, WithStack(0))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(1), v)
+	})
 }
 
 func TestWithHeap(t *testing.T) {
-	prog := program.New([]instr.Instruction{
-		instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
-		instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW),
-		instr.New(instr.I32_CONST, 3), instr.New(instr.REF_NEW),
-	})
-	i := New(prog, WithHeap(1))
-	defer i.Close()
+	t.Run("initial capacity grows", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
+			instr.New(instr.I32_CONST, 2), instr.New(instr.REF_NEW),
+			instr.New(instr.I32_CONST, 3), instr.New(instr.REF_NEW),
+		})
+		i := New(prog, WithHeap(1))
+		defer i.Close()
 
-	require.NoError(t, i.Run(context.Background()))
-	require.Equal(t, 3, i.Len())
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 3, i.Len())
+	})
+
+	t.Run("negative capacity normalizes", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
+		})
+		i := New(prog, WithHeap(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 1, i.Len())
+	})
 }
 
 func TestWithMaxHeap(t *testing.T) {

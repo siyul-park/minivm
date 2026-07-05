@@ -29,8 +29,6 @@ type module struct {
 	entries map[anchor]asm.Callable
 	loops   map[anchor]bool
 	emits   int
-	links   int
-	skips   int
 	bytes   int
 }
 
@@ -105,7 +103,6 @@ type activation struct {
 type pending struct {
 	label  asm.Label
 	ops    []step
-	tail   []step
 	values []value
 	frames []activation
 	hits   int64
@@ -289,7 +286,6 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 	mod.entries[a] = linked[0].Callable
 	mod.loops[a] = ctx.loop
 	mod.emits++
-	mod.links++
 	mod.bytes += len(code.Bytes)
 	return true, nil
 }
@@ -353,9 +349,9 @@ func (ctx *lowering) sp() int {
 	return f.base + len(f.kinds) + (len(ctx.values) - f.opBase)
 }
 
-// snapshot deep-copies the operand and frame state for a pending branch:
-// registers are dropped because the guard flushed everything to the VM stack,
-// so the branch body reloads on demand.
+// snapshot deep-copies operand and frame state for a pending branch. Callers
+// must flush VM stack homes before snapshot; re-entry reloads locals on demand,
+// so stale register/local loaded state must stay dropped.
 func (ctx *lowering) snapshot() ([]value, []activation) {
 	values := make([]value, len(ctx.values))
 	for i, v := range ctx.values {
@@ -371,7 +367,9 @@ func (ctx *lowering) snapshot() ([]value, []activation) {
 	return values, frames
 }
 
-// pre copies the operand stack for one guard fallback.
+// pre copies the operand stack for one guard fallback. saved may share backing
+// storage with values; mutating ops must remain terminal or avoid changing
+// symbolic values after aliasing.
 func (ctx *lowering) pre() []value {
 	ctx.saved = append(ctx.saved[:0], ctx.values...)
 	return ctx.saved
