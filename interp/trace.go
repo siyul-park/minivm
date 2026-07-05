@@ -9,8 +9,8 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// Tracer is the shared JIT front-end: it records hot linear traces that the
-// trace compiler consumes. One Tracer is shared across a pool so a trace
+// Tracer is the shared JIT front-end: it records hot traces that the trace
+// compiler consumes. One Tracer is shared across a pool so a trace
 // recorded by one member compiles once and serves all.
 type Tracer struct {
 	mu        sync.Mutex
@@ -77,8 +77,7 @@ type tree struct {
 }
 
 const (
-	linear outcome = iota
-	loop
+	loop outcome = iota + 1
 	returned
 	completed
 	aborted
@@ -154,7 +153,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		}
 	}
 
-	t := &trace{anchor: a, kind: linear}
+	t := &trace{anchor: a}
 	startFP := clone.fp
 	for len(t.ops) < opLimit {
 		f := clone.fr
@@ -188,8 +187,8 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 			r.store(a, t)
 			return t, nil
 		}
-		// YIELD/RESUME and exception-producing ops have side effects a linear
-		// trace cannot represent. In the anchor frame, record the op as the
+		// YIELD/RESUME and exception-producing ops have side effects a trace
+		// cannot represent. In the anchor frame, record the op as the
 		// terminal and store kind=returned WITHOUT stepping the clone; the JIT
 		// lowers this to an unconditional deopt so the threaded handler performs
 		// the real work. Abort rather than miscompile when the op sits in an
@@ -632,7 +631,7 @@ func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
 		return false
 	}
 	switch op {
-	// YIELD and RESUME suspend or rebuild a frame, so a linear trace cannot
+	// YIELD and RESUME suspend or rebuild a frame, so a trace cannot
 	// span them; capture records them as terminal deopt boundaries instead of
 	// aborting, and the JIT lowers each to an unconditional deopt that hands the
 	// real suspend/resume back to the threaded handler. CORO_DONE and
