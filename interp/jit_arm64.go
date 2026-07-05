@@ -14,11 +14,6 @@ import (
 // arm64Lowerer is the AArch64 JIT lowerer.
 type arm64Lowerer struct{}
 
-type valueWords struct {
-	itab uintptr
-	data uintptr
-}
-
 // Boxing masks used by scalar trace lowering.
 const (
 	maskI32 = uint64(0xFFFFFFFF)
@@ -57,19 +52,19 @@ const (
 var (
 	_ lowerer = arm64Lowerer{}
 
-	heapI32       = valueItab(types.I32(0))
-	heapF32       = valueItab(types.F32(0))
-	heapF64       = valueItab(types.F64(0))
-	heapArrayI1   = valueItab(types.TypedArray[bool](nil))
-	heapArrayI8   = valueItab(types.TypedArray[int8](nil))
-	heapArrayI32  = valueItab(types.TypedArray[int32](nil))
-	heapArrayI64  = valueItab(types.TypedArray[int64](nil))
-	heapArrayF32  = valueItab(types.TypedArray[float32](nil))
-	heapArrayF64  = valueItab(types.TypedArray[float64](nil))
-	heapArrayRef  = valueItab((*types.Array)(nil))
-	heapStruct    = valueItab((*types.Struct)(nil))
-	heapError     = valueItab((*types.Error)(nil))
-	heapCoroutine = valueItab((*Coroutine)(nil))
+	heapI32       = itab(types.I32(0))
+	heapF32       = itab(types.F32(0))
+	heapF64       = itab(types.F64(0))
+	heapArrayI1   = itab(types.TypedArray[bool](nil))
+	heapArrayI8   = itab(types.TypedArray[int8](nil))
+	heapArrayI32  = itab(types.TypedArray[int32](nil))
+	heapArrayI64  = itab(types.TypedArray[int64](nil))
+	heapArrayF32  = itab(types.TypedArray[float32](nil))
+	heapArrayF64  = itab(types.TypedArray[float64](nil))
+	heapArrayRef  = itab((*types.Array)(nil))
+	heapStruct    = itab((*types.Struct)(nil))
+	heapError     = itab((*types.Error)(nil))
+	heapCoroutine = itab((*Coroutine)(nil))
 )
 
 func newCompiler() (*compiler, error) {
@@ -3405,8 +3400,4 @@ func (l arm64Lowerer) zero32(ctx *lowering, v asm.VReg) asm.VReg {
 
 func (arm64Lowerer) narrow32(v asm.VReg) asm.VReg {
 	return asm.NewVReg(v.ID(), v.Type(), asm.Width32)
-}
-
-func valueItab(v types.Value) uintptr {
-	return (*valueWords)(unsafe.Pointer(&v)).itab
 }

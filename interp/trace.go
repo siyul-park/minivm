@@ -40,6 +40,11 @@ type shape struct {
 	typ  uintptr
 }
 
+type iface struct {
+	itab uintptr
+	_    uintptr
+}
+
 type outcome int
 
 type step struct {
@@ -391,7 +396,7 @@ func (r *Tracer) shape(i *Interpreter, v types.Boxed) shape {
 	if val == nil {
 		return shape{}
 	}
-	out := shape{itab: valueItab(val)}
+	out := shape{itab: itab(val)}
 	if s, ok := val.(*types.Struct); ok && s.Typ != nil {
 		out.typ = uintptr(unsafe.Pointer(s.Typ))
 	}
@@ -680,4 +685,8 @@ func (t *tree) branchIPs() map[branch]leg {
 		}
 	}
 	return out
+}
+
+func itab(v types.Value) uintptr {
+	return (*iface)(unsafe.Pointer(&v)).itab
 }
