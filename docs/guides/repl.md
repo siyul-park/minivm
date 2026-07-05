@@ -1,6 +1,12 @@
 # Guide: REPL
 
-Interactive assembly REPL for MiniVM bytecode interpreter.
+Interactive assembly REPL for minivm bytecode programs.
+
+## When to Read
+
+Use this guide when working with the command-line REPL, assembly files, bytecode debugging, or saved program text.
+
+For the debugger API, see `docs/debugging.md`. For opcode syntax and semantics, see `docs/instruction-set.md`.
 
 ## Running
 
@@ -9,13 +15,15 @@ Interactive assembly REPL for MiniVM bytecode interpreter.
 ./dist/minivm run <file>       # execute an assembly file and print the final stack
 ```
 
-`run` accepts files written in the same format `.show` (and `.save`) emit — code lines optionally prefixed with `NNNN:\t`, followed by `.const`-style function blocks, followed by single-line type descriptors. The exit status is 0 on success and 1 on open/parse/runtime errors (diagnostics go to stderr).
+`run` accepts the same text format emitted by `.show` and `.save`: instructions, optional `NNNN:\t` byte-offset prefixes, `.const` function blocks, and type descriptors.
+
+Exit status is `0` on success and `1` on file, parse, verification, or runtime errors. Diagnostics are written to stderr.
 
 ## Basic Usage
 
-Enter assembly instructions one per line. Each instruction executes immediately and current stack is printed after each step.
+Enter one assembly instruction per line. The REPL executes the accumulated program and prints the current stack after each step.
 
-```
+```text
 > i32.const 42
 42
 > i32.const 8
@@ -28,25 +36,27 @@ Enter assembly instructions one per line. Each instruction executes immediately 
 
 | Command | Description |
 |---|---|
-| `.const` | Declare a function constant (multi-line, end with blank line) |
-| `.type` | Declare type descriptors (multi-line, end with blank line) |
+| `.const` | Declare a function constant; end the block with a blank line |
+| `.type` | Declare type descriptors; end the block with a blank line |
 | `.show` | Disassemble the accumulated program |
-| `.profile` | Re-execute with profiling and print function/IP/opcode samples |
-| `.load <file>` | Replace REPL state with the program parsed from `<file>` |
-| `.save <file>` | Write the current program to `<file>` in `Program.String()` format |
-| `.reset` | Clear all instructions, constants, types, and breakpoints |
+| `.profile` | Re-execute with profiling and print function, IP, opcode, and metric samples |
+| `.load <file>` | Replace REPL state with the parsed file |
+| `.save <file>` | Write the current program in `Program.String()` format |
+| `.reset` | Clear instructions, constants, types, and breakpoints |
 | `.help` | Show help |
 | `.quit` / `.exit` | Exit the REPL |
 
-`.save` followed by `.load` round-trips the session through a file. `.load` replaces state rather than merging — merging would require renumbering instruction-embedded constant and type indices, which is out of scope. `.save` refuses programs that contain host-typed constants (`*interp.HostFunction`, `*interp.HostObject`) because those values have no textual representation.
+`.load` replaces state rather than merging it. Merging would require renumbering constant and type indexes embedded in instructions.
+
+`.save` refuses programs with host-only constants such as `*interp.HostFunction` or `*interp.HostObject`, because those values have no textual representation.
 
 ## Debugging
 
-REPL integrates `interp.Debugger` for GDB-style bytecode-level debugging. Breakpoints persist across `.debug` sessions; `.reset` clears them.
+The REPL integrates `interp.Debugger` for bytecode-level debugging. Breakpoints persist across `.debug` sessions; `.reset` clears them.
 
-### Setting Breakpoints
+### Breakpoints
 
-```
+```text
 > .break 5          set breakpoint at func=0, ip=5
 > .break 1:10       set breakpoint at func=1, ip=10
 > .breaks           list all breakpoints
@@ -55,13 +65,13 @@ REPL integrates `interp.Debugger` for GDB-style bytecode-level debugging. Breakp
 > .disable 1        disable breakpoint 1
 ```
 
-Breakpoint offsets match byte offsets shown by `.show`.
+Breakpoint offsets are byte offsets, matching `.show` output.
 
-### Starting a Debug Session
+### Debug Session
 
-`.debug` runs accumulated program under debugger. Execution always stops at first instruction (step mode), regardless of breakpoints.
+`.debug` runs the accumulated program under the debugger. Execution starts in step mode and stops before the first instruction, regardless of breakpoints.
 
-```
+```text
 > i32.const 42
 42
 > i32.const 8
@@ -78,50 +88,52 @@ debug> continue
 42 8
 ```
 
-### Debug Sub-loop Commands
+### Debug Commands
 
 | Command | Shorthand | Effect |
 |---|---|---|
 | `step` | `s` | Execute one instruction, entering calls |
 | `next` | `n` | Execute one instruction, stepping over calls |
-| `finish` | `f` | Run until current frame returns |
-| `continue` | `c` | Run until next breakpoint or program end |
+| `finish` | `f` | Run until the current frame returns |
+| `continue` | `c` | Run until the next breakpoint or program end |
 | `stack` | | Print the operand stack |
-| `locals` | | Print local variables of the current frame |
-| `globals` | | Print all global variables |
+| `locals` | | Print current-frame locals |
+| `globals` | | Print globals |
 | `frames` | | Print the call stack |
-| `breaks` | | List all breakpoints |
-| `break <spec>` | `b` | Add a breakpoint (also persists to REPL) |
+| `breaks` | | List breakpoints |
+| `break <spec>` | `b` | Add a breakpoint that also persists to the REPL |
 | `clear <id>` | | Remove a breakpoint |
 | `quit` / `q` | | Exit the debug session |
 
-Empty line re-prints current stopped location.
+An empty line reprints the current stopped location.
 
-### Inspection
+All stops occur before the displayed instruction executes. The displayed IP is the byte offset of the next instruction.
 
-All stops occur **before** indicated instruction executes. Displayed ip is bytecode offset of next instruction to run.
+`frames` marks the innermost frame with `>`.
 
-`locals` and `globals` iterate until out-of-range index reached (no explicit count needed).
-
-`frames` prints full call stack with `>` marking innermost frame:
-
-```
+```text
 debug> frames
 > frame[0] func=0 ip=0005
   frame[1] func=1 ip=0012
 ```
 
-### JIT and Precision
+## JIT and Precision
 
-`.debug` automatically disables JIT and sets tick=1 (via `interp.WithDebugger`), preserving exact bytecode instruction boundaries for step-level control.
+`.debug` installs `interp.WithDebugger`, which disables JIT and sets `WithTick(1)`. This preserves exact bytecode instruction boundaries for stepping.
 
 ## Branch Syntax
 
-Both relative and absolute branch targets are accepted:
+Both relative and absolute branch targets are accepted.
 
-```
+```text
 br 10           relative offset from instruction end
 br @0x0010      absolute byte offset in accumulated program
 ```
 
-`.show` output uses absolute offsets; REPL normalizes them to relative on input.
+`.show` prints absolute byte offsets. The REPL normalizes absolute branch input to relative offsets.
+
+## Related Docs
+
+- `docs/debugging.md` — debugger API and precision model
+- `docs/instruction-set.md` — opcode semantics and branch-offset rules
+- `docs/profile.md` — `.profile` output and sampling behavior
