@@ -134,9 +134,9 @@ func WithProfiler(p *prof.Profiler) func(*option) {
 	return func(o *option) { o.profiler = p }
 }
 
-// withLocal injects a pre-seeded sample collector. Tests use it to drive hot-IP
+// WithLocal injects a pre-seeded sample collector. Tests use it to drive hot-IP
 // selection and to read JIT counters back after a run.
-func withLocal(p *prof.Collector) func(*option) {
+func WithLocal(p *prof.Collector) func(*option) {
 	return func(o *option) { o.local = p }
 }
 
@@ -795,7 +795,7 @@ func (i *Interpreter) flush() {
 	}
 }
 
-func (i *Interpreter) growGlobals(idx int) {
+func (i *Interpreter) ensure(idx int) {
 	if idx < len(i.globals) {
 		return
 	}
@@ -808,14 +808,6 @@ func (i *Interpreter) growGlobals(idx int) {
 	globals := make([]types.Boxed, newLen, newCap)
 	copy(globals, i.globals)
 	i.globals = globals
-}
-
-func (i *Interpreter) hot(addr int) []int {
-	ips := i.local.IPs(addr)
-	if len(ips) == 0 {
-		return i.tracer.anchors(addr)
-	}
-	return ips
 }
 
 // function returns the *types.Function at addr in the heap, or false if

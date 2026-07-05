@@ -363,7 +363,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			val := i.stack[i.sp-1]
-			i.growGlobals(idx)
+			i.ensure(idx)
 			old := i.globals[idx]
 			if old != val {
 				i.releaseBox(old)
@@ -381,7 +381,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 				panic(ErrStackUnderflow)
 			}
 			val := i.stack[i.sp-1]
-			i.growGlobals(idx)
+			i.ensure(idx)
 			old := i.globals[idx]
 			if old != val {
 				i.retainBox(val)
