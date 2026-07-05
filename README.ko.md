@@ -9,13 +9,13 @@
 
 **어디에나 손쉽게 내장하는 빠른 바이트코드 VM.**
 
-minivm은 Go 프로그램 안에서 작은 바이트코드 프로그램을 실행하고, 호스트 함수를 호출하며, 스택/힙/fuel/hook 제한 아래에서 동작합니다. 시작은 빠른 스레디드 인터프리터, 핫 함수와 루프는 트레이스 JIT가 네이티브 ARM64 코드로 자동 컴파일합니다.
+minivm은 Go 프로그램 안에서 작은 바이트코드 프로그램을 실행하고, 호스트 함수를 호출하며, 스택/힙/fuel/hook 제한 아래에서 동작합니다. 시작은 빠른 스레디드 인터프리터, 핫 함수와 루프는 트레이스 JIT가 네이티브 ARM64 코드로 자동 컴파일합니다. 전체 문서 지도는 [`docs/README.md`](docs/README.md)에서 시작하세요. 패키지 흐름은 [`docs/architecture.md`](docs/architecture.md), 플랫폼 지원은 [`docs/compatibility.md`](docs/compatibility.md)에 정리되어 있습니다.
 
 ```bash
 go get github.com/siyul-park/minivm
 ```
 
-> Go 1.26.2 이상. VM 코어는 Go 표준 라이브러리만 사용합니다.
+> Go 1.26.2 이상. VM 코어는 Go 표준 라이브러리만 사용합니다. 지원 플랫폼과 CGO 관련 사항은 [`docs/compatibility.md`](docs/compatibility.md)를 참고하세요.
 
 ## 왜 minivm인가
 
@@ -27,12 +27,16 @@ go get github.com/siyul-park/minivm
 | JIT 전에도 빠른 실행 | 클로저 기반 스레디드 디스패치와 재귀 워크로드에서 거의 0에 가까운 할당 |
 | 필요한 곳만 네이티브 속도 | 핫 함수와 루프를 위한 적응형 ARM64 트레이스 JIT |
 
+세부 설명의 소유 문서는 실행 흐름의 [`docs/architecture.md`](docs/architecture.md), Go 경계의 [`docs/host-integration.md`](docs/host-integration.md), 힙 소유권의 [`docs/memory-model.md`](docs/memory-model.md), 네이티브 lowering의 [`docs/jit-internals.md`](docs/jit-internals.md)입니다.
+
 ## 만들 수 있는 것
 
 - **스크립팅 엔진** — 사용자 정의 로직을 호스트 정책 아래에서 실행
 - **룰 엔진** — 재배포 없이 런타임에 복잡한 조건을 평가
 - **DSL 런타임** — 검증된 VM 위에 도메인 특화 명령어 셋을 정의
 - **플러그인 시스템** — GC가 관리하는 격리 환경에서 바이트코드를 실행
+
+임베딩 패턴, 호스트 호출 계약, 값 변환 규칙은 [`docs/host-integration.md`](docs/host-integration.md)를 참고하세요. 패키지 경계와 인터프리터 파이프라인은 [`docs/architecture.md`](docs/architecture.md)에 있습니다.
 
 ## 성능
 
@@ -62,7 +66,7 @@ minivm의 JIT는 트레이스 기반입니다. 함수 진입점이나 루프 헤
 | 호스트 함수 호출 | ~18 |
 | 배열 / 구조체 연산 | ~30–44 |
 
-전체 측정 결과: [`docs/benchmarks.md`](docs/benchmarks.md)
+전체 결과와 측정 방법은 [`docs/benchmarks.md`](docs/benchmarks.md)에 있습니다. 트레이스 컴파일 세부 사항은 [`docs/jit-internals.md`](docs/jit-internals.md), NaN-boxing과 값 레이아웃은 [`docs/value-representation.md`](docs/value-representation.md)를 참고하세요.
 
 ## 사용법
 
@@ -84,6 +88,8 @@ if err := vm.Run(context.Background()); err != nil {
 
 result, _ := vm.Pop() // types.I32(42)
 ```
+
+명령어 인코딩, 스택 효과, opcode별 JIT 현황은 [`docs/instruction-set.md`](docs/instruction-set.md)에 있습니다. 신뢰할 수 없는 프로그램의 검증 규칙은 [`docs/verification.md`](docs/verification.md)를 참고하세요.
 
 ### 바이트코드에서 Go 함수 호출
 
@@ -112,7 +118,7 @@ prog := program.New(
 )
 ```
 
-파라미터는 타입 안전한 `[]Boxed`로 전달됩니다. 리플렉션이나 `interface{}` 박싱은 없습니다.
+파라미터는 타입 안전한 `[]Boxed`로 전달됩니다. 리플렉션이나 `interface{}` 박싱은 없습니다. 호스트 경계, `Marshal` / `Unmarshal`, 힙 ref 소유권은 [`docs/host-integration.md`](docs/host-integration.md)에 정리되어 있습니다.
 
 ### 함수 정의
 
@@ -140,6 +146,8 @@ factorial := types.NewFunctionBuilder(&types.FunctionType{
 ).Build()
 ```
 
+함수, 클로저, 로컬, 상수, 분기, 호출 동작은 [`docs/instruction-set.md`](docs/instruction-set.md)가 소유합니다. 패키지 수준 실행 흐름은 [`docs/architecture.md`](docs/architecture.md)를 참고하세요.
+
 ### 신뢰할 수 없는 바이트코드 검증
 
 외부에서 생성했거나 신뢰할 수 없는 바이트코드는 인터프리터를 만들기 전에 검증하세요:
@@ -165,7 +173,7 @@ prog, err := optimize.NewOptimizer(optimize.O1).Optimize(prog)
 - **상수 폴딩** — `I32_CONST 3, I32_CONST 4, I32_ADD` → `I32_CONST 7`
 - **상수 중복 제거** — 동일한 값은 하나의 슬롯으로 통합
 
-대수 단순화와 데드 코드 제거까지 원하면 `O2`, 블록 사이 전역 값 번호화까지 원하면 `O3`를 사용하세요.
+대수 단순화와 데드 코드 제거까지 원하면 `O2`, 블록 사이 전역 값 번호화까지 원하면 `O3`를 사용하세요. 패스 매니저, 분석 소유권, optimizer level은 [`docs/pass-system.md`](docs/pass-system.md)에 있습니다.
 
 ## JIT 동작 방식
 
@@ -191,6 +199,8 @@ JIT는 **트레이스 기반**입니다. 함수 진입점이나 루프 헤더가
 
 커버리지는 i32/i64/f32/f64 산술·비트·비교·변환(좁은 i1/i8 종류는 i32 표현을 공유해 i32와 함께 네이티브로 계산되며, width-closed 비트 연산에서 종류가 보존됩니다), 스택 연산·로컬·글로벌·업밸류·상수·`select`·분기, 직접/클로저/가드 간접 호출, 읽기 전용 힙 빠른 경로(`array.get/len`, `struct.get`, `error.get`, ref 읽기), 그리고 **루프**까지 포함합니다. 핫 루프는 본문을 레지스터에 유지한 채 네이티브 back-edge를 돌며 매 반복 사이에 세이프포인트를 폴링합니다. 할당·변형·호스트 호출·`error.new`·`error.code`·`throw`는 트레이스를 끝내고 인터프리터가 담당합니다. 스레디드 인터프리터는 스위치 테이블 대신 클로저 디스패치를 써서 JIT 전에도 충분히 빠릅니다.
 
+전체 trace lifecycle, lowering 계약, journal fallback, backend 책임은 [`docs/jit-internals.md`](docs/jit-internals.md)에 있습니다. 카운터와 스냅샷은 [`docs/profile.md`](docs/profile.md), backend 가용성은 [`docs/compatibility.md`](docs/compatibility.md)를 참고하세요.
+
 ## 명령어 셋
 
 WebAssembly를 참고한 커스텀 명령어 셋입니다. opcode는 1바이트, 피연산자는 고정 폭 또는 길이 접두사 형식입니다.
@@ -211,7 +221,7 @@ WebAssembly를 참고한 커스텀 명령어 셋입니다. opcode는 1바이트,
 | 클로저 | `CLOSURE_NEW` |
 | 에러 | `THROW` `ERROR_NEW` `ERROR_GET` `ERROR_CODE` |
 
-전체 opcode 참조, 스택 효과, 피연산자 폭, JIT 지원 현황은 [`docs/instruction-set.md`](docs/instruction-set.md)를 참고하세요.
+전체 opcode 참조, 스택 효과, 피연산자 폭, ARM64/AMD64 JIT 지원 현황은 [`docs/instruction-set.md`](docs/instruction-set.md)를 참고하세요.
 
 ## 옵션
 
@@ -229,11 +239,9 @@ vm := interp.New(prog,
 )
 ```
 
-`WithTick`은 프로파일 샘플, context 취소 확인, hook 호출 주기, fuel 소비를 함께 제어합니다. `WithFuel(0)`은 무제한이며, 0이 아닌 값은 내부에서 가장 가까운 tick 간격으로 올림합니다. Hook은 `Run` 고루틴에서 동기적으로 실행됩니다.
+`WithTick`은 프로파일 샘플, context 취소 확인, hook 호출 주기, fuel 소비를 함께 제어합니다. `WithFuel(0)`은 무제한이며, 0이 아닌 값은 내부에서 가장 가까운 tick 간격으로 올림합니다. Hook은 `Run` 고루틴에서 동기적으로 실행됩니다. 런타임 제한과 힙 소유권은 [`docs/memory-model.md`](docs/memory-model.md), 프로파일링 주기와 JIT 카운터는 [`docs/profile.md`](docs/profile.md)에 있습니다.
 
 바이트코드 단위 디버깅(중단점, `Step`, `Next`, `Finish`)은 `NewDebugger` + `WithDebugger`를 사용하세요. JIT는 비활성화됩니다. 자세한 내용: [`docs/debugging.md`](docs/debugging.md).
-
-프로파일 스냅샷과 JIT 카운터는 [`docs/profile.md`](docs/profile.md)를 참고하세요.
 
 ## 구현 현황
 
@@ -245,7 +253,7 @@ vm := interp.New(prog,
 | ARM64 트레이스 JIT — 호출, 업밸류, 레퍼런스, 힙 읽기, 루프 | ✅ |
 | x86-64 JIT | 🔲 계획 중 (`asm/amd64`는 아직 코드를 내보내지 않는 placeholder) |
 
-로드맵: [docs/roadmap.md](docs/roadmap.md)
+플랫폼/backend matrix는 [`docs/compatibility.md`](docs/compatibility.md), 우선순위와 향후 방향은 [`docs/roadmap.md`](docs/roadmap.md)를 참고하세요.
 
 ## 라이선스
 
