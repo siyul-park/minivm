@@ -39,15 +39,16 @@ type Interpreter struct {
 	module    *types.Function
 	dynamic   map[int]bool
 
-	frames      []frame
-	fr          *frame
-	stack       []types.Boxed
-	roots       []types.Boxed
-	heap        []types.Value
-	interned    map[string]types.Ref
-	free        []int
-	rc          []int
-	refsScratch []types.Ref
+	frames   []frame
+	fr       *frame
+	stack    []types.Boxed
+	roots    []types.Boxed
+	heap     []types.Value
+	hbase    int
+	interned map[string]types.Ref
+	free     []int
+	rc       []int
+	refbuf   []types.Ref
 
 	fp  int
 	sp  int
@@ -58,7 +59,6 @@ type Interpreter struct {
 	tick      int
 	fuel      int64
 	limit     int
-	baseHeap  int
 }
 
 type frame struct {
@@ -280,7 +280,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		i.constants[j] = val
 	}
 
-	i.baseHeap = len(i.heap)
+	i.hbase = len(i.heap)
 
 	c := &threadedCompiler{
 		types:     i.types,
@@ -643,9 +643,9 @@ func (i *Interpreter) Reset() {
 	i.roots = i.roots[:0]
 	clear(i.interned)
 
-	i.heap = i.heap[:i.baseHeap]
-	i.rc = i.rc[:i.baseHeap]
-	for j := 0; j < i.baseHeap; j++ {
+	i.heap = i.heap[:i.hbase]
+	i.rc = i.rc[:i.hbase]
+	for j := 0; j < i.hbase; j++ {
 		i.rc[j] = 1
 	}
 	i.free = i.free[:0]
@@ -1649,8 +1649,8 @@ func (i *Interpreter) refs(v types.Value) []types.Ref {
 	if !ok {
 		return nil
 	}
-	i.refsScratch = t.Refs(i.refsScratch[:0])
-	return i.refsScratch
+	i.refbuf = t.Refs(i.refbuf[:0])
+	return i.refbuf
 }
 
 // reclaim finalizes slot addr holding v: it drops interned-string and

@@ -2289,12 +2289,12 @@ func TestInterpreter_Reset(t *testing.T) {
 		i := New(prog)
 		defer i.Close()
 
-		require.Equal(t, i.baseHeap, len(i.heap))
+		require.Equal(t, i.hbase, len(i.heap))
 		require.NoError(t, i.Push(types.String("temporary")))
-		require.Greater(t, len(i.heap), i.baseHeap)
+		require.Greater(t, len(i.heap), i.hbase)
 
 		i.Reset()
-		require.Equal(t, i.baseHeap, len(i.heap))
+		require.Equal(t, i.hbase, len(i.heap))
 		require.Equal(t, 0, i.sp)
 	})
 }
