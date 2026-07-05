@@ -19,7 +19,7 @@ For REPL command usage, see `docs/guides/repl.md`.
 
 ## Summary
 
-The debugger provides precise bytecode-level control over interpreter execution.
+The debugger provides exact bytecode-level control over interpreter execution.
 
 Use it for:
 
@@ -59,7 +59,7 @@ for {
 }
 ```
 
-`WithDebugger` applies the runtime settings required for precise debugging:
+`WithDebugger` applies the runtime settings required for exact debugging:
 
 - installs the debugger hook
 - sets `WithTick(1)`

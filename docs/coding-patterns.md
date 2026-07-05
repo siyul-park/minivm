@@ -121,6 +121,10 @@ Public APIs should make the common path obvious and keep advanced behavior expli
 
 Prefer options for rare configuration and direct arguments for required behavior.
 
+Functional options may be declared immediately before the constructor they
+configure. This keeps read order aligned with call sites such as
+`interp.New(prog, interp.WithTick(1))`.
+
 Keep builders focused. A builder should construct one thing, validate inputs near construction, and avoid becoming a general mutable configuration store.
 
 Do not expose internal representation unless callers have a stable reason to depend on it.

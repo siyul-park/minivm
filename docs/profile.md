@@ -12,7 +12,7 @@ For trace compiler internals, see `docs/jit-internals.md`.
 
 | Concern | File or API |
 |---|---|
-| profiler implementation | `interp.Tracer` |
+| profiler implementation | `prof` package |
 | runtime sampling | `interp.Run` |
 | tick option | `interp.WithTick` |
 | hotness threshold option | `interp.WithThreshold` |
@@ -52,41 +52,57 @@ Lower tick values produce denser samples but add more overhead.
 
 Compiled loops do not pass through the normal interpreter tick on every bytecode instruction.
 
-Instead, loops use a safepoint at back-edges. Every `tick` back-edges, the loop returns to the interpreter coordination path for context checks, fuel checks, hook calls, and profile samples.
+Instead, loops use a fixed back-edge budget before returning to the interpreter coordination path for context checks, fuel checks, hook calls, and profile samples.
 
 For compiled loops, cadence is counted in back-edges, not bytecode instructions. This keeps cancellation and fuel bounded, but approximate.
 
 ## Library API
 
 ```go
-tracer := interp.NewTracer()
+p := prof.New()
 
-vm := interp.New(prog, interp.WithTracer(tracer))
-defer vm.Close()
+vm := interp.New(prog, interp.WithProfiler(p))
 
 if err := vm.Run(ctx); err != nil {
     return err
 }
 
-snap := vm.Profile()
-shared := tracer.Profile()
+if err := vm.Close(); err != nil {
+    return err
+}
+metrics := p.Metrics()
 ```
 
 For pooled execution:
 
 ```go
-profile := pool.Profile()
+p := prof.New()
+pool := interp.NewPool(prog, 4, interp.WithProfiler(p))
+
+vm, err := pool.Get(ctx)
+if err != nil {
+    return err
+}
+err = vm.Run(ctx)
+pool.Put(vm)
+if err != nil {
+    return err
+}
+if err := pool.Close(); err != nil {
+    return err
+}
+metrics := p.Metrics()
 ```
 
-`NewPool` creates one shared `Tracer` for all pool members. `Put` and `Close` flush member-local samples into the shared tracer.
+`WithProfiler` attaches a shared profiler. `Interpreter.Close`, `Pool.Put`, and `Pool.Close` flush member-local samples into it.
 
 ## Reporting API
 
-| Method | Use |
+| API | Use |
 |---|---|
-| `Interpreter.Profile()` | shared aggregate plus this interpreter's unflushed local samples |
-| `Pool.Profile()` | shared aggregate for flushed pool members |
-| `Tracer.Profile()` | shared aggregate for a manually shared tracer |
+| `interp.WithProfiler(p)` | attach a profiler to one interpreter or pool |
+| `prof.Profiler.Metrics()` | read flushed aggregate samples and counters |
+| `prof.Collector.Metrics()` | read a collector directly, mainly for tests and internal plumbing |
 
 Reported data includes total samples, function samples, instruction pointer samples, opcode samples, and named metrics.
 

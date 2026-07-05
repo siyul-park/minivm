@@ -9,7 +9,7 @@ import (
 
 // fuseRefImm tries to fuse a constant ref load with the following instruction.
 // Returns nil if no fusion pattern applies.
-func (c *threadedCompiler) fuseRefImm(addr int, size int) func(*Interpreter) {
+func (c *threader) fuseRefImm(addr int, size int) func(*Interpreter) {
 	switch v := c.heap[addr].(type) {
 	case types.I64:
 		if fused := c.fuseI64Imm(int64(v), size); fused != nil {
@@ -28,34 +28,13 @@ func (c *threadedCompiler) fuseRefImm(addr int, size int) func(*Interpreter) {
 			return fused
 		}
 	}
-	if c.precise || c.ip >= len(c.code) {
-		return nil
-	}
-	if instr.Opcode(c.code[c.ip]) == instr.REF_GET {
-		switch c.heap[addr].(type) {
-		case types.I32, types.I64, types.F32, types.F64:
-			return func(i *Interpreter) {
-				if i.sp == len(i.stack) {
-					panic(ErrStackOverflow)
-				}
-				switch i.heap[addr].(type) {
-				case types.I32, types.I64, types.F32, types.F64:
-				default:
-					panic(ErrTypeMismatch)
-				}
-				i.stack[i.sp] = i.box(i.heap[addr])
-				i.sp++
-				i.fr.ip += size + 1
-			}
-		}
-	}
 	return nil
 }
 
 // fuseFunction tries to fuse a function ref load with a following CALL.
 // Returns nil if no fusion pattern applies.
-func (c *threadedCompiler) fuseFunction(fn *types.Function, addr int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseFunction(fn *types.Function, addr int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -180,8 +159,8 @@ func (c *threadedCompiler) fuseFunction(fn *types.Function, addr int) func(*Inte
 	return nil
 }
 
-func (c *threadedCompiler) fuseClosure(fn *types.Closure, addr int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseClosure(fn *types.Closure, addr int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -294,99 +273,29 @@ func (c *threadedCompiler) fuseClosure(fn *types.Closure, addr int) func(*Interp
 	return nil
 }
 
-func (c *threadedCompiler) fuseHostFunction(fn *HostFunction, size int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseHostFunction(fn *HostFunction, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	params := len(fn.Typ.Params)
 	returns := len(fn.Typ.Returns)
-	delta := returns - params
-	// A param whose declared kind can never be a heap ref (I32/I1/I8/F32/F64,
-	// via Repr()) needs no cleanup scan; I64 is excluded because it can be
-	// promoted to a ref when out of the boxable range. An all-scalar signature
-	// skips the scan entirely instead of calling releaseArgs.
-	scalar := true
+	refs := false
 	for _, p := range fn.Typ.Params {
 		switch p.Kind().Repr() {
 		case types.KindI32, types.KindF32, types.KindF64:
 		default:
-			scalar = false
+			refs = true
 		}
 	}
 	switch instr.Opcode(c.code[c.ip]) {
 	case instr.CALL:
-		if scalar {
-			return func(i *Interpreter) {
-				if i.sp < params {
-					panic(ErrStackUnderflow)
-				}
-				if i.sp+delta > len(i.stack) {
-					panic(ErrStackOverflow)
-				}
-				args := i.stack[i.sp-params : i.sp]
-				rets, err := fn.Fn(i, args)
-				if err != nil {
-					panic(err)
-				}
-				i.sp += delta
-				copy(i.stack[i.sp-returns:i.sp], rets)
-				i.fr.ip += size + 1
-			}
-		}
 		return func(i *Interpreter) {
-			if i.sp < params {
-				panic(ErrStackUnderflow)
-			}
-			if i.sp+delta > len(i.stack) {
-				panic(ErrStackOverflow)
-			}
-			args := i.stack[i.sp-params : i.sp]
-			rets, err := fn.Fn(i, args)
-			if err != nil {
-				panic(err)
-			}
-			i.releaseArgs(args, rets)
-			i.sp += delta
-			copy(i.stack[i.sp-returns:i.sp], rets)
+			i.callHostDirect(fn, params, returns, refs)
 			i.fr.ip += size + 1
 		}
 	case instr.RETURN_CALL:
-		if scalar {
-			return func(i *Interpreter) {
-				if i.sp < params {
-					panic(ErrStackUnderflow)
-				}
-				if i.sp+delta > len(i.stack) {
-					panic(ErrStackOverflow)
-				}
-				args := i.stack[i.sp-params : i.sp]
-				rets, err := fn.Fn(i, args)
-				if err != nil {
-					panic(err)
-				}
-				i.sp += delta
-				copy(i.stack[i.sp-returns:i.sp], rets)
-				i.fr.ip += size + 1
-				if i.fp > 1 {
-					i.ret()
-				}
-			}
-		}
 		return func(i *Interpreter) {
-			if i.sp < params {
-				panic(ErrStackUnderflow)
-			}
-			if i.sp+delta > len(i.stack) {
-				panic(ErrStackOverflow)
-			}
-			args := i.stack[i.sp-params : i.sp]
-			rets, err := fn.Fn(i, args)
-			if err != nil {
-				panic(err)
-			}
-			i.releaseArgs(args, rets)
-			i.sp += delta
-			copy(i.stack[i.sp-returns:i.sp], rets)
+			i.callHostDirect(fn, params, returns, refs)
 			i.fr.ip += size + 1
 			if i.fp > 1 {
 				i.ret()
@@ -394,61 +303,6 @@ func (c *threadedCompiler) fuseHostFunction(fn *HostFunction, size int) func(*In
 		}
 	}
 	return nil
-}
-
-// fuseString tries to fuse a constant string load with a following I32_CONST
-// code and ERROR_NEW, wrapping the string in an Error in one dispatch. The
-// interned string becomes the error's payload and message. Returns nil if no
-// pattern applies.
-func (c *threadedCompiler) fuseString(text string, size int) func(*Interpreter) {
-	if c.precise || c.ip+5 >= len(c.code) {
-		return nil
-	}
-	if instr.Opcode(c.code[c.ip]) != instr.I32_CONST || instr.Opcode(c.code[c.ip+5]) != instr.ERROR_NEW {
-		return nil
-	}
-	code := int32(*(*int32)(unsafe.Pointer(&c.code[c.ip+1])))
-	return func(i *Interpreter) {
-		if i.sp == len(i.stack) {
-			panic(ErrStackOverflow)
-		}
-		payload := types.BoxRef(int(i.intern(text)))
-		i.stack[i.sp] = types.BoxRef(i.keep(types.NewError(types.ErrorCode(code), text, payload)))
-		i.sp++
-		i.fr.ip += size + 6
-	}
-}
-
-// fuseError tries to fuse an ERROR_NEW with a following THROW, building the
-// exception and raising it in one dispatch. As a terminator the fused closure
-// never advances the IP: it lands on a handler or escapes the dispatch loop.
-// Returns nil if no pattern applies.
-func (c *threadedCompiler) fuseError() func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
-		return nil
-	}
-	if instr.Opcode(c.code[c.ip]) != instr.THROW {
-		return nil
-	}
-	return func(i *Interpreter) {
-		if i.sp < 2 {
-			panic(ErrStackUnderflow)
-		}
-		code := i.stack[i.sp-1]
-		if code.Kind() != types.KindI32 {
-			panic(ErrTypeMismatch)
-		}
-		payload := i.stack[i.sp-2]
-		// The payload reference transfers into the new Error's value field, so the
-		// slot is dropped without a release. The i32 code slot is discarded.
-		exc := types.BoxRef(i.keep(types.NewError(types.ErrorCode(code.I32()), i.message(payload), payload)))
-		i.sp -= 2
-		if fp, h, ok := i.handler(); ok {
-			i.land(fp, h, exc)
-			return
-		}
-		panic(escape{i.uncaught(exc)})
-	}
 }
 
 // fuseLocalConst folds LOCAL_GET idx; <kind>.CONST c; <kind binop> into one
@@ -468,8 +322,8 @@ func (c *threadedCompiler) fuseError() func(*Interpreter) {
 // releases a ref operand once read, so the local's boxed value is retained
 // first to keep the local slot's own reference balanced; I32/F32/F64 never
 // box to a ref and skip the retain, matching the plain LOCAL_GET fast path.
-func (c *threadedCompiler) fuseLocalConst(idx int) func(*Interpreter) {
-	if c.precise || idx >= len(c.locals) {
+func (c *threader) fuseLocalConst(idx int) func(*Interpreter) {
+	if c.exact || idx >= len(c.locals) {
 		return nil
 	}
 
@@ -532,8 +386,8 @@ func (c *threadedCompiler) fuseLocalConst(idx int) func(*Interpreter) {
 // operands are retained before unboxI64 releases them, keeping each local
 // slot's own reference balanced; I32/F32/F64 never box to a ref and skip the
 // retain.
-func (c *threadedCompiler) fuseLocalLocal(idxA int) func(*Interpreter) {
-	if c.precise || idxA >= len(c.locals) || c.ip+1 >= len(c.code) {
+func (c *threader) fuseLocalLocal(idxA int) func(*Interpreter) {
+	if c.exact || idxA >= len(c.locals) || c.ip+1 >= len(c.code) {
 		return nil
 	}
 	if instr.Opcode(c.code[c.ip]) != instr.LOCAL_GET {
@@ -572,8 +426,8 @@ func (c *threadedCompiler) fuseLocalLocal(idxA int) func(*Interpreter) {
 // own start byte, keeping that offset a valid branch target. BR_IF's fixed
 // 3-byte width (opcode + i16 offset) is a constant every caller already
 // knows and folds into its own total fused width.
-func (c *threadedCompiler) peekBrIf(pos int) (offset int, ok bool) {
-	if c.precise || pos+2 >= len(c.code) || instr.Opcode(c.code[pos]) != instr.BR_IF {
+func (c *threader) peekBrIf(pos int) (offset int, ok bool) {
+	if c.exact || pos+2 >= len(c.code) || instr.Opcode(c.code[pos]) != instr.BR_IF {
 		return 0, false
 	}
 	return instr.ParseI16(c.code, pos+1), true
@@ -586,8 +440,8 @@ func (c *threadedCompiler) peekBrIf(pos int) (offset int, ok bool) {
 // after probing. ARRAY_GET/STRUCT_GET are not handled here: an I32 local can
 // never hold the array/struct ref those opcodes need, so the combination
 // cannot occur in valid bytecode.
-func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseLocalI32Const(idx int, cst int32, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -1137,8 +991,8 @@ func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(
 // it: unboxI64 releases a heap-promoted ref once read, and without the
 // retain that would drop the local slot's own ownership instead of just the
 // temporary read.
-func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseLocalI64Const(idx int, cst int64, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -1772,8 +1626,8 @@ func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(
 // the local directly instead of through an already-pushed stack slot and
 // pushing the result once. Does not touch c.ip; fuseLocalConst restores it
 // after probing. F32 never boxes to a heap ref, so no retain is needed.
-func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseLocalF32Const(idx int, cst float32, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -2110,8 +1964,8 @@ func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) fun
 // the local directly instead of through an already-pushed stack slot and
 // pushing the result once. Does not touch c.ip; fuseLocalConst restores it
 // after probing. F64 never boxes to a heap ref, so no retain is needed.
-func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseLocalF64Const(idx int, cst float64, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -2447,8 +2301,8 @@ func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) fun
 // LOCAL_GET idxB (I32); <binop>: it reads both frame slots directly and
 // pushes the result once. Does not touch c.ip; fuseLocalLocal restores it
 // after probing. I32 never boxes to a heap ref, so no retain is needed.
-func (c *threadedCompiler) fuseLocalLocalI32(idxA, idxB int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseLocalLocalI32(idxA, idxB int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -2850,8 +2704,8 @@ func (c *threadedCompiler) fuseLocalLocalI32(idxA, idxB int) func(*Interpreter) 
 // unboxI64 releases a heap-promoted ref once read, and without the retain
 // that would drop each local slot's own ownership instead of just the
 // temporary read.
-func (c *threadedCompiler) fuseLocalLocalI64(idxA, idxB int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseLocalLocalI64(idxA, idxB int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -3301,8 +3155,8 @@ func (c *threadedCompiler) fuseLocalLocalI64(idxA, idxB int) func(*Interpreter) 
 // pushes the result once. Does not touch c.ip; fuseLocalLocal restores it
 // after probing. F32 never boxes to a ref, so no retain is needed (matching
 // fuseLocalLocalI32's plain-scalar handling).
-func (c *threadedCompiler) fuseLocalLocalF32(idxA, idxB int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseLocalLocalF32(idxA, idxB int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -3540,8 +3394,8 @@ func (c *threadedCompiler) fuseLocalLocalF32(idxA, idxB int) func(*Interpreter) 
 // pushes the result once. Does not touch c.ip; fuseLocalLocal restores it
 // after probing. F64 never boxes to a ref, so no retain is needed (matching
 // fuseLocalLocalI32's plain-scalar handling).
-func (c *threadedCompiler) fuseLocalLocalF64(idxA, idxB int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseLocalLocalF64(idxA, idxB int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -3774,8 +3628,8 @@ func (c *threadedCompiler) fuseLocalLocalF64(idxA, idxB int) func(*Interpreter) 
 	return nil
 }
 
-func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, kind types.Kind, size int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseI32(rhs func(*Interpreter) int32, kind types.Kind, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -4048,8 +3902,8 @@ func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, kind types.Kind
 	return nil
 }
 
-func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -4334,8 +4188,8 @@ func (c *threadedCompiler) fuseI32Imm(rhs int32, size int) func(*Interpreter) {
 	return nil
 }
 
-func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseI64(rhs func(*Interpreter) int64, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -4605,8 +4459,8 @@ func (c *threadedCompiler) fuseI64(rhs func(*Interpreter) int64, size int) func(
 	return nil
 }
 
-func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -4874,8 +4728,8 @@ func (c *threadedCompiler) fuseI64Imm(rhs int64, size int) func(*Interpreter) {
 	return nil
 }
 
-func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseF32(rhs func(*Interpreter) float32, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -5042,8 +4896,8 @@ func (c *threadedCompiler) fuseF32(rhs func(*Interpreter) float32, size int) fun
 	return nil
 }
 
-func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseF32Imm(rhs float32, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -5210,8 +5064,8 @@ func (c *threadedCompiler) fuseF32Imm(rhs float32, size int) func(*Interpreter) 
 	return nil
 }
 
-func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseF64(rhs func(*Interpreter) float64, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {
@@ -5378,8 +5232,8 @@ func (c *threadedCompiler) fuseF64(rhs func(*Interpreter) float64, size int) fun
 	return nil
 }
 
-func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) {
-	if c.precise || c.ip >= len(c.code) {
+func (c *threader) fuseF64Imm(rhs float64, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
 		return nil
 	}
 	switch instr.Opcode(c.code[c.ip]) {

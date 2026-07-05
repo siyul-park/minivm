@@ -28,7 +28,7 @@ minivm always compiles bytecode to threaded closures first. The JIT is a lazy AR
 
 ```text
 program.Program
-  -> threadedCompiler -> []func(*Interpreter)   always available
+  -> threader -> []func(*Interpreter)   always available
   -> Tracer           -> trace snapshots        lazy runtime recording
   -> compiler         -> *module                lazy ARM64 backend
 ```

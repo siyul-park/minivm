@@ -1846,7 +1846,7 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 
 	f := ctx.frame()
 	f.resume = op.ip + 1
-	frame := newFrame(op.callee, target, base, len(ctx.values)-params)
+	frame := newActivation(op.callee, target, base, len(ctx.values)-params)
 	frame.upvalRef = closureRef
 	ctx.values = ctx.values[:len(ctx.values)-params]
 	if len(frame.kinds) > params {
@@ -2079,7 +2079,7 @@ func (l arm64Lowerer) tailLoop(ctx *lowering, op step) bool {
 	if ctx.count() != 0 {
 		return false
 	}
-	f := newFrame(ctx.addr, target, 0, 0)
+	f := newActivation(ctx.addr, target, 0, 0)
 	if !l.locals(ctx, &f, args) {
 		return false
 	}
@@ -2110,7 +2110,7 @@ func (l arm64Lowerer) tailMorph(ctx *lowering, op step) bool {
 	if ctx.count() != 0 {
 		return false
 	}
-	f := newFrame(op.callee, target, base, len(ctx.values))
+	f := newActivation(op.callee, target, base, len(ctx.values))
 	f.resume = op.ip + 1
 	if !l.locals(ctx, &f, args) {
 		return false

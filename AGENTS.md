@@ -99,7 +99,7 @@ The Task Router above routes by task; this catalogs what each doc covers. Read o
 minivm: bytecode VM + adaptive JIT.
 
 ```text
-program.Program → threadedCompiler → []func(*Interpreter) → Interpreter.Run()
+program.Program → threader → []func(*Interpreter) → Interpreter.Run()
                                                         ├─ threaded closures
                                                         └─ hot segments promoted to native ARM64
 ```
@@ -206,8 +206,8 @@ These traps have been seen in past refactors and are easy to repeat. Each maps t
 - **Private names use role words, not subsystem prefixes (§1.2).** If file, package, or receiver already says JIT/trace/cache, don't repeat it in every type: prefer `lowering`, `activation`, `value`, `step`, `compiler`, `module` over `jitContext`, `jitFrame`, `jitOperand`, `traceOperation`, `jitCompiler`, `jitModule`.
 - **Don't expose interpreter internals through a callback interface to a downstream package (§0.5).** When pkg B integrates pkg A's output, A defines plain-value input/output structs; B fills the input, hands them over once, applies the output. Never define a `View`/`Engine` interface so A can reach back into B's mutable state.
 - **Slot order moves with conversions (§2.4).** When a package function becomes a method per §1.5, move its declaration up into method territory. The reverse is also true — don't let a private function linger among methods. Constructors are the exception: private `newFoo` constructors stay above methods with public constructors.
-- **Constructors above their `With*` options (§1.3).** `New` is the orchestrator; `WithX` are lower-level. The functional-options template puts `With*` first in many codebases — this repo does not.
-- **Struct field layering distinguishes bridge state from runtime state (§2.5).** A "jitted" map that tracks integration with another package is infrastructure, not runtime state. Plain integer config (threshold, cutoff, tick, fuel) is read-only config near the bottom, not policy at the top.
+- **`With*` options may precede their constructor (§1.3).** When `WithX` configures `New`, keep options immediately above `New` so the declaration order matches call sites like `New(prog, WithX(...))`.
+- **Struct field layering distinguishes bridge state from runtime state (§2.5).** A "tried" map that tracks integration with another package is infrastructure, not runtime state. Plain integer config (threshold, cutoff, tick, fuel) is read-only config near the bottom, not policy at the top.
 - **Refactor steps that prove non-viable get recorded, not silently dropped.** If a plan step turns out to be the wrong call (e.g. extracting a shared tail when the middles diverge too much, or moving arch-local state when the owning type is a singleton), say so in the final summary with the reason. Future passes re-derive the same conclusion if you don't.
 - **No test helpers, including white-box introspection (§6.1, §6.8).** Inline program construction, the run sequence (`Reset`/`Push`/`Run`/`Pop`), and any tracer-state scan into each `t.Run`. Do not extract a `branchTreeProgram()`, a `runEvalI32()`, or a `traceReturnsConst()` scan, even when the scan nests several loops and repeats across subtests. Do not add production API to tracer types just to shorten a test (§0.5).
 - **One helper owns a branch-or-fallback decision, not every call site (§1.4).** When a helper already signals "ineligible/failed", don't re-state its precondition at each caller to choose between it and a fallback. JIT branch lowering routes `brIf`/`brTable` through one `branchOrExit` (try `continuation`, else `exit`) instead of repeating `branches[ip] != nil && len(frames) == 1 && !marked(...)` per target.
