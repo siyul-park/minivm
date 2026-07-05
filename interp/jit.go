@@ -53,12 +53,14 @@ type lowering struct {
 	head      asm.Label
 	back      asm.Label
 
-	values  []value
-	frames  []activation
-	pending []pending
-	exits   []sideExit
-	queued  map[branch]asm.Label
-	saved   []value
+	values          []value
+	frames          []activation
+	pending         []pending
+	pendingBranches int
+	exits           []sideExit
+	queued          map[branch]asm.Label
+	tails           map[*step]asm.Label
+	saved           []value
 
 	addr    int
 	returns int
@@ -103,10 +105,13 @@ type activation struct {
 
 // pending is the cold continuation of a guarded branch: state was
 // flushed to the VM stack at the guard, so the body re-enters at label with
-// every local unloaded and every operand awaiting reload.
+// every local unloaded and every operand awaiting reload. If the branch
+// returned from an inlined callee, tail keeps the caller path that must run
+// after the pending body stitches back into the caller frame.
 type pending struct {
 	label  asm.Label
 	ops    []step
+	tail   []step
 	values []value
 	frames []activation
 	hits   int64
@@ -263,6 +268,7 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 		branches:  tree.branchIPs(),
 		funcs:     funcs,
 		queued:    map[branch]asm.Label{},
+		tails:     map[*step]asm.Label{},
 		constants: i.constants,
 		globals:   i.globals,
 		heap:      i.heap,

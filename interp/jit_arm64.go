@@ -108,7 +108,7 @@ func (l arm64Lowerer) lower(ctx *lowering) bool {
 		ctx.frames = p.frames
 		ctx.assembler.Bind(p.label)
 		l.reload(ctx)
-		if !l.walk(ctx, p.ops, nil) {
+		if !l.walk(ctx, p.ops, p.tail) {
 			return false
 		}
 	}
@@ -565,7 +565,19 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step) bool {
 		}
 	}
 	if len(tail) > 0 {
-		return l.walk(ctx, tail, nil)
+		label, ok := ctx.tails[&tail[0]]
+		if !l.flush(ctx, false) {
+			return false
+		}
+		if !ok {
+			label = ctx.assembler.Label()
+			ctx.tails[&tail[0]] = label
+			p := pending{label: label, ops: tail}
+			p.values, p.frames = ctx.snapshot()
+			ctx.pending = append(ctx.pending, p)
+		}
+		ctx.assembler.Emit(arm64.BLabel(label))
+		return true
 	}
 	if ctx.tree.root.kind == completed {
 		return l.complete(ctx)
@@ -1734,27 +1746,33 @@ func (l arm64Lowerer) branchClean(ctx *lowering, ip int, tail []step) (asm.Label
 
 // continuation materializes the current symbolic state and returns a native
 // label for a learned branch target, or false when the target is not eligible
-// (no learned trace, a caller tail, a marked stack, or too many pending
-// continuations). Flushed callers write VM stack homes before jumping to the
-// reloading branch body; clean callers skip the no-op flush after proving those
-// homes are already current.
+// (no learned trace, a marked stack, or too many pending continuations).
+// Flushed callers write VM stack homes before jumping to the reloading branch
+// body; clean callers skip the no-op flush after proving those homes are
+// already current. Caller-tailed continuations compile as distinct pending
+// blocks because the same branch target may need different caller remainders.
 func (l arm64Lowerer) continuation(ctx *lowering, ip int, tail []step, flush bool) (asm.Label, bool) {
 	target := branch{fn: ctx.frame().addr, ip: ip}
 	leg := ctx.branches[target]
-	if leg.trace == nil || len(tail) > 0 || l.marked(ctx) || len(ctx.pending) >= pendingLimit {
+	if leg.trace == nil || l.marked(ctx) || ctx.pendingBranches >= pendingLimit {
 		return 0, false
 	}
 	if flush && !l.flush(ctx, false) {
 		return 0, false
 	}
-	if label, ok := ctx.queued[target]; ok {
-		return label, true
+	if len(tail) == 0 {
+		if label, ok := ctx.queued[target]; ok {
+			return label, true
+		}
 	}
 	label := ctx.assembler.Label()
-	ctx.queued[target] = label
-	p := pending{label: label, ops: leg.trace.ops, hits: leg.hits}
+	if len(tail) == 0 {
+		ctx.queued[target] = label
+	}
+	p := pending{label: label, ops: leg.trace.ops, tail: tail, hits: leg.hits}
 	p.values, p.frames = ctx.snapshot()
 	ctx.pending = append(ctx.pending, p)
+	ctx.pendingBranches++
 	return label, true
 }
 

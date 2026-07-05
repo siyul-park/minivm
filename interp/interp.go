@@ -1052,11 +1052,14 @@ func (i *Interpreter) exit(root anchor) {
 	if err != nil {
 		panic(err)
 	}
-	if hits < exitThreshold || hits%exitThreshold != 0 {
+	if i.cache != nil {
+		if hits < exitThreshold || hits%exitThreshold != 0 {
+			return
+		}
+		i.cache.rearm(root.addr)
 		return
 	}
-	if i.cache != nil {
-		i.cache.rearm(root.addr)
+	if hits != exitThreshold {
 		return
 	}
 	if i.compiler == nil {

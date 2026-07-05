@@ -4212,7 +4212,7 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, int64(0), hits)
 	})
 
-	t.Run("falls back learned callee branch through caller tail", func(t *testing.T) {
+	t.Run("jits learned callee branch through caller tail", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
@@ -4331,10 +4331,10 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(21), v)
 		}
-		require.Greater(t, i.tracer.rootAt(root).hits[id], hits)
+		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 	})
 
-	t.Run("keeps inlined callee params across nested learned branch deopt", func(t *testing.T) {
+	t.Run("keeps inlined callee params across nested learned branch continuations", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
@@ -4473,7 +4473,40 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(31), v)
 		}
-		require.Greater(t, i.tracer.rootAt(root).hits[id], hits)
+		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
+
+		nested := -1
+		for range exitThreshold * 4 {
+			i.Reset()
+			row[0], row[1] = 0.2, 0.1
+			require.NoError(t, i.Run(context.Background()))
+			v, err = i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.F64(-9), v)
+
+			tree := i.tracer.rootAt(root)
+			require.NotNil(t, tree)
+			for bid, branch := range tree.branches {
+				if branch == nil || tree.hits[bid] < exitThreshold {
+					continue
+				}
+				for _, op := range branch.ops {
+					if op.op != instr.F64_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
+						continue
+					}
+					code := i.instrs[op.fn]
+					if op.ip+9 <= len(code) && math.Float64frombits(binary.LittleEndian.Uint64(code[op.ip+1:op.ip+9])) == -10 {
+						nested = bid
+					}
+				}
+			}
+			if nested >= 0 {
+				break
+			}
+		}
+		require.GreaterOrEqual(t, nested, 0, "no nested callee branch returning f64.const -10 was learned")
+		nestedHits := i.tracer.rootAt(root).hits[nested]
+		require.Equal(t, int64(exitThreshold), nestedHits)
 
 		for range 3 {
 			i.Reset()
@@ -4483,7 +4516,9 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(-9), v)
 		}
-		require.Greater(t, i.tracer.rootAt(root).hits[id], hits)
+		tree := i.tracer.rootAt(root)
+		require.Equal(t, hits, tree.hits[id])
+		require.Equal(t, nestedHits, tree.hits[nested])
 	})
 
 	t.Run("jits learned br_table continuations", func(t *testing.T) {
@@ -4580,6 +4615,101 @@ func TestWithThreshold(t *testing.T) {
 		v, err = i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(99), v)
+	})
+
+	t.Run("jits inlined br_table continuation through caller tail", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		choice := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32)
+		zero := choice.Label()
+		one := choice.Label()
+		two := choice.Label()
+		def := choice.Label()
+		choice.Emit(instr.New(instr.LOCAL_GET, 0)).
+			BrTable(def, zero, one, two).
+			Bind(zero).
+			Emit(instr.New(instr.I32_CONST, 10)).
+			Emit(instr.New(instr.RETURN)).
+			Bind(one).
+			Emit(instr.New(instr.I32_CONST, 11)).
+			Emit(instr.New(instr.RETURN)).
+			Bind(two).
+			Emit(instr.New(instr.I32_CONST, 12)).
+			Emit(instr.New(instr.RETURN)).
+			Bind(def).
+			Emit(instr.New(instr.I32_CONST, 99)).
+			Emit(instr.New(instr.RETURN))
+		choiceFn, err := choice.Build()
+		require.NoError(t, err)
+
+		eval := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32)
+		eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.CONST_GET, 0)).
+			Emit(instr.New(instr.CALL)).
+			Emit(instr.New(instr.I32_CONST, 100)).
+			Emit(instr.New(instr.I32_ADD)).
+			Emit(instr.New(instr.RETURN))
+		evalFn, err := eval.Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CALL),
+		}, program.WithConstants(choiceFn, evalFn))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		root := anchor{addr: i.constants[1].Ref(), ip: 0}
+
+		i.Reset()
+		require.NoError(t, i.Push(types.I32(0)))
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(110), v)
+
+		id := -1
+		for range exitThreshold * 4 {
+			i.Reset()
+			require.NoError(t, i.Push(types.I32(1)))
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(111), v)
+
+			tree := i.tracer.rootAt(root)
+			require.NotNil(t, tree)
+			for bid, branch := range tree.branches {
+				if branch == nil {
+					continue
+				}
+				for _, op := range branch.ops {
+					if op.op != instr.I32_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
+						continue
+					}
+					code := i.instrs[op.fn]
+					if op.ip+5 <= len(code) && int32(instr.ParseI32(code, op.ip+1)) == 11 {
+						id = bid
+					}
+				}
+			}
+			if id >= 0 && tree.hits[id] >= exitThreshold {
+				break
+			}
+		}
+		require.GreaterOrEqual(t, id, 0, "no inlined br_table branch returning i32.const 11 was learned")
+		hits := i.tracer.rootAt(root).hits[id]
+		require.Equal(t, int64(exitThreshold), hits)
+
+		for range 3 {
+			i.Reset()
+			require.NoError(t, i.Push(types.I32(1)))
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(111), v)
+		}
+		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 	})
 }
 

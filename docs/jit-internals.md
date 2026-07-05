@@ -237,9 +237,15 @@ Recorded forward branches become guarded exits or learned branch continuations.
 
 When a side exit becomes hot, the tracer records that target. A later compile may fold it into the same native callable as a pending block.
 
-Pending blocks reload from VM stack homes, compile hotter exits first, reuse one native label per learned `(function, IP)` target when safe, and stop at a bounded pending cap.
+Pending blocks reload from VM stack homes, compile hotter exits first, and stop at a bounded pending cap.
 
-Targets still deoptimize when they are unknown, caller-tailed, or unsupported.
+A branch pending block may carry the caller tail that remains after an inlined callee returns. The side trace body lowers first; on callee `RETURN`, lowering stitches the result into the caller frame and jumps to a shared pending suffix for that tail. The suffix reloads from VM stack homes before continuing, so different side traces can reuse the caller remainder without sharing registers.
+
+Labels are reused for learned `(function, IP)` targets with no caller tail, and for shared caller-tail suffixes. Caller-tailed side traces keep distinct pending labels because the same bytecode target can need different caller remainders.
+
+Solo interpreters recompile a side exit when its hit count first reaches the hot-exit threshold. Pooled interpreters also rearm on later threshold multiples so a peer can recover a missed shared-cache publication.
+
+Targets still deoptimize when they are unknown or unsupported.
 
 Branch lowering may skip hot-path flushes only when the branch state is clean. If locals or operands are dirty, flush first. Learned continuations and side exits must see the same stack image as threaded dispatch.
 
