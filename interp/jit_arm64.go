@@ -1626,6 +1626,19 @@ func (l arm64Lowerer) brIf(ctx *lowering, op step, tail []step) bool {
 		diverge = op.ip + 3
 	}
 
+	if l.clean(ctx) {
+		label, ok := l.branchClean(ctx, diverge, tail)
+		if !ok {
+			return false
+		}
+		if taken {
+			ctx.assembler.Emit(arm64.CBZLabel(l.narrow32(cond.reg), label))
+		} else {
+			ctx.assembler.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), label))
+		}
+		return true
+	}
+
 	label, ok := l.branchOrExit(ctx, diverge, tail)
 	if !ok {
 		return false
@@ -1654,6 +1667,10 @@ func (l arm64Lowerer) brTable(ctx *lowering, op step, tail []step) bool {
 	cond := ctx.pop()
 	condI32 := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.ANDI(condI32, cond.reg, maskI32))
+	clean := l.clean(ctx)
+	if !clean && !l.flush(ctx, false) {
+		return false
+	}
 
 	next := ctx.assembler.Label()
 	for idx := 0; idx < count; idx++ {
@@ -1665,7 +1682,13 @@ func (l arm64Lowerer) brTable(ctx *lowering, op step, tail []step) bool {
 		skip := ctx.assembler.Label()
 		ctx.assembler.Emit(arm64.CMPI(condI32, uint16(idx)))
 		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, skip))
-		label, ok := l.branchOrExit(ctx, targets[idx], tail)
+		var label asm.Label
+		var ok bool
+		if clean {
+			label, ok = l.branchClean(ctx, targets[idx], tail)
+		} else {
+			label, ok = l.branchOrExit(ctx, targets[idx], tail)
+		}
 		if !ok {
 			return false
 		}
@@ -1673,7 +1696,13 @@ func (l arm64Lowerer) brTable(ctx *lowering, op step, tail []step) bool {
 		ctx.assembler.Bind(skip)
 	}
 	if targets[count] != op.target {
-		label, ok := l.branchOrExit(ctx, targets[count], tail)
+		var label asm.Label
+		var ok bool
+		if clean {
+			label, ok = l.branchClean(ctx, targets[count], tail)
+		} else {
+			label, ok = l.branchOrExit(ctx, targets[count], tail)
+		}
 		if !ok {
 			return false
 		}
@@ -1685,24 +1714,37 @@ func (l arm64Lowerer) brTable(ctx *lowering, op step, tail []step) bool {
 
 // branchOrExit returns a learned continuation label, or a deopt label.
 func (l arm64Lowerer) branchOrExit(ctx *lowering, ip int, tail []step) (asm.Label, bool) {
-	if label, ok := l.continuation(ctx, ip, tail); ok {
+	if label, ok := l.continuation(ctx, ip, tail, true); ok {
 		return label, true
 	}
 	return l.sideExit(ctx, ctx.values, ip)
 }
 
+// branchClean returns a learned continuation or deopt label when the caller has
+// already proven branch flush would be a no-op.
+func (l arm64Lowerer) branchClean(ctx *lowering, ip int, tail []step) (asm.Label, bool) {
+	if label, ok := l.continuation(ctx, ip, tail, false); ok {
+		return label, true
+	}
+	label := ctx.assembler.Label()
+	values, frames := ctx.snapshot()
+	ctx.exits = append(ctx.exits, sideExit{label: label, values: values, frames: frames, resume: ip})
+	return label, true
+}
+
 // continuation materializes the current symbolic state and returns a native
 // label for a learned branch target, or false when the target is not eligible
 // (no learned trace, a caller tail, a marked stack, or too many pending
-// continuations). The branch body starts from a reload, so every predecessor
-// writes the same VM stack homes before jumping to it.
-func (l arm64Lowerer) continuation(ctx *lowering, ip int, tail []step) (asm.Label, bool) {
+// continuations). Flushed callers write VM stack homes before jumping to the
+// reloading branch body; clean callers skip the no-op flush after proving those
+// homes are already current.
+func (l arm64Lowerer) continuation(ctx *lowering, ip int, tail []step, flush bool) (asm.Label, bool) {
 	target := branch{fn: ctx.frame().addr, ip: ip}
 	leg := ctx.branches[target]
 	if leg.trace == nil || len(tail) > 0 || l.marked(ctx) || len(ctx.pending) >= pendingLimit {
 		return 0, false
 	}
-	if !l.flush(ctx, false) {
+	if flush && !l.flush(ctx, false) {
 		return 0, false
 	}
 	label := ctx.assembler.Label()
@@ -3371,6 +3413,23 @@ func (l arm64Lowerer) marked(ctx *lowering) bool {
 		}
 	}
 	return false
+}
+
+// clean reports whether a branch can skip the hot-path flush: no live operand
+// or dirty local will be reloaded from VM stack homes later in the trace.
+func (l arm64Lowerer) clean(ctx *lowering) bool {
+	if ctx.count() != 0 {
+		return false
+	}
+	for fi := range ctx.frames {
+		f := &ctx.frames[fi]
+		for idx := range f.dirty {
+			if f.dirty[idx] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // setBool pushes the condition flags as a raw 0/1 i32.

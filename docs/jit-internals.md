@@ -202,6 +202,11 @@ up to a bounded pending cap, and reuse one native label per learned
 `(function, IP)` target when no caller tail is attached. Targets that are still
 unknown, have a caller tail, have unsafe stack/frame shape, or touch unsupported
 operations continue to deopt through the journal.
+ARM64 `BR_IF` and `BR_TABLE` keep branch flushes off the recorded hot path only
+when the branch state is clean: after consuming the condition there are no live
+operands and no dirty locals whose VM stack homes might be reloaded later. Dirty
+locals or live operands preserve the hot-path flush before splitting, so learned
+continuations and side exits see the same stack image as threaded dispatch.
 This progressively widens branch-heavy traces without adding a separate static
 method compiler.
 

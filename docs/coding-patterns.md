@@ -178,12 +178,15 @@ Do not split tiny single-use helpers out of nearby logic unless the helper names
 Do not re-state a callee's precondition at the call site to pick between it and
 a fallback. When a helper already returns "ineligible/failed", let one helper
 own the whole decision rather than guarding every caller with the helper's own
-condition. The JIT branch lowering does this: `brIf` and `brTable` call a single
-`branchOrExit`, which tries `continuation` (the eligibility gate) and falls back
-to `exit` on failure — instead of each call site repeating
+condition. The JIT branch lowering does this: `brIf` and `brTable` route through
+branch helpers that try `continuation` (the eligibility gate) and fall back to
+`exit` on failure — instead of each call site repeating
 `branches[ip] != nil && len(frames) == 1 && !marked(...)` before deciding. The
-fallback stays correct because both paths flush the same live state first, so a
-flush failure aborts the compile either way.
+fallback stays correct because the normal branch path flushes the same live
+state first, so a flush failure aborts the compile either way. Branches that
+prove they have no live operands or dirty locals may route through the clean
+branch path, where the flush is intentionally skipped because it would write no
+required VM stack homes.
 
 ### 1.5 Methods vs package-level functions
 
