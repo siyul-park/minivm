@@ -73,6 +73,8 @@ Each recorded instruction stores:
 
 - opcode, function, IP, and inline depth
 - observed call target box and callee address
+- observed narrow input for value-specialized guards (divisors, shifts,
+  branch/table conditions, and heap indexes)
 - explicit branch target and branch-taken metadata
 - selected observed heap values for guarded read-only heap fast paths
 
@@ -153,6 +155,10 @@ Guard fallbacks set `journalTrap = trapFallback`, write `journalSP`, append live
 frame records, and return. The Go wrapper deopts from the journal, restores frame
 metadata, and if the fallback IP is 0 runs the shadowed threaded entry handler
 once to avoid immediate native re-entry.
+Observed numeric facts are speculative unless they came from bytecode constants:
+native code may guard an observed value and then specialize the hot path, but a
+runtime mismatch must exit before the opcode so threaded dispatch owns the
+general case.
 
 ## Calls And Returns
 
@@ -189,11 +195,11 @@ Recorded forward branches become guarded exits or pending branch continuations.
 When a side exit reaches the exit threshold, the tracer records that target and a
 later compile folds the learned continuation into the same native callable as a
 straight-line pending block. Pending blocks reload from VM stack homes written at
-the branch, can enqueue further learned continuations up to a bounded pending
-cap, and reuse one native label per learned `(function, IP)` target when no
-caller tail is attached. Targets that are still unknown, have a caller tail,
-have unsafe stack/frame shape, or touch unsupported operations continue to deopt
-through the journal.
+the branch, compile hotter exits first, can enqueue further learned continuations
+up to a bounded pending cap, and reuse one native label per learned
+`(function, IP)` target when no caller tail is attached. Targets that are still
+unknown, have a caller tail, have unsafe stack/frame shape, or touch unsupported
+operations continue to deopt through the journal.
 This progressively widens branch-heavy traces without adding a separate static
 method compiler.
 

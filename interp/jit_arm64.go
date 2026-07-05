@@ -2,6 +2,7 @@ package interp
 
 import (
 	"encoding/binary"
+	"sort"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/asm"
@@ -86,8 +87,8 @@ func newCompiler() (*compiler, error) {
 
 // lower lowers a recorded entry trace tree into one framed native callable.
 // The hot path follows the recorded opcodes linearly with scalars unboxed in
-// registers; recorded branch directions, observed call targets, and divide
-// guards exit through the journal and resume through threaded dispatch.
+// registers; recorded branch directions, observed call targets, and narrow
+// value guards exit through the journal and resume through threaded dispatch.
 // Returns false whenever the trace touches an opcode, kind, or shape the
 // typed lowerer does not support; the caller leaves threaded dispatch installed.
 func (l arm64Lowerer) lower(ctx *lowering) bool {
@@ -104,6 +105,9 @@ func (l arm64Lowerer) lower(ctx *lowering) bool {
 		return false
 	}
 	for n := 0; n < len(ctx.pending); n++ {
+		sort.SliceStable(ctx.pending[n:], func(i, j int) bool {
+			return ctx.pending[n+i].hits > ctx.pending[n+j].hits
+		})
 		p := ctx.pending[n]
 		ctx.values = p.values
 		ctx.frames = p.frames
@@ -585,7 +589,7 @@ func (l arm64Lowerer) i32Const(ctx *lowering, op step) bool {
 	val := binary.LittleEndian.Uint32(f.code[op.ip+1 : op.ip+5])
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDI(dst, uint64(val))...)
-	ctx.push(value{reg: dst, kind: types.KindI32, raw: true})
+	ctx.push(value{reg: dst, kind: types.KindI32, raw: true, known: true, i64: int64(int32(val))})
 	return true
 }
 
@@ -597,7 +601,7 @@ func (l arm64Lowerer) i64Const(ctx *lowering, op step) bool {
 	}
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDI(dst, uint64(val))...)
-	ctx.push(value{reg: dst, kind: types.KindI64, raw: true})
+	ctx.push(value{reg: dst, kind: types.KindI64, raw: true, known: true, i64: val})
 	return true
 }
 
@@ -636,12 +640,19 @@ func (l arm64Lowerer) constGet(ctx *lowering, op step, fused bool) bool {
 	switch v.Kind() {
 	case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
 		dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		val := value{reg: dst, kind: v.Kind(), raw: true}
 		if v.Kind() == types.KindI64 {
 			ctx.assembler.Emit(arm64.LDI(dst, uint64(v.I64()))...)
+			val.known = true
+			val.i64 = v.I64()
 		} else {
 			ctx.assembler.Emit(arm64.LDI(dst, uint64(v))...)
+			if v.Kind().Repr() == types.KindI32 {
+				val.known = true
+				val.i64 = int64(v.I32())
+			}
 		}
-		ctx.push(value{reg: dst, kind: v.Kind(), raw: true})
+		ctx.push(val)
 		return true
 	case types.KindRef:
 		ref := v.Ref()
@@ -919,12 +930,22 @@ func (l arm64Lowerer) i32Divide(
 	b := prep(ctx, ctx.values[len(ctx.values)-1].reg)
 	a := prep(ctx, ctx.values[len(ctx.values)-2].reg)
 
-	fail, ok := l.sideExit(ctx, ctx.values, op.ip)
-	if !ok {
-		return false
+	guarded := false
+	top := ctx.values[len(ctx.values)-1]
+	if !top.known && op.arg.Kind().Repr() == types.KindI32 && op.arg.I32() != 0 {
+		if !l.guardRaw(ctx, l.narrow32(b), uint64(uint32(op.arg.I32())), op.ip) {
+			return false
+		}
+		guarded = true
 	}
-	ctx.assembler.Emit(arm64.CMPI(b, 0))
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, fail))
+	if !(top.known && top.i64 != 0) && !guarded {
+		fail, ok := l.sideExit(ctx, ctx.values, op.ip)
+		if !ok {
+			return false
+		}
+		ctx.assembler.Emit(arm64.CMPI(b, 0))
+		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, fail))
+	}
 
 	ctx.pop()
 	ctx.pop()
@@ -941,18 +962,25 @@ func (l arm64Lowerer) i32Divide(
 
 func (l arm64Lowerer) i32Shift(
 	ctx *lowering,
-	op func(dst, src1, src2 asm.Reg) asm.Instruction,
+	shiftOp func(dst, src1, src2 asm.Reg) asm.Instruction,
 	prep func(*lowering, asm.VReg) asm.VReg,
 ) bool {
-	b, a, ok := l.operands(ctx, types.KindI32)
-	if !ok {
+	if ctx.count() < 2 || !l.kinds(ctx, types.KindI32, 2) {
 		return false
 	}
+	b := ctx.values[len(ctx.values)-1]
+	a := ctx.values[len(ctx.values)-2]
 	shift := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ANDI(shift, b.reg, 0x1F))
+	if b.known {
+		ctx.assembler.Emit(arm64.LDI(shift, uint64(uint32(b.i64)&0x1F))...)
+	} else {
+		ctx.assembler.Emit(arm64.ANDI(shift, b.reg, 0x1F))
+	}
 	val := prep(ctx, a.reg)
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(op(dst, val, shift))
+	ctx.assembler.Emit(shiftOp(dst, val, shift))
+	ctx.pop()
+	ctx.pop()
 	ctx.push(value{reg: dst, kind: types.KindI32, raw: true})
 	return true
 }
@@ -1172,12 +1200,22 @@ func (l arm64Lowerer) i64Divide(ctx *lowering, op step, div func(dst, src1, src2
 	b := ctx.values[len(ctx.values)-1].reg
 	a := ctx.values[len(ctx.values)-2].reg
 
-	fail, ok := l.sideExit(ctx, ctx.values, op.ip)
-	if !ok {
-		return false
+	guarded := false
+	top := ctx.values[len(ctx.values)-1]
+	if !top.known && op.arg.Kind() == types.KindI64 && op.arg.I64() != 0 {
+		if !l.guardRaw(ctx, b, uint64(op.arg.I64()), op.ip) {
+			return false
+		}
+		guarded = true
 	}
-	ctx.assembler.Emit(arm64.CMPI(b, 0))
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, fail))
+	if !(top.known && top.i64 != 0) && !guarded {
+		fail, ok := l.sideExit(ctx, ctx.values, op.ip)
+		if !ok {
+			return false
+		}
+		ctx.assembler.Emit(arm64.CMPI(b, 0))
+		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, fail))
+	}
 
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(div(raw, a, b))
@@ -1202,7 +1240,11 @@ func (l arm64Lowerer) i64Shift(ctx *lowering, op step, opfn func(dst, src1, src2
 	b := ctx.values[len(ctx.values)-1].reg
 	a := ctx.values[len(ctx.values)-2].reg
 	shift := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ANDI(shift, b, 0x3F))
+	if ctx.values[len(ctx.values)-1].known {
+		ctx.assembler.Emit(arm64.LDI(shift, uint64(ctx.values[len(ctx.values)-1].i64)&0x3F)...)
+	} else {
+		ctx.assembler.Emit(arm64.ANDI(shift, b, 0x3F))
+	}
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(opfn(raw, a, shift))
 	if checked && !l.boxableI64(ctx, raw, op.ip) {
@@ -1524,6 +1566,23 @@ func (l arm64Lowerer) boxableI64(ctx *lowering, raw asm.VReg, ip int) bool {
 	return true
 }
 
+// guardRaw keeps observed narrow inputs speculative: a different runtime value
+// exits before the opcode, so the threaded handler owns the general case.
+func (l arm64Lowerer) guardRaw(ctx *lowering, got asm.VReg, val uint64, ip int) bool {
+	fail, ok := l.sideExit(ctx, ctx.values, ip)
+	if !ok {
+		return false
+	}
+	want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(want, val)...)
+	if got.Width() == asm.Width32 {
+		want = l.narrow32(want)
+	}
+	ctx.assembler.Emit(arm64.CMP(got, want))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+	return true
+}
+
 // sign64 sign-extends the 49-bit value lane of a boxed i64 to a full raw
 // i64 value.
 func (l arm64Lowerer) sign64(ctx *lowering, v asm.VReg) asm.VReg {
@@ -1639,8 +1698,8 @@ func (l arm64Lowerer) branchOrExit(ctx *lowering, ip int, tail []step) (asm.Labe
 // writes the same VM stack homes before jumping to it.
 func (l arm64Lowerer) continuation(ctx *lowering, ip int, tail []step) (asm.Label, bool) {
 	target := branch{fn: ctx.frame().addr, ip: ip}
-	tr := ctx.branches[target]
-	if tr == nil || len(tail) > 0 || l.marked(ctx) || len(ctx.pending) >= pendingLimit {
+	leg := ctx.branches[target]
+	if leg.trace == nil || len(tail) > 0 || l.marked(ctx) || len(ctx.pending) >= pendingLimit {
 		return 0, false
 	}
 	if !l.flush(ctx, false) {
@@ -1653,7 +1712,7 @@ func (l arm64Lowerer) continuation(ctx *lowering, ip int, tail []step) (asm.Labe
 		}
 		ctx.queued[target] = label
 	}
-	p := pending{label: label, ops: tr.ops, tail: tail}
+	p := pending{label: label, ops: leg.trace.ops, tail: tail, hits: leg.hits}
 	p.values, p.frames = ctx.snapshot()
 	ctx.pending = append(ctx.pending, p)
 	return label, true
@@ -2255,6 +2314,9 @@ func (l arm64Lowerer) reload(ctx *lowering) {
 		a.Emit(arm64.LDR(reg, addr, int16(ctx.slot(j)*8)))
 		v.reg = reg
 		if v.kind != types.KindRef {
+			if v.kind == types.KindI64 {
+				v.reg = l.sign64(ctx, reg)
+			}
 			v.raw = true
 		}
 	}

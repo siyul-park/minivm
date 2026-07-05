@@ -3527,6 +3527,147 @@ func TestWithThreshold(t *testing.T) {
 		require.ErrorIs(t, i.Run(context.Background()), ErrIndexOutOfRange)
 	})
 
+	t.Run("jits constant nonzero divisors", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		for _, tt := range []struct {
+			name  string
+			typ   types.Type
+			cnst  instr.Instruction
+			div   instr.Opcode
+			value types.Value
+			want  types.Value
+		}{
+			{
+				name:  "i32",
+				typ:   types.TypeI32,
+				cnst:  instr.New(instr.I32_CONST, 3),
+				div:   instr.I32_DIV_S,
+				value: types.I32(90),
+				want:  types.I32(30),
+			},
+			{
+				name:  "i64",
+				typ:   types.TypeI64,
+				cnst:  instr.New(instr.I64_CONST, 3),
+				div:   instr.I64_DIV_S,
+				value: types.I64(90),
+				want:  types.I64(30),
+			},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				eval := types.NewFunctionBuilder(nil).
+					WithParams(tt.typ).
+					WithReturns(tt.typ)
+				fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+					Emit(tt.cnst).
+					Emit(instr.New(tt.div)).
+					Emit(instr.New(instr.RETURN)).
+					Build()
+				require.NoError(t, err)
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				}, program.WithConstants(fn))
+
+				i := New(prog, WithTick(1), WithThreshold(0))
+				defer i.Close()
+				for range 8 {
+					i.Reset()
+					require.NoError(t, i.Push(tt.value))
+					require.NoError(t, i.Run(context.Background()))
+					got, err := i.Pop()
+					require.NoError(t, err)
+					require.Equal(t, tt.want, got)
+				}
+				require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+			})
+		}
+	})
+
+	t.Run("deopts variable zero divisors", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		for _, tt := range []struct {
+			name  string
+			typ   types.Type
+			div   instr.Opcode
+			left  types.Value
+			right types.Value
+			want  types.Value
+			alt   types.Value
+			next  types.Value
+			zero  types.Value
+		}{
+			{
+				name:  "i32",
+				typ:   types.TypeI32,
+				div:   instr.I32_DIV_S,
+				left:  types.I32(90),
+				right: types.I32(3),
+				want:  types.I32(30),
+				alt:   types.I32(5),
+				next:  types.I32(18),
+				zero:  types.I32(0),
+			},
+			{
+				name:  "i64",
+				typ:   types.TypeI64,
+				div:   instr.I64_DIV_S,
+				left:  types.I64(90),
+				right: types.I64(3),
+				want:  types.I64(30),
+				alt:   types.I64(5),
+				next:  types.I64(18),
+				zero:  types.I64(0),
+			},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				eval := types.NewFunctionBuilder(nil).
+					WithParams(tt.typ, tt.typ).
+					WithReturns(tt.typ)
+				fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+					Emit(instr.New(instr.LOCAL_GET, 1)).
+					Emit(instr.New(tt.div)).
+					Emit(instr.New(instr.RETURN)).
+					Build()
+				require.NoError(t, err)
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+				}, program.WithConstants(fn))
+
+				i := New(prog, WithTick(1), WithThreshold(0))
+				defer i.Close()
+				for range 8 {
+					i.Reset()
+					require.NoError(t, i.Push(tt.left))
+					require.NoError(t, i.Push(tt.right))
+					require.NoError(t, i.Run(context.Background()))
+					got, err := i.Pop()
+					require.NoError(t, err)
+					require.Equal(t, tt.want, got)
+				}
+				require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+
+				i.Reset()
+				require.NoError(t, i.Push(tt.left))
+				require.NoError(t, i.Push(tt.alt))
+				require.NoError(t, i.Run(context.Background()))
+				got, err := i.Pop()
+				require.NoError(t, err)
+				require.Equal(t, tt.next, got)
+
+				i.Reset()
+				require.NoError(t, i.Push(tt.left))
+				require.NoError(t, i.Push(tt.zero))
+				require.ErrorIs(t, i.Run(context.Background()), ErrDivideByZero)
+			})
+		}
+	})
+
 	t.Run("falls back learned callee branch through caller tail", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
