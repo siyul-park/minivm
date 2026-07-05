@@ -1,109 +1,114 @@
 # Coding Patterns
 
-> Read before writing new code.
+Read this before writing or changing code.
 
-## Agent Fast Path
+This document defines the default style for minivm code. It is optimized for agents and contributors who need to make changes safely, consistently, and with minimal unnecessary structure.
 
-Style authority. Read only task-relevant sections.
+## Fast Path
 
-| Change | Read |
-|---|---|
-| Function shape/helper extraction | 0. Core Principles, 1. Function Design |
-| Public APIs, constructors, builders, parsers | 2. Type & Interface Design, 3. API Design |
-| Errors or panic/recover | 4. Error Design |
-| Architecture-specific files | 5. Build Tags |
-| Tests | 6. Testing |
-| Commits/PR text | 7. Git & PR Workflow |
-| Docs | 8. Documentation Maintenance |
+Read only the sections relevant to the change.
 
-Default: match nearby code first; use this doc when local style unclear or new pattern needed.
+| Change                                    | Read                        |
+| ----------------------------------------- | --------------------------- |
+| Function shape, helper extraction, naming | 0. Principles, 1. Functions |
+| Types, interfaces, fields, constructors   | 2. Types                    |
+| Public APIs, options, builders, parsers   | 3. APIs                     |
+| Errors, panic, recover                    | 4. Errors                   |
+| Architecture-specific files               | 5. Build Tags               |
+| Tests                                     | 6. Tests                    |
+| Commits and PRs                           | 7. Git and PRs              |
+| Documentation changes                     | 8. Docs                     |
 
-Priorities:
+Default rule: **match nearby code first**. Use this document when local style is unclear or a new pattern is needed.
 
-- readability over cleverness
-- explicit behavior over hidden magic
-- stable structure over local optimization
-- top-down flow over fragmented logic
-- intention-revealing APIs over implementation exposure
+## 0. Principles
 
-Code reads like a behavior specification. Readers quickly understand what system does, where complexity lives, why structure exists — without simulating low-level mechanics.
+### 0.1 Simpler is better
 
-## 0. Core Principles
-
-### 0.1 Complexity placement
-
-Push complexity downward. Public APIs stay simple even when implementation hard.
+If two designs provide the same behavior, choose the simpler one.
 
 Prefer:
 
-- complex implementation behind simple interfaces
-- explicit control flow over implicit magic
-- localized complexity over distributed state
-- predictable structure over clever abstraction
+* fewer files
+* fewer types
+* fewer functions
+* fewer methods
+* fewer arguments
+* fewer names
+* less indirection
+* more local code
 
-Avoid spreading complexity across layers. Difficult step → one difficult implementation, not many partially difficult call sites.
+Do not add abstraction just because code can be split. Add abstraction only when it clearly improves readability, removes real duplication, isolates real complexity, or names a meaningful domain step.
 
-### 0.2 Top-down readability
+### 0.2 Keep public surfaces small
 
-Put important logic first. Reading downward reveals detail progressively: policy above, mechanics below. Readers rarely jump backward.
+Push complexity down. Public APIs should stay simple even when the implementation is hard.
 
-### 0.3 Avoid cleverness
+Prefer:
 
-Prefer short, standard names, but do not make code cryptic. Prefer mechanically obvious code, even if longer, when it reduces hidden state, avoids surprising flow, improves debuggability, or preserves interpreter/JIT symmetry.
+* simple APIs over exposed mechanisms
+* explicit behavior over hidden magic
+* local complexity over distributed state
+* predictable structure over clever abstraction
 
-### 0.4 Behavioral symmetry
+A difficult behavior should have one clear implementation, not many partially difficult call sites.
 
-Interpreter and JIT paths stay structurally similar when possible. Symmetry matters more than local optimization.
+### 0.3 Read top-down
 
-### 0.5 Minimal surface and locality
+Important behavior comes first. Details follow later.
 
-Minimize file count, type count, function count, method count, and argument count while keeping behavior explicit. Avoid splitting code merely because it can be split.
+Readers should understand the flow by reading downward:
 
-Every file, type, function, method, and argument has design and maintenance cost. Prefer inline logic when a helper is used once and does not name a distinct domain step. Extract only when it removes real duplication, isolates real complexity, or gives a behavior-level name callers need.
+```text
+Run
+  parse
+  exec
+  commit
+```
 
-Keep logically related code close together: shared state, validation, mutation, and cleanup for one behavior should be easy to see in one local area. Keep unrelated code apart so each file, type, function, and method has one cohesive reason to exist.
+Avoid forcing readers to jump around to reconstruct the main path.
 
-## 1. Function Design
+### 0.4 Be obvious
 
-### 1.1 Single abstraction level
+Prefer mechanically obvious code over clever code.
 
-Every statement sits at same conceptual height. Don't mix parsing with domain logic, policy with arithmetic, orchestration with buffer mutation, or business flow with index manipulation.
+A slightly longer implementation is better when it:
 
-Functions read like a narrative. Callers understand behavior without decoding parsing, temporary state, or low-level mechanics. Put mechanics in intent-named helpers.
+* avoids hidden state
+* improves debugging
+* preserves interpreter/JIT symmetry
+* makes control flow explicit
+* keeps behavior easy to verify
+
+### 0.5 Preserve symmetry
+
+Interpreter and JIT paths should stay structurally similar when possible.
+
+Symmetry matters more than small local optimizations because it keeps behavior easier to compare, test, and maintain.
+
+### 0.6 Keep related code close
+
+Keep state, validation, mutation, and cleanup for one behavior near each other.
+
+Avoid splitting logic across files or helpers unless the split has a clear ownership or readability benefit.
+
+## 1. Functions
+
+### 1.1 Use one abstraction level
+
+Each function should operate at one conceptual level.
+
+Do not mix orchestration with parsing details, policy with arithmetic, or high-level flow with byte/index manipulation.
+
+Good functions read like a short behavior description:
 
 ```go
-// ✗ mixed abstraction levels
 func (r *REPL) Run(ctx context.Context) error {
-    scanner := bufio.NewScanner(r.in)
-
     for {
-        fmt.Fprint(r.out, "> ")
-        scanner.Scan()
-
-        line := strings.TrimSpace(scanner.Text())
-
-        if strings.HasPrefix(fields[1], "@") {
-            abs, _ := strconv.ParseInt(fields[1][1:], 0, 64)
-            rel := int(abs) - (ip + 3)
-            line = fmt.Sprintf("br %d", rel)
+        line, err := r.read()
+        if err != nil {
+            return err
         }
-
-        instr.Parse(line)
-    }
-}
-
-// ✓ consistent abstraction level
-func (r *REPL) Run(ctx context.Context) error {
-    scanner := bufio.NewScanner(r.in)
-
-    for {
-        fmt.Fprint(r.out, prompt)
-
-        if !scanner.Scan() {
-            return scanner.Err()
-        }
-
-        line := strings.TrimSpace(scanner.Text())
 
         inst, err := r.parse(line)
         if err != nil {
@@ -119,305 +124,268 @@ func (r *REPL) Run(ctx context.Context) error {
 }
 ```
 
-Comments explaining transitions between statements signal mixed abstraction levels.
+If comments are needed to explain transitions between unrelated steps, the function likely mixes abstraction levels.
 
-### 1.2 Names express intent
+### 1.2 Name by role
 
-Names describe caller-visible outcomes, not internal mechanisms.
+Names describe caller-visible behavior, not implementation mechanics.
 
-Use the shortest standard name that clearly expresses the role. Use at most one word when the receiver, package, or surrounding code already provides context. Do not encode implementation steps in the name.
+Use the shortest standard name that is still clear. Prefer one word when package, receiver, or surrounding context already provides meaning.
 
-Public names follow the same rule: keep them concise and role-based, but still clear to package users.
+Examples:
 
-Avoid one-letter abbreviations for types, fields, functions, and methods. Avoid other abbreviations unless they are standard in the domain or broadly recognized (`ID`, `IP`, `ABI`, `JIT`, `VM`, `CPU`). Prefer one short word over private shorthand.
+| Avoid                     | Prefer       |
+| ------------------------- | ------------ |
+| `rewriteBranchAbsolute`   | `normalize`  |
+| `appendInstrAndUpdateLen` | `commit`     |
+| `checkEmptyAndFormatProg` | `show`       |
+| `jitContext`              | `lowering`   |
+| `jitFrame`                | `activation` |
+| `jitOperand`              | `value`      |
+| `traceOperation`          | `step`       |
 
-Do not prefix private names with their package, file, subsystem, or neighboring
-type when that context is already obvious. Prefer a role word over a location
-word: `lowering`, `activation`, `value`, `step`, `compiler`, `module`. Use a
-subsystem prefix only when two same-scope concepts would otherwise collide and a
-better role word does not exist. JIT internals are already in `jit.go` or behind
-an `arm64Lowerer` receiver; names like `jitContext`, `jitFrame`, `jitOperand`,
-and `traceOperation` repeat the address label instead of naming the role.
+Receiver context counts. For example, `r.show()` and `r.commit()` are clear on `*REPL`.
 
-| ✗ Mechanism | ✓ Intent |
-|---|---|
-| `rewriteBranchAbsolute` | `normalize` |
-| `makeAndCopyInstructions` | `build` |
-| `nilOutFieldsAndPrint` | `reset` |
-| `checkEmptyAndFormatProg` | `show` |
-| `appendInstrAndUpdateLen` | `commit` |
-| `jitContext` | `lowering` |
-| `jitFrame` | `activation` |
-| `jitOperand` | `value` |
-| `traceOperation` | `step` |
+Avoid:
 
-Receiver context counts: `r.show()`, `r.commit()` clear on `*REPL`.
+* private names that repeat the package, file, or subsystem
+* non-standard abbreviations
+* one-letter names outside tight local scopes
+* implementation-step names when a role name is enough
 
-### 1.3 Top-down structure
+Allowed abbreviations are common domain terms such as `ID`, `IP`, `ABI`, `JIT`, `VM`, and `CPU`.
 
-Declare callers above callees. Reading downward follows execution flow.
+### 1.3 Prefer one-word names
+
+When clear, prefer one short, standard, consistent word.
+
+Good role words:
 
 ```text
-Run
-  command → reset / show / readConst / readType
-               readType → block / addType
-  exec    → printStack → format
-  parse   → normalize → parseInt
+value
+step
+state
+frame
+module
+target
+source
+lowering
+activation
+compiler
+builder
+cache
+trace
+root
+exit
 ```
 
-Readers discover detail progressively, not reconstruct from scattered helpers.
+Do not force one-word names when clarity suffers. Short and clear is the goal; cryptic is not.
 
-### 1.4 Small responsibilities
+### 1.4 Declare callers before callees
 
-Function does one conceptual thing: orchestrate, transform, validate, emit, or normalize.
+Within a file and section, place high-level functions before the helpers they call.
 
-Split when abstraction level changes, naming hard, comments explain sections, or temporary state lives too long.
+This makes the file read from policy to mechanics.
 
-Do not split tiny single-use helpers out of nearby logic unless the helper names a meaningful behavior. A short helper that only hides one switch, loop, or predicate usually makes code harder to maintain because readers must chase another symbol.
+### 1.5 Extract only when useful
 
-Do not re-state a callee's precondition at the call site to pick between it and
-a fallback. When a helper already returns "ineligible/failed", let one helper
-own the whole decision rather than guarding every caller with the helper's own
-condition. The JIT branch lowering does this: `brIf` and `brTable` route through
-branch helpers that try `continuation` (the eligibility gate) and fall back to
-`exit` on failure — instead of each call site repeating
-`branches[ip] != nil && len(frames) == 1 && !marked(...)` before deciding. The
-fallback stays correct because the normal branch path flushes the same live
-state first, so a flush failure aborts the compile either way. Branches that
-prove they have no live operands or dirty locals may route through the clean
-branch path, where the flush is intentionally skipped because it would write no
-required VM stack homes.
+Inline simple single-use logic.
 
-### 1.5 Methods vs package-level functions
+Extract a helper only when it:
 
-Behavior belongs with the type owning required context. Receiver syntax marks ownership even when the receiver itself is unused.
+* removes real duplication
+* isolates real complexity
+* names a meaningful behavior
+* keeps the caller at one abstraction level
 
-**Rule**: A function used by only one type is a method on that type, regardless of whether it touches receiver state. Package-level functions are reserved for one of:
+Do not extract tiny helpers that only hide a short switch, predicate, or loop used once.
 
-- Used by ≥2 types
-- Public and general enough to be reused outside this package
-- Constructor (see exception)
-- Consumed only by other package-level functions — i.e. no struct ever participates
+### 1.6 Let one function own a decision
 
-```go
-// ✗ package-level helper (used only by Compiler)
-func mergeBlockInputs(inputs map[int][]VReg, blocks []*BasicBlock, ...) bool { ... }
+Do not duplicate a helper’s eligibility checks at every call site.
 
-// ✓ ownership is explicit, even though receiver is unused
-func (*Compiler) merge(inputs map[int][]VReg, blocks []*BasicBlock, ...) bool { ... }
-```
+If a helper can decide whether it applies and return failure or fallback, let it own that decision. Callers should not repeat the helper’s internal preconditions unless doing so changes behavior.
 
-**Strategy callbacks pass as method values, not package functions.** If a helper is passed as a `func(...)` argument, it still becomes a method; the call site uses the method value `t.fn`:
+### 1.7 Methods show ownership
+
+A function used by one type belongs on that type, even if the receiver is not used directly.
+
+Package-level functions are for:
+
+* constructors
+* functions used by multiple types
+* public general utilities
+* helpers used only by other package-level functions
+
+Callbacks should also be methods when ownership belongs to a type:
 
 ```go
-// ✓ method + method value at pass site
-func (Lowerer) sign32(c *Context, v VReg) VReg { ... }
-
 func (l Lowerer) cmp(c *Context) bool {
-    return l.compare(c, l.sign32)   // bound method value
-}
-
-// ✗ package function dropped in because the call shape looks like a callback
-func sign32(c *Context, v VReg) VReg { ... }
-func (l Lowerer) cmp(c *Context) bool { return l.compare(c, sign32) }
-```
-
-**Counter-rule (single-use inline)**: Do not extract a tiny helper used by exactly one call site just to satisfy this rule. If the body is ≤~15 straight-line lines (no looping branch logic worth a name), inline it at the one caller. §1.4 "do not split single-use helpers" outranks the method-conversion rule when the only call site is the helper's only justification.
-
-```go
-// ✗ method with unused receiver, used only once at construction
-func (*caller) validateOptions(opts options) error { /* 20 lines validation */ }
-func newCaller(opts options) (*caller, error) {
-    c := &caller{...}
-    return c, c.validateOptions(opts)
-}
-
-// ✓ inline at the single call site
-func newCaller(opts options) (*caller, error) {
-    if opts.limit < 0 { ... }
-    for _, rule := range opts.rules { ... }
-    return &caller{limit: opts.limit, rules: opts.rules}, nil
+    return l.compare(c, l.sign32)
 }
 ```
 
-**Constructor-helper pattern (2-phase init)**: When a constructor needs a value computed by a method on the type, AND the helper is large enough to extract (not subject to the counter-rule), build the struct first with the field zero, call the method, assign, return:
+Do not extract a tiny single-use method just to satisfy ownership. Inline it instead.
+
+### 1.8 Constructors are functions
+
+Constructors are standalone functions, never methods.
+
+Use:
 
 ```go
-func newRewriter(info RegInfo, insts []Instruction, pins map[int32]PReg) *rewriter {
-    r := &rewriter{pool: ..., pins: pins, assigned: ..., widths: ...}
-    r.last = r.scanLastUses(insts)   // extracted because the scan loop names a real step
-    return r
-}
+func newCompiler(...) *compiler
+func NewOptimizer(...) *Optimizer
 ```
 
-**Exception**: Constructors themselves remain standalone, never methods:
+Do not use:
 
 ```go
-// ✓ standalone constructor
-func newCompiler(arch *Arch, p program) *compiler { ... }
-
-// ✗ "new" + receiver is contradictory
-func (a *Assembler) newCompiler(arch *Arch, p program) *compiler { ... }
+func (c *compiler) newCompiler(...) *compiler
 ```
 
-Match type visibility and constructor visibility unless construction is intentionally restricted. Public concrete type with a normal constructor uses `NewType` in the same file as the type. Private type uses `newType`.
+Public concrete types use `NewType`. Private concrete types use `newType`.
 
-**Method expressions for callbacks**: When a callback's body is exactly one method call on its argument, pass the method expression rather than a wrapper:
+### 1.9 Keep methods with their type
 
-```go
-// ✓ method expression
-b.grow(end, memory.executable)   // func(memory) error
+A file should contain methods for one main type.
 
-// ✗ wrapper that adds no value
-func sealRegion(m memory) error { return m.executable() }
-b.grow(end, sealRegion)
-```
+Split a large type across files by concern if needed, but do not place methods for type A in type B’s file just for locality.
 
-**A file's methods belong to one type.** Split a large type across several files by concern, but every one of those files still holds that one type's methods — never another type's. `*Interpreter` is spread over `interp.go`, `threaded.go`, `fuse.go`, `host.go`, `marshal.go`, `pool.go`; each holds only `*Interpreter` methods. Do not move a type's methods into a *different* type's file to chase "locality": code that operates on type A's state is a method on A, declared in A's file, even when it integrates with subsystem B. If the behavior truly operates on B's state instead, make it a method on a B type — passing the other type in as an argument is the smell that you picked the wrong owner (see §0.5 cross-boundary structs).
+For JIT code:
 
-For JIT this means: `interp/jit.go` owns `compiler`, `module`, journal constants, `lowering`, and architecture-neutral trace orchestration; `interp/jit_arm64.go` owns ARM64 construction/constants plus the `lowerer` (`arm64Lowerer`) trace opcode handlers. The `Interpreter`'s own JIT bridge (`compile`, `install`, `entry`, `deopt`, `hot`, `function`) is `*Interpreter` behavior, so it stays in `interp.go` with the rest of the type — not in `jit.go`.
+* `interp/jit.go` owns JIT-neutral compiler/module/trace orchestration.
+* `interp/jit_arm64.go` owns ARM64 lowering.
+* `*Interpreter` JIT bridge behavior stays with `*Interpreter`.
 
-## 2. Type & Interface Design
+## 2. Types
 
-### 2.1 Interface-first
+### 2.1 Define interfaces where consumed
 
-Define interfaces in consuming package, not implementing package.
+Interfaces belong in the package that consumes the behavior, not the package that implements it.
 
-```go
-// asm/caller.go
-type Caller interface {
-    Call(params []Value, scratch *[]uint64) ([]Value, error)
-}
-```
+Interfaces describe what the caller needs, not what the implementation is.
 
-Interfaces represent required behavior, not implementation ownership.
+### 2.2 Prefer private type, public instance
 
-### 2.2 Private type, public instance
-
-One meaningful implementation → unexported concrete type with one exported instance.
+When there is one meaningful implementation, use an unexported concrete type with an exported value.
 
 ```go
 type i32Type struct{}
 
 var TypeI32 = i32Type{}
-
-func (i32Type) Kind() Kind             { return KindI32 }
-func (i32Type) String() string         { return "i32" }
-func (i32Type) Cast(other Type) bool   { return other == TypeI32 }
-func (i32Type) Equals(other Type) bool { return other == TypeI32 }
 ```
 
-### 2.3 Interface compliance assertions
+### 2.3 Keep interfaces small
 
-`var _ Foo = (*Bar)(nil)`. Declare in slot 6 per §2.4 (private values), after the types they assert. Group several with one `var (...)` block when convenient.
+Do not create an interface until there is a consumer that needs it.
+
+Do not add methods “for later.” Add only the behavior required now.
+
+### 2.4 Assert interface compliance near the type
+
+Use:
 
 ```go
 var _ Traceable = (*Struct)(nil)
-var _ Type      = (*StructType)(nil)
 ```
 
-### 2.4 File layout
+Place assertions after the related types, in the private value section.
 
-Every `.go` file declares symbols in this fixed order:
+### 2.5 File layout
 
-1. public type (interface, struct, alias)
-2. private type
-3. public const
-4. private const
-5. public value (`var`)
-6. private value (`var`) — includes interface compliance assertions
-7. constructor function (public `NewFoo` and private `newFoo`)
-8. public function
-9. public method
-10. private method
-11. private function
+Use this order in every `.go` file:
 
-Constructors are declared before methods even when private. `NewFoo` and
-`newFoo` both live in slot 7 because construction is top-level orchestration, not
-a low-level helper. Within each slot, follow §1.3 (callers above callees) and
-§4.1 (group sentinel errors in a single `var (...)` block).
+1. public types
+2. private types
+3. public constants
+4. private constants
+5. public variables
+6. private variables
+7. constructors
+8. public functions
+9. public methods
+10. private methods
+11. private functions
 
-### 2.5 Struct field ordering
+Within each group, keep top-down flow: callers before callees.
 
-Struct layout mirrors human reasoning: what the type IS and DOES before how it works internally.
+### 2.6 Order struct fields by meaning
 
-| Level | Characteristic | Examples |
-| --- | --- | --- |
-| lifecycle / policy | rich behavioral objects; caller-supplied | `context.Context`, profile collectors, hooks, marshalers |
-| infrastructure | stable complex objects; set at construction | assemblers, buffers, allocators, JIT compiler |
-| program data | loaded at init; stable during execution | bytecode, constants, type tables |
-| runtime state | mutated during execution | frames, stacks, heaps, caches |
-| mutable counters | small integers written every step | `fp`, `sp` |
-| read-only config | plain integers set at construction; never written back during execution | thresholds, cutoffs, tick intervals, fuel budgets |
-| sync primitives | raw concurrency mechanics | `sync.Mutex`, `sync.RWMutex` |
+Struct fields should follow how readers understand the type:
 
-Key rules:
+1. lifecycle and policy objects
+2. infrastructure
+3. program data
+4. runtime state
+5. mutable counters
+6. read-only config
+7. sync primitives
 
-- **Behavioral objects vs plain integers**: Rich objects (interfaces, callbacks, object pointers) are lifecycle/policy even when set once at construction. Plain numeric parameters (`int`, `int64`) are read-only config, not lifecycle/policy — they go near the bottom.
-- **Mutable counters above read-only config**: `fp`/`sp` are written every step, so they sit above threshold/cutoff/tick/fuel which are set once and only read.
-- **`sync.Mutex` always last**: It is a concurrency mechanic, not a semantic field.
-- **Separate layers with a blank line.**
+Separate layers with a blank line.
+
+Example:
 
 ```go
-// ✗ plain ints mixed into policy, mutable and read-only counters merged
 type Interpreter struct {
     ctx       context.Context
-    threshold int64
-    cutoff    int
-    compiler  *compiler
-    frames    []frame
-    fp        int
-    tick      int
-}
-
-// ✓ layered correctly
-type Interpreter struct {
-    ctx       context.Context         // lifecycle: behavioral objects
     tracer    *Tracer
     hook      func(*Interpreter) error
     marshaler Marshaler
 
-    compiler *compiler             // infrastructure
+    compiler *compiler
     cache    *Cache
 
-    types     []types.Type            // program data
+    types     []types.Type
     constants []types.Boxed
 
-    frames []frame                    // runtime state
+    frames []frame
     stack  []types.Boxed
 
-    fp int                            // mutable counters (written every step)
+    fp int
     sp int
 
-    threshold int64                   // read-only config (plain ints, set once)
+    threshold int64
     cutoff    int
     tick      int
     fuel      int64
-}
 
-// ✓ sync.Mutex at absolute bottom when a type owns synchronization:
-// put data fields first, read-only config next, and the mutex last.
+    mu sync.Mutex
+}
 ```
 
-Struct literals preserve declaration order. Zero-value fields may omit, but remaining stay ordered.
+Rules:
 
-Field names stay as short as clarity allows. Prefer one short word. Avoid one-letter field names unless the domain convention is already that short. Exported API fields follow the same rule and keep enough meaning for package users.
+* rich behavioral objects go near the top
+* mutable counters go above read-only config
+* plain numeric config goes near the bottom
+* `sync.Mutex` goes last
+* struct literals follow field declaration order
 
-## 3. API Design
+Field names should be short and clear. Prefer one word when possible.
 
-### 3.1 Constructor naming
+## 3. APIs
 
-Constructors use `New<Type>`.
+### 3.1 Constructors
+
+Constructor names use `New<Type>` for public types and `new<Type>` for private types.
 
 ```go
 func NewOptimizer(level Level) *Optimizer
-func NewBasicBlocksAnalysis() *BasicBlocksAnalysis
-func NewCaller(chunk *Chunk) (Caller, error)
+func newCompiler(...) *compiler
 ```
 
-### 3.2 Parser naming
+### 3.2 Parsers
 
-`Parse` handles primary package type.
+Parser names follow this pattern:
+
+| Function      | Meaning                                          |
+| ------------- | ------------------------------------------------ |
+| `Parse`       | parses the package’s primary type                |
+| `Parse<Type>` | parses a secondary type                          |
+| `ParseAll`    | parses multiple values, usually from `io.Reader` |
+
+Examples:
 
 ```go
 func Parse(s string) (Type, error)
@@ -425,29 +393,13 @@ func ParseFunction(lines []string) (*Function, error)
 func ParseAll(r io.Reader) ([]Instruction, error)
 ```
 
-Rules:
-
-- `Parse` → primary package type
-- `Parse<Type>` → secondary parse target
-- `ParseAll` → batch parse from `io.Reader`
-
-### 3.3 Functional options
+### 3.3 Options
 
 Prefer functional options over config structs.
 
+Apply defaults first, then options.
+
 ```go
-type option struct {
-    stack     int
-    heap      int
-    threshold int
-}
-
-func WithStack(val int) func(*option) {
-    return func(o *option) {
-        o.stack = val
-    }
-}
-
 func New(prog *program.Program, opts ...func(*option)) *Interpreter {
     opt := option{
         stack:     1024,
@@ -455,19 +407,17 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
         threshold: 4096,
     }
 
-    for _, o := range opts {
-        o(&opt)
+    for _, fn := range opts {
+        fn(&opt)
     }
 
     ...
 }
 ```
 
-Apply defaults before options.
+### 3.4 Builders
 
-### 3.4 Builder pattern
-
-Builders are mutable; built results are immutable.
+Builders are mutable. Built values should be treated as immutable.
 
 ```go
 fn := types.NewFunctionBuilder(&types.FunctionType{}).
@@ -479,36 +429,48 @@ fn := types.NewFunctionBuilder(&types.FunctionType{}).
 
 Discard builders after `Build()`.
 
-## 4. Error Design
+### 3.5 Avoid premature API surface
 
-### 4.1 Errors are API surface
+Do not add public methods, options, interfaces, or exported fields unless a real caller needs them.
 
-Errors are package behavior. Sentinel errors: stable semantic categories, not implementation details.
+A smaller API is easier to maintain, test, and keep compatible.
+
+## 4. Errors
+
+### 4.1 Errors are API
+
+Sentinel errors are stable semantic categories.
 
 ```go
 var (
-    ErrUnknownOpcode     = errors.New("unknown opcode")
-    ErrSegmentationFault = errors.New("segmentation fault")
-    ErrStackOverflow     = errors.New("stack overflow")
-    ErrDivideByZero      = errors.New("divide by zero")
+    ErrUnknownOpcode = errors.New("unknown opcode")
+    ErrStackOverflow = errors.New("stack overflow")
+    ErrDivideByZero  = errors.New("divide by zero")
 )
 ```
 
-### 4.2 Always wrap with `%w`
+Do not expose implementation details as sentinel errors.
+
+### 4.2 Wrap errors with `%w`
+
+Use `%w` whenever returning an error with context.
 
 ```go
 return nil, fmt.Errorf("%w: %d", ErrTooManyParams, len(sig.Params))
-return nil, fmt.Errorf("%w: %w", ErrMmapFailed, err)
 return fmt.Errorf("%w: at=%d", ErrInvalidJump, ip)
 ```
 
-### 4.3 Panic strategy
+### 4.3 Panic only for invariants
 
-Panic only for violated internal invariants in hot paths. Normal control flow stays explicit. Recover once at execution boundary.
+Panic is allowed only for violated internal invariants, usually in hot paths.
+
+Normal control flow must return errors.
+
+Recover at the execution boundary, not throughout the codebase.
 
 ## 5. Build Tags
 
-Architecture-specific files require matching stubs.
+Architecture-specific files must have matching stubs.
 
 ```go
 //go:build arm64
@@ -518,27 +480,23 @@ Architecture-specific files require matching stubs.
 //go:build !arm64
 ```
 
-## 6. Testing
+Tests must mirror production build tags.
+
+## 6. Tests
 
 ### 6.1 Tests are executable documentation
 
-Tests show setup, execution, and expectation in one visible flow — no helper indirection.
+Tests should show setup, execution, and expectation in one visible flow.
 
-**No test helpers that wrap test logic.** Inline everything inside each `t.Run` body. When a test uses an abstraction, readers must chase the helper to understand what the API does and what the test asserts. Tests serve two purposes: verification and documentation of API usage. Both require full call sequence visible at the point of the test.
+Avoid hiding important behavior behind helpers.
+
+Prefer:
 
 ```go
-// WRONG: hides what the API does
-runCancel := func(t *testing.T, prog *program.Program, opts ...func(*option)) {
-    t.Helper()
-    ctx, cancel := context.WithCancel(context.Background())
-    // ...
-}
-t.Run("threaded", func(t *testing.T) { runCancel(t, prog, WithTick(1)) })
-
-// CORRECT: full call visible, no indirection
 t.Run("threaded", func(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
+
     calls := 0
     i := New(prog, WithTick(1), WithHook(func(i *Interpreter) error {
         calls++
@@ -546,12 +504,36 @@ t.Run("threaded", func(t *testing.T) {
         return nil
     }))
     defer i.Close()
+
     require.ErrorIs(t, i.Run(ctx), context.Canceled)
     require.Equal(t, 1, calls)
 })
 ```
 
-### 6.2 File naming
+Avoid:
+
+* fixture builders
+* test-only run wrappers
+* assertion helpers
+* hidden setup helpers
+
+Duplicated setup is acceptable when it makes the tested API visible.
+
+### 6.2 Test public behavior
+
+Top-level tests target public symbols.
+
+| Symbol      | Test          |
+| ----------- | ------------- |
+| `Foo`       | `TestFoo`     |
+| `NewFoo`    | `TestNewFoo`  |
+| `(Foo).Bar` | `TestFoo_Bar` |
+
+Do not name top-level tests after private helpers. Test private behavior through the public API that owns the observable behavior.
+
+### 6.3 Match test files to production files
+
+Use matching names:
 
 ```text
 buffer.go      → buffer_test.go
@@ -559,161 +541,74 @@ assembler.go   → assembler_test.go
 jit_arm64.go   → jit_arm64_test.go
 ```
 
-Default to matching production files with corresponding `_test.go` files.
-Tests for a public symbol live in the `_test.go` file matching the production
-file that defines that symbol's owning type or constructor. `Cache.Close` belongs
-in `cache_test.go`, not in a neighboring pool or interpreter test file.
+Tests for a public symbol belong in the test file matching the file that defines the owning type or constructor.
 
-When implementation file only supports another type's public API, put tests in owner type's test file. E.g., interpreter option functions and `Interpreter` methods belong in `interp_test.go`, even if implemented in smaller supporting file.
+### 6.4 Keep nesting shallow
 
-### 6.3 One test per public symbol
+Aim for at most one `t.Run` level.
 
-Test targets are public API only. Do not create top-level tests named after private helpers or implementation details. Exercise private behavior through the public function or method that owns the observable behavior.
+Do not add wrapper subtests just to group cases.
 
-| Symbol | Test |
-|---|---|
-| `Foo` | `TestFoo` |
-| `NewFoo` | `TestNewFoo` |
-| `(Foo).Bar` | `TestFoo_Bar` |
+Use table-driven tests when setup and assertions share one shape. Use explicit subtests when cases need different setup or clearer labels.
 
-All cases for a symbol belong in one test function.
+Do not mix table-driven and explicit subtest styles at the same nesting level.
 
-### 6.4 Test structure
+### 6.5 Use `require`
 
-**Minimize nesting depth.** Each `t.Run` level adds reading, filtering, debugging overhead. Aim for at most one subtest level. Wrapper subtests that only group cases add depth without value — hoist directly.
-
-At each nesting level, use **one** pattern — table-driven or explicit `t.Run`. Don't mix both.
-
-**Table-driven** — when all cases share identical setup and assertion shape:
-
-```go
-func TestBoxed_Kind(t *testing.T) {
-    tests := []struct {
-        val  Boxed
-        kind Kind
-    }{
-        {BoxI32(0), KindI32},
-        {BoxI64(0), KindI64},
-    }
-
-    for _, tt := range tests {
-        t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
-            require.Equal(t, tt.kind, tt.val.Kind())
-        })
-    }
-}
-```
-
-No `name string` field when subtest name derives from primary input. Use `fmt.Sprint(tt.input)` instead. `name` field allowed only when inputs don't produce readable name (e.g. program bytecode, complex configs).
-
-**Explicit subtests** — when cases differ in setup, have side effects, or benefit from a descriptive label:
-
-```go
-func TestBuffer_Append(t *testing.T) {
-    t.Run("normal", func(t *testing.T) { ... })
-    t.Run("overflow", func(t *testing.T) { ... })
-}
-```
-
-**No grouping wrappers** unless wrapper does meaningful shared setup that can't be inlined. Wrapper that only groups adds depth without gain — hoist to parent level.
-
-Shared setup across few cases: inline it at each case. Do not extract a
-test-only data builder such as `smallProgram()` or `pooledArithmeticProgram()`;
-the duplicated setup is documentation of the API under test.
-
-```go
-// WRONG: extra level just for grouping
-t.Run("with auth", func(t *testing.T) {
-    t.Run("valid token", func(t *testing.T) { ... })
-    t.Run("expired token", func(t *testing.T) { ... })
-})
-
-// CORRECT: hoisted, setup visible in each case
-t.Run("valid token", func(t *testing.T) { ctx := context.WithValue(...); ... })
-t.Run("expired token", func(t *testing.T) { ctx := context.WithValue(...); ... })
-```
-
-For `interp.Interpreter.Run`, opcode examples live in a package-level
-`runTests` table (`var runTests = []struct{ program *program.Program; values
-[]types.Value; err error }`): one representative program per opcode, showing
-the bytecode, constants/types/locals it needs, and the final stack values or
-expected error. `TestInterpreter_Run` iterates the
-table with `t.Run(fmt.Sprint(tt.program), ...)`; `program.Program.String()`
-renders its disassembly, so the subtest name is generated from the program
-itself with no `name` field. Other tests that exercise `Run` against many
-programs (e.g. pool tests) reuse the same `runTests` table instead of building
-a parallel one.
-
-A runtime behavior that cannot fit one table row — the entry-frame `YIELD`
-escape, where `Run` returns `ErrYield` and a second `Run` call resumes — is a
-separate explicit `t.Run` subtest placed after the table loop in
-`TestInterpreter_Run`, not folded into the table.
-
-### 6.5 Assertions
-
-Always use `require`; never use `assert`.
+Always use `require`, not `assert`.
 
 ```go
 require.NoError(t, err)
 require.ErrorIs(t, err, ErrFoo)
+require.Equal(t, want, got)
 ```
 
-### 6.6 Resource cleanup
+### 6.6 Clean up immediately
 
-Clean up immediately after allocation.
+Defer cleanup right after successful allocation.
 
 ```go
 b, err := NewBuffer(64)
 require.NoError(t, err)
-
 defer b.Free()
 ```
 
-### 6.7 Architecture-specific tests
+### 6.7 No test helpers by default
 
-Tests must mirror production build tags.
+Do not add test helpers for fixtures, programs, contexts, configured objects, or assertions.
 
-```go
-//go:build arm64
+Before adding a helper, ask:
 
-package arm64
-```
+1. Can this be inlined?
+2. Can this be a table?
+3. Does this behavior belong in production code instead?
 
-### 6.8 Test helper policy
+Only add a helper when it is clearly better than visible, local test flow.
 
-No test helpers. Tests stay self-contained; don't hide setup, assertions, or execution flow.
-Test-only helpers that return fixtures, programs, contexts, or configured
-objects are not allowed. Inline setup in the `t.Run` body or use a table when
-all cases share one assertion shape.
+### 6.8 Shared opcode tests
 
-Before adding a new helper, check whether the logic belongs to the type it
-operates on. If so, refine it into a method/function on that type (following
-the existing method-design conventions for the package, e.g. naming and
-return shape of sibling methods) instead of a test-only helper, and call the
-new method directly from the test.
+For `interp.Interpreter.Run`, opcode examples live in the package-level `runTests` table.
 
-This holds for white-box introspection too. A JIT test that builds a program,
-runs it, then scans tracer internals (`tracer.rootAt`, `tree.branches`,
-`tree.hits`, a trace's `ops`) inlines all three steps into each `t.Run`. Do not
-extract a `branchTreeProgram()` builder, a `runEvalI32()` run wrapper, or a
-`traceReturnsConst()` scan — even when the scan is several nested loops and
-recurs across subtests. The duplicated build/run/scan is the documentation of
-what the JIT actually does; adding production API on tracer types purely to
-shorten a test trades a real surface cost (§0.5) for test brevity and is not
-allowed.
+Each row should show:
 
-## 7. Git & PR Workflow
+* bytecode program
+* constants/types/locals needed
+* final stack values or expected error
 
-### 7.1 Branch & commit types
+`TestInterpreter_Run` iterates this table. Runtime behavior that does not fit one table row, such as entry-frame `YIELD` resume behavior, should be an explicit subtest after the table loop.
 
-| Issue | Branch | Commit |
-|---|---|---|
-| Bug | `hotfix/<desc>` | `fix` |
-| Feature | `feature/<desc>` | `feat` |
-| Performance | `feature/<desc>` | `perf` |
-| Refactor | — | `refactor` |
-| Test | — | `test` |
-| Docs | — | `docs` |
+## 7. Git and PRs
+
+### 7.1 Branch and commit types
+
+| Change      | Branch           | Commit     |
+| ----------- | ---------------- | ---------- |
+| Bug         | `hotfix/<desc>`  | `fix`      |
+| Feature     | `feature/<desc>` | `feat`     |
+| Performance | `feature/<desc>` | `perf`     |
+| Refactor    | —                | `refactor` |
+| Test        | —                | `test`     |
+| Docs        | —                | `docs`     |
 
 Use lowercase, concise, hyphen-separated names.
 
@@ -723,24 +618,26 @@ Use lowercase, concise, hyphen-separated names.
 <type>(scope): <summary>
 ```
 
+Examples:
+
 ```text
 feat(interp): add trace jit support
-fix(asm): correct register allocation bug
+fix(asm): correct register allocation
 ```
 
 Rules:
 
-- imperative mood
-- ≤ 72 characters
-- one logical concern per commit
+* imperative mood
+* at most 72 characters
+* one logical concern per commit
 
-Breaking changes:
+Breaking changes use:
 
 ```text
-feat!: ...
+feat!: change bytecode format
 ```
 
-with:
+and include:
 
 ```text
 BREAKING CHANGE: ...
@@ -748,7 +645,9 @@ BREAKING CHANGE: ...
 
 ### 7.3 Performance changes
 
-Performance claims require benchmarks.
+Performance claims require benchmark evidence.
+
+Include:
 
 ```text
 before: ...
@@ -758,28 +657,54 @@ conclusion: ...
 
 ### 7.4 Self-review checklist
 
-Before opening a PR:
+Before opening a PR, check:
 
-- [ ] issue fully resolved
-- [ ] no unrelated changes
-- [ ] code remains readable
-- [ ] invariants preserved
-- [ ] tests sufficient
-- [ ] documentation updated if conventions changed
+* issue is fully resolved
+* no unrelated changes
+* code is simpler or clearly justified
+* names are short, standard, and consistent
+* public surface is minimal
+* invariants are preserved
+* tests cover behavior
+* docs are updated when conventions change
 
 ### 7.5 Pull requests
 
-Follow existing PR template, explain changes clearly, include benchmark results when relevant.
+Follow the existing PR template.
 
-## 8. Documentation Maintenance
+Explain:
 
-Documentation is part of codebase. New code conventions require same-commit doc updates.
+* what changed
+* why it changed
+* how it was tested
+* benchmark impact, if relevant
 
-| Change | Update |
-|---|---|
-| style / naming / structure | `docs/coding-patterns.md` |
-| architecture / boundaries | `docs/architecture.md` |
-| JIT contracts / assembler APIs | `docs/jit-internals.md` |
-| invariants / pitfalls | `AGENTS.md` or `architecture.md` |
+## 8. Docs
 
-Code changes establishing new convention are incomplete without matching doc update.
+Documentation is part of the codebase.
+
+Update docs in the same commit when code establishes or changes a convention.
+
+| Change                              | Update                           |
+| ----------------------------------- | -------------------------------- |
+| style, naming, structure            | `docs/coding-patterns.md`        |
+| architecture, ownership, boundaries | `docs/architecture.md`           |
+| JIT contracts, assembler APIs       | `docs/jit-internals.md`          |
+| invariants, pitfalls                | `AGENTS.md` or `architecture.md` |
+
+A convention-changing code change is incomplete without the matching documentation update.
+
+## Agent Rule of Thumb
+
+When unsure, choose the smallest correct change.
+
+Prefer:
+
+1. local code over a new helper
+2. one clear function over many small fragments
+3. one short standard name over a long mechanism name
+4. one cohesive type over extra interfaces
+5. one explicit flow over clever indirection
+6. existing nearby style over a new pattern
+
+The best design is usually the one that keeps behavior obvious, names few things, and leaves the next reader with less to understand.

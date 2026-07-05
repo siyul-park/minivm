@@ -1,79 +1,182 @@
 # Compatibility
 
-Platform requirements, CGO usage, and build constraints for minivm.
+Platform support, CGO requirements, build constraints, and low-level portability notes for minivm.
+
+## Summary
+
+minivm is portable by default.
+
+The threaded interpreter and optimizer work on all supported Go platforms. The JIT is ARM64-only. On Darwin/ARM64, JIT execution requires CGO for instruction-cache coherence.
+
+Default rule for contributors and agents:
+
+* keep platform-specific code small and isolated
+* prefer simple stubs over scattered build-condition checks
+* do not require manual build tags for normal use
+* keep names short, standard, and consistent
+* if behavior is the same, choose the simpler design
 
 ## Go Version
 
 **Minimum: Go 1.26.2**
 
-Declared in `go.mod`. VM core uses only Go standard library. CLI and tests pull small module dependencies (`cobra`, `testify`).
+The minimum version is declared in `go.mod`.
+
+The VM core uses only the Go standard library. The CLI and tests use small external dependencies such as `cobra` and `testify`.
 
 ## Platform Matrix
 
-| Platform | Threaded Interpreter | AOT Optimizer | ARM64 JIT |
-|---|---|---|---|
-| Any OS / Any arch | ✅ | ✅ | — |
-| Darwin / ARM64 | ✅ | ✅ | ✅ (CGO required) |
-| Linux / ARM64 | ✅ | ✅ | ✅ (no CGO required) |
-| Darwin / x86-64 | ✅ | ✅ | — |
-| Linux / x86-64 | ✅ | ✅ | — |
+| Platform          | Threaded Interpreter | AOT Optimizer |       ARM64 JIT |
+| ----------------- | -------------------: | ------------: | --------------: |
+| Any OS / Any arch |                    ✅ |             ✅ |               — |
+| Darwin / ARM64    |                    ✅ |             ✅ | ✅, CGO required |
+| Linux / ARM64     |                    ✅ |             ✅ |               ✅ |
+| Darwin / x86-64   |                    ✅ |             ✅ |               — |
+| Linux / x86-64    |                    ✅ |             ✅ |               — |
 
-On non-ARM64 platforms, only threaded interpreter and optimizer are active. JIT stubs compile without error but produce no native code. The `asm/amd64` package is a placeholder: it exposes the generic `asm.Arch` shape, but its encoder and ABI return `asm.ErrNotImplemented`.
+On non-ARM64 platforms, only the threaded interpreter and optimizer are active.
+
+JIT stubs compile cleanly but do not emit native code. `asm/amd64` is currently a placeholder: it preserves the generic `asm.Arch` shape, but its encoder and ABI return `asm.ErrNotImplemented`.
 
 ## CGO
 
-**CGO is optional except on Darwin/ARM64 with JIT enabled.**
+CGO is optional except for **Darwin/ARM64 with JIT enabled**.
 
-On Darwin/ARM64, JIT writes native code into mmap'd executable memory. Apple Silicon enforces W^X and requires explicit instruction-cache flush (`__builtin_arm_isb`) after every `Seal()`. This flush is implemented via CGO in `asm/icache_darwin_arm64.go`.
+On Apple Silicon, JIT code is written to executable memory. Darwin requires explicit instruction-cache synchronization after sealing writable code pages. minivm performs this flush through CGO in `asm/icache_darwin_arm64.go`.
 
-| Build | CGO | Icache flush |
-|---|---|---|
-| `darwin && arm64 && cgo` | required | `__builtin_arm_isb(15)` via CGO |
-| `darwin && arm64 && !cgo` | not used | no-op — **unsafe: stale icache can cause intermittent `SIGILL`** |
-| `linux && arm64` | not used | no-op (Linux kernel handles coherence) |
-| any other platform | not used | no-op (JIT not active) |
+| Build                     |      CGO | Icache behavior                        |
+| ------------------------- | -------: | -------------------------------------- |
+| `darwin && arm64 && cgo`  | required | real flush via `__builtin_arm_isb(15)` |
+| `darwin && arm64 && !cgo` | disabled | no-op flush; unsafe with JIT           |
+| `linux && arm64`          | not used | no-op; kernel handles coherence        |
+| other platforms           | not used | no-op; JIT inactive                    |
 
-To build without CGO on Darwin/ARM64, set `CGO_ENABLED=0`. This compiles cleanly but disables icache coherence — only safe when JIT is also disabled via `WithThreshold(-1)`.
+Building with `CGO_ENABLED=0` on Darwin/ARM64 is allowed, but safe only when JIT is disabled with `WithThreshold(-1)`. Otherwise, stale instruction cache state may cause intermittent `SIGILL`.
 
 ## Build Tags
 
-| Tag | Effect |
-|---|---|
-| `arm64` | enables `asm/arm64/` encoder, ABI, trampoline; enables `interp/jit_arm64.go` handler table |
-| `!arm64` | stubs out `asm/arm64/` with zero-value returns; `interp/jit_arm64.go` not compiled |
-| `darwin && arm64 && cgo` | real icache flush in `asm/icache_darwin_arm64.go` |
-| `!darwin \|\| !arm64 \|\| !cgo` | no-op icache stub in `asm/icache_noop.go` |
-| `darwin \|\| linux` | real executable-memory mapping in `asm/memory.go` |
-| `!darwin && !linux` | executable-memory allocation returns `ErrMmapFailed` through `asm/memory_stub.go` |
+Normal users should not set manual build tags. The Go toolchain selects the correct files from `GOOS`, `GOARCH`, and CGO state.
 
-No manual build tags required for normal use. The Go toolchain selects correct files automatically based on `GOOS` and `GOARCH`.
+| Condition                       | Effect                                                   |
+| ------------------------------- | -------------------------------------------------------- |
+| `arm64`                         | enables ARM64 encoder, ABI, trampoline, and JIT lowering |
+| `!arm64`                        | uses ARM64 stubs; ARM64 JIT lowering is not compiled     |
+| `darwin && arm64 && cgo`        | enables real instruction-cache flush                     |
+| `!darwin \|\| !arm64 \|\| !cgo` | uses no-op instruction-cache flush                       |
+| `darwin \|\| linux`             | enables executable-memory mapping                        |
+| `!darwin && !linux`             | executable-memory allocation returns `ErrMmapFailed`     |
 
-## `unsafe` Usage
+Design rule: keep build tags at file boundaries. Avoid inline platform branching unless it is simpler and clearly local.
 
-`unsafe` is used in a few low-level packages:
+## JIT Support
 
-- `asm/memory.go`: `mmap`/`mprotect` syscalls and pointer access to executable memory on Darwin/Linux
-- `asm/buffer.go`, `asm/link.go`, `asm/arch.go`, `asm/arm64/abi.go`: pointer arithmetic for native code patching and callable entry binding
-- `instr/instr.go`, `interp/threaded.go`: fixed-width bytecode operand loads
-- `interp/interp.go`: scratch pointers passed to native JIT code
-- `interp/host.go`, `interp/marshal.go`: host-object field access and reflection bridge
+The JIT is currently implemented for ARM64 only.
 
-No `unsafe` in `types/`, `program/`, `pass/`, `analysis/`, `transform/`, or `optimize/`. Guest bytecode cannot escape VM heap via `unsafe`.
+| Platform                              | JIT behavior                              |
+| ------------------------------------- | ----------------------------------------- |
+| Darwin/ARM64 with CGO                 | supported                                 |
+| Linux/ARM64                           | supported                                 |
+| ARM64 without required icache support | builds, but JIT may be unsafe or inactive |
+| x86-64                                | not implemented                           |
+| Windows / Plan9                       | not supported                             |
+
+When no JIT backend is available, the interpreter remains usable. JIT-related paths fall back to stubs or fail only when executable memory is explicitly requested.
+
+Use `WithThreshold(-1)` to disable JIT explicitly.
 
 ## Executable Memory
 
-JIT uses `syscall.Mmap` + `syscall.SYS_MPROTECT` directly on Darwin/Linux:
+On Darwin and Linux, the JIT uses executable memory backed by `mmap`.
 
-- **Darwin/Linux**: `MAP_ANON | MAP_PRIVATE`, toggle between `PROT_READ|PROT_WRITE` and `PROT_READ|PROT_EXEC`
+The memory flow is:
 
-Platforms without the Darwin/Linux mapping path (e.g. Windows, plan9) cannot use JIT. `asm.NewBuffer` returns `ErrMmapFailed` there, while threaded interpreter and optimizer code still compile with the non-ARM64 JIT stub.
+1. allocate anonymous private memory
+2. write code while pages are writable
+3. seal pages as executable
+4. flush instruction cache when required
+5. call generated code through the platform ABI bridge
 
-## Windows / Plan9
+On Darwin/Linux, minivm toggles pages between:
 
-JIT not supported. `asm/memory_stub.go` keeps packages that import `asm` buildable, but executable buffer allocation fails with `ErrMmapFailed`. Threaded interpreter and full optimizer pipeline work without restriction.
+```text id="3azauu"
+PROT_READ | PROT_WRITE
+PROT_READ | PROT_EXEC
+```
 
-Build normally — JIT stubs compile cleanly and interpreter runs. `WithThreshold(-1)` effectively applies when no JIT backend is registered.
+Platforms without executable-memory support use `asm/memory_stub.go`. In that case, `asm.NewBuffer` returns `ErrMmapFailed`.
+
+## `unsafe` Usage
+
+`unsafe` is limited to low-level packages that need direct memory, bytecode, or host-object access.
+
+Current usage includes:
+
+| Package/file                                  | Purpose                                        |
+| --------------------------------------------- | ---------------------------------------------- |
+| `asm/memory.go`                               | `mmap`, `mprotect`, executable memory access   |
+| `asm/buffer.go`, `asm/link.go`, `asm/arch.go` | code patching and callable entry binding       |
+| `asm/arm64/abi.go`                            | native ABI bridge                              |
+| `instr/instr.go`                              | fixed-width bytecode operand loads             |
+| `interp/threaded.go`                          | fast bytecode operand reads                    |
+| `interp/interp.go`                            | scratch pointers passed to JIT code            |
+| `interp/host.go`, `interp/marshal.go`         | host-object field access and reflection bridge |
+
+There is no `unsafe` usage in:
+
+```text id="meqih8"
+types
+program
+pass
+analysis
+transform
+optimize
+```
+
+Guest bytecode cannot use `unsafe` to escape the VM heap.
+
+Design rule: keep `unsafe` local, obvious, and documented. Do not spread unsafe assumptions into higher-level packages.
+
+## Windows and Plan9
+
+Windows and Plan9 do not support JIT execution in minivm.
+
+The threaded interpreter and optimizer still build and run normally. `asm/memory_stub.go` keeps packages that import `asm` buildable, but executable buffer allocation fails with `ErrMmapFailed`.
+
+No special build setup is required.
 
 ## Module Stability
 
-`interp`, `types`, `instr`, `program`, `pass`, `analysis`, `transform`, and `optimize` packages follow semantic versioning. `asm/`, `asm/arm64/`, and `asm/amd64/` are internal; APIs may change without major version bump.
+The following packages are public and follow semantic versioning:
+
+```text id="shfr7l"
+interp
+types
+instr
+program
+pass
+analysis
+transform
+optimize
+```
+
+The following packages are low-level implementation details and may change without a major version bump:
+
+```text id="fekwr2"
+asm
+asm/arm64
+asm/amd64
+```
+
+## Agent Notes
+
+When changing compatibility-sensitive code:
+
+* prefer one clear platform boundary over many scattered checks
+* add a stub for every architecture-specific implementation
+* keep JIT unavailable paths buildable and predictable
+* do not make normal users pass custom build tags
+* keep public behavior stable even when backend support differs
+* use short, standard names such as `memory`, `buffer`, `arch`, `flush`, `seal`, and `stub`
+* do not introduce a new abstraction when a file-level build tag or small stub is enough
+
+The simplest compatible design is usually best: portable by default, specialized only where required, and explicit at the boundary.

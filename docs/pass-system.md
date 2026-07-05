@@ -1,83 +1,169 @@
 # Pass System
 
-How the analysis/transform/optimization pipeline works and how to write passes.
-The design follows LLVM's new pass manager: a lazy, caching **analysis manager**
-(`pass.Manager`) is kept separate from an ordered **transform pipeline**
-(`pass.Pipeline`).
+How minivm analyses, transforms, and optimization pipelines work.
 
-## Agent Checklist
+The pass system follows LLVM’s new pass manager model:
+
+* `pass.Manager` lazily computes and caches analyses.
+* `pass.Pipeline` runs transforms in order.
+* Analyses and transforms stay separate.
+
+## Summary
+
+Use an **analysis** when code needs to compute reusable information about an IR unit.
+
+Use a **transform** when code mutates `*program.Program`.
+
+Default design rule:
+
+* keep analyses pure
+* keep transforms in-place
+* request analyses through `pass.Manager`
+* report invalidation with `pass.Preserved`
+* prefer simple local passes before complex global rewrites
+* if two pass designs produce the same result, choose the simpler one
+* use short, standard names such as `blocks`, `rewrite`, `fold`, `dedup`, `value`, and `pass`
+
+## Agent Fast Path
 
 Before editing:
 
-- decide whether you are writing an **analysis** (computes a cached result for an
-  IR unit) or a **transform** (mutates `*program.Program` in place)
-- request cached analyses with `pass.GetResult[R](m, unit)`; never recompute by hand
-- preserve in-place mutation — transforms mutate the unit and report `pass.Preserved`
+| Task                    | Rule                                 |
+| ----------------------- | ------------------------------------ |
+| Add analysis            | implement `Analysis[U, R]`           |
+| Add transform           | implement `Pass[U]`                  |
+| Need analysis data      | use `pass.GetResult[R](m, unit)`     |
+| Mutate bytecode         | return `pass.PreserveNone()`         |
+| No mutation             | return `pass.PreserveAll()`          |
+| Rewrite bytecode length | repair branches and exception tables |
+| Rewrite constants/types | verify indexes separately            |
 
 After editing:
 
-- add package-local tests in `analysis/`, `transform/`, `optimize/`, or `pass/`
-- for bytecode rewrites, verify branch offsets and constant/type indexes separately
-- run `go test ./analysis ./transform ./optimize ./pass`
+```bash
+go test ./analysis ./transform ./optimize ./pass
+```
 
-## `pass.Manager` (analysis cache)
+For bytecode rewrites, test branch offsets, exception handlers, and constant/type indexes separately.
 
-`pass.Manager` lazily runs analyses and caches their results, keyed by result
-type and unit identity. Generics carry the types; the only reflection is
-`reflect.TypeFor[R]()` used as a map key (no dynamic dispatch).
+## Core Model
+
+```text
+analysis:  IR unit → cached result
+transform: IR unit → mutate in place → preserved analyses
+pipeline:  ordered transforms + invalidation
+```
+
+Analyses should compute facts. They should not mutate the program.
+
+Transforms may mutate the program. They must report which cached analyses are still valid.
+
+## `pass.Manager`
+
+`pass.Manager` owns analysis registration and caching.
+
+It caches results by:
+
+* result type
+* IR unit identity
 
 ```go
 type Manager struct {
-    analyses map[reflect.Type]func(*Manager, any) (any, error) // result type → runner
-    cache    map[cacheKey]any                                  // (result type, unit) → result
+    analyses map[reflect.Type]func(*Manager, any) (any, error)
+    cache    map[cacheKey]any
 }
 ```
 
-- `Register[U, R](m, analysis)`: registers an `Analysis[U, R]` under `R`.
-- `GetResult[R](m, unit)`: returns the cached `R` for `unit`, computing and caching
-  on a miss; errors with `ErrUnregisteredAnalysis` if no analysis produces `R`.
-- `Invalidate(preserved)`: drops cached results unless `preserved` is `PreserveAll()`.
+Main APIs:
 
-## `pass.Pipeline` (transform sequence)
+| API                           | Purpose                                             |
+| ----------------------------- | --------------------------------------------------- |
+| `Register[U, R](m, analysis)` | register analysis result type `R` for unit type `U` |
+| `GetResult[R](m, unit)`       | get cached result or compute it on demand           |
+| `Invalidate(preserved)`       | drop stale cached results                           |
 
-`pass.Pipeline[U]` runs an ordered sequence of transforms over an IR unit of type
-`U`, invalidating stale analyses between passes (LLVM's `PassManager`).
+Rules:
+
+* never recompute registered analyses by hand
+* always request analyses with `pass.GetResult`
+* do not retain the manager after `Run` returns
+* keep analysis result types specific and meaningful
+
+If no registered analysis produces `R`, `GetResult` returns `ErrUnregisteredAnalysis`.
+
+## `pass.Pipeline`
+
+`pass.Pipeline[U]` runs transforms over an IR unit.
 
 ```go
 pl := pass.NewPipeline[*program.Program]()
 pl.AddPass(transform.NewConstantFoldingPass())
-prog, err := pl.Run(m, prog) // m is a *pass.Manager
+
+prog, err := pl.Run(m, prog)
 ```
+
+The pipeline:
+
+1. runs each pass in order
+2. receives the pass’s `Preserved` result
+3. invalidates stale analyses
+4. stops on the first error
+
+Transforms see fresh analysis results after earlier transforms invalidate stale ones.
 
 ## Writing an Analysis
 
-An analysis implements `Analysis[U, R]` — `Run(*Manager, U) (R, error)`. It receives
-its IR unit directly and may request other analyses through the manager.
+An analysis implements:
+
+```go
+type Analysis[U, R] interface {
+    Run(*Manager, U) (R, error)
+}
+```
+
+Example:
 
 ```go
 type BasicBlocksAnalysis struct{}
 
 var _ pass.Analysis[*types.Function, []*BasicBlock] = (*BasicBlocksAnalysis)(nil)
 
-func NewBasicBlocksAnalysis() *BasicBlocksAnalysis { return &BasicBlocksAnalysis{} }
+func NewBasicBlocksAnalysis() *BasicBlocksAnalysis {
+    return &BasicBlocksAnalysis{}
+}
 
 func (a *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*BasicBlock, error) {
-    // compute control-flow blocks for fn
+    // compute blocks
 }
 ```
 
+Rules:
+
+* keep analysis read-only
+* request dependent analyses through the manager
+* avoid hidden global state
+* return deterministic results for the same unit state
+
 ## Writing a Transform
 
-A transform implements `Pass[U]` — `Run(*Manager, U) (Preserved, error)`. It mutates
-the unit in place and reports which analyses it preserved. Transforms that touch
-code return `pass.PreserveNone()`.
+A transform implements:
+
+```go
+type Pass[U] interface {
+    Run(*Manager, U) (Preserved, error)
+}
+```
+
+Example:
 
 ```go
 type MyPass struct{}
 
 var _ pass.Pass[*program.Program] = (*MyPass)(nil)
 
-func NewMyPass() *MyPass { return &MyPass{} }
+func NewMyPass() *MyPass {
+    return &MyPass{}
+}
 
 func (p *MyPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
     for _, fn := range functions(prog) {
@@ -85,155 +171,284 @@ func (p *MyPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, er
         if err != nil {
             return pass.PreserveNone(), err
         }
-        // mutate fn.Code / prog.Constants in place using blocks
+
         _ = blocks
+        // mutate fn.Code or prog.Constants in place
     }
+
     return pass.PreserveNone(), nil
 }
 ```
 
 Rules:
 
-- request analyses with `pass.GetResult`; the manager runs `BasicBlocksAnalysis`
-  on demand and caches it per function
-- mutate the program in place; return `pass.PreserveNone()` after code changes so
-  cached analyses are invalidated, or `pass.PreserveAll()` if nothing changed
-- return `pass.PreserveNone(), err` on failure; the pipeline stops and propagates it
-- do not retain the manager after `Run` returns
+* mutate the unit in place
+* use `pass.GetResult` for analysis data
+* return `pass.PreserveNone()` after code changes
+* return `pass.PreserveAll()` only when nothing changed
+* return `pass.PreserveNone(), err` on failure
+* do not keep references to stale analysis results after mutation
 
 ## Optimizer Levels
 
-`optimize.NewOptimizer(level)` registers `BasicBlocksAnalysis` and builds the
-transform pipeline for the level. Levels are cumulative:
+`optimize.NewOptimizer(level)` registers required analyses and builds a cumulative pipeline.
 
 ```text
 O0  no transforms
-O1  ConstantFoldingPass, ConstantDeduplicationPass                          (cheap, local)
-O2  + AlgebraicSimplificationPass, DeadCodeEliminationPass                  (CFG / peephole)
-O3  + GlobalValueNumberingPass (replaces block-local CSE)                   (cross-block value numbering)
+
+O1  ConstantFoldingPass
+    ConstantDeduplicationPass
+
+O2  ConstantFoldingPass
+    AlgebraicSimplificationPass
+    ConstantDeduplicationPass
+    DeadCodeEliminationPass
+
+O3  ConstantFoldingPass
+    AlgebraicSimplificationPass
+    GlobalValueNumberingPass
+    ConstantDeduplicationPass
+    DeadCodeEliminationPass
 ```
 
-`Optimize(prog)` runs the pipeline; `AddPass(p)` appends a custom transform.
-Because analyses are invalidated between passes, each transform sees fresh blocks.
+`Optimize(prog)` runs the configured pipeline.
 
-## `BasicBlocksAnalysis`
+`AddPass(p)` appends a custom transform.
 
-Shared by the optimizer and the JIT `compiler`; same boundary rules.
+Because analyses are invalidated between transforms, each pass receives fresh analysis data.
 
-Input: `*types.Function`. Output: `[]*analysis.BasicBlock`:
+## Basic Blocks
 
-- `Start`: first instruction byte offset, inclusive
-- `End`: byte offset past last instruction, exclusive
-- `Succs`: successor block indices
-- `Preds`: predecessor block indices
+`BasicBlocksAnalysis` is shared by the optimizer and JIT.
 
-Block boundaries:
-
-- offset `0`
-- byte after `BR`, `BR_IF`, `BR_TABLE`, `UNREACHABLE`, or `RETURN`
-- every branch target offset from `BR`, `BR_IF`, or `BR_TABLE`
-
-## `GlobalValueNumberingAnalysis`
-
-Assigns every value a function computes a value number by abstractly
-interpreting the operand stack, then finds recomputations that are redundant
-both within and across basic blocks. Equal expressions hash-cons to the same
-number; commutative ops canonicalize operand order.
-
-Input: `*types.Function`. Output: `*GlobalValueNumbering`:
-
-- `Redundant`: finalizing-op offset → `Redundancy{Start, End, Kind, Home, Def}`,
-  one per recomputation of a value already produced on every path that reaches it
-- `Defs`: group id → definition offsets that must receive a `LOCAL_TEE` so the
-  value is captured for later reloads (`Home >= 0` uses need no entry)
-
-Only side-effect-free, non-allocating numeric ops (and reference comparisons) are
-candidates. Each value carries a block-local number (for within-block matching,
-exactly the old local pass) and a function-wide global key. Cross-block identity
-is conservative: only constants, the constant pool, the null reference, and
-locals never reassigned carry a stable global key; values built from a mutable
-load (heap, globals, upvalues) or a reassigned local are opaque across blocks
-(sound — an opaque value never matches) and still match within their own block.
-
-Availability is a forward dataflow over global ids: `AVAIL_in = ⋂ preds
-AVAIL_out`, `AVAIL_out = AVAIL_in ∪ gen`, with an optimistic ⊤ initialization on
-non-entry blocks so the intersection converges through loop back-edges. A pure,
-contiguous recomputation of an available value (at a control-flow merge, or a
-loop-invariant expression recomputed inside the loop) is reported redundant;
-catch and entry blocks have no predecessors, so nothing is available there.
-
-## `ConstantFoldingPass`
-
-Folds 2- and 3-instruction windows: `CONST CONST OP` → `CONST result`.
-
-Folded output is right-aligned in the original byte range; the left side is padded
-with NOPs.
+Input:
 
 ```text
-Before: [I32_CONST 3][I32_CONST 4][I32_ADD]             11 bytes
-After:  [NOP][NOP][NOP][NOP][NOP][NOP][I32_CONST 7]    11 bytes
+*types.Function
 ```
 
-Supported folds: `I32`/`I64`/`F32`/`F64` constant pairs (arithmetic, bitwise,
-comparisons), `I32_CONST × I32_EQZ`, type conversions such as
-`I32_CONST × I32_TO_F32_S`, and string `CONST_GET` ops.
+Output:
 
-A folded **comparison** yields `i1`, not `i32`, matching the kind a dynamic
-compare produces. Since there is no `i1` immediate, the boolean is interned into
-the constant pool (`types.I1`, deduped to two singletons per run) and emitted as
-`CONST_GET`, e.g. `[I32_CONST 1][I32_CONST 1][I32_EQ]` →
-`[NOP×8][CONST_GET idx]` with `I1(true)` appended to the pool. Arithmetic and
-bitwise folds still emit the inline `*_CONST` for their numeric kind.
+```text
+[]*analysis.BasicBlock
+```
 
-## `AlgebraicSimplificationPass`
+Each block contains:
 
-Integer peepholes whose right operand is a constant, on `I32`/`I64`:
+| Field   | Meaning                                  |
+| ------- | ---------------------------------------- |
+| `Start` | first instruction byte offset, inclusive |
+| `End`   | byte offset after the last instruction   |
+| `Succs` | successor block indexes                  |
+| `Preds` | predecessor block indexes                |
 
-- identities dropped to NOPs, leaving the left operand: `x+0`, `x-0`, `x*1`, `x/1`,
-  `x|0`, `x^0`, `x&-1`, `x<<0`, `x>>0`
-- strength reduction: `x*2ⁿ` → `x << n`; unsigned `x/2ⁿ` → `x >> n`
+Block boundaries are:
 
-Float identities are intentionally skipped (unsound under IEEE-754: NaN, signed
-zero), as are annihilators such as `x*0` and `x&0` (they would need to drop the
-live left operand).
+* offset `0`
+* every branch target
+* the byte after `BR`, `BR_IF`, `BR_TABLE`, `UNREACHABLE`, or `RETURN`
 
-## `GlobalValueNumberingPass`
+Keep these boundary rules consistent with the JIT.
 
-Consumes `GlobalValueNumberingAnalysis` and rewrites each redundant
-recomputation to a load. Within-block recomputations load a live local home
-(`Home >= 0`, with `LOCAL_GET Home`) or a freshly captured slot; cross-block
-recomputations capture the value at every definition in `Defs[Def]` with an
-inserted `LOCAL_TEE` into one fresh slot per value and reload it at each use.
-Speculative code motion (inserting computes on edges to make a *partial*
-redundancy full) is out of scope: it needs edge splitting, unsafe under the
-signed-16-bit branch operands.
+## Global Value Numbering
 
-Unlike the peephole passes, this pass changes code length: it uses the `rewriter`
-(`transform/rewrite.go`) to splice edits and then repair every `BR`/`BR_IF`/
-`BR_TABLE` operand and exception-table boundary for the new layout, bailing
-(leaving the function untouched) if a branch would no longer reach within its
-signed 16-bit operand. Allocating a local shifts the operand-stack base, so each
-handler's `Depth` grows by the number of locals added; new local indexes must
-stay below 256 (the 1-byte `LOCAL` operand). The top-level body (slot 0) may read
-its declared `Program.Locals` but cannot allocate fresh ones — the write-back
-persists only code and handlers (`prog.Code`, `prog.Handlers`), not `prog.Locals` —
-so only the load-from-home case applies there.
+`GlobalValueNumberingAnalysis` finds redundant pure computations within and across basic blocks.
 
-## `ConstantDeduplicationPass`
+It abstractly interprets the operand stack and assigns value numbers to computed values.
 
-Scans all `CONST_GET` and type operands across functions; collapses equal
-constants/types to the lowest index, rewrites references, and shrinks the tables.
+Output:
 
-## `DeadCodeEliminationPass`
+| Field       | Meaning                                            |
+| ----------- | -------------------------------------------------- |
+| `Redundant` | recomputation offset → replacement metadata        |
+| `Defs`      | value group → definition offsets that need capture |
 
-1. Mark bytes in basic blocks with no predecessors as `UNREACHABLE`. Handler
-   `Catch` blocks are entered out of band (no CFG predecessors), so they are
-   treated as live roots and never marked dead.
-2. Compact bytecode by removing NOP runs and unreachable sequences, rewriting
-   branch offsets for the new positions and remapping each exception-table
-   boundary to the first surviving instruction at or after its old offset.
+Candidate operations are side-effect-free and non-allocating numeric operations, plus reference comparisons.
 
-Compaction rewrites only branch operands (`BR`, `BR_IF`, `BR_TABLE`). Other
-operands keep meaning because compaction changes instruction positions, not
-constant/type/global/local indexes. For the top-level body (slot 0) the repaired
-code and exception table are written back to `prog.Code` and `prog.Handlers`.
+The analysis is conservative across blocks:
+
+* constants are stable
+* constant-pool values are stable
+* null refs are stable
+* locals never reassigned are stable
+* heap loads, globals, upvalues, and reassigned locals are opaque across blocks
+
+Opaque values do not match across blocks, but may still match within their own block.
+
+Availability uses forward dataflow:
+
+```text
+AVAIL_in  = intersection of predecessor AVAIL_out
+AVAIL_out = AVAIL_in union generated values
+```
+
+Entry and catch blocks start with no available values.
+
+## Constant Folding
+
+`ConstantFoldingPass` folds small constant windows.
+
+Main pattern:
+
+```text
+CONST CONST OP → CONST result
+```
+
+The folded instruction is right-aligned in the original byte range. The unused left side is padded with `NOP`.
+
+```text
+Before: [I32_CONST 3][I32_CONST 4][I32_ADD]
+After:  [NOP...][I32_CONST 7]
+```
+
+Supported folds include:
+
+* `I32`, `I64`, `F32`, and `F64` arithmetic
+* bitwise operations
+* comparisons
+* `I32_EQZ`
+* numeric conversions
+* string `CONST_GET` operations
+
+Comparison folds produce `i1`, matching runtime comparison results. Because there is no `i1` immediate, folded booleans are interned in the constant pool and emitted with `CONST_GET`.
+
+## Algebraic Simplification
+
+`AlgebraicSimplificationPass` performs integer peepholes where the right operand is a constant.
+
+Supported identities:
+
+```text
+x + 0  → x
+x - 0  → x
+x * 1  → x
+x / 1  → x
+x | 0  → x
+x ^ 0  → x
+x & -1 → x
+x << 0 → x
+x >> 0 → x
+```
+
+Supported strength reductions:
+
+```text
+x * 2^n → x << n
+x / 2^n → x >> n   // unsigned division only
+```
+
+Skipped intentionally:
+
+* float identities, because IEEE-754 makes them unsafe
+* annihilators such as `x * 0` or `x & 0`, because they would need to drop a live left operand
+
+## Global Value Numbering Pass
+
+`GlobalValueNumberingPass` consumes `GlobalValueNumberingAnalysis`.
+
+It rewrites redundant recomputations to local reloads.
+
+Within a block, it reloads from an existing or freshly captured local home.
+
+Across blocks, it:
+
+1. allocates one fresh local per value
+2. inserts `LOCAL_TEE` at each required definition
+3. replaces recomputations with `LOCAL_GET`
+
+This pass can change code length. It uses `transform/rewrite.go` to splice edits and repair:
+
+* `BR`
+* `BR_IF`
+* `BR_TABLE`
+* exception-table boundaries
+
+If a repaired branch no longer fits in signed 16 bits, the function is left unchanged.
+
+Limits and rules:
+
+* new local indexes must fit in the 1-byte `LOCAL_*` operand
+* handler depths grow by the number of inserted locals
+* top-level code may read declared `Program.Locals`
+* top-level code cannot allocate fresh locals because `prog.Locals` is not rewritten by this pass
+* speculative code motion and edge splitting are out of scope
+
+## Constant Deduplication
+
+`ConstantDeduplicationPass` collapses duplicate constants and types.
+
+It scans all functions for:
+
+* `CONST_GET`
+* type operands
+
+Then it:
+
+1. maps equal constants/types to the lowest index
+2. rewrites references
+3. shrinks the constant and type tables
+
+This pass changes indexes, not instruction layout.
+
+## Dead Code Elimination
+
+`DeadCodeEliminationPass` removes unreachable code and compacts bytecode.
+
+Steps:
+
+1. Mark basic blocks with no predecessors as `UNREACHABLE`.
+2. Treat handler catch blocks as live roots.
+3. Remove `NOP` runs and unreachable sequences.
+4. Rewrite branch offsets for the new layout.
+5. Remap exception-table boundaries to the first surviving instruction at or after the old offset.
+
+Only branch operands are rewritten during compaction.
+
+Other operands keep their meaning because compaction changes instruction positions, not constant, type, global, or local indexes.
+
+For top-level code, the repaired code and handlers are written back to:
+
+* `prog.Code`
+* `prog.Handlers`
+
+## Rewrite Rules
+
+Any pass that changes bytecode length must repair all position-sensitive data.
+
+Repair at least:
+
+* branch offsets
+* branch table targets
+* exception handler starts
+* exception handler ends
+* exception handler catch targets
+
+Check separately:
+
+* constant indexes
+* type indexes
+* local indexes
+* handler depths
+* signed 16-bit branch reachability
+
+If repair cannot preserve behavior, leave the function unchanged.
+
+Prefer a safe no-op over a risky rewrite.
+
+## Agent Notes
+
+When changing the pass system:
+
+* decide first: analysis or transform
+* keep analyses cached and read-only
+* keep transforms in-place and explicit
+* use the manager instead of recomputing analysis facts
+* invalidate aggressively when unsure
+* prefer one simple pass over several tightly coupled passes
+* avoid new abstractions unless they remove real duplication
+* keep bytecode rewrites conservative
+* never silently produce invalid branch offsets
+* test indexes and offsets independently
+* preserve optimizer/JIT agreement on CFG boundaries
+
+The best pass is small, local, deterministic, and explicit about what it preserves.
