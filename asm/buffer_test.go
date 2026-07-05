@@ -2,6 +2,7 @@ package asm
 
 import (
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 )
@@ -39,5 +40,35 @@ func TestBuffer_Write(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, b.old, 1)
 		require.Equal(t, 3, b.offset)
+	})
+
+	t.Run("patches batch writes without leaving the buffer writable", func(t *testing.T) {
+		b, err := NewBuffer(64)
+		require.NoError(t, err)
+		defer b.Free()
+
+		bases, err := b.writeBatch([][]byte{{0x01}, {0x02, 0x03}}, func(bases []unsafe.Pointer) error {
+			_, err := b.patch(bases[0], []byte{0x09}, true)
+			require.NoError(t, err)
+			require.False(t, b.sealed)
+			return nil
+		})
+		require.NoError(t, err)
+		require.True(t, b.sealed)
+		require.Len(t, bases, 2)
+		require.Equal(t, byte(0x09), (*[1]byte)(bases[0])[0])
+	})
+
+	t.Run("seals after batch patch error", func(t *testing.T) {
+		b, err := NewBuffer(64)
+		require.NoError(t, err)
+		defer b.Free()
+
+		_, err = b.writeBatch([][]byte{{0x01}, {0x02, 0x03}}, func([]unsafe.Pointer) error {
+			require.False(t, b.sealed)
+			return ErrInvalidArgs
+		})
+		require.ErrorIs(t, err, ErrInvalidArgs)
+		require.True(t, b.sealed)
 	})
 }

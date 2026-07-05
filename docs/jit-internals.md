@@ -1,98 +1,166 @@
 # JIT Internals
 
-Contracts for native JIT files in `interp/` and their interaction with `asm/`.
-Read before editing `interp/jit.go`, `interp/jit_arm64.go`, `interp/trace.go`, or asm callable ABI code.
+Contracts for the native JIT in `interp/` and its interaction with `asm/`.
 
-## Checklist
+Read this before editing:
 
-Before editing: check opcode width in `instr/type.go`; preserve threaded/JIT
-parity; keep threaded fallback correct; read `profile.md` for ticks and
-thresholds; read `value-representation.md` for boxing/unboxing; read
-`memory-model.md` for refs and heap objects.
+* `interp/jit.go`
+* `interp/jit_arm64.go`
+* `interp/trace.go`
+* `asm` callable ABI code
 
-After editing: add or update tests in `asm/assembler_test.go` for callable ABI
-changes and `interp/interp_test.go` for trace recording, native lowering, and
-wiring changes; run `go test ./asm/... ./interp/...`.
+## Summary
 
-## Execution Model
+minivm always compiles bytecode to threaded closures first. The JIT is a lazy ARM64 trace backend layered on top of that portable threaded runtime.
 
 ```text
 program.Program
-  -> threadedCompiler -> []func(*Interpreter)    always, portable fallback
-  -> Tracer            -> trace tree snapshots     lazy runtime front-end
-  -> compiler      -> *module               lazy ARM64 trace backend
+  → threadedCompiler → []func(*Interpreter)   always available
+  → Tracer           → trace snapshots        lazy runtime recording
+  → compiler         → *module                lazy ARM64 native backend
 ```
 
-The threaded compiler and native backend read the same bytecode. `i.code[addr][ip]`
-is the primary dispatch table. A hot JIT attempt first records a runtime trace
-from the current interpreter state, then the ARM64 backend publishes a native
-callable for each usable root: the module or function entry (`ip == 0`) and any
-hot loop header (`ip > 0`). A function entry callable installs at
-`i.code[addr][0]` and tears the frame down on return; the top-level module entry
-installs at `i.code[0][0]`, preserves its frame, and completes by advancing to
-the end of the program code. A loop callable installs at `i.code[addr][header]`
-and re-enters the live frame without unwinding it. Rejected traces emit nothing
-and threaded dispatch remains installed.
+The threaded interpreter is the source of correctness. Native code is an optimization and must always have a correct threaded fallback.
 
-Solo interpreters compile into a private `compiler` and private `asm.Buffer`.
-Pool interpreters use a shared `Cache`: trigger counts live in atomics, the
-winning member compiles with a throwaway compiler, and published modules share
-immutable `asm.Callable`s. Each interpreter still binds those callables into its
-own threaded closure table at a safepoint.
+Default design rule:
 
-## compiler
+* preserve threaded/JIT semantic parity
+* prefer simple trace lowering over broad static compilation
+* keep fallback behavior explicit
+* keep architecture-specific code isolated
+* use short, standard names
+* if two designs behave the same, choose the simpler one
 
-`compiler` is private to `interp` and lives in `jit.go`. `Compile(i, addr, fn)`
-is trace-only and emits every usable root anchored at `addr` (`emitRoot` per
-anchor):
+## Agent Fast Path
 
-1. find the `Tracer` trace tree for each `(addr, ip)` anchor — module/function
-   entry plus loop headers — skipping aborted roots, side-exit branches, and
-   entry-anchored loops
-2. build a `lowering` with typed symbolic operands, frames, constants,
-   globals, heap view, and scratch registers (`loop` set for loop roots)
-3. ask the architecture `lowerer` to emit the trace
-4. link one callable into `module.entries[anchor]`, recording `module.loops[anchor]`
-   so `install` chooses the entry vs loop wrapper
+Before editing:
 
-There is no static method pipeline, block planner, segment selection, or
-boxed-shadow fallback lowerer. Runtime deoptimization still exists: guards
-materialize VM state into the journal, return to the Go wrapper, and resume the
-threaded interpreter at the reported fallback IP.
+| Area                    | Check                     |
+| ----------------------- | ------------------------- |
+| Opcode shape            | `instr/type.go`           |
+| Threaded behavior       | `interp/threaded.go`      |
+| Boxing and value layout | `value-representation.md` |
+| Refs and heap ownership | `memory-model.md`         |
+| Ticks and thresholds    | `profile.md`              |
+| Instruction semantics   | `instruction-set.md`      |
+
+After editing:
+
+| Change                   | Test                    |
+| ------------------------ | ----------------------- |
+| ABI or callable behavior | `asm/assembler_test.go` |
+| trace recording          | `interp/interp_test.go` |
+| native lowering          | `interp/interp_test.go` |
+| install/wiring behavior  | `interp/interp_test.go` |
+
+Run:
+
+```bash
+go test ./asm/... ./interp/...
+```
+
+## Execution Model
+
+The dispatch table is:
+
+```go
+i.code[addr][ip]
+```
+
+Where:
+
+* `addr` is the function slot
+* `ip` is the bytecode offset
+* each entry is a threaded closure or a wrapper around a native callable
+
+A hot JIT attempt records a runtime trace from the current interpreter state. The ARM64 backend then emits native callables for usable roots:
+
+| Root           | Meaning                    | Install point          |
+| -------------- | -------------------------- | ---------------------- |
+| module entry   | top-level program start    | `i.code[0][0]`         |
+| function entry | function start             | `i.code[addr][0]`      |
+| loop header    | hot backward-branch target | `i.code[addr][header]` |
+
+Rejected traces emit nothing. The threaded closure remains installed.
+
+Function entry callables tear down their frame on return. Module entry callables preserve the top-level frame and complete by advancing to the end of program code. Loop callables re-enter a live frame and must not unwind it.
+
+## Solo and Pool JIT
+
+Solo interpreters own a private `compiler` and `asm.Buffer`.
+
+Pool interpreters use a shared `Cache`:
+
+* trigger counts are atomic
+* one winning interpreter compiles
+* compiled modules publish immutable `asm.Callable`s
+* each interpreter installs those callables into its own dispatch table at a safepoint
+
+The published native code is shared. The dispatch table remains interpreter-local.
+
+## Compiler
+
+`compiler` is private to `interp` and lives in `jit.go`.
+
+`Compile(i, addr, fn)` is trace-only. It does not run a static method compiler or block planner.
+
+For each usable root, it:
+
+1. finds the trace tree for `(addr, ip)`
+2. skips aborted roots, side exits, and entry-anchored loops
+3. builds a `lowering`
+4. calls the architecture `lowerer`
+5. links the callable into `module.entries`
+6. records loop roots in `module.loops`
+
+There is no boxed-shadow fallback lowerer. General behavior belongs to the threaded interpreter. Native guard failures materialize VM state into the journal and resume threaded execution.
 
 ## Tracer
 
-Trace recording and profile aggregation live in `interp/trace.go`; trace
-compilation state lives in `interp/jit.go`. Recording clones the current
-interpreter, points the clone at the requested `(addr, ip)` anchor, and executes
-threaded closures until it reaches a return, loop, branch exit, unsupported
-step, or trace limit. The live interpreter state is not mutated during
-recording.
+Trace recording lives in `interp/trace.go`.
 
-Each recorded instruction stores:
+Recording clones the interpreter, starts the clone at the requested `(addr, ip)`, and executes threaded closures until one of these happens:
 
-- opcode, function, IP, and inline depth
-- observed call target box and callee address
-- explicit branch target and branch-taken metadata
-- selected observed heap values for guarded read-only heap fast paths
+* return
+* loop back-edge
+* branch exit
+* unsupported operation
+* trace limit
+* abort condition
 
-The `Tracer` aborts before host calls, allocation, and mutating heap operations.
-Those operations remain interpreter-owned. Native guard fallbacks report their
-live deopt state back to the local trace tree; after an exit counter reaches the
-threshold, a solo interpreter recompiles the entry trace with the new branch
-continuation.
+The live interpreter is not mutated while recording.
 
-One `Tracer` is shared across a pool, and every tree mutation — `store` on the
-root, `exit` growing `branches`/`hits` — happens under `r.mu`. The compiler must
-never read the live tree while another member records into it: `rootAt` returns
-`tree.snapshot()`, a shallow copy taken under the lock (root pointer plus copied
-`branches`/`hits`), so `emitRoot` lowers from immutable data without holding
-`r.mu`. Published `*trace` values are built to completion before `store`/`exit`
-install them, so sharing the pointers across the snapshot boundary is safe.
+Each recorded step stores the data needed for safe speculative lowering:
 
-## JIT Lowerer (`lowerer`)
+* opcode
+* function and IP
+* inline depth
+* observed call target
+* observed callee address
+* observed guard values
+* observed heap shape
+* branch target and taken state
+* selected heap values for read-only fast paths
 
-`jit.go` is architecture-neutral. Its `lowerer` interface has one operation:
+The tracer aborts before host calls, allocation, and mutating heap operations. These remain interpreter-owned.
+
+## Trace Snapshots
+
+A pool shares one `Tracer`. Tree mutations are locked.
+
+The compiler must not lower from a live mutable tree. `rootAt` returns `tree.snapshot()`, a shallow immutable view containing:
+
+* root pointer
+* copied branches
+* copied hit counters
+
+Published traces are fully built before they are installed. Sharing trace pointers across the snapshot boundary is safe.
+
+## Lowerer
+
+`jit.go` is architecture-neutral.
+
+The architecture hook is intentionally small:
 
 ```go
 type lowerer interface {
@@ -100,197 +168,295 @@ type lowerer interface {
 }
 ```
 
-`jit_arm64.go` provides ARM64 construction, constants, offsets, and the concrete
-`arm64Lowerer.lower` implementation. On other architectures `jit_stub.go` returns a
-nil `compiler`, so JIT is unavailable.
+`jit_arm64.go` provides:
+
+* ARM64 construction
+* constants
+* offsets
+* opcode lowering
+* `arm64Lowerer.lower`
+
+Other architectures use stubs, so JIT is unavailable.
+
+Design rule: keep the lowerer interface small. Add architecture hooks only when the architecture-neutral lowering context cannot express the behavior cleanly.
 
 ## Trace ABI
 
-Native callables use a standard AAPCS64-shaped entry: `Callable.Call(ctx)` passes
-`&i.journal[0]` in X0. External entries copy journal cells into pinned scratch
-registers; recursive trace calls branch to an internal label after that reload
-and keep the registers live. The Go trampoline preserves X19-X26 for native
-register allocation. Native entry/return does not reserve its own SP frame; only
-native self-calls save LR and the caller BP/SP around their internal `BL`, so the
-assembler spill frame keeps a stable SP-relative base.
+Native callables use an AAPCS64-shaped entry.
 
-| Constant | ARM64 | Purpose |
-| --- | --- | --- |
-| `scratchStack` | X10 | `&i.stack[0]` input |
-| `scratchGlobals` | X11 | `&i.globals[0]` input |
-| `scratchBP` | X12 | current frame `bp` input |
-| `scratchSP` | X13 | interpreter `sp` input |
-| `scratchCtrl` | X14 | `&i.journal[0]` context pointer |
+`Callable.Call(ctx)` passes:
 
-Native code loads locals and operands from `scratchStack`, keeps scalars in
-registers, and writes stack results back on return or deopt. The `interp` entry
-wrapper does not marshal params or returns; it calls `Callable.Call(ctx)` and
-reads trap state from the journal.
+```text
+&i.journal[0] in X0
+```
+
+Native code loads VM state from the journal into pinned scratch registers.
+
+| Name             | ARM64 | Purpose               |
+| ---------------- | ----- | --------------------- |
+| `scratchStack`   | X10   | `&i.stack[0]`         |
+| `scratchGlobals` | X11   | `&i.globals[0]`       |
+| `scratchBP`      | X12   | current frame base    |
+| `scratchSP`      | X13   | current stack pointer |
+| `scratchCtrl`    | X14   | journal pointer       |
+
+The Go trampoline preserves X19-X26 for native register allocation.
+
+Native code does not marshal parameters or returns. It writes results and trap state into the journal, and the Go wrapper restores interpreter state from there.
 
 ## Frame Journal
 
-`i.journal` is an Interpreter-owned `[]uint64` that both supplies entry context
-and reports deopt state. Header cells precede fixed-stride frame records:
+`i.journal` is owned by `Interpreter`.
 
-| Cell | Purpose |
-| --- | --- |
-| `journalStack` | `&i.stack[0]` or `0`; external entry in |
-| `journalGlobals` | `&i.globals[0]` or `0`; external entry in |
-| `journalBP` | current frame `bp`; external entry in |
-| `journalSP` | interpreter `sp`; external entry in/out |
-| `journalDepth` | trap-time frame records written; native read/write |
-| `journalCap` | frame budget `len(i.frames)-i.fp`; read-only |
-| `journalTrap` | `trapNone`, `trapFallback`, `trapOverflow`, or `trapYield` |
-| `journalNextIP` | resume/fallback IP |
-| `journalBudget` | back-edges left before the next safepoint |
-| `journalActive` | active native call depth; X15 mirrors it |
-| `journalRC` | `&i.rc[0]` or `0`; guarded refcount fast paths |
-| `journalUpvals` | `&i.fr.upvals[0]` or `0`; closure-body upvalue fast paths |
-| `journalHeap` | `&i.heap[0]` or `0`; read-only heap fast paths |
-| `journalHead`... | records of `{addr, bp, ip, returns}`, stride 4 |
+It is both:
 
-Guard fallbacks set `journalTrap = trapFallback`, write `journalSP`, append live
-frame records, and return. The Go wrapper deopts from the journal, restores frame
-metadata, and if the fallback IP is 0 runs the shadowed threaded entry handler
-once to avoid immediate native re-entry.
+1. input context for native entry
+2. output state for deoptimization
 
-## Calls And Returns
+Header cells come before fixed-stride frame records.
 
-Recorded `CONST_GET function; CALL` and guarded function-value `CALL` sites can
-lower to native `BL` when the observed target is a JIT-eligible `*types.Function`
-with matching arity. Closure body calls can lower when the `Tracer` observed the
-closure and the trace can recover its upvalue base. Host calls, allocation, heap
-mutation, maps, and unsupported targets stay threaded through deopt. Non-self
-callees inline as fused frames when the trace shape is safe. Inlined callee
-branches with a caller tail deopt through the journal so the threaded
-interpreter owns the caller remainder.
-Inlined callee params are first materialized into VM stack homes, and ref locals
-reload from those homes on each use, so pending continuations never inherit
-caller-register lifetimes.
+| Cell             | Purpose                                                    |
+| ---------------- | ---------------------------------------------------------- |
+| `journalStack`   | stack base pointer                                         |
+| `journalGlobals` | globals base pointer                                       |
+| `journalBP`      | current frame base                                         |
+| `journalSP`      | stack pointer                                              |
+| `journalDepth`   | number of written frame records                            |
+| `journalCap`     | available frame record capacity                            |
+| `journalTrap`    | `trapNone`, `trapFallback`, `trapOverflow`, or `trapYield` |
+| `journalNextIP`  | fallback or resume IP                                      |
+| `journalBudget`  | native loop back-edge budget                               |
+| `journalActive`  | active native call depth                                   |
+| `journalRC`      | refcount base pointer                                      |
+| `journalUpvals`  | closure upvalue base pointer                               |
+| `journalHeap`    | heap base pointer                                          |
+| `journalHead...` | frame records `{addr, bp, ip, returns}`                    |
 
-Native calls are frame-aware. The call lowering checks frame budget against
-`journalActive`, increments native depth, saves caller bp/sp on the host stack,
-and enters the callee trace. Normal return restores bp/sp and receives return
-values through the ABI registers and memory return slots. On deopt, each native
-callee/caller appends enough frame state for the Go wrapper to rebuild the VM
-call chain before threaded resume. Frame overflow reports `trapOverflow`, and the
-wrapper panics with `ErrFrameOverflow`.
+On guard failure, native code:
 
-`RETURN` closes a function entry trace only when it returns from the outer
-recorded frame. Top-level module code has no synthetic `RETURN`; falling off the
-end of slot `0` closes the trace as a completed module entry and writes every
-live operand back to the VM stack. Inlined callee returns stitch values back into
-the caller's symbolic stack.
+1. writes live stack state
+2. appends frame records
+3. sets `journalTrap = trapFallback`
+4. sets `journalNextIP`
+5. returns to Go
 
-## Branches And Loops
+The Go wrapper rebuilds the VM state and resumes threaded execution.
 
-Recorded forward branches become guarded exits or pending branch continuations.
-`BR_IF` and `BR_TABLE` emit the recorded path and deopt on unrecorded targets.
-When a side exit reaches the exit threshold, the tracer records that target and a
-later compile folds the learned continuation into the same native callable as a
-straight-line pending block. Pending blocks reload from VM stack homes written at
-the branch, can enqueue further learned continuations up to a bounded pending
-cap, and reuse one native label per learned `(function, IP)` target when no
-caller tail is attached. Targets that are still unknown, have a caller tail,
-have unsafe stack/frame shape, or touch unsupported operations continue to deopt
-through the journal.
-This progressively widens branch-heavy traces without adding a separate static
-method compiler.
+If the fallback IP is `0`, the wrapper runs the shadowed threaded entry handler once to avoid immediate native re-entry.
 
-A loop is anchored at its header — the target of a backward `BR`/`BR_IF`. The
-safepoint discovers headers statically (`Tracer.headers` scans for back-edge
-targets) and, once the module or function is hot, records one iteration from the
-live state at the header (a stack-consistent point); the recorded trace's kind is
-`loop`.
-`emitRoot` lowers it with `loop` set: after the prologue it binds a back-edge
-label, walks the body, and at the recorded back-edge commits loop-carried locals
-to the VM stack, decrements `journalBudget`, and branches back while budget
-remains. The loop-exit edge (a `BR_IF` falling through, or any guard) is a normal
-side exit. Loop-carried locals round-trip through the VM stack each iteration —
-the body reloads them at the header — so no cross-back-edge register fixpoint is
-needed. Loops whose header is the function entry (`ip == 0`) are left to threaded
-dispatch.
+## Speculation
 
-A loop callable installs at `i.code[addr][header]` behind the `i.loop` wrapper,
-which (unlike `i.entry`) never tears the frame down: the header is reached
-mid-function with the frame live. `i.loop` seeds `journalBudget` with `loopBudget`
-(decoupled from `tick`, so a native iteration is not drowned in per-iteration
-yields), runs the native loop, then on `trapYield` deopts to the header and runs
-one safepoint before the Run loop re-dispatches the header callable; on a
-`trapFallback` side exit it deopts to the resume IP for threaded dispatch.
+Observed numeric and heap facts are speculative unless they come from bytecode constants.
+
+Native code may specialize on observed values, but a mismatch must exit before the opcode executes. The threaded handler owns the general case.
+
+This rule keeps native lowering small and safe.
+
+## Calls and Returns
+
+Native lowering supports selected calls:
+
+* direct `CONST_GET function; CALL`
+* guarded function-value calls
+* eligible closure-body calls
+
+A call may lower to native `BL` when the observed target is a JIT-eligible `*types.Function` with matching arity.
+
+Unsupported targets fall back:
+
+* host calls
+* allocation
+* heap mutation
+* maps
+* unsupported functions or closures
+
+Native calls are frame-aware. The lowering:
+
+1. checks frame budget
+2. increments native depth
+3. saves caller `bp` and `sp`
+4. enters the callee trace
+5. restores caller state on return
+
+On deopt, native frames append enough journal records for Go to rebuild the VM call chain.
+
+Frame overflow reports `trapOverflow`; the wrapper panics with `ErrFrameOverflow`.
+
+`RETURN` closes a function entry trace only when it returns from the outer recorded frame. Inlined callee returns stitch values back into the caller’s symbolic stack.
+
+Top-level module code has no synthetic `RETURN`. Falling off the end closes the module trace and writes live operands back to the VM stack.
+
+## Branches
+
+Recorded forward branches become either:
+
+* guarded exits
+* learned branch continuations
+
+`BR_IF` and `BR_TABLE` emit the recorded path. Unrecorded targets deopt.
+
+When a side exit becomes hot, the tracer records that target. A later compile may fold it into the same native callable as a pending block.
+
+Pending blocks:
+
+* reload from VM stack homes
+* compile hotter exits first
+* reuse one native label per learned `(function, IP)` target when safe
+* stop at a bounded pending cap
+
+Targets still deopt when they are unknown, unsafe, caller-tailed, or unsupported.
+
+Branch lowering may skip hot-path flushes only when the branch state is clean: after consuming the condition, there must be no live operands and no dirty locals needed by later continuations.
+
+If locals or operands are dirty, flush first. Learned continuations and side exits must see the same stack image as threaded dispatch.
+
+## Loops
+
+A loop root is anchored at a loop header: the target of a backward branch.
+
+The tracer discovers headers statically. Once the function or module is hot, it records one iteration from the live state at the header.
+
+Loop lowering:
+
+1. builds the normal native prologue
+2. binds a back-edge label
+3. lowers the loop body
+4. commits loop-carried locals to VM stack homes
+5. decrements `journalBudget`
+6. branches back while budget remains
+
+Loop-carried locals round-trip through the VM stack each iteration. This avoids a cross-back-edge register fixpoint.
+
+Loops whose header is the function entry (`ip == 0`) remain threaded.
+
+Loop callables install at:
+
+```go
+i.code[addr][header]
+```
+
+The loop wrapper does not tear down the frame. It runs with the current frame live.
+
+On `trapYield`, the wrapper deopts to the header and runs one safepoint before redispatch. On `trapFallback`, it deopts to the reported resume IP.
 
 ## Coroutine Suspension
 
-`YIELD` and `RESUME` are true suspension points: `suspend` snapshots the frame
-into the `Coroutine` heap handle and unwinds to the caller, while `resume`
-rebuilds a frame from a runtime-only stack image. Neither is representable in a
-linear trace, so the JIT does not execute them natively. Instead the tracer
-records a `YIELD`/`RESUME` reached in the trace's **anchor frame** as the trace's
-terminal (`kind = returned`) without stepping it, and `walk` lowers it to an
-unconditional `trapFallback` deopt at the op's own IP. After deopt the Run loop
-re-dispatches that IP, so the threaded handler performs the real suspend/resume
-exactly once (each handler advances `ip` itself, which is why the resume IP is
-the op, not the next instruction). Native emits only the deopt — it never
-touches the coroutine handle — so refcounts match threaded execution.
+`YIELD` and `RESUME` are true suspension points. They cannot execute as normal linear native trace operations.
 
-A suspension reached inside an **inlined callee** frame aborts the trace rather
-than compiling: `deopt` rebuilds inlined frames from the journal records
-(`addr`, `bp`, `ip`, `returns`) and never restores their `coro` field, so a
-threaded `suspend` there would look up `heap[0]` and trap. Only the outermost
-(anchor) frame keeps its `coro` across deopt, so only an anchor-frame suspension
-is safe. This lifts the former blanket rejection: a hot loop whose hot back-edge
-never yields now compiles, with the rare `RESUME`/`YIELD` as a clean side exit.
+For anchor-frame suspension:
 
-## Values, Refs, And Heap Reads
+* tracer records the opcode as a terminal
+* native code emits an unconditional fallback at the opcode IP
+* threaded dispatch performs the real suspend or resume exactly once
 
-Scalars stay unboxed between trace opcodes. `i32` values use low 32 bits, `f32`
-and `f64` use IEEE bits, and inline `i64` values use the full signed register
-value while guards enforce the boxed 49-bit range before materialization. Heap
-promoted `i64` values deopt on load.
+The resume IP is the opcode itself, not the next instruction, because the threaded handler advances `ip`.
 
-`ARRAY_GET` and `STRUCT_GET` lower on ARM64 as full-trace heap reads for the
-observed shape, so scalar/ref reads can feed later native ops instead of forcing
-an immediate threaded resume. Native code guards the heap itab for that single
-typed primitive-array, generic ref-array, or guest struct shape, checks the
-index and field kind, performs the load, and continues through the trace.
-Guard failures branch to an out-of-line side exit that resumes threaded dispatch
-at the original opcode with the pre-op stack state flushed. Primitive array read
-fast paths cover `i1`, `i8`, `i32`, `f32`, and `f64`; `ref` array/field reads
-retain the loaded ref. `i64` reads remain terminal because heap-promoted i64
-fallback needs the interpreter-owned boxing path.
+Suspension inside an inlined callee aborts the trace. Deopt can rebuild inlined frames, but it does not restore their coroutine handle. Only the anchor frame can safely keep its coroutine state across deopt.
 
-Primitive `ARRAY_SET` and `STRUCT_SET` still lower as terminal heap mutations:
-the hot path performs the store, flushes the result state, and resumes threaded
-dispatch at the next instruction. Shape, bounds, field-kind, or refcount-release
-failures deopt at the opcode so the interpreter owns the full handler semantics.
+## Values
 
-The narrow kinds `i1`/`i8` share the i32 representation, so they ride in the low
-32 bits exactly like `i32` and `loadLocal`/`constGet` materialize them raw. Kind
-checks are by representation (`kinds` compares `Kind.Repr`), so an `i1`/`i8`
-operand flows into any `i32.*` lowering. Result kinds match the interpreter:
-`i32.and`/`or`/`xor` use `i32Bitwise`, which keeps a shared narrow kind
-(`i8 & i8 → i8`, `i1 ^ i1 → i1`) and widens a mixed pair to `i32`; other
-arithmetic widens to `i32`; comparisons/`eqz`/`ref.test`/`ref.eq` go through
-`setBool`, which pushes `KindI1`. `box` then tags each result `i8`/`i1`/`i32`
-after masking the low lane.
+Scalars stay unboxed between native trace operations.
 
-`GLOBAL_*`, `LOCAL_*`, and `UPVAL_*` lower for in-range static slots. Scalar
-slots load/store raw values directly; ref-bearing slots use `journalRC` guarded
-retain/release. If a release might free (`rc == 1`), native deopts so the
-interpreter owns recursive release.
+| Kind                | Native treatment                                             |
+| ------------------- | ------------------------------------------------------------ |
+| `i32`               | low 32 bits                                                  |
+| `i1` / `i8`         | low 32 bits with narrow result kind preserved where required |
+| `i64`               | full signed register value when inline-boxable               |
+| `f32` / `f64`       | IEEE bit representation                                      |
+| heap-promoted `i64` | deopt on load                                                |
 
-Heap fast paths cover observed scalar `REF_GET`, selected typed
-`ARRAY_LEN`/`ARRAY_GET`/`ARRAY_SET`, selected `STRUCT_GET`/`STRUCT_SET` shapes,
-`ERROR_GET`, and the coroutine reads `CORO_DONE`/`CORO_VALUE`. They guard the
-ref, heap itab, element/field kind, index, and release safety as needed;
-`ERROR_GET` guards `*types.Error`, loads the boxed payload, retains a ref
-payload, and releases the error handle. The coroutine reads guard the handle's
-itab and load the `done` byte or the boxed `value` directly (`CORO_VALUE` retains
-the value and releases the handle, `CORO_DONE` keeps it, matching the threaded
-handlers). Heap allocation and complex ref-bearing mutations remain threaded.
+Narrow kinds share the `i32` representation. Kind checks compare representation, so `i1` and `i8` can flow into `i32.*` lowering.
 
-`ERROR_NEW`, `ERROR_CODE`, and `THROW` are terminal fallback boundaries like
-anchor-frame `YIELD`/`RESUME`: the tracer records them without stepping the
-clone, and native code deopts at the opcode's own IP so the threaded handler
-performs allocation, code extraction, throw unwinding, and handler landing. The
-trace aborts if any appears in an inlined callee frame.
+Result kinds must match the interpreter:
+
+* `i32.and`, `or`, and `xor` preserve a shared narrow kind
+* mixed narrow operands widen to `i32`
+* other arithmetic widens to `i32`
+* comparisons and `eqz` produce `i1`
+
+## Slots and Refs
+
+`GLOBAL_*`, `LOCAL_*`, and `UPVAL_*` lower for in-range static slots.
+
+Scalar slots load and store raw values directly.
+
+Ref-bearing slots use guarded retain/release through `journalRC`.
+
+If a release may free the object (`rc == 1`), native code deopts before the release. The interpreter owns recursive release and cleanup.
+
+## Heap Reads and Mutations
+
+ARM64 supports selected heap fast paths.
+
+Native full-trace reads include observed shapes for:
+
+* scalar `REF_GET`
+* selected `ARRAY_LEN`
+* selected `ARRAY_GET`
+* selected `STRUCT_GET`
+* `ERROR_GET`
+* `CORO_DONE`
+* `CORO_VALUE`
+
+Heap reads guard:
+
+* ref address
+* heap itab
+* array element kind
+* struct type pointer
+* struct field kind
+* index bounds
+* release safety when needed
+
+Ref reads retain loaded refs. `CORO_VALUE` retains the value and releases the handle. `CORO_DONE` keeps the handle.
+
+Heap-promoted `i64` values fall back before boxing.
+
+Primitive `ARRAY_SET` and `STRUCT_SET` are terminal mutations. The hot path may perform the store, flush state, and resume threaded execution at the next instruction. Shape, bounds, field-kind, or release failure deopts at the original opcode so the interpreter owns full semantics.
+
+Allocation and complex ref-bearing mutations stay threaded.
+
+## Exceptions
+
+`ERROR_NEW`, `ERROR_CODE`, and `THROW` are terminal fallback boundaries.
+
+The tracer records them without stepping the clone. Native code deopts at the opcode IP, and the threaded handler performs:
+
+* error allocation
+* code extraction
+* throw unwinding
+* handler landing
+
+If any of these appears in an inlined callee frame, the trace aborts.
+
+## Installation
+
+Compiled modules install into the threaded dispatch table.
+
+Entry wrappers and loop wrappers differ:
+
+| Wrapper | Use                   | Frame behavior                  |
+| ------- | --------------------- | ------------------------------- |
+| `entry` | module/function entry | may complete or tear down frame |
+| `loop`  | loop header           | re-enters live frame            |
+
+Install only accepted callables. Rejected roots leave the existing threaded closure intact.
+
+Native wrappers must always leave the interpreter in a valid state for threaded redispatch.
+
+## Agent Notes
+
+When changing JIT internals:
+
+* keep the threaded interpreter correct first
+* keep native lowering speculative and guarded
+* deopt before executing behavior the JIT cannot fully own
+* prefer one simple terminal fallback over partial duplicated semantics
+* keep architecture-neutral code in `jit.go`
+* keep ARM64 details in `jit_arm64.go`
+* keep journal layout explicit and stable
+* preserve interpreter/JIT stack and ref ownership symmetry
+* use short, standard names such as `trace`, `root`, `entry`, `loop`, `module`, `lowering`, `guard`, `exit`, `frame`, and `value`
+* avoid adding an abstraction unless it removes real duplication or isolates real complexity
+
+The best JIT change is usually the smallest guarded native path that preserves exact threaded fallback semantics.

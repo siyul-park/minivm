@@ -44,9 +44,11 @@ type Interpreter struct {
 	stack    []types.Boxed
 	roots    []types.Boxed
 	heap     []types.Value
+	hbase    int
 	interned map[string]types.Ref
 	free     []int
 	rc       []int
+	refbuf   []types.Ref
 
 	fp  int
 	sp  int
@@ -278,6 +280,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		i.constants[j] = val
 	}
 
+	i.hbase = len(i.heap)
+
 	c := &threadedCompiler{
 		types:     i.types,
 		constants: i.constants,
@@ -288,7 +292,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	i.module = &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
 
 	i.instrs[0] = prog.Code
-	i.code[0] = c.Compile(prog.Code, i.module.LocalKinds())
+	i.code[0] = c.Compile(prog.Code, i.module.LocalKinds(), types.Kinds(i.module.Captures))
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
 			i.bind(i.constants[j].Ref(), fn, false)
@@ -639,16 +643,9 @@ func (i *Interpreter) Reset() {
 	i.roots = i.roots[:0]
 	clear(i.interned)
 
-	constants := 1
-	for _, v := range i.constants {
-		if v.Kind() == types.KindRef {
-			constants++
-		}
-	}
-
-	i.heap = i.heap[:constants]
-	i.rc = i.rc[:constants]
-	for j := 0; j < constants; j++ {
+	i.heap = i.heap[:i.hbase]
+	i.rc = i.rc[:i.hbase]
+	for j := 0; j < i.hbase; j++ {
 		i.rc[j] = 1
 	}
 	i.free = i.free[:0]
@@ -1470,7 +1467,7 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 		precise:   i.tick == 1,
 	}
 	i.instrs[addr] = fn.Code
-	i.code[addr] = c.Compile(fn.Code, fn.LocalKinds())
+	i.code[addr] = c.Compile(fn.Code, fn.LocalKinds(), types.Kinds(fn.Captures))
 	i.handlers[addr] = fn.Handlers
 	i.coros[addr] = containsYield(fn.Code)
 	if dynamic {
@@ -1535,10 +1532,8 @@ func (i *Interpreter) release(addr int) {
 		i.rc[addr]--
 		if i.rc[addr] == 0 {
 			v := i.heap[addr]
-			if t, ok := v.(types.Traceable); ok {
-				for _, r := range t.Refs() {
-					stack = append(stack, int(r))
-				}
+			for _, r := range i.refs(v) {
+				stack = append(stack, int(r))
 			}
 			i.reclaim(addr, v)
 		}
@@ -1546,12 +1541,8 @@ func (i *Interpreter) release(addr int) {
 }
 
 func (i *Interpreter) trace(val types.Value) int {
-	t, ok := val.(types.Traceable)
-	if !ok {
-		return 0
-	}
 	n := 0
-	for _, ref := range t.Refs() {
+	for _, ref := range i.refs(val) {
 		n += i.root(types.BoxRef(int(ref)))
 	}
 	return n
@@ -1624,10 +1615,8 @@ func (i *Interpreter) mark() {
 	for len(stack) > 0 {
 		addr := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		if t, ok := i.heap[addr].(types.Traceable); ok {
-			for _, ref := range t.Refs() {
-				push(int(ref))
-			}
+		for _, ref := range i.refs(i.heap[addr]) {
+			push(int(ref))
 		}
 	}
 }
@@ -1643,16 +1632,25 @@ func (i *Interpreter) sweep() {
 			continue
 		}
 		v := i.heap[j]
-		if t, ok := v.(types.Traceable); ok {
-			for _, ref := range t.Refs() {
-				if r := int(ref); i.rc[r] > 0 {
-					i.rc[r]--
-				}
+		for _, ref := range i.refs(v) {
+			if r := int(ref); i.rc[r] > 0 {
+				i.rc[r]--
 			}
 		}
 		i.rc[j] = 0
 		i.reclaim(j, v)
 	}
+}
+
+// refs returns v's nested refs using the interpreter's reused scratch buffer,
+// or nil if v is not Traceable. The result is only valid until the next call.
+func (i *Interpreter) refs(v types.Value) []types.Ref {
+	t, ok := v.(types.Traceable)
+	if !ok {
+		return nil
+	}
+	i.refbuf = t.Refs(i.refbuf[:0])
+	return i.refbuf
 }
 
 // reclaim finalizes slot addr holding v: it drops interned-string and

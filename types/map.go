@@ -39,6 +39,12 @@ type MapType struct {
 	TraceValues bool
 }
 
+// MapIterator walks the live map via reflect.MapIter rather than a
+// construction-time snapshot: a snapshot of ref-typed keys/values would not be
+// refcount-protected, so a MAP_DELETE on an entry still queued in the snapshot
+// could free it before the iterator reached it. Ranging over the live map has
+// no such hazard - Go guarantees a key deleted mid-range is simply never
+// produced.
 type MapIterator struct {
 	iter    *reflect.MapIter
 	current Value
@@ -202,20 +208,16 @@ func (m *TypedMap[K]) String() string {
 	return fmt.Sprintf("%s{%s}", m.Typ, strings.Join(parts, ", "))
 }
 
-func (m *TypedMap[K]) Refs() []Ref {
+func (m *TypedMap[K]) Refs(dst []Ref) []Ref {
 	if !m.Typ.TraceValues {
-		return nil
+		return dst
 	}
-	var refs []Ref
 	for _, value := range m.entries {
 		if value.Kind() == KindRef {
-			if refs == nil {
-				refs = make([]Ref, 0, m.Len())
-			}
-			refs = append(refs, Ref(value.Ref()))
+			dst = append(dst, Ref(value.Ref()))
 		}
 	}
-	return refs
+	return dst
 }
 
 func (m *Map) Kind() Kind { return KindRef }
@@ -265,28 +267,21 @@ func (m *Map) String() string {
 	return fmt.Sprintf("%s{%s}", m.Typ, strings.Join(parts, ", "))
 }
 
-func (m *Map) Refs() []Ref {
+func (m *Map) Refs(dst []Ref) []Ref {
 	traceKeys := m.Typ.TraceKeys
 	traceValues := m.Typ.TraceValues
 	if !traceKeys && !traceValues {
-		return nil
+		return dst
 	}
-	var refs []Ref
 	for _, entry := range m.entries {
 		if traceKeys && entry.Key.Kind() == KindRef {
-			if refs == nil {
-				refs = make([]Ref, 0, m.Len()*2)
-			}
-			refs = append(refs, Ref(entry.Key.Ref()))
+			dst = append(dst, Ref(entry.Key.Ref()))
 		}
 		if traceValues && entry.Value.Kind() == KindRef {
-			if refs == nil {
-				refs = make([]Ref, 0, m.Len()*2)
-			}
-			refs = append(refs, Ref(entry.Value.Ref()))
+			dst = append(dst, Ref(entry.Value.Ref()))
 		}
 	}
-	return refs
+	return dst
 }
 
 func (it *MapIterator) Kind() Kind { return KindRef }
@@ -331,19 +326,19 @@ func (it *MapIterator) Current() Value { return it.current }
 
 func (it *MapIterator) Done() bool { return it.done }
 
-func (it *MapIterator) Refs() []Ref {
-	refs := []Ref{it.ref}
+func (it *MapIterator) Refs(dst []Ref) []Ref {
+	dst = append(dst, it.ref)
 	if !it.done {
 		switch current := it.current.(type) {
 		case Boxed:
 			if current.Kind() == KindRef {
-				refs = append(refs, Ref(current.Ref()))
+				dst = append(dst, Ref(current.Ref()))
 			}
 		case Ref:
-			refs = append(refs, current)
+			dst = append(dst, current)
 		}
 	}
-	return refs
+	return dst
 }
 
 func (k MapKey) String() string {

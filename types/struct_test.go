@@ -96,10 +96,10 @@ func TestStruct_Refs(t *testing.T) {
 	t.Run("primitive fields", func(t *testing.T) {
 		s := NewStruct(NewStructType(NewStructField(TypeI32)), BoxI32(1))
 
-		require.Empty(t, s.Refs())
+		require.Empty(t, s.Refs(nil))
 		var refs []Ref
 		allocs := testing.AllocsPerRun(100, func() {
-			refs = s.Refs()
+			refs = s.Refs(nil)
 		})
 		require.Empty(t, refs)
 		require.Zero(t, allocs)
@@ -111,7 +111,7 @@ func TestStruct_Refs(t *testing.T) {
 			BoxRef(1), BoxI32(2), BoxRef(3),
 		)
 
-		require.Equal(t, []Ref{1, 3}, s.Refs())
+		require.Equal(t, []Ref{1, 3}, s.Refs(nil))
 	})
 }
 
@@ -176,7 +176,7 @@ func BenchmarkStruct_Refs(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for n := 0; n < b.N; n++ {
-			refs = s.Refs()
+			refs = s.Refs(nil)
 		}
 		b.StopTimer()
 		require.Empty(b, refs)
@@ -189,7 +189,7 @@ func BenchmarkStruct_Refs(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for n := 0; n < b.N; n++ {
-			refs = s.Refs()
+			refs = s.Refs(refs[:0])
 		}
 		b.StopTimer()
 		require.Len(b, refs, 1)

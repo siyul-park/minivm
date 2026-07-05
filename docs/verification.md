@@ -1,93 +1,279 @@
 # Verification
 
-Static, pre-execution validation of bytecode. Lives in `program/verify.go`.
+Static pre-execution validation for minivm bytecode.
 
-## Agent Usage
+The verifier lives in `program/verify.go`.
 
-Read when changing the verifier, adding an opcode, or changing how untrusted
-bytecode is admitted.
+## Summary
 
-- Per-opcode stack effects: the `Pop`/`Push` fields on `instr.Type`
-  (`instr/type.go`). A new opcode with a statically fixed effect gets its kinds
-  there; one whose effect depends on operands, constants, declared types, or the
-  runtime stack leaves `Pop`/`Push` nil and is handled case-by-case in
-  `program/verify.go` `checker.step`.
-- Abstract stack lattice, CFG construction, driver, and passes: all in
-  `program/verify.go` (one cohesive file; it does not depend on `analysis`/`pass`
-  so `program` stays free of an import cycle).
-- Entry points: `program.Verify` directly. The `run` CLI subcommand verifies
-  every loaded file before constructing the interpreter.
+`program.Verify` is the trust boundary for untrusted bytecode.
 
-## Why
+`program.New` and `interp.New` trust their input. They do not verify bytecode. Call `program.Verify` before constructing an interpreter when bytecode comes from files, users, plugins, network input, generated code, or any other untrusted source.
 
-minivm targets safe plugin / DSL / rules execution. Like WebAssembly and the
-JVM, it must be able to reject malformed or hostile bytecode *before* running
-it. `program.New` and `interp.New` trust the producer; `program.Verify` supplies
-the trust boundary for untrusted bytecode so a bad module fails fast with a typed
-error instead of trapping mid-run, corrupting the operand stack, or panicking the
-host.
+Default design rule:
+
+* reject malformed bytecode before execution
+* keep verification separate from interpretation
+* keep structural checks strict
+* keep stack checks conservative
+* never reject when the verifier cannot know statically
+* let runtime guards handle dynamic behavior
+* use short, standard names such as `check`, `step`, `block`, `stack`, `kind`, and `target`
+
+## Agent Fast Path
+
+Read this before:
+
+* changing `program/verify.go`
+* adding an opcode
+* changing opcode operands
+* changing stack effects
+* changing how untrusted bytecode is loaded
+* changing CLI `run` behavior
+
+When adding or changing an opcode:
+
+| Change                   | Update                                                    |
+| ------------------------ | --------------------------------------------------------- |
+| fixed stack effect       | `instr.Type.Pop` and `instr.Type.Push` in `instr/type.go` |
+| operand-dependent effect | case handling in `checker.step`                           |
+| new operand width        | `instr/type.go` and verifier structure checks             |
+| new branch behavior      | CFG construction and branch-target validation             |
+| new type behavior        | stack-kind rules in `checker.step`                        |
+| new runtime trap         | usually not a verifier error unless statically malformed  |
+
+`program/verify.go` intentionally stays self-contained. It does not import `analysis` or `pass`, avoiding a dependency cycle through `program`.
+
+## Why Verification Exists
+
+minivm is designed for safe plugin, DSL, rules, and embedded script execution.
+
+Like WebAssembly or the JVM, it should reject malformed or hostile bytecode before running it.
+
+Verification prevents untrusted bytecode from:
+
+* decoding past instruction bounds
+* jumping into the middle of instructions
+* using invalid pool, local, type, or upvalue indexes
+* falling through from function bodies
+* causing definite stack underflow
+* causing definite operand type confusion
+* reaching control-flow merges with incompatible stack heights
+
+Runtime traps such as divide-by-zero, heap exhaustion, invalid array indexes, and fuel exhaustion are still runtime behavior, not verification failures.
 
 ## API
 
-```go
-err := program.Verify(prog) // nil or *program.VerifyError
-if err != nil {
+```go id="1o28i6"
+if err := program.Verify(prog); err != nil {
     return err
 }
-vm := interp.New(prog) // trusts prog; verify first
+
+vm := interp.New(prog)
 ```
 
-Verification is decoupled from the interpreter: `interp.New` never verifies and
-trusts its input. Run `program.Verify` beforehand for untrusted or externally
-loaded bytecode.
+`interp.New` does not verify. Verify first when the program is untrusted.
 
-`VerifyError` locates the first violation by verifier slot (0 = top-level code,
-`j+1` = constant `j`; runtime dispatch is keyed by heap ref), instruction byte
-offset, and opcode, and wraps a sentinel (`errors.Is`-compatible):
-`ErrTruncated`, `ErrUnknownOpcode`, `ErrIndexOutOfRange`,
-`ErrStackUnderflow`, `ErrStackMismatch`, `ErrTypeMismatch`, `ErrFallThrough`,
-`ErrInvalidJump`, `ErrHandlerRange`, and `ErrHandlerTarget`.
+The CLI `run` command verifies loaded bytecode before constructing the interpreter.
 
-## What it checks
+## Verify Errors
 
-Each function slot is verified in four passes (`checker.run`):
+Verification returns either `nil` or `*program.VerifyError`.
 
-1. **Structure** — every instruction decodes within bounds (no truncated
-   trailing instruction, no variable-width count byte past the code), names a
-   defined opcode (`instr.Valid`), and carries in-range operand indices:
-   `CONST_GET` into `Constants`; type-index ops (`REF_TEST`/`REF_CAST`,
-   `ARRAY_NEW*`/`STRUCT_NEW*`/`MAP_NEW*`) into `Types`; `LOCAL_*` into the
-   param+local list; `UPVAL_*` into `Captures`.
-2. **Control flow** — `checker.blocks` builds the CFG, which also
-   proves every branch target lands on an instruction boundary.
-3. **Termination** — every exit block of a *function body* ends in `RETURN`,
-   `RETURN_CALL`, or `UNREACHABLE`. Top-level code (slot 0) is exempt: the
-   interpreter ends it by running off the end of the code.
-4. **Operand stack** — an abstract interpretation over the CFG to a fixpoint
-   checks for underflow, operand type confusion, and stack-height disagreement
-   at control-flow merges. Kinds reuse `types.Kind` plus a top element
-   (`anyKind`) for statically-unknown values; merges widen to `anyKind`, so the
-   verifier rejects only on a *definite* concrete mismatch, never on an unknown.
-   Operand kinds are compared by **representation** (`accepts` uses `Kind.Repr`),
-   so the narrow kinds `i1`/`i8` satisfy an `i32` operand — they share the i32
-   representation. Most ops push their declared `Push` kind, but the width-closed
-   bitwise ops (`i32.and`/`or`/`xor`) are special-cased: `bitwise` keeps a shared
-   narrow operand kind (`i8 & i8 → i8`, `i1 ^ i1 → i1`) and widens a mixed pair
-   to `i32`, matching what the interpreter and JIT compute at runtime.
+`VerifyError` reports:
 
-## Limits (by design)
+| Field  | Meaning                                                     |
+| ------ | ----------------------------------------------------------- |
+| slot   | verifier slot; `0` is top-level code, `j+1` is constant `j` |
+| offset | instruction byte offset                                     |
+| opcode | opcode at the failure point                                 |
+| cause  | wrapped sentinel error                                      |
 
-minivm's bytecode is not fully statically stack-typed the way WebAssembly is
-(no type operand on `CALL`, no block types, a stack-counted `MAP_NEW`). The
-verifier resolves a `CALL`/`RETURN_CALL` arity from the callee's static
-`*types.FunctionType` when it is recoverable (a function/closure constant, or a
-typed param/local/upval). When an effect cannot be determined statically — a
-call through a dynamic `ref` slot, the stack-counted `MAP_NEW`, `CLOSURE_NEW`,
-or an extension op — the stack pass stops without a verdict for that function.
-The structural passes (1–3) still hold, and the interpreter guards the rest at
-runtime. Consequently the stack pass never produces a false rejection.
+Sentinel errors are compatible with `errors.Is`.
 
-Out of scope, because they are already runtime-guarded or dynamic: `GLOBAL_*`
-indices (globals grow dynamically and are bounds-checked at run time), heap
-exhaustion, fuel, divide-by-zero, and array/map index traps. These are
-intentional runtime traps, not verification failures.
+Common causes:
+
+```text id="l2ox5m"
+ErrTruncated
+ErrUnknownOpcode
+ErrIndexOutOfRange
+ErrStackUnderflow
+ErrStackMismatch
+ErrTypeMismatch
+ErrFallThrough
+ErrInvalidJump
+ErrHandlerRange
+ErrHandlerTarget
+```
+
+## Verification Passes
+
+Each function slot is checked in four passes.
+
+### 1. Structure
+
+The verifier checks that every instruction:
+
+* decodes within bounds
+* uses a known opcode
+* has complete fixed-width or variable-width operands
+* references valid constant indexes
+* references valid type indexes
+* references valid local indexes
+* references valid upvalue indexes
+
+Examples:
+
+* `CONST_GET` must reference `Constants`
+* `REF_TEST`, `REF_CAST`, `ARRAY_NEW`, `STRUCT_NEW`, and `MAP_NEW` must reference `Types`
+* `LOCAL_*` must fit within params plus locals
+* `UPVAL_*` must fit within captures
+
+### 2. Control Flow
+
+The verifier builds a CFG and validates branch targets.
+
+It checks that each branch target lands on an instruction boundary.
+
+Branch targets include:
+
+* `BR`
+* `BR_IF`
+* `BR_TABLE`
+
+### 3. Termination
+
+Function bodies must terminate explicitly.
+
+Every exit block in a function body must end with one of:
+
+```text id="q9eh7q"
+RETURN
+RETURN_CALL
+UNREACHABLE
+```
+
+Top-level code, slot `0`, is exempt. The interpreter finishes top-level code by running off the end.
+
+### 4. Operand Stack
+
+The verifier performs abstract interpretation over the CFG until a fixpoint.
+
+It checks:
+
+* stack underflow
+* stack-height mismatch at merges
+* definite type mismatch
+* statically known call arity when recoverable
+
+The abstract stack uses `types.Kind` plus a verifier-only top kind for unknown values.
+
+At control-flow merges, differing compatible information widens to unknown. This keeps verification conservative: it rejects definite errors, not uncertain dynamic behavior.
+
+## Kind Rules
+
+Operand kinds are compared by representation.
+
+This means `i1`, `i8`, and `i32` are compatible for `i32`-representation operands.
+
+Examples:
+
+```text id="kduhjr"
+i8  accepted by i32 operand
+i1  accepted by i32 operand
+f32 not accepted by i32 operand
+```
+
+Most opcodes push the kind declared in `instr.Type.Push`.
+
+Special case: `i32.and`, `i32.or`, and `i32.xor` are width-closed.
+
+```text id="0m2hxj"
+i8 & i8  → i8
+i1 ^ i1  → i1
+i8 & i32 → i32
+```
+
+This must match interpreter and JIT behavior.
+
+## Dynamic Effects
+
+Some opcodes cannot always be checked statically.
+
+Examples:
+
+* `CALL` through a dynamic `ref`
+* `RETURN_CALL` through a dynamic `ref`
+* stack-counted `MAP_NEW`
+* `CLOSURE_NEW`
+* extension or future dynamic operations
+
+When stack effect cannot be determined statically, the stack pass stops without a verdict for that function.
+
+Structural, control-flow, and termination checks still apply.
+
+The interpreter then owns the remaining runtime checks.
+
+This is intentional. The verifier should avoid false rejection.
+
+## Calls
+
+The verifier resolves `CALL` and `RETURN_CALL` arity when the callee type is statically recoverable.
+
+Recoverable cases include:
+
+* function constants
+* closure constants
+* typed params
+* typed locals
+* typed upvalues
+
+If the callee is dynamic and its function type cannot be recovered, verification does not guess. Runtime call checks handle it.
+
+## What Verification Does Not Check
+
+These are runtime concerns, not verifier failures:
+
+* global indexes, because globals can grow dynamically
+* heap exhaustion
+* fuel exhaustion
+* context cancellation
+* divide-by-zero
+* array, string, or map index traps
+* failed casts depending on runtime values
+* host-function errors
+* allocation failures
+* dynamic call target mismatch
+
+Do not move runtime policy into the verifier unless the error is statically malformed bytecode.
+
+## Design Notes
+
+The verifier is intentionally in `program`, not `interp`.
+
+Reasons:
+
+* bytecode can be checked before interpreter construction
+* verification is a trust-boundary concern
+* `interp.New` remains fast and trusting
+* `program` avoids importing `analysis` or `pass`
+* the verifier can keep its own small CFG logic without package cycles
+
+Keep the verifier cohesive. Avoid scattering verification logic across packages unless there is a clear ownership reason.
+
+## Agent Notes
+
+When changing verification:
+
+* keep structural validation strict
+* keep stack validation conservative
+* update opcode stack effects and verifier cases together
+* keep `i1`/`i8`/`i32` representation compatibility
+* reject definite malformed bytecode
+* do not reject dynamic behavior merely because it is unknown
+* preserve `program.Verify` as the trust boundary
+* keep `interp.New` free of implicit verification
+* test malformed bytecode, bad targets, bad indexes, stack underflow, and type mismatch separately
+* keep verifier, instruction docs, interpreter, and tests in sync
+
+The best verifier change is strict about bytecode shape, conservative about dynamic behavior, and simple enough to trust before execution.

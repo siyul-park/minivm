@@ -588,19 +588,25 @@ func (s *marshalState) value(v reflect.Value) (types.Value, error) {
 
 func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *HostFunction {
 	m := s.m
+	fnType := fn.Type()
+	// in and seen are allocated fresh inside the returned closure on every
+	// call: the returned HostFunction is a types.Value that can be placed in
+	// program.WithConstants, so pooled Interpreters built from the same
+	// program share this exact *HostFunction (New keeps the constant's Go
+	// value directly - see interp.go's BoxRef(i.keep(v)) path) and may call
+	// it concurrently from separate goroutines. Call-scoped scratch would
+	// race across such concurrent calls.
 	return NewHostFunction(typ, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
-		fnType := fn.Type()
 		if len(params) != fnType.NumIn() {
 			return nil, fmt.Errorf("%w: got %d params, want %d", ErrTypeMismatch, len(params), fnType.NumIn())
 		}
 		in := make([]reflect.Value, fnType.NumIn())
 		unmarshal := &unmarshalState{m: m, i: i}
 		for idx := range in {
-			arg := reflect.New(fnType.In(idx)).Elem()
-			if err := unmarshal.value(params[idx], arg); err != nil {
+			in[idx] = reflect.New(fnType.In(idx)).Elem()
+			if err := unmarshal.value(params[idx], in[idx]); err != nil {
 				return nil, fmt.Errorf("function param %d: %w", idx, err)
 			}
-			in[idx] = arg
 		}
 
 		out := fn.Call(in)

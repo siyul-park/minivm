@@ -3,6 +3,7 @@ package interp
 import (
 	"fmt"
 	"sync"
+	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/types"
@@ -29,11 +30,28 @@ type branch struct {
 	ip int
 }
 
+type leg struct {
+	trace *trace
+	hits  int64
+}
+
+type shape struct {
+	itab uintptr
+	typ  uintptr
+}
+
+type iface struct {
+	itab uintptr
+	_    uintptr
+}
+
 type outcome int
 
 type step struct {
-	op   instr.Opcode
-	seen types.Boxed
+	op    instr.Opcode
+	seen  types.Boxed
+	arg   types.Boxed
+	shape shape
 
 	fn     int
 	ip     int
@@ -206,15 +224,6 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 			r.store(a, t)
 			return t, nil
 		}
-		if (op == instr.ARRAY_GET || op == instr.STRUCT_GET) && st.seen.Kind() == types.KindI64 {
-			if clone.fp != startFP {
-				t.kind = aborted
-				break
-			}
-			t.kind = returned
-			r.store(a, t)
-			return t, nil
-		}
 		switch {
 		case op == instr.RETURN && st.depth == 0:
 			t.kind = returned
@@ -302,8 +311,10 @@ func (r *Tracer) codes(i *Interpreter) [][]func(*Interpreter) {
 			continue
 		}
 		var locals []types.Kind
+		var captures []types.Kind
 		if fn, ok := i.function(addr); ok {
 			locals = fn.LocalKinds()
+			captures = types.Kinds(fn.Captures)
 		}
 		tc := &threadedCompiler{
 			types:     i.types,
@@ -311,7 +322,7 @@ func (r *Tracer) codes(i *Interpreter) [][]func(*Interpreter) {
 			heap:      i.heap,
 			precise:   true,
 		}
-		r.precise[addr] = tc.Compile(code, locals)
+		r.precise[addr] = tc.Compile(code, locals, captures)
 	}
 	return r.precise
 }
@@ -325,14 +336,71 @@ func (r *Tracer) op(i *Interpreter, op instr.Opcode, startFP int) step {
 		depth: i.fp - startFP,
 	}
 	switch op {
+	case instr.I32_DIV_S,
+		instr.I32_DIV_U,
+		instr.I32_REM_S,
+		instr.I32_REM_U,
+		instr.I32_SHL,
+		instr.I32_SHR_S,
+		instr.I32_SHR_U,
+		instr.I64_DIV_S,
+		instr.I64_DIV_U,
+		instr.I64_REM_S,
+		instr.I64_REM_U,
+		instr.I64_SHL,
+		instr.I64_SHR_S,
+		instr.I64_SHR_U,
+		instr.BR_TABLE:
+		if i.sp > 0 {
+			st.arg = i.stack[i.sp-1]
+		}
+	case instr.ARRAY_LEN, instr.REF_GET, instr.ERROR_GET, instr.CORO_DONE, instr.CORO_VALUE:
+		if i.sp > 0 {
+			st.arg = i.stack[i.sp-1]
+			st.shape = r.shape(i, i.stack[i.sp-1])
+		}
+	case instr.ARRAY_GET, instr.STRUCT_GET:
+		if i.sp > 0 {
+			st.arg = i.stack[i.sp-1]
+		}
+		if i.sp > 1 {
+			st.shape = r.shape(i, i.stack[i.sp-2])
+		}
+	case instr.ARRAY_SET, instr.STRUCT_SET:
+		if i.sp > 2 {
+			st.arg = i.stack[i.sp-2]
+			st.shape = r.shape(i, i.stack[i.sp-3])
+		}
 	case instr.BR, instr.BR_IF:
 		st.target = f.ip + instr.ParseI16(i.instrs[f.addr], f.ip+1) + 3
+		if op == instr.BR_IF && i.sp > 0 {
+			st.arg = i.stack[i.sp-1]
+		}
 	case instr.CALL, instr.RETURN_CALL:
 		if i.sp > 0 {
 			st.seen = i.stack[i.sp-1]
 		}
 	}
 	return st
+}
+
+func (r *Tracer) shape(i *Interpreter, v types.Boxed) shape {
+	if v.Kind() != types.KindRef {
+		return shape{}
+	}
+	addr := v.Ref()
+	if addr < 0 || addr >= len(i.heap) {
+		return shape{}
+	}
+	val := i.heap[addr]
+	if val == nil {
+		return shape{}
+	}
+	out := shape{itab: itab(val)}
+	if s, ok := val.(*types.Struct); ok && s.Typ != nil {
+		out.typ = uintptr(unsafe.Pointer(s.Typ))
+	}
+	return out
 }
 
 func (r *Tracer) finish(i *Interpreter, st *step, op instr.Opcode) {
@@ -609,12 +677,16 @@ func (t *tree) snapshot() *tree {
 	}
 }
 
-func (t *tree) branchIPs() map[branch]*trace {
-	out := map[branch]*trace{}
-	for _, tr := range t.branches {
+func (t *tree) branchIPs() map[branch]leg {
+	out := map[branch]leg{}
+	for id, tr := range t.branches {
 		if tr != nil {
-			out[branch{fn: tr.anchor.addr, ip: tr.anchor.ip}] = tr
+			out[branch{fn: tr.anchor.addr, ip: tr.anchor.ip}] = leg{trace: tr, hits: t.hits[id]}
 		}
 	}
 	return out
+}
+
+func itab(v types.Value) uintptr {
+	return (*iface)(unsafe.Pointer(&v)).itab
 }

@@ -27,13 +27,12 @@ func (c *Closure) String() string {
 	return c.Typ.String()
 }
 
-func (c *Closure) Refs() []Ref {
-	refs := make([]Ref, 0, 1+len(c.Upvals))
-	refs = append(refs, c.Fn)
+func (c *Closure) Refs(dst []Ref) []Ref {
+	dst = append(dst, c.Fn)
 	for _, u := range c.Upvals {
 		if u.Kind() == KindRef {
-			refs = append(refs, Ref(u.Ref()))
+			dst = append(dst, Ref(u.Ref()))
 		}
 	}
-	return refs
+	return dst
 }

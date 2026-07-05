@@ -298,15 +298,42 @@ func (c *threadedCompiler) fuseHostFunction(fn *HostFunction, size int) func(*In
 	if c.precise || c.ip >= len(c.code) {
 		return nil
 	}
+	params := len(fn.Typ.Params)
+	returns := len(fn.Typ.Returns)
+	delta := returns - params
+	// A param whose declared kind can never be a heap ref (I32/I1/I8/F32/F64,
+	// via Repr()) needs no cleanup scan; I64 is excluded because it can be
+	// promoted to a ref when out of the boxable range. An all-scalar signature
+	// skips the scan entirely instead of calling releaseArgs.
+	scalar := true
+	for _, p := range fn.Typ.Params {
+		switch p.Kind().Repr() {
+		case types.KindI32, types.KindF32, types.KindF64:
+		default:
+			scalar = false
+		}
+	}
 	switch instr.Opcode(c.code[c.ip]) {
 	case instr.CALL:
-		params := len(fn.Typ.Params)
-		returns := len(fn.Typ.Returns)
-		delta := returns - params
-		return func(i *Interpreter) {
-			if i.fp == len(i.frames) {
-				panic(ErrFrameOverflow)
+		if scalar {
+			return func(i *Interpreter) {
+				if i.sp < params {
+					panic(ErrStackUnderflow)
+				}
+				if i.sp+delta > len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				args := i.stack[i.sp-params : i.sp]
+				rets, err := fn.Fn(i, args)
+				if err != nil {
+					panic(err)
+				}
+				i.sp += delta
+				copy(i.stack[i.sp-returns:i.sp], rets)
+				i.fr.ip += size + 1
 			}
+		}
+		return func(i *Interpreter) {
 			if i.sp < params {
 				panic(ErrStackUnderflow)
 			}
@@ -318,29 +345,33 @@ func (c *threadedCompiler) fuseHostFunction(fn *HostFunction, size int) func(*In
 			if err != nil {
 				panic(err)
 			}
-			for _, val := range args {
-				if val.Kind() != types.KindRef {
-					continue
-				}
-				keep := false
-				for _, ret := range rets {
-					if ret == val {
-						keep = true
-						break
-					}
-				}
-				if !keep {
-					i.release(val.Ref())
-				}
-			}
+			i.releaseArgs(args, rets)
 			i.sp += delta
 			copy(i.stack[i.sp-returns:i.sp], rets)
 			i.fr.ip += size + 1
 		}
 	case instr.RETURN_CALL:
-		params := len(fn.Typ.Params)
-		returns := len(fn.Typ.Returns)
-		delta := returns - params
+		if scalar {
+			return func(i *Interpreter) {
+				if i.sp < params {
+					panic(ErrStackUnderflow)
+				}
+				if i.sp+delta > len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				args := i.stack[i.sp-params : i.sp]
+				rets, err := fn.Fn(i, args)
+				if err != nil {
+					panic(err)
+				}
+				i.sp += delta
+				copy(i.stack[i.sp-returns:i.sp], rets)
+				i.fr.ip += size + 1
+				if i.fp > 1 {
+					i.ret()
+				}
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp < params {
 				panic(ErrStackUnderflow)
@@ -353,21 +384,7 @@ func (c *threadedCompiler) fuseHostFunction(fn *HostFunction, size int) func(*In
 			if err != nil {
 				panic(err)
 			}
-			for _, val := range args {
-				if val.Kind() != types.KindRef {
-					continue
-				}
-				keep := false
-				for _, ret := range rets {
-					if ret == val {
-						keep = true
-						break
-					}
-				}
-				if !keep {
-					i.release(val.Ref())
-				}
-			}
+			i.releaseArgs(args, rets)
 			i.sp += delta
 			copy(i.stack[i.sp-returns:i.sp], rets)
 			i.fr.ip += size + 1
@@ -435,25 +452,27 @@ func (c *threadedCompiler) fuseError() func(*Interpreter) {
 }
 
 // fuseLocalConst folds LOCAL_GET idx; <kind>.CONST c; <kind binop> into one
-// dispatch: it pushes the typed local as the lhs, then runs the existing
-// const+binop fused closure (fuse*Imm) in the same dispatch, saving a
-// central-loop round-trip. The local kind selects the matching CONST opcode,
-// immediate width, and folder so all four numeric kinds are handled the same
-// way. Returns nil when no pattern applies.
+// dispatch: it reads the typed local directly out of the frame slot, computes
+// the result against the compile-time constant with the existing
+// i32Add/i64Add/etc. helper methods, and pushes the result once. There is no
+// intermediate stack write for the local's own value and no extra bounds
+// check for a slot that was never really pushed. The local kind selects the
+// matching CONST opcode, immediate width, and per-kind case switch so all
+// four numeric kinds are handled the same way. Narrow I1/I8 locals fall
+// through to the plain LOCAL_GET path, matching fuseLocalLocal. Returns nil
+// when no pattern applies.
 //
-// c.ip is restored after probing the folder so the compile loop still emits
-// standalone handlers for the absorbed CONST and binop, keeping branch targets
-// valid. I64 locals may hold a heap-promoted KindRef, and the i64 folder
-// unboxes (and releases) the lhs, so the pushed local is retained to stay
-// balanced; I32/F32/F64 never box to a ref and skip the retain (and its Kind
-// branch), matching the plain LOCAL_GET fast path.
+// c.ip is restored after probing the binop so the compile loop still emits
+// standalone handlers for the absorbed CONST and binop, keeping branch
+// targets valid. I64 locals may hold a heap-promoted KindRef, and unboxI64
+// releases a ref operand once read, so the local's boxed value is retained
+// first to keep the local slot's own reference balanced; I32/F32/F64 never
+// box to a ref and skip the retain, matching the plain LOCAL_GET fast path.
 func (c *threadedCompiler) fuseLocalConst(idx int) func(*Interpreter) {
 	if c.precise || idx >= len(c.locals) {
 		return nil
 	}
 
-	var inner func(*Interpreter)
-	retain := false
 	switch c.locals[idx] {
 	case types.KindI32:
 		if c.ip+5 >= len(c.code) || instr.Opcode(c.code[c.ip]) != instr.I32_CONST {
@@ -462,8 +481,9 @@ func (c *threadedCompiler) fuseLocalConst(idx int) func(*Interpreter) {
 		cst := *(*int32)(unsafe.Pointer(&c.code[c.ip+1]))
 		save := c.ip
 		c.ip += 5
-		inner = c.fuseI32Imm(cst, 5)
+		fused := c.fuseLocalI32Const(idx, cst, 5)
 		c.ip = save
+		return fused
 	case types.KindI64:
 		if c.ip+9 >= len(c.code) || instr.Opcode(c.code[c.ip]) != instr.I64_CONST {
 			return nil
@@ -471,9 +491,9 @@ func (c *threadedCompiler) fuseLocalConst(idx int) func(*Interpreter) {
 		cst := int64(*(*uint64)(unsafe.Pointer(&c.code[c.ip+1])))
 		save := c.ip
 		c.ip += 9
-		inner = c.fuseI64Imm(cst, 9)
+		fused := c.fuseLocalI64Const(idx, cst, 9)
 		c.ip = save
-		retain = true
+		return fused
 	case types.KindF32:
 		if c.ip+5 >= len(c.code) || instr.Opcode(c.code[c.ip]) != instr.F32_CONST {
 			return nil
@@ -481,8 +501,9 @@ func (c *threadedCompiler) fuseLocalConst(idx int) func(*Interpreter) {
 		cst := *(*float32)(unsafe.Pointer(&c.code[c.ip+1]))
 		save := c.ip
 		c.ip += 5
-		inner = c.fuseF32Imm(cst, 5)
+		fused := c.fuseLocalF32Const(idx, cst, 5)
 		c.ip = save
+		return fused
 	case types.KindF64:
 		if c.ip+9 >= len(c.code) || instr.Opcode(c.code[c.ip]) != instr.F64_CONST {
 			return nil
@@ -490,16 +511,638 @@ func (c *threadedCompiler) fuseLocalConst(idx int) func(*Interpreter) {
 		cst := *(*float64)(unsafe.Pointer(&c.code[c.ip+1]))
 		save := c.ip
 		c.ip += 9
-		inner = c.fuseF64Imm(cst, 9)
+		fused := c.fuseLocalF64Const(idx, cst, 9)
 		c.ip = save
-	default:
+		return fused
+	}
+	return nil
+}
+
+// fuseLocalLocal folds LOCAL_GET idxA; LOCAL_GET idxB; <binop> into one
+// dispatch when both locals share the same declared kind: it reads both
+// frame slots directly and pushes the result once, skipping the double
+// push/pop round trip the unfused sequence would otherwise do. Only locals
+// declared exactly KindI32/I64/F32/F64 participate (matching fuseLocalConst);
+// narrower I1/I8 locals fall through to the plain LOCAL_GET path. Returns nil
+// when no pattern applies.
+//
+// c.ip is restored after probing the second LOCAL_GET and the binop so the
+// compile loop still emits standalone handlers for both, keeping branch
+// targets valid. I64 locals may hold a heap-promoted KindRef, so both
+// operands are retained before unboxI64 releases them, keeping each local
+// slot's own reference balanced; I32/F32/F64 never box to a ref and skip the
+// retain.
+func (c *threadedCompiler) fuseLocalLocal(idxA int) func(*Interpreter) {
+	if c.precise || idxA >= len(c.locals) || c.ip+1 >= len(c.code) {
 		return nil
 	}
-	if inner == nil {
+	if instr.Opcode(c.code[c.ip]) != instr.LOCAL_GET {
+		return nil
+	}
+	idxB := int(c.code[c.ip+1])
+	// idxA == idxB is valid: the unfused program reads the same slot twice.
+	if idxB >= len(c.locals) || c.locals[idxB] != c.locals[idxA] {
 		return nil
 	}
 
-	if retain {
+	save := c.ip
+	c.ip += 2
+	var fused func(*Interpreter)
+	switch c.locals[idxA] {
+	case types.KindI32:
+		fused = c.fuseLocalLocalI32(idxA, idxB)
+	case types.KindI64:
+		fused = c.fuseLocalLocalI64(idxA, idxB)
+	case types.KindF32:
+		fused = c.fuseLocalLocalF32(idxA, idxB)
+	case types.KindF64:
+		fused = c.fuseLocalLocalF64(idxA, idxB)
+	}
+	c.ip = save
+	return fused
+}
+
+// peekBrIf reports whether the byte at pos starts a BR_IF instruction,
+// returning its parsed jump offset for a comparison+BR_IF (or CONST+BR_IF)
+// fusion to apply via Interpreter.branchIf. It only reads c.code — it never
+// advances c.ip — so every caller, whether already sitting right after its
+// own opcode (pos == c.ip) or still probing one opcode further ahead
+// (pos == c.ip+1, from inside an already-probing fuseLocalXConst case), needs
+// no restore: the compile loop still visits and standalone-compiles BR_IF's
+// own start byte, keeping that offset a valid branch target. BR_IF's fixed
+// 3-byte width (opcode + i16 offset) is a constant every caller already
+// knows and folds into its own total fused width.
+func (c *threadedCompiler) peekBrIf(pos int) (offset int, ok bool) {
+	if c.precise || pos+2 >= len(c.code) || instr.Opcode(c.code[pos]) != instr.BR_IF {
+		return 0, false
+	}
+	return instr.ParseI16(c.code, pos+1), true
+}
+
+// fuseLocalI32Const builds the fused closure for LOCAL_GET idx (I32);
+// I32_CONST cst; <binop>, mirroring fuseI32Imm's opcode dispatch but reading
+// the local directly instead of through an already-pushed stack slot and
+// pushing the result once. Does not touch c.ip; fuseLocalConst restores it
+// after probing. ARRAY_GET/STRUCT_GET are not handled here: an I32 local can
+// never hold the array/struct ref those opcodes need, so the combination
+// cannot occur in valid bytecode.
+func (c *threadedCompiler) fuseLocalI32Const(idx int, cst int32, size int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.I32_ADD:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32Add(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_SUB:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32Sub(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_MUL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32Mul(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_DIV_S:
+		if cst == 0 {
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32DivS(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_DIV_U:
+		if cst == 0 {
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32DivU(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_REM_S:
+		if cst == 0 {
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32RemS(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_REM_U:
+		if cst == 0 {
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32RemU(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_SHL:
+		cst &= 0x1F
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32Shl(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_SHR_S:
+		cst &= 0x1F
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32ShrS(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_SHR_U:
+		cst &= 0x1F
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32ShrU(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_XOR:
+		rhs := types.BoxI32(cst)
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr]
+			i.stack[i.sp] = i.i32Xor(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_AND:
+		rhs := types.BoxI32(cst)
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr]
+			i.stack[i.sp] = i.i32And(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_OR:
+		rhs := types.BoxI32(cst)
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr]
+			i.stack[i.sp] = i.i32Or(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_ROTL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32Rotl(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_ROTR:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32Rotr(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_EQ:
+		// Superinstruction: LOCAL_GET idx; I32_CONST cst; I32_EQ; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].I32()
+				i.branchIf(lhs == cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32Eq(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_NE:
+		// Superinstruction: LOCAL_GET idx; I32_CONST cst; I32_NE; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].I32()
+				i.branchIf(lhs != cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32Ne(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_LT_S:
+		// Superinstruction: LOCAL_GET idx; I32_CONST cst; I32_LT_S; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].I32()
+				i.branchIf(lhs < cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32LtS(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_LT_U:
+		// Superinstruction: LOCAL_GET idx; I32_CONST cst; I32_LT_U; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].I32()
+				i.branchIf(uint32(lhs) < uint32(cst), offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32LtU(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_GT_S:
+		// Superinstruction: LOCAL_GET idx; I32_CONST cst; I32_GT_S; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].I32()
+				i.branchIf(lhs > cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32GtS(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_GT_U:
+		// Superinstruction: LOCAL_GET idx; I32_CONST cst; I32_GT_U; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].I32()
+				i.branchIf(uint32(lhs) > uint32(cst), offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32GtU(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_LE_S:
+		// Superinstruction: LOCAL_GET idx; I32_CONST cst; I32_LE_S; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].I32()
+				i.branchIf(lhs <= cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32LeS(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_LE_U:
+		// Superinstruction: LOCAL_GET idx; I32_CONST cst; I32_LE_U; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].I32()
+				i.branchIf(uint32(lhs) <= uint32(cst), offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32LeU(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_GE_S:
+		// Superinstruction: LOCAL_GET idx; I32_CONST cst; I32_GE_S; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].I32()
+				i.branchIf(lhs >= cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32GeS(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I32_GE_U:
+		// Superinstruction: LOCAL_GET idx; I32_CONST cst; I32_GE_U; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].I32()
+				i.branchIf(uint32(lhs) >= uint32(cst), offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].I32()
+			i.stack[i.sp] = i.i32GeU(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	}
+	return nil
+}
+
+// fuseLocalI64Const builds the fused closure for LOCAL_GET idx (I64);
+// I64_CONST cst; <binop>, mirroring fuseI64Imm's opcode dispatch but reading
+// the local directly instead of through an already-pushed stack slot and
+// pushing the result once. Does not touch c.ip; fuseLocalConst restores it
+// after probing. The local's boxed value is retained before unboxI64 reads
+// it: unboxI64 releases a heap-promoted ref once read, and without the
+// retain that would drop the local slot's own ownership instead of just the
+// temporary read.
+func (c *threadedCompiler) fuseLocalI64Const(idx int, cst int64, size int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.I64_ADD:
 		return func(i *Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
@@ -510,25 +1153,2625 @@ func (c *threadedCompiler) fuseLocalConst(idx int) func(*Interpreter) {
 			}
 			val := i.stack[addr]
 			i.retainBox(val)
-			i.stack[i.sp] = val
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64Add(lhs, cst)
 			i.sp++
-			i.fr.ip += 2
-			inner(i)
+			i.fr.ip += size + 3
+		}
+	case instr.I64_SUB:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64Sub(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_MUL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64Mul(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_DIV_S:
+		if cst == 0 {
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64DivS(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_DIV_U:
+		if cst == 0 {
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64DivU(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_REM_S:
+		if cst == 0 {
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64RemS(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_REM_U:
+		if cst == 0 {
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64RemU(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_SHL:
+		cst &= 0x3F
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64Shl(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_SHR_S:
+		cst &= 0x3F
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64ShrS(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_SHR_U:
+		cst &= 0x3F
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64ShrU(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_XOR:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64Xor(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_AND:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64And(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_OR:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64Or(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_ROTL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64Rotl(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_ROTR:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64Rotr(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_EQ:
+		// Superinstruction: LOCAL_GET idx; I64_CONST cst; I64_EQ; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		// The retain-before-unbox dance is unchanged: it protects the local
+		// slot's own reference exactly as the non-branching path below does.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				val := i.stack[addr]
+				i.retainBox(val)
+				lhs := i.unboxI64(val)
+				i.branchIf(lhs == cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64Eq(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_NE:
+		// Superinstruction: LOCAL_GET idx; I64_CONST cst; I64_NE; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		// The retain-before-unbox dance is unchanged: it protects the local
+		// slot's own reference exactly as the non-branching path below does.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				val := i.stack[addr]
+				i.retainBox(val)
+				lhs := i.unboxI64(val)
+				i.branchIf(lhs != cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64Ne(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_LT_S:
+		// Superinstruction: LOCAL_GET idx; I64_CONST cst; I64_LT_S; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		// The retain-before-unbox dance is unchanged: it protects the local
+		// slot's own reference exactly as the non-branching path below does.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				val := i.stack[addr]
+				i.retainBox(val)
+				lhs := i.unboxI64(val)
+				i.branchIf(lhs < cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64LtS(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_LT_U:
+		// Superinstruction: LOCAL_GET idx; I64_CONST cst; I64_LT_U; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		// The retain-before-unbox dance is unchanged: it protects the local
+		// slot's own reference exactly as the non-branching path below does.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				val := i.stack[addr]
+				i.retainBox(val)
+				lhs := i.unboxI64(val)
+				i.branchIf(uint64(lhs) < uint64(cst), offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64LtU(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_GT_S:
+		// Superinstruction: LOCAL_GET idx; I64_CONST cst; I64_GT_S; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		// The retain-before-unbox dance is unchanged: it protects the local
+		// slot's own reference exactly as the non-branching path below does.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				val := i.stack[addr]
+				i.retainBox(val)
+				lhs := i.unboxI64(val)
+				i.branchIf(lhs > cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64GtS(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_GT_U:
+		// Superinstruction: LOCAL_GET idx; I64_CONST cst; I64_GT_U; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		// The retain-before-unbox dance is unchanged: it protects the local
+		// slot's own reference exactly as the non-branching path below does.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				val := i.stack[addr]
+				i.retainBox(val)
+				lhs := i.unboxI64(val)
+				i.branchIf(uint64(lhs) > uint64(cst), offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64GtU(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_LE_S:
+		// Superinstruction: LOCAL_GET idx; I64_CONST cst; I64_LE_S; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		// The retain-before-unbox dance is unchanged: it protects the local
+		// slot's own reference exactly as the non-branching path below does.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				val := i.stack[addr]
+				i.retainBox(val)
+				lhs := i.unboxI64(val)
+				i.branchIf(lhs <= cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64LeS(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_LE_U:
+		// Superinstruction: LOCAL_GET idx; I64_CONST cst; I64_LE_U; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		// The retain-before-unbox dance is unchanged: it protects the local
+		// slot's own reference exactly as the non-branching path below does.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				val := i.stack[addr]
+				i.retainBox(val)
+				lhs := i.unboxI64(val)
+				i.branchIf(uint64(lhs) <= uint64(cst), offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64LeU(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_GE_S:
+		// Superinstruction: LOCAL_GET idx; I64_CONST cst; I64_GE_S; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		// The retain-before-unbox dance is unchanged: it protects the local
+		// slot's own reference exactly as the non-branching path below does.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				val := i.stack[addr]
+				i.retainBox(val)
+				lhs := i.unboxI64(val)
+				i.branchIf(lhs >= cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64GeS(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.I64_GE_U:
+		// Superinstruction: LOCAL_GET idx; I64_CONST cst; I64_GE_U; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		// The retain-before-unbox dance is unchanged: it protects the local
+		// slot's own reference exactly as the non-branching path below does.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				val := i.stack[addr]
+				i.retainBox(val)
+				lhs := i.unboxI64(val)
+				i.branchIf(uint64(lhs) >= uint64(cst), offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			val := i.stack[addr]
+			i.retainBox(val)
+			lhs := i.unboxI64(val)
+			i.stack[i.sp] = i.i64GeU(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
 		}
 	}
-	return func(i *Interpreter) {
-		if i.sp == len(i.stack) {
-			panic(ErrStackOverflow)
-		}
-		addr := i.fr.bp + idx
-		if addr > i.sp {
-			panic(ErrSegmentationFault)
-		}
-		i.stack[i.sp] = i.stack[addr]
-		i.sp++
-		i.fr.ip += 2
-		inner(i)
+	return nil
+}
+
+// fuseLocalF32Const builds the fused closure for LOCAL_GET idx (F32);
+// F32_CONST cst; <binop>, mirroring fuseF32Imm's opcode dispatch but reading
+// the local directly instead of through an already-pushed stack slot and
+// pushing the result once. Does not touch c.ip; fuseLocalConst restores it
+// after probing. F32 never boxes to a heap ref, so no retain is needed.
+func (c *threadedCompiler) fuseLocalF32Const(idx int, cst float32, size int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
 	}
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.F32_ADD:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F32()
+			i.stack[i.sp] = i.f32Add(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F32_SUB:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F32()
+			i.stack[i.sp] = i.f32Sub(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F32_MUL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F32()
+			i.stack[i.sp] = i.f32Mul(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F32_DIV:
+		if cst == 0 {
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F32()
+			i.stack[i.sp] = i.f32Div(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F32_REM:
+		if cst == 0 {
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F32()
+			i.stack[i.sp] = i.f32Rem(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F32_MOD:
+		if cst == 0 {
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F32()
+			i.stack[i.sp] = i.f32Mod(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F32_MIN:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F32()
+			i.stack[i.sp] = i.f32Min(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F32_MAX:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F32()
+			i.stack[i.sp] = i.f32Max(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F32_COPYSIGN:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F32()
+			i.stack[i.sp] = i.f32Copysign(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F32_EQ:
+		// Superinstruction: LOCAL_GET idx; F32_CONST cst; F32_EQ; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].F32()
+				i.branchIf(lhs == cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F32()
+			i.stack[i.sp] = i.f32Eq(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F32_NE:
+		// Superinstruction: LOCAL_GET idx; F32_CONST cst; F32_NE; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].F32()
+				i.branchIf(lhs != cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F32()
+			i.stack[i.sp] = i.f32Ne(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F32_LT:
+		// Superinstruction: LOCAL_GET idx; F32_CONST cst; F32_LT; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].F32()
+				i.branchIf(lhs < cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F32()
+			i.stack[i.sp] = i.f32Lt(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F32_GT:
+		// Superinstruction: LOCAL_GET idx; F32_CONST cst; F32_GT; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].F32()
+				i.branchIf(lhs > cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F32()
+			i.stack[i.sp] = i.f32Gt(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F32_LE:
+		// Superinstruction: LOCAL_GET idx; F32_CONST cst; F32_LE; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].F32()
+				i.branchIf(lhs <= cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F32()
+			i.stack[i.sp] = i.f32Le(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F32_GE:
+		// Superinstruction: LOCAL_GET idx; F32_CONST cst; F32_GE; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].F32()
+				i.branchIf(lhs >= cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F32()
+			i.stack[i.sp] = i.f32Ge(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	}
+	return nil
+}
+
+// fuseLocalF64Const builds the fused closure for LOCAL_GET idx (F64);
+// F64_CONST cst; <binop>, mirroring fuseF64Imm's opcode dispatch but reading
+// the local directly instead of through an already-pushed stack slot and
+// pushing the result once. Does not touch c.ip; fuseLocalConst restores it
+// after probing. F64 never boxes to a heap ref, so no retain is needed.
+func (c *threadedCompiler) fuseLocalF64Const(idx int, cst float64, size int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.F64_ADD:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F64()
+			i.stack[i.sp] = i.f64Add(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F64_SUB:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F64()
+			i.stack[i.sp] = i.f64Sub(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F64_MUL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F64()
+			i.stack[i.sp] = i.f64Mul(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F64_DIV:
+		if cst == 0 {
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F64()
+			i.stack[i.sp] = i.f64Div(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F64_REM:
+		if cst == 0 {
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F64()
+			i.stack[i.sp] = i.f64Rem(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F64_MOD:
+		if cst == 0 {
+			return func(i *Interpreter) {
+				if i.sp == len(i.stack) {
+					panic(ErrStackOverflow)
+				}
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				panic(ErrDivideByZero)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F64()
+			i.stack[i.sp] = i.f64Mod(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F64_MIN:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F64()
+			i.stack[i.sp] = i.f64Min(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F64_MAX:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F64()
+			i.stack[i.sp] = i.f64Max(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F64_COPYSIGN:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F64()
+			i.stack[i.sp] = i.f64Copysign(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F64_EQ:
+		// Superinstruction: LOCAL_GET idx; F64_CONST cst; F64_EQ; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].F64()
+				i.branchIf(lhs == cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F64()
+			i.stack[i.sp] = i.f64Eq(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F64_NE:
+		// Superinstruction: LOCAL_GET idx; F64_CONST cst; F64_NE; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].F64()
+				i.branchIf(lhs != cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F64()
+			i.stack[i.sp] = i.f64Ne(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F64_LT:
+		// Superinstruction: LOCAL_GET idx; F64_CONST cst; F64_LT; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].F64()
+				i.branchIf(lhs < cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F64()
+			i.stack[i.sp] = i.f64Lt(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F64_GT:
+		// Superinstruction: LOCAL_GET idx; F64_CONST cst; F64_GT; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].F64()
+				i.branchIf(lhs > cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F64()
+			i.stack[i.sp] = i.f64Gt(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F64_LE:
+		// Superinstruction: LOCAL_GET idx; F64_CONST cst; F64_LE; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].F64()
+				i.branchIf(lhs <= cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F64()
+			i.stack[i.sp] = i.f64Le(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	case instr.F64_GE:
+		// Superinstruction: LOCAL_GET idx; F64_CONST cst; F64_GE; BR_IF collapses
+		// the 4-instruction loop-header shape into one dispatch, reusing the
+		// branch-taking logic instead of also pushing/popping a boxed bool.
+		if offset, ok := c.peekBrIf(c.ip + 1); ok {
+			return func(i *Interpreter) {
+				addr := i.fr.bp + idx
+				if addr > i.sp {
+					panic(ErrSegmentationFault)
+				}
+				lhs := i.stack[addr].F64()
+				i.branchIf(lhs >= cst, offset, size+6)
+			}
+		}
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addr := i.fr.bp + idx
+			if addr > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addr].F64()
+			i.stack[i.sp] = i.f64Ge(lhs, cst)
+			i.sp++
+			i.fr.ip += size + 3
+		}
+	}
+	return nil
+}
+
+// fuseLocalLocalI32 builds the fused closure for LOCAL_GET idxA (I32);
+// LOCAL_GET idxB (I32); <binop>: it reads both frame slots directly and
+// pushes the result once. Does not touch c.ip; fuseLocalLocal restores it
+// after probing. I32 never boxes to a heap ref, so no retain is needed.
+func (c *threadedCompiler) fuseLocalLocalI32(idxA, idxB int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.I32_ADD:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			i.stack[i.sp] = i.i32Add(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_SUB:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			i.stack[i.sp] = i.i32Sub(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_MUL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			i.stack[i.sp] = i.i32Mul(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_DIV_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.i32DivS(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_DIV_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.i32DivU(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_REM_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.i32RemS(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_REM_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.i32RemU(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_SHL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32() & 0x1F
+			i.stack[i.sp] = i.i32Shl(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_SHR_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32() & 0x1F
+			i.stack[i.sp] = i.i32ShrS(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_SHR_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32() & 0x1F
+			i.stack[i.sp] = i.i32ShrU(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_XOR:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA]
+			rhs := i.stack[addrB]
+			i.stack[i.sp] = i.i32Xor(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_AND:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA]
+			rhs := i.stack[addrB]
+			i.stack[i.sp] = i.i32And(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_OR:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA]
+			rhs := i.stack[addrB]
+			i.stack[i.sp] = i.i32Or(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_ROTL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			i.stack[i.sp] = i.i32Rotl(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_ROTR:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			i.stack[i.sp] = i.i32Rotr(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_EQ:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			i.stack[i.sp] = i.i32Eq(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_NE:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			i.stack[i.sp] = i.i32Ne(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_LT_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			i.stack[i.sp] = i.i32LtS(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_LT_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			i.stack[i.sp] = i.i32LtU(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_GT_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			i.stack[i.sp] = i.i32GtS(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_GT_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			i.stack[i.sp] = i.i32GtU(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_LE_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			i.stack[i.sp] = i.i32LeS(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_LE_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			i.stack[i.sp] = i.i32LeU(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_GE_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			i.stack[i.sp] = i.i32GeS(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I32_GE_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].I32()
+			rhs := i.stack[addrB].I32()
+			i.stack[i.sp] = i.i32GeU(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	}
+	return nil
+}
+
+// fuseLocalLocalI64 builds the fused closure for LOCAL_GET idxA (I64);
+// LOCAL_GET idxB (I64); <binop>: it reads both frame slots directly and
+// pushes the result once. Does not touch c.ip; fuseLocalLocal restores it
+// after probing. Both operands are retained before unboxI64 reads them:
+// unboxI64 releases a heap-promoted ref once read, and without the retain
+// that would drop each local slot's own ownership instead of just the
+// temporary read.
+func (c *threadedCompiler) fuseLocalLocalI64(idxA, idxB int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.I64_ADD:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64Add(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_SUB:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64Sub(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_MUL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64Mul(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_DIV_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.i64DivS(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_DIV_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.i64DivU(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_REM_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.i64RemS(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_REM_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.i64RemU(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_SHL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)&0x3F
+			i.stack[i.sp] = i.i64Shl(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_SHR_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)&0x3F
+			i.stack[i.sp] = i.i64ShrS(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_SHR_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)&0x3F
+			i.stack[i.sp] = i.i64ShrU(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_XOR:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64Xor(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_AND:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64And(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_OR:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64Or(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_ROTL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64Rotl(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_ROTR:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64Rotr(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_EQ:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64Eq(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_NE:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64Ne(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_LT_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64LtS(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_LT_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64LtU(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_GT_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64GtS(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_GT_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64GtU(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_LE_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64LeS(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_LE_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64LeU(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_GE_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64GeS(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.I64_GE_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			valA, valB := i.stack[addrA], i.stack[addrB]
+			i.retainBox(valA)
+			i.retainBox(valB)
+			lhs, rhs := i.unboxI64(valA), i.unboxI64(valB)
+			i.stack[i.sp] = i.i64GeU(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	}
+	return nil
+}
+
+// fuseLocalLocalF32 builds the fused closure for LOCAL_GET idxA (F32);
+// LOCAL_GET idxB (F32); <binop>: it reads both frame slots directly and
+// pushes the result once. Does not touch c.ip; fuseLocalLocal restores it
+// after probing. F32 never boxes to a ref, so no retain is needed (matching
+// fuseLocalLocalI32's plain-scalar handling).
+func (c *threadedCompiler) fuseLocalLocalF32(idxA, idxB int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.F32_ADD:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F32()
+			rhs := i.stack[addrB].F32()
+			i.stack[i.sp] = i.f32Add(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F32_SUB:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F32()
+			rhs := i.stack[addrB].F32()
+			i.stack[i.sp] = i.f32Sub(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F32_MUL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F32()
+			rhs := i.stack[addrB].F32()
+			i.stack[i.sp] = i.f32Mul(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F32_DIV:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F32()
+			rhs := i.stack[addrB].F32()
+			i.stack[i.sp] = i.f32Div(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F32_REM:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F32()
+			rhs := i.stack[addrB].F32()
+			i.stack[i.sp] = i.f32Rem(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F32_MOD:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F32()
+			rhs := i.stack[addrB].F32()
+			i.stack[i.sp] = i.f32Mod(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F32_MIN:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F32()
+			rhs := i.stack[addrB].F32()
+			i.stack[i.sp] = i.f32Min(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F32_MAX:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F32()
+			rhs := i.stack[addrB].F32()
+			i.stack[i.sp] = i.f32Max(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F32_COPYSIGN:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F32()
+			rhs := i.stack[addrB].F32()
+			i.stack[i.sp] = i.f32Copysign(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F32_EQ:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F32()
+			rhs := i.stack[addrB].F32()
+			i.stack[i.sp] = i.f32Eq(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F32_NE:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F32()
+			rhs := i.stack[addrB].F32()
+			i.stack[i.sp] = i.f32Ne(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F32_LT:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F32()
+			rhs := i.stack[addrB].F32()
+			i.stack[i.sp] = i.f32Lt(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F32_GT:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F32()
+			rhs := i.stack[addrB].F32()
+			i.stack[i.sp] = i.f32Gt(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F32_LE:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F32()
+			rhs := i.stack[addrB].F32()
+			i.stack[i.sp] = i.f32Le(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F32_GE:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F32()
+			rhs := i.stack[addrB].F32()
+			i.stack[i.sp] = i.f32Ge(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	}
+	return nil
+}
+
+// fuseLocalLocalF64 builds the fused closure for LOCAL_GET idxA (F64);
+// LOCAL_GET idxB (F64); <binop>: it reads both frame slots directly and
+// pushes the result once. Does not touch c.ip; fuseLocalLocal restores it
+// after probing. F64 never boxes to a ref, so no retain is needed (matching
+// fuseLocalLocalI32's plain-scalar handling).
+func (c *threadedCompiler) fuseLocalLocalF64(idxA, idxB int) func(*Interpreter) {
+	if c.precise || c.ip >= len(c.code) {
+		return nil
+	}
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.F64_ADD:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F64()
+			rhs := i.stack[addrB].F64()
+			i.stack[i.sp] = i.f64Add(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F64_SUB:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F64()
+			rhs := i.stack[addrB].F64()
+			i.stack[i.sp] = i.f64Sub(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F64_MUL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F64()
+			rhs := i.stack[addrB].F64()
+			i.stack[i.sp] = i.f64Mul(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F64_DIV:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F64()
+			rhs := i.stack[addrB].F64()
+			i.stack[i.sp] = i.f64Div(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F64_REM:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F64()
+			rhs := i.stack[addrB].F64()
+			i.stack[i.sp] = i.f64Rem(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F64_MOD:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F64()
+			rhs := i.stack[addrB].F64()
+			i.stack[i.sp] = i.f64Mod(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F64_MIN:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F64()
+			rhs := i.stack[addrB].F64()
+			i.stack[i.sp] = i.f64Min(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F64_MAX:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F64()
+			rhs := i.stack[addrB].F64()
+			i.stack[i.sp] = i.f64Max(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F64_COPYSIGN:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F64()
+			rhs := i.stack[addrB].F64()
+			i.stack[i.sp] = i.f64Copysign(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F64_EQ:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F64()
+			rhs := i.stack[addrB].F64()
+			i.stack[i.sp] = i.f64Eq(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F64_NE:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F64()
+			rhs := i.stack[addrB].F64()
+			i.stack[i.sp] = i.f64Ne(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F64_LT:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F64()
+			rhs := i.stack[addrB].F64()
+			i.stack[i.sp] = i.f64Lt(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F64_GT:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F64()
+			rhs := i.stack[addrB].F64()
+			i.stack[i.sp] = i.f64Gt(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F64_LE:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F64()
+			rhs := i.stack[addrB].F64()
+			i.stack[i.sp] = i.f64Le(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	case instr.F64_GE:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			addrA, addrB := i.fr.bp+idxA, i.fr.bp+idxB
+			if addrA > i.sp || addrB > i.sp {
+				panic(ErrSegmentationFault)
+			}
+			lhs := i.stack[addrA].F64()
+			rhs := i.stack[addrB].F64()
+			i.stack[i.sp] = i.f64Ge(lhs, rhs)
+			i.sp++
+			i.fr.ip += 5
+		}
+	}
+	return nil
 }
 
 func (c *threadedCompiler) fuseI32(rhs func(*Interpreter) int32, kind types.Kind, size int) func(*Interpreter) {

@@ -110,7 +110,7 @@ func TestHostObject(t *testing.T) {
 
 		var refs []types.Ref
 		allocs := testing.AllocsPerRun(100, func() {
-			refs = ho.Refs()
+			refs = ho.Refs(nil)
 		})
 		require.Empty(t, refs)
 		require.Zero(t, allocs)
@@ -162,6 +162,14 @@ func TestHostObject(t *testing.T) {
 		require.Equal(t, []types.Boxed{types.BoxI32(5)}, returns)
 
 		require.Equal(t, types.BoxI32(5), ho.Field(0))
+
+		// A second call against the same *HostFunction gets its own fresh
+		// reflect arg storage (wrapFunc allocates per call) - the new param
+		// must fully replace the prior call's value, not accumulate with it.
+		returns, err = fn.Fn(i, []types.Boxed{types.BoxI32(10)})
+		require.NoError(t, err)
+		require.Equal(t, []types.Boxed{types.BoxI32(15)}, returns)
+		require.Equal(t, types.BoxI32(15), ho.Field(0))
 	})
 
 	t.Run("pointer to named scalar with method routes to HostObject", func(t *testing.T) {

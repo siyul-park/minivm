@@ -67,7 +67,7 @@ func TestStringIterator(t *testing.T) {
 	t.Run("refs", func(t *testing.T) {
 		iter := NewStringIterator(Ref(3), String("a"))
 
-		require.Equal(t, []Ref{3}, iter.Refs())
+		require.Equal(t, []Ref{3}, iter.Refs(nil))
 	})
 }
 

@@ -130,7 +130,7 @@ func TestMapIterator(t *testing.T) {
 		require.Equal(t, I64(1<<50), iter.Current())
 		require.False(t, iter.Next())
 		require.True(t, iter.Done())
-		require.Equal(t, []Ref{7}, iter.Refs())
+		require.Equal(t, []Ref{7}, iter.Refs(nil))
 	})
 
 	t.Run("generic map ref key", func(t *testing.T) {
@@ -141,7 +141,7 @@ func TestMapIterator(t *testing.T) {
 		require.Equal(t, NewIteratorType(TypeString), iter.Type())
 		require.True(t, iter.Next())
 		require.Equal(t, BoxRef(9), iter.Current())
-		require.Equal(t, []Ref{7, 9}, iter.Refs())
+		require.Equal(t, []Ref{7, 9}, iter.Refs(nil))
 	})
 }
 
@@ -152,7 +152,7 @@ func TestMap_Refs(t *testing.T) {
 
 		var refs []Ref
 		allocs := testing.AllocsPerRun(100, func() {
-			refs = m.Refs()
+			refs = m.Refs(nil)
 		})
 		require.Empty(t, refs)
 		require.Zero(t, allocs)
@@ -165,7 +165,7 @@ func TestMap_Refs(t *testing.T) {
 			Key:   BoxRef(1),
 			Value: BoxRef(2),
 		})
-		require.Equal(t, []Ref{1, 2}, m.Refs())
+		require.Equal(t, []Ref{1, 2}, m.Refs(nil))
 	})
 
 	t.Run("spilled i64 value", func(t *testing.T) {
@@ -175,7 +175,7 @@ func TestMap_Refs(t *testing.T) {
 			Key:   BoxI32(1),
 			Value: BoxRef(2),
 		})
-		require.Equal(t, []Ref{2}, m.Refs())
+		require.Equal(t, []Ref{2}, m.Refs(nil))
 	})
 }
 
@@ -364,7 +364,7 @@ func TestTypedMap_Refs(t *testing.T) {
 
 		var refs []Ref
 		allocs := testing.AllocsPerRun(100, func() {
-			refs = m.Refs()
+			refs = m.Refs(nil)
 		})
 		require.Empty(t, refs)
 		require.Zero(t, allocs)
@@ -373,7 +373,7 @@ func TestTypedMap_Refs(t *testing.T) {
 	t.Run("ref value", func(t *testing.T) {
 		m := NewTypedMap[int32](NewMapType(TypeI32, TypeString), 0)
 		m.Set(1, BoxRef(2))
-		require.Equal(t, []Ref{2}, m.Refs())
+		require.Equal(t, []Ref{2}, m.Refs(nil))
 	})
 }
 
@@ -477,7 +477,7 @@ func BenchmarkMap_Refs(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for n := 0; n < b.N; n++ {
-			refs = m.Refs()
+			refs = m.Refs(nil)
 		}
 		b.StopTimer()
 		require.Empty(b, refs)
@@ -491,7 +491,7 @@ func BenchmarkMap_Refs(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for n := 0; n < b.N; n++ {
-			refs = m.Refs()
+			refs = m.Refs(nil)
 		}
 		b.StopTimer()
 		require.Empty(b, refs)
@@ -505,7 +505,7 @@ func BenchmarkMap_Refs(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for n := 0; n < b.N; n++ {
-			refs = m.Refs()
+			refs = m.Refs(refs[:0])
 		}
 		b.StopTimer()
 		require.Len(b, refs, 2)

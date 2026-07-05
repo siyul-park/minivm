@@ -24,7 +24,7 @@ func TestCoroutine_Refs(t *testing.T) {
 		upvals: []types.Boxed{types.BoxRef(7), types.BoxF64(2)},
 		value:  types.BoxRef(9),
 	}
-	require.ElementsMatch(t, []types.Ref{3, 5, 7, 9}, co.Refs())
+	require.ElementsMatch(t, []types.Ref{3, 5, 7, 9}, co.Refs(nil))
 
-	require.Empty(t, (&Coroutine{value: types.BoxI32(1)}).Refs())
+	require.Empty(t, (&Coroutine{value: types.BoxI32(1)}).Refs(nil))
 }

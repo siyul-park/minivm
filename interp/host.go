@@ -71,17 +71,13 @@ func (h *HostObject) String() string {
 	return fmt.Sprintf("host<%s>", h.Receiver.Elem().Type())
 }
 
-func (h *HostObject) Refs() []types.Ref {
-	var refs []types.Ref
+func (h *HostObject) Refs(dst []types.Ref) []types.Ref {
 	for _, s := range h.slots {
 		if s.isMethod() {
-			if refs == nil {
-				refs = make([]types.Ref, 0, len(h.slots))
-			}
-			refs = append(refs, types.Ref(s.addr))
+			dst = append(dst, types.Ref(s.addr))
 		}
 	}
-	return refs
+	return dst
 }
 
 func (h *HostObject) Field(i int) types.Boxed {

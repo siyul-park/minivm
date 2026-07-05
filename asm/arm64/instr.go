@@ -51,6 +51,7 @@ const (
 	OpLSRI
 	OpASRI
 	OpRORI
+	OpSBFX
 	OpCLZ
 	OpRBIT
 	OpREV
@@ -242,6 +243,10 @@ func newRegImm(op Op, dst, src asm.Reg, v int64) asm.Instruction {
 	return newInst(op, regOperand(dst), regOperand(src), imm(v))
 }
 
+func newRegImm2(op Op, dst, src asm.Reg, v1, v2 int64) asm.Instruction {
+	return newInst(op, regOperand(dst), regOperand(src), imm(v1), imm(v2))
+}
+
 func newRegMem(op Op, dst, base asm.Reg, offset int64) asm.Instruction {
 	return newInst(op, regOperand(dst), asm.Mem(regOperand(base), offset))
 }
@@ -351,6 +356,11 @@ func ASRI(dst, src asm.Reg, shift uint8) asm.Instruction {
 }
 func RORI(dst, src asm.Reg, shift uint8) asm.Instruction {
 	return newRegImm(OpRORI, dst, src, int64(shift))
+}
+
+// SBFX extracts a bitfield and sign-extends it.
+func SBFX(dst, src asm.Reg, lsb, width uint8) asm.Instruction {
+	return newRegImm2(OpSBFX, dst, src, int64(lsb), int64(width))
 }
 
 // Bit-manipulation

@@ -15,9 +15,14 @@ type Type interface {
 	Equals(other Type) bool
 }
 
+// Traceable exposes an object's nested refs for GC mark/sweep and release
+// graph walks. Refs appends each nested ref to dst and returns the extended
+// slice (the same append contract as the built-in append), so callers can
+// reuse one buffer across many calls instead of allocating a fresh slice per
+// object.
 type Traceable interface {
 	Value
-	Refs() []Ref
+	Refs(dst []Ref) []Ref
 }
 
 type Iterator interface {

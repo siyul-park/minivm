@@ -31,16 +31,15 @@ func Link(buf *Buffer, arch Arch, codes []*Code, resolve Resolver) ([]Linked, er
 		return nil, fmt.Errorf("%w: nil buffer", ErrInvalidArgs)
 	}
 
-	bases := make([]unsafe.Pointer, len(codes))
+	chunks := make([][]byte, len(codes))
 	for i, c := range codes {
-		base, err := buf.Write(c.Bytes)
-		if err != nil {
-			return nil, err
-		}
-		bases[i] = base
+		chunks[i] = c.Bytes
 	}
 
-	if err := patchExternalRelocs(buf, arch, codes, bases, resolve); err != nil {
+	bases, err := buf.writeBatch(chunks, func(bases []unsafe.Pointer) error {
+		return patchExternalRelocs(buf, arch, codes, bases, resolve)
+	})
+	if err != nil {
 		return nil, err
 	}
 
@@ -107,7 +106,7 @@ func patchExternalRelocs(buf *Buffer, arch Arch, codes []*Code, bases []unsafe.P
 			if err != nil {
 				return err
 			}
-			if _, err := buf.writeAt(src, code); err != nil {
+			if _, err := buf.patch(src, code, true); err != nil {
 				return err
 			}
 		}

@@ -41,7 +41,7 @@ type module struct {
 type lowering struct {
 	assembler *asm.Assembler
 	tree      *tree
-	branches  map[branch]*trace
+	branches  map[branch]leg
 	funcs     map[int]*types.Function
 	constants []types.Boxed
 	globals   []types.Boxed
@@ -56,6 +56,7 @@ type lowering struct {
 	pending []pending
 	exits   []sideExit
 	queued  map[branch]asm.Label
+	saved   []value
 
 	addr    int
 	returns int
@@ -69,11 +70,13 @@ type lowering struct {
 // was never materialized; fn holds the target function and ref holds the
 // callable heap ref.
 type value struct {
-	reg  asm.VReg
-	kind types.Kind
-	raw  bool
-	fn   int
-	ref  int
+	reg   asm.VReg
+	kind  types.Kind
+	raw   bool
+	known bool
+	imm   int64
+	fn    int
+	ref   int
 }
 
 // activation mirrors one interpreter frame the trace inlined. Locals live in
@@ -105,6 +108,7 @@ type pending struct {
 	tail   []step
 	values []value
 	frames []activation
+	hits   int64
 }
 
 type sideExit struct {
@@ -355,7 +359,7 @@ func (ctx *lowering) sp() int {
 func (ctx *lowering) snapshot() ([]value, []activation) {
 	values := make([]value, len(ctx.values))
 	for i, v := range ctx.values {
-		values[i] = value{kind: v.kind, raw: v.raw, fn: v.fn, ref: v.ref}
+		values[i] = value{kind: v.kind, raw: v.raw, known: v.known, imm: v.imm, fn: v.fn, ref: v.ref}
 	}
 	frames := make([]activation, len(ctx.frames))
 	for i, f := range ctx.frames {
@@ -365,6 +369,12 @@ func (ctx *lowering) snapshot() ([]value, []activation) {
 		frames[i].dirty = make([]bool, len(f.dirty))
 	}
 	return values, frames
+}
+
+// pre copies the operand stack for one guard fallback.
+func (ctx *lowering) pre() []value {
+	ctx.saved = append(ctx.saved[:0], ctx.values...)
+	return ctx.saved
 }
 
 // pin returns a fresh Width64 int vreg bound to the scratch register at idx.

@@ -73,17 +73,13 @@ func (a *Array) String() string {
 	return formatSlice(a.Type(), len(a.Elems), func(i int) string { return a.Elems[i].String() })
 }
 
-func (a *Array) Refs() []Ref {
-	var refs []Ref
+func (a *Array) Refs(dst []Ref) []Ref {
 	for _, e := range a.Elems {
 		if e.Kind() == KindRef {
-			if refs == nil {
-				refs = make([]Ref, 0, len(a.Elems))
-			}
-			refs = append(refs, Ref(e.Ref()))
+			dst = append(dst, Ref(e.Ref()))
 		}
 	}
-	return refs
+	return dst
 }
 
 func (t *ArrayType) Kind() Kind { return KindRef }
