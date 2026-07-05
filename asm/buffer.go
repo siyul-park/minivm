@@ -47,12 +47,55 @@ func (b *Buffer) Write(code []byte) (unsafe.Pointer, error) {
 		return nil, err
 	}
 
+	ptr, err := b.write(code)
+	if err != nil {
+		_ = b.seal()
+		return nil, err
+	}
+
+	if err := b.seal(); err != nil {
+		return nil, err
+	}
+	return ptr, nil
+}
+
+func (b *Buffer) writeBatch(codes [][]byte, patch func([]unsafe.Pointer) error) ([]unsafe.Pointer, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if err := b.unseal(); err != nil {
+		return nil, err
+	}
+
+	bases := make([]unsafe.Pointer, len(codes))
+	for i, code := range codes {
+		base, err := b.write(code)
+		if err != nil {
+			_ = b.seal()
+			return nil, err
+		}
+		bases[i] = base
+	}
+
+	if patch != nil {
+		if err := patch(bases); err != nil {
+			_ = b.seal()
+			return nil, err
+		}
+	}
+
+	if err := b.seal(); err != nil {
+		return nil, err
+	}
+	return bases, nil
+}
+
+func (b *Buffer) write(code []byte) (unsafe.Pointer, error) {
 	end := b.offset + len(code)
 	if end > len(b.mem) {
 		// Seal the outgoing region before retention so pointers callers
 		// stamped into it stay executable.
 		if err := b.grow(end, memory.executable); err != nil {
-			_ = b.seal()
 			return nil, fmt.Errorf("%w: grow to %d", ErrBufferFull, end)
 		}
 		end = b.offset + len(code)
@@ -62,9 +105,6 @@ func (b *Buffer) Write(code []byte) (unsafe.Pointer, error) {
 	ptr := unsafe.Pointer(&b.mem[b.offset])
 	b.offset = end
 
-	if err := b.seal(); err != nil {
-		return nil, err
-	}
 	return ptr, nil
 }
 
@@ -88,9 +128,17 @@ func (b *Buffer) writeAt(ptr unsafe.Pointer, code []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	return b.patch(ptr, code, false)
+}
+
+func (b *Buffer) patch(ptr unsafe.Pointer, code []byte, batch bool) (int, error) {
 	mem, off, current, ok := b.locate(ptr, len(code))
 	if !ok {
 		return 0, fmt.Errorf("%w: writeAt out of range", ErrInvalidArgs)
+	}
+	if batch && current {
+		copy(mem[off:off+len(code)], code)
+		return len(code), nil
 	}
 
 	open, close := mem.writable, mem.executable
