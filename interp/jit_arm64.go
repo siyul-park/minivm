@@ -23,7 +23,7 @@ const (
 	maskI32 = uint64(0xFFFFFFFF)
 	maskI64 = uint64(0x0001_FFFF_FFFF_FFFF)
 
-	signI64 = uint8(15)
+	boxableWidth = uint8(49)
 )
 
 // Boxing tags used by scalar trace lowering, derived from the canonical Kind
@@ -702,7 +702,7 @@ func (l arm64Lowerer) localSet(ctx *lowering, op step, pop bool) bool {
 		if !ok {
 			return false
 		}
-		pre := append([]value(nil), ctx.values...)
+		pre := ctx.pre()
 		vStack := ctx.pin(scratchStack)
 		addr := l.base(ctx, vStack)
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -783,7 +783,7 @@ func (l arm64Lowerer) globalSet(ctx *lowering, op step, pop bool) bool {
 	}
 	base := ctx.pin(scratchGlobals)
 	if kind == types.KindRef || kind == types.KindI64 {
-		pre := append([]value(nil), ctx.values...)
+		pre := ctx.pre()
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(old, base, int16(idx*8)))
 		// Release the overwritten ref first: it is the only deopt point, so no
@@ -823,7 +823,7 @@ func (l arm64Lowerer) drop(ctx *lowering, op step) bool {
 	if ctx.count() < 1 {
 		return false
 	}
-	pre := append([]value(nil), ctx.values...)
+	pre := ctx.pre()
 	v := ctx.values[len(ctx.values)-1]
 	if v.kind == types.KindRef {
 		boxed, ok := l.box(ctx, v)
@@ -919,13 +919,12 @@ func (l arm64Lowerer) i32Divide(
 	b := prep(ctx, ctx.values[len(ctx.values)-1].reg)
 	a := prep(ctx, ctx.values[len(ctx.values)-2].reg)
 
-	ctx.assembler.Emit(arm64.CMPI(b, 0))
-	ok := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, ok))
-	if !l.exit(ctx, op.ip) {
+	fail, ok := l.sideExit(ctx, ctx.values, op.ip)
+	if !ok {
 		return false
 	}
-	ctx.assembler.Bind(ok)
+	ctx.assembler.Emit(arm64.CMPI(b, 0))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, fail))
 
 	ctx.pop()
 	ctx.pop()
@@ -1173,13 +1172,12 @@ func (l arm64Lowerer) i64Divide(ctx *lowering, op step, div func(dst, src1, src2
 	b := ctx.values[len(ctx.values)-1].reg
 	a := ctx.values[len(ctx.values)-2].reg
 
-	ctx.assembler.Emit(arm64.CMPI(b, 0))
-	ok := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, ok))
-	if !l.exit(ctx, op.ip) {
+	fail, ok := l.sideExit(ctx, ctx.values, op.ip)
+	if !ok {
 		return false
 	}
-	ctx.assembler.Bind(ok)
+	ctx.assembler.Emit(arm64.CMPI(b, 0))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, fail))
 
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(div(raw, a, b))
@@ -1498,48 +1496,39 @@ func (l arm64Lowerer) copysign(ctx *lowering, kind types.Kind) bool {
 	return true
 }
 
-// guardI64 deopts at ip when v is not an inline i64 (a heap-promoted i64
-// whose bits the trace cannot read as a value).
+// guardI64 deopts when v is a heap-promoted i64.
 func (l arm64Lowerer) guardI64(ctx *lowering, v asm.VReg, ip int) bool {
+	fail, ok := l.sideExit(ctx, ctx.values, ip)
+	if !ok {
+		return false
+	}
 	tag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LSRI(tag, v, uint8(types.VBits)))
 	want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDI(want, tagI64>>types.VBits)...)
 	ctx.assembler.Emit(arm64.CMP(tag, want))
-	ok := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, ok))
-	if !l.exit(ctx, ip) {
-		return false
-	}
-	ctx.assembler.Bind(ok)
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 	return true
 }
 
-// boxableI64 deopts at ip when raw does not fit the 49-bit boxable range,
-// keeping the invariant that every raw i64 in a trace is boxable. Operands are
-// left untouched so the interpreter redoes the producing op.
+// boxableI64 keeps raw i64 values within the boxed 49-bit lane.
 func (l arm64Lowerer) boxableI64(ctx *lowering, raw asm.VReg, ip int) bool {
-	shifted := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LSLI(shifted, raw, signI64))
-	ext := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ASRI(ext, shifted, signI64))
-	ctx.assembler.Emit(arm64.CMP(ext, raw))
-	ok := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, ok))
-	if !l.exit(ctx, ip) {
+	fail, ok := l.sideExit(ctx, ctx.values, ip)
+	if !ok {
 		return false
 	}
-	ctx.assembler.Bind(ok)
+	ext := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.SBFX(ext, raw, 0, boxableWidth))
+	ctx.assembler.Emit(arm64.CMP(ext, raw))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 	return true
 }
 
 // sign64 sign-extends the 49-bit value lane of a boxed i64 to a full raw
 // i64 value.
 func (l arm64Lowerer) sign64(ctx *lowering, v asm.VReg) asm.VReg {
-	shifted := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LSLI(shifted, v, signI64))
 	out := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ASRI(out, shifted, signI64))
+	ctx.assembler.Emit(arm64.SBFX(out, v, 0, boxableWidth))
 	return out
 }
 
@@ -1566,9 +1555,7 @@ func (l arm64Lowerer) callerTail(ops []step, idx int, tail []step) []step {
 	return tail
 }
 
-// brIf guards the recorded branch direction: the recorded side falls through
-// inline and the diverging side branches into a learned trace or exits to the
-// interpreter (see branchOrExit), with the condition already consumed.
+// brIf lets the recorded direction fall through and branches on divergence.
 func (l arm64Lowerer) brIf(ctx *lowering, op step, tail []step) bool {
 	if ctx.count() < 1 || !l.kinds(ctx, types.KindI32, 1) {
 		return false
@@ -1580,16 +1567,15 @@ func (l arm64Lowerer) brIf(ctx *lowering, op step, tail []step) bool {
 		diverge = op.ip + 3
 	}
 
-	cont := ctx.assembler.Label()
-	if taken {
-		ctx.assembler.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), cont))
-	} else {
-		ctx.assembler.Emit(arm64.CBZLabel(l.narrow32(cond.reg), cont))
-	}
-	if !l.branchOrExit(ctx, diverge, tail) {
+	label, ok := l.branchOrExit(ctx, diverge, tail)
+	if !ok {
 		return false
 	}
-	ctx.assembler.Bind(cont)
+	if taken {
+		ctx.assembler.Emit(arm64.CBZLabel(l.narrow32(cond.reg), label))
+	} else {
+		ctx.assembler.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), label))
+	}
 	return true
 }
 
@@ -1620,30 +1606,30 @@ func (l arm64Lowerer) brTable(ctx *lowering, op step, tail []step) bool {
 		skip := ctx.assembler.Label()
 		ctx.assembler.Emit(arm64.CMPI(condI32, uint16(idx)))
 		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, skip))
-		if !l.branchOrExit(ctx, targets[idx], tail) {
+		label, ok := l.branchOrExit(ctx, targets[idx], tail)
+		if !ok {
 			return false
 		}
+		ctx.assembler.Emit(arm64.BLabel(label))
 		ctx.assembler.Bind(skip)
 	}
 	if targets[count] != op.target {
-		if !l.branchOrExit(ctx, targets[count], tail) {
+		label, ok := l.branchOrExit(ctx, targets[count], tail)
+		if !ok {
 			return false
 		}
+		ctx.assembler.Emit(arm64.BLabel(label))
 	}
 	ctx.assembler.Bind(next)
 	return true
 }
 
-// branchOrExit lowers one recorded branch target: it continues into a learned
-// branch trace when the target is eligible, otherwise exits to the interpreter
-// at that target. Both paths flush live state, so a flush failure aborts the
-// compile either way.
-func (l arm64Lowerer) branchOrExit(ctx *lowering, ip int, tail []step) bool {
+// branchOrExit returns a learned continuation label, or a deopt label.
+func (l arm64Lowerer) branchOrExit(ctx *lowering, ip int, tail []step) (asm.Label, bool) {
 	if label, ok := l.continuation(ctx, ip, tail); ok {
-		ctx.assembler.Emit(arm64.BLabel(label))
-		return true
+		return label, true
 	}
-	return l.exit(ctx, ip)
+	return l.sideExit(ctx, ctx.values, ip)
 }
 
 // continuation materializes the current symbolic state and returns a native
@@ -1713,16 +1699,15 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 		} else if wantRef != op.callee {
 			return false
 		}
+		pre := ctx.pre()
+		fail, ok := l.sideExit(ctx, pre, op.ip)
+		if !ok {
+			return false
+		}
 		want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDI(want, uint64(types.BoxRef(wantRef)))...)
 		ctx.assembler.Emit(arm64.CMP(v.reg, want))
-		ok := ctx.assembler.Label()
-		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, ok))
-		if !l.exit(ctx, op.ip) {
-			return false
-		}
-		ctx.assembler.Bind(ok)
-		pre := append([]value(nil), ctx.values...)
+		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 		l.releaseBox(ctx, v.reg, pre, op.ip)
 	}
 	if len(target.Captures) > 0 {
@@ -1940,7 +1925,7 @@ func (l arm64Lowerer) tailTarget(ctx *lowering, op step) (*types.Function, int, 
 			return nil, 0, false
 		}
 		ctx.assembler.Bind(ok)
-		pre := append([]value(nil), ctx.values...)
+		pre := ctx.pre()
 		l.releaseBox(ctx, v.reg, pre, op.ip)
 	}
 	ctx.pop()
@@ -2253,9 +2238,7 @@ func (l arm64Lowerer) flush(ctx *lowering, commit bool) bool {
 	return true
 }
 
-// reload pulls every operand back from its VM stack home after control
-// returned from a BL or re-entered through a pending branch label; locals
-// reload lazily on first use.
+// reload pulls operands back from VM stack homes after a call or continuation.
 func (l arm64Lowerer) reload(ctx *lowering) {
 	a := ctx.assembler
 	if len(ctx.values) == 0 {
@@ -2265,13 +2248,15 @@ func (l arm64Lowerer) reload(ctx *lowering) {
 	addr := l.base(ctx, vStack)
 	for j := range ctx.values {
 		v := &ctx.values[j]
-		if v.kind == types.KindRef {
+		if v.kind == types.KindRef && v.raw {
 			continue
 		}
 		reg := a.Reg(asm.RegTypeInt, asm.Width64)
 		a.Emit(arm64.LDR(reg, addr, int16(ctx.slot(j)*8)))
 		v.reg = reg
-		v.raw = true
+		if v.kind != types.KindRef {
+			v.raw = true
+		}
 	}
 }
 
@@ -2351,7 +2336,7 @@ func (l arm64Lowerer) upvalSet(ctx *lowering, op step) bool {
 	}
 	base := l.upvalBase(ctx)
 	if kind == types.KindRef || kind == types.KindI64 {
-		pre := append([]value(nil), ctx.values...)
+		pre := ctx.pre()
 		old := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(old, base, int16(idx*8)))
 		l.releaseBoxUnlessEqual(ctx, old, boxed, pre, op.ip)
@@ -2394,7 +2379,7 @@ func (l arm64Lowerer) refIsNull(ctx *lowering, op step) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
 		return false
 	}
-	pre := append([]value(nil), ctx.values...)
+	pre := ctx.pre()
 	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
@@ -2416,7 +2401,7 @@ func (l arm64Lowerer) refGet(ctx *lowering, op step) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
 		return false
 	}
-	pre := append([]value(nil), ctx.values...)
+	pre := ctx.pre()
 	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
@@ -2467,7 +2452,7 @@ func (l arm64Lowerer) arrayLen(ctx *lowering, op step) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
 		return false
 	}
-	pre := append([]value(nil), ctx.values...)
+	pre := ctx.pre()
 	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
@@ -2545,7 +2530,7 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 	default:
 		return false
 	}
-	pre := append([]value(nil), ctx.values...)
+	pre := ctx.pre()
 	idx := l.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
 	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-2])
 	if !ok {
@@ -2556,37 +2541,11 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 	if !ok {
 		return false
 	}
-	tag := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LSRI(tag, ref, uint8(types.VBits)))
-	wantRef := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDI(wantRef, tagRef>>types.VBits)...)
-	a.Emit(arm64.CMP(tag, wantRef))
-	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
-
-	addr := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.ANDI(addr, ref, maskI32))
-	heap := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journalHeap*8)))
-	off := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LSLI(off, addr, 4))
-	cell := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.ADD(cell, heap, off))
-	itab := a.Reg(asm.RegTypeInt, asm.Width64)
-	data := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(
-		arm64.LDR(itab, cell, 0),
-		arm64.LDR(data, cell, 8),
-	)
-	wantItab := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDI(wantItab, uint64(want))...)
-	a.Emit(arm64.CMP(itab, wantItab))
-	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+	addr, itab, data := l.guardHeap(ctx, ref, fail)
+	l.guardItab(ctx, itab, want, fail)
 
 	dataPtr, n := l.sliceHeader(ctx, data, base)
-	a.Emit(arm64.CMPI(idx, 0))
-	a.Emit(arm64.BCondLabel(arm64.OpBLT, fail))
-	a.Emit(arm64.CMP(idx, n))
-	a.Emit(arm64.BCondLabel(arm64.OpBGE, fail))
+	l.guardIndex(ctx, idx, n, fail)
 
 	result := a.Reg(asm.RegTypeInt, asm.Width64)
 	switch kind {
@@ -2618,18 +2577,13 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 		}
 	}
 	if kind == types.KindI64 {
-		shifted := a.Reg(asm.RegTypeInt, asm.Width64)
-		a.Emit(arm64.LSLI(shifted, result, signI64))
 		ext := a.Reg(asm.RegTypeInt, asm.Width64)
-		a.Emit(arm64.ASRI(ext, shifted, signI64))
+		a.Emit(arm64.SBFX(ext, result, 0, boxableWidth))
 		a.Emit(arm64.CMP(ext, result))
 		a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 	}
 	rcBase := l.rcBase(ctx)
-	rc := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDRR(rc, rcBase, addr))
-	a.Emit(arm64.CMPI(rc, 1))
-	a.Emit(arm64.BCondLabel(arm64.OpBLE, fail))
+	rc := l.guardRC(ctx, addr, rcBase, fail)
 	a.Emit(arm64.SUBI(rc, rc, 1))
 	a.Emit(arm64.STRR(rc, rcBase, addr))
 	if kind == types.KindRef {
@@ -2669,7 +2623,7 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 	default:
 		return false
 	}
-	pre := append([]value(nil), ctx.values...)
+	pre := ctx.pre()
 	val := ctx.values[len(ctx.values)-1]
 	idx := l.sign32(ctx, ctx.values[len(ctx.values)-2].reg)
 	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-3])
@@ -2681,43 +2635,14 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 	if !ok {
 		return false
 	}
-	tag := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LSRI(tag, ref, uint8(types.VBits)))
-	wantRef := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDI(wantRef, tagRef>>types.VBits)...)
-	a.Emit(arm64.CMP(tag, wantRef))
-	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
-
-	addr := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.ANDI(addr, ref, maskI32))
-	heap := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journalHeap*8)))
-	off := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LSLI(off, addr, 4))
-	cell := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.ADD(cell, heap, off))
-	itab := a.Reg(asm.RegTypeInt, asm.Width64)
-	data := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(
-		arm64.LDR(itab, cell, 0),
-		arm64.LDR(data, cell, 8),
-	)
-	wantItab := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDI(wantItab, uint64(want))...)
-	a.Emit(arm64.CMP(itab, wantItab))
-	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+	addr, itab, data := l.guardHeap(ctx, ref, fail)
+	l.guardItab(ctx, itab, want, fail)
 
 	dataPtr, n := l.sliceHeader(ctx, data, 0)
-	a.Emit(arm64.CMPI(idx, 0))
-	a.Emit(arm64.BCondLabel(arm64.OpBLT, fail))
-	a.Emit(arm64.CMP(idx, n))
-	a.Emit(arm64.BCondLabel(arm64.OpBGE, fail))
+	l.guardIndex(ctx, idx, n, fail)
 
 	rcBase := l.rcBase(ctx)
-	rc := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDRR(rc, rcBase, addr))
-	a.Emit(arm64.CMPI(rc, 1))
-	a.Emit(arm64.BCondLabel(arm64.OpBLE, fail))
+	rc := l.guardRC(ctx, addr, rcBase, fail)
 
 	switch kind {
 	case types.KindI1, types.KindI8:
@@ -2750,7 +2675,7 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 	default:
 		return false
 	}
-	pre := append([]value(nil), ctx.values...)
+	pre := ctx.pre()
 	idx := l.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
 	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-2])
 	if !ok {
@@ -2761,39 +2686,13 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 	if !ok {
 		return false
 	}
-	tag := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LSRI(tag, ref, uint8(types.VBits)))
-	wantRef := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDI(wantRef, tagRef>>types.VBits)...)
-	a.Emit(arm64.CMP(tag, wantRef))
-	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
-
-	addr := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.ANDI(addr, ref, maskI32))
-	heap := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journalHeap*8)))
-	off := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LSLI(off, addr, 4))
-	cell := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.ADD(cell, heap, off))
-	itab := a.Reg(asm.RegTypeInt, asm.Width64)
-	data := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(
-		arm64.LDR(itab, cell, 0),
-		arm64.LDR(data, cell, 8),
-	)
-	wantItab := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDI(wantItab, uint64(heapStruct))...)
-	a.Emit(arm64.CMP(itab, wantItab))
-	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+	addr, itab, data := l.guardHeap(ctx, ref, fail)
+	l.guardItab(ctx, itab, heapStruct, fail)
 
 	typ := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDR(typ, data, int16(structTyp)))
 	fields, n := l.sliceHeader(ctx, typ, int16(fieldsSlice))
-	a.Emit(arm64.CMPI(idx, 0))
-	a.Emit(arm64.BCondLabel(arm64.OpBLT, fail))
-	a.Emit(arm64.CMP(idx, n))
-	a.Emit(arm64.BCondLabel(arm64.OpBGE, fail))
+	l.guardIndex(ctx, idx, n, fail)
 
 	fieldOff := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDI(fieldOff, uint64(fieldSize))...)
@@ -2809,18 +2708,13 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 	result := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDRR(result, dataPtr, idx))
 	if out == types.KindI64 {
-		shifted := a.Reg(asm.RegTypeInt, asm.Width64)
-		a.Emit(arm64.LSLI(shifted, result, signI64))
 		ext := a.Reg(asm.RegTypeInt, asm.Width64)
-		a.Emit(arm64.ASRI(ext, shifted, signI64))
+		a.Emit(arm64.SBFX(ext, result, 0, boxableWidth))
 		a.Emit(arm64.CMP(ext, result))
 		a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 	}
 	rcBase := l.rcBase(ctx)
-	rc := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDRR(rc, rcBase, addr))
-	a.Emit(arm64.CMPI(rc, 1))
-	a.Emit(arm64.BCondLabel(arm64.OpBLE, fail))
+	rc := l.guardRC(ctx, addr, rcBase, fail)
 	if out == types.KindRef {
 		l.retainBox(ctx, result)
 	}
@@ -2843,7 +2737,7 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 	default:
 		return false
 	}
-	pre := append([]value(nil), ctx.values...)
+	pre := ctx.pre()
 	val := ctx.values[len(ctx.values)-1]
 	idx := l.sign32(ctx, ctx.values[len(ctx.values)-2].reg)
 	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-3])
@@ -2855,39 +2749,13 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 	if !ok {
 		return false
 	}
-	tag := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LSRI(tag, ref, uint8(types.VBits)))
-	wantRef := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDI(wantRef, tagRef>>types.VBits)...)
-	a.Emit(arm64.CMP(tag, wantRef))
-	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
-
-	addr := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.ANDI(addr, ref, maskI32))
-	heap := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journalHeap*8)))
-	off := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LSLI(off, addr, 4))
-	cell := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.ADD(cell, heap, off))
-	itab := a.Reg(asm.RegTypeInt, asm.Width64)
-	data := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(
-		arm64.LDR(itab, cell, 0),
-		arm64.LDR(data, cell, 8),
-	)
-	wantItab := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDI(wantItab, uint64(heapStruct))...)
-	a.Emit(arm64.CMP(itab, wantItab))
-	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+	addr, itab, data := l.guardHeap(ctx, ref, fail)
+	l.guardItab(ctx, itab, heapStruct, fail)
 
 	typ := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDR(typ, data, int16(structTyp)))
 	fields, n := l.sliceHeader(ctx, typ, int16(fieldsSlice))
-	a.Emit(arm64.CMPI(idx, 0))
-	a.Emit(arm64.BCondLabel(arm64.OpBLT, fail))
-	a.Emit(arm64.CMP(idx, n))
-	a.Emit(arm64.BCondLabel(arm64.OpBGE, fail))
+	l.guardIndex(ctx, idx, n, fail)
 
 	fieldOff := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDI(fieldOff, uint64(fieldSize))...)
@@ -2900,10 +2768,7 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 
 	rcBase := l.rcBase(ctx)
-	rc := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDRR(rc, rcBase, addr))
-	a.Emit(arm64.CMPI(rc, 1))
-	a.Emit(arm64.BCondLabel(arm64.OpBLE, fail))
+	rc := l.guardRC(ctx, addr, rcBase, fail)
 
 	dataPtr, _ := l.sliceHeader(ctx, data, int16(structData))
 	var stored asm.VReg
@@ -2928,7 +2793,7 @@ func (l arm64Lowerer) errorGet(ctx *lowering, op step) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
 		return false
 	}
-	pre := append([]value(nil), ctx.values...)
+	pre := ctx.pre()
 	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
@@ -2991,7 +2856,7 @@ func (l arm64Lowerer) coroDone(ctx *lowering, op step) bool {
 	if v.kind != types.KindRef || v.raw {
 		return false
 	}
-	pre := append([]value(nil), ctx.values...)
+	pre := ctx.pre()
 	ref, ok := l.box(ctx, v)
 	if !ok {
 		return false
@@ -3020,7 +2885,7 @@ func (l arm64Lowerer) coroValue(ctx *lowering, op step) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
 		return false
 	}
-	pre := append([]value(nil), ctx.values...)
+	pre := ctx.pre()
 	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
@@ -3060,7 +2925,7 @@ func (l arm64Lowerer) coroValue(ctx *lowering, op step) bool {
 }
 
 func (l arm64Lowerer) heapValue(ctx *lowering, ref asm.VReg, pre []value, ip int) (asm.VReg, asm.VReg, asm.VReg) {
-	l.guardTag(ctx, ref, tagRef, arm64.OpBEQ, pre, ip)
+	l.guardTag(ctx, ref, tagRef, pre, ip)
 
 	addr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.ANDI(addr, ref, maskI32))
@@ -3081,6 +2946,33 @@ func (l arm64Lowerer) heapValue(ctx *lowering, ref asm.VReg, pre []value, ip int
 	return addr, itab, data
 }
 
+// guardHeap loads a heap cell or branches to fail on a non-ref tag.
+func (arm64Lowerer) guardHeap(ctx *lowering, ref asm.VReg, fail asm.Label) (asm.VReg, asm.VReg, asm.VReg) {
+	a := ctx.assembler
+	tag := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LSRI(tag, ref, uint8(types.VBits)))
+	wantRef := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDI(wantRef, tagRef>>types.VBits)...)
+	a.Emit(arm64.CMP(tag, wantRef))
+	a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+
+	addr := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ANDI(addr, ref, maskI32))
+	heap := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journalHeap*8)))
+	off := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LSLI(off, addr, 4))
+	cell := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ADD(cell, heap, off))
+	itab := a.Reg(asm.RegTypeInt, asm.Width64)
+	data := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(
+		arm64.LDR(itab, cell, 0),
+		arm64.LDR(data, cell, 8),
+	)
+	return addr, itab, data
+}
+
 func (arm64Lowerer) sliceHeader(ctx *lowering, data asm.VReg, base int16) (asm.VReg, asm.VReg) {
 	ptr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	n := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -3091,26 +2983,11 @@ func (arm64Lowerer) sliceHeader(ctx *lowering, data asm.VReg, base int16) (asm.V
 	return ptr, n
 }
 
-func (l arm64Lowerer) guardIndex(ctx *lowering, idx, n asm.VReg, pre []value, ip int) bool {
-	nonNegative := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.CMPI(idx, 0))
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBGE, nonNegative))
-	ctx.values = append(ctx.values[:0], pre...)
-	if !l.exit(ctx, ip) {
-		return false
-	}
-	ctx.assembler.Bind(nonNegative)
-
-	inRange := ctx.assembler.Label()
+// guardIndex uses one unsigned check: sign-extended negative i32 indexes are
+// above any VM array or struct length.
+func (arm64Lowerer) guardIndex(ctx *lowering, idx, n asm.VReg, fail asm.Label) {
 	ctx.assembler.Emit(arm64.CMP(idx, n))
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBLT, inRange))
-	ctx.values = append(ctx.values[:0], pre...)
-	if !l.exit(ctx, ip) {
-		return false
-	}
-	ctx.assembler.Bind(inRange)
-	ctx.values = append(ctx.values[:0], pre...)
-	return true
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBCS, fail))
 }
 
 func (arm64Lowerer) matchItab(ctx *lowering, got asm.VReg, want uintptr, hit asm.Label) {
@@ -3118,6 +2995,13 @@ func (arm64Lowerer) matchItab(ctx *lowering, got asm.VReg, want uintptr, hit asm
 	ctx.assembler.Emit(arm64.LDI(v, uint64(want))...)
 	ctx.assembler.Emit(arm64.CMP(got, v))
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, hit))
+}
+
+func (arm64Lowerer) guardItab(ctx *lowering, got asm.VReg, want uintptr, fail asm.Label) {
+	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(v, uint64(want))...)
+	ctx.assembler.Emit(arm64.CMP(got, v))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 }
 
 func (arm64Lowerer) matchKind(ctx *lowering, got asm.VReg, want types.Kind, hit asm.Label) {
@@ -3257,11 +3141,7 @@ func (l arm64Lowerer) retain(ctx *lowering, fn int) {
 
 func (l arm64Lowerer) retainBox(ctx *lowering, v asm.VReg) {
 	l.refOnly(ctx, v, func(addr asm.VReg) {
-		base := l.rcBase(ctx)
-		rc := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		ctx.assembler.Emit(arm64.LDRR(rc, base, addr))
-		ctx.assembler.Emit(arm64.ADDI(rc, rc, 1))
-		ctx.assembler.Emit(arm64.STRR(rc, base, addr))
+		l.retainRef(ctx, addr)
 	})
 }
 
@@ -3288,36 +3168,48 @@ func (l arm64Lowerer) retainBoxUnlessEqual(ctx *lowering, old, val asm.VReg) {
 	ctx.assembler.Bind(done)
 }
 
-func (l arm64Lowerer) releaseRef(ctx *lowering, addr asm.VReg, pre []value, ip int) {
+func (l arm64Lowerer) retainRef(ctx *lowering, addr asm.VReg) {
 	base := l.rcBase(ctx)
 	rc := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDRR(rc, base, addr))
-	ctx.assembler.Emit(arm64.CMPI(rc, 1))
-
-	ok := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBGT, ok))
-	ctx.values = append(ctx.values[:0], pre...)
-	_ = l.exit(ctx, ip)
-
-	ctx.assembler.Bind(ok)
-	ctx.values = append(ctx.values[:0], pre...)
-	ctx.assembler.Emit(arm64.SUBI(rc, rc, 1))
+	ctx.assembler.Emit(arm64.ADDI(rc, rc, 1))
 	ctx.assembler.Emit(arm64.STRR(rc, base, addr))
 }
 
-func (l arm64Lowerer) guardTag(ctx *lowering, v asm.VReg, want uint64, skip arm64.Op, pre []value, ip int) {
+// guardRC keeps releases that could free objects in the interpreter.
+func (arm64Lowerer) guardRC(ctx *lowering, addr, rcBase asm.VReg, fail asm.Label) asm.VReg {
+	a := ctx.assembler
+	rc := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDRR(rc, rcBase, addr))
+	a.Emit(arm64.CMPI(rc, 1))
+	a.Emit(arm64.BCondLabel(arm64.OpBLE, fail))
+	return rc
+}
+
+// releaseRef decrements addr after guardRC proves it will stay live.
+func (l arm64Lowerer) releaseRef(ctx *lowering, addr asm.VReg, pre []value, ip int) {
+	fail, ok := l.sideExit(ctx, pre, ip)
+	if !ok {
+		return
+	}
+	rcBase := l.rcBase(ctx)
+	rc := l.guardRC(ctx, addr, rcBase, fail)
+	ctx.assembler.Emit(arm64.SUBI(rc, rc, 1))
+	ctx.assembler.Emit(arm64.STRR(rc, rcBase, addr))
+}
+
+// guardTag deopts when v's tag is not want.
+func (l arm64Lowerer) guardTag(ctx *lowering, v asm.VReg, want uint64, pre []value, ip int) {
+	fail, ok := l.sideExit(ctx, pre, ip)
+	if !ok {
+		return
+	}
 	tag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LSRI(tag, v, uint8(types.VBits)))
 	wantReg := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDI(wantReg, want>>types.VBits)...)
 	ctx.assembler.Emit(arm64.CMP(tag, wantReg))
-
-	ok := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.BCondLabel(skip, ok))
-	ctx.values = append(ctx.values[:0], pre...)
-	_ = l.exit(ctx, ip)
-	ctx.assembler.Bind(ok)
-	ctx.values = append(ctx.values[:0], pre...)
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 }
 
 func (l arm64Lowerer) refOnly(ctx *lowering, v asm.VReg, body func(asm.VReg)) {
@@ -3403,11 +3295,10 @@ func (l arm64Lowerer) args(ctx *lowering, target *types.Function, params int) bo
 	return true
 }
 
-// marked reports whether an unmaterialized function marker is live on
-// the operand stack; pending branches cannot resume one.
+// marked reports whether a raw ref marker blocks pending continuation reload.
 func (l arm64Lowerer) marked(ctx *lowering) bool {
 	for _, v := range ctx.values {
-		if v.kind == types.KindRef {
+		if v.kind == types.KindRef && v.raw {
 			return true
 		}
 	}

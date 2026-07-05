@@ -3401,6 +3401,132 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
 	})
 
+	t.Run("jits learned br_if continuation over a live ref value", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		row := []float64{10, 20}
+		b := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeI32, types.TypeF64Array).
+			WithReturns(types.TypeF64)
+		neg := b.Label()
+		b.Emit(instr.New(instr.LOCAL_GET, 1)).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.I32_LT_S)).
+			BrIf(neg).
+			Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.ARRAY_GET)).
+			Emit(instr.New(instr.RETURN)).
+			Bind(neg).
+			Emit(instr.New(instr.I32_CONST, 1)).
+			Emit(instr.New(instr.ARRAY_GET)).
+			Emit(instr.New(instr.RETURN))
+		eval, err := b.Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CALL),
+		}, program.WithConstants(types.TypedArray[float64](row), eval))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		root := anchor{addr: i.constants[1].Ref(), ip: 0}
+
+		// Record the root trace through both directions of the BR_IF before
+		// warming the diverging (negative-cond) side. In both directions the
+		// array ref pushed by LOCAL_GET 1 stays live on the operand stack across
+		// the branch, so the diverging side can only become a learned pending
+		// continuation if marked() lets an ordinary materialized ref through.
+		i.Reset()
+		require.NoError(t, i.Push(types.I32(1)))
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.F64(10), v)
+
+		id := -1
+		for range exitThreshold * 4 {
+			i.Reset()
+			require.NoError(t, i.Push(types.I32(-1)))
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.F64(20), v)
+
+			tree := i.tracer.rootAt(root)
+			require.NotNil(t, tree)
+			for bid, branch := range tree.branches {
+				if branch == nil || tree.hits[bid] < exitThreshold {
+					continue
+				}
+				for _, op := range branch.ops {
+					if op.op != instr.I32_CONST || op.fn < 0 || op.fn >= len(i.instrs) {
+						continue
+					}
+					code := i.instrs[op.fn]
+					if op.ip+5 <= len(code) && int32(instr.ParseI32(code, op.ip+1)) == 1 {
+						id = bid
+					}
+				}
+			}
+			if id >= 0 {
+				break
+			}
+		}
+		require.GreaterOrEqual(t, id, 0, "no branch reading array index 1 was learned")
+		hits := i.tracer.rootAt(root).hits[id]
+		require.Equal(t, int64(exitThreshold), hits)
+
+		for range 3 {
+			i.Reset()
+			require.NoError(t, i.Push(types.I32(-1)))
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.F64(20), v)
+		}
+		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
+	})
+
+	t.Run("deopts array get on negative index", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		row := []float64{7}
+		eval := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeI32, types.TypeF64Array).
+			WithReturns(types.TypeF64)
+		eval.Emit(instr.New(instr.LOCAL_GET, 1)).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.ARRAY_GET)).
+			Emit(instr.New(instr.RETURN))
+		fn, err := eval.Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CONST_GET, 1),
+			instr.New(instr.CALL),
+		}, program.WithConstants(types.TypedArray[float64](row), fn))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		for range 8 {
+			i.Reset()
+			require.NoError(t, i.Push(types.I32(0)))
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.F64(7), v)
+		}
+		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+
+		i.Reset()
+		require.NoError(t, i.Push(types.I32(-1)))
+		require.ErrorIs(t, i.Run(context.Background()), ErrIndexOutOfRange)
+	})
+
 	t.Run("falls back learned callee branch through caller tail", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")

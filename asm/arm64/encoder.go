@@ -345,6 +345,19 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		s := uint32(shift) & mask
 		return enc(base | reg(n)<<16 | s<<10 | reg(n)<<5 | reg(d)), nil
 
+	case OpSBFX:
+		d, n, lsb, width, err := e.decodeRegImm2(inst)
+		if err != nil {
+			return nil, err
+		}
+		base, mask, err := bitfieldBase(0x93400000, d, n)
+		if err != nil {
+			return nil, err
+		}
+		l := uint32(lsb) & mask
+		imms := (l + uint32(width) - 1) & mask
+		return enc(base | l<<16 | imms<<10 | reg(n)<<5 | reg(d)), nil
+
 	// -----------------------------------------------------------------------
 	// Bit manipulation
 	// -----------------------------------------------------------------------
@@ -1216,6 +1229,26 @@ func (e *Encoder) decodeRegImm(inst asm.Instruction) (dst, src asm.PReg, imm int
 // decodeRegShift decodes (dst, src, shift_amount) for immediate-shift instructions.
 func (e *Encoder) decodeRegShift(inst asm.Instruction) (dst, src asm.PReg, shift int64, err error) {
 	return e.decodeRegImm(inst)
+}
+
+func (e *Encoder) decodeRegImm2(inst asm.Instruction) (dst, src asm.PReg, imm1, imm2 int64, err error) {
+	dstOp, ok := inst.Dst.(asm.PRegOperand)
+	if !ok {
+		return asm.PReg{}, asm.PReg{}, 0, 0, ErrMissingDestinationReg
+	}
+	srcOp, ok := inst.Src1.(asm.PRegOperand)
+	if !ok {
+		return asm.PReg{}, asm.PReg{}, 0, 0, ErrMissingSourceReg
+	}
+	imm1Op, ok := inst.Src2.(asm.ImmOperand)
+	if !ok {
+		return asm.PReg{}, asm.PReg{}, 0, 0, ErrMissingImmediate
+	}
+	imm2Op, ok := inst.Src3.(asm.ImmOperand)
+	if !ok {
+		return asm.PReg{}, asm.PReg{}, 0, 0, ErrMissingImmediate
+	}
+	return dstOp.Reg, srcOp.Reg, imm1Op.Value, imm2Op.Value, nil
 }
 
 func (e *Encoder) decodeCmp(inst asm.Instruction) (src1, src2 asm.PReg, err error) {

@@ -56,6 +56,7 @@ type lowering struct {
 	pending []pending
 	exits   []sideExit
 	queued  map[branch]asm.Label
+	saved   []value
 
 	addr    int
 	returns int
@@ -365,6 +366,12 @@ func (ctx *lowering) snapshot() ([]value, []activation) {
 		frames[i].dirty = make([]bool, len(f.dirty))
 	}
 	return values, frames
+}
+
+// pre copies the operand stack for one guard fallback.
+func (ctx *lowering) pre() []value {
+	ctx.saved = append(ctx.saved[:0], ctx.values...)
+	return ctx.saved
 }
 
 // pin returns a fresh Width64 int vreg bound to the scratch register at idx.
