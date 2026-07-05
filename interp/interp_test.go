@@ -3668,6 +3668,101 @@ func TestWithThreshold(t *testing.T) {
 		}
 	})
 
+	t.Run("deopts array len on shape mismatch", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		eval := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeRef).
+			WithReturns(types.TypeI32)
+		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.ARRAY_LEN)).
+			Emit(instr.New(instr.RETURN)).
+			Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		for range 8 {
+			i.Reset()
+			require.NoError(t, i.Push(types.TypedArray[int32]{1, 2}))
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(2), got)
+		}
+		require.NotNil(t, i.fallbacks[root])
+
+		i.Reset()
+		require.NoError(t, i.Push(types.NewArray(types.NewArrayType(types.TypeI32), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))))
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(3), got)
+
+		var hits int64
+		tree := i.tracer.rootAt(root)
+		require.NotNil(t, tree)
+		for _, hit := range tree.hits {
+			hits += hit
+		}
+		require.Greater(t, hits, int64(0))
+	})
+
+	t.Run("deopts struct get on type mismatch", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		eval := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeRef).
+			WithReturns(types.TypeI32)
+		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.STRUCT_GET)).
+			Emit(instr.New(instr.RETURN)).
+			Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		first := types.NewStructType(types.NewStructField(types.TypeI32))
+		second := types.NewStructType(types.NewStructField(types.TypeI32))
+		for range 8 {
+			i.Reset()
+			require.NoError(t, i.Push(types.NewStruct(first, types.BoxI32(7))))
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(7), got)
+		}
+		require.NotNil(t, i.fallbacks[root])
+
+		i.Reset()
+		require.NoError(t, i.Push(types.NewStruct(second, types.BoxI32(9))))
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(9), got)
+
+		var hits int64
+		tree := i.tracer.rootAt(root)
+		require.NotNil(t, tree)
+		for _, hit := range tree.hits {
+			hits += hit
+		}
+		require.Greater(t, hits, int64(0))
+	})
+
 	t.Run("falls back learned callee branch through caller tail", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")

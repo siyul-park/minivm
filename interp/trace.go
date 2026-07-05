@@ -3,6 +3,7 @@ package interp
 import (
 	"fmt"
 	"sync"
+	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/types"
@@ -34,12 +35,18 @@ type leg struct {
 	hits  int64
 }
 
+type shape struct {
+	itab uintptr
+	typ  uintptr
+}
+
 type outcome int
 
 type step struct {
-	op   instr.Opcode
-	seen types.Boxed
-	arg  types.Boxed
+	op    instr.Opcode
+	seen  types.Boxed
+	arg   types.Boxed
+	shape shape
 
 	fn     int
 	ip     int
@@ -347,15 +354,26 @@ func (r *Tracer) op(i *Interpreter, op instr.Opcode, startFP int) step {
 		instr.I64_SHL,
 		instr.I64_SHR_S,
 		instr.I64_SHR_U,
-		instr.BR_TABLE,
-		instr.ARRAY_GET,
-		instr.STRUCT_GET:
+		instr.BR_TABLE:
 		if i.sp > 0 {
 			st.arg = i.stack[i.sp-1]
 		}
-	case instr.ARRAY_SET, instr.STRUCT_SET:
+	case instr.ARRAY_LEN, instr.REF_GET, instr.ERROR_GET, instr.CORO_DONE, instr.CORO_VALUE:
+		if i.sp > 0 {
+			st.arg = i.stack[i.sp-1]
+			st.shape = r.shape(i, i.stack[i.sp-1])
+		}
+	case instr.ARRAY_GET, instr.STRUCT_GET:
+		if i.sp > 0 {
+			st.arg = i.stack[i.sp-1]
+		}
 		if i.sp > 1 {
+			st.shape = r.shape(i, i.stack[i.sp-2])
+		}
+	case instr.ARRAY_SET, instr.STRUCT_SET:
+		if i.sp > 2 {
 			st.arg = i.stack[i.sp-2]
+			st.shape = r.shape(i, i.stack[i.sp-3])
 		}
 	case instr.BR, instr.BR_IF:
 		st.target = f.ip + instr.ParseI16(i.instrs[f.addr], f.ip+1) + 3
@@ -368,6 +386,25 @@ func (r *Tracer) op(i *Interpreter, op instr.Opcode, startFP int) step {
 		}
 	}
 	return st
+}
+
+func (r *Tracer) shape(i *Interpreter, v types.Boxed) shape {
+	if v.Kind() != types.KindRef {
+		return shape{}
+	}
+	addr := v.Ref()
+	if addr < 0 || addr >= len(i.heap) {
+		return shape{}
+	}
+	val := i.heap[addr]
+	if val == nil {
+		return shape{}
+	}
+	out := shape{itab: valueItab(val)}
+	if s, ok := val.(*types.Struct); ok && s.Typ != nil {
+		out.typ = uintptr(unsafe.Pointer(s.Typ))
+	}
+	return out
 }
 
 func (r *Tracer) finish(i *Interpreter, st *step, op instr.Opcode) {

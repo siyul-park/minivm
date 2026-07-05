@@ -75,6 +75,8 @@ Each recorded instruction stores:
 - observed call target box and callee address
 - observed narrow input for value-specialized guards (divisors, shifts,
   branch/table conditions, and heap indexes)
+- observed heap shape for heap fast paths: interface table for arrays,
+  refs/errors/coroutines, plus exact struct type pointer for structs
 - explicit branch target and branch-taken metadata
 - selected observed heap values for guarded read-only heap fast paths
 
@@ -256,9 +258,10 @@ promoted `i64` values deopt on load.
 
 `ARRAY_GET` and `STRUCT_GET` lower on ARM64 as full-trace heap reads for the
 observed shape, so scalar/ref reads can feed later native ops instead of forcing
-an immediate threaded resume. Native code guards the heap itab for that single
-typed primitive-array, generic ref-array, or guest struct shape, checks the
-index and field kind, performs the load, and continues through the trace.
+an immediate threaded resume. Native code guards the recorded heap itab for that
+single typed primitive-array, generic ref-array, or guest struct shape, and
+struct reads also guard the exact recorded struct type pointer before checking
+the index and field kind. The load then continues through the trace.
 Guard failures branch to an out-of-line side exit that resumes threaded dispatch
 at the original opcode with the pre-op stack state flushed. Primitive array read
 fast paths cover `i1`, `i8`, `i32`, `f32`, and `f64`; `ref` array/field reads
