@@ -2,52 +2,63 @@
 
 Checklist for adding a native backend for a new CPU architecture.
 
-## Agent Summary
+## When to Read
 
-Adding an architecture is cross-cutting. Keep edits explicit:
+Use this guide when adding a new JIT backend. For the runtime model, journal layout, and fallback contracts, use `docs/jit-internals.md` as the canonical reference.
 
-- `asm/<arch>/`: physical register IDs, encoder, ABI, trampoline/caller.
-- `interp/jit_<arch>.go`: backend constants, `newCompiler`, and recorded-trace opcode handlers.
-- docs: this guide plus `jit-internals.md` if backend contracts change.
+## Source of Truth
 
-Do not change ARM64 behavior unless a shared `asm/` contract requires it.
+| Concern | File or package |
+|---|---|
+| Generic native-code interfaces | `asm/` |
+| ARM64 reference backend | `asm/arm64/`, `interp/jit_arm64.go` |
+| Architecture-neutral JIT driver | `interp/jit.go` |
+| Trace recording | `interp/trace.go` |
+| Platform and CGO support | `docs/compatibility.md` |
+| JIT contracts | `docs/jit-internals.md` |
 
-## Before You Start
+Do not change ARM64 behavior unless the shared `asm` contract requires it.
 
-Read `docs/jit-internals.md`, especially Trace ABI and Frame Journal. Use `asm/arm64/` and `interp/jit_arm64.go` as reference implementations.
+## Step 1 — Create `asm/<arch>/`
 
-## Step 1 - Create `asm/<arch>/`
+Mirror the ARM64 package shape where it applies:
 
-Mirror `asm/arm64/`: implement `asm.Arch`, `asm.Encoder`, `asm.ABI`, optional `asm.Frame`, and the native callable trampoline.
+- physical register identifiers
+- instruction encoder
+- ABI bridge
+- callable entry adapter
+- optional spill frame support
 
-`asm.ABI` exposes `NewCallable`. The trampoline contract is:
+The callable adapter contract is:
 
 1. `Callable.Call(ctx uintptr) error` receives `&i.journal[0]`.
-2. The trampoline passes `ctx` in the architecture's first integer argument register.
-3. It preserves any callee-saved registers the backend allocator may use.
-4. It calls the native chunk.
+2. The adapter passes `ctx` in the architecture's first integer argument register.
+3. It preserves every callee-saved register used by the backend allocator.
+4. It calls the native chunk and returns control to Go.
 
-There is no param/return ABI, no `asm.Value`, and no header packing.
+There is no VM parameter/return ABI. Native traces read and write VM state through the journal.
 
-Return nil from `Arch.Frame()` when the backend has no spill-frame support. Backends that support spilling should keep the frame implementation as a separate private type rather than adding frame methods to `arch`.
+Return `nil` from `Arch.Frame()` when the backend has no spill-frame support. If spilling is supported, keep the frame implementation as a separate private type instead of adding frame methods to the architecture type.
 
-## Step 2 - Add `interp/jit_<arch>.go`
+## Step 2 — Add `interp/jit_<arch>.go`
 
-Add a concrete `lowerer` in package `interp`, then provide a build-tagged `newCompiler` implementation for the architecture.
+Add an architecture-specific lowerer in package `interp`, then provide a build-tagged `newCompiler` implementation for the architecture.
 
 ```go
-type archJIT struct{}
+type archLowerer struct{}
 ```
 
-Handler rules:
+Lowering rules:
 
-- `trace` returns `false` without mutating published state when an opcode, kind, or observed shape is unsupported.
-- External entry loads the context journal into pinned registers before entering the trace head.
-- Guard exits materialize live symbolic state into `i.stack`, write `journalSP` and `journalNextIP`, append frame records, then return.
-- Entry-frame `RETURN` writes boxed returns and returns with `trapNone`; inlined callee returns stitch values into the caller's symbolic stack.
-- `CALL` may lower only when the recorded target, frame budget, refs, host functions, stack bounds, and Go write-barrier rules remain safe.
+- return `false` without mutating published state when an opcode, kind, or observed heap shape is unsupported
+- load the context journal into pinned scratch registers before entering the trace body
+- materialize live symbolic state on guard exits
+- write `journalSP`, `journalNextIP`, and frame records before returning to Go
+- handle entry-frame `RETURN` by writing boxed returns and returning with `trapNone`
+- stitch inlined callee returns into the caller's symbolic stack
+- lower `CALL` only when the target, frame budget, refs, host behavior, stack bounds, and write-barrier constraints are safe
 
-Scratch slot order is fixed:
+Scratch slot order is shared with the existing ARM64 backend:
 
 | Slot | Purpose |
 |---|---|
@@ -57,24 +68,46 @@ Scratch slot order is fixed:
 | `scratchSP` | interpreter stack pointer input |
 | `scratchCtrl` | `&i.journal[0]` |
 
-## Step 3 - Verify
+## Step 3 — Keep Platform Behavior Explicit
+
+Update `docs/compatibility.md` when backend support changes.
+
+Document:
+
+- supported `GOOS/GOARCH` pairs
+- whether CGO is required
+- executable-memory support
+- instruction-cache synchronization requirements
+- build tags and stubs
+
+Normal users should not need manual build tags.
+
+## Step 4 — Implement Opcode Coverage Incrementally
+
+Prioritize small, common, low-risk paths first:
+
+1. stack operations: `NOP`, `DROP`, `DUP`, `SWAP`
+2. constants: `I32_CONST`, `I64_CONST`, `F32_CONST`, `F64_CONST`, `CONST_GET`
+3. numeric arithmetic and comparison
+4. numeric conversions
+5. locals and globals
+6. branches
+7. entry-frame `RETURN`
+8. RC-neutral refs such as `REF_NULL`, `REF_IS_NULL`, and `REF_EQ`
+
+More complex paths, such as calls, ref-counted stores, heap reads, loops, and coroutine suspension, should be added only after the basic backend is stable.
+
+## Step 5 — Verify
 
 ```bash
 go test ./asm/<arch>/... ./interp/...
 GOOS=linux GOARCH=<arch> go build ./...
 ```
 
-A nonzero `vm_jit_emits_total` metric after running a hot arithmetic function confirms end-to-end emission.
+A nonzero `vm_jit_emits_total` metric after running a hot arithmetic function confirms end-to-end native emission.
 
-## Opcode Priority
+## Related Docs
 
-Implement in this order to get meaningful benchmark gains early:
-
-1. `NOP`, `DROP`, `DUP`, `SWAP`
-2. `I32_CONST`, `I64_CONST`, `F32_CONST`, `F64_CONST`, `CONST_GET`
-3. Numeric arithmetic and comparison ops
-4. Conversions
-5. `LOCAL_GET/SET/TEE`, `GLOBAL_GET/SET/TEE`
-6. `BR`, `BR_IF`, `BR_TABLE`
-7. `RETURN` for entry traces
-8. RC-neutral refs: `REF_NULL`, `REF_IS_NULL`, `REF_EQ`
+- `docs/jit-internals.md` — trace ABI, journal layout, guards, calls, loops, and fallback
+- `docs/compatibility.md` — platform matrix, CGO, build tags, and executable memory
+- `docs/instruction-set.md` — opcode-level JIT status
