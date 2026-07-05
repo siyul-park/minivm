@@ -163,9 +163,9 @@ func TestHostObject(t *testing.T) {
 
 		require.Equal(t, types.BoxI32(5), ho.Field(0))
 
-		// A second call against the same *HostFunction reuses its cached
-		// reflect arg storage (wrapFunc caches it across calls) - the fresh
-		// param must fully replace the cached slot, not accumulate with it.
+		// A second call against the same *HostFunction gets its own fresh
+		// reflect arg storage (wrapFunc allocates per call) - the new param
+		// must fully replace the prior call's value, not accumulate with it.
 		returns, err = fn.Fn(i, []types.Boxed{types.BoxI32(10)})
 		require.NoError(t, err)
 		require.Equal(t, []types.Boxed{types.BoxI32(15)}, returns)

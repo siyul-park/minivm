@@ -589,23 +589,21 @@ func (s *marshalState) value(v reflect.Value) (types.Value, error) {
 func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *HostFunction {
 	m := s.m
 	fnType := fn.Type()
-	// in and seen are call-scoped scratch reused across every invocation of the
-	// returned closure: this HostFunction is created fresh per marshaled Go
-	// value (never cached/shared across Interpreters or goroutines - see
-	// docs/host-integration.md's ban on recursive vm.Run from a host function),
-	// so calls against it are always sequential and never reentrant.
-	in := make([]reflect.Value, fnType.NumIn())
-	for idx := range in {
-		in[idx] = reflect.New(fnType.In(idx)).Elem()
-	}
-	seen := make(map[uintptr]bool)
+	// in and seen are allocated fresh inside the returned closure on every
+	// call: the returned HostFunction is a types.Value that can be placed in
+	// program.WithConstants, so pooled Interpreters built from the same
+	// program share this exact *HostFunction (New keeps the constant's Go
+	// value directly - see interp.go's BoxRef(i.keep(v)) path) and may call
+	// it concurrently from separate goroutines. Call-scoped scratch would
+	// race across such concurrent calls.
 	return NewHostFunction(typ, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
 		if len(params) != fnType.NumIn() {
 			return nil, fmt.Errorf("%w: got %d params, want %d", ErrTypeMismatch, len(params), fnType.NumIn())
 		}
+		in := make([]reflect.Value, fnType.NumIn())
 		unmarshal := &unmarshalState{m: m, i: i}
 		for idx := range in {
-			in[idx].Set(reflect.Zero(fnType.In(idx)))
+			in[idx] = reflect.New(fnType.In(idx)).Elem()
 			if err := unmarshal.value(params[idx], in[idx]); err != nil {
 				return nil, fmt.Errorf("function param %d: %w", idx, err)
 			}
@@ -626,8 +624,7 @@ func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *Host
 		}
 
 		returns := make([]types.Boxed, len(out))
-		clear(seen)
-		marshal := &marshalState{m: m, i: i, seen: seen}
+		marshal := &marshalState{m: m, i: i, seen: make(map[uintptr]bool)}
 		defer marshal.close()
 		for idx := range out {
 			boxed, err := marshal.boxAs(out[idx], typ.Returns[idx])

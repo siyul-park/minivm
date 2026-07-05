@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1914,12 +1915,74 @@ func TestInterpreter_Run(t *testing.T) {
 }
 
 func TestInterpreter_Marshal(t *testing.T) {
-	i := New(program.New(nil))
-	defer i.Close()
+	t.Run("scalar value", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
 
-	v, err := i.Marshal(int32(7))
-	require.NoError(t, err)
-	require.Equal(t, types.I32(7), v)
+		v, err := i.Marshal(int32(7))
+		require.NoError(t, err)
+		require.Equal(t, types.I32(7), v)
+	})
+
+	t.Run("marshaled function is shared and race-safe across interpreters", func(t *testing.T) {
+		setup := New(program.New(nil))
+		v, err := setup.Marshal(func(a, b int32) int32 { return a + b })
+		require.NoError(t, err)
+		setup.Close()
+
+		// program.New's default constant path keeps the *HostFunction Go
+		// value itself (not a copy) in each Interpreter's heap, so two
+		// Interpreters built from programs referencing the same fn share one
+		// *HostFunction and race on any call-scoped state it caches.
+		fn := v.(*HostFunction)
+
+		prog1 := program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fn),
+		)
+		prog2 := program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, 10),
+				instr.New(instr.I32_CONST, 20),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fn),
+		)
+
+		i1 := New(prog1)
+		defer i1.Close()
+		i2 := New(prog2)
+		defer i2.Close()
+
+		var wg sync.WaitGroup
+		var err1, err2 error
+		var v1, v2 types.Value
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if err1 = i1.Run(context.Background()); err1 == nil {
+				v1, err1 = i1.Pop()
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if err2 = i2.Run(context.Background()); err2 == nil {
+				v2, err2 = i2.Pop()
+			}
+		}()
+		wg.Wait()
+
+		require.NoError(t, err1)
+		require.NoError(t, err2)
+		require.Equal(t, types.I32(3), v1)
+		require.Equal(t, types.I32(30), v2)
+	})
 }
 
 func TestInterpreter_Unmarshal(t *testing.T) {
