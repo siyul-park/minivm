@@ -44,7 +44,7 @@ type Interpreter struct {
 	stack    []types.Boxed
 	roots    []types.Boxed
 	heap     []types.Value
-	heapBase int
+	base     int
 	interned map[string]types.Ref
 	free     []int
 	rc       []int
@@ -58,7 +58,7 @@ type Interpreter struct {
 	threshold int64
 	tick      int
 	fuel      int64
-	heapLimit int
+	limit     int
 }
 
 type frame struct {
@@ -260,7 +260,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		tick:      opt.tick,
 		fuel:      fuel,
 		gas:       fuel,
-		heapLimit: opt.maxHeap,
+		limit:     opt.maxHeap,
 	}
 	i.alloc(types.Null)
 
@@ -289,7 +289,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		i.constants[j] = val
 	}
 
-	i.heapBase = len(i.heap)
+	i.base = len(i.heap)
 
 	c := &threader{
 		types:     i.types,
@@ -652,9 +652,9 @@ func (i *Interpreter) Reset() {
 	i.roots = i.roots[:0]
 	clear(i.interned)
 
-	i.heap = i.heap[:i.heapBase]
-	i.rc = i.rc[:i.heapBase]
-	for j := 0; j < i.heapBase; j++ {
+	i.heap = i.heap[:i.base]
+	i.rc = i.rc[:i.base]
+	for j := 0; j < i.base; j++ {
 		i.rc[j] = 1
 	}
 	i.free = i.free[:0]
@@ -768,9 +768,9 @@ func (i *Interpreter) install(mod *module, account bool) {
 		if entry.loop {
 			i.code[a.addr][a.ip] = i.loop(entry.callable)
 		} else if a.addr == 0 {
-			i.code[a.addr][a.ip] = i.moduleEntry(a, entry.callable)
+			i.code[a.addr][a.ip] = i.start(a, entry.callable)
 		} else {
-			i.code[a.addr][a.ip] = i.entry(a, entry.callable)
+			i.code[a.addr][a.ip] = i.call(a, entry.callable)
 		}
 	}
 }
@@ -931,13 +931,13 @@ func (i *Interpreter) sample(f *frame) {
 	i.samples.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
 }
 
-// entry wraps a native trace Entry Callable. The CALL handler has already
+// call wraps a native trace Entry Callable. The CALL handler has already
 // pushed a frame and set i.fr before this closure runs. The native Entry reads
 // params from stack scratch slots; on a normal return
 // this closure performs the frame teardown that RETURN would do in the threaded
 // interpreter, and on a trap it rebuilds the native call chain into real VM
 // frames before resuming threaded execution at the fallback IP.
-func (i *Interpreter) entry(root anchor, callable asm.Callable) func(*Interpreter) {
+func (i *Interpreter) call(root anchor, callable asm.Callable) func(*Interpreter) {
 	return func(i *Interpreter) {
 		ctx := i.context()
 		i.fr.code = nil
@@ -983,10 +983,10 @@ func (i *Interpreter) entry(root anchor, callable asm.Callable) func(*Interprete
 	}
 }
 
-// moduleEntry wraps a native trace for top-level code. Unlike function entries,
+// start wraps a native trace for top-level code. Unlike function entries,
 // top-level completion does not tear down its frame; it preserves the operand
 // stack and marks the module frame as exhausted so dispatch returns normally.
-func (i *Interpreter) moduleEntry(root anchor, callable asm.Callable) func(*Interpreter) {
+func (i *Interpreter) start(root anchor, callable asm.Callable) func(*Interpreter) {
 	return func(i *Interpreter) {
 		ctx := i.context()
 		i.fr.code = nil
@@ -1397,7 +1397,7 @@ func (i *Interpreter) alloc(val types.Value) int {
 		return addr
 	}
 
-	if i.heapLimit > 0 && len(i.heap) >= i.heapLimit {
+	if i.limit > 0 && len(i.heap) >= i.limit {
 		i.gc()
 		if addr, ok := i.reuse(val); ok {
 			return addr
@@ -1410,7 +1410,7 @@ func (i *Interpreter) alloc(val types.Value) int {
 		if addr, ok := i.reuse(val); ok {
 			return addr
 		}
-		if i.heapLimit > 0 && len(i.heap) >= i.heapLimit {
+		if i.limit > 0 && len(i.heap) >= i.limit {
 			panic(ErrHeapExhausted)
 		}
 

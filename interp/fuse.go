@@ -290,12 +290,44 @@ func (c *threader) fuseHostFunction(fn *HostFunction, size int) func(*Interprete
 	switch instr.Opcode(c.code[c.ip]) {
 	case instr.CALL:
 		return func(i *Interpreter) {
-			i.callHostDirect(fn, params, returns, refs)
+			delta := returns - params
+			if i.sp < params {
+				panic(ErrStackUnderflow)
+			}
+			if i.sp+delta > len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			args := i.stack[i.sp-params : i.sp]
+			out, err := fn.Fn(i, args)
+			if err != nil {
+				panic(err)
+			}
+			if refs {
+				i.releaseArgs(args, out)
+			}
+			i.sp += delta
+			copy(i.stack[i.sp-returns:i.sp], out)
 			i.fr.ip += size + 1
 		}
 	case instr.RETURN_CALL:
 		return func(i *Interpreter) {
-			i.callHostDirect(fn, params, returns, refs)
+			delta := returns - params
+			if i.sp < params {
+				panic(ErrStackUnderflow)
+			}
+			if i.sp+delta > len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			args := i.stack[i.sp-params : i.sp]
+			out, err := fn.Fn(i, args)
+			if err != nil {
+				panic(err)
+			}
+			if refs {
+				i.releaseArgs(args, out)
+			}
+			i.sp += delta
+			copy(i.stack[i.sp-returns:i.sp], out)
 			i.fr.ip += size + 1
 			if i.fp > 1 {
 				i.ret()

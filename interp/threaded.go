@@ -4786,26 +4786,6 @@ func (i *Interpreter) callHost(fn *HostFunction) {
 	i.fr.ip++
 }
 
-func (i *Interpreter) callHostDirect(fn *HostFunction, params, returns int, refs bool) {
-	delta := returns - params
-	if i.sp < params {
-		panic(ErrStackUnderflow)
-	}
-	if i.sp+delta > len(i.stack) {
-		panic(ErrStackOverflow)
-	}
-	args := i.stack[i.sp-params : i.sp]
-	out, err := fn.Fn(i, args)
-	if err != nil {
-		panic(err)
-	}
-	if refs {
-		i.releaseArgs(args, out)
-	}
-	i.sp += delta
-	copy(i.stack[i.sp-returns:i.sp], out)
-}
-
 // releaseArgs releases each ref-kind value in args that rets does not return
 // unchanged, i.e. every arg whose ownership the host call consumed rather than
 // handing back to the caller. Non-ref args need no bookkeeping and are
