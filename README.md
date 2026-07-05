@@ -167,27 +167,9 @@ prog, err := optimize.NewOptimizer(optimize.O1).Optimize(prog)
 
 Use `O2` when you also want algebraic simplification and dead-code elimination, or `O3` for cross-block global value numbering.
 
-## How the JIT works
+## JIT
 
-minivm runs a two-tier pipeline by default; thresholds and sampling cadence remain configurable:
-
-```
-           startup
-bytecode ──────────► threaded interpreter
-                           │
-                     every tick: sample function + IP
-                           │
-                     function or loop header hot
-                           │
-                           ▼
-                     record the live hot path → trace
-                     compile trace to native ARM64
-                     install at the entry / loop header
-                           │
-                     guard fails ──► deopt to interpreter
-```
-
-The JIT records the hot path through a function entry or loop header, compiles that trace to native code, and deopts back to the interpreter when a guard fails. See [`docs/jit-internals.md`](docs/jit-internals.md) for details.
+On ARM64, hot functions and loops can run as native trace-compiled code. Unsupported paths continue in the threaded interpreter. See [`docs/jit-internals.md`](docs/jit-internals.md) for details.
 
 ## Instruction set
 
