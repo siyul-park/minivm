@@ -9,13 +9,13 @@
 
 **Fast bytecode VM that embeds anywhere.**
 
-minivm lets Go programs load tiny bytecode programs, call back into host functions, and run under explicit stack, heap, fuel, and hook limits. It starts as a fast threaded interpreter and compiles hot functions and loops to native ARM64 code automatically with a trace JIT.
+minivm lets Go programs load tiny bytecode programs, call back into host functions, and run under explicit stack, heap, fuel, and hook limits. It starts as a fast threaded interpreter and compiles hot functions and loops to native ARM64 code automatically with a trace JIT. For the full documentation map, start with [`docs/README.md`](docs/README.md); the package flow is expanded in [`docs/architecture.md`](docs/architecture.md) and platform support is tracked in [`docs/compatibility.md`](docs/compatibility.md).
 
 ```bash
 go get github.com/siyul-park/minivm
 ```
 
-> Requires Go 1.26.2+. The VM core depends only on the Go standard library.
+> Requires Go 1.26.2+. The VM core depends only on the Go standard library. See [`docs/compatibility.md`](docs/compatibility.md) for the supported platform matrix and CGO notes.
 
 ## Why minivm
 
@@ -27,12 +27,16 @@ go get github.com/siyul-park/minivm
 | Stay fast before JIT | closure-threaded dispatch with near-zero allocations on recursive workloads |
 | Get native speed where it matters | adaptive ARM64 trace JIT for hot functions and loops |
 
+The detailed owners are [`docs/architecture.md`](docs/architecture.md) for execution flow, [`docs/host-integration.md`](docs/host-integration.md) for Go boundaries, [`docs/memory-model.md`](docs/memory-model.md) for heap ownership, and [`docs/jit-internals.md`](docs/jit-internals.md) for native lowering.
+
 ## Build With It
 
 - **Scripting engines** — execute user-defined logic under your host policy
 - **Rule engines** — evaluate complex conditions at runtime without redeployment
 - **DSL runtimes** — define a custom instruction set on a proven VM foundation
 - **Plugin systems** — run sandboxed bytecode in a GC-managed environment
+
+For embedding patterns, host-call contracts, and value conversion rules, use [`docs/host-integration.md`](docs/host-integration.md). For package boundaries and the interpreter pipeline, use [`docs/architecture.md`](docs/architecture.md).
 
 ## Performance
 
@@ -62,7 +66,7 @@ Single-instruction throughput (threaded interpreter, JIT disabled):
 | host function call | ~18 |
 | array / struct operations | ~30–44 |
 
-Full results: [`docs/benchmarks.md`](docs/benchmarks.md)
+Full results and methodology: [`docs/benchmarks.md`](docs/benchmarks.md). Trace compilation details: [`docs/jit-internals.md`](docs/jit-internals.md). NaN-boxing and value layout: [`docs/value-representation.md`](docs/value-representation.md).
 
 ## Usage
 
@@ -84,6 +88,8 @@ if err := vm.Run(context.Background()); err != nil {
 
 result, _ := vm.Pop() // types.I32(42)
 ```
+
+Instruction encoding, stack effects, and opcode-level JIT status are documented in [`docs/instruction-set.md`](docs/instruction-set.md). Validation rules for untrusted programs are in [`docs/verification.md`](docs/verification.md).
 
 ### Call Go from bytecode
 
@@ -112,7 +118,7 @@ prog := program.New(
 )
 ```
 
-Parameters arrive as typed `[]Boxed`: no reflection, no `interface{}` boxing.
+Parameters arrive as typed `[]Boxed`: no reflection, no `interface{}` boxing. The host boundary, `Marshal` / `Unmarshal`, and heap-reference ownership are covered in [`docs/host-integration.md`](docs/host-integration.md).
 
 ### Define reusable functions
 
@@ -140,6 +146,8 @@ factorial := types.NewFunctionBuilder(&types.FunctionType{
 ).Build()
 ```
 
+Function, closure, local, constant, branch, and call behavior is owned by [`docs/instruction-set.md`](docs/instruction-set.md); the package-level execution flow is in [`docs/architecture.md`](docs/architecture.md).
+
 ### Validate untrusted bytecode
 
 Verify bytecode from untrusted or external producers before constructing an interpreter:
@@ -165,7 +173,7 @@ prog, err := optimize.NewOptimizer(optimize.O1).Optimize(prog)
 - **Constant folding** — `I32_CONST 3, I32_CONST 4, I32_ADD` → `I32_CONST 7`
 - **Constant deduplication** — identical values share a single constant slot
 
-Use `O2` when you also want algebraic simplification and dead-code elimination, or `O3` for cross-block global value numbering.
+Use `O2` when you also want algebraic simplification and dead-code elimination, or `O3` for cross-block global value numbering. The pass manager, analysis ownership, and optimizer levels are documented in [`docs/pass-system.md`](docs/pass-system.md).
 
 ## How the JIT works
 
@@ -191,6 +199,8 @@ The JIT is **trace-based**: when a function entry or loop header gets hot, it re
 
 Coverage spans arithmetic, bitwise, comparison, and conversion across i32/i64/f32/f64 (the narrow i1/i8 kinds share the i32 representation and compute natively alongside it, keeping their kind through width-closed bitwise ops); stack ops, locals, globals, upvalues, constants, `select`, and branches; direct, closure, and guarded indirect calls; read-only heap fast paths (`array.get/len`, `struct.get`, `error.get`, ref reads); and **loops** — a hot loop runs its body in registers across a native back-edge, polling a safepoint between iterations. Allocation, mutation, host calls, `error.new`, `error.code`, and `throw` end a trace and stay interpreter-owned. The threaded interpreter uses closure dispatch rather than a switch table, so it stays fast before the JIT kicks in.
 
+For the full trace lifecycle, lowering contracts, journal fallback, and per-backend responsibilities, see [`docs/jit-internals.md`](docs/jit-internals.md). For counters and snapshots, see [`docs/profile.md`](docs/profile.md); for backend availability, see [`docs/compatibility.md`](docs/compatibility.md).
+
 ## Instruction set
 
 WebAssembly-inspired, intentionally custom. Opcodes are one byte; operands are fixed-width or length-prefixed.
@@ -211,7 +221,7 @@ WebAssembly-inspired, intentionally custom. Opcodes are one byte; operands are f
 | Closures | `CLOSURE_NEW` |
 | Errors | `THROW` `ERROR_NEW` `ERROR_GET` `ERROR_CODE` |
 
-For the complete opcode reference, stack effects, operand widths, and JIT status, see [`docs/instruction-set.md`](docs/instruction-set.md).
+For the complete opcode reference, stack effects, operand widths, and ARM64/AMD64 JIT status, see [`docs/instruction-set.md`](docs/instruction-set.md).
 
 ## Options
 
@@ -229,11 +239,9 @@ vm := interp.New(prog,
 )
 ```
 
-`WithTick` governs profiling, context-cancellation checks, hook cadence, and fuel consumption together. `WithFuel(0)` is unlimited; non-zero values round up to the nearest tick interval. Hooks execute synchronously on the `Run` goroutine.
+`WithTick` governs profiling, context-cancellation checks, hook cadence, and fuel consumption together. `WithFuel(0)` is unlimited; non-zero values round up to the nearest tick interval. Hooks execute synchronously on the `Run` goroutine. Runtime limits and heap ownership are described in [`docs/memory-model.md`](docs/memory-model.md); profiling cadence and JIT counters are described in [`docs/profile.md`](docs/profile.md).
 
 For instruction-accurate debugging (breakpoints, `Step`, `Next`, `Finish`), use `NewDebugger` + `WithDebugger` — this disables JIT. See [`docs/debugging.md`](docs/debugging.md).
-
-For profile snapshots and JIT counters, see [`docs/profile.md`](docs/profile.md).
 
 ## Status
 
@@ -245,7 +253,7 @@ For profile snapshots and JIT counters, see [`docs/profile.md`](docs/profile.md)
 | ARM64 trace JIT — calls, upvalues, refs, heap reads, loops | ✅ |
 | x86-64 JIT | 🔲 planned (`asm/amd64` is a non-emitting placeholder) |
 
-See [docs/roadmap.md](docs/roadmap.md) for priorities and future direction.
+See [`docs/compatibility.md`](docs/compatibility.md) for the platform/backend matrix and [`docs/roadmap.md`](docs/roadmap.md) for priorities and future direction.
 
 ## License
 
