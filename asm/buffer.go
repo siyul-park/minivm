@@ -131,12 +131,14 @@ func (b *Buffer) writeAt(ptr unsafe.Pointer, code []byte) (int, error) {
 	return b.patch(ptr, code, false)
 }
 
-func (b *Buffer) patch(ptr unsafe.Pointer, code []byte, batch bool) (int, error) {
+func (b *Buffer) patch(ptr unsafe.Pointer, code []byte, unsealed bool) (int, error) {
 	mem, off, current, ok := b.locate(ptr, len(code))
 	if !ok {
 		return 0, fmt.Errorf("%w: writeAt out of range", ErrInvalidArgs)
 	}
-	if batch && current {
+	if unsealed && current {
+		// writeBatch already opened the active mapping; keep the seal window
+		// owned by that outer call.
 		copy(mem[off:off+len(code)], code)
 		return len(code), nil
 	}

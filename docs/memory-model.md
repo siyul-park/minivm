@@ -43,15 +43,15 @@ RC is manually handled in every threaded closure touching refs.
 
 `release(addr)` decrements `rc[addr]`. When RC reaches `0`, it:
 
-1. gets nested refs from `Refs()` if object is `Traceable`
+1. gets nested refs from `Refs(dst)` if object is `Traceable`
 2. calls `Close()` if object is `io.Closer`
 3. clears `heap[addr]` and appends `addr` to `free`
 4. repeats for nested refs using explicit work stack
 
 `release` must stay iterative, not recursive, to avoid stack overflow on deep object graphs.
-`Refs()` returns `nil` without allocation when an object has no nested refs; if
-it finds a child ref, it allocates once with capacity for that object's slots.
-Keep this property when adding new `Traceable` implementations.
+`Refs(dst)` appends nested refs to caller-owned scratch and returns the extended
+slice. It returns `dst` unchanged when an object has no nested refs. Keep this
+append-only contract when adding new `Traceable` implementations.
 
 ## Allocation
 
@@ -92,7 +92,7 @@ roots = stack values + constants + globals
 for each root KindRef addr:
     if rc[addr] < 0:
         rc[addr] = -rc[addr]
-    recursively trace Traceable.Refs()
+    recursively trace Traceable.Refs(dst)
 ```
 
 ### 3. Sweep

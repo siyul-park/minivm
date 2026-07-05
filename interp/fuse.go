@@ -458,8 +458,9 @@ func (c *threadedCompiler) fuseError() func(*Interpreter) {
 // intermediate stack write for the local's own value and no extra bounds
 // check for a slot that was never really pushed. The local kind selects the
 // matching CONST opcode, immediate width, and per-kind case switch so all
-// four numeric kinds are handled the same way. Returns nil when no pattern
-// applies.
+// four numeric kinds are handled the same way. Narrow I1/I8 locals fall
+// through to the plain LOCAL_GET path, matching fuseLocalLocal. Returns nil
+// when no pattern applies.
 //
 // c.ip is restored after probing the binop so the compile loop still emits
 // standalone handlers for the absorbed CONST and binop, keeping branch
@@ -539,6 +540,7 @@ func (c *threadedCompiler) fuseLocalLocal(idxA int) func(*Interpreter) {
 		return nil
 	}
 	idxB := int(c.code[c.ip+1])
+	// idxA == idxB is valid: the unfused program reads the same slot twice.
 	if idxB >= len(c.locals) || c.locals[idxB] != c.locals[idxA] {
 		return nil
 	}
@@ -558,6 +560,23 @@ func (c *threadedCompiler) fuseLocalLocal(idxA int) func(*Interpreter) {
 	}
 	c.ip = save
 	return fused
+}
+
+// peekBrIf reports whether the byte at pos starts a BR_IF instruction,
+// returning its parsed jump offset for a comparison+BR_IF (or CONST+BR_IF)
+// fusion to apply via Interpreter.branchIf. It only reads c.code — it never
+// advances c.ip — so every caller, whether already sitting right after its
+// own opcode (pos == c.ip) or still probing one opcode further ahead
+// (pos == c.ip+1, from inside an already-probing fuseLocalXConst case), needs
+// no restore: the compile loop still visits and standalone-compiles BR_IF's
+// own start byte, keeping that offset a valid branch target. BR_IF's fixed
+// 3-byte width (opcode + i16 offset) is a constant every caller already
+// knows and folds into its own total fused width.
+func (c *threadedCompiler) peekBrIf(pos int) (offset int, ok bool) {
+	if c.precise || pos+2 >= len(c.code) || instr.Opcode(c.code[pos]) != instr.BR_IF {
+		return 0, false
+	}
+	return instr.ParseI16(c.code, pos+1), true
 }
 
 // fuseLocalI32Const builds the fused closure for LOCAL_GET idx (I32);
@@ -5525,21 +5544,4 @@ func (c *threadedCompiler) fuseF64Imm(rhs float64, size int) func(*Interpreter) 
 		}
 	}
 	return nil
-}
-
-// peekBrIf reports whether the byte at pos starts a BR_IF instruction,
-// returning its parsed jump offset for a comparison+BR_IF (or CONST+BR_IF)
-// fusion to apply via Interpreter.branchIf. It only reads c.code — it never
-// advances c.ip — so every caller, whether already sitting right after its
-// own opcode (pos == c.ip) or still probing one opcode further ahead
-// (pos == c.ip+1, from inside an already-probing fuseLocalXConst case), needs
-// no restore: the compile loop still visits and standalone-compiles BR_IF's
-// own start byte, keeping that offset a valid branch target. BR_IF's fixed
-// 3-byte width (opcode + i16 offset) is a constant every caller already
-// knows and folds into its own total fused width.
-func (c *threadedCompiler) peekBrIf(pos int) (offset int, ok bool) {
-	if c.precise || pos+2 >= len(c.code) || instr.Opcode(c.code[pos]) != instr.BR_IF {
-		return 0, false
-	}
-	return instr.ParseI16(c.code, pos+1), true
 }

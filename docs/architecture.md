@@ -156,7 +156,7 @@ Core API:
 1. `Assembler.Build`: rewrite VRegs to physical registers, insert spill frame code if needed, encode IR to machine code, and record relocations.
 2. `resolve()`: two-pass encode. Pass 1 measures sizes via `Imm(0)` placeholders; Pass 2 patches labels and records `Relocation`s.
 3. Return `*Code` with bytes, optional entry labels, and relocations.
-4. `Link`: writes code into the executable buffer via `buffer.Write` (which brackets the copy in its own W^X unseal/seal), patches external relocations through `buffer.writeAt`, and creates primary/internal `Callable`s.
+4. `Link`: writes all code chunks through one `writeBatch` W^X window, patches external relocations before resealing, and creates primary/internal `Callable`s.
 
 ### `asm/arm64/`
 

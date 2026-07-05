@@ -280,12 +280,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		i.constants[j] = val
 	}
 
-	i.baseHeap = 1
-	for _, v := range i.constants {
-		if v.Kind() == types.KindRef {
-			i.baseHeap++
-		}
-	}
+	i.baseHeap = len(i.heap)
 
 	c := &threadedCompiler{
 		types:     i.types,

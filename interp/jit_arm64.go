@@ -583,7 +583,7 @@ func (l arm64Lowerer) i32Const(ctx *lowering, op step) bool {
 	val := binary.LittleEndian.Uint32(f.code[op.ip+1 : op.ip+5])
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDI(dst, uint64(val))...)
-	ctx.push(value{reg: dst, kind: types.KindI32, raw: true, known: true, i64: int64(int32(val))})
+	ctx.push(value{reg: dst, kind: types.KindI32, raw: true, known: true, imm: int64(int32(val))})
 	return true
 }
 
@@ -595,7 +595,7 @@ func (l arm64Lowerer) i64Const(ctx *lowering, op step) bool {
 	}
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDI(dst, uint64(val))...)
-	ctx.push(value{reg: dst, kind: types.KindI64, raw: true, known: true, i64: val})
+	ctx.push(value{reg: dst, kind: types.KindI64, raw: true, known: true, imm: val})
 	return true
 }
 
@@ -638,12 +638,12 @@ func (l arm64Lowerer) constGet(ctx *lowering, op step, fused bool) bool {
 		if v.Kind() == types.KindI64 {
 			ctx.assembler.Emit(arm64.LDI(dst, uint64(v.I64()))...)
 			val.known = true
-			val.i64 = v.I64()
+			val.imm = v.I64()
 		} else {
 			ctx.assembler.Emit(arm64.LDI(dst, uint64(v))...)
 			if v.Kind().Repr() == types.KindI32 {
 				val.known = true
-				val.i64 = int64(v.I32())
+				val.imm = int64(v.I32())
 			}
 		}
 		ctx.push(val)
@@ -924,21 +924,13 @@ func (l arm64Lowerer) i32Divide(
 	b := prep(ctx, ctx.values[len(ctx.values)-1].reg)
 	a := prep(ctx, ctx.values[len(ctx.values)-2].reg)
 
-	guarded := false
 	top := ctx.values[len(ctx.values)-1]
-	if !top.known && op.arg.Kind().Repr() == types.KindI32 && op.arg.I32() != 0 {
-		if !l.guardRaw(ctx, l.narrow32(b), uint64(uint32(op.arg.I32())), op.ip) {
-			return false
-		}
-		guarded = true
+	observed := uint64(0)
+	if op.arg.Kind().Repr() == types.KindI32 {
+		observed = uint64(uint32(op.arg.I32()))
 	}
-	if !(top.known && top.i64 != 0) && !guarded {
-		fail, ok := l.sideExit(ctx, ctx.values, op.ip)
-		if !ok {
-			return false
-		}
-		ctx.assembler.Emit(arm64.CMPI(b, 0))
-		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, fail))
+	if !l.guardDivisor(ctx, top, l.narrow32(b), observed, op.ip) {
+		return false
 	}
 
 	ctx.pop()
@@ -966,7 +958,7 @@ func (l arm64Lowerer) i32Shift(
 	a := ctx.values[len(ctx.values)-2]
 	shift := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	if b.known {
-		ctx.assembler.Emit(arm64.LDI(shift, uint64(uint32(b.i64)&0x1F))...)
+		ctx.assembler.Emit(arm64.LDI(shift, uint64(uint32(b.imm)&0x1F))...)
 	} else {
 		ctx.assembler.Emit(arm64.ANDI(shift, b.reg, 0x1F))
 	}
@@ -1194,21 +1186,13 @@ func (l arm64Lowerer) i64Divide(ctx *lowering, op step, div func(dst, src1, src2
 	b := ctx.values[len(ctx.values)-1].reg
 	a := ctx.values[len(ctx.values)-2].reg
 
-	guarded := false
 	top := ctx.values[len(ctx.values)-1]
-	if !top.known && op.arg.Kind() == types.KindI64 && op.arg.I64() != 0 {
-		if !l.guardRaw(ctx, b, uint64(op.arg.I64()), op.ip) {
-			return false
-		}
-		guarded = true
+	observed := uint64(0)
+	if op.arg.Kind() == types.KindI64 {
+		observed = uint64(op.arg.I64())
 	}
-	if !(top.known && top.i64 != 0) && !guarded {
-		fail, ok := l.sideExit(ctx, ctx.values, op.ip)
-		if !ok {
-			return false
-		}
-		ctx.assembler.Emit(arm64.CMPI(b, 0))
-		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, fail))
+	if !l.guardDivisor(ctx, top, b, observed, op.ip) {
+		return false
 	}
 
 	raw := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -1235,7 +1219,7 @@ func (l arm64Lowerer) i64Shift(ctx *lowering, op step, opfn func(dst, src1, src2
 	a := ctx.values[len(ctx.values)-2].reg
 	shift := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	if ctx.values[len(ctx.values)-1].known {
-		ctx.assembler.Emit(arm64.LDI(shift, uint64(ctx.values[len(ctx.values)-1].i64)&0x3F)...)
+		ctx.assembler.Emit(arm64.LDI(shift, uint64(ctx.values[len(ctx.values)-1].imm)&0x3F)...)
 	} else {
 		ctx.assembler.Emit(arm64.ANDI(shift, b, 0x3F))
 	}
@@ -1547,17 +1531,44 @@ func (l arm64Lowerer) guardI64(ctx *lowering, v asm.VReg, ip int) bool {
 	return true
 }
 
+// guardDivisor deopts before a divide by zero. When trace recorded a non-zero
+// divisor, guardRaw owns the mismatch exit; otherwise the zero check protects
+// the native divide itself.
+func (l arm64Lowerer) guardDivisor(ctx *lowering, divisor value, reg asm.VReg, observed uint64, ip int) bool {
+	guarded := false
+	if !divisor.known && observed != 0 {
+		if !l.guardRaw(ctx, reg, observed, ip) {
+			return false
+		}
+		guarded = true
+	}
+	if divisor.known && divisor.imm != 0 || guarded {
+		return true
+	}
+	fail, ok := l.sideExit(ctx, ctx.values, ip)
+	if !ok {
+		return false
+	}
+	ctx.assembler.Emit(arm64.CMPI(reg, 0))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, fail))
+	return true
+}
+
 // boxableI64 keeps raw i64 values within the boxed 49-bit lane.
 func (l arm64Lowerer) boxableI64(ctx *lowering, raw asm.VReg, ip int) bool {
 	fail, ok := l.sideExit(ctx, ctx.values, ip)
 	if !ok {
 		return false
 	}
-	ext := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.SBFX(ext, raw, 0, boxableWidth))
-	ctx.assembler.Emit(arm64.CMP(ext, raw))
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+	l.guardBoxable(ctx, raw, fail)
 	return true
+}
+
+func (l arm64Lowerer) guardBoxable(ctx *lowering, v asm.VReg, fail asm.Label) {
+	ext := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.SBFX(ext, v, 0, boxableWidth))
+	ctx.assembler.Emit(arm64.CMP(ext, v))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 }
 
 // guardRaw keeps observed narrow inputs speculative: a different runtime value
@@ -2618,10 +2629,7 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 		}
 	}
 	if kind == types.KindI64 {
-		ext := a.Reg(asm.RegTypeInt, asm.Width64)
-		a.Emit(arm64.SBFX(ext, result, 0, boxableWidth))
-		a.Emit(arm64.CMP(ext, result))
-		a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+		l.guardBoxable(ctx, result, fail)
 	}
 	rcBase := l.rcBase(ctx)
 	rc := l.guardRC(ctx, addr, rcBase, fail)
@@ -2716,6 +2724,9 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 	default:
 		return false
 	}
+	if op.shape.itab != 0 && op.shape.itab != heapStruct {
+		return false
+	}
 	pre := ctx.pre()
 	idx := l.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
 	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-2])
@@ -2755,10 +2766,7 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 	result := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDRR(result, dataPtr, idx))
 	if out == types.KindI64 {
-		ext := a.Reg(asm.RegTypeInt, asm.Width64)
-		a.Emit(arm64.SBFX(ext, result, 0, boxableWidth))
-		a.Emit(arm64.CMP(ext, result))
-		a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+		l.guardBoxable(ctx, result, fail)
 	}
 	rcBase := l.rcBase(ctx)
 	rc := l.guardRC(ctx, addr, rcBase, fail)
@@ -2779,6 +2787,9 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 	switch kind {
 	case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
 	default:
+		return false
+	}
+	if op.shape.itab != 0 && op.shape.itab != heapStruct {
 		return false
 	}
 	pre := ctx.pre()
@@ -2962,6 +2973,18 @@ func (l arm64Lowerer) coroValue(ctx *lowering, op step) bool {
 		l.releaseRef(ctx, addr, pre, op.ip)
 		ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: true})
 	case types.KindRef:
+		base := l.rcBase(ctx)
+		rc := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDRR(rc, base, addr))
+		ctx.assembler.Emit(arm64.CMPI(rc, 1))
+		shared := ctx.assembler.Label()
+		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBGT, shared))
+		ctx.values = append(ctx.values[:0], pre...)
+		if !l.exit(ctx, op.ip) {
+			return false
+		}
+		ctx.assembler.Bind(shared)
+		ctx.values = append(ctx.values[:0], pre...)
 		l.retainBox(ctx, dst)
 		l.releaseRef(ctx, addr, pre, op.ip)
 		ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: dst, kind: kind, raw: false})

@@ -2283,6 +2283,20 @@ func TestInterpreter_Reset(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(7), v)
 	})
+
+	t.Run("restores heap baseline after reset", func(t *testing.T) {
+		prog := program.New(nil, program.WithConstants(types.Ref(42)))
+		i := New(prog)
+		defer i.Close()
+
+		require.Equal(t, i.baseHeap, len(i.heap))
+		require.NoError(t, i.Push(types.String("temporary")))
+		require.Greater(t, len(i.heap), i.baseHeap)
+
+		i.Reset()
+		require.Equal(t, i.baseHeap, len(i.heap))
+		require.Equal(t, 0, i.sp)
+	})
 }
 
 func TestNew(t *testing.T) {

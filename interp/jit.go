@@ -74,7 +74,7 @@ type value struct {
 	kind  types.Kind
 	raw   bool
 	known bool
-	i64   int64
+	imm   int64
 	fn    int
 	ref   int
 }
@@ -359,7 +359,7 @@ func (ctx *lowering) sp() int {
 func (ctx *lowering) snapshot() ([]value, []activation) {
 	values := make([]value, len(ctx.values))
 	for i, v := range ctx.values {
-		values[i] = value{kind: v.kind, raw: v.raw, known: v.known, i64: v.i64, fn: v.fn, ref: v.ref}
+		values[i] = value{kind: v.kind, raw: v.raw, known: v.known, imm: v.imm, fn: v.fn, ref: v.ref}
 	}
 	frames := make([]activation, len(ctx.frames))
 	for i, f := range ctx.frames {
