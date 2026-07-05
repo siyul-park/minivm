@@ -1,26 +1,33 @@
 # Architecture
 
-This document describes minivm’s main components, ownership boundaries, and execution flow.
-Use it when a change crosses package boundaries or touches runtime state, optimization, JIT, debugging, or bytecode validation.
+This document describes minivm's package boundaries, ownership model, and execution flow.
 
-## Quick Map
+## When to Read
 
-| Area                                            | Also read                                    |
-| ----------------------------------------------- | -------------------------------------------- |
-| `interp/` runtime state, frames, globals        | `memory-model.md`, `value-representation.md` |
-| `interp/` debugger API or bytecode stepping     | `debugging.md`, `profile.md`                 |
-| `interp.Tracer` or profile options              | `profile.md`                                 |
-| `interp/threaded.go` or `interp/jit*.go`        | `jit-internals.md`, `instruction-set.md`     |
-| `analysis/`, `transform/`, `optimize/`, `pass/` | `pass-system.md`                             |
-| `program/verify.go` or untrusted bytecode       | `verification.md`                            |
-| `cli/` or `cmd/minivm/`                         | `guides/repl.md`                             |
+Read this document when a change crosses package boundaries or touches runtime state, optimization, JIT, debugging, profiling, or bytecode verification.
 
-Core boundary rules:
+For detailed behavior, follow the related topic docs instead of duplicating the same explanation here.
 
-* `instr` should remain leaf-like.
-* `types` must not import `interp`.
-* Optimizer code should flow through `pass.Pipeline` and `pass.Manager`.
-* `program/verify.go` intentionally avoids importing `analysis` or `pass` to prevent dependency cycles.
+## Related Docs
+
+| Area | Also read |
+|---|---|
+| Runtime state, heap ownership, refs | `memory-model.md`, `value-representation.md` |
+| Opcode semantics | `instruction-set.md` |
+| JIT internals | `jit-internals.md`, `profile.md` |
+| Optimizer and analyses | `pass-system.md` |
+| Static bytecode validation | `verification.md` |
+| Host functions and marshaling | `host-integration.md` |
+| Debugger and REPL | `debugging.md`, `guides/repl.md` |
+| Platforms and build constraints | `compatibility.md` |
+
+## Boundary Rules
+
+- `instr` should remain leaf-like.
+- `types` must not import `interp`.
+- Optimizer code should flow through `pass.Pipeline` and `pass.Manager`.
+- `program/verify.go` intentionally avoids importing `analysis` or `pass` to prevent dependency cycles.
+- Architecture-specific native code should stay under `asm/<arch>/` and `interp/jit_<arch>.go`.
 
 ## Package Dependency Graph
 
@@ -41,9 +48,27 @@ cli → debug, instr, interp, prof, program, types, cobra
 cmd/minivm → cli
 ```
 
-## Component Responsibilities
+## Package Responsibilities
 
-### `program/`
+| Package | Responsibility |
+|---|---|
+| `program/` | bytecode, constants, types, handlers, builder, and verifier entry point |
+| `instr/` | opcode definitions, encoding, parsing, formatting, and metadata |
+| `types/` | VM values, type descriptors, boxed representation, arrays, structs, maps, strings, functions, closures, and errors |
+| `interp/` | interpreter state, threaded dispatch, host APIs, coroutines, tracing, JIT driver, and pooling |
+| `debug/` | bytecode-level debugger API |
+| `prof/` | execution samples and JIT metrics |
+| `asm/` | architecture-neutral native-code interfaces, buffers, linking, and executable memory |
+| `asm/arm64/` | active ARM64 encoder, ABI bridge, and register conventions |
+| `asm/amd64/` | placeholder backend; does not emit native code yet |
+| `pass/` | generic analysis and transform infrastructure |
+| `analysis/` | reusable static analyses |
+| `transform/` | optimization transforms |
+| `optimize/` | optimization pipeline wiring |
+| `cli/` | command tree, run command, REPL, and value formatting |
+| `cmd/minivm/` | executable entrypoint |
+
+## Core Runtime Model
 
 `program.Program` is the hand-off format between bytecode producers and the VM.
 
@@ -56,190 +81,121 @@ type Program struct {
 }
 ```
 
-Its fields define the executable bytecode, entry-frame locals, constant pool, and type descriptors used by runtime allocation instructions.
+`program.Builder` is the preferred construction API. It handles labels, branch offsets, constant and type interning, and stable pool indexes.
 
-`program.Builder` is the preferred high-level API for constructing programs. It handles label patching, branch offsets, constant/type interning, and stable pool indices so callers do not need to compute byte offsets or pool positions manually.
-
-### `instr/`
-
-`instr` defines the instruction set and bytecode encoding.
-
-It provides utilities to:
-
-* serialize instructions with `Marshal`
-* deserialize bytecode with `Unmarshal`
-* format bytecode for debugging with `Format`
-* parse textual instructions with `Parse` and `ParseAll`
-
-Each opcode has metadata such as its mnemonic and operand widths.
-
-### `types/`
-
-`types` defines the VM’s value and type model.
-
-The main abstractions are:
-
-* `types.Value`: runtime values
-* `types.Type`: type descriptors
-* `types.Boxed`: the compact representation used by the VM stack and globals
-
-Heap objects are represented as references. Objects that may contain nested references implement `types.Traceable`, allowing the collector to walk arrays, structs, maps, host objects, and other reference-carrying values.
-
-### `interp/`
-
-`interp` owns VM execution state.
-
-Key state includes:
-
-| Field      | Purpose                                          |
-| ---------- | ------------------------------------------------ |
-| `instrs`   | raw bytecode per function slot                   |
-| `code`     | threaded dispatch closures                       |
-| `tracer`   | trace and profile collection                     |
-| `frames`   | call stack                                       |
-| `stack`    | VM value stack                                   |
-| `heap`     | heap object storage                              |
-| `rc`       | reference counts                                 |
-| `free`     | reusable heap indices                            |
-| `globals`  | global slots                                     |
-| `compiler` | private JIT compiler for standalone interpreters |
-| `cache`    | shared native-code cache used by pools           |
-
-The threaded compiler converts bytecode into dispatch closures. Common instruction patterns can be fused into superinstructions to reduce dispatch overhead, such as local/constant numeric operations or comparison followed by `BR_IF`.
-
-The tracer records hot execution paths and profile data. The JIT uses this information to compile supported traces into native code.
-
-The ARM64 JIT can lower numeric traces, direct calls, selected indirect calls, local/global accesses, and limited heap reads. Unsupported paths fall back to threaded execution through guards or deoptimization.
-
-`HostFunction` wraps Go functions so they can be called from VM code. Go values are converted through `Marshal` and `Unmarshal`.
-
-`Coroutine` implements `yield`/`resume` semantics. Entry-frame yields escape to the interpreter host, while function-local yields suspend and resume through coroutine handles.
-
-`Pool` allows multiple goroutines to borrow interpreters while sharing JIT cache and profile data. Each individual `Interpreter` remains single-goroutine-owned.
-
-### `debug/`
-
-`debug` provides instruction-accurate execution control.
-
-`Debugger` manages breakpoints, stepping, next, and finish behavior. It is installed through `interp.WithDebugger`. Debug mode disables JIT and uses tick-based hooks so execution stops on exact bytecode boundaries.
-
-### `prof/`
-
-`prof` collects execution samples and metrics.
-
-* `Collector` stores interpreter-local samples.
-* `Profiler` aggregates samples across shared tracers or pools.
-
-Function, instruction pointer, opcode, and JIT metrics are exposed through the same reporting surface.
-
-### `asm/`
-
-`asm` is the low-level native code emission layer. It is independent of VM stack semantics and handles virtual registers, instruction emission, ABI boundaries, relocation, and linking.
-
-The general flow is:
-
-1. emit virtual-register instructions
-2. allocate physical registers
-3. encode machine code
-4. patch relocations
-5. link executable code
-
-### `asm/arm64/`
-
-`asm/arm64` provides the active native backend for minivm’s JIT.
-
-It supplies the ARM64 encoder, ABI adapter, trampoline, and register conventions required to call generated native code from Go.
-
-### `asm/amd64/`
-
-`asm/amd64` is currently a placeholder. It preserves the generic `asm` API shape, but native encoding and ABI support are not implemented yet.
-
-### `pass/`
-
-`pass` provides the analysis and transform infrastructure, modeled after LLVM’s new pass manager.
-
-The main pieces are:
-
-* `pass.Manager`: lazily computes and caches analysis results
-* `pass.Pipeline`: runs transform passes in order
-* `Preserved`: describes which analysis results remain valid after a transform
-
-Transforms request analyses through the manager, and invalidation happens after code mutation.
-
-### `analysis/`, `transform/`, `optimize/`
-
-These packages implement static analyses and optimization passes.
-
-`BasicBlocksAnalysis` is the foundation for both the optimizer and JIT. Basic block boundaries are created at function entry, branch targets, after branch-like instructions, and after terminating instructions.
-
-Optimization levels are cumulative:
-
-```text
-O1: ConstantFolding → ConstantDeduplication
-O2: ConstantFolding → AlgebraicSimplification → ConstantDeduplication → DeadCodeElimination
-O3: ConstantFolding → AlgebraicSimplification → GlobalValueNumbering → ConstantDeduplication → DeadCodeElimination
-```
-
-Transform passes mutate `*program.Program` directly and use `pass.Manager` for analysis results.
-
-### `program/verify.go`
-
-`program.Verify` validates bytecode before execution.
-
-It checks opcode validity, operand ranges, branch targets, pool/local/upvalue indices, termination, stack balance, and type consistency where it can be determined statically.
-
-Verification is separate from `interp.New`. Callers should explicitly verify untrusted bytecode before constructing an interpreter.
-
-### `cli/`
-
-`cli` contains the command-line interface, run command, REPL, and shared value formatting.
-
-The REPL stores instruction history, constants, type descriptors, and filesystem access for `.load` and `.save`. Each step rebuilds a fresh `Program` and `Interpreter`, so heap references do not persist across REPL executions.
-
-### `cmd/minivm/`
-
-`cmd/minivm` is the thin executable entrypoint around `cli.Root().Execute()`.
+`interp.New` compiles bytecode to threaded dispatch closures. The threaded interpreter is the source of correctness. The JIT is an optimization layered on top of it and must always preserve threaded fallback behavior.
 
 ## Execution Flow
 
-A typical minivm execution follows this path:
+A typical execution follows this path:
 
 ```text
-1. program.New(...)
-   └─ build bytecode through instr.Marshal
+1. Build program
+   └─ program.New(...) or program.Builder
 
-2. program.Verify(...) [optional]
-   └─ validate untrusted bytecode before execution
+2. Verify when input is not trusted
+   └─ program.Verify(...)
 
-3. optimize.Optimize(...) [optional]
-   └─ run AOT optimization passes
+3. Optimize when requested
+   └─ optimize.NewOptimizer(level).Optimize(...)
 
-4. interp.New(...)
-   ├─ compile top-level bytecode into threaded closures
-   └─ compile function constants into function slots
+4. Construct interpreter
+   └─ interp.New(...)
 
-5. interp.Run(ctx)
-   ├─ execute the threaded dispatch loop
-   ├─ periodically check context, fuel, hooks, and profiling
-   └─ when a path becomes hot, tracer/JIT may compile it to native code
+5. Run
+   ├─ threaded dispatch executes bytecode
+   ├─ tick path handles context, fuel, hooks, and samples
+   └─ ARM64 JIT may compile hot traces
 
-6. interp.Close()
-   └─ release native buffers and runtime resources
+6. Close or reset
+   └─ release runtime resources
 ```
 
-`WithThreshold(0)` enables JIT on the first sample.
-Negative thresholds disable JIT.
-Debugging disables JIT to preserve exact bytecode-boundary behavior.
+`program.New` and `interp.New` trust their inputs. Use `program.Verify` before constructing an interpreter for bytecode loaded from external sources.
+
+## Runtime State
+
+`interp.Interpreter` owns execution state.
+
+| State | Purpose |
+|---|---|
+| `instrs` | raw bytecode per function slot |
+| `code` | threaded dispatch closures or native wrappers |
+| `tracer` | profile samples and trace recording |
+| `frames` | call stack |
+| `stack` | operand stack |
+| `heap`, `rc`, `free` | heap storage, reference counts, and reusable slots |
+| `globals` | global slots |
+| `compiler` | private JIT compiler for standalone interpreters |
+| `cache` | shared native-code cache used by pools |
+
+Each `Interpreter` is single-goroutine-owned during use. `Pool` lets multiple goroutines borrow separate interpreters while sharing profile and native-code cache data.
+
+## Key Invariants
+
+### Heap and Values
+
+- Heap index `0` is permanently `Null`.
+- Only `KindRef` values participate in reference counting.
+- Heap indices are stable and must not move.
+- Values that contain refs must implement `types.Traceable`.
+- Large `i64` values may spill to the heap while preserving bytecode semantics.
+
+See `memory-model.md` and `value-representation.md` for the detailed rules.
+
+### Frames
+
+A frame separates the function/template address from the callable reference.
+
+| Field | Meaning |
+|---|---|
+| `addr` | function/template slot used for code, profiling, and JIT |
+| `ref` | callable heap ref released on return |
+
+For plain functions, `addr == ref`. For closures, `addr` points to the function template and `ref` points to the closure object.
+
+### Threaded Dispatch
+
+- Compile-time handlers advance `c.ip`.
+- Runtime handlers advance `i.fr.ip`.
+- Runtime traps panic internally and are recovered by `interp.Run`.
+- Debugging with `WithDebugger` disables JIT and preserves bytecode instruction boundaries.
+
+### JIT
+
+- Native code is speculative and guarded.
+- Unsupported paths must fall back to threaded execution.
+- JIT handlers must not duplicate complex interpreter behavior unless they can own all semantics.
+- Guard failure materializes VM state and resumes threaded dispatch.
+
+See `jit-internals.md` for trace recording, journal layout, calls, branches, loops, and fallback rules.
+
+### Optimization
+
+Optimization passes mutate `*program.Program` through the pass system.
+
+Bytecode length changes must repair all position-sensitive data, including branch offsets and exception handler ranges. If repair cannot preserve behavior, the transform should leave the function unchanged.
+
+See `pass-system.md` for optimizer levels and rewrite rules.
 
 ## Focus Areas
 
-| Area                 | Direction                                                                                      |
-| -------------------- | ---------------------------------------------------------------------------------------------- |
-| JIT coverage         | Expand reliable native lowering for numeric traces, calls, guarded reads, and common hot paths |
-| Architecture support | Keep ARM64 optimized; add AMD64 JIT only when justified by users and benchmarks                |
-| Benchmarks           | Broaden coverage for numeric loops, host calls, and heap-object workloads                      |
-| Program format       | Keep `instr` and `program` as a compact Go-native bytecode surface                             |
-| Host integration     | Keep `HostFunction`, `Marshal`, and `Unmarshal` as the main Go integration path                |
-| Resource policy      | Clarify how context, fuel, hooks, stack/heap/frame limits, and host policy work together       |
+| Area | Direction |
+|---|---|
+| JIT coverage | Expand reliable native lowering for hot numeric, call, and read-only heap paths |
+| Architecture support | Keep ARM64 stable; add other backends only with clear user and benchmark value |
+| Benchmarks | Keep benchmark claims tied to `docs/benchmarks.md` |
+| Program format | Keep `instr` and `program` compact and Go-native |
+| Host integration | Keep `HostFunction`, `Marshal`, and `Unmarshal` explicit about ownership |
+| Resource policy | Keep context, fuel, hooks, stack, heap, frame limits, and host policy easy to reason about |
 
-See `docs/roadmap.md` for current priorities.
+## Maintenance Notes
+
+When changing architecture-level behavior:
+
+- update the owning topic document rather than repeating details here
+- keep package boundaries explicit
+- preserve interpreter/JIT semantic parity
+- keep public APIs small
+- prefer local, simple ownership rules
+- keep examples current with the code
