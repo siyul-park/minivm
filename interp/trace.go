@@ -219,15 +219,6 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 			r.store(a, t)
 			return t, nil
 		}
-		if (op == instr.ARRAY_GET || op == instr.STRUCT_GET) && st.seen.Kind() == types.KindI64 {
-			if clone.fp != startFP {
-				t.kind = aborted
-				break
-			}
-			t.kind = returned
-			r.store(a, t)
-			return t, nil
-		}
 		switch {
 		case op == instr.RETURN && st.depth == 0:
 			t.kind = returned

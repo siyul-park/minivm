@@ -3763,6 +3763,180 @@ func TestWithThreshold(t *testing.T) {
 		require.Greater(t, hits, int64(0))
 	})
 
+	t.Run("continues i64 array get through arithmetic", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		eval := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeI64Array).
+			WithReturns(types.TypeI64)
+		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.ARRAY_GET)).
+			Emit(instr.New(instr.I64_CONST, 1)).
+			Emit(instr.New(instr.I64_ADD)).
+			Emit(instr.New(instr.RETURN)).
+			Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		for range 8 {
+			i.Reset()
+			require.NoError(t, i.Push(types.TypedArray[int64]{41}))
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I64(42), got)
+		}
+		require.NotNil(t, i.fallbacks[root])
+
+		var hits int64
+		tree := i.tracer.rootAt(root)
+		require.NotNil(t, tree)
+		for _, hit := range tree.hits {
+			hits += hit
+		}
+		require.Equal(t, int64(0), hits)
+	})
+
+	t.Run("deopts after i64 array get with stack shape intact", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		eval := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeI64Array).
+			WithReturns(types.TypeI64)
+		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.ARRAY_GET)).
+			Emit(instr.New(instr.I64_CONST, 1)).
+			Emit(instr.New(instr.I64_ADD)).
+			Emit(instr.New(instr.RETURN)).
+			Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		for range 8 {
+			i.Reset()
+			require.NoError(t, i.Push(types.TypedArray[int64]{1<<48 - 1}))
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I64(1<<48), got)
+		}
+		require.NotNil(t, i.fallbacks[root])
+
+		var hits int64
+		tree := i.tracer.rootAt(root)
+		require.NotNil(t, tree)
+		for _, hit := range tree.hits {
+			hits += hit
+		}
+		require.Greater(t, hits, int64(0))
+	})
+
+	t.Run("deopts nonboxable i64 array get", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		eval := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeI64Array).
+			WithReturns(types.TypeI64)
+		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.ARRAY_GET)).
+			Emit(instr.New(instr.RETURN)).
+			Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		for range 8 {
+			i.Reset()
+			require.NoError(t, i.Push(types.TypedArray[int64]{41}))
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I64(41), got)
+		}
+		require.NotNil(t, i.fallbacks[root])
+
+		i.Reset()
+		require.NoError(t, i.Push(types.TypedArray[int64]{1 << 48}))
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I64(1<<48), got)
+
+		var hits int64
+		tree := i.tracer.rootAt(root)
+		require.NotNil(t, tree)
+		for _, hit := range tree.hits {
+			hits += hit
+		}
+		require.Greater(t, hits, int64(0))
+	})
+
+	t.Run("continues i64 struct get through arithmetic", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		typ := types.NewStructType(types.NewStructField(types.TypeI64))
+		eval := types.NewFunctionBuilder(nil).
+			WithParams(typ).
+			WithReturns(types.TypeI64)
+		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.STRUCT_GET)).
+			Emit(instr.New(instr.I64_CONST, 1)).
+			Emit(instr.New(instr.I64_ADD)).
+			Emit(instr.New(instr.RETURN)).
+			Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(fn))
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		root := anchor{addr: i.constants[0].Ref(), ip: 0}
+		for range 8 {
+			i.Reset()
+			require.NoError(t, i.Push(types.NewStruct(typ, types.BoxI64(41))))
+			require.NoError(t, i.Run(context.Background()))
+			got, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I64(42), got)
+		}
+		require.NotNil(t, i.fallbacks[root])
+
+		var hits int64
+		tree := i.tracer.rootAt(root)
+		require.NotNil(t, tree)
+		for _, hit := range tree.hits {
+			hits += hit
+		}
+		require.Equal(t, int64(0), hits)
+	})
+
 	t.Run("falls back learned callee branch through caller tail", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")

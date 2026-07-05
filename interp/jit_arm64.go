@@ -490,9 +490,6 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step) bool {
 			if !l.arrayGet(ctx, op) {
 				return false
 			}
-			if op.seen.Kind() == types.KindI64 {
-				return idx == len(ops)-1
-			}
 			ok = true
 		case instr.ARRAY_SET:
 			if !l.arraySet(ctx, op) {
@@ -502,9 +499,6 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step) bool {
 		case instr.STRUCT_GET:
 			if !l.structGet(ctx, op) {
 				return false
-			}
-			if op.seen.Kind() == types.KindI64 {
-				return idx == len(ops)-1
 			}
 			ok = true
 		case instr.STRUCT_SET:
@@ -2637,9 +2631,6 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 		l.retainBox(ctx, result)
 	}
 	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: kind, raw: raw})
-	if kind == types.KindI64 {
-		return l.exit(ctx, op.ip+1)
-	}
 	return true
 }
 
@@ -2777,9 +2768,6 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 	a.Emit(arm64.SUBI(rc, rc, 1))
 	a.Emit(arm64.STRR(rc, rcBase, addr))
 	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: out, raw: out != types.KindRef})
-	if out == types.KindI64 {
-		return l.exit(ctx, op.ip+1)
-	}
 	return true
 }
 

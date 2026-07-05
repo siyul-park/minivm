@@ -264,9 +264,10 @@ struct reads also guard the exact recorded struct type pointer before checking
 the index and field kind. The load then continues through the trace.
 Guard failures branch to an out-of-line side exit that resumes threaded dispatch
 at the original opcode with the pre-op stack state flushed. Primitive array read
-fast paths cover `i1`, `i8`, `i32`, `f32`, and `f64`; `ref` array/field reads
-retain the loaded ref. `i64` reads remain terminal because heap-promoted i64
-fallback needs the interpreter-owned boxing path.
+fast paths cover `i1`, `i8`, `i32`, `i64`, `f32`, and `f64`; `ref` array/field
+reads retain the loaded ref. `i64` reads also guard that the loaded raw value
+fits the inline boxed range; heap-promoted values fall back before the read so
+the interpreter owns boxing.
 
 Primitive `ARRAY_SET` and `STRUCT_SET` still lower as terminal heap mutations:
 the hot path performs the store, flushes the result state, and resumes threaded
