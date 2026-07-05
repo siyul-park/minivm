@@ -21,7 +21,7 @@ go get github.com/siyul-park/minivm
 
 | Need | What minivm gives you |
 |---|---|
-| Embed runtime behavior | bytecode programs with first-class functions, locals, globals, refs, arrays, structs, and strings |
+| Embed runtime behavior | bytecode programs with first-class functions, locals, globals, refs, arrays, structs, maps, strings, coroutines, and structured errors |
 | Call host code | zero-reflection `HostFunction` path plus `Marshal` / `Unmarshal` for ordinary Go values |
 | Keep execution bounded | stack, heap, frame, fuel, context, and hook controls |
 | Stay fast before JIT | closure-threaded dispatch with near-zero allocations on recursive workloads |
@@ -140,6 +140,18 @@ factorial := types.NewFunctionBuilder(&types.FunctionType{
 ).Build()
 ```
 
+### Validate untrusted bytecode
+
+Verify bytecode from untrusted or external producers before constructing an interpreter:
+
+```go
+if err := program.Verify(prog); err != nil {
+    log.Fatal(err)
+}
+```
+
+The `run` CLI command performs this check before execution. See [`docs/verification.md`](docs/verification.md) for the verifier model and limits.
+
 ### Optimize before running
 
 Fold constants before the VM sees them:
@@ -186,14 +198,20 @@ WebAssembly-inspired, intentionally custom. Opcodes are one byte; operands are f
 | Category | Instructions |
 |---|---|
 | Stack | `NOP` `DROP` `DUP` `SWAP` `SELECT` |
-| Control | `BR` `BR_IF` `BR_TABLE` `CALL` `RETURN` `UNREACHABLE` |
-| Variables | `LOCAL_GET/SET/TEE` &nbsp; `GLOBAL_GET/SET/TEE` &nbsp; `CONST_GET` |
+| Control | `BR` `BR_IF` `BR_TABLE` `CALL` `RETURN` `RETURN_CALL` `UNREACHABLE` |
+| Coroutines | `YIELD` `RESUME` `CORO_DONE` `CORO_VALUE` |
+| Variables | `LOCAL_GET/SET/TEE` &nbsp; `GLOBAL_GET/SET/TEE` &nbsp; `UPVAL_GET/SET` &nbsp; `CONST_GET` |
 | Integers | `I32_CONST` `I64_CONST` — arithmetic, bitwise, comparisons, conversions |
 | Floats | `F32_CONST` `F64_CONST` — arithmetic, comparisons, conversions |
-| References | `REF_NULL` `REF_TEST` `REF_CAST` `REF_IS_NULL` `REF_EQ` `REF_NE` |
-| Strings | `STRING_NEW_UTF32` `STRING_LEN` `STRING_CONCAT` and comparisons |
-| Arrays | `ARRAY_NEW` `ARRAY_NEW_DEFAULT` `ARRAY_LEN` `ARRAY_GET/SET` `ARRAY_FILL/COPY` |
+| References | `REF_NULL` `REF_TEST` `REF_CAST` `REF_IS_NULL` `REF_EQ/NE` `REF_NEW/GET/SET` |
+| Strings | `STRING_NEW_UTF32` `STRING_ENCODE_UTF32` `STRING_ITER` `STRING_LEN` `STRING_CONCAT` and comparisons |
+| Arrays | `ARRAY_NEW` `ARRAY_NEW_DEFAULT` `ARRAY_LEN` `ARRAY_GET/SET` `ARRAY_FILL/COPY` `ARRAY_APPEND/DELETE/SLICE` |
 | Structs | `STRUCT_NEW` `STRUCT_NEW_DEFAULT` `STRUCT_GET/SET` |
+| Maps | `MAP_NEW` `MAP_NEW_DEFAULT` `MAP_LEN` `MAP_GET/LOOKUP` `MAP_SET/DELETE/CLEAR` `MAP_KEYS/ITER` |
+| Closures | `CLOSURE_NEW` |
+| Errors | `THROW` `ERROR_NEW` `ERROR_GET` `ERROR_CODE` |
+
+For the complete opcode reference, stack effects, operand widths, and JIT status, see [`docs/instruction-set.md`](docs/instruction-set.md).
 
 ## Options
 
