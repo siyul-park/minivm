@@ -1501,7 +1501,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 3, i.rc[5]) // fill value owned once per filled slot
 	})
 
-	t.Run("host call with an all-scalar signature works through the generic path (precise, fusion disabled)", func(t *testing.T) {
+	t.Run("host call with an all-scalar signature works through the generic path (exact, fusion disabled)", func(t *testing.T) {
 		hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}},
 			func(_ *Interpreter, args []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{types.BoxI32(args[0].I32() * args[1].I32())}, nil
@@ -1510,7 +1510,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 6), instr.New(instr.I32_CONST, 7),
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
 		}, program.WithConstants(hostFn))
-		i := New(prog, WithTick(1)) // precise: disables fusion, forcing the generic callHost path
+		i := New(prog, WithTick(1)) // exact: disables fusion, forcing the generic callHost path
 		defer i.Close()
 
 		require.NoError(t, i.Run(context.Background()))
@@ -1535,7 +1535,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 0, i.rc[2]) // arg not returned: host cleanup released it
 	})
 
-	t.Run("host call releases a ref param the callee does not return (generic, precise)", func(t *testing.T) {
+	t.Run("host call releases a ref param the callee does not return (generic, exact)", func(t *testing.T) {
 		hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeRef}, Returns: []types.Type{types.TypeI32}},
 			func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
 				return []types.Boxed{types.BoxI32(1)}, nil
@@ -1549,6 +1549,47 @@ func TestInterpreter_Run(t *testing.T) {
 
 		require.NoError(t, i.Run(context.Background()))
 		require.Equal(t, 0, i.rc[2])
+	})
+
+	t.Run("host call releases the consumed callable ref on fused and generic paths", func(t *testing.T) {
+		for _, tt := range []struct {
+			name string
+			opts []func(*option)
+		}{
+			{name: "fused"},
+			{name: "generic", opts: []func(*option){WithTick(1)}},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				hostFn := NewHostFunction(&types.FunctionType{Params: []types.Type{types.TypeI32}, Returns: []types.Type{types.TypeI32}},
+					func(_ *Interpreter, args []types.Boxed) ([]types.Boxed, error) {
+						return []types.Boxed{args[0]}, nil
+					})
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 9),
+					instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+				}, program.WithConstants(hostFn))
+				i := New(prog, tt.opts...)
+				defer i.Close()
+
+				require.NoError(t, i.Run(context.Background()))
+				require.Equal(t, 1, i.rc[1])
+			})
+		}
+	})
+
+	t.Run("generic host call can return the consumed callable ref", func(t *testing.T) {
+		hostFn := NewHostFunction(&types.FunctionType{Returns: []types.Type{types.TypeRef}},
+			func(i *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+				return []types.Boxed{i.stack[i.sp-1]}, nil
+			})
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		}, program.WithConstants(hostFn))
+		i := New(prog, WithTick(1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 2, i.rc[1])
 	})
 
 	t.Run("host call releases a promoted i64 param even though I64 is declared (not the scalar fast path)", func(t *testing.T) {
@@ -2377,12 +2418,12 @@ func TestInterpreter_Reset(t *testing.T) {
 		i := New(prog)
 		defer i.Close()
 
-		require.Equal(t, i.hbase, len(i.heap))
+		require.Equal(t, i.heapBase, len(i.heap))
 		require.NoError(t, i.Push(types.String("temporary")))
-		require.Greater(t, len(i.heap), i.hbase)
+		require.Greater(t, len(i.heap), i.heapBase)
 
 		i.Reset()
-		require.Equal(t, i.hbase, len(i.heap))
+		require.Equal(t, i.heapBase, len(i.heap))
 		require.Equal(t, 0, i.sp)
 	})
 }
@@ -2671,7 +2712,7 @@ func TestWithThreshold(t *testing.T) {
 			return
 		}
 		require.NotNil(t, i.fallbacks[anchor{addr: 0, ip: 0}])
-		require.Equal(t, float64(1), i.local.Value("vm_jit_emits_total"))
+		require.Equal(t, float64(1), i.samples.Value("vm_jit_emits_total"))
 	})
 
 	t.Run("warm entry skips sampling", func(t *testing.T) {
@@ -2710,7 +2751,7 @@ func TestWithThreshold(t *testing.T) {
 
 		// Once warm, the entry dispatches natively and the threaded safepoint no
 		// longer samples it: the sample count must not grow across further runs.
-		warm := i.local.Samples(addr)
+		warm := i.samples.Samples(addr)
 		for range 32 {
 			i.Reset()
 			require.NoError(t, i.Push(types.I32(41)))
@@ -2719,7 +2760,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), v)
 		}
-		require.Equal(t, warm, i.local.Samples(addr))
+		require.Equal(t, warm, i.samples.Samples(addr))
 	})
 
 	t.Run("jits prefix before f64 rem terminal", func(t *testing.T) {
@@ -2738,7 +2779,7 @@ func TestWithThreshold(t *testing.T) {
 		got, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.F64(1.5), got)
-		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 	})
 
 	t.Run("jits prefix before string read terminal", func(t *testing.T) {
@@ -2756,7 +2797,7 @@ func TestWithThreshold(t *testing.T) {
 		got, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(5), got)
-		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 	})
 
 	t.Run("jits top-level loop", func(t *testing.T) {
@@ -2791,7 +2832,7 @@ func TestWithThreshold(t *testing.T) {
 			looped = looped || ip > 0
 		}
 		require.True(t, looped)
-		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 	})
 
 	t.Run("jits top-level loop-free branch tree over constant f64 array", func(t *testing.T) {
@@ -2831,8 +2872,8 @@ func TestWithThreshold(t *testing.T) {
 			return
 		}
 		require.NotNil(t, i.fallbacks[anchor{addr: 0, ip: 0}])
-		require.GreaterOrEqual(t, i.local.Value("vm_jit_attempts_total"), float64(1))
-		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_attempts_total"), float64(1))
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 	})
 
 	t.Run("jits called loop-free branch tree over constant f64 array", func(t *testing.T) {
@@ -2878,8 +2919,8 @@ func TestWithThreshold(t *testing.T) {
 			return
 		}
 		require.NotNil(t, i.fallbacks[anchor{addr: 0, ip: 0}])
-		require.GreaterOrEqual(t, i.local.Value("vm_jit_attempts_total"), float64(1))
-		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_attempts_total"), float64(1))
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 	})
 
 	t.Run("jits top-level accumulator over many scalar calls", func(t *testing.T) {
@@ -2927,8 +2968,8 @@ func TestWithThreshold(t *testing.T) {
 			return
 		}
 		require.NotNil(t, i.fallbacks[anchor{addr: 0, ip: 0}])
-		require.GreaterOrEqual(t, i.local.Value("vm_jit_attempts_total"), float64(1))
-		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_attempts_total"), float64(1))
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 	})
 
 	t.Run("jits array get from host-pushed f64 array argument", func(t *testing.T) {
@@ -2969,7 +3010,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.InDelta(t, 8*sum, float64(got.(types.F64)), 1e-9)
 		}
-		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 	})
 
 	t.Run("jits array get from host-pushed i1 array argument", func(t *testing.T) {
@@ -3012,7 +3053,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(8*sum), got)
 		}
-		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 	})
 
 	t.Run("jits array get from host-pushed i8 array argument", func(t *testing.T) {
@@ -3053,7 +3094,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(8*sum), got)
 		}
-		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 	})
 
 	t.Run("jits array get from host-pushed i32 array argument", func(t *testing.T) {
@@ -3094,7 +3135,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(8*sum), got)
 		}
-		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 	})
 
 	t.Run("jits array get from host-pushed i64 array argument", func(t *testing.T) {
@@ -3135,7 +3176,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I64(8*sum), got)
 		}
-		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 	})
 
 	t.Run("jits array get from host-pushed f32 array argument", func(t *testing.T) {
@@ -3176,7 +3217,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.InDelta(t, 8*sum, float64(got.(types.F32)), 1e-5)
 		}
-		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 	})
 
 	t.Run("jits array set for host-pushed primitive array arguments", func(t *testing.T) {
@@ -3281,7 +3322,7 @@ func TestWithThreshold(t *testing.T) {
 						require.Equal(t, 2.5, got)
 					}
 				}
-				require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 			})
 		}
 	})
@@ -3339,7 +3380,7 @@ func TestWithThreshold(t *testing.T) {
 					require.NoError(t, err)
 					require.Equal(t, tt.want, got)
 				}
-				require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 			})
 		}
 	})
@@ -3400,7 +3441,7 @@ func TestWithThreshold(t *testing.T) {
 					require.Equal(t, types.I32(7), got)
 					require.Equal(t, tt.want, s.Field(int(tt.idx)))
 				}
-				require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 			})
 		}
 	})
@@ -3754,7 +3795,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.F64(7), v)
 		}
-		require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 
 		i.Reset()
 		require.NoError(t, i.Push(types.I32(-1)))
@@ -3815,7 +3856,7 @@ func TestWithThreshold(t *testing.T) {
 					require.NoError(t, err)
 					require.Equal(t, tt.want, got)
 				}
-				require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 			})
 		}
 	})
@@ -3884,7 +3925,7 @@ func TestWithThreshold(t *testing.T) {
 					require.NoError(t, err)
 					require.Equal(t, tt.want, got)
 				}
-				require.GreaterOrEqual(t, i.local.Value("vm_jit_emits_total"), float64(1))
+				require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 
 				i.Reset()
 				require.NoError(t, i.Push(tt.left))

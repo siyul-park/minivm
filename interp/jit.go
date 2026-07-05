@@ -26,10 +26,14 @@ type compiler struct {
 const pendingLimit = 256
 
 type module struct {
-	entries map[anchor]asm.Callable
-	loops   map[anchor]bool
+	entries map[anchor]native
 	emits   int
 	bytes   int
+}
+
+type native struct {
+	callable asm.Callable
+	loop     bool
 }
 
 // lowering carries the symbolic interpreter state for one trace
@@ -166,9 +170,7 @@ const (
 // yield over many iterations while still polling for cancellation and fuel.
 const loopBudget = 1 << 13
 
-// newFrame builds the frame mirror for fn entered at stack delta base
-// with its operands starting at opBase in the value stack.
-func newFrame(addr int, fn *types.Function, base, opBase int) activation {
+func newActivation(addr int, fn *types.Function, base, opBase int) activation {
 	kinds := fn.LocalKinds()
 	upvals := types.Kinds(fn.Captures)
 	returns := 0
@@ -198,7 +200,7 @@ func (c *compiler) Close() error {
 // callable. Without a usable trace, unsupported op, or rejected observed shape,
 // it emits nothing and leaves threaded dispatch in place.
 func (c *compiler) Compile(i *Interpreter, addr int, fn *types.Function) (*module, error) {
-	mod := &module{entries: map[anchor]asm.Callable{}, loops: map[anchor]bool{}}
+	mod := &module{entries: map[anchor]native{}}
 	if fn == nil || len(fn.Code) == 0 {
 		return mod, nil
 	}
@@ -244,9 +246,14 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 	if (a.ip != 0) != (tree.root.kind == loop) {
 		return false, nil
 	}
-	scratch, ok := c.scratch()
-	if !ok {
+	if len(c.scratchRegs) < scratchCount {
 		return false, nil
+	}
+	funcs := map[int]*types.Function{}
+	for addr := range i.instrs {
+		if fn, ok := i.function(addr); ok {
+			funcs[addr] = fn
+		}
 	}
 	asmb := asm.New(c.arch)
 	entry := asmb.Label()
@@ -254,12 +261,12 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 		assembler: asmb,
 		tree:      tree,
 		branches:  tree.branchIPs(),
-		funcs:     c.funcs(i),
+		funcs:     funcs,
 		queued:    map[branch]asm.Label{},
 		constants: i.constants,
 		globals:   i.globals,
 		heap:      i.heap,
-		scratch:   scratch,
+		scratch:   c.scratchRegs[:scratchCount],
 		entry:     entry,
 		head:      asmb.Label(),
 		addr:      addr,
@@ -268,7 +275,7 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 	if fn.Typ != nil {
 		ctx.returns = len(fn.Typ.Returns)
 	}
-	ctx.frames = append(ctx.frames, newFrame(addr, fn, 0, 0))
+	ctx.frames = append(ctx.frames, newActivation(addr, fn, 0, 0))
 	if !c.lowerer.lower(ctx) {
 		return false, nil
 	}
@@ -283,30 +290,10 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 	if err != nil {
 		return false, err
 	}
-	mod.entries[a] = linked[0].Callable
-	mod.loops[a] = ctx.loop
+	mod.entries[a] = native{callable: linked[0].Callable, loop: ctx.loop}
 	mod.emits++
 	mod.bytes += len(code.Bytes)
 	return true, nil
-}
-
-func (c *compiler) scratch() ([]asm.PReg, bool) {
-	if len(c.scratchRegs) < scratchCount {
-		return nil, false
-	}
-	return c.scratchRegs[:scratchCount], true
-}
-
-// funcs maps every function address to its *types.Function so the trace
-// compiler can inline observed call targets.
-func (c *compiler) funcs(i *Interpreter) map[int]*types.Function {
-	funcs := map[int]*types.Function{}
-	for addr := range i.instrs {
-		if fn, ok := i.function(addr); ok {
-			funcs[addr] = fn
-		}
-	}
-	return funcs
 }
 
 // frame returns the innermost (currently executing) frame.

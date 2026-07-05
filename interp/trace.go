@@ -14,7 +14,7 @@ import (
 // recorded by one member compiles once and serves all.
 type Tracer struct {
 	mu        sync.Mutex
-	precise   [][]func(*Interpreter)
+	exact     [][]func(*Interpreter)
 	loops     map[int][]int
 	trees     map[anchor]*tree
 	blacklist map[anchor]bool
@@ -301,10 +301,10 @@ func (r *Tracer) heap(heap []types.Value) []types.Value {
 func (r *Tracer) codes(i *Interpreter) [][]func(*Interpreter) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if len(r.precise) == len(i.instrs) {
-		return r.precise
+	if len(r.exact) == len(i.instrs) {
+		return r.exact
 	}
-	r.precise = make([][]func(*Interpreter), len(i.instrs))
+	r.exact = make([][]func(*Interpreter), len(i.instrs))
 	for addr, code := range i.instrs {
 		if len(code) == 0 {
 			continue
@@ -315,15 +315,15 @@ func (r *Tracer) codes(i *Interpreter) [][]func(*Interpreter) {
 			locals = fn.LocalKinds()
 			captures = types.Kinds(fn.Captures)
 		}
-		tc := &threadedCompiler{
+		tc := &threader{
 			types:     i.types,
 			constants: i.constants,
 			heap:      i.heap,
-			precise:   true,
+			exact:     true,
 		}
-		r.precise[addr] = tc.Compile(code, locals, captures)
+		r.exact[addr] = tc.Compile(code, locals, captures)
 	}
-	return r.precise
+	return r.exact
 }
 
 func (r *Tracer) op(i *Interpreter, op instr.Opcode, startFP int) step {
@@ -501,7 +501,7 @@ func (r *Tracer) remove(addr int) {
 		}
 	}
 	delete(r.loops, addr)
-	r.precise = nil
+	r.exact = nil
 }
 
 func (r *Tracer) tree(a anchor) *tree {

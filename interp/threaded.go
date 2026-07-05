@@ -9,7 +9,7 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-type threadedCompiler struct {
+type threader struct {
 	types     []types.Type
 	constants []types.Boxed
 	heap      []types.Value
@@ -17,16 +17,16 @@ type threadedCompiler struct {
 	captures  []types.Kind
 	code      []byte
 	ip        int
-	precise   bool
+	exact     bool
 }
 
-var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
-	instr.NOP: func(c *threadedCompiler) func(i *Interpreter) {
+var threaded = [256]func(c *threader) func(i *Interpreter){
+	instr.NOP: func(c *threader) func(i *Interpreter) {
 		skip := 0
-		for !c.precise && c.ip+skip < len(c.code) && instr.Opcode(c.code[c.ip+skip]) == instr.NOP {
+		for !c.exact && c.ip+skip < len(c.code) && instr.Opcode(c.code[c.ip+skip]) == instr.NOP {
 			skip++
 		}
-		if c.precise {
+		if c.exact {
 			skip = 1
 		}
 		c.ip++
@@ -34,14 +34,14 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += skip
 		}
 	},
-	instr.UNREACHABLE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.UNREACHABLE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			i.fr.ip++
 			panic(ErrUnreachableExecuted)
 		}
 	},
-	instr.DROP: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.DROP: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -53,7 +53,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.DUP: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.DUP: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -69,7 +69,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.SWAP: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.SWAP: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -79,7 +79,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.BR: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.BR: func(c *threader) func(i *Interpreter) {
 		offset := instr.ParseI16(c.code, c.ip+1)
 		c.ip += 3
 		return func(i *Interpreter) {
@@ -87,7 +87,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			f.ip += offset + 3
 		}
 	},
-	instr.BR_IF: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.BR_IF: func(c *threader) func(i *Interpreter) {
 		offset := instr.ParseI16(c.code, c.ip+1)
 		c.ip += 3
 		return func(i *Interpreter) {
@@ -102,7 +102,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 3
 		}
 	},
-	instr.BR_TABLE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.BR_TABLE: func(c *threader) func(i *Interpreter) {
 		count := int(c.code[c.ip+1])
 		offsets := make([]int, count+1)
 		for i := 0; i < len(offsets); i++ {
@@ -122,7 +122,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += offsets[cond] + count*2 + 4
 		}
 	},
-	instr.SELECT: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.SELECT: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 3 {
@@ -143,7 +143,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.CALL: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.CALL: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -228,7 +228,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 		}
 	},
-	instr.RETURN: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.RETURN: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.fp == 1 {
@@ -241,7 +241,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.ret()
 		}
 	},
-	instr.YIELD: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.YIELD: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -254,13 +254,13 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.suspend()
 		}
 	},
-	instr.RESUME: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.RESUME: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			i.resume()
 		}
 	},
-	instr.CORO_DONE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.CORO_DONE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -287,7 +287,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.CORO_VALUE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.CORO_VALUE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -312,7 +312,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.RETURN_CALL: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.RETURN_CALL: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -338,7 +338,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 		}
 	},
-	instr.GLOBAL_GET: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.GLOBAL_GET: func(c *threader) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
 		return func(i *Interpreter) {
@@ -355,7 +355,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 3
 		}
 	},
-	instr.GLOBAL_SET: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.GLOBAL_SET: func(c *threader) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
 		return func(i *Interpreter) {
@@ -373,7 +373,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 3
 		}
 	},
-	instr.GLOBAL_TEE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.GLOBAL_TEE: func(c *threader) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
 		return func(i *Interpreter) {
@@ -391,7 +391,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 3
 		}
 	},
-	instr.LOCAL_GET: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.LOCAL_GET: func(c *threader) func(i *Interpreter) {
 		idx := int(c.code[c.ip+1])
 		c.ip += 2
 		switch c.locals[idx].Repr() {
@@ -476,7 +476,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 2
 		}
 	},
-	instr.LOCAL_SET: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.LOCAL_SET: func(c *threader) func(i *Interpreter) {
 		idx := int(c.code[c.ip+1])
 		c.ip += 2
 		// I32/F32/F64 locals never hold a heap ref, so the old value can never
@@ -516,7 +516,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 2
 		}
 	},
-	instr.LOCAL_TEE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.LOCAL_TEE: func(c *threader) func(i *Interpreter) {
 		idx := int(c.code[c.ip+1])
 		c.ip += 2
 		// I32/F32/F64 locals never hold a heap ref, so the old value can never
@@ -555,7 +555,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 2
 		}
 	},
-	instr.CONST_GET: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.CONST_GET: func(c *threader) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
 		if idx >= len(c.constants) {
@@ -585,9 +585,6 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			addr := val.Ref()
 			if str, ok := c.heap[addr].(types.String); ok {
 				text := string(str)
-				if fused := c.fuseString(text, 3); fused != nil {
-					return fused
-				}
 				return func(i *Interpreter) {
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
@@ -619,7 +616,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 3
 		}
 	},
-	instr.UPVAL_GET: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.UPVAL_GET: func(c *threader) func(i *Interpreter) {
 		idx := int(c.code[c.ip+1])
 		c.ip += 2
 		// I32/F32/F64 captures never hold a heap ref, so retain is a no-op; skip
@@ -654,7 +651,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 2
 		}
 	},
-	instr.UPVAL_SET: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.UPVAL_SET: func(c *threader) func(i *Interpreter) {
 		idx := int(c.code[c.ip+1])
 		c.ip += 2
 		// I32/F32/F64 captures never hold a heap ref, so the old value can never
@@ -692,7 +689,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 2
 		}
 	},
-	instr.REF_NEW: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.REF_NEW: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -706,7 +703,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.REF_GET: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.REF_GET: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			val := i.refGet()
@@ -715,7 +712,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.REF_SET: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.REF_SET: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -736,7 +733,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.REF_NULL: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.REF_NULL: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == len(i.stack) {
@@ -748,7 +745,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.REF_TEST: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.REF_TEST: func(c *threader) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
 		if idx >= len(c.types) {
@@ -775,7 +772,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 3
 		}
 	},
-	instr.REF_CAST: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.REF_CAST: func(c *threader) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
 		if idx >= len(c.types) {
@@ -803,7 +800,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 3
 		}
 	},
-	instr.REF_IS_NULL: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.REF_IS_NULL: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -815,7 +812,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.REF_EQ: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.REF_EQ: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -830,7 +827,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.REF_NE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.REF_NE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -845,7 +842,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_CONST: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_CONST: func(c *threader) func(i *Interpreter) {
 		raw := *(*int32)(unsafe.Pointer(&c.code[c.ip+1]))
 		val := types.BoxI32(raw)
 		c.ip += 5
@@ -869,7 +866,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 5
 		}
 	},
-	instr.I32_ADD: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_ADD: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -882,7 +879,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_SUB: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_SUB: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -895,7 +892,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_MUL: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_MUL: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -908,7 +905,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_DIV_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_DIV_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -922,7 +919,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_DIV_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_DIV_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -936,7 +933,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_REM_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_REM_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -950,7 +947,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_REM_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_REM_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -964,7 +961,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_SHL: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_SHL: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -977,7 +974,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_SHR_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_SHR_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -990,7 +987,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_SHR_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_SHR_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1003,7 +1000,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_XOR: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_XOR: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1016,7 +1013,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_AND: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_AND: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1029,7 +1026,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_OR: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_OR: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1042,7 +1039,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_CLZ: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_CLZ: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1053,7 +1050,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_CTZ: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_CTZ: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1064,7 +1061,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_POPCNT: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_POPCNT: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1075,7 +1072,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_ROTL: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_ROTL: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1088,7 +1085,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_ROTR: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_ROTR: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1101,7 +1098,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_EXTEND8_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_EXTEND8_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1112,7 +1109,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_EXTEND16_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_EXTEND16_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1123,7 +1120,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_EQZ: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_EQZ: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1144,7 +1141,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_EQ: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_EQ: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1168,7 +1165,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_NE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_NE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1192,7 +1189,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_LT_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_LT_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1216,7 +1213,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_LT_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_LT_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1240,7 +1237,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_GT_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_GT_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1264,7 +1261,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_GT_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_GT_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1288,7 +1285,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_LE_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_LE_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1312,7 +1309,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_LE_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_LE_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1336,7 +1333,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_GE_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_GE_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1360,7 +1357,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_GE_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_GE_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1384,7 +1381,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_TO_I64_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_TO_I64_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1395,7 +1392,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_TO_I64_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_TO_I64_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1406,7 +1403,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_TO_F32_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_TO_F32_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1417,7 +1414,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_TO_F32_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_TO_F32_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1428,7 +1425,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_TO_F64_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_TO_F64_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1439,7 +1436,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_TO_F64_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_TO_F64_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1450,7 +1447,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I32_REINTERPRET_F32: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I32_REINTERPRET_F32: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1461,7 +1458,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_CONST: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_CONST: func(c *threader) func(i *Interpreter) {
 		val := int64(*(*uint64)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 9
 		if fused := c.fuseI64(func(*Interpreter) int64 { return val }, 9); fused != nil {
@@ -1488,7 +1485,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 9
 		}
 	},
-	instr.I64_ADD: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_ADD: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1501,7 +1498,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_SUB: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_SUB: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1514,7 +1511,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_MUL: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_MUL: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1527,7 +1524,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_DIV_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_DIV_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1541,7 +1538,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_DIV_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_DIV_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1555,7 +1552,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_REM_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_REM_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1569,7 +1566,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_REM_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_REM_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1583,7 +1580,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_SHL: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_SHL: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1596,7 +1593,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_SHR_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_SHR_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1609,7 +1606,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_SHR_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_SHR_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1622,7 +1619,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_XOR: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_XOR: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1635,7 +1632,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_AND: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_AND: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1648,7 +1645,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_OR: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_OR: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1661,7 +1658,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_CLZ: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_CLZ: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1672,7 +1669,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_CTZ: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_CTZ: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1683,7 +1680,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_POPCNT: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_POPCNT: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1694,7 +1691,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_ROTL: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_ROTL: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1707,7 +1704,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_ROTR: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_ROTR: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -1720,7 +1717,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_EXTEND8_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_EXTEND8_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1731,7 +1728,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_EXTEND16_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_EXTEND16_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1742,7 +1739,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_EXTEND32_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_EXTEND32_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -1753,7 +1750,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_EQZ: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_EQZ: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1774,7 +1771,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_EQ: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_EQ: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1798,7 +1795,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_NE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_NE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1822,7 +1819,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_LT_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_LT_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1846,7 +1843,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_LT_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_LT_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1870,7 +1867,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_GT_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_GT_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1894,7 +1891,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_GT_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_GT_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1918,7 +1915,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_LE_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_LE_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1942,7 +1939,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_LE_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_LE_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1966,7 +1963,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_GE_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_GE_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -1990,7 +1987,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_GE_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_GE_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -2014,7 +2011,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_TO_I32: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_TO_I32: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2025,7 +2022,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_TO_F32_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_TO_F32_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2036,7 +2033,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_TO_F32_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_TO_F32_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2047,7 +2044,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_TO_F64_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_TO_F64_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2058,7 +2055,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_TO_F64_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_TO_F64_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2069,7 +2066,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.I64_REINTERPRET_F64: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.I64_REINTERPRET_F64: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2080,7 +2077,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_CONST: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_CONST: func(c *threader) func(i *Interpreter) {
 		raw := *(*float32)(unsafe.Pointer(&c.code[c.ip+1]))
 		val := types.BoxF32(raw)
 		c.ip += 5
@@ -2096,7 +2093,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 5
 		}
 	},
-	instr.F32_ADD: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_ADD: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2109,7 +2106,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_SUB: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_SUB: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2122,7 +2119,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_MUL: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_MUL: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2135,7 +2132,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_DIV: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_DIV: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2149,7 +2146,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_REM: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_REM: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2163,7 +2160,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_MOD: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_MOD: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2177,7 +2174,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_ABS: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_ABS: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2188,7 +2185,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_NEG: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_NEG: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2199,7 +2196,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_SQRT: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_SQRT: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2210,7 +2207,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_CEIL: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_CEIL: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2221,7 +2218,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_FLOOR: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_FLOOR: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2232,7 +2229,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_TRUNC: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_TRUNC: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2243,7 +2240,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_NEAREST: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_NEAREST: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2254,7 +2251,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_MIN: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_MIN: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2267,7 +2264,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_MAX: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_MAX: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2280,7 +2277,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_COPYSIGN: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_COPYSIGN: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2293,7 +2290,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_EQ: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_EQ: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -2317,7 +2314,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_NE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_NE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -2341,7 +2338,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_LT: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_LT: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -2365,7 +2362,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_GT: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_GT: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -2389,7 +2386,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_LE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_LE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -2413,7 +2410,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_GE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_GE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -2437,7 +2434,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_TO_I32_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_TO_I32_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2448,7 +2445,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_TO_I32_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_TO_I32_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2459,7 +2456,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_TO_I64_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_TO_I64_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2470,7 +2467,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_TO_I64_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_TO_I64_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2481,7 +2478,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_TO_F64: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_TO_F64: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2492,7 +2489,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F32_REINTERPRET_I32: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F32_REINTERPRET_I32: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2503,7 +2500,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_CONST: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_CONST: func(c *threader) func(i *Interpreter) {
 		raw := *(*float64)(unsafe.Pointer(&c.code[c.ip+1]))
 		val := types.BoxF64(raw)
 		c.ip += 9
@@ -2519,7 +2516,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 9
 		}
 	},
-	instr.F64_ADD: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_ADD: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2532,7 +2529,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_SUB: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_SUB: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2545,7 +2542,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_MUL: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_MUL: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2558,7 +2555,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_DIV: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_DIV: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2572,7 +2569,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_REM: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_REM: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2586,7 +2583,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_MOD: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_MOD: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2600,7 +2597,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_ABS: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_ABS: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2611,7 +2608,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_NEG: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_NEG: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2622,7 +2619,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_SQRT: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_SQRT: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2633,7 +2630,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_CEIL: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_CEIL: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2644,7 +2641,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_FLOOR: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_FLOOR: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2655,7 +2652,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_TRUNC: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_TRUNC: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2666,7 +2663,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_NEAREST: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_NEAREST: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2677,7 +2674,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_MIN: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_MIN: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2690,7 +2687,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_MAX: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_MAX: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2703,7 +2700,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_COPYSIGN: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_COPYSIGN: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2716,7 +2713,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_EQ: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_EQ: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -2740,7 +2737,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_NE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_NE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -2764,7 +2761,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_LT: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_LT: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -2788,7 +2785,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_GT: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_GT: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -2812,7 +2809,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_LE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_LE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -2836,7 +2833,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_GE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_GE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		if offset, ok := c.peekBrIf(c.ip); ok {
 			return func(i *Interpreter) {
@@ -2860,7 +2857,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_TO_I32_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_TO_I32_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2871,7 +2868,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_TO_I32_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_TO_I32_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2882,7 +2879,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_TO_I64_S: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_TO_I64_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2893,7 +2890,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_TO_I64_U: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_TO_I64_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2904,7 +2901,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_TO_F32: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_TO_F32: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2915,7 +2912,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.F64_REINTERPRET_I64: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.F64_REINTERPRET_I64: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2926,7 +2923,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.STRING_NEW_UTF32: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.STRING_NEW_UTF32: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2937,7 +2934,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.STRING_LEN: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.STRING_LEN: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -2948,7 +2945,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.STRING_CONCAT: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.STRING_CONCAT: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2961,7 +2958,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.STRING_EQ: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.STRING_EQ: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2976,7 +2973,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.STRING_NE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.STRING_NE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -2991,7 +2988,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.STRING_LT: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.STRING_LT: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -3004,7 +3001,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.STRING_GT: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.STRING_GT: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -3017,7 +3014,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.STRING_LE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.STRING_LE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -3030,7 +3027,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.STRING_GE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.STRING_GE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -3043,7 +3040,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.STRING_ENCODE_UTF32: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.STRING_ENCODE_UTF32: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -3054,7 +3051,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.STRING_ITER: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.STRING_ITER: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -3075,7 +3072,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.ARRAY_NEW: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.ARRAY_NEW: func(c *threader) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
 		if idx >= len(c.types) {
@@ -3212,7 +3209,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 		}
 	},
-	instr.ARRAY_NEW_DEFAULT: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.ARRAY_NEW_DEFAULT: func(c *threader) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
 		if idx >= len(c.types) {
@@ -3323,7 +3320,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			}
 		}
 	},
-	instr.ARRAY_LEN: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.ARRAY_LEN: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -3352,7 +3349,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.ARRAY_GET: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.ARRAY_GET: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			val := i.arrayGet()
@@ -3361,7 +3358,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.ARRAY_SET: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.ARRAY_SET: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 3 {
@@ -3406,7 +3403,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.ARRAY_FILL: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.ARRAY_FILL: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 4 {
@@ -3481,7 +3478,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.ARRAY_COPY: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.ARRAY_COPY: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 5 {
@@ -3569,7 +3566,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.ARRAY_APPEND: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.ARRAY_APPEND: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 1 {
@@ -3627,7 +3624,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.ARRAY_DELETE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.ARRAY_DELETE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -3686,7 +3683,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.ARRAY_SLICE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.ARRAY_SLICE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 3 {
@@ -3763,7 +3760,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.STRUCT_NEW: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.STRUCT_NEW: func(c *threader) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
 		if idx >= len(c.types) {
@@ -3799,7 +3796,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 3
 		}
 	},
-	instr.STRUCT_NEW_DEFAULT: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.STRUCT_NEW_DEFAULT: func(c *threader) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
 		if idx >= len(c.types) {
@@ -3823,7 +3820,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 3
 		}
 	},
-	instr.STRUCT_GET: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.STRUCT_GET: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			val := i.structGet()
@@ -3832,7 +3829,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.STRUCT_SET: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.STRUCT_SET: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 3 {
@@ -3902,7 +3899,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.MAP_NEW: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.MAP_NEW: func(c *threader) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
 		if idx >= len(c.types) {
@@ -4023,7 +4020,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 3
 		}
 	},
-	instr.MAP_NEW_DEFAULT: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.MAP_NEW_DEFAULT: func(c *threader) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
 		if idx >= len(c.types) {
@@ -4049,7 +4046,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip += 3
 		}
 	},
-	instr.MAP_LEN: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.MAP_LEN: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 1 {
@@ -4084,7 +4081,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.MAP_GET: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.MAP_GET: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -4191,7 +4188,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.MAP_LOOKUP: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.MAP_LOOKUP: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -4288,7 +4285,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.MAP_SET: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.MAP_SET: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 3 {
@@ -4385,7 +4382,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.MAP_DELETE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.MAP_DELETE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 2 {
@@ -4476,7 +4473,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.MAP_CLEAR: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.MAP_CLEAR: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 1 {
@@ -4525,7 +4522,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.MAP_KEYS: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.MAP_KEYS: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 1 {
@@ -4592,7 +4589,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.MAP_ITER: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.MAP_ITER: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp < 1 {
@@ -4621,7 +4618,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.CLOSURE_NEW: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.CLOSURE_NEW: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -4650,7 +4647,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		}
 	},
 
-	instr.THROW: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.THROW: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -4666,11 +4663,8 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		}
 	},
 
-	instr.ERROR_NEW: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.ERROR_NEW: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if fused := c.fuseError(); fused != nil {
-			return fused
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -4690,7 +4684,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 		}
 	},
 
-	instr.ERROR_GET: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.ERROR_GET: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -4711,7 +4705,7 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 			i.fr.ip++
 		}
 	},
-	instr.ERROR_CODE: func(c *threadedCompiler) func(i *Interpreter) {
+	instr.ERROR_CODE: func(c *threader) func(i *Interpreter) {
 		c.ip++
 		return func(i *Interpreter) {
 			if i.sp == 0 {
@@ -4733,23 +4727,23 @@ var threaded = [256]func(c *threadedCompiler) func(i *Interpreter){
 	},
 }
 
-var unknown = func(_ *Interpreter) {
+var invalid = func(_ *Interpreter) {
 	panic(ErrUnknownOpcode)
 }
 
 func init() {
 	for i, fn := range threaded {
 		if fn == nil {
-			threaded[i] = func(c *threadedCompiler) func(*Interpreter) {
+			threaded[i] = func(c *threader) func(*Interpreter) {
 				inst := instr.Instruction(c.code[c.ip:])
 				c.ip += inst.Width()
-				return unknown
+				return invalid
 			}
 		}
 	}
 }
 
-func (c *threadedCompiler) Compile(code []byte, locals []types.Kind, captures []types.Kind) []func(*Interpreter) {
+func (c *threader) Compile(code []byte, locals []types.Kind, captures []types.Kind) []func(*Interpreter) {
 	c.code = code
 	c.locals = locals
 	c.captures = captures
@@ -4762,7 +4756,7 @@ func (c *threadedCompiler) Compile(code []byte, locals []types.Kind, captures []
 	}
 	for ip := 0; ip < len(code); ip++ {
 		if compiled[ip] == nil {
-			compiled[ip] = unknown
+			compiled[ip] = invalid
 		}
 	}
 	return compiled
@@ -4786,18 +4780,37 @@ func (i *Interpreter) callHost(fn *HostFunction) {
 		panic(err)
 	}
 	i.releaseArgs(args, out)
+	i.releaseArgs(i.stack[i.sp-1:i.sp], out)
 	i.sp += returns - params - 1
 	copy(i.stack[i.sp-returns:i.sp], out)
 	i.fr.ip++
 }
 
+func (i *Interpreter) callHostDirect(fn *HostFunction, params, returns int, refs bool) {
+	delta := returns - params
+	if i.sp < params {
+		panic(ErrStackUnderflow)
+	}
+	if i.sp+delta > len(i.stack) {
+		panic(ErrStackOverflow)
+	}
+	args := i.stack[i.sp-params : i.sp]
+	out, err := fn.Fn(i, args)
+	if err != nil {
+		panic(err)
+	}
+	if refs {
+		i.releaseArgs(args, out)
+	}
+	i.sp += delta
+	copy(i.stack[i.sp-returns:i.sp], out)
+}
+
 // releaseArgs releases each ref-kind value in args that rets does not return
 // unchanged, i.e. every arg whose ownership the host call consumed rather than
 // handing back to the caller. Non-ref args need no bookkeeping and are
-// skipped. callHost and fuseHostFunction's generic (non-scalar-only) closures
-// share this scan; a compile-time-provable all-scalar host signature skips it
-// entirely instead of calling this with an args slice that can never hold a
-// ref (see fuseHostFunction).
+// skipped. callHostDirect skips this scan when a host signature cannot carry
+// heap refs.
 func (i *Interpreter) releaseArgs(args, rets []types.Boxed) {
 	for _, val := range args {
 		if val.Kind() != types.KindRef {

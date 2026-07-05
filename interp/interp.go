@@ -24,9 +24,9 @@ type Interpreter struct {
 	compiler  *compiler
 	cache     *Cache
 	profiler  *prof.Profiler
-	local     *prof.Collector
+	samples   *prof.Collector
 	fallbacks map[anchor]func(*Interpreter)
-	jitted    map[int]bool
+	tried     map[int]bool
 	journal   []uint64
 
 	types     []types.Type
@@ -44,7 +44,7 @@ type Interpreter struct {
 	stack    []types.Boxed
 	roots    []types.Boxed
 	heap     []types.Value
-	hbase    int
+	heapBase int
 	interned map[string]types.Ref
 	free     []int
 	rc       []int
@@ -58,7 +58,7 @@ type Interpreter struct {
 	threshold int64
 	tick      int
 	fuel      int64
-	limit     int
+	heapLimit int
 }
 
 type frame struct {
@@ -84,7 +84,7 @@ type option struct {
 	cache      *Cache
 	tracer     *Tracer
 	profiler   *prof.Profiler
-	local      *prof.Collector
+	samples    *prof.Collector
 	threshold  int
 	cutoff     int
 
@@ -137,7 +137,7 @@ func WithProfiler(p *prof.Profiler) func(*option) {
 // WithLocal injects a pre-seeded sample collector. Tests use it to drive hot-IP
 // selection and to read JIT counters back after a run.
 func WithLocal(p *prof.Collector) func(*option) {
-	return func(o *option) { o.local = p }
+	return func(o *option) { o.samples = p }
 }
 
 func WithFrame(val int) func(*option) {
@@ -207,9 +207,9 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	if tracer == nil {
 		tracer = NewTracer()
 	}
-	local := opt.local
-	if local == nil {
-		local = prof.NewCollector()
+	samples := opt.samples
+	if samples == nil {
+		samples = prof.NewCollector()
 	}
 	m := opt.marshaler
 	if m == nil {
@@ -240,7 +240,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		marshaler: m,
 		cache:     opt.cache,
 		profiler:  opt.profiler,
-		local:     local,
+		samples:   samples,
 		threshold: threshold,
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
@@ -248,7 +248,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
 		fallbacks: map[anchor]func(*Interpreter){},
-		jitted:    map[int]bool{},
+		tried:     map[int]bool{},
 		dynamic:   map[int]bool{},
 		journal:   make([]uint64, journalHead+journalStride*opt.frame),
 		frames:    make([]frame, opt.frame),
@@ -260,7 +260,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		tick:      opt.tick,
 		fuel:      fuel,
 		gas:       fuel,
-		limit:     opt.maxHeap,
+		heapLimit: opt.maxHeap,
 	}
 	i.alloc(types.Null)
 
@@ -289,13 +289,13 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		i.constants[j] = val
 	}
 
-	i.hbase = len(i.heap)
+	i.heapBase = len(i.heap)
 
-	c := &threadedCompiler{
+	c := &threader{
 		types:     i.types,
 		constants: i.constants,
 		heap:      i.heap,
-		precise:   opt.tick == 1,
+		exact:     opt.tick == 1,
 	}
 
 	i.module = &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
@@ -652,9 +652,9 @@ func (i *Interpreter) Reset() {
 	i.roots = i.roots[:0]
 	clear(i.interned)
 
-	i.heap = i.heap[:i.hbase]
-	i.rc = i.rc[:i.hbase]
-	for j := 0; j < i.hbase; j++ {
+	i.heap = i.heap[:i.heapBase]
+	i.rc = i.rc[:i.heapBase]
+	for j := 0; j < i.heapBase; j++ {
 		i.rc[j] = 1
 	}
 	i.free = i.free[:0]
@@ -677,7 +677,7 @@ func (i *Interpreter) compile(addr int) error {
 	if i.compiler == nil {
 		compiler, err := newCompiler()
 		if err != nil {
-			i.local.AddMetric("vm_jit_errors_total", 1)
+			i.samples.AddMetric("vm_jit_errors_total", 1)
 			return err
 		}
 		i.compiler = compiler
@@ -685,15 +685,8 @@ func (i *Interpreter) compile(addr int) error {
 	if i.compiler == nil {
 		return nil
 	}
-	i.local.AddMetric("vm_jit_attempts_total", 1)
-
-	fn, ok := i.function(addr)
-	if !ok {
-		return nil
-	}
-	mod, err := i.compiler.Compile(i, addr, fn)
+	mod, err := i.build(i.compiler, addr)
 	if err != nil {
-		i.local.AddMetric("vm_jit_errors_total", 1)
 		return err
 	}
 	if mod == nil {
@@ -704,15 +697,9 @@ func (i *Interpreter) compile(addr int) error {
 }
 
 func (i *Interpreter) shared(addr int) error {
-	fn, ok := i.function(addr)
-	if !ok {
-		i.cache.fail(addr)
-		return nil
-	}
-
 	compiler, err := newCompiler()
 	if err != nil {
-		i.local.AddMetric("vm_jit_errors_total", 1)
+		i.samples.AddMetric("vm_jit_errors_total", 1)
 		i.cache.ready(addr)
 		return err
 	}
@@ -720,20 +707,19 @@ func (i *Interpreter) shared(addr int) error {
 		i.cache.ready(addr)
 		return nil
 	}
-	i.local.AddMetric("vm_jit_attempts_total", 1)
-
-	mod, err := compiler.Compile(i, addr, fn)
+	mod, err := i.build(compiler, addr)
 	if err != nil {
 		_ = compiler.Close()
-		i.local.AddMetric("vm_jit_errors_total", 1)
 		i.cache.ready(addr)
 		return err
 	}
 	if mod == nil {
-		mod = &module{}
+		_ = compiler.Close()
+		i.cache.fail(addr)
+		return nil
 	}
-	i.local.AddMetric("vm_jit_emits_total", float64(mod.emits))
-	i.local.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
+	i.samples.AddMetric("vm_jit_emits_total", float64(mod.emits))
+	i.samples.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
 	var buf *asm.Buffer
 	if mod.emits > 0 {
 		buf = compiler.buffer
@@ -744,16 +730,30 @@ func (i *Interpreter) shared(addr int) error {
 	return nil
 }
 
+func (i *Interpreter) build(c *compiler, addr int) (*module, error) {
+	fn, ok := i.function(addr)
+	if !ok {
+		return nil, nil
+	}
+	i.samples.AddMetric("vm_jit_attempts_total", 1)
+	mod, err := c.Compile(i, addr, fn)
+	if err != nil {
+		i.samples.AddMetric("vm_jit_errors_total", 1)
+		return nil, err
+	}
+	return mod, nil
+}
+
 // install accounts a successful Compile and rewires the dispatch table: a
 // trace entry replaces the function's first opcode handler and keeps the
 // shadowed threaded handler for guard fallback.
 func (i *Interpreter) install(mod *module, account bool) {
 	if account {
-		i.local.AddMetric("vm_jit_emits_total", float64(mod.emits))
-		i.local.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
+		i.samples.AddMetric("vm_jit_emits_total", float64(mod.emits))
+		i.samples.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
 	}
-	for a, callable := range mod.entries {
-		if a.addr < 0 || a.addr >= len(i.code) || a.ip < 0 || a.ip >= len(i.code[a.addr]) || callable == nil {
+	for a, entry := range mod.entries {
+		if a.addr < 0 || a.addr >= len(i.code) || a.ip < 0 || a.ip >= len(i.code[a.addr]) || entry.callable == nil {
 			continue
 		}
 		// Save the original threaded handler once so deopt always resumes in the
@@ -765,12 +765,12 @@ func (i *Interpreter) install(mod *module, account bool) {
 		if i.fallbacks[a] == nil {
 			i.fallbacks[a] = i.code[a.addr][a.ip]
 		}
-		if mod.loops[a] {
-			i.code[a.addr][a.ip] = i.loop(callable)
+		if entry.loop {
+			i.code[a.addr][a.ip] = i.loop(entry.callable)
 		} else if a.addr == 0 {
-			i.code[a.addr][a.ip] = i.moduleEntry(a, callable)
+			i.code[a.addr][a.ip] = i.moduleEntry(a, entry.callable)
 		} else {
-			i.code[a.addr][a.ip] = i.entry(a, callable)
+			i.code[a.addr][a.ip] = i.entry(a, entry.callable)
 		}
 	}
 }
@@ -791,7 +791,7 @@ func (i *Interpreter) sync() {
 
 func (i *Interpreter) flush() {
 	if i.profiler != nil {
-		i.profiler.Flush(i.local)
+		i.profiler.Flush(i.samples)
 	}
 }
 
@@ -896,7 +896,7 @@ func (i *Interpreter) observe(f *frame) error {
 	// installs anything; compile here, once the function is hot and the loop
 	// trace first appears, so the loop header gets its own native. The hotness
 	// gate keeps WithThreshold(-1) a pure interpreter.
-	samples := i.local.Samples(f.addr)
+	samples := i.samples.Samples(f.addr)
 	if i.threshold >= 0 && f.ip > 0 &&
 		samples >= uint64(i.threshold) &&
 		i.fallbacks[anchor{addr: f.addr, ip: f.ip}] == nil {
@@ -917,8 +917,8 @@ func (i *Interpreter) observe(f *frame) error {
 			break
 		}
 	}
-	if i.cache == nil && i.threshold >= 0 && samples >= uint64(i.threshold) && !i.jitted[f.addr] {
-		i.jitted[f.addr] = true
+	if i.cache == nil && i.threshold >= 0 && samples >= uint64(i.threshold) && !i.tried[f.addr] {
+		i.tried[f.addr] = true
 		if err := i.compile(f.addr); err != nil {
 			return err
 		}
@@ -928,7 +928,7 @@ func (i *Interpreter) observe(f *frame) error {
 
 // sample records one profile hit for the frame's current instruction.
 func (i *Interpreter) sample(f *frame) {
-	i.local.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
+	i.samples.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
 }
 
 // entry wraps a native trace Entry Callable. The CALL handler has already
@@ -978,14 +978,7 @@ func (i *Interpreter) entry(root anchor, callable asm.Callable) func(*Interprete
 				panic(err)
 			}
 		default:
-			i.exit(root)
-			// IP 0 may dispatch to a native entry; run the handler it shadows once
-			// so we make progress instead of re-entering native and re-trapping. Any
-			// later IP is an untouched threaded handler the Run loop dispatches next.
-			fallback := anchor{addr: i.fr.addr, ip: 0}
-			if i.fr.ip == 0 && i.fallbacks[fallback] != nil {
-				i.fallbacks[fallback](i)
-			}
+			i.fallback(root)
 		}
 	}
 }
@@ -1019,11 +1012,7 @@ func (i *Interpreter) moduleEntry(root anchor, callable asm.Callable) func(*Inte
 				panic(err)
 			}
 		default:
-			i.exit(root)
-			fallback := anchor{addr: i.fr.addr, ip: 0}
-			if i.fr.ip == 0 && i.fallbacks[fallback] != nil {
-				i.fallbacks[fallback](i)
-			}
+			i.fallback(root)
 		}
 	}
 }
@@ -1038,7 +1027,7 @@ func (i *Interpreter) loop(callable asm.Callable) func(*Interpreter) {
 	return func(i *Interpreter) {
 		ctx := i.context()
 		// Decouple the loop's safepoint cadence from tick: a native iteration does
-		// the work of a whole loop body, so yielding every tick (1 under precise
+		// the work of a whole loop body, so yielding every tick (1 under exact
 		// dispatch) would drown the loop in deopt/re-enter churn. Run many
 		// iterations natively between safepoints instead.
 		i.journal[journalBudget] = loopBudget
@@ -1073,18 +1062,20 @@ func (i *Interpreter) exit(root anchor) {
 	if i.compiler == nil {
 		return
 	}
-	i.local.AddMetric("vm_jit_attempts_total", 1)
-	fn, ok := i.function(root.addr)
-	if !ok {
-		return
-	}
-	mod, err := i.compiler.Compile(i, root.addr, fn)
+	mod, err := i.build(i.compiler, root.addr)
 	if err != nil {
-		i.local.AddMetric("vm_jit_errors_total", 1)
 		panic(err)
 	}
 	if mod != nil {
 		i.install(mod, true)
+	}
+}
+
+func (i *Interpreter) fallback(root anchor) {
+	i.exit(root)
+	a := anchor{addr: i.fr.addr, ip: 0}
+	if i.fr.ip == 0 && i.fallbacks[a] != nil {
+		i.fallbacks[a](i)
 	}
 }
 
@@ -1406,7 +1397,7 @@ func (i *Interpreter) alloc(val types.Value) int {
 		return addr
 	}
 
-	if i.limit > 0 && len(i.heap) >= i.limit {
+	if i.heapLimit > 0 && len(i.heap) >= i.heapLimit {
 		i.gc()
 		if addr, ok := i.reuse(val); ok {
 			return addr
@@ -1419,7 +1410,7 @@ func (i *Interpreter) alloc(val types.Value) int {
 		if addr, ok := i.reuse(val); ok {
 			return addr
 		}
-		if i.limit > 0 && len(i.heap) >= i.limit {
+		if i.heapLimit > 0 && len(i.heap) >= i.heapLimit {
 			panic(ErrHeapExhausted)
 		}
 
@@ -1472,11 +1463,11 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if addr >= len(i.coros) {
 		i.coros = append(i.coros, make([]bool, n-len(i.coros))...)
 	}
-	c := &threadedCompiler{
+	c := &threader{
 		types:     i.types,
 		constants: i.constants,
 		heap:      i.heap,
-		precise:   i.tick == 1,
+		exact:     i.tick == 1,
 	}
 	i.instrs[addr] = fn.Code
 	i.code[addr] = c.Compile(fn.Code, fn.LocalKinds(), types.Kinds(fn.Captures))
@@ -1501,7 +1492,7 @@ func (i *Interpreter) remove(addr int) {
 			delete(i.fallbacks, a)
 		}
 	}
-	delete(i.jitted, addr)
+	delete(i.tried, addr)
 	if i.tracer != nil {
 		i.tracer.remove(addr)
 	}

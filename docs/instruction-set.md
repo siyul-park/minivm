@@ -103,7 +103,7 @@ Exception handling uses per-function handler tables. `types.Error` is the canoni
 
 ## Fusion Notes
 
-Threaded execution may fuse common opcode sequences in non-precise mode. Debugging with `WithTick(1)` preserves bytecode-level instruction boundaries.
+Threaded execution may fuse common opcode sequences in non-exact mode. Debugging with `WithTick(1)` preserves bytecode-level instruction boundaries.
 
 Examples:
 
