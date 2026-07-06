@@ -112,7 +112,7 @@ func (a *GlobalValueNumberingAnalysis) Run(m *pass.Manager, fn *types.Function) 
 		return nil, err
 	}
 
-	g := newGNumbering(fn, blocks)
+	g := newNumbering(fn, blocks)
 	for block, blk := range blocks {
 		g.reset(block)
 		for ip := blk.Start; ip < blk.End; {
@@ -127,7 +127,7 @@ func (a *GlobalValueNumberingAnalysis) Run(m *pass.Manager, fn *types.Function) 
 	return g.out, nil
 }
 
-func newGNumbering(fn *types.Function, blocks []*BasicBlock) *gnumbering {
+func newNumbering(fn *types.Function, blocks []*BasicBlock) *gnumbering {
 	var locals []types.Type
 	if fn.Typ != nil {
 		locals = append(locals, fn.Typ.Params...)
