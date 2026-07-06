@@ -23,7 +23,11 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 			instr.New(instr.RETURN),
 		).MustBuild()
 
-		gvn := runGVN(t, fn)
+		m := pass.NewManager()
+		pass.Register(m, NewBasicBlocksAnalysis())
+		pass.Register(m, NewGlobalValueNumberingAnalysis())
+		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		require.NoError(t, err)
 		require.Len(t, gvn.Redundant, 1)
 		r := gvn.Redundant[9]
 		require.Equal(t, 5, r.Start)
@@ -46,7 +50,11 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 		fb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
 		fn := fb.MustBuild()
 
-		gvn := runGVN(t, fn)
+		m := pass.NewManager()
+		pass.Register(m, NewBasicBlocksAnalysis())
+		pass.Register(m, NewGlobalValueNumberingAnalysis())
+		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		require.NoError(t, err)
 		require.Len(t, gvn.Redundant, 1)
 		var r Redundancy
 		for _, v := range gvn.Redundant {
@@ -67,7 +75,11 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 		fb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
 		fn := fb.MustBuild()
 
-		gvn := runGVN(t, fn)
+		m := pass.NewManager()
+		pass.Register(m, NewBasicBlocksAnalysis())
+		pass.Register(m, NewGlobalValueNumberingAnalysis())
+		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		require.NoError(t, err)
 		require.Len(t, gvn.Redundant, 1)
 		var r Redundancy
 		for _, v := range gvn.Redundant {
@@ -90,7 +102,11 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 		fb.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
 		fn := fb.MustBuild()
 
-		gvn := runGVN(t, fn)
+		m := pass.NewManager()
+		pass.Register(m, NewBasicBlocksAnalysis())
+		pass.Register(m, NewGlobalValueNumberingAnalysis())
+		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		require.NoError(t, err)
 		require.Empty(t, gvn.Redundant)
 	})
 
@@ -104,7 +120,11 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 		fb.Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN))
 		fn := fb.MustBuild()
 
-		gvn := runGVN(t, fn)
+		m := pass.NewManager()
+		pass.Register(m, NewBasicBlocksAnalysis())
+		pass.Register(m, NewGlobalValueNumberingAnalysis())
+		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		require.NoError(t, err)
 		require.Empty(t, gvn.Redundant, "slot 2 is reassigned, so its value has no stable cross-block identity")
 	})
 
@@ -120,7 +140,11 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 			instr.New(instr.RETURN),
 		).MustBuild()
 
-		gvn := runGVN(t, fn)
+		m := pass.NewManager()
+		pass.Register(m, NewBasicBlocksAnalysis())
+		pass.Register(m, NewGlobalValueNumberingAnalysis())
+		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		require.NoError(t, err)
 		require.Len(t, gvn.Redundant, 1)
 		for _, r := range gvn.Redundant {
 			require.Equal(t, 2, r.Home, "slot 2 still holds the value")
@@ -138,7 +162,12 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 			instr.New(instr.RETURN),
 		).MustBuild()
 
-		require.Len(t, runGVN(t, fn).Redundant, 1)
+		m := pass.NewManager()
+		pass.Register(m, NewBasicBlocksAnalysis())
+		pass.Register(m, NewGlobalValueNumberingAnalysis())
+		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		require.NoError(t, err)
+		require.Len(t, gvn.Redundant, 1)
 	})
 
 	t.Run("non-commutative operands do not match", func(t *testing.T) {
@@ -152,7 +181,12 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 			instr.New(instr.RETURN),
 		).MustBuild()
 
-		require.Empty(t, runGVN(t, fn).Redundant)
+		m := pass.NewManager()
+		pass.Register(m, NewBasicBlocksAnalysis())
+		pass.Register(m, NewGlobalValueNumberingAnalysis())
+		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		require.NoError(t, err)
+		require.Empty(t, gvn.Redundant)
 	})
 
 	t.Run("a store invalidates the expression", func(t *testing.T) {
@@ -169,7 +203,12 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 			instr.New(instr.RETURN),
 		).MustBuild()
 
-		require.Empty(t, runGVN(t, fn).Redundant)
+		m := pass.NewManager()
+		pass.Register(m, NewBasicBlocksAnalysis())
+		pass.Register(m, NewGlobalValueNumberingAnalysis())
+		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		require.NoError(t, err)
+		require.Empty(t, gvn.Redundant)
 	})
 
 	t.Run("a call ends numbering", func(t *testing.T) {
@@ -185,16 +224,11 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 			instr.New(instr.RETURN),
 		).MustBuild()
 
-		require.Empty(t, runGVN(t, fn).Redundant)
+		m := pass.NewManager()
+		pass.Register(m, NewBasicBlocksAnalysis())
+		pass.Register(m, NewGlobalValueNumberingAnalysis())
+		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		require.NoError(t, err)
+		require.Empty(t, gvn.Redundant)
 	})
-}
-
-func runGVN(t *testing.T, fn *types.Function) *GlobalValueNumbering {
-	t.Helper()
-	m := pass.NewManager()
-	pass.Register(m, NewBasicBlocksAnalysis())
-	pass.Register(m, NewGlobalValueNumberingAnalysis())
-	gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
-	require.NoError(t, err)
-	return gvn
 }
