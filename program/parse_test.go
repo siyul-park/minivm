@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/internal/textparse"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
@@ -65,4 +66,16 @@ func TestParse(t *testing.T) {
 			require.Equal(t, tt.prog.String(), parsed.String())
 		})
 	}
+
+	t.Run("long code line", func(t *testing.T) {
+		parsed, err := Parse(strings.NewReader("i32.const" + strings.Repeat(" ", 70_000) + "1\n"))
+		require.NoError(t, err)
+		require.Equal(t, New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}).String(), parsed.String())
+	})
+
+	t.Run("oversized code line", func(t *testing.T) {
+		_, err := Parse(strings.NewReader("i32.const " + strings.Repeat(" ", textparse.MaxLineBytes) + "1\n"))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "exceeds maximum allowed size")
+	})
 }
