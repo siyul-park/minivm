@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/internal/textparse"
+	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
