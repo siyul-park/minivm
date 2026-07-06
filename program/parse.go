@@ -13,13 +13,14 @@ import (
 // Parse parses the output of Program.String() back into a Program.
 // Format:
 //
-//	<disassembly lines>   — code section
-//	                      — blank line separator
-//	<constants section>   — "NNNN:\t<line0>\n\t<continuation>…" (func values)
-//	                      — blank line separator
-//	<types section>       — "N:\t<type-string>"
+//	<disassembly lines>   - code section
+//	                      - blank line separator
+//	<constants section>   - "NNNN:\t<line0>\n\t<continuation>..." (func values)
+//	                      - blank line separator
+//	<types section>       - "N:\t<type-string>"
 func Parse(r io.Reader) (*Program, error) {
 	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 
 	// Phase 1: code section (lines until first blank line or EOF).
 	var codeLines []string
@@ -41,8 +42,8 @@ func Parse(r io.Reader) (*Program, error) {
 
 	// Phases 2+: read all remaining multi-line entries (blank line terminates each
 	// section; EOF ends reading). Classify each entry by content:
-	//   - starts with "func(" → constant (*Function)
-	//   - otherwise           → type (single-line Type string)
+	//   - starts with "func(" -> constant (*Function)
+	//   - otherwise           -> type (single-line Type string)
 	var entries [][]string
 	var block []string
 
