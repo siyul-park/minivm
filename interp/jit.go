@@ -222,9 +222,19 @@ func (c *compiler) emit(i *Interpreter, addr int, fn *types.Function, mod *modul
 	if i.tracer == nil {
 		return false, nil
 	}
+	anchors := i.tracer.anchors(addr)
+	if len(anchors) == 0 {
+		return false, nil
+	}
+	funcs := map[int]*types.Function{}
+	for addr := range i.instrs {
+		if fn, ok := i.function(addr); ok {
+			funcs[addr] = fn
+		}
+	}
 	any := false
-	for _, ip := range i.tracer.anchors(addr) {
-		ok, err := c.emitRoot(i, addr, fn, mod, anchor{addr: addr, ip: ip})
+	for _, ip := range anchors {
+		ok, err := c.emitRoot(i, addr, fn, mod, anchor{addr: addr, ip: ip}, funcs)
 		if err != nil {
 			return false, err
 		}
@@ -237,7 +247,7 @@ func (c *compiler) emit(i *Interpreter, addr int, fn *types.Function, mod *modul
 // callable keyed by a. An entry root (a.ip == 0) compiles the whole function
 // from a clean frame; a loop root compiles one iteration with a native
 // back-edge re-entered mid-function at a.ip.
-func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *module, a anchor) (bool, error) {
+func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *module, a anchor, funcs map[int]*types.Function) (bool, error) {
 	tree := i.tracer.rootAt(a)
 	if tree == nil {
 		return false, nil
@@ -253,12 +263,6 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 	}
 	if len(c.scratchRegs) < scratchCount {
 		return false, nil
-	}
-	funcs := map[int]*types.Function{}
-	for addr := range i.instrs {
-		if fn, ok := i.function(addr); ok {
-			funcs[addr] = fn
-		}
 	}
 	asmb := asm.New(c.arch)
 	entry := asmb.Label()

@@ -17,17 +17,19 @@ import (
 
 type Interpreter struct {
 	ctx       context.Context
+	done      <-chan struct{}
 	tracer    *Tracer
 	hook      func(*Interpreter) error
 	marshaler Marshaler
 
-	compiler  *compiler
-	cache     *Cache
-	profiler  *prof.Profiler
-	samples   *prof.Collector
-	fallbacks map[anchor]func(*Interpreter)
-	tried     map[int]bool
-	journal   []uint64
+	compiler       *compiler
+	cache          *Cache
+	profiler       *prof.Profiler
+	samples        *prof.Collector
+	fallbacks      map[anchor]func(*Interpreter)
+	entryFallbacks []func(*Interpreter)
+	tried          map[int]bool
+	journal        []uint64
 
 	types     []types.Type
 	constants []types.Boxed
@@ -235,32 +237,33 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	}
 
 	i := &Interpreter{
-		tracer:    tracer,
-		hook:      opt.hook,
-		marshaler: m,
-		cache:     opt.cache,
-		profiler:  opt.profiler,
-		samples:   samples,
-		threshold: threshold,
-		types:     prog.Types,
-		constants: make([]types.Boxed, len(prog.Constants)),
-		globals:   make([]types.Boxed, 0, opt.globals),
-		instrs:    make([][]byte, len(prog.Constants)+1),
-		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
-		fallbacks: map[anchor]func(*Interpreter){},
-		tried:     map[int]bool{},
-		dynamic:   map[int]bool{},
-		journal:   make([]uint64, journalHead+journalStride*opt.frame),
-		frames:    make([]frame, opt.frame),
-		stack:     make([]types.Boxed, opt.stack),
-		heap:      make([]types.Value, 0, opt.heap),
-		interned:  make(map[string]types.Ref),
-		free:      make([]int, 0, opt.heap),
-		rc:        make([]int, 0, opt.heap),
-		tick:      opt.tick,
-		fuel:      fuel,
-		gas:       fuel,
-		limit:     opt.maxHeap,
+		tracer:         tracer,
+		hook:           opt.hook,
+		marshaler:      m,
+		cache:          opt.cache,
+		profiler:       opt.profiler,
+		samples:        samples,
+		threshold:      threshold,
+		types:          prog.Types,
+		constants:      make([]types.Boxed, len(prog.Constants)),
+		globals:        make([]types.Boxed, 0, opt.globals),
+		instrs:         make([][]byte, len(prog.Constants)+1),
+		code:           make([][]func(*Interpreter), len(prog.Constants)+1),
+		fallbacks:      map[anchor]func(*Interpreter){},
+		entryFallbacks: make([]func(*Interpreter), len(prog.Constants)+1),
+		tried:          map[int]bool{},
+		dynamic:        map[int]bool{},
+		journal:        make([]uint64, journalHead+journalStride*opt.frame),
+		frames:         make([]frame, opt.frame),
+		stack:          make([]types.Boxed, opt.stack),
+		heap:           make([]types.Value, 0, opt.heap),
+		interned:       make(map[string]types.Ref),
+		free:           make([]int, 0, opt.heap),
+		rc:             make([]int, 0, opt.heap),
+		tick:           opt.tick,
+		fuel:           fuel,
+		gas:            fuel,
+		limit:          opt.maxHeap,
 	}
 	i.alloc(types.Null)
 
@@ -339,6 +342,10 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 
 func (i *Interpreter) Run(ctx context.Context) error {
 	i.ctx = ctx
+	i.done = nil
+	if ctx != nil {
+		i.done = ctx.Done()
+	}
 	for {
 		// dispatch's recover absorbs every panic, so nothing escapes it and ctx is
 		// always cleared below; a caught throw/trap loops to resume at the handler.
@@ -347,6 +354,7 @@ func (i *Interpreter) Run(ctx context.Context) error {
 			continue
 		}
 		i.ctx = nil
+		i.done = nil
 		return err
 	}
 }
@@ -374,13 +382,16 @@ func (i *Interpreter) dispatch() (caught bool, err error) {
 	f := i.fr
 	code := f.code
 	tick := i.tick
+	quiet := i.done == nil && i.gas < 0 && i.hook == nil && i.profiler == nil && i.cache == nil
 
 	for f.ip < len(code) {
 		tick--
 		if tick == 0 {
 			tick = i.tick
-			if err := i.safepoint(); err != nil {
-				return false, err
+			if !quiet || i.entryFallback(f.addr) == nil {
+				if err := i.safepoint(); err != nil {
+					return false, err
+				}
 			}
 		}
 
@@ -764,6 +775,9 @@ func (i *Interpreter) install(mod *module, account bool) {
 		// on return; a loop root re-enters mid-function and never unwinds it.
 		if i.fallbacks[a] == nil {
 			i.fallbacks[a] = i.code[a.addr][a.ip]
+			if a.ip == 0 {
+				i.entryFallbacks[a.addr] = i.fallbacks[a]
+			}
 		}
 		if entry.loop {
 			i.code[a.addr][a.ip] = i.loop(entry.callable)
@@ -829,10 +843,12 @@ func (i *Interpreter) function(addr int) (*types.Function, bool) {
 // frame i.fr, so a native yield must rebuild frames (deopt) and point i.fr at
 // the resumable frame before calling it.
 func (i *Interpreter) safepoint() error {
-	select {
-	case <-i.ctx.Done():
-		return i.ctx.Err()
-	default:
+	if i.done != nil {
+		select {
+		case <-i.done:
+			return i.ctx.Err()
+		default:
+		}
 	}
 
 	if i.gas >= 0 {
@@ -853,8 +869,8 @@ func (i *Interpreter) safepoint() error {
 	// A warm function already has its entry trace installed. Its sampling and
 	// entry/loop capture are dead (those gates require the entry fallback nil)
 	// and its one-shot compile trigger has already fired, so the warm path pays
-	// only one map lookup here. A user profiler still needs per-tick samples.
-	if i.fallbacks[anchor{addr: f.addr, ip: 0}] == nil {
+	// only one indexed read here. A user profiler still needs per-tick samples.
+	if i.entryFallback(f.addr) == nil {
 		if err := i.observe(f); err != nil {
 			return err
 		}
@@ -1076,10 +1092,18 @@ func (i *Interpreter) exit(root anchor) {
 
 func (i *Interpreter) fallback(root anchor) {
 	i.exit(root)
-	a := anchor{addr: i.fr.addr, ip: 0}
-	if i.fr.ip == 0 && i.fallbacks[a] != nil {
-		i.fallbacks[a](i)
+	if i.fr.ip == 0 {
+		if fn := i.entryFallback(i.fr.addr); fn != nil {
+			fn(i)
+		}
 	}
+}
+
+func (i *Interpreter) entryFallback(addr int) func(*Interpreter) {
+	if addr < 0 || addr >= len(i.entryFallbacks) {
+		return nil
+	}
+	return i.entryFallbacks[addr]
 }
 
 // deopt rebuilds VM frames from the native journal after a trap. Native frames
@@ -1460,6 +1484,9 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if addr >= len(i.code) {
 		i.code = append(i.code, make([][]func(*Interpreter), n-len(i.code))...)
 	}
+	if addr >= len(i.entryFallbacks) {
+		i.entryFallbacks = append(i.entryFallbacks, make([]func(*Interpreter), n-len(i.entryFallbacks))...)
+	}
 	if addr >= len(i.handlers) {
 		i.handlers = append(i.handlers, make([][]instr.Handler, n-len(i.handlers))...)
 	}
@@ -1488,6 +1515,7 @@ func (i *Interpreter) remove(addr int) {
 	}
 	i.instrs[addr] = nil
 	i.code[addr] = nil
+	i.entryFallbacks[addr] = nil
 	i.handlers[addr] = nil
 	i.coros[addr] = false
 	for a := range i.fallbacks {

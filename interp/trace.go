@@ -257,11 +257,12 @@ func (r *Tracer) clone(i *Interpreter) Interpreter {
 	out.hook = nil
 	out.threshold = -1
 
-	out.constants = append([]types.Boxed(nil), i.constants...)
+	out.constants = i.constants
 	out.globals = append([]types.Boxed(nil), i.globals...)
-	out.instrs = append([][]byte(nil), i.instrs...)
+	out.instrs = i.instrs
 	out.code = r.codes(i)
 	out.fallbacks = map[anchor]func(*Interpreter){}
+	out.entryFallbacks = make([]func(*Interpreter), len(out.code))
 	out.journal = append([]uint64(nil), i.journal...)
 	out.frames = append([]frame(nil), i.frames...)
 	out.stack = append([]types.Boxed(nil), i.stack...)
