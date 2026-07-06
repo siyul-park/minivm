@@ -42,9 +42,10 @@ Do not report done, open/update a PR, or summarize a change as complete until ev
 3. Removable symbols were removed, inlined, merged, narrowed, made private, renamed by role, or replaced by direct local code.
 4. A simpler algorithm or control flow was considered; the chosen shape is the simplest correct option found.
 5. Another simplification pass found no safe improvement.
-6. Tests follow `docs/coding-patterns.md` §6.
-7. PR/commit/docs expectations follow `docs/coding-patterns.md` §7-§8.
-8. Any intentionally skipped simplification is recorded in the final summary with the reason.
+6. Declaration order follows `docs/coding-patterns.md` §1.3 and §2.4: callers before callees, except `With*` option functions may sit immediately above the constructor they configure.
+7. Tests follow `docs/coding-patterns.md` §6.
+8. PR/commit/docs expectations follow `docs/coding-patterns.md` §7-§8.
+9. Any intentionally skipped simplification is recorded in the final summary with the reason.
 
 For Claude Code, also apply `.claude/CLAUDE.md`. For Codex, this `AGENTS.md` is the required agent instruction source.
 
