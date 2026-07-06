@@ -510,6 +510,8 @@ Use the standard shape from `docs/README.md`:
 
 Keep wording direct and standard. Prefer `minivm`, `threaded interpreter`, `JIT`, `trace`, `opcode`, `value`, `ref`, and `heap` consistently.
 
+Agent instruction files are routing and enforcement surfaces. Keep `AGENTS.md` as the common Claude Code / Codex contract, keep `.claude/CLAUDE.md` as a short Claude overlay that imports `AGENTS.md`, and keep detailed coding rules in their owner docs.
+
 A convention-changing code change is incomplete without the matching documentation update.
 
 | Change | Update |
