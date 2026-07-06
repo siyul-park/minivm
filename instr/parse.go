@@ -11,6 +11,8 @@ import (
 
 var mnemonicMap map[string]Opcode
 
+const maxParseLineBytes = 1 << 20 // 1 MiB
+
 func init() {
 	mnemonicMap = make(map[string]Opcode)
 	for i := 0; i <= 0xFF; i++ {
@@ -134,7 +136,9 @@ func Parse(line string) (Instruction, error) {
 func ParseAll(r io.Reader) ([]Instruction, error) {
 	var instrs []Instruction
 	scanner := bufio.NewScanner(r)
-	for line := 1; scanner.Scan(); line++ {
+	scanner.Buffer(make([]byte, 0, 64*1024), maxParseLineBytes)
+	line := 1
+	for ; scanner.Scan(); line++ {
 		inst, err := Parse(scanner.Text())
 		if err != nil {
 			return nil, fmt.Errorf("line %d: %w", line, err)
@@ -144,7 +148,10 @@ func ParseAll(r io.Reader) ([]Instruction, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		if strings.Contains(err.Error(), "token too long") {
+			return nil, fmt.Errorf("line %d exceeds maximum allowed size of %d bytes", line, maxParseLineBytes)
+		}
+		return nil, fmt.Errorf("line %d: %w", line, err)
 	}
 	return instrs, nil
 }
@@ -164,7 +171,7 @@ func parseOperands(fields []string, widths []int) ([]uint64, error) {
 			operands = append(operands, v)
 			fi++
 		} else {
-			// Variable-length: count byte followed by count × |w| elements
+			// Variable-length: count byte followed by count x |w| elements
 			if fi >= len(fields) {
 				return nil, fmt.Errorf("expected count, got end of input")
 			}
@@ -208,7 +215,7 @@ func parseOperand(s string, width int) (uint64, error) {
 		}
 		return v, nil
 	}
-	// Float literal (contains '.' or 'e'/'E') → encode as IEEE 754 bits
+	// Float literal (contains '.' or 'e'/'E') -> encode as IEEE 754 bits
 	if strings.ContainsAny(s, ".eE") {
 		switch width {
 		case 4:

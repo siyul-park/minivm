@@ -10,6 +10,8 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+const maxParseLineBytes = 1 << 20 // 1 MiB
+
 // Parse parses the output of Program.String() back into a Program.
 // Format:
 //
@@ -20,10 +22,13 @@ import (
 //	<types section>       — "N:\t<type-string>"
 func Parse(r io.Reader) (*Program, error) {
 	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxParseLineBytes)
 
 	// Phase 1: code section (lines until first blank line or EOF).
 	var codeLines []string
+	lineNum := 0
 	for scanner.Scan() {
+		lineNum++
 		line := scanner.Text()
 		if line == "" {
 			break
@@ -31,7 +36,10 @@ func Parse(r io.Reader) (*Program, error) {
 		codeLines = append(codeLines, line)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		if strings.Contains(err.Error(), "token too long") {
+			return nil, fmt.Errorf("line %d exceeds maximum allowed size of %d bytes", lineNum+1, maxParseLineBytes)
+		}
+		return nil, fmt.Errorf("line %d: %w", lineNum+1, err)
 	}
 
 	codeInstrs, err := instr.ParseAll(strings.NewReader(strings.Join(codeLines, "\n")))
@@ -54,6 +62,7 @@ func Parse(r io.Reader) (*Program, error) {
 	}
 
 	for scanner.Scan() {
+		lineNum++
 		line := scanner.Text()
 		if line == "" {
 			flushBlock()
@@ -72,7 +81,10 @@ func Parse(r io.Reader) (*Program, error) {
 	}
 	flushBlock()
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		if strings.Contains(err.Error(), "token too long") {
+			return nil, fmt.Errorf("line %d exceeds maximum allowed size of %d bytes", lineNum+1, maxParseLineBytes)
+		}
+		return nil, fmt.Errorf("line %d: %w", lineNum+1, err)
 	}
 
 	var constants []types.Value

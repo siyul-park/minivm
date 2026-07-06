@@ -65,4 +65,16 @@ func TestParse(t *testing.T) {
 			require.Equal(t, tt.prog.String(), parsed.String())
 		})
 	}
+
+	t.Run("long code line", func(t *testing.T) {
+		parsed, err := Parse(strings.NewReader("i32.const" + strings.Repeat(" ", 70_000) + "1\n"))
+		require.NoError(t, err)
+		require.Equal(t, New([]instr.Instruction{instr.New(instr.I32_CONST, 1)}).String(), parsed.String())
+	})
+
+	t.Run("oversized code line", func(t *testing.T) {
+		_, err := Parse(strings.NewReader("i32.const " + strings.Repeat(" ", maxParseLineBytes) + "1\n"))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "exceeds maximum allowed size")
+	})
 }
