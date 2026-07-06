@@ -1,16 +1,27 @@
 # CLAUDE.md
 
-Claude-specific workflows only. Read `AGENTS.md` first.
+Claude-specific workflow gate. Read `AGENTS.md` first; it is the common contract for Claude Code and Codex.
 
-## Code Changes
+## Required Flow
 
-Before changing code or tests, read `docs/coding-patterns.md` through its Fast Path and any task-relevant docs listed in `AGENTS.md`. Treat that read as mandatory for each editing task, not optional background context.
+Before changing code or tests:
 
-Follow `docs/coding-patterns.md` unless the task or repository context requires a narrower rule. Before reporting done, re-read touched files against the checklist below and the relevant `docs/coding-patterns.md` sections. This review is a strict completion gate: fix every convention violation you find, and record any convention-driven refactor you intentionally leave unapplied with the reason.
+1. Read task-relevant docs from `AGENTS.md`.
+2. Read `docs/coding-patterns.md` through its Fast Path.
+3. Always apply §0, then apply the task-specific sections from the document's When to Read table.
+
+Before reporting done:
+
+1. Complete the Agent Completion Gate in `AGENTS.md`.
+2. Re-read touched files against the checklist below.
+3. Fix every convention violation found.
+4. Record any convention-driven refactor intentionally left unapplied with the reason.
+
+Do not summarize a change as complete until both the common gate and this Claude-specific gate pass.
 
 ## How to Use `docs/coding-patterns.md`
 
-`docs/coding-patterns.md` is the authority; this file is the Claude-specific pre-finish gate.
+`docs/coding-patterns.md` is the authority; this file is only a Claude-specific enforcement checklist.
 
 1. Start with §0 for simplicity, symbol review, algorithm review, and repeat-until-stable rules.
 2. Add the task sections from the document's When to Read table.
