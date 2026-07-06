@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Agent guide for this repo (`Claude Code`, `Codex`, `Cursor`, etc.).
+Common agent guide for this repo. Applies to Claude Code and Codex.
 
 ## Quick Commands
 
@@ -31,7 +31,22 @@ go test -race -run 'TestInterpreter_WithDebugger|TestDebugger_Breakpoints' ./int
 8. Run narrow tests first, then `go test ./...`; use `make coverage` when you want the same broad validation CI runs.
 9. `make benchmark` also runs the separate `benchmarks/` Go module. Use `make benchmark test-options="-count=2"` to match CI's comparison workflow.
 10. For debugger, stepping, or breakpoint work, read `docs/debugging.md` and verify in `./interp`; `interp.WithDebugger` forces `WithTick(1)` and disables JIT.
-11. **Before reporting done, perform a strict coding-convention review:** re-read every new/modified code or test file against `docs/coding-patterns.md` §0.7-§0.9 and §7.4 plus the relevant task sections; fix violations and mention intentionally non-viable simplifications in the final summary.
+11. **Before reporting done, perform the Agent Completion Gate below.**
+
+## Agent Completion Gate
+
+Do not report done, open/update a PR, or summarize a change as complete until every item below is true.
+
+1. Every touched code/test file was re-read against `docs/coding-patterns.md` §0.7-§0.9 and the task-specific sections.
+2. Every touched symbol has a current reason to exist.
+3. Removable symbols were removed, inlined, merged, narrowed, made private, renamed by role, or replaced by direct local code.
+4. A simpler algorithm or control flow was considered; the chosen shape is the simplest correct option found.
+5. Another simplification pass found no safe improvement.
+6. Tests follow `docs/coding-patterns.md` §6.
+7. PR/commit/docs expectations follow `docs/coding-patterns.md` §7-§8.
+8. Any intentionally skipped simplification is recorded in the final summary with the reason.
+
+For Claude Code, also apply `.claude/CLAUDE.md`. For Codex, this `AGENTS.md` is the required agent instruction source.
 
 ## Code Exploration
 
@@ -54,7 +69,7 @@ If `codegraph` reports the index is stale or not initialized, fall back to grep/
 
 ## Local Hooks
 
-`.codex/hooks.json` runs `goimports` after `Edit`/`MultiEdit`/`Write` on `.go` files. Hooks best-effort; run `make lint` before finishing.
+`.codex/hooks.json` runs `goimports` after `Edit`/`MultiEdit`/`Write` on `.go` files. Hooks are best-effort only. They do not replace the Agent Completion Gate; run `make lint` before finishing.
 
 ## Task Router
 
@@ -173,7 +188,7 @@ Incorrect ordering crashes on Apple Silicon.
 
 ## Coding Pattern Usage
 
-`docs/coding-patterns.md` is the authority. This section only routes agents to the right parts.
+`docs/coding-patterns.md` is the authority. This section routes agents to the right parts; it is not a replacement.
 
 | Need | Read in `docs/coding-patterns.md` |
 |---|---|
@@ -188,14 +203,7 @@ Incorrect ordering crashes on Apple Silicon.
 | Commits, PRs, final review | §7 |
 | Documentation updates | §8 |
 
-Required review loop before finishing:
-
-1. Re-read every touched code/test file against the relevant sections.
-2. Run the §0.7-§0.9 pass: removable symbols, narrower ownership, simpler control flow, simpler algorithms, then tests/docs.
-3. Apply §7.4 before opening or updating a PR.
-4. Record any intentionally non-viable simplification in the final summary.
-
-Frequent traps are intentionally not repeated here; use the section map above so `docs/coding-patterns.md` stays the single source of truth. Claude-specific reminders live in `.claude/CLAUDE.md`.
+Claude-specific reminders live in `.claude/CLAUDE.md`. Codex-specific enforcement lives in this file through the Agent Workflow and Agent Completion Gate.
 
 ## Test Conventions
 
