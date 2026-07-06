@@ -151,7 +151,7 @@ func ParseAll(r io.Reader) ([]Instruction, error) {
 		if strings.Contains(err.Error(), "token too long") {
 			return nil, fmt.Errorf("line %d exceeds maximum allowed size of %d bytes", line, maxParseLineBytes)
 		}
-		return nil, err
+		return nil, fmt.Errorf("line %d: %w", line, err)
 	}
 	return instrs, nil
 }
