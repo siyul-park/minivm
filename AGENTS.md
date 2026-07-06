@@ -1,6 +1,20 @@
 # AGENTS.md
 
-Common agent guide for this repo. Applies to Claude Code and Codex.
+Repository instructions for Codex and Claude Code.
+
+This file is the common agent contract. Codex reads `AGENTS.md` directly. Claude Code loads `.claude/CLAUDE.md`, which imports this file and adds Claude-specific reminders.
+
+Keep this file terse and actionable. Put detailed coding rules in `docs/coding-patterns.md`, not here.
+
+## Instruction Priority
+
+1. Follow the user's latest explicit request first.
+2. Follow the closest applicable repository instruction file.
+3. Use this file as the root repository contract.
+4. Use `docs/coding-patterns.md` as the coding-style authority.
+5. Match nearby code when it is stricter than this guide.
+
+If instructions conflict, choose the more specific instruction and mention the conflict in the final summary.
 
 ## Quick Commands
 
@@ -19,58 +33,46 @@ go test -race -run 'TestInterpreter_WithDebugger|TestDebugger_Breakpoints' ./int
 ./dist/minivm      # interactive assembly REPL
 ```
 
-## Agent Workflow
+## Required Workflow
 
-1. `git status --short`; don't overwrite unrelated changes.
-2. **For code exploration, prefer `codegraph` MCP tools over grep/read** (see Code Exploration below).
-3. **Read task-relevant docs from Documentation Index before writing code or tests.**
-4. **Before modifying code or tests, read `docs/coding-patterns.md` through its Fast Path:** always apply §0, then the task-relevant sections from its When to Read table.
-5. Mirror nearby tests; follow Test Conventions and `docs/coding-patterns.md` §6.
-6. Update docs using `docs/coding-patterns.md` §8 when behavior, invariants, commands, pitfalls, workflow, or conventions change.
-7. On a fresh environment or CI-like run, start with `make init`; CI does this before lint/coverage.
-8. Run narrow tests first, then `go test ./...`; use `make coverage` when you want the same broad validation CI runs.
-9. `make benchmark` also runs the separate `benchmarks/` Go module. Use `make benchmark test-options="-count=2"` to match CI's comparison workflow.
-10. For debugger, stepping, or breakpoint work, read `docs/debugging.md` and verify in `./interp`; `interp.WithDebugger` forces `WithTick(1)` and disables JIT.
-11. **Before reporting done, perform the Agent Completion Gate below.**
+1. Run `git status --short`; never overwrite unrelated user changes.
+2. Prefer `codegraph` MCP tools for structural exploration; fall back to grep/read only for literal text or stale indexes.
+3. Read task-relevant docs from the Task Router before changing code or tests.
+4. Read `docs/coding-patterns.md` through its Fast Path: always apply §0, then the task-specific sections from its When to Read table.
+5. Make the smallest correct change. Avoid speculative cleanup outside the task.
+6. Validate with the narrowest relevant tests first, then broader tests when the change warrants it.
+7. Run the Completion Gate before reporting done, opening a PR, or updating a PR.
 
-## Agent Completion Gate
+## Completion Gate
 
-Do not report done, open/update a PR, or summarize a change as complete until every item below is true.
+Do not call work complete until every item is true:
 
-1. Every touched code/test file was re-read against `docs/coding-patterns.md` §0.7-§0.9 and the task-specific sections.
+1. Every touched code/test file was re-read against `docs/coding-patterns.md` §0.7-§0.9 plus the task-specific sections.
 2. Every touched symbol has a current reason to exist.
 3. Removable symbols were removed, inlined, merged, narrowed, made private, renamed by role, or replaced by direct local code.
 4. A simpler algorithm or control flow was considered; the chosen shape is the simplest correct option found.
 5. Another simplification pass found no safe improvement.
 6. Declaration order follows `docs/coding-patterns.md` §1.3 and §2.4: callers before callees, except `With*` option functions may sit immediately above the constructor they configure.
-7. Tests follow `docs/coding-patterns.md` §6.
-8. PR/commit/docs expectations follow `docs/coding-patterns.md` §7-§8.
+7. Tests follow `docs/coding-patterns.md` §6 and assert behavior rather than private shape.
+8. PR, commit, and documentation expectations follow `docs/coding-patterns.md` §7-§8.
 9. Any intentionally skipped simplification is recorded in the final summary with the reason.
 
-For Claude Code, also apply `.claude/CLAUDE.md`. For Codex, this `AGENTS.md` is the required agent instruction source.
+## Coding Pattern Map
 
-## Code Exploration
+`docs/coding-patterns.md` is the authority. Use this map only to choose what to read.
 
-Prefer `codegraph` MCP tools over grep/read for structural questions. It is a tree-sitter knowledge graph of every symbol, edge, and file (sub-millisecond reads). Fall back to grep/read only for literal text (string contents, comments, log messages) or to confirm a specific detail codegraph didn't cover.
-
-| Question | Tool |
+| Need | Read in `docs/coding-patterns.md` |
 |---|---|
-| Where is symbol X defined? | `codegraph_search` |
-| Focused context for a task/area | `codegraph_context` |
-| How does X reach Y? / trace the flow | `codegraph_trace` |
-| What calls Y? | `codegraph_callers` |
-| What does Y call? | `codegraph_callees` |
-| What breaks if I change Z? | `codegraph_impact` |
-| Show Y's signature/source | `codegraph_node` |
-| Survey several related symbols' source | `codegraph_explore` |
-| What files exist under path/ | `codegraph_files` |
-| Is the index healthy? | `codegraph_status` |
-
-If `codegraph` reports the index is stale or not initialized, fall back to grep/read for affected files.
-
-## Local Hooks
-
-`.codex/hooks.json` runs `goimports` after `Edit`/`MultiEdit`/`Write` on `.go` files. Hooks are best-effort only. They do not replace the Agent Completion Gate; run `make lint` before finishing.
+| Before any code/test edit | When to Read, §0 |
+| Removing unnecessary structure | §0.1, §0.7-§0.9 |
+| Naming, helper extraction, method ownership | §1.2, §1.4, §1.5 |
+| File order, type/interface shape, struct fields | §2.1-§2.5 |
+| Public API, options, builders, parsers | §3 |
+| Errors, panic, recover | §4 |
+| Architecture build tags | §5 |
+| Tests | §6 |
+| Commits, PRs, final review | §7 |
+| Documentation updates | §8 |
 
 ## Task Router
 
@@ -89,7 +91,7 @@ If `codegraph` reports the index is stale or not initialized, fall back to grep/
 
 ## Documentation Index
 
-The Task Router above routes by task; this catalogs what each doc covers. Read only relevant docs.
+Read only docs relevant to the task.
 
 | Document | Covers |
 |---|---|
@@ -110,23 +112,30 @@ The Task Router above routes by task; this catalogs what each doc covers. Read o
 | `docs/benchmarks.md` | measured performance, cross-runtime comparison, methodology |
 | `docs/debugging.md` | debugger API, breakpoints, stepping, inspection |
 
-## Architecture Overview
+## Code Exploration
 
-minivm: bytecode VM + adaptive JIT.
+Prefer `codegraph` MCP tools over grep/read for structural questions.
+
+| Question | Tool |
+|---|---|
+| Where is symbol X defined? | `codegraph_search` |
+| Focused context for a task/area | `codegraph_context` |
+| How does X reach Y? / trace the flow | `codegraph_trace` |
+| What calls Y? | `codegraph_callers` |
+| What does Y call? | `codegraph_callees` |
+| What breaks if I change Z? | `codegraph_impact` |
+| Show Y's signature/source | `codegraph_node` |
+| Survey several related symbols' source | `codegraph_explore` |
+| What files exist under path/ | `codegraph_files` |
+| Is the index healthy? | `codegraph_status` |
+
+## Project Map
 
 ```text
 program.Program -> threader -> []func(*Interpreter) -> Interpreter.Run()
                                                         |- threaded closures
                                                         `- hot segments promoted to native ARM64
 ```
-
-Hot-segment compilation:
-
-- profile samples record `(function, ip, opcode)` every 128 instructions
-- JIT threshold defaults to 4096 ticks = 32 profile samples
-- compiled native handlers replace threaded closures in-place
-
-## Package Responsibilities
 
 | Package | Responsibility |
 |---|---|
@@ -140,77 +149,27 @@ Hot-segment compilation:
 | `analysis/` | shared analysis passes |
 | `transform/` | optimization transforms |
 | `optimize/` | optimization pipeline wiring |
-| `cli/` | CLI command tree, REPL, and shared value formatting (`Root`, `NewRunCommand`, `NewREPL`, `WriteFS`, `OS`) |
+| `cli/` | CLI command tree, REPL, and shared value formatting |
 | `cmd/minivm/` | CLI entrypoint |
 
 ## Key Invariants
 
 Violations cause silent corruption or invalid execution.
 
-### Runtime
-
 - Heap index `0` is permanently `Null`.
 - `release()` must stay iterative, never recursive.
 - Threaded closure errors should `panic`; `interp.Run()` recovers and annotates `at=<ip>`.
-- A `frame` separates `addr` (template/code index for `i.code`/`i.instrs`/profiler/JIT) from `ref` (heap index released on `RETURN`). They differ for closures; every frame-creating `CALL`/fused path must set both, and non-closure paths must reset `upvals = nil`.
-- `closure.new` takes the function ref from the stack top (like `call`) and transfers ownership of the function ref plus its upvals into the closure.
-
-### Threaded Compiler
-
-- Advance `c.ip` during compile time.
-- Advance `f.ip` during runtime execution.
-- Missing either -> invalid execution or infinite loops.
-
-### JIT
-
+- A `frame` separates `addr` (template/code index for code/profiler/JIT) from `ref` (heap index released on `RETURN`). They differ for closures; every frame-creating `CALL`/fused path must set both, and non-closure paths must reset `upvals = nil`.
+- `closure.new` takes the function ref from the stack top and transfers ownership of the function ref plus upvals into the closure.
+- Compile-time threaded code advances `c.ip`; runtime threaded execution advances `f.ip`.
 - JIT handlers return `true` only after lowering the opcode and advancing `s.ip` by its exact width.
-- On type mismatch or unsupported lowering, return `false` without mutating IR, stack, params, facts, or labels.
-- Branch termination is determined by the trace boundary; branch handlers return `true` after successful terminal emission.
-- Compile each entry IP at most once per JIT attempt; natural-fallthrough traces may expose compatible internal entries.
-- Completed JIT segments emit when `count >= emit` default `8`; truncated and branch-terminated segments use the same cutoff.
+- On JIT type mismatch or unsupported lowering, return `false` without mutating IR, stack, params, facts, or labels.
+- Executable buffers must follow `Unseal -> Append -> Seal -> Call`; `Seal()` must sync the instruction cache on Darwin/ARM64.
+- Offset-preserving passes must preserve byte offsets; `GlobalValueNumberingPass` and `DeadCodeEliminationPass` are the known exceptions and must repair branches/handlers.
 
-### Executable Buffers
+## Tests
 
-Always:
-
-```text
-Unseal -> Append -> Seal -> Call
-```
-
-Incorrect ordering crashes on Apple Silicon.
-`Seal()` must sync instruction cache (Darwin/ARM64); missing flushes -> intermittent `SIGILL`.
-
-### Optimization
-
-- `ConstantFoldingPass` right-aligns folded instructions, pads left with NOPs.
-- Preserve folded ranges until `DeadCodeEliminationPass` compacts bytecode and rewrites branches.
-- Threaded NOP handlers absorb consecutive gaps with one runtime dispatch.
-- Most passes preserve byte offsets; `GlobalValueNumberingPass` (O3) and `DeadCodeEliminationPass` are the exceptions. GVN uses the `transform.rewriter` to grow/shrink code, which re-derives every branch operand and handler offset, bails on int16 branch overflow, and bumps handler `Depth` by the number of locals it allocates (allocating a local shifts the operand-stack base). New local indexes must stay below 256. DCE compacts bytecode and likewise remaps branch and handler offsets; both write the root body's repaired code and handlers back to `prog`.
-
-## Coding Pattern Usage
-
-`docs/coding-patterns.md` is the authority. This section routes agents to the right parts; it is not a replacement.
-
-| Need | Read in `docs/coding-patterns.md` |
-|---|---|
-| Before any code/test edit | When to Read, §0 |
-| Removing unnecessary structure | §0.1, §0.7-§0.9 |
-| Naming, helper extraction, method ownership | §1.2, §1.4, §1.5 |
-| File order, type/interface shape, struct fields | §2.1-§2.5 |
-| Public API, options, builders, parsers | §3 |
-| Errors, panic, recover | §4 |
-| Architecture build tags | §5 |
-| Tests | §6 |
-| Commits, PRs, final review | §7 |
-| Documentation updates | §8 |
-
-Claude-specific reminders live in `.claude/CLAUDE.md`. Codex-specific enforcement lives in this file through the Agent Workflow and Agent Completion Gate.
-
-## Test Conventions
-
-Before writing or modifying tests, read relevant docs from Documentation Index and Task Router, then apply `docs/coding-patterns.md` §6.
-
-Core reminders:
+Before writing or modifying tests, read relevant docs from the Task Router and apply `docs/coding-patterns.md` §6.
 
 - One top-level test per public symbol: `Test<Func>` or `Test<Type>_<Method>`.
 - Put sub-cases under `t.Run`; do not split them into parallel top-level tests.
