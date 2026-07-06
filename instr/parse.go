@@ -1,16 +1,17 @@
 package instr
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"math"
 	"strconv"
 	"strings"
-
-	"github.com/siyul-park/minivm/internal/textparse"
 )
 
 var mnemonicMap map[string]Opcode
+
+const maxParseLineBytes = 1 << 20 // 1 MiB
 
 func init() {
 	mnemonicMap = make(map[string]Opcode)
@@ -134,7 +135,8 @@ func Parse(line string) (Instruction, error) {
 // number for context.
 func ParseAll(r io.Reader) ([]Instruction, error) {
 	var instrs []Instruction
-	scanner := textparse.NewScanner(r)
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxParseLineBytes)
 	line := 1
 	for ; scanner.Scan(); line++ {
 		inst, err := Parse(scanner.Text())
@@ -146,7 +148,10 @@ func ParseAll(r io.Reader) ([]Instruction, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, textparse.LineError(line, err)
+		if strings.Contains(err.Error(), "token too long") {
+			return nil, fmt.Errorf("line %d exceeds maximum allowed size of %d bytes", line, maxParseLineBytes)
+		}
+		return nil, err
 	}
 	return instrs, nil
 }
