@@ -175,12 +175,12 @@ Loop-anchored trace compilation lets hot loop bodies run in native code between 
 
 `BenchmarkJITIssue101` tracks a LightGBM-style branchy batch path with many tiny tree-score functions called over one mutable `f64` feature row. It is sensitive to per-tick coordination overhead after a trace is already installed.
 
-| Workload | Mode | Before ns/op | Current ns/op | B/op | allocs/op |
-|---|---|---:|---:|---:|---:|
-| `branchy_batch_tree_evaluation` | threaded | 1,760 | 1,807 | 0 | 0 |
-| `branchy_batch_tree_evaluation` | JIT | 2,874 | 1,203 | 0 | 0 |
+| Workload | Mode | ns/op | B/op | allocs/op |
+|---|---|---:|---:|---:|
+| `branchy_batch_tree_evaluation` | threaded | 1,807 | 0 | 0 |
+| `branchy_batch_tree_evaluation` | JIT | 1,203 | 0 | 0 |
 
-The JIT row improved by keeping warm-entry fallback checks dense and skipping no-op safepoints when no context cancellation, fuel, hook, profiler, or shared cache coordination is active.
+The JIT row stays faster by keeping warm-entry fallback checks dense and skipping no-op safepoints when no context cancellation, fuel, hook, profiler, or shared cache coordination is active.
 
 On x86-64, JIT is not implemented yet. The runtime falls back to threaded execution.
 
