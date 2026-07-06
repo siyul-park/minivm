@@ -19,61 +19,57 @@ func BenchmarkJITIssue60(b *testing.B) {
 		program *program.Program
 		want    types.Value
 	}{
-		{
-			name:    "indirect_call_fib_via_local",
-			program: indirectFibViaLocal(20),
-			want:    types.I32(6765),
-		},
-		{
-			name:    "closure_counter_loop",
-			program: closureCounter(1024),
-			want:    types.I32(1024),
-		},
-		{
-			name:    "typed_array_sum",
-			program: typedArraySum(1024),
-			want:    types.I32(524800),
-		},
+		{name: "indirect_call_fib_via_local", program: indirectFibViaLocal(20), want: types.I32(6765)},
+		{name: "closure_counter_loop", program: closureCounter(1024), want: types.I32(1024)},
+		{name: "typed_array_sum", program: typedArraySum(1024), want: types.I32(524800)},
 	}
-
-	for _, tt := range tests {
-		b.Run(tt.name, func(b *testing.B) {
-			b.Run("interp", func(b *testing.B) {
-				vm := interp.New(tt.program, interp.WithThreshold(-1))
-				runMiniVMProgram(b, vm, tt.want)
-			})
-			b.Run("jit", func(b *testing.B) {
-				vm := interp.New(
-					tt.program,
-					interp.WithTick(1),
-					interp.WithThreshold(1),
-				)
-				runMiniVMProgram(b, vm, tt.want)
-			})
-		})
-	}
-}
-
-func runMiniVMProgram(b *testing.B, i *interp.Interpreter, want types.Value) {
-	b.Helper()
-	defer i.Close()
 
 	ctx := context.Background()
-	require.NoError(b, i.Run(ctx))
-	got, err := i.Pop()
-	require.NoError(b, err)
-	require.Equal(b, want, got)
-	i.Reset()
+	for _, tt := range tests {
+		b.Run(tt.name+"/interp", func(b *testing.B) {
+			vm := interp.New(tt.program, interp.WithThreshold(-1))
+			defer vm.Close()
 
-	b.ReportAllocs()
-	b.ResetTimer()
-	for n := 0; n < b.N; n++ {
-		err = i.Run(ctx)
-		if err != nil {
-			break
-		}
-		i.Reset()
+			require.NoError(b, vm.Run(ctx))
+			got, err := vm.Pop()
+			require.NoError(b, err)
+			require.Equal(b, tt.want, got)
+			vm.Reset()
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for n := 0; n < b.N; n++ {
+				err = vm.Run(ctx)
+				if err != nil {
+					break
+				}
+				vm.Reset()
+			}
+			b.StopTimer()
+			require.NoError(b, err)
+		})
+
+		b.Run(tt.name+"/jit", func(b *testing.B) {
+			vm := interp.New(tt.program, interp.WithTick(1), interp.WithThreshold(1))
+			defer vm.Close()
+
+			require.NoError(b, vm.Run(ctx))
+			got, err := vm.Pop()
+			require.NoError(b, err)
+			require.Equal(b, tt.want, got)
+			vm.Reset()
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for n := 0; n < b.N; n++ {
+				err = vm.Run(ctx)
+				if err != nil {
+					break
+				}
+				vm.Reset()
+			}
+			b.StopTimer()
+			require.NoError(b, err)
+		})
 	}
-	b.StopTimer()
-	require.NoError(b, err)
 }
