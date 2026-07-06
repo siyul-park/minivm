@@ -2711,7 +2711,7 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			return
 		}
-		require.NotNil(t, i.fallbacks[anchor{addr: 0, ip: 0}])
+		require.NotNil(t, i.exits[anchor{addr: 0, ip: 0}])
 		require.Equal(t, float64(1), i.samples.Value("vm_jit_emits_total"))
 	})
 
@@ -2743,11 +2743,11 @@ func TestWithThreshold(t *testing.T) {
 			v, err := i.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.I32(42), v)
-			if i.fallbacks[anchor{addr: addr, ip: 0}] != nil {
+			if i.exits[anchor{addr: addr, ip: 0}] != nil {
 				break
 			}
 		}
-		require.NotNil(t, i.fallbacks[anchor{addr: addr, ip: 0}], "callee entry never warmed")
+		require.NotNil(t, i.exits[anchor{addr: addr, ip: 0}], "callee entry never warmed")
 
 		// Once warm, the entry dispatches natively and the threaded safepoint no
 		// longer samples it: the sample count must not grow across further runs.
@@ -2871,7 +2871,7 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			return
 		}
-		require.NotNil(t, i.fallbacks[anchor{addr: 0, ip: 0}])
+		require.NotNil(t, i.exits[anchor{addr: 0, ip: 0}])
 		require.GreaterOrEqual(t, i.samples.Value("vm_jit_attempts_total"), float64(1))
 		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 	})
@@ -2918,7 +2918,7 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			return
 		}
-		require.NotNil(t, i.fallbacks[anchor{addr: 0, ip: 0}])
+		require.NotNil(t, i.exits[anchor{addr: 0, ip: 0}])
 		require.GreaterOrEqual(t, i.samples.Value("vm_jit_attempts_total"), float64(1))
 		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 	})
@@ -2967,7 +2967,7 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			return
 		}
-		require.NotNil(t, i.fallbacks[anchor{addr: 0, ip: 0}])
+		require.NotNil(t, i.exits[anchor{addr: 0, ip: 0}])
 		require.GreaterOrEqual(t, i.samples.Value("vm_jit_attempts_total"), float64(1))
 		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 	})
@@ -3971,7 +3971,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(2), got)
 		}
-		require.NotNil(t, i.fallbacks[root])
+		require.NotNil(t, i.exits[root])
 
 		i.Reset()
 		require.NoError(t, i.Push(types.NewArray(types.NewArrayType(types.TypeI32), types.BoxI32(1), types.BoxI32(2), types.BoxI32(3))))
@@ -4020,7 +4020,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(7), got)
 		}
-		require.NotNil(t, i.fallbacks[root])
+		require.NotNil(t, i.exits[root])
 
 		i.Reset()
 		require.NoError(t, i.Push(types.NewStruct(second, types.BoxI32(9))))
@@ -4069,7 +4069,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I64(42), got)
 		}
-		require.NotNil(t, i.fallbacks[root])
+		require.NotNil(t, i.exits[root])
 
 		var hits int64
 		tree := i.tracer.rootAt(root)
@@ -4111,7 +4111,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I64(1<<48), got)
 		}
-		require.NotNil(t, i.fallbacks[root])
+		require.NotNil(t, i.exits[root])
 
 		var hits int64
 		tree := i.tracer.rootAt(root)
@@ -4151,7 +4151,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I64(41), got)
 		}
-		require.NotNil(t, i.fallbacks[root])
+		require.NotNil(t, i.exits[root])
 
 		i.Reset()
 		require.NoError(t, i.Push(types.TypedArray[int64]{1 << 48}))
@@ -4201,7 +4201,7 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I64(42), got)
 		}
-		require.NotNil(t, i.fallbacks[root])
+		require.NotNil(t, i.exits[root])
 
 		var hits int64
 		tree := i.tracer.rootAt(root)
@@ -4284,11 +4284,11 @@ func TestWithThreshold(t *testing.T) {
 			v, err = i.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.F64(22), v)
-			if i.fallbacks[root] != nil {
+			if i.exits[root] != nil {
 				break
 			}
 		}
-		require.NotNil(t, i.fallbacks[root])
+		require.NotNil(t, i.exits[root])
 
 		id := -1
 		for range exitThreshold * 4 {
@@ -4426,11 +4426,11 @@ func TestWithThreshold(t *testing.T) {
 			v, err = i.Pop()
 			require.NoError(t, err)
 			require.Equal(t, types.F64(22), v)
-			if i.fallbacks[root] != nil {
+			if i.exits[root] != nil {
 				break
 			}
 		}
-		require.NotNil(t, i.fallbacks[root])
+		require.NotNil(t, i.exits[root])
 
 		id := -1
 		for range exitThreshold * 4 {
