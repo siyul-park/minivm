@@ -1,30 +1,31 @@
 package program
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/internal/textparse"
 	"github.com/siyul-park/minivm/types"
 )
 
 // Parse parses the output of Program.String() back into a Program.
 // Format:
 //
-//	<disassembly lines>   - code section
-//	                      - blank line separator
-//	<constants section>   - "NNNN:\t<line0>\n\t<continuation>..." (func values)
-//	                      - blank line separator
-//	<types section>       - "N:\t<type-string>"
+//	<disassembly lines>   — code section
+//	                      — blank line separator
+//	<constants section>   — "NNNN:\t<line0>\n\t<continuation>…" (func values)
+//	                      — blank line separator
+//	<types section>       — "N:\t<type-string>"
 func Parse(r io.Reader) (*Program, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	scanner := textparse.NewScanner(r)
 
 	// Phase 1: code section (lines until first blank line or EOF).
 	var codeLines []string
+	lineNum := 0
 	for scanner.Scan() {
+		lineNum++
 		line := scanner.Text()
 		if line == "" {
 			break
@@ -32,7 +33,7 @@ func Parse(r io.Reader) (*Program, error) {
 		codeLines = append(codeLines, line)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return nil, textparse.LineError(lineNum+1, err)
 	}
 
 	codeInstrs, err := instr.ParseAll(strings.NewReader(strings.Join(codeLines, "\n")))
@@ -42,8 +43,8 @@ func Parse(r io.Reader) (*Program, error) {
 
 	// Phases 2+: read all remaining multi-line entries (blank line terminates each
 	// section; EOF ends reading). Classify each entry by content:
-	//   - starts with "func(" -> constant (*Function)
-	//   - otherwise           -> type (single-line Type string)
+	//   - starts with "func(" → constant (*Function)
+	//   - otherwise           → type (single-line Type string)
 	var entries [][]string
 	var block []string
 
@@ -55,6 +56,7 @@ func Parse(r io.Reader) (*Program, error) {
 	}
 
 	for scanner.Scan() {
+		lineNum++
 		line := scanner.Text()
 		if line == "" {
 			flushBlock()
@@ -73,7 +75,7 @@ func Parse(r io.Reader) (*Program, error) {
 	}
 	flushBlock()
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return nil, textparse.LineError(lineNum+1, err)
 	}
 
 	var constants []types.Value
