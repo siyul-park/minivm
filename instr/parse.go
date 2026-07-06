@@ -24,28 +24,44 @@ func init() {
 }
 
 // ReadU8 returns v truncated to 8 bits.
-func ReadU8(v uint64) int { return int(uint8(v)) }
+func ReadU8(v uint64) int {
+	return int(uint8(v))
+}
 
 // ReadI8 returns v sign-extended from 8 bits.
-func ReadI8(v uint64) int { return int(int8(uint8(v))) }
+func ReadI8(v uint64) int {
+	return int(int8(uint8(v)))
+}
 
 // ReadU16 returns v truncated to 16 bits.
-func ReadU16(v uint64) int { return int(uint16(v)) }
+func ReadU16(v uint64) int {
+	return int(uint16(v))
+}
 
 // ReadI16 returns v sign-extended from 16 bits.
-func ReadI16(v uint64) int { return int(int16(uint16(v))) }
+func ReadI16(v uint64) int {
+	return int(int16(uint16(v)))
+}
 
 // ReadU32 returns v truncated to 32 bits.
-func ReadU32(v uint64) int { return int(uint32(v)) }
+func ReadU32(v uint64) int {
+	return int(uint32(v))
+}
 
 // ReadI32 returns v sign-extended from 32 bits.
-func ReadI32(v uint64) int { return int(int32(uint32(v))) }
+func ReadI32(v uint64) int {
+	return int(int32(uint32(v)))
+}
 
 // ParseU8 reads an unsigned 8-bit value from code[offset:].
-func ParseU8(code []byte, offset int) int { return int(code[offset]) }
+func ParseU8(code []byte, offset int) int {
+	return int(code[offset])
+}
 
 // ParseI8 reads a signed 8-bit value from code[offset:].
-func ParseI8(code []byte, offset int) int { return int(int8(code[offset])) }
+func ParseI8(code []byte, offset int) int {
+	return int(int8(code[offset]))
+}
 
 // ParseU16 reads a little-endian unsigned 16-bit value from code[offset:].
 func ParseU16(code []byte, offset int) int {
@@ -186,6 +202,7 @@ func parseOperands(fields []string, widths []int) ([]uint64, error) {
 //   - decimal float (for 4- or 8-byte widths): 1.0, -3.14
 //   - signed decimal: -1, 42
 func parseOperand(s string, width int) (uint64, error) {
+	// Hex
 	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
 		v, err := strconv.ParseUint(s[2:], 16, 64)
 		if err != nil {
@@ -193,6 +210,7 @@ func parseOperand(s string, width int) (uint64, error) {
 		}
 		return v, nil
 	}
+	// Float literal (contains '.' or 'e'/'E') -> encode as IEEE 754 bits
 	if strings.ContainsAny(s, ".eE") {
 		switch width {
 		case 4:
@@ -209,6 +227,7 @@ func parseOperand(s string, width int) (uint64, error) {
 			return math.Float64bits(f), nil
 		}
 	}
+	// Signed decimal (handles negative integers)
 	v, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid integer %q: %w", s, err)
