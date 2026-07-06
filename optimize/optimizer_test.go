@@ -145,6 +145,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 			)
 		}
 
+		before := build()
 		optimized, err := NewOptimizer(O3).Optimize(build())
 		require.NoError(t, err)
 
@@ -152,7 +153,18 @@ func TestOptimizer_Optimize(t *testing.T) {
 		require.Len(t, fn.Locals, 1, "common subexpression captured into a fresh local")
 		require.Contains(t, instr.Format(fn.Code), "local.tee")
 
-		require.Equal(t, run(t, build()), run(t, optimized))
+		beforeVM := interp.New(before)
+		defer beforeVM.Close()
+		require.NoError(t, beforeVM.Run(context.Background()))
+		beforeValue, err := beforeVM.Pop()
+		require.NoError(t, err)
+
+		optimizedVM := interp.New(optimized)
+		defer optimizedVM.Close()
+		require.NoError(t, optimizedVM.Run(context.Background()))
+		optimizedValue, err := optimizedVM.Pop()
+		require.NoError(t, err)
+		require.Equal(t, beforeValue, optimizedValue)
 	})
 
 	t.Run("O3 repairs branch offsets after shrinking", func(t *testing.T) {
@@ -190,10 +202,23 @@ func TestOptimizer_Optimize(t *testing.T) {
 			)
 		}
 
+		before := build()
 		optimized, err := NewOptimizer(O3).Optimize(build())
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(optimized))
-		require.Equal(t, run(t, build()), run(t, optimized))
+
+		beforeVM := interp.New(before)
+		defer beforeVM.Close()
+		require.NoError(t, beforeVM.Run(context.Background()))
+		beforeValue, err := beforeVM.Pop()
+		require.NoError(t, err)
+
+		optimizedVM := interp.New(optimized)
+		defer optimizedVM.Close()
+		require.NoError(t, optimizedVM.Run(context.Background()))
+		optimizedValue, err := optimizedVM.Pop()
+		require.NoError(t, err)
+		require.Equal(t, beforeValue, optimizedValue)
 	})
 
 	t.Run("O3 eliminates a redundancy across a control-flow merge", func(t *testing.T) {
@@ -223,13 +248,26 @@ func TestOptimizer_Optimize(t *testing.T) {
 			)
 		}
 
+		before := build()
 		optimized, err := NewOptimizer(O3).Optimize(build())
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(optimized))
 
 		fn := optimized.Constants[0].(*types.Function)
 		require.Len(t, fn.Locals, 1, "merge redundancy captured into a fresh local")
-		require.Equal(t, run(t, build()), run(t, optimized))
+
+		beforeVM := interp.New(before)
+		defer beforeVM.Close()
+		require.NoError(t, beforeVM.Run(context.Background()))
+		beforeValue, err := beforeVM.Pop()
+		require.NoError(t, err)
+
+		optimizedVM := interp.New(optimized)
+		defer optimizedVM.Close()
+		require.NoError(t, optimizedVM.Run(context.Background()))
+		optimizedValue, err := optimizedVM.Pop()
+		require.NoError(t, err)
+		require.Equal(t, beforeValue, optimizedValue)
 	})
 
 	t.Run("O3 preserves types and handlers", func(t *testing.T) {
@@ -270,6 +308,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 			)
 		}
 
+		before := build()
 		optimized, err := NewOptimizer(O3).Optimize(build())
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(optimized))
@@ -277,16 +316,18 @@ func TestOptimizer_Optimize(t *testing.T) {
 
 		fn := optimized.Constants[0].(*types.Function)
 		require.Len(t, fn.Handlers, 1, "function handlers are not dropped")
-		require.Equal(t, run(t, build()), run(t, optimized))
-	})
-}
 
-func run(t *testing.T, prog *program.Program) types.Value {
-	t.Helper()
-	i := interp.New(prog)
-	defer i.Close()
-	require.NoError(t, i.Run(context.Background()))
-	v, err := i.Pop()
-	require.NoError(t, err)
-	return v
+		beforeVM := interp.New(before)
+		defer beforeVM.Close()
+		require.NoError(t, beforeVM.Run(context.Background()))
+		beforeValue, err := beforeVM.Pop()
+		require.NoError(t, err)
+
+		optimizedVM := interp.New(optimized)
+		defer optimizedVM.Close()
+		require.NoError(t, optimizedVM.Run(context.Background()))
+		optimizedValue, err := optimizedVM.Pop()
+		require.NoError(t, err)
+		require.Equal(t, beforeValue, optimizedValue)
+	})
 }
