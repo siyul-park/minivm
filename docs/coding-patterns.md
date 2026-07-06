@@ -518,7 +518,8 @@ A convention-changing code change is incomplete without the matching documentati
 | architecture, ownership, boundaries | `docs/architecture.md` |
 | opcode semantics, stack effects, JIT status | `docs/instruction-set.md` |
 | JIT contracts, assembler APIs | `docs/jit-internals.md` |
-| invariants, pitfalls | `AGENTS.md` or `docs/architecture.md` |
+| workflow / convention rules | `AGENTS.md` and `.claude/CLAUDE.md` |
+| invariants, pitfalls | `docs/architecture.md` |
 
 ## Agent Rule of Thumb
 
