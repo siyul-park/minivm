@@ -39,7 +39,7 @@ func Parse(r io.Reader) (*Program, error) {
 		if strings.Contains(err.Error(), "token too long") {
 			return nil, fmt.Errorf("line %d exceeds maximum allowed size of %d bytes", lineNum+1, maxParseLineBytes)
 		}
-		return nil, err
+		return nil, fmt.Errorf("line %d: %w", lineNum+1, err)
 	}
 
 	codeInstrs, err := instr.ParseAll(strings.NewReader(strings.Join(codeLines, "\n")))
@@ -84,7 +84,7 @@ func Parse(r io.Reader) (*Program, error) {
 		if strings.Contains(err.Error(), "token too long") {
 			return nil, fmt.Errorf("line %d exceeds maximum allowed size of %d bytes", lineNum+1, maxParseLineBytes)
 		}
-		return nil, err
+		return nil, fmt.Errorf("line %d: %w", lineNum+1, err)
 	}
 
 	var constants []types.Value
