@@ -160,17 +160,17 @@ var runTests = []struct {
 	{
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.GLOBAL_SET, 0), instr.New(instr.GLOBAL_GET, 0),
-		}),
+		}, program.WithGlobals(types.TypeI32)),
 		values: []types.Value{types.I32(3)},
 	},
 	{
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 4), instr.New(instr.GLOBAL_SET, 0), instr.New(instr.GLOBAL_GET, 0),
-		}),
+		}, program.WithGlobals(types.TypeI32)),
 		values: []types.Value{types.I32(4)},
 	},
 	{
-		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 6), instr.New(instr.GLOBAL_TEE, 0)}),
+		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 6), instr.New(instr.GLOBAL_TEE, 0)}, program.WithGlobals(types.TypeI32)),
 		values:  []types.Value{types.I32(6)},
 	},
 	{
@@ -1301,7 +1301,7 @@ func TestInterpreter_Run(t *testing.T) {
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
 			instr.New(instr.GLOBAL_TEE, 0), // duplicates ownership: stack + global
 			instr.New(instr.DROP),          // drop stack copy; global still owns
-		})
+		}, program.WithGlobals(types.TypeRef))
 		i := New(prog)
 		defer i.Close()
 
@@ -1446,6 +1446,79 @@ func TestInterpreter_Run(t *testing.T) {
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+	})
+
+	t.Run("GLOBAL_SET rejects an undeclared global slot", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.GLOBAL_SET, 0),
+		})
+		i := New(prog)
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+	})
+
+	t.Run("GLOBAL_TEE rejects an undeclared global slot", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.GLOBAL_TEE, 0),
+		})
+		i := New(prog)
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+	})
+
+	t.Run("unseeded declared globals read kind-correct zeros", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.I32_CONST, i32operand(2)),
+			instr.New(instr.I32_ADD), // fuses without any prior GLOBAL_SET/SetGlobal
+			instr.New(instr.GLOBAL_GET, 1),
+			instr.New(instr.GLOBAL_GET, 2),
+		}, program.WithGlobals(types.TypeI32, types.TypeF64, types.TypeRef))
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 3, i.sp)
+		require.Equal(t, types.BoxI32(2), i.stack[0])
+		require.Equal(t, types.BoxF64(0), i.stack[1])
+		require.Equal(t, types.BoxedNull, i.stack[2])
+	})
+
+	t.Run("GLOBAL_GET declares and reads an I32 global with a fused superinstruction", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 5),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.I32_CONST, i32operand(2)),
+			instr.New(instr.I32_ADD),
+		}, program.WithGlobals(types.TypeI32))
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		require.Equal(t, 1, i.sp)
+		require.Equal(t, types.BoxI32(7), i.stack[i.sp-1])
+	})
+
+	t.Run("GLOBAL_TEE retains the ref stored into a declared ref global", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), // heap[1]
+			instr.New(instr.GLOBAL_TEE, 0),
+			instr.New(instr.DROP),
+		}, program.WithGlobals(types.TypeRef))
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+
+		g, err := i.Global(0)
+		require.NoError(t, err)
+		require.Equal(t, 1, g.Ref())
+		require.Equal(t, 1, i.rc[1])
 	})
 
 	t.Run("I64 local rejects non-I64 heap refs", func(t *testing.T) {
@@ -2198,7 +2271,7 @@ func TestInterpreter_Const(t *testing.T) {
 }
 
 func TestInterpreter_Global(t *testing.T) {
-	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 4), instr.New(instr.GLOBAL_SET, 0)})
+	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 4), instr.New(instr.GLOBAL_SET, 0)}, program.WithGlobals(types.TypeI32))
 	i := New(prog)
 	defer i.Close()
 
@@ -2209,7 +2282,7 @@ func TestInterpreter_Global(t *testing.T) {
 }
 
 func TestInterpreter_SetGlobal(t *testing.T) {
-	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.GLOBAL_SET, 0)})
+	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.GLOBAL_SET, 0)}, program.WithGlobals(types.TypeI32))
 	i := New(prog)
 	defer i.Close()
 
@@ -2413,6 +2486,22 @@ func TestInterpreter_Reset(t *testing.T) {
 		require.Equal(t, types.I32(7), v)
 	})
 
+	t.Run("restores declared-kind zero globals", func(t *testing.T) {
+		prog := program.New(nil, program.WithGlobals(types.TypeI32, types.TypeRef))
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.SetGlobal(0, types.BoxI32(9)))
+		i.Reset()
+
+		g, err := i.Global(0)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(0), g)
+		g, err = i.Global(1)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxedNull, g)
+	})
+
 	t.Run("restores heap baseline after reset", func(t *testing.T) {
 		prog := program.New(nil, program.WithConstants(types.Ref(42)))
 		i := New(prog)
@@ -2552,60 +2641,6 @@ func TestWithFrame(t *testing.T) {
 		v, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(1), v)
-	})
-}
-
-func TestWithGlobals(t *testing.T) {
-	t.Run("initial capacity grows", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 9), instr.New(instr.GLOBAL_SET, 5), instr.New(instr.GLOBAL_GET, 5),
-		})
-		i := New(prog, WithGlobals(1))
-		defer i.Close()
-
-		require.NoError(t, i.Run(context.Background()))
-		v, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(9), v)
-	})
-
-	t.Run("zero capacity GLOBAL_SET grows slot zero", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 9), instr.New(instr.GLOBAL_SET, 0), instr.New(instr.GLOBAL_GET, 0),
-		})
-		i := New(prog, WithGlobals(0))
-		defer i.Close()
-
-		require.NoError(t, i.Run(context.Background()))
-		v, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(9), v)
-	})
-
-	t.Run("zero capacity GLOBAL_TEE grows slot zero", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 9), instr.New(instr.GLOBAL_TEE, 0),
-		})
-		i := New(prog, WithGlobals(0))
-		defer i.Close()
-
-		require.NoError(t, i.Run(context.Background()))
-		v, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(9), v)
-	})
-
-	t.Run("negative capacity normalizes to lazy growth", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 9), instr.New(instr.GLOBAL_SET, 0), instr.New(instr.GLOBAL_GET, 0),
-		})
-		i := New(prog, WithGlobals(-1))
-		defer i.Close()
-
-		require.NoError(t, i.Run(context.Background()))
-		v, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(9), v)
 	})
 }
 

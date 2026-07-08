@@ -305,6 +305,13 @@ func (r *Tracer) codes(i *Interpreter) [][]func(*Interpreter) {
 	if len(r.exact) == len(i.instrs) {
 		return r.exact
 	}
+	// The declared Program.Globals are out of scope here; New pre-seeds every
+	// slot to the zero Boxed of its declared kind, so the runtime values carry
+	// the declared kinds at all times.
+	globals := make([]types.Kind, len(i.globals))
+	for j, g := range i.globals {
+		globals[j] = g.Kind()
+	}
 	r.exact = make([][]func(*Interpreter), len(i.instrs))
 	for addr, code := range i.instrs {
 		if len(code) == 0 {
@@ -320,6 +327,7 @@ func (r *Tracer) codes(i *Interpreter) [][]func(*Interpreter) {
 			types:     i.types,
 			constants: i.constants,
 			heap:      i.heap,
+			globals:   globals,
 			exact:     true,
 		}
 		r.exact[addr] = tc.Compile(code, locals, captures)

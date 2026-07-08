@@ -12,6 +12,7 @@ import (
 type Program struct {
 	Code      []byte
 	Locals    []types.Type
+	Globals   []types.Type
 	Constants []types.Value
 	Types     []types.Type
 	Handlers  []instr.Handler
@@ -38,6 +39,18 @@ func WithLocals(locals ...types.Type) func(*Program) {
 	}
 }
 
+// WithGlobals declares the module's global slots and their types, forming the
+// fixed global table addressed by GLOBAL_GET/SET/TEE; GLOBAL_* past the
+// declared count traps. Declaring globals gives each interpreter a pre-sized,
+// kind-stable global table so GLOBAL_GET/SET emit native traces at the top
+// level. Seed per-run input into a declared slot with Interpreter.SetGlobal
+// before Run.
+func WithGlobals(globals ...types.Type) func(*Program) {
+	return func(p *Program) {
+		p.Globals = globals
+	}
+}
+
 // WithHandlers attaches the exception table for the top-level code (slot 0).
 func WithHandlers(handlers ...instr.Handler) func(*Program) {
 	return func(p *Program) {
@@ -60,6 +73,10 @@ func (p *Program) String() string {
 	if len(p.Locals) > 0 {
 		sb.WriteString(".locals\n")
 		writeIndexed(&sb, p.Locals)
+	}
+	if len(p.Globals) > 0 {
+		sb.WriteString(".globals\n")
+		writeIndexed(&sb, p.Globals)
 	}
 	if len(p.Constants) > 0 {
 		sb.WriteString(".constants\n")

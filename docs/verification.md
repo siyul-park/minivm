@@ -48,7 +48,7 @@ Verification prevents external bytecode from:
 - decoding past instruction bounds
 - using unknown opcodes
 - jumping into the middle of instructions
-- using invalid constant, type, local, or upvalue indexes
+- using invalid constant, type, local, upvalue, or global indexes
 - falling through from function bodies
 - causing definite stack underflow
 - causing definite operand type mismatch
@@ -109,6 +109,7 @@ Examples:
 - type-indexed instructions must reference `Types`
 - `LOCAL_*` must fit within params plus locals
 - `UPVAL_*` must fit within captures
+- `GLOBAL_*` must fit within declared `.globals`
 
 ### 2. Control Flow
 
@@ -207,7 +208,6 @@ If the callee is dynamic and its function type cannot be recovered, verification
 
 These are runtime concerns, not verifier failures:
 
-- global indexes, because globals can grow dynamically
 - heap exhaustion
 - fuel exhaustion
 - context cancellation

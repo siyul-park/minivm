@@ -182,6 +182,19 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, Verify(prog), ErrIndexOutOfRange)
 	})
 
+	t.Run("global index in range", func(t *testing.T) {
+		prog := New([]instr.Instruction{
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.DROP),
+		}, WithGlobals(types.TypeI32))
+		require.NoError(t, Verify(prog))
+	})
+
+	t.Run("global index out of range", func(t *testing.T) {
+		prog := New([]instr.Instruction{instr.New(instr.GLOBAL_GET, 9)}, WithGlobals(types.TypeI32))
+		require.ErrorIs(t, Verify(prog), ErrIndexOutOfRange)
+	})
+
 	t.Run("invalid jump", func(t *testing.T) {
 		prog := New([]instr.Instruction{instr.New(instr.BR, 100)})
 		require.ErrorIs(t, Verify(prog), ErrInvalidJump)

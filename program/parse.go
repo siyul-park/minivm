@@ -95,6 +95,8 @@ func processSection(prog *Program, section string, lineStart int, lines []string
 		prog.Code = instr.Marshal(code)
 	case ".locals":
 		prog.Locals, err = parseTypes(lines)
+	case ".globals":
+		prog.Globals, err = parseTypes(lines)
 	case ".constants":
 		prog.Constants, err = parseConstants(lines)
 	case ".types":

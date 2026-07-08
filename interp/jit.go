@@ -46,7 +46,7 @@ type lowering struct {
 	branches  map[branch]leg
 	funcs     map[int]*types.Function
 	constants []types.Boxed
-	globals   []types.Boxed
+	globals   []types.Kind
 	heap      []types.Value
 	scratch   []asm.PReg
 	entry     asm.Label
@@ -264,8 +264,18 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 	if len(c.scratchRegs) < scratchCount {
 		return false, nil
 	}
+
 	asmb := asm.New(c.arch)
 	entry := asmb.Label()
+
+	// The declared Program.Globals are out of scope here; New pre-seeds every
+	// slot to the zero Boxed of its declared kind, so the runtime values carry
+	// the declared kinds at all times.
+	globals := make([]types.Kind, len(i.globals))
+	for j, g := range i.globals {
+		globals[j] = g.Kind()
+	}
+
 	ctx := &lowering{
 		assembler: asmb,
 		tree:      tree,
@@ -274,7 +284,7 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 		queued:    map[branch]asm.Label{},
 		tails:     map[*step]asm.Label{},
 		constants: i.constants,
-		globals:   i.globals,
+		globals:   globals,
 		heap:      i.heap,
 		scratch:   c.scratchRegs[:scratchCount],
 		entry:     entry,

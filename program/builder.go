@@ -15,6 +15,7 @@ type Builder struct {
 	constants []types.Value
 	typs      []types.Type
 	locals    []types.Type
+	globals   []types.Type
 
 	constIndex map[string]int
 	typeIndex  map[string]int
@@ -110,6 +111,17 @@ func (b *Builder) Locals(ts ...types.Type) *Builder {
 	return b
 }
 
+// Globals declares the module's global slots and their types; their positions
+// are the indices used by GLOBAL_* at the top level, forming the module's
+// fixed global table. GLOBAL_* past the declared count traps. Declaring
+// globals gives each interpreter a pre-sized, kind-stable global table so
+// GLOBAL_GET/SET emit native traces. Seed per-run input into a declared slot
+// with Interpreter.SetGlobal before Run.
+func (b *Builder) Globals(ts ...types.Type) *Builder {
+	b.globals = append(b.globals, ts...)
+	return b
+}
+
 // Build resolves every branch and returns the assembled program with its
 // constant and type pools.
 func (b *Builder) Build() (*Program, error) {
@@ -121,6 +133,9 @@ func (b *Builder) Build() (*Program, error) {
 	var opts []func(*Program)
 	if len(b.locals) > 0 {
 		opts = append(opts, WithLocals(b.locals...))
+	}
+	if len(b.globals) > 0 {
+		opts = append(opts, WithGlobals(b.globals...))
 	}
 	if len(b.constants) > 0 {
 		opts = append(opts, WithConstants(b.constants...))

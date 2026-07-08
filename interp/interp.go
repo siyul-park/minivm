@@ -91,7 +91,6 @@ type option struct {
 	cutoff     int
 
 	frame   int
-	globals int
 	stack   int
 	heap    int
 	maxHeap int
@@ -146,10 +145,6 @@ func WithFrame(val int) func(*option) {
 	return func(o *option) { o.frame = val }
 }
 
-func WithGlobals(val int) func(*option) {
-	return func(o *option) { o.globals = val }
-}
-
 func WithStack(val int) func(*option) {
 	return func(o *option) { o.stack = val }
 }
@@ -179,7 +174,6 @@ func WithFuel(val uint64) func(*option) {
 func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	opt := option{
 		frame:     128,
-		globals:   128,
 		stack:     1024,
 		heap:      128,
 		tick:      128,
@@ -191,9 +185,6 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 
 	if opt.frame <= 0 {
 		opt.frame = 1
-	}
-	if opt.globals < 0 {
-		opt.globals = 0
 	}
 	if opt.stack <= 0 {
 		opt.stack = 1
@@ -246,7 +237,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		threshold: threshold,
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
-		globals:   make([]types.Boxed, 0, opt.globals),
+		globals:   make([]types.Boxed, len(prog.Globals)),
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
 		exits:     map[anchor]func(*Interpreter){},
@@ -298,6 +289,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		types:     i.types,
 		constants: i.constants,
 		heap:      i.heap,
+		globals:   types.Kinds(prog.Globals),
 		exact:     opt.tick == 1,
 	}
 
@@ -329,6 +321,15 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	if locals := len(prog.Locals); locals > 0 {
 		clear(i.stack[i.sp : i.sp+locals])
 		i.sp += locals
+	}
+	// Declared globals are pre-seeded to the zero Boxed of their declared kind
+	// (Program.Globals, like Locals): numeric slots get a typed zero, ref slots
+	// a retained null ref. A slot's runtime kind therefore always matches its
+	// declaration, so kind metadata for GLOBAL_GET/SET fusion and JIT lowering
+	// can be derived from the slot values at any time. Callers overwrite each
+	// run's input via Interpreter.SetGlobal before Run.
+	for j, k := range types.Kinds(prog.Globals) {
+		i.globals[j] = i.zero(k)
 	}
 	i.fp = 1
 	i.fr = &i.frames[0]
@@ -654,11 +655,6 @@ func (i *Interpreter) Reset() {
 		i.sp += locals
 	}
 
-	for idx := range i.globals {
-		i.globals[idx] = 0
-	}
-	i.globals = i.globals[:0]
-
 	i.gas = i.fuel
 	i.roots = i.roots[:0]
 	clear(i.interned)
@@ -669,6 +665,15 @@ func (i *Interpreter) Reset() {
 		i.rc[j] = 1
 	}
 	i.free = i.free[:0]
+
+	// Restore the declared-kind zero seed (see New). Each slot's runtime kind
+	// still matches its declaration, so the kind is read back from the slot
+	// itself; the heap and refcounts were re-baselined above, so any old ref
+	// value needs no release, and this runs after the rc reset so the seed's
+	// null-ref retain is preserved.
+	for idx := range i.globals {
+		i.globals[idx] = i.zero(i.globals[idx].Kind())
+	}
 }
 
 // jit lazily builds the native compiler, compiles the function at addr, and
@@ -807,21 +812,6 @@ func (i *Interpreter) flush() {
 	if i.profiler != nil {
 		i.profiler.Flush(i.samples)
 	}
-}
-
-func (i *Interpreter) ensure(idx int) {
-	if idx < len(i.globals) {
-		return
-	}
-	if cap(i.globals) > idx {
-		i.globals = i.globals[:idx+1]
-		return
-	}
-	newLen := idx + 1
-	newCap := max(newLen, cap(i.globals)*2, 1)
-	globals := make([]types.Boxed, newLen, newCap)
-	copy(globals, i.globals)
-	i.globals = globals
 }
 
 // function returns the *types.Function at addr in the heap, or false if
@@ -1350,6 +1340,26 @@ func (i *Interpreter) framesInfo() []FrameInfo {
 	return frames
 }
 
+// zero returns the zero Boxed for a slot of the declared kind: a typed
+// numeric zero, or for ref kinds a retained null ref (heap index 0 is
+// permanently Null), so the slot's runtime kind always matches its
+// declaration and releasing the seeded value stays balanced.
+func (i *Interpreter) zero(kind types.Kind) types.Boxed {
+	switch kind.Repr() {
+	case types.KindI32:
+		return types.BoxI32(0)
+	case types.KindI64:
+		return types.BoxI64(0)
+	case types.KindF32:
+		return types.BoxF32(0)
+	case types.KindF64:
+		return types.BoxF64(0)
+	default:
+		i.retain(0)
+		return types.BoxedNull
+	}
+}
+
 func (i *Interpreter) boxI64(val int64) types.Boxed {
 	if types.IsBoxable(val) {
 		return types.BoxI64(val)
@@ -1493,10 +1503,18 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if addr >= len(i.coros) {
 		i.coros = append(i.coros, make([]bool, n-len(i.coros))...)
 	}
+	// The declared Program.Globals are out of scope here; New pre-seeds every
+	// slot to the zero Boxed of its declared kind, so the runtime values carry
+	// the declared kinds at all times.
+	globals := make([]types.Kind, len(i.globals))
+	for j, g := range i.globals {
+		globals[j] = g.Kind()
+	}
 	c := &threader{
 		types:     i.types,
 		constants: i.constants,
 		heap:      i.heap,
+		globals:   globals,
 		exact:     i.tick == 1,
 	}
 	i.instrs[addr] = fn.Code

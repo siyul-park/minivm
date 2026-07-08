@@ -33,6 +33,15 @@ func TestBuilder_Locals(t *testing.T) {
 	require.Equal(t, []types.Type{types.TypeI32, types.TypeI64}, prog.Locals)
 }
 
+func TestBuilder_Globals(t *testing.T) {
+	b := NewBuilder()
+	b.Globals(types.TypeI32, types.NewArrayType(types.TypeF64)).Emit(instr.GLOBAL_GET, 0).Emit(instr.DROP)
+
+	prog, err := b.Build()
+	require.NoError(t, err)
+	require.Equal(t, []types.Type{types.TypeI32, types.NewArrayType(types.TypeF64)}, prog.Globals)
+}
+
 func TestBuilder_ConstGet(t *testing.T) {
 	b := NewBuilder()
 	b.ConstGet(types.String("x")).ConstGet(types.String("x"))

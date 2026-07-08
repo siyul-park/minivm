@@ -815,15 +815,18 @@ func (l arm64Lowerer) globalSet(ctx *lowering, op step, pop bool) bool {
 	return true
 }
 
-// global decodes the global index and returns its statically observed
-// kind. Out-of-range indices and offsets past the 12-bit LDR/STR limit reject.
+// global decodes the global index and returns its statically observed kind.
+// The lowering carries the global kinds (mirroring how Locals use declared
+// LocalKinds), so GLOBAL_GET/SET see a stable kind at lower time: a per-run
+// input is seeded via SetGlobal before Run, so the entry trace already observes
+// it. Out-of-range indices and offsets past the 12-bit LDR/STR limit reject.
 func (l arm64Lowerer) global(ctx *lowering, op step) (int, types.Kind, bool) {
 	f := ctx.frame()
 	idx := int(uint16(f.code[op.ip+1]) | uint16(f.code[op.ip+2])<<8)
 	if idx >= len(ctx.globals) || idx > 4095 {
 		return 0, 0, false
 	}
-	kind := ctx.globals[idx].Kind()
+	kind := ctx.globals[idx]
 	switch kind {
 	case types.KindI32, types.KindI64, types.KindF32, types.KindF64, types.KindRef:
 		return idx, kind, true

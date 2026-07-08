@@ -14,6 +14,7 @@ type threader struct {
 	constants []types.Boxed
 	heap      []types.Value
 	locals    []types.Kind
+	globals   []types.Kind
 	captures  []types.Kind
 	code      []byte
 	ip        int
@@ -341,6 +342,63 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	instr.GLOBAL_GET: func(c *threader) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
+		if idx < len(c.globals) {
+			switch c.globals[idx].Repr() {
+			case types.KindI32:
+				if fused := c.fuseI32(func(i *Interpreter) int32 {
+					if idx >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					return i.globals[idx].I32()
+				}, c.globals[idx], 3); fused != nil {
+					return fused
+				}
+			case types.KindI64:
+				if fused := c.fuseI64(func(i *Interpreter) int64 {
+					if idx >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					return i.unboxI64(i.globals[idx])
+				}, 3); fused != nil {
+					return fused
+				}
+			case types.KindF32:
+				if fused := c.fuseF32(func(i *Interpreter) float32 {
+					if idx >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					return i.globals[idx].F32()
+				}, 3); fused != nil {
+					return fused
+				}
+			case types.KindF64:
+				if fused := c.fuseF64(func(i *Interpreter) float64 {
+					if idx >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					return i.globals[idx].F64()
+				}, 3); fused != nil {
+					return fused
+				}
+			}
+			// I32/F32/F64 globals never hold a heap ref, so retain is a no-op;
+			// skip it and the Kind branch. I64 may box to a ref, so it keeps
+			// retainBox.
+			switch c.globals[idx].Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					if idx >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					i.stack[i.sp] = i.globals[idx]
+					i.sp++
+					i.fr.ip += 3
+				}
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
@@ -358,12 +416,32 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	instr.GLOBAL_SET: func(c *threader) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
+		// I32/F32/F64 globals never hold a heap ref, so the old value can never
+		// be a ref; skip the release. I64 may box to a ref, so it keeps it.
+		if idx < len(c.globals) {
+			switch c.globals[idx].Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+				return func(i *Interpreter) {
+					if i.sp == 0 {
+						panic(ErrStackUnderflow)
+					}
+					if idx >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					i.globals[idx] = i.stack[i.sp-1]
+					i.sp--
+					i.fr.ip += 3
+				}
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
+			if idx >= len(i.globals) {
+				panic(ErrSegmentationFault)
+			}
 			val := i.stack[i.sp-1]
-			i.ensure(idx)
 			old := i.globals[idx]
 			if old != val {
 				i.releaseBox(old)
@@ -376,12 +454,31 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	instr.GLOBAL_TEE: func(c *threader) func(i *Interpreter) {
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
+		// I32/F32/F64 globals never hold a heap ref, so the old value can never
+		// be a ref; skip the release. I64 may box to a ref, so it keeps it.
+		if idx < len(c.globals) {
+			switch c.globals[idx].Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+				return func(i *Interpreter) {
+					if i.sp == 0 {
+						panic(ErrStackUnderflow)
+					}
+					if idx >= len(i.globals) {
+						panic(ErrSegmentationFault)
+					}
+					i.globals[idx] = i.stack[i.sp-1]
+					i.fr.ip += 3
+				}
+			}
+		}
 		return func(i *Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
 			}
+			if idx >= len(i.globals) {
+				panic(ErrSegmentationFault)
+			}
 			val := i.stack[i.sp-1]
-			i.ensure(idx)
 			old := i.globals[idx]
 			if old != val {
 				i.retainBox(val)

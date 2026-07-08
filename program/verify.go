@@ -221,6 +221,10 @@ func (c *checker) bounds(ip int, op instr.Opcode) error {
 		if int(inst.Operand(0)) >= len(c.locals) {
 			return c.fail(ip, op, ErrIndexOutOfRange)
 		}
+	case instr.GLOBAL_GET, instr.GLOBAL_SET, instr.GLOBAL_TEE:
+		if int(inst.Operand(0)) >= len(c.prog.Globals) {
+			return c.fail(ip, op, ErrIndexOutOfRange)
+		}
 	case instr.UPVAL_GET, instr.UPVAL_SET:
 		if int(inst.Operand(0)) >= len(c.captures) {
 			return c.fail(ip, op, ErrIndexOutOfRange)

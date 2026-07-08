@@ -90,9 +90,9 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Coroutines | `RESUME` | `resume` | ◐ | 🔲 | terminal fallback to coroutine resume |
 | Coroutines | `CORO_DONE` | `coro.done` | ✅ | 🔲 | native coroutine field read |
 | Coroutines | `CORO_VALUE` | `coro.value` | ✅ | 🔲 | native coroutine field read |
-| Variables | `GLOBAL_GET` | `global.get` | ✅ | 🔲 | — |
-| Variables | `GLOBAL_SET` | `global.set` | ✅ | 🔲 | — |
-| Variables | `GLOBAL_TEE` | `global.tee` | ✅ | 🔲 | — |
+| Variables | `GLOBAL_GET` | `global.get` | ✅ | 🔲 | index must be within declared `.globals`; out-of-range traps (segmentation fault) |
+| Variables | `GLOBAL_SET` | `global.set` | ✅ | 🔲 | index must be within declared `.globals`; out-of-range traps (segmentation fault) |
+| Variables | `GLOBAL_TEE` | `global.tee` | ✅ | 🔲 | index must be within declared `.globals`; out-of-range traps (segmentation fault) |
 | Variables | `LOCAL_GET` | `local.get` | ✅ | 🔲 | — |
 | Variables | `LOCAL_SET` | `local.set` | ✅ | 🔲 | — |
 | Variables | `LOCAL_TEE` | `local.tee` | ✅ | 🔲 | — |
