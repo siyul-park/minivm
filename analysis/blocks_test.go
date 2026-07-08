@@ -211,6 +211,39 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 			).MustBuild(),
 			err: ErrInvalidJump,
 		},
+		{
+			name: "br_table repeated targets are deduplicated",
+			fn: types.NewFunctionBuilder(nil).Emit(
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.BR_TABLE, 2, 5, 5, 5),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_CONST, 3),
+			).MustBuild(),
+			blocks: []*BasicBlock{
+				{Start: 0, End: 18, Succs: []int{1}, Preds: nil},
+				{Start: 18, End: 23, Succs: nil, Preds: []int{0}},
+			},
+		},
+		{
+			name: "br_if duplicate edge is deduplicated",
+			fn: types.NewFunctionBuilder(nil).Emit(
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.BR_IF, 0),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_CONST, 3),
+			).MustBuild(),
+			blocks: []*BasicBlock{
+				{Start: 0, End: 8, Succs: []int{1}, Preds: nil},
+				{Start: 8, End: 18, Succs: nil, Preds: []int{0}},
+			},
+		},
+		{
+			name: "invalid br target after map lookup",
+			fn: types.NewFunctionBuilder(nil).Emit(
+				instr.New(instr.BR, 100),
+			).MustBuild(),
+			err: ErrInvalidJump,
+		},
 	}
 
 	for _, tt := range tests {
@@ -231,4 +264,25 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 			require.Equal(t, tt.blocks, actual)
 		})
 	}
+}
+
+func BenchmarkBasicBlocksAnalysis_Run(b *testing.B) {
+	b.Run("many_blocks", func(b *testing.B) {
+		const n = 10000
+		emit := make([]instr.Instruction, 0, n)
+		for range n {
+			emit = append(emit, instr.New(instr.I32_CONST, 0))
+		}
+		fn := types.NewFunctionBuilder(nil).Emit(emit...).MustBuild()
+
+		m := pass.NewManager()
+		analysis := NewBasicBlocksAnalysis()
+
+		b.ResetTimer()
+		for b.Loop() {
+			if _, err := analysis.Run(m, fn); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }

@@ -92,6 +92,11 @@ func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*Basic
 		}
 	}
 
+	indexByStart := make(map[int]int, len(blocks))
+	for idx, block := range blocks {
+		indexByStart[block.Start] = idx
+	}
+
 	for j, blk := range blocks {
 		ip := blk.Start
 		for ip < blk.End {
@@ -110,7 +115,7 @@ func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*Basic
 		case instr.UNREACHABLE, instr.RETURN, instr.THROW:
 		case instr.BR, instr.BR_IF:
 			offset := ip + inst.Width() + instr.ReadI16(inst.Operand(0))
-			if !p.link(blocks, j, offset) {
+			if !p.link(blocks, indexByStart, j, offset) {
 				return nil, invalidJumpError(ip, offset)
 			}
 			if inst.Opcode() == instr.BR_IF && j+1 < len(blocks) {
@@ -123,12 +128,12 @@ func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*Basic
 			count := int(operands[0])
 			for k := range count {
 				offset := ip + instr.ReadI16(operands[k+1]) + width
-				if !p.link(blocks, j, offset) {
+				if !p.link(blocks, indexByStart, j, offset) {
 					return nil, invalidJumpError(ip, offset)
 				}
 			}
 			offset := ip + instr.ReadI16(operands[len(operands)-1]) + width
-			if !p.link(blocks, j, offset) {
+			if !p.link(blocks, indexByStart, j, offset) {
 				return nil, invalidJumpError(ip, offset)
 			}
 		default:
@@ -140,18 +145,18 @@ func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*Basic
 	}
 	for _, b := range blocks {
 		slices.Sort(b.Succs)
+		b.Succs = slices.Compact(b.Succs)
 		slices.Sort(b.Preds)
+		b.Preds = slices.Compact(b.Preds)
 	}
 	return blocks, nil
 }
 
-func (p *BasicBlocksAnalysis) link(blocks []*BasicBlock, src, dst int) bool {
-	for i, b := range blocks {
-		if b.Start <= dst && dst < b.End {
-			blocks[src].Succs = append(blocks[src].Succs, i)
-			blocks[i].Preds = append(blocks[i].Preds, src)
-			return true
-		}
+func (p *BasicBlocksAnalysis) link(blocks []*BasicBlock, indexByStart map[int]int, src, dst int) bool {
+	if i, ok := indexByStart[dst]; ok {
+		blocks[src].Succs = append(blocks[src].Succs, i)
+		blocks[i].Preds = append(blocks[i].Preds, src)
+		return true
 	}
 	return false
 }
