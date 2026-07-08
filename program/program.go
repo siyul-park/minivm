@@ -55,18 +55,37 @@ func New(instrs []instr.Instruction, options ...func(*Program)) *Program {
 
 func (p *Program) String() string {
 	var sb strings.Builder
+	sb.WriteString(".code\n")
 	sb.WriteString(instr.Format(p.Code))
 	if len(p.Locals) > 0 {
-		sb.WriteString("\n")
+		sb.WriteString(".locals\n")
 		writeIndexed(&sb, p.Locals)
 	}
 	if len(p.Constants) > 0 {
-		sb.WriteString("\n")
-		writeIndexed(&sb, p.Constants)
+		sb.WriteString(".constants\n")
+		for i, v := range p.Constants {
+			if fn, ok := v.(*types.Function); ok {
+				head, tail, _ := strings.Cut(fn.String(), "\n")
+				sb.WriteString(fmt.Sprintf("%04d:\t%s\n", i, head))
+				for tail != "" {
+					var line string
+					line, tail, _ = strings.Cut(tail, "\n")
+					sb.WriteString(fmt.Sprintf("\t%s\n", line))
+				}
+			} else {
+				sb.WriteString(fmt.Sprintf("%04d:\t%s %s\n", i, v.Type().String(), v.String()))
+			}
+		}
 	}
 	if len(p.Types) > 0 {
-		sb.WriteString("\n")
+		sb.WriteString(".types\n")
 		writeIndexed(&sb, p.Types)
+	}
+	if len(p.Handlers) > 0 {
+		sb.WriteString(".handlers\n")
+		for i, h := range p.Handlers {
+			sb.WriteString(fmt.Sprintf("%04d:\tstart=%d end=%d catch=%d depth=%d\n", i, h.Start, h.End, h.Catch, h.Depth))
+		}
 	}
 	return sb.String()
 }
