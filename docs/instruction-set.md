@@ -245,7 +245,7 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Floating point | `F64_TO_F32` | `f64.to_f32` | ✅ | 🔲 | — |
 | Floating point | `F64_REINTERPRET_I64` | `f64.reinterpret_i64` | ✅ | 🔲 | — |
 | Strings | `STRING_NEW_UTF32` | `string.new_utf32` | ⬜ | 🔲 | allocation stays interpreter-owned |
-| Strings | `STRING_LEN` | `string.len` | ◐ | 🔲 | terminal fallback |
+| Strings | `STRING_LEN` | `string.len` | ✅ | 🔲 | native typed-array-length-style length read |
 | Strings | `STRING_CONCAT` | `string.concat` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Strings | `STRING_EQ` | `string.eq` | ⬜ | 🔲 | string comparisons stay threaded |
 | Strings | `STRING_NE` | `string.ne` | ⬜ | 🔲 | string comparisons stay threaded |
@@ -258,7 +258,7 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Arrays | `ARRAY_NEW_DEFAULT` | `array.new_default` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Arrays | `ARRAY_LEN` | `array.len` | ✅ | 🔲 | native typed-array length fast path |
 | Arrays | `ARRAY_GET` | `array.get` | ✅ | 🔲 | native typed-array get fast path |
-| Arrays | `ARRAY_SET` | `array.set` | ◐ | 🔲 | terminal native mutation |
+| Arrays | `ARRAY_SET` | `array.set` | ◐ | 🔲 | terminal native mutation; scalar and ref-kind elements |
 | Arrays | `ARRAY_FILL` | `array.fill` | ⬜ | 🔲 | bulk mutation stays threaded |
 | Arrays | `ARRAY_COPY` | `array.copy` | ⬜ | 🔲 | bulk mutation stays threaded |
 | Arrays | `ARRAY_APPEND` | `array.append` | ⬜ | 🔲 | grow/mutation stays threaded |
@@ -267,7 +267,7 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Structs | `STRUCT_NEW` | `struct.new` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Structs | `STRUCT_NEW_DEFAULT` | `struct.new_default` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Structs | `STRUCT_GET` | `struct.get` | ✅ | 🔲 | native field get fast path |
-| Structs | `STRUCT_SET` | `struct.set` | ◐ | 🔲 | terminal native mutation |
+| Structs | `STRUCT_SET` | `struct.set` | ◐ | 🔲 | terminal native mutation; scalar and ref-kind fields |
 | Maps | `MAP_NEW` | `map.new` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Maps | `MAP_NEW_DEFAULT` | `map.new_default` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Maps | `MAP_LEN` | `map.len` | ◐ | 🔲 | terminal fallback |

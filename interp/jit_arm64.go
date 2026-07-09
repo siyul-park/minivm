@@ -62,6 +62,7 @@ var (
 	heapArrayF32  = itab(types.TypedArray[float32](nil))
 	heapArrayF64  = itab(types.TypedArray[float64](nil))
 	heapArrayRef  = itab((*types.Array)(nil))
+	heapString    = itab(types.String(""))
 	heapStruct    = itab((*types.Struct)(nil))
 	heapError     = itab((*types.Error)(nil))
 	heapCoroutine = itab((*Coroutine)(nil))
@@ -507,8 +508,17 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step) bool {
 			ok = l.coroDone(ctx, op)
 		case instr.CORO_VALUE:
 			ok = l.coroValue(ctx, op)
-		case instr.STRING_LEN,
-			instr.STRING_ENCODE_UTF32,
+		case instr.STRING_LEN:
+			ok = l.stringLen(ctx, op)
+		// STRING_EQ/STRING_NE stay threaded like REF_EQ/REF_NE above: they
+		// release two refs, and a deopt after the first inline decrement would
+		// double-release. REF_SET stays threaded because it needs a fresh
+		// interface box (an allocation); storing in place is unsound against
+		// shared static boxes. REF_TEST/REF_CAST stay threaded because they
+		// need structural type equality that an itab guard cannot express.
+		// MAP_* stay threaded because they reach into Go map internals the
+		// lowerer has no native access to.
+		case instr.STRING_ENCODE_UTF32,
 			instr.STRING_ITER,
 			instr.MAP_LEN,
 			instr.MAP_GET,
@@ -2564,6 +2574,37 @@ func (l arm64Lowerer) refGet(ctx *lowering, op step) bool {
 	return true
 }
 
+// stringLen mirrors the threaded STRING_LEN handler: a heap-boxed
+// types.String has the same {data, len} header layout as a slice, so its
+// length lives at the same sliceLen offset arrayLen reads. Unlike ARRAY_LEN,
+// the opcode's target concrete type is always types.String, so there is no
+// shape to pick among; guardItab below is the only check needed and it deopts
+// at runtime instead of aborting the lowering at trace-build time.
+func (l arm64Lowerer) stringLen(ctx *lowering, op step) bool {
+	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
+		return false
+	}
+	pre := ctx.pre()
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
+	if !ok {
+		return false
+	}
+	fail, ok := l.sideExit(ctx, pre, op.ip)
+	if !ok {
+		return false
+	}
+	addr, itab, data := l.guardHeap(ctx, ref, fail)
+	l.guardItab(ctx, itab, heapString, fail)
+
+	result := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	n := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDR(n, data, sliceLen))
+	ctx.assembler.Emit(arm64.MOV(result, n))
+	l.releaseRef(ctx, addr, pre, op.ip)
+	ctx.values = append(pre[:len(pre)-1:len(pre)-1], value{reg: result, kind: types.KindI32, raw: true})
+	return true
+}
+
 func (l arm64Lowerer) arrayLen(ctx *lowering, op step) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
 		return false
@@ -2704,6 +2745,7 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 	}
 	kind := ctx.values[len(ctx.values)-1].kind
 	var want uintptr
+	var base int16
 	var scale uint8
 	switch kind {
 	case types.KindI1:
@@ -2722,6 +2764,9 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 	case types.KindF64:
 		want = heapArrayF64
 		scale = 3
+	case types.KindRef:
+		want = heapArrayRef
+		base = int16(arrayElems)
 	default:
 		return false
 	}
@@ -2743,28 +2788,42 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 	addr, itab, data := l.guardHeap(ctx, ref, fail)
 	l.guardItab(ctx, itab, want, fail)
 
-	dataPtr, n := l.sliceHeader(ctx, data, 0)
+	dataPtr, n := l.sliceHeader(ctx, data, base)
 	l.guardIndex(ctx, idx, n, fail)
 
 	rcBase := l.rcBase(ctx)
 	rc := l.guardRC(ctx, addr, rcBase, fail)
 
-	switch kind {
-	case types.KindI1, types.KindI8:
-		elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
-		a.Emit(arm64.ADD(elemAddr, dataPtr, idx))
-		a.Emit(arm64.STRB(val.reg, elemAddr, 0))
-	case types.KindI32, types.KindF32:
-		elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
-		off := a.Reg(asm.RegTypeInt, asm.Width64)
-		a.Emit(arm64.LSLI(off, idx, scale))
-		a.Emit(arm64.ADD(elemAddr, dataPtr, off))
-		a.Emit(arm64.STRW(val.reg, elemAddr, 0))
-	case types.KindI64, types.KindF64:
-		a.Emit(arm64.STRR(val.reg, dataPtr, idx))
+	if kind == types.KindRef {
+		// The container's refcount deopt point (guardRC above) runs before the
+		// overwritten element's release, which carries its own internal deopt
+		// (releaseBoxUnlessEqual -> releaseRef -> guardRC). Neither refcount is
+		// decremented until both checks pass, matching the release-old-ref-first
+		// idiom used by globalSet.
+		old := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LDRR(old, dataPtr, idx))
+		l.releaseBoxUnlessEqual(ctx, old, val.reg, pre, op.ip)
+	} else {
+		switch kind {
+		case types.KindI1, types.KindI8:
+			elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
+			a.Emit(arm64.ADD(elemAddr, dataPtr, idx))
+			a.Emit(arm64.STRB(val.reg, elemAddr, 0))
+		case types.KindI32, types.KindF32:
+			elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
+			off := a.Reg(asm.RegTypeInt, asm.Width64)
+			a.Emit(arm64.LSLI(off, idx, scale))
+			a.Emit(arm64.ADD(elemAddr, dataPtr, off))
+			a.Emit(arm64.STRW(val.reg, elemAddr, 0))
+		case types.KindI64, types.KindF64:
+			a.Emit(arm64.STRR(val.reg, dataPtr, idx))
+		}
 	}
 	a.Emit(arm64.SUBI(rc, rc, 1))
 	a.Emit(arm64.STRR(rc, rcBase, addr))
+	if kind == types.KindRef {
+		a.Emit(arm64.STRR(val.reg, dataPtr, idx))
+	}
 
 	ctx.values = pre[: len(pre)-3 : len(pre)-3]
 	return l.exit(ctx, op.ip+1)
@@ -2841,7 +2900,7 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 	}
 	kind := ctx.values[len(ctx.values)-1].kind
 	switch kind {
-	case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
+	case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64, types.KindRef:
 	default:
 		return false
 	}
@@ -2888,17 +2947,31 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 	rc := l.guardRC(ctx, addr, rcBase, fail)
 
 	dataPtr, _ := l.sliceHeader(ctx, data, int16(structData))
-	var stored asm.VReg
-	switch kind {
-	case types.KindI1, types.KindI8, types.KindI32, types.KindF32:
-		stored = a.Reg(asm.RegTypeInt, asm.Width64)
-		a.Emit(arm64.ANDI(stored, val.reg, maskI32))
-	case types.KindI64, types.KindF64:
-		stored = val.reg
+	if kind == types.KindRef {
+		// Mirrors arraySet's ref-element handling: the container's guardRC
+		// above is the deopt point for the container's own refcount, and the
+		// overwritten field's release (releaseBoxUnlessEqual) carries its own
+		// internal deopt. Neither refcount is decremented until both checks
+		// pass.
+		old := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LDRR(old, dataPtr, idx))
+		l.releaseBoxUnlessEqual(ctx, old, val.reg, pre, op.ip)
+	} else {
+		var stored asm.VReg
+		switch kind {
+		case types.KindI1, types.KindI8, types.KindI32, types.KindF32:
+			stored = a.Reg(asm.RegTypeInt, asm.Width64)
+			a.Emit(arm64.ANDI(stored, val.reg, maskI32))
+		case types.KindI64, types.KindF64:
+			stored = val.reg
+		}
+		a.Emit(arm64.STRR(stored, dataPtr, idx))
 	}
-	a.Emit(arm64.STRR(stored, dataPtr, idx))
 	a.Emit(arm64.SUBI(rc, rc, 1))
 	a.Emit(arm64.STRR(rc, rcBase, addr))
+	if kind == types.KindRef {
+		a.Emit(arm64.STRR(val.reg, dataPtr, idx))
+	}
 
 	ctx.values = pre[: len(pre)-3 : len(pre)-3]
 	return l.exit(ctx, op.ip+1)

@@ -5431,3 +5431,1183 @@ func (c *threader) fuseF64Imm(rhs float64, size int) func(*Interpreter) {
 	}
 	return nil
 }
+
+// fusePairI32 folds <I32 lhs source>; <I32 rhs source>; <binop> into one
+// dispatch when both operands come from loaders instead of the stack: it
+// calls lhs and rhs directly and pushes the result once, skipping the
+// double push/pop round trip the unfused sequence would otherwise do.
+// Mirrors fuseI32's opcode switch, but neither operand is popped from the
+// stack (both loaders already resolve their own value), so the check
+// guards a push instead of a pop and ip advances by size+1 (size covers
+// both source instructions; +1 covers the binop). Returns nil when c.exact
+// or no pattern matches.
+func (c *threader) fusePairI32(lhs, rhs func(*Interpreter) int32, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
+		return nil
+	}
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.I32_ADD:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i32Add(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_SUB:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i32Sub(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_MUL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i32Mul(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_DIV_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.i32DivS(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_DIV_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.i32DivU(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_REM_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.i32RemS(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_REM_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.i32RemU(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_SHL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)&0x1F
+			i.stack[i.sp] = i.i32Shl(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_SHR_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)&0x1F
+			i.stack[i.sp] = i.i32ShrS(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_SHR_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)&0x1F
+			i.stack[i.sp] = i.i32ShrU(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_XOR:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhsVal := types.BoxI32(lhs(i))
+			rhsVal := types.BoxI32(rhs(i))
+			i.stack[i.sp] = i.i32Xor(lhsVal, rhsVal)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_AND:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhsVal := types.BoxI32(lhs(i))
+			rhsVal := types.BoxI32(rhs(i))
+			i.stack[i.sp] = i.i32And(lhsVal, rhsVal)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_OR:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhsVal := types.BoxI32(lhs(i))
+			rhsVal := types.BoxI32(rhs(i))
+			i.stack[i.sp] = i.i32Or(lhsVal, rhsVal)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_ROTL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i32Rotl(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_ROTR:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i32Rotr(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_EQ:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i32Eq(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_NE:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i32Ne(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_LT_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i32LtS(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_LT_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i32LtU(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_GT_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i32GtS(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_GT_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i32GtU(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_LE_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i32LeS(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_LE_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i32LeU(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_GE_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i32GeS(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I32_GE_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i32GeU(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	}
+	return nil
+}
+
+// fusePairI64 folds <I64 lhs source>; <I64 rhs source>; <binop> into one
+// dispatch, mirroring fusePairI32 for 64-bit operands. Both loaders return
+// already-unboxed int64 values (matching the no-retain contract the
+// existing I64 rhs loaders in threaded.go use for GLOBAL_GET/LOCAL_GET/
+// UPVAL_GET/CONST_GET), so the fused closure never touches refcounts
+// itself.
+func (c *threader) fusePairI64(lhs, rhs func(*Interpreter) int64, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
+		return nil
+	}
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.I64_ADD:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64Add(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_SUB:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64Sub(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_MUL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64Mul(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_DIV_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.i64DivS(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_DIV_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.i64DivU(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_REM_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.i64RemS(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_REM_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.i64RemU(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_SHL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)&0x3F
+			i.stack[i.sp] = i.i64Shl(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_SHR_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)&0x3F
+			i.stack[i.sp] = i.i64ShrS(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_SHR_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)&0x3F
+			i.stack[i.sp] = i.i64ShrU(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_XOR:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64Xor(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_AND:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64And(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_OR:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64Or(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_ROTL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64Rotl(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_ROTR:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64Rotr(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_EQ:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64Eq(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_NE:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64Ne(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_LT_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64LtS(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_LT_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64LtU(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_GT_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64GtS(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_GT_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64GtU(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_LE_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64LeS(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_LE_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64LeU(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_GE_S:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64GeS(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.I64_GE_U:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.i64GeU(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	}
+	return nil
+}
+
+// fusePairF32 folds <F32 lhs source>; <F32 rhs source>; <binop> into one
+// dispatch, mirroring fusePairI32 for 32-bit floats.
+func (c *threader) fusePairF32(lhs, rhs func(*Interpreter) float32, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
+		return nil
+	}
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.F32_ADD:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f32Add(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F32_SUB:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f32Sub(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F32_MUL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f32Mul(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F32_DIV:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.f32Div(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F32_REM:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.f32Rem(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F32_MOD:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.f32Mod(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F32_MIN:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f32Min(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F32_MAX:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f32Max(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F32_COPYSIGN:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f32Copysign(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F32_EQ:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f32Eq(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F32_NE:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f32Ne(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F32_LT:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f32Lt(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F32_GT:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f32Gt(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F32_LE:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f32Le(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F32_GE:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f32Ge(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	}
+	return nil
+}
+
+// fusePairF64 folds <F64 lhs source>; <F64 rhs source>; <binop> into one
+// dispatch, mirroring fusePairI32 for 64-bit floats.
+func (c *threader) fusePairF64(lhs, rhs func(*Interpreter) float64, size int) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
+		return nil
+	}
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.F64_ADD:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f64Add(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F64_SUB:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f64Sub(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F64_MUL:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f64Mul(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F64_DIV:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.f64Div(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F64_REM:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.f64Rem(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F64_MOD:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			if rhs == 0 {
+				panic(ErrDivideByZero)
+			}
+			i.stack[i.sp] = i.f64Mod(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F64_MIN:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f64Min(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F64_MAX:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f64Max(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F64_COPYSIGN:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f64Copysign(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F64_EQ:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f64Eq(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F64_NE:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f64Ne(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F64_LT:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f64Lt(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F64_GT:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f64Gt(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F64_LE:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f64Le(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	case instr.F64_GE:
+		return func(i *Interpreter) {
+			if i.sp == len(i.stack) {
+				panic(ErrStackOverflow)
+			}
+			lhs, rhs := lhs(i), rhs(i)
+			i.stack[i.sp] = i.f64Ge(lhs, rhs)
+			i.sp++
+			i.fr.ip += size + 1
+		}
+	}
+	return nil
+}
+
+// -- Loader constructors for fusePair operand sources --------------------
+//
+// Each loader reproduces the exact read semantics its single-operand rhs
+// fusion counterpart uses in threaded.go: I32/F32/F64 sources are read as
+// plain scalars (never boxed to a heap ref), while I64 sources use
+// borrowI64, which never releases, so the slot keeps its own ownership of
+// a heap-promoted ref and the loader only borrows the scalar.
+
+func (c *threader) loadGlobalI32(idx int) func(*Interpreter) int32 {
+	return func(i *Interpreter) int32 {
+		if idx >= len(i.globals) {
+			panic(ErrSegmentationFault)
+		}
+		return i.globals[idx].I32()
+	}
+}
+
+func (c *threader) loadGlobalI64(idx int) func(*Interpreter) int64 {
+	return func(i *Interpreter) int64 {
+		if idx >= len(i.globals) {
+			panic(ErrSegmentationFault)
+		}
+		return i.borrowI64(i.globals[idx])
+	}
+}
+
+func (c *threader) loadGlobalF32(idx int) func(*Interpreter) float32 {
+	return func(i *Interpreter) float32 {
+		if idx >= len(i.globals) {
+			panic(ErrSegmentationFault)
+		}
+		return i.globals[idx].F32()
+	}
+}
+
+func (c *threader) loadGlobalF64(idx int) func(*Interpreter) float64 {
+	return func(i *Interpreter) float64 {
+		if idx >= len(i.globals) {
+			panic(ErrSegmentationFault)
+		}
+		return i.globals[idx].F64()
+	}
+}
+
+func (c *threader) loadUpvalI32(idx int) func(*Interpreter) int32 {
+	return func(i *Interpreter) int32 {
+		if idx >= len(i.fr.upvals) {
+			panic(ErrSegmentationFault)
+		}
+		return i.fr.upvals[idx].I32()
+	}
+}
+
+func (c *threader) loadUpvalI64(idx int) func(*Interpreter) int64 {
+	return func(i *Interpreter) int64 {
+		if idx >= len(i.fr.upvals) {
+			panic(ErrSegmentationFault)
+		}
+		return i.borrowI64(i.fr.upvals[idx])
+	}
+}
+
+func (c *threader) loadUpvalF32(idx int) func(*Interpreter) float32 {
+	return func(i *Interpreter) float32 {
+		if idx >= len(i.fr.upvals) {
+			panic(ErrSegmentationFault)
+		}
+		return i.fr.upvals[idx].F32()
+	}
+}
+
+func (c *threader) loadUpvalF64(idx int) func(*Interpreter) float64 {
+	return func(i *Interpreter) float64 {
+		if idx >= len(i.fr.upvals) {
+			panic(ErrSegmentationFault)
+		}
+		return i.fr.upvals[idx].F64()
+	}
+}
+
+func (c *threader) loadLocalI32(idx int) func(*Interpreter) int32 {
+	return func(i *Interpreter) int32 {
+		addr := i.fr.bp + idx
+		if addr >= i.sp {
+			panic(ErrSegmentationFault)
+		}
+		return i.stack[addr].I32()
+	}
+}
+
+func (c *threader) loadLocalI64(idx int) func(*Interpreter) int64 {
+	return func(i *Interpreter) int64 {
+		addr := i.fr.bp + idx
+		if addr >= i.sp {
+			panic(ErrSegmentationFault)
+		}
+		return i.borrowI64(i.stack[addr])
+	}
+}
+
+func (c *threader) loadLocalF32(idx int) func(*Interpreter) float32 {
+	return func(i *Interpreter) float32 {
+		addr := i.fr.bp + idx
+		if addr >= i.sp {
+			panic(ErrSegmentationFault)
+		}
+		return i.stack[addr].F32()
+	}
+}
+
+func (c *threader) loadLocalF64(idx int) func(*Interpreter) float64 {
+	return func(i *Interpreter) float64 {
+		addr := i.fr.bp + idx
+		if addr >= i.sp {
+			panic(ErrSegmentationFault)
+		}
+		return i.stack[addr].F64()
+	}
+}
+
+func loadConstI32(cst int32) func(*Interpreter) int32 {
+	return func(*Interpreter) int32 { return cst }
+}
+
+func loadConstI64(cst int64) func(*Interpreter) int64 {
+	return func(*Interpreter) int64 { return cst }
+}
+
+func loadConstF32(cst float32) func(*Interpreter) float32 {
+	return func(*Interpreter) float32 { return cst }
+}
+
+func loadConstF64(cst float64) func(*Interpreter) float64 {
+	return func(*Interpreter) float64 { return cst }
+}
+
+// fuseSourcePair probes whether the instruction(s) at c.ip form a rhs
+// operand source of the given kind — I32_CONST/I64_CONST/F32_CONST/
+// F64_CONST, LOCAL_GET, GLOBAL_GET, or UPVAL_GET — matching kind exactly,
+// followed by a fusable binop, and if so builds and returns the fused
+// closure combining it with lhs (the already-resolved left operand) via
+// fusePairI32/I64/F32/F64. lhsSize is the byte width already consumed by
+// the left operand's own instruction. c.ip is restored before returning so
+// the compile loop still emits standalone handlers for the probed
+// instructions, keeping branch targets valid. Returns nil when no pattern
+// applies.
+func (c *threader) fuseSourcePair(kind types.Kind, lhsSize int, lhsI32 func(*Interpreter) int32, lhsI64 func(*Interpreter) int64, lhsF32 func(*Interpreter) float32, lhsF64 func(*Interpreter) float64) func(*Interpreter) {
+	if c.exact || c.ip >= len(c.code) {
+		return nil
+	}
+	save := c.ip
+	defer func() { c.ip = save }()
+
+	switch instr.Opcode(c.code[c.ip]) {
+	case instr.I32_CONST:
+		if kind != types.KindI32 || c.ip+5 > len(c.code) {
+			return nil
+		}
+		cst := *(*int32)(unsafe.Pointer(&c.code[c.ip+1]))
+		c.ip += 5
+		return c.fusePairI32(lhsI32, loadConstI32(cst), lhsSize+5)
+	case instr.I64_CONST:
+		if kind != types.KindI64 || c.ip+9 > len(c.code) {
+			return nil
+		}
+		cst := int64(*(*uint64)(unsafe.Pointer(&c.code[c.ip+1])))
+		c.ip += 9
+		return c.fusePairI64(lhsI64, loadConstI64(cst), lhsSize+9)
+	case instr.F32_CONST:
+		if kind != types.KindF32 || c.ip+5 > len(c.code) {
+			return nil
+		}
+		cst := *(*float32)(unsafe.Pointer(&c.code[c.ip+1]))
+		c.ip += 5
+		return c.fusePairF32(lhsF32, loadConstF32(cst), lhsSize+5)
+	case instr.F64_CONST:
+		if kind != types.KindF64 || c.ip+9 > len(c.code) {
+			return nil
+		}
+		cst := *(*float64)(unsafe.Pointer(&c.code[c.ip+1]))
+		c.ip += 9
+		return c.fusePairF64(lhsF64, loadConstF64(cst), lhsSize+9)
+	case instr.LOCAL_GET:
+		if c.ip+2 > len(c.code) {
+			return nil
+		}
+		j := int(c.code[c.ip+1])
+		if j >= len(c.locals) || c.locals[j] != kind {
+			return nil
+		}
+		c.ip += 2
+		switch kind {
+		case types.KindI32:
+			return c.fusePairI32(lhsI32, c.loadLocalI32(j), lhsSize+2)
+		case types.KindI64:
+			return c.fusePairI64(lhsI64, c.loadLocalI64(j), lhsSize+2)
+		case types.KindF32:
+			return c.fusePairF32(lhsF32, c.loadLocalF32(j), lhsSize+2)
+		case types.KindF64:
+			return c.fusePairF64(lhsF64, c.loadLocalF64(j), lhsSize+2)
+		}
+		return nil
+	case instr.GLOBAL_GET:
+		if c.ip+3 > len(c.code) {
+			return nil
+		}
+		j := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+		if j >= len(c.globals) || c.globals[j] != kind {
+			return nil
+		}
+		c.ip += 3
+		switch kind {
+		case types.KindI32:
+			return c.fusePairI32(lhsI32, c.loadGlobalI32(j), lhsSize+3)
+		case types.KindI64:
+			return c.fusePairI64(lhsI64, c.loadGlobalI64(j), lhsSize+3)
+		case types.KindF32:
+			return c.fusePairF32(lhsF32, c.loadGlobalF32(j), lhsSize+3)
+		case types.KindF64:
+			return c.fusePairF64(lhsF64, c.loadGlobalF64(j), lhsSize+3)
+		}
+		return nil
+	case instr.UPVAL_GET:
+		if c.ip+2 > len(c.code) {
+			return nil
+		}
+		j := int(c.code[c.ip+1])
+		if j >= len(c.captures) || c.captures[j] != kind {
+			return nil
+		}
+		c.ip += 2
+		switch kind {
+		case types.KindI32:
+			return c.fusePairI32(lhsI32, c.loadUpvalI32(j), lhsSize+2)
+		case types.KindI64:
+			return c.fusePairI64(lhsI64, c.loadUpvalI64(j), lhsSize+2)
+		case types.KindF32:
+			return c.fusePairF32(lhsF32, c.loadUpvalF32(j), lhsSize+2)
+		case types.KindF64:
+			return c.fusePairF64(lhsF64, c.loadUpvalF64(j), lhsSize+2)
+		}
+		return nil
+	}
+	return nil
+}
+
+// fuseGlobalPair tries GLOBAL_GET idx; <CONST|LOCAL_GET|GLOBAL_GET|
+// UPVAL_GET matching idx's declared kind>; <binop>, folding all three into
+// one dispatch that never pushes the left operand onto the stack. Returns
+// nil when idx's kind isn't I32/I64/F32/F64 or no rhs source/binop pattern
+// matches.
+func (c *threader) fuseGlobalPair(idx int) func(*Interpreter) {
+	if c.exact || idx >= len(c.globals) {
+		return nil
+	}
+	kind := c.globals[idx].Repr()
+	switch kind {
+	case types.KindI32, types.KindI64, types.KindF32, types.KindF64:
+	default:
+		return nil
+	}
+	return c.fuseSourcePair(kind, 3, c.loadGlobalI32(idx), c.loadGlobalI64(idx), c.loadGlobalF32(idx), c.loadGlobalF64(idx))
+}
+
+// fuseUpvalPair tries UPVAL_GET idx; <CONST|LOCAL_GET|GLOBAL_GET|
+// UPVAL_GET matching idx's declared kind>; <binop>, mirroring
+// fuseGlobalPair for upvalue captures.
+func (c *threader) fuseUpvalPair(idx int) func(*Interpreter) {
+	if c.exact || idx >= len(c.captures) {
+		return nil
+	}
+	kind := c.captures[idx].Repr()
+	switch kind {
+	case types.KindI32, types.KindI64, types.KindF32, types.KindF64:
+	default:
+		return nil
+	}
+	return c.fuseSourcePair(kind, 2, c.loadUpvalI32(idx), c.loadUpvalI64(idx), c.loadUpvalF32(idx), c.loadUpvalF64(idx))
+}

@@ -1393,6 +1393,20 @@ func (i *Interpreter) unboxI64(val types.Boxed) int64 {
 	return int64(v)
 }
 
+// borrowI64 reads an I64 without consuming a reference: unlike unboxI64 it
+// never releases, so slot-resident values (locals, globals, upvals) keep
+// their ownership while the caller only borrows the scalar.
+func (i *Interpreter) borrowI64(val types.Boxed) int64 {
+	if val.Kind() != types.KindRef {
+		return val.I64()
+	}
+	v, ok := i.heap[val.Ref()].(types.I64)
+	if !ok {
+		panic(ErrTypeMismatch)
+	}
+	return int64(v)
+}
+
 func (i *Interpreter) box(val types.Value) types.Boxed {
 	switch v := val.(type) {
 	case types.Boxed:

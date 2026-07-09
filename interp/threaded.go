@@ -358,7 +358,9 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 					if idx >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
-					return i.unboxI64(i.globals[idx])
+					// borrowI64, not unboxI64: the global slot keeps its own
+					// ownership of a heap-promoted ref; this read only borrows.
+					return i.borrowI64(i.globals[idx])
 				}, 3); fused != nil {
 					return fused
 				}
@@ -380,6 +382,11 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 				}, 3); fused != nil {
 					return fused
 				}
+			}
+			// Superinstruction: GLOBAL_GET idx; <CONST|LOCAL_GET|GLOBAL_GET|
+			// UPVAL_GET matching kind>; <binop>.
+			if fused := c.fuseGlobalPair(idx); fused != nil {
+				return fused
 			}
 			// I32/F32/F64 globals never hold a heap ref, so retain is a no-op;
 			// skip it and the Kind branch. I64 may box to a ref, so it keeps
@@ -508,7 +515,9 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 				if addr >= i.sp {
 					panic(ErrSegmentationFault)
 				}
-				return i.unboxI64(i.stack[addr])
+				// borrowI64, not unboxI64: the local slot keeps its own
+				// ownership of a heap-promoted ref; this read only borrows.
+				return i.borrowI64(i.stack[addr])
 			}, 2); fused != nil {
 				return fused
 			}
@@ -716,6 +725,53 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	instr.UPVAL_GET: func(c *threader) func(i *Interpreter) {
 		idx := int(c.code[c.ip+1])
 		c.ip += 2
+		if idx < len(c.captures) {
+			switch c.captures[idx].Repr() {
+			case types.KindI32:
+				if fused := c.fuseI32(func(i *Interpreter) int32 {
+					if idx >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					return i.fr.upvals[idx].I32()
+				}, c.captures[idx], 2); fused != nil {
+					return fused
+				}
+			case types.KindI64:
+				if fused := c.fuseI64(func(i *Interpreter) int64 {
+					if idx >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					// borrowI64, not unboxI64: the capture slot keeps its own
+					// ownership of a heap-promoted ref; this read only borrows.
+					return i.borrowI64(i.fr.upvals[idx])
+				}, 2); fused != nil {
+					return fused
+				}
+			case types.KindF32:
+				if fused := c.fuseF32(func(i *Interpreter) float32 {
+					if idx >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					return i.fr.upvals[idx].F32()
+				}, 2); fused != nil {
+					return fused
+				}
+			case types.KindF64:
+				if fused := c.fuseF64(func(i *Interpreter) float64 {
+					if idx >= len(i.fr.upvals) {
+						panic(ErrSegmentationFault)
+					}
+					return i.fr.upvals[idx].F64()
+				}, 2); fused != nil {
+					return fused
+				}
+			}
+			// Superinstruction: UPVAL_GET idx; <CONST|LOCAL_GET|GLOBAL_GET|
+			// UPVAL_GET matching kind>; <binop>.
+			if fused := c.fuseUpvalPair(idx); fused != nil {
+				return fused
+			}
+		}
 		// I32/F32/F64 captures never hold a heap ref, so retain is a no-op; skip
 		// it and the Kind branch. I64 may box to a ref, so it keeps retainBox.
 		if idx < len(c.captures) {
