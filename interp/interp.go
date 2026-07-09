@@ -297,6 +297,20 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 
 	i.instrs[0] = prog.Code
 	i.code[0] = c.Compile(prog.Code, i.module.LocalKinds(), types.Kinds(i.module.Captures))
+
+	// Declared globals are pre-seeded to the zero Boxed of their declared kind
+	// (Program.Globals, like Locals): numeric slots get a typed zero, ref slots
+	// a retained null ref. A slot's runtime kind therefore always matches its
+	// declaration, so kind metadata for GLOBAL_GET/SET fusion and JIT lowering
+	// can be derived from the slot values at any time. Callers overwrite each
+	// run's input via Interpreter.SetGlobal before Run. This must precede bind:
+	// bind reads i.globals kinds to thread each constant's GLOBAL_* accesses, so
+	// an unseeded slot would misclassify a ref global as numeric and skip its
+	// retain/release, corrupting the refcount.
+	for j, k := range types.Kinds(prog.Globals) {
+		i.globals[j] = i.zero(k)
+	}
+
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
 			i.bind(i.constants[j].Ref(), fn, false)
@@ -321,15 +335,6 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	if locals := len(prog.Locals); locals > 0 {
 		clear(i.stack[i.sp : i.sp+locals])
 		i.sp += locals
-	}
-	// Declared globals are pre-seeded to the zero Boxed of their declared kind
-	// (Program.Globals, like Locals): numeric slots get a typed zero, ref slots
-	// a retained null ref. A slot's runtime kind therefore always matches its
-	// declaration, so kind metadata for GLOBAL_GET/SET fusion and JIT lowering
-	// can be derived from the slot values at any time. Callers overwrite each
-	// run's input via Interpreter.SetGlobal before Run.
-	for j, k := range types.Kinds(prog.Globals) {
-		i.globals[j] = i.zero(k)
 	}
 	i.fp = 1
 	i.fr = &i.frames[0]
