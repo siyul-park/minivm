@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -299,9 +300,13 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 	if !c.lowerer.lower(ctx) {
 		return false, nil
 	}
+	last := ctx.tree.root.ops[len(ctx.tree.root.ops)-1].op
+	if ctx.loop || last == instr.ARRAY_SET || last == instr.STRUCT_SET {
+		asmb.DisableSpilling()
+	}
 	code, err := asmb.Build()
 	if err != nil {
-		if errors.Is(err, asm.ErrNoRegistersAvailable) {
+		if errors.Is(err, asm.ErrNoRegistersAvailable) || errors.Is(err, asm.ErrBranchOutOfRange) {
 			return false, nil
 		}
 		return false, err

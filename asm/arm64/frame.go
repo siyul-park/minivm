@@ -3,9 +3,9 @@ package arm64
 import "github.com/siyul-park/minivm/asm"
 
 // frame implements asm.Frame so the shared register allocator can spill to a
-// stack-pointer-relative frame. Native code may make framed self-calls, but
-// those calls save and restore SP around the branch. The VM garbage collector
-// never runs while native code holds the stack.
+// native stack frame. X26 holds its stable base because native self-calls move
+// SP while saving their LR and VM frame state. The invoke trampoline preserves
+// X26, and arch excludes it from automatic allocation.
 //
 // The load/store and add/subtract-immediate forms used here read register
 // field 31 as SP, so they emit against the SP alias rather than SP (same
@@ -24,6 +24,17 @@ const (
 // Enter reserves the spill area. SP updates stay within ARM64's unshifted
 // add/sub immediate range while preserving 16-byte alignment after every step.
 func (frame) Enter(slots int) []asm.Instruction {
+	out := frame{}.Resume(slots)
+	if len(out) == 0 {
+		return nil
+	}
+	return append(out, ADDI(X26, SP, 0))
+}
+
+// Resume reserves the spill area after an intra-code call returned through
+// the shared epilogue. It leaves spillBase unchanged so stores and reloads
+// around the call keep addressing the outer activation's slots.
+func (frame) Resume(slots int) []asm.Instruction {
 	if slots <= 0 {
 		return nil
 	}
@@ -58,19 +69,24 @@ func (frame) Leave(slots int) []asm.Instruction {
 	return out
 }
 
-// Store spills reg to slot: STR reg, [SP, #slot*8].
+// Store spills reg to slot relative to the stable spill base.
 func (frame) Store(slot int, reg asm.PReg) asm.Instruction {
-	return STR(spillReg(reg), SP, int16(slot*spillSlotBytes))
+	return STR(spillReg(reg), X26, int16(slot*spillSlotBytes))
 }
 
-// Reload fills reg from slot: LDR reg, [SP, #slot*8].
+// Reload fills reg from a slot relative to the stable spill base.
 func (frame) Reload(reg asm.PReg, slot int) asm.Instruction {
-	return LDR(spillReg(reg), SP, int16(slot*spillSlotBytes))
+	return LDR(spillReg(reg), X26, int16(slot*spillSlotBytes))
 }
 
 // Returns reports whether op is the native return.
 func (frame) Returns(op uint16) bool {
 	return Op(op) == OpRET
+}
+
+// Calls reports whether op is an ARM64 branch with link.
+func (frame) Calls(op uint16) bool {
+	return Op(op) == OpBL
 }
 
 // spillReg widens reg to its 64-bit view so a full slot is stored and

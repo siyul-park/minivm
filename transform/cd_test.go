@@ -54,6 +54,28 @@ func TestConstantDeduplicationPass_Run(t *testing.T) {
 				program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF64))),
 			),
 		},
+		{
+			program: program.New(
+				[]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CONST_GET, 1),
+				},
+				program.WithConstants(
+					types.TypedArray[float64]{1},
+					types.TypedArray[float64]{1},
+				),
+			),
+			expected: program.New(
+				[]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CONST_GET, 1),
+				},
+				program.WithConstants(
+					types.TypedArray[float64]{1},
+					types.TypedArray[float64]{1},
+				),
+			),
+		},
 	}
 
 	for _, tt := range tests {

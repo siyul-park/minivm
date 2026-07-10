@@ -54,6 +54,111 @@ func TestAssembler_Build(t *testing.T) {
 		require.Equal(t, []uint64{3, 4, 7}, ctxBuf)
 	})
 
+	t.Run("relaxes an out-of-range CBZ branch", func(t *testing.T) {
+		arch := arm64.New()
+
+		a := asm.New(arch)
+		ctx := a.Reg(asm.RegTypeInt, asm.Width64)
+		flag := a.Reg(asm.RegTypeInt, asm.Width64)
+		filler := a.Reg(asm.RegTypeInt, asm.Width64)
+		result := a.Reg(asm.RegTypeInt, asm.Width64)
+
+		require.NoError(t, a.Pin(ctx, arm64.X0))
+
+		zero := a.Label()
+
+		a.Emit(arm64.LDR(flag, ctx, 0))
+		a.Emit(arm64.CBZLabel(flag, zero))
+
+		// Over 1MB of filler instructions pushes the CBZ's target past
+		// its +-1MB imm19 range, forcing Assembler.encode to relax it.
+		const fillerCount = 280_000
+		a.Emit(arm64.LDI(filler, 1)...)
+		for i := 0; i < fillerCount; i++ {
+			a.Emit(arm64.ADDI(filler, filler, 1))
+		}
+
+		a.Emit(arm64.LDI(result, 1)...)
+		a.Emit(arm64.STR(result, ctx, 8))
+		a.Emit(arm64.RET())
+
+		a.Bind(zero)
+		a.Emit(arm64.LDI(result, 0)...)
+		a.Emit(arm64.STR(result, ctx, 8))
+		a.Emit(arm64.RET())
+
+		code, err := a.Build()
+		require.NoError(t, err)
+		require.Greater(t, len(code.Bytes), 1<<20)
+
+		buf, err := asm.NewBuffer(len(code.Bytes) + 4096)
+		require.NoError(t, err)
+		defer buf.Free()
+
+		linked, err := asm.Link(buf, arch, []*asm.Code{code}, nil)
+		require.NoError(t, err)
+
+		notTaken := []uint64{1, 0xFF}
+		require.NoError(t, linked[0].Callable.Call(uintptr(unsafe.Pointer(&notTaken[0]))))
+		require.Equal(t, uint64(1), notTaken[1])
+
+		taken := []uint64{0, 0xFF}
+		require.NoError(t, linked[0].Callable.Call(uintptr(unsafe.Pointer(&taken[0]))))
+		require.Equal(t, uint64(0), taken[1])
+	})
+
+	t.Run("relaxes an out-of-range B.cond branch", func(t *testing.T) {
+		arch := arm64.New()
+
+		a := asm.New(arch)
+		ctx := a.Reg(asm.RegTypeInt, asm.Width64)
+		flag := a.Reg(asm.RegTypeInt, asm.Width64)
+		filler := a.Reg(asm.RegTypeInt, asm.Width64)
+		result := a.Reg(asm.RegTypeInt, asm.Width64)
+
+		require.NoError(t, a.Pin(ctx, arm64.X0))
+
+		zero := a.Label()
+
+		a.Emit(arm64.LDR(flag, ctx, 0))
+		a.Emit(arm64.CMPI(flag, 0))
+		a.Emit(arm64.BCondLabel(arm64.OpBEQ, zero))
+
+		const fillerCount = 280_000
+		a.Emit(arm64.LDI(filler, 1)...)
+		for i := 0; i < fillerCount; i++ {
+			a.Emit(arm64.ADDI(filler, filler, 1))
+		}
+
+		a.Emit(arm64.LDI(result, 1)...)
+		a.Emit(arm64.STR(result, ctx, 8))
+		a.Emit(arm64.RET())
+
+		a.Bind(zero)
+		a.Emit(arm64.LDI(result, 0)...)
+		a.Emit(arm64.STR(result, ctx, 8))
+		a.Emit(arm64.RET())
+
+		code, err := a.Build()
+		require.NoError(t, err)
+		require.Greater(t, len(code.Bytes), 1<<20)
+
+		buf, err := asm.NewBuffer(len(code.Bytes) + 4096)
+		require.NoError(t, err)
+		defer buf.Free()
+
+		linked, err := asm.Link(buf, arch, []*asm.Code{code}, nil)
+		require.NoError(t, err)
+
+		notTaken := []uint64{1, 0xFF}
+		require.NoError(t, linked[0].Callable.Call(uintptr(unsafe.Pointer(&notTaken[0]))))
+		require.Equal(t, uint64(1), notTaken[1])
+
+		taken := []uint64{0, 0xFF}
+		require.NoError(t, linked[0].Callable.Call(uintptr(unsafe.Pointer(&taken[0]))))
+		require.Equal(t, uint64(0), taken[1])
+	})
+
 	t.Run("spills under register pressure", func(t *testing.T) {
 		arch := arm64.New()
 
@@ -116,6 +221,28 @@ func TestAssembler_Pin(t *testing.T) {
 
 	_, err := a.Build()
 	require.ErrorIs(t, err, asm.ErrConflictingPin)
+}
+
+func TestAssembler_DisableSpilling(t *testing.T) {
+	a := asm.New(arm64.New())
+	a.DisableSpilling()
+
+	const n = 64
+	vals := make([]asm.VReg, n)
+	for i := range vals {
+		vals[i] = a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LDI(vals[i], uint64(i+1))...)
+	}
+	acc := vals[0]
+	for i := 1; i < len(vals); i++ {
+		next := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ADD(next, acc, vals[i]))
+		acc = next
+	}
+	a.Emit(arm64.RET())
+
+	_, err := a.Build()
+	require.ErrorIs(t, err, asm.ErrNoRegistersAvailable)
 }
 
 func TestLink(t *testing.T) {

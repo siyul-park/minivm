@@ -166,6 +166,7 @@ Violations cause silent corruption or invalid execution.
 - On JIT type mismatch or unsupported lowering, return `false` without mutating IR, stack, params, facts, or labels.
 - Executable buffers must follow `Unseal -> Append -> Seal -> Call`; `Seal()` must sync the instruction cache on Darwin/ARM64.
 - Offset-preserving passes must preserve byte offsets; `GlobalValueNumberingPass` and `DeadCodeEliminationPass` are the known exceptions and must repair branches/handlers.
+- `asm.Relaxer.Relax` implementations must return a replacement sequence that is already in range; `asm.Assembler.encode`'s fixpoint loop relies on this to relax each branch at most once and terminate.
 
 ## Tests
 

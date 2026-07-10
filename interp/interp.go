@@ -29,6 +29,9 @@ type Interpreter struct {
 	exits    map[anchor]func(*Interpreter)
 	stubs    []func(*Interpreter)
 	tried    map[int]bool
+	headers  map[int][]int
+	entered  map[int]bool
+	looped   map[anchor]bool
 	journal  []uint64
 
 	types     []types.Type
@@ -243,6 +246,9 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		exits:     map[anchor]func(*Interpreter){},
 		stubs:     make([]func(*Interpreter), len(prog.Constants)+1),
 		tried:     map[int]bool{},
+		headers:   map[int][]int{},
+		entered:   map[int]bool{},
+		looped:    map[anchor]bool{},
 		dynamic:   map[int]bool{},
 		journal:   make([]uint64, journalHead+journalStride*opt.frame),
 		frames:    make([]frame, opt.frame),
@@ -895,9 +901,20 @@ func (i *Interpreter) safepoint() error {
 // threaded safepoint used to repeat on that lookup are already satisfied.
 func (i *Interpreter) observe(f *frame) error {
 	i.sample(f)
-	if f.ip == 0 && !i.tracer.hasEntry(f.addr) {
-		if _, err := i.tracer.capture(i, anchor{addr: f.addr, ip: 0}); err != nil {
-			return err
+	// entered memoizes a true hasEntry(addr) locally: once an anchor's entry
+	// trace is recorded non-aborted it never reverts (i.remove clears the memo
+	// on rebind/invalidation), so a solo interpreter skips the tracer's shared
+	// mutex on every following tick instead of re-checking hasEntry.
+	if f.ip == 0 && !i.entered[f.addr] {
+		if i.tracer.hasEntry(f.addr) {
+			i.entered[f.addr] = true
+		} else {
+			if _, err := i.tracer.capture(i, anchor{addr: f.addr, ip: 0}); err != nil {
+				return err
+			}
+			if i.tracer.hasEntry(f.addr) {
+				i.entered[f.addr] = true
+			}
 		}
 	}
 	// A hot loop header sampled mid-function: f.ip is genuinely at the back-edge
@@ -911,18 +928,29 @@ func (i *Interpreter) observe(f *frame) error {
 	if i.threshold >= 0 && f.ip > 0 &&
 		samples >= uint64(i.threshold) &&
 		i.exits[anchor{addr: f.addr, ip: f.ip}] == nil {
-		for _, h := range i.tracer.headers(i, f.addr) {
+		hs, ok := i.headers[f.addr]
+		if !ok {
+			hs = i.tracer.headers(i, f.addr)
+			i.headers[f.addr] = hs
+		}
+		for _, h := range hs {
 			if h != f.ip {
 				continue
 			}
-			if !i.tracer.hasLoop(f.addr, f.ip) {
-				if _, err := i.tracer.capture(i, anchor{addr: f.addr, ip: f.ip}); err != nil {
-					return err
-				}
-				if i.tracer.hasLoop(f.addr, f.ip) {
-					if err := i.compile(f.addr); err != nil {
+			a := anchor{addr: f.addr, ip: f.ip}
+			if !i.looped[a] {
+				if !i.tracer.hasLoop(f.addr, f.ip) {
+					if _, err := i.tracer.capture(i, a); err != nil {
 						return err
 					}
+					if i.tracer.hasLoop(f.addr, f.ip) {
+						i.looped[a] = true
+						if err := i.compile(f.addr); err != nil {
+							return err
+						}
+					}
+				} else {
+					i.looped[a] = true
 				}
 			}
 			break
@@ -1560,7 +1588,14 @@ func (i *Interpreter) remove(addr int) {
 			delete(i.exits, a)
 		}
 	}
+	for a := range i.looped {
+		if a.addr == addr {
+			delete(i.looped, a)
+		}
+	}
 	delete(i.tried, addr)
+	delete(i.headers, addr)
+	delete(i.entered, addr)
 	if i.tracer != nil {
 		i.tracer.remove(addr)
 	}

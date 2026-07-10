@@ -79,6 +79,22 @@ Compared with other script VMs, minivm JIT is about **22-40x faster** on this be
 
 minivm JIT is still slower than wazero by about **1.2x**. This is expected: minivm keeps NaN-boxed values and deoptimization state, while wazero compiles WASM to unboxed native code without the same fallback requirements.
 
+### Warmup vs. Steady-State Allocations
+
+The `minivm interp` and `minivm JIT` rows above run `-benchtime=2s`, which repeats `Run`/`Reset` enough times to amortize one-time setup: the interpreter's entry-trace capture, and (for JIT) native trace compilation and installation. At a small `-benchtime`/`-benchtime=Nx` (few `b.N` iterations), that one-time cost dominates and inflates the reported `allocs/op`, making the runtime look far less allocation-light than it is in steady state.
+
+`benchmarks/alloc_test.go` isolates the two phases explicitly by running one untimed `Run`/`Reset` cycle before `b.ResetTimer()`:
+
+| Benchmark | Isolates | ns/op | B/op | allocs/op |
+|---|---|---:|---:|---:|
+| `BenchmarkFib35AllocInterpSteady` | threaded interpreter, warm | 516,040,250 | 0 | 0 |
+| `BenchmarkFib20AllocJITWarmup` | one fresh compile + `fib(20)` run | 171,915 | 290,147 | 2,264 |
+| `BenchmarkFib35AllocJITSteady` | JIT, trace already installed | 48,199,078 | 0 | 0 |
+
+Both the threaded interpreter and the JIT are zero-allocation per `Run` once warm. The JIT's ~2,264 allocations and ~290 KB are a one-shot cost from `interp.New`, tracer capture, and native compilation/installation on the first hot entry; they do not recur on subsequent `Run` calls against the same interpreter.
+
+Large bytecode programs also used to make profiler warmup quadratic because each newly observed instruction offset reallocated the collector's sample slice to its exact length. Geometric growth reduced a 10,000-row tl2g batch benchmark (`-benchtime=20x`) from about 50.9 MB/op to 551 KB/op; the remaining figure includes the workload's output and other setup allocations.
+
 ## Threaded Interpreter Throughput
 
 The following results measure the pure threaded interpreter with JIT disabled.

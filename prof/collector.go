@@ -84,7 +84,11 @@ func (c *Collector) Add(fn, ip int, op byte) {
 		c.funcs = append(c.funcs, function{})
 	}
 	if len(c.funcs[fn].ips) <= ip {
-		ips := make([]uint64, ip+1)
+		n := len(c.funcs[fn].ips) * 2
+		if n < ip+1 {
+			n = ip + 1
+		}
+		ips := make([]uint64, n)
 		copy(ips, c.funcs[fn].ips)
 		c.funcs[fn].ips = ips
 	}

@@ -1,6 +1,8 @@
 package transform
 
 import (
+	"reflect"
+
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
@@ -39,7 +41,7 @@ func (p *ConstantDeduplicationPass) Run(m *pass.Manager, prog *program.Program) 
 		}
 	}
 
-	constIndex, constSize := dedup(constants, constUsed, func(a, b types.Value) bool { return a == b })
+	constIndex, constSize := dedup(constants, constUsed, valueEqual)
 	typeIndex, typesSize := dedup(typs, typeUsed, func(a, b types.Type) bool { return a.Equals(b) })
 
 	for i, v := range constIndex {
@@ -84,6 +86,17 @@ func (p *ConstantDeduplicationPass) Run(m *pass.Manager, prog *program.Program) 
 	prog.Types = typs
 
 	return pass.PreserveNone(), nil
+}
+
+// valueEqual reports whether a and b are the same constant. types.Value can
+// be backed by an uncomparable dynamic type (e.g. types.TypedArray, a
+// slice), which panics under Go's == on the interface; such constants are
+// never deduplicated with each other since they're never equal.
+func valueEqual(a, b types.Value) bool {
+	if !reflect.TypeOf(a).Comparable() {
+		return false
+	}
+	return a == b
 }
 
 // dedup builds a compaction index for items: each referenced entry (used[i])

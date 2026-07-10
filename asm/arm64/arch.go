@@ -10,6 +10,7 @@ type arch struct {
 }
 
 var _ asm.Arch = arch{}
+var _ asm.Relaxer = arch{}
 
 // New returns an asm.Arch targeting ARM64. The arch's encoder, ABI, and
 // frame are stateless singletons; allocate once per process.
@@ -28,9 +29,9 @@ func New() asm.Arch {
 			[]uint8{8, 9, 10, 11, 12, 13, 14, 15},
 			// X10-X14: pinned VM context registers. X0-X1: internal
 			// native return registers. X15: pinned native call-depth
-			// register. Pinning can claim them explicitly; auto-allocation
-			// cannot.
-			[]uint8{0, 1, 10, 11, 12, 13, 14, 15},
+			// register. X26: stable spill-frame base across native calls.
+			// Pinning can claim them explicitly; auto-allocation cannot.
+			[]uint8{0, 1, 10, 11, 12, 13, 14, 15, 26},
 		),
 		encoder: NewEncoder(),
 		abi:     abi{},

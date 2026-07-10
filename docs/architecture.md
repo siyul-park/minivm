@@ -167,6 +167,8 @@ For plain functions, `addr == ref`. For closures, `addr` points to the function 
 - Unsupported paths must fall back to threaded execution.
 - JIT handlers must not duplicate complex interpreter behavior unless they can own all semantics.
 - Guard failure materializes VM state and resumes threaded dispatch.
+- ARM64 label branches are range-checked and relaxed only to replacements that are already in range; an unreachable target falls back to threaded execution.
+- Spill frames use a stable base register, and every internal call resume point must restore the active spill-frame depth. Loop traces and terminal mutation traces disable spilling when control flow cannot preserve that contract.
 
 See `jit-internals.md` for trace recording, journal layout, calls, branches, loops, and fallback rules.
 

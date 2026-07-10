@@ -26,6 +26,7 @@ type Assembler struct {
 	entries  []Label
 	nextVReg int32
 	nextLbl  Label
+	noSpill  bool
 	err      error
 }
 
@@ -67,6 +68,12 @@ func (a *Assembler) Entry(id Label) {
 	a.entries = append(a.entries, id)
 }
 
+// DisableSpilling makes Build return ErrNoRegistersAvailable instead of
+// inserting a spill frame when register pressure exhausts the physical bank.
+func (a *Assembler) DisableSpilling() {
+	a.noSpill = true
+}
+
 // Pin forces v to occupy preg. A vreg can be pinned to only one preg; a
 // conflicting Pin records an error returned from Build.
 func (a *Assembler) Pin(v VReg, preg PReg) error {
@@ -97,7 +104,10 @@ func (a *Assembler) Build() (*Code, error) {
 	}
 
 	rw := newRewriter(a.arch, a.insts, a.pins)
-	rewritten, labels, err := rw.run(a.insts, a.labels)
+	if a.noSpill {
+		rw.frame = nil
+	}
+	rewritten, labels, err := rw.run(a.insts, a.labels, a.entries)
 	if err != nil {
 		return nil, err
 	}
@@ -123,6 +133,11 @@ func (a *Assembler) Build() (*Code, error) {
 // operands and records byte offsets; final patches intra-Code labels and
 // records external labels as relocations.
 func (a *Assembler) encode(insts []Instruction, labels map[Label]int) ([]byte, map[Label]int, []Relocation, error) {
+	insts, labels, err := a.relax(insts, labels)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	encoded, offsets, err := a.draft(insts)
 	if err != nil {
 		return nil, nil, nil, err
@@ -138,6 +153,75 @@ func (a *Assembler) encode(insts []Instruction, labels map[Label]int) ([]byte, m
 		return nil, nil, nil, err
 	}
 	return out, pos, relocs, nil
+}
+
+// relax rewrites out-of-range intra-Code label branches into equivalent
+// in-range multi-instruction sequences when the target Arch implements
+// Relaxer. It runs a fixpoint loop: draft the current instruction list to
+// measure offsets, find the first label branch whose Relaxer-reported
+// replacement differs, splice it in, and repeat. Every replacement is
+// constructed by Relax to already be in range (a short in-range skip
+// branch plus, at most, one in-range unconditional branch), so each
+// branch relaxes at most once and the loop terminates after the first
+// full pass that finds nothing left to relax. Architectures without a
+// Relaxer (e.g. amd64) leave insts and labels untouched.
+func (a *Assembler) relax(insts []Instruction, labels map[Label]int) ([]Instruction, map[Label]int, error) {
+	relaxer, ok := a.arch.(Relaxer)
+	if !ok {
+		return insts, labels, nil
+	}
+
+	for {
+		_, offsets, err := a.draft(insts)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		idx, replacement := -1, []Instruction(nil)
+		for i, inst := range insts {
+			lbl, isLabel := inst.Src2.(LabelOperand)
+			if !isLabel {
+				continue
+			}
+			target, intra := labels[lbl.ID]
+			if !intra {
+				continue
+			}
+			disp := int64(offsets[target] - offsets[i])
+			repl, relaxed := relaxer.Relax(inst, disp)
+			if !relaxed {
+				continue
+			}
+			idx, replacement = i, repl
+			break
+		}
+		if idx < 0 {
+			return insts, labels, nil
+		}
+
+		insts, labels = spliceInstruction(insts, labels, idx, replacement)
+	}
+}
+
+// spliceInstruction replaces insts[idx] with replacement and shifts every
+// label bound at or after idx by the resulting length delta, preserving
+// every label's logical position in the rewritten stream.
+func spliceInstruction(insts []Instruction, labels map[Label]int, idx int, replacement []Instruction) ([]Instruction, map[Label]int) {
+	delta := len(replacement) - 1
+
+	out := make([]Instruction, 0, len(insts)+delta)
+	out = append(out, insts[:idx]...)
+	out = append(out, replacement...)
+	out = append(out, insts[idx+1:]...)
+
+	newLabels := make(map[Label]int, len(labels))
+	for id, pos := range labels {
+		if pos > idx {
+			pos += delta
+		}
+		newLabels[id] = pos
+	}
+	return out, newLabels
 }
 
 // draft encodes each instruction with #0 substituted for label operands so

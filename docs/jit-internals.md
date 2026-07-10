@@ -168,7 +168,11 @@ Native code loads VM state from the journal into pinned scratch registers.
 | `scratchSP` | X13 | current stack pointer |
 | `scratchCtrl` | X14 | journal pointer |
 
-The Go trampoline preserves X19-X26 for native register allocation.
+The Go trampoline preserves X19-X26. X26 is reserved as the stable spill-frame base, so a native self-call may move SP without changing spill addresses.
+
+Register allocation (`asm/rewriter.go`) is a single linear-scan pass: it spills the vreg with the farthest-away next use to a stack slot at the stream position where pressure was observed. Rewritten labels target the start of any inserted reload/store prefix, and labels on a return target its inserted frame epilogue. Intra-Code calls that return through the shared epilogue reserve the caller's spill area again before continuing.
+
+Linear spill state is still unsafe across a loop back-edge, and terminal `ARRAY_SET`/`STRUCT_SET` traces can combine multiple branch paths before their exit. The compiler disables spilling for loop roots and terminal mutation roots. A root that exhausts physical registers then returns `asm.ErrNoRegistersAvailable` and keeps threaded dispatch installed; acyclic entry traces can still spill and emit native code.
 
 Native code does not marshal parameters or returns. It writes results and trap state into the journal, and the Go wrapper restores interpreter state from there.
 
@@ -248,6 +252,12 @@ Solo interpreters recompile a side exit when its hit count first reaches the hot
 Targets still deoptimize when they are unknown or unsupported.
 
 Branch lowering may skip hot-path flushes only when the branch state is clean. If locals or operands are dirty, flush first. Learned continuations and side exits must see the same stack image as threaded dispatch.
+
+### Branch range validation
+
+ARM64 conditional/compare/test branches (`B.cond`, `CBZ`/`CBNZ`, `TBZ`/`TBNZ`) encode a fixed-width signed PC-relative immediate — imm19 (±1MB) for `B.cond`/`CBZ`/`CBNZ`, imm14 (±32KB) for `TBZ`/`TBNZ`, imm26 (±128MB) for `B`/`BL`. `asm/arm64.Encoder.Encode` validates every such offset is 4-byte aligned and fits its field, returning `asm.ErrBranchOutOfRange` instead of silently masking an out-of-range offset into a wrong target. `interp/jit.go` `emitRoot` treats `ErrBranchOutOfRange` the same as `asm.ErrNoRegistersAvailable`: it aborts native lowering for that trace and falls back to threaded dispatch rather than emit a corrupt callable.
+
+Before that fallback triggers, `asm.Assembler.encode` runs a branch relaxation fixpoint (`asm.Relaxer`, implemented by `asm/arm64.arch.Relax`) between the draft and final encoding passes. For each intra-Code `B.cond`/`CBZ`/`CBNZ` label branch whose imm19 displacement does not fit, `Relax` rewrites it into an inverted-condition branch that skips a following unconditional `B` (imm26, ±128MB) to the original target, then re-drafts and repeats until nothing is left to relax. Both replacement instructions are constructed to already be in range, so a branch relaxes at most once and the loop always terminates; if the unconditional `B` itself would not reach the target (>±128MB), `Relax` returns `false` and `ErrBranchOutOfRange`/the JIT fallback still applies. `TBZ`/`TBNZ` never carry a `LabelOperand` in this codebase (their offset is always a caller-computed immediate — see `asm/arm64/instr.go`), so they never reach `Relax` and the imm14 (±32KB) window has no relaxation path; architectures without a `Relaxer` (amd64) are unaffected — `encode` no-ops the pass.
 
 ## Loops
 
@@ -329,6 +339,8 @@ Ref reads retain loaded refs. `CORO_VALUE` retains the value and releases the ha
 Heap-promoted `i64` values fall back before boxing.
 
 Primitive `ARRAY_SET` and `STRUCT_SET` are terminal mutations. The hot path may perform the store, flush state, and resume threaded execution at the next instruction. Shape, bounds, field-kind, or release failure deoptimizes at the original opcode so the interpreter owns full semantics.
+
+A loop body that inlines two or more branchy calls before a terminal `ARRAY_SET`/`STRUCT_SET` can push register pressure past the physical bank; before the register allocator rejected unsafe spilling (see "Trace ABI" above), that shape corrupted the native stack pointer on return from `asm/arm64.invoke` (regression test: `interp.TestInterpreter_JITArraySetAfterBranchyCallsInLoop`). The allocator now falls back to threaded dispatch for any trace that would need to spill across a branch, so the lowerer no longer special-cases pending-branch counts.
 
 Allocation and complex ref-bearing mutations stay threaded.
 

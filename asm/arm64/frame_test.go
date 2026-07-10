@@ -12,7 +12,12 @@ func TestFrame(t *testing.T) {
 		require.Equal(t, []asm.Instruction{
 			SUBI(SP, SP, maxFrameAdjust),
 			SUBI(SP, SP, 16),
+			ADDI(X26, SP, 0),
 		}, frame{}.Enter(512))
+		require.Equal(t, []asm.Instruction{
+			SUBI(SP, SP, maxFrameAdjust),
+			SUBI(SP, SP, 16),
+		}, frame{}.Resume(512))
 		require.Equal(t, []asm.Instruction{
 			ADDI(SP, SP, maxFrameAdjust),
 			ADDI(SP, SP, 16),
