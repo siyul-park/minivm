@@ -5,7 +5,12 @@ import (
 	"fmt"
 )
 
-const maxSpillSlots = 512
+// MaxSpillSlots caps how many spill slots the allocator may use for one
+// Code. It sizes the spill area the arm64 invoke trampoline reserves on its
+// native stack frame (see docs/jit-internals.md and asm/arm64/abi_arm64.s);
+// changing it without updating the trampoline's reserve and interp's
+// nativeFrameLimit breaks that arithmetic invariant silently.
+const MaxSpillSlots = 512
 
 // rewriter transforms an instruction list whose operands reference virtual
 // registers into one whose operands reference physical registers. It owns
@@ -62,9 +67,21 @@ func newRewriter(arch Arch, insts []Instruction, pins map[int32]PReg) *rewriter 
 // substituting every operand's vreg with its current physical register,
 // then injects the spill frame and returns labels rebased onto the
 // rewritten stream.
-func (r *rewriter) run(insts []Instruction, labels map[Label]int) ([]Instruction, map[Label]int, error) {
+func (r *rewriter) run(insts []Instruction, labels map[Label]int, entries []Label) ([]Instruction, map[Label]int, error) {
+	for i, inst := range insts {
+		lbl, ok := inst.Src2.(LabelOperand)
+		if !ok {
+			continue
+		}
+		if pos, intra := labels[lbl.ID]; intra && pos <= i {
+			r.frame = nil
+			break
+		}
+	}
+
 	newIdx := make([]int, len(insts)+1)
 	for i, inst := range insts {
+		newIdx[i] = len(r.out)
 		protected := make(map[int32]bool)
 		for _, v := range inst.Uses() {
 			if err := r.use(v, protected); err != nil {
@@ -76,7 +93,6 @@ func (r *rewriter) run(insts []Instruction, labels map[Label]int) ([]Instruction
 				return nil, nil, err
 			}
 		}
-		newIdx[i] = len(r.out)
 		r.out = append(r.out, r.substitute(inst))
 		for _, v := range inst.Uses() {
 			if r.last[v.ID()] == i {
@@ -85,7 +101,7 @@ func (r *rewriter) run(insts []Instruction, labels map[Label]int) ([]Instruction
 		}
 	}
 	newIdx[len(insts)] = len(r.out)
-	return r.inject(labels, newIdx)
+	return r.inject(labels, entries, newIdx)
 }
 
 // use ensures v occupies a physical register before the instruction that
@@ -231,7 +247,7 @@ func (r *rewriter) slotFor(id int32) (int, bool) {
 		s = r.free[n-1]
 		r.free = r.free[:n-1]
 	} else {
-		if r.slots >= maxSpillSlots {
+		if r.slots >= MaxSpillSlots {
 			return 0, false
 		}
 		s = r.slots
@@ -268,8 +284,11 @@ func (r *rewriter) note(v VReg) {
 // through and labels rebase onto the (1:1) instruction indices. Otherwise a
 // frame prologue is prepended, a frame epilogue precedes every return, and
 // labels are rebased across both the per-instruction shifts and the
-// inserted frame instructions.
-func (r *rewriter) inject(labels map[Label]int, newIdx []int) ([]Instruction, map[Label]int, error) {
+// inserted frame instructions. Resume is injected only after a call whose
+// target label is bound in this Code: an external call (resolved later by
+// Link) never runs this Code's epilogue, so re-reserving the spill area
+// after it would double-adjust SP.
+func (r *rewriter) inject(labels map[Label]int, entries []Label, newIdx []int) ([]Instruction, map[Label]int, error) {
 	if r.slots == 0 || r.frame == nil {
 		out := make(map[Label]int, len(labels))
 		for id, idx := range labels {
@@ -280,27 +299,40 @@ func (r *rewriter) inject(labels map[Label]int, newIdx []int) ([]Instruction, ma
 
 	enter := r.frame.Enter(r.slots)
 	leave := r.frame.Leave(r.slots)
+	entry := make(map[Label]bool, len(entries))
+	for _, id := range entries {
+		if labels[id] != 0 {
+			return nil, nil, fmt.Errorf("%w: entry=%d offset=%d", ErrEntryRequiresFrame, id, labels[id])
+		}
+		entry[id] = true
+	}
 	final := make([]Instruction, 0, len(enter)+len(r.out)+len(leave))
 	final = append(final, enter...)
 
 	bodyToFinal := make([]int, len(r.out)+1)
 	for bi, inst := range r.out {
+		bodyToFinal[bi] = len(final)
 		if r.frame.Returns(inst.Op) {
 			final = append(final, leave...)
 		}
-		bodyToFinal[bi] = len(final)
 		final = append(final, inst)
+		if lbl, isLabel := inst.Src2.(LabelOperand); isLabel && r.frame.Calls(inst.Op) {
+			if _, intra := labels[lbl.ID]; intra {
+				final = append(final, r.frame.Resume(r.slots)...)
+			}
+		}
 	}
 	bodyToFinal[len(r.out)] = len(final)
 
-	// No label targets the frame prologue. The primary callable enters at
-	// byte 0 and falls through the prologue, so reaching it never depends on
-	// a label; conversely an intra-code branch — including a back-edge that
-	// lands on body index 0 — must skip the prologue or it would re-reserve
-	// the frame on every pass and walk SP off the stack. Rebase every label
-	// past the prologue.
+	// Internal branches skip the prologue so a back-edge cannot reserve the
+	// frame again. An external entry bound at instruction zero is different:
+	// its callable must start at byte zero and execute Enter before the body.
 	out := make(map[Label]int, len(labels))
 	for id, idx := range labels {
+		if entry[id] {
+			out[id] = 0
+			continue
+		}
 		out[id] = bodyToFinal[newIdx[idx]]
 	}
 	return final, out, nil

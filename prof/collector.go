@@ -80,14 +80,7 @@ func (c *Collector) Add(fn, ip int, op byte) {
 	if fn < 0 || ip < 0 {
 		return
 	}
-	for len(c.funcs) <= fn {
-		c.funcs = append(c.funcs, function{})
-	}
-	if len(c.funcs[fn].ips) <= ip {
-		ips := make([]uint64, ip+1)
-		copy(ips, c.funcs[fn].ips)
-		c.funcs[fn].ips = ips
-	}
+	c.grow(fn, ip)
 	c.total++
 	c.funcs[fn].count++
 	c.funcs[fn].ips[ip]++
@@ -149,19 +142,12 @@ func (c *Collector) merge(o *Collector) {
 		if fd.count == 0 {
 			continue
 		}
-		for len(c.funcs) <= fn {
-			c.funcs = append(c.funcs, function{})
-		}
+		c.grow(fn, len(fd.ips)-1)
 		c.total += fd.count
 		c.funcs[fn].count += fd.count
 		for offset, n := range fd.ips {
 			if n == 0 {
 				continue
-			}
-			if len(c.funcs[fn].ips) <= offset {
-				ips := make([]uint64, offset+1)
-				copy(ips, c.funcs[fn].ips)
-				c.funcs[fn].ips = ips
 			}
 			c.funcs[fn].ips[offset] += n
 		}
@@ -174,11 +160,43 @@ func (c *Collector) merge(o *Collector) {
 	}
 }
 
+// grow ensures index fn and index ip within c.funcs[fn].ips are addressable,
+// growing each slice's capacity geometrically (doubling) while sizing its
+// length to exactly what's needed, so callers never scan padded trailing
+// zeros the way a length-doubling grow would leave behind.
+func (c *Collector) grow(fn, ip int) {
+	if need := fn + 1; len(c.funcs) < need {
+		if cap(c.funcs) >= need {
+			c.funcs = c.funcs[:need]
+		} else {
+			funcs := make([]function, need, max(need, 2*cap(c.funcs)))
+			copy(funcs, c.funcs)
+			c.funcs = funcs
+		}
+	}
+	if need := ip + 1; len(c.funcs[fn].ips) < need {
+		if cap(c.funcs[fn].ips) >= need {
+			c.funcs[fn].ips = c.funcs[fn].ips[:need]
+		} else {
+			ips := make([]uint64, need, max(need, 2*cap(c.funcs[fn].ips)))
+			copy(ips, c.funcs[fn].ips)
+			c.funcs[fn].ips = ips
+		}
+	}
+}
+
+// reset clears every recorded sample while keeping the backing arrays c.funcs
+// and each function's ips grew to. A Pool flushes (and so resets) its local
+// collector on every Put, so nil-ing these out here would defeat the
+// geometric growth in grow and force a fresh allocation on the next borrow.
 func (c *Collector) reset() {
 	c.total = 0
-	c.funcs = nil
+	for i := range c.funcs {
+		c.funcs[i].count = 0
+		clear(c.funcs[i].ips)
+	}
 	clear(c.ops[:])
-	c.metrics = nil
+	c.metrics = c.metrics[:0]
 }
 
 func (c *Collector) opcodeLabel(code byte) string {

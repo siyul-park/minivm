@@ -3,11 +3,13 @@ package interp
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -83,6 +85,10 @@ func TestPool_Get(t *testing.T) {
 	})
 
 	t.Run("compiles a shared branch tree concurrently without racing", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+
 		// A called function with a branch tree: members share one Tracer, so one
 		// interpreter warming a side exit (Tracer.exit mutating tree.branches/hits)
 		// runs concurrently with another lowering the same root (rootAt reading it).
@@ -121,22 +127,24 @@ func TestPool_Get(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(eval))
 
-		p := NewPool(prog, 4, WithTick(1), WithThreshold(0))
+		metrics := prof.New()
+		p := NewPool(prog, 12, WithTick(1), WithThreshold(0), WithProfiler(metrics))
 		defer p.Close()
 
 		var wg sync.WaitGroup
-		errs := make(chan error, 8)
-		for range 8 {
+		errs := make(chan error, 12)
+		for worker := range 12 {
 			wg.Add(1)
-			go func() {
+			go func(worker int) {
 				defer wg.Done()
-				for range exitThreshold * 4 {
+				for n := range exitThreshold * 32 {
 					i, err := p.Get(context.Background())
 					if err != nil {
 						errs <- err
 						return
 					}
-					if err := i.Push(types.I32(3)); err != nil {
+					value := int32((worker+n)%24 - 8)
+					if err := i.Push(types.I32(value)); err != nil {
 						p.Put(i)
 						errs <- err
 						return
@@ -148,13 +156,77 @@ func TestPool_Get(t *testing.T) {
 					}
 					p.Put(i)
 				}
-			}()
+			}(worker)
 		}
 		wg.Wait()
 		close(errs)
 		for err := range errs {
 			require.NoError(t, err)
 		}
+		emits, ok := metrics.Metric("vm_jit_emits_total")
+		require.True(t, ok)
+		require.Greater(t, emits, float64(0))
+	})
+
+	t.Run("runs a spilled shared native entry from fresh goroutines", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+
+		const workers = 8
+		const values = 256
+		const rounds = 8
+		want := types.I32(values * (values + 1) / 2)
+
+		b := program.NewBuilder()
+		for value := range values {
+			b.Emit(instr.I32_CONST, uint64(value+1))
+		}
+		for range values - 1 {
+			b.Emit(instr.I32_ADD)
+		}
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		metrics := prof.New()
+		p := NewPool(prog, workers, WithTick(1), WithThreshold(0), WithProfiler(metrics))
+		defer p.Close()
+		for range rounds {
+			ready := make(chan struct{}, workers)
+			start := make(chan struct{})
+			results := make(chan error, workers)
+			for range workers {
+				go func() {
+					i, err := p.Get(context.Background())
+					ready <- struct{}{}
+					<-start
+					if err != nil {
+						results <- err
+						return
+					}
+					err = i.Run(context.Background())
+					if err == nil {
+						var value types.Value
+						value, err = i.Pop()
+						if err == nil && value != want {
+							err = fmt.Errorf("got %v, want %v", value, want)
+						}
+					}
+					p.Put(i)
+					results <- err
+				}()
+			}
+			for range workers {
+				<-ready
+			}
+			close(start)
+			for range workers {
+				require.NoError(t, <-results)
+			}
+		}
+		emits, ok := metrics.Metric("vm_jit_emits_total")
+		require.True(t, ok)
+		require.Greater(t, emits, float64(0))
 	})
 
 	t.Run("rearms shared cache after missed side-exit threshold", func(t *testing.T) {
@@ -177,6 +249,44 @@ func TestPool_Get(t *testing.T) {
 
 		require.Equal(t, cacheCold, p.cache.state[0].Load())
 		require.True(t, p.cache.due(0, 1))
+	})
+
+	t.Run("does not recompile a known loop exit", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		b := program.NewBuilder()
+		loop := b.Label()
+		b.Locals(types.TypeI32).
+			Emit(instr.I32_CONST, 0).
+			Emit(instr.LOCAL_SET, 0).
+			Bind(loop).
+			Emit(instr.LOCAL_GET, 0).
+			Emit(instr.I32_CONST, 1).
+			Emit(instr.I32_ADD).
+			Emit(instr.LOCAL_TEE, 0).
+			Emit(instr.I32_CONST, 4).
+			Emit(instr.I32_LT_S).
+			BrIf(loop).
+			Emit(instr.LOCAL_GET, 0)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		metrics := prof.New()
+		p := NewPool(prog, 1, WithTick(1), WithThreshold(0), WithProfiler(metrics))
+
+		for range exitThreshold * 8 {
+			i, err := p.Get(context.Background())
+			require.NoError(t, err)
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(4), value)
+			p.Put(i)
+		}
+		require.NoError(t, p.Close())
+		attempts, ok := metrics.Metric("vm_jit_attempts_total")
+		require.True(t, ok)
+		require.Equal(t, float64(2), attempts)
 	})
 }
 

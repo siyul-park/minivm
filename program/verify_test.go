@@ -200,6 +200,18 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, Verify(prog), ErrInvalidJump)
 	})
 
+	t.Run("function branch to end", func(t *testing.T) {
+		fn := &types.Function{
+			Typ: &types.FunctionType{},
+			Code: instr.Marshal([]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.BR_IF, 0),
+			}),
+		}
+		prog := New([]instr.Instruction{instr.New(instr.NOP)}, WithConstants(fn))
+		require.ErrorIs(t, Verify(prog), ErrInvalidJump)
+	})
+
 	t.Run("function falls through", func(t *testing.T) {
 		fn := &types.Function{
 			Typ:  &types.FunctionType{},

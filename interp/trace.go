@@ -52,6 +52,7 @@ type step struct {
 	seen  types.Boxed
 	arg   types.Boxed
 	shape shape
+	cut   bool
 
 	fn     int
 	ip     int
@@ -80,6 +81,7 @@ const (
 	loop outcome = iota + 1
 	returned
 	completed
+	partial
 	aborted
 )
 
@@ -103,8 +105,14 @@ func (r *Tracer) exit(i *Interpreter, root anchor, target branch) (int64, error)
 	id := r.exitIndex(tree, target)
 	tree.hits[id]++
 	hits := tree.hits[id]
-	if tree.branches[id] != nil {
+	if branch := tree.branches[id]; branch != nil {
 		r.mu.Unlock()
+		// The first hot exit publishes the standalone loop entry. Later exits
+		// cannot be folded into the parent trace, so recompiling that parent
+		// would only publish the same pair again.
+		if branch.kind == loop && hits != exitThreshold {
+			return 0, nil
+		}
 		return hits, nil
 	}
 	r.mu.Unlock()
@@ -210,6 +218,23 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 
 		r.finish(&clone, &st, op)
 		t.ops = append(t.ops, st)
+		// A backward edge to a different header starts a distinct loop trace.
+		// Stop this linear prefix at the header instead of unrolling the loop up
+		// to opLimit; threaded execution will make that header hot and compile it
+		// with the native back-edge and safepoint budget intact.
+		if (op == instr.BR || op == instr.BR_IF) &&
+			clone.fr.addr == st.fn && clone.fr.ip <= st.ip &&
+			(clone.fr.addr != a.addr || clone.fr.ip != a.ip) {
+			t.ops = append(t.ops, step{
+				fn:     clone.fr.addr,
+				target: clone.fr.ip,
+				depth:  clone.fp - startFP,
+				cut:    true,
+			})
+			t.kind = partial
+			r.store(a, t)
+			return t, nil
+		}
 		// Heap mutations still lower as terminal native fast paths: the hot
 		// path performs the store and resumes at the next threaded instruction;
 		// guard failures resume at the opcode so the interpreter owns the full
@@ -245,7 +270,11 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		}
 	}
 	if len(t.ops) >= opLimit {
-		t.kind = aborted
+		// Preserve the bounded prefix. Its synthetic cut lowers through the same
+		// side-exit path as a guard, so a hot remainder becomes a continuation.
+		f := clone.fr
+		t.ops = append(t.ops, step{fn: f.addr, target: f.ip, depth: clone.fp - startFP, cut: true})
+		t.kind = partial
 	}
 	r.store(a, t)
 	return t, nil
@@ -549,8 +578,26 @@ func (r *Tracer) rootAt(a anchor) *tree {
 	return t.snapshot()
 }
 
-func (r *Tracer) hasEntry(addr int) bool {
-	return r.hasLoop(addr, 0)
+// ensureEntry returns the recorded entry trace for addr, capturing it once
+// if no non-aborted trace is recorded yet. Both the sampling safepoint
+// (observe) and the one-shot compile trigger (compile) need an entry trace
+// captured before compiling; routing both through this single owner means a
+// trigger that lands after the other already captured the entry reuses that
+// root instead of re-walking the function and inflating attempt/blacklist
+// counters with duplicate work.
+func (r *Tracer) ensureEntry(i *Interpreter, addr int) (*trace, error) {
+	if !r.hasLoop(addr, 0) {
+		if _, err := r.capture(i, anchor{addr: addr, ip: 0}); err != nil {
+			return nil, err
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tr := r.trees[anchor{addr: addr, ip: 0}]
+	if tr == nil {
+		return nil, nil
+	}
+	return tr.root, nil
 }
 
 // hasLoop reports whether a non-aborted trace is already recorded at
@@ -585,9 +632,10 @@ func (r *Tracer) headers(i *Interpreter, addr int) []int {
 			if w <= 0 {
 				break
 			}
-			switch instr.Opcode(code[ip]) {
-			case instr.BR, instr.BR_IF:
-				target := ip + instr.ParseI16(code, ip+1) + 3
+			// instr.Targets covers BR_TABLE's multiple case targets as well as
+			// BR/BR_IF's single target, so a loop formed only through a
+			// backward BR_TABLE case is recognized as a header too.
+			for _, target := range instr.Targets(code, ip) {
 				if target >= 0 && target < ip && !seen[target] {
 					seen[target] = true
 					hs = append(hs, target)
@@ -686,10 +734,15 @@ func (t *tree) snapshot() *tree {
 	}
 }
 
+// branchIPs returns the learned continuations eligible for inlining into a
+// parent trace. An aborted branch recorded only a partial, unsupported
+// fragment; inlining it would let the walk fall off its end and be mistaken
+// for top-level completion, so it is excluded here rather than filtered by
+// every caller.
 func (t *tree) branchIPs() map[branch]leg {
 	out := map[branch]leg{}
 	for id, tr := range t.branches {
-		if tr != nil {
+		if tr != nil && tr.kind != aborted {
 			out[branch{fn: tr.anchor.addr, ip: tr.anchor.ip}] = leg{trace: tr, hits: t.hits[id]}
 		}
 	}

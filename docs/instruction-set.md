@@ -42,6 +42,8 @@ JIT status is per opcode and per backend. It describes whether a recorded trace 
 
 AMD64 currently has no active JIT backend. `asm/amd64` is a placeholder and `interp/jit_stub.go` disables compiler construction on non-ARM64 platforms, so every AMD64 entry is `🔲`.
 
+ARM64 native branches are range-checked before encoding. Conditional label branches outside their signed imm19 range are relaxed to an inverted conditional skip plus an unconditional imm26 branch when that replacement can reach the target; otherwise JIT compilation cleanly falls back to threaded execution.
+
 ## Operand Widths
 
 Operand widths are declared in `instr/type.go`.

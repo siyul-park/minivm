@@ -104,7 +104,7 @@ General behavior belongs to the threaded interpreter. Native guard failures mate
 
 Trace recording lives in `interp/trace.go`.
 
-Recording clones the interpreter, starts the clone at the requested `(addr, ip)`, and executes threaded closures until it reaches return, loop back-edge, branch exit, unsupported operation, trace limit, or abort condition.
+Recording clones the interpreter, starts the clone at the requested `(addr, ip)`, and executes threaded closures until it reaches return, loop back-edge, branch exit, unsupported operation, trace limit, or abort condition. A backward edge to a different header cuts the linear prefix so that header can become a standalone loop trace with a native safepoint budget. Reaching the trace limit records a partial trace with a resumable cut instead of aborting. Native execution deoptimizes at that cut; when the exit becomes hot, the existing side-exit machinery records and compiles the next bounded continuation.
 
 The live interpreter is not mutated while recording.
 
@@ -118,9 +118,16 @@ Each recorded step stores the data needed for speculative lowering:
 - observed guard values
 - observed heap shape
 - branch target and taken state
+- partial-trace resume boundary
 - selected heap values for read-only fast paths
 
 The tracer aborts before host calls, allocation, and mutating heap operations. These remain interpreter-owned.
+
+Every recorded `trace` carries a `kind outcome`: `loop`, `returned`, `completed`, `partial`, or `aborted`. `completed` and `returned` both mark a trace that ended cleanly (reached the top-level function's end, or returned from its recorded frame) and may lower as a normal native completion. `partial` always ends in its own recorded cut step, which the lowerer's `walk` handles explicitly before it can fall off the end of the fragment's ops. `aborted` means recording stopped on an unsupported op with no terminal step recorded at all; `tree.branchIPs()` excludes `aborted` branches from the set eligible for inlining as a continuation, and `arm64Lowerer.continuation` repeats that check as a direct safeguard. When `arm64Lowerer.walk` lowers a fragment (the root, or a pending branch continuation) and its ops run out without hitting an explicit terminal case, it checks that *fragment's own* `kind` — never the root's — before falling through as a normal completion; checking the root's kind instead would let a branch continuation that itself aborted after recording a few ops be lowered as if it had completed normally.
+
+Both `observe` (the sampling safepoint) and `compile` (the one-shot JIT trigger) need an entry trace captured before compiling. They both route through `Tracer.ensureEntry`, the single owner of "capture the entry trace for this addr unless one is already recorded" — this avoids the entry being captured twice (once from each trigger, when both land close together), which would otherwise re-walk the function and inflate `tree.attempts`/blacklist counters with duplicate work.
+
+`Tracer.headers` (the static loop-header scan) uses `instr.Targets(code, ip)` rather than switching on `BR`/`BR_IF` directly, so a loop formed only through a backward `BR_TABLE` case target is recognized as a header too.
 
 ## Trace Snapshots
 
@@ -152,7 +159,7 @@ Keep the lowerer interface small. Add architecture hooks only when the architect
 
 Native callables use an AAPCS64-shaped entry.
 
-`Callable.Call(ctx)` passes:
+`Callable.Call(ctx unsafe.Pointer)` passes:
 
 ```text
 &i.journal[0] in X0
@@ -168,7 +175,34 @@ Native code loads VM state from the journal into pinned scratch registers.
 | `scratchSP` | X13 | current stack pointer |
 | `scratchCtrl` | X14 | journal pointer |
 
-The Go trampoline preserves X19-X26 for native register allocation.
+The context stays an `unsafe.Pointer` through the Go call boundary so Go can
+relocate a stack-backed context when the trampoline grows the goroutine stack.
+Converting it to `uintptr` before that stack split would leave native code with
+a stale address.
+
+The Go trampoline preserves X19-X26 and declares an 8,192-byte native reserve:
+`asm.MaxSpillSlots` (512) × 8 bytes plus `interp.nativeFrameLimit` (128) × 32
+bytes. Its complete Go frame is 8,272 bytes including the 80-byte trampoline
+area.
+Native code starts at the top of the reserve, so generated SP adjustments stay
+inside memory covered by Go's stack-growth check. X26 is the stable spill-frame
+base, so a native self-call may move SP without changing spill addresses. Keep
+the allocator limit, native frame limit, and `asm/arm64/abi_arm64.s` reserve in
+sync: `interp.TestNativeStackReserve` (`interp/jit_arm64_test.go`) asserts
+`asm.MaxSpillSlots*8 + nativeFrameLimit*journalStride*8` equals the reserve
+literal parsed out of `abi_arm64.s`, and that the reserve plus the 80-byte
+callee-saved save area equals the trampoline's total Go frame size, so an
+edit to any one constant without the others fails a test instead of
+corrupting the native stack at runtime.
+
+Register allocation (`asm/rewriter.go`) is a single linear-scan pass: it spills the vreg with the farthest-away next use to a stack slot at the stream position where pressure was observed. Rewritten labels target the start of any inserted reload/store prefix, and labels on a return target its inserted frame epilogue. Only a call whose target label is bound inside the same `Code` (an intra-Code self-call, which runs through the shared epilogue on return) reserves the caller's spill area again before continuing; a call to a label resolved externally by `Link` never runs this `Code`'s epilogue, so the rewriter must not re-reserve after it. `Assembler.Entry` documents the matching limitation for non-primary entries: only the primary entry (offset 0) runs the frame prologue, so `Build` returns `asm.ErrEntryRequiresFrame` when spilling occurs and a non-primary entry exists.
+
+Linear spill state is still unsafe across a loop back-edge, and terminal `ARRAY_SET`/`STRUCT_SET` traces can combine multiple branch paths before their exit. Two independent layers disable spilling for these cases, and both are needed:
+
+- `asm/rewriter.go` disables spilling generically for any `Code` containing an intra-Code backward label branch (a loop back-edge), as a safety net that has no notion of VM opcodes. It cannot see terminal `ARRAY_SET`/`STRUCT_SET` mutations, which are a VM-opcode concept.
+- `interp/jit.go`'s `spillSafe(tree *tree) bool` disables spilling for VM-opcode reasons the assembler cannot know about: it scans the *whole* trace tree — the root trace and every branch the tree may inline as a learned continuation, not just the root's own last op — for a terminal `ARRAY_SET`/`STRUCT_SET`. A learned continuation that itself ends in a mutation would otherwise escape a root-only check. `spillSafe` does not need to check for loop back-edges itself; the assembler's generic scan already covers that.
+
+When `spillSafe` returns false, `emitRoot` wraps `c.arch` in a private `noSpillArch` (`interp/jit.go`) whose `Frame()` returns `nil` — the assembler's own documented contract for "no spilling" (`asm.Frame`'s doc comment) — rather than calling a dedicated `Assembler.DisableSpilling` API; no such API exists in `asm` because disabling spilling for this reason is purely an interp-side JIT policy decision. A root that exhausts physical registers then returns `asm.ErrNoRegistersAvailable` and keeps threaded dispatch installed; acyclic entry traces can still spill and emit native code.
 
 Native code does not marshal parameters or returns. It writes results and trap state into the journal, and the Go wrapper restores interpreter state from there.
 
@@ -185,7 +219,7 @@ Header cells come before fixed-stride frame records.
 | `journalBP` | current frame base |
 | `journalSP` | stack pointer |
 | `journalDepth` | number of written frame records |
-| `journalCap` | available frame record capacity |
+| `journalCap` | available frame record capacity, capped at 128 |
 | `journalTrap` | trap state |
 | `journalNextIP` | fallback or resume IP |
 | `journalBudget` | native loop back-edge budget |
@@ -235,7 +269,7 @@ Recorded forward branches become guarded exits or learned branch continuations.
 
 `BR_IF` and `BR_TABLE` emit the recorded path. Unrecorded targets deoptimize.
 
-When a side exit becomes hot, the tracer records that target. A later compile may fold it into the same native callable as a pending block.
+When a side exit becomes hot, the tracer records that target. A later compile may fold it into the same native callable as a pending block. Loop roots are never folded as ordinary continuations: they deoptimize at the header and use their standalone loop entry, which preserves back-edge and safepoint semantics.
 
 Pending blocks reload from VM stack homes, compile hotter exits first, and stop at a bounded pending cap.
 
@@ -248,6 +282,12 @@ Solo interpreters recompile a side exit when its hit count first reaches the hot
 Targets still deoptimize when they are unknown or unsupported.
 
 Branch lowering may skip hot-path flushes only when the branch state is clean. If locals or operands are dirty, flush first. Learned continuations and side exits must see the same stack image as threaded dispatch.
+
+### Branch range validation
+
+ARM64 conditional/compare/test branches (`B.cond`, `CBZ`/`CBNZ`, `TBZ`/`TBNZ`) encode a fixed-width signed PC-relative immediate — imm19 (±1MB) for `B.cond`/`CBZ`/`CBNZ`, imm14 (±32KB) for `TBZ`/`TBNZ`, imm26 (±128MB) for `B`/`BL`. `asm/arm64.Encoder.Encode` validates every such offset is 4-byte aligned and fits its field, returning `asm.ErrBranchOutOfRange` instead of silently masking an out-of-range offset into a wrong target. `interp/jit.go` `emitRoot` treats `ErrBranchOutOfRange` the same as `asm.ErrNoRegistersAvailable`: it aborts native lowering for that trace and falls back to threaded dispatch rather than emit a corrupt callable. `asm.Link` can also return `ErrBranchOutOfRange` (from `asm/link.go`'s `patchExternalRelocs`, which re-encodes relocations whose target lands outside the branch's field once resolved against another `Code`'s address) — `emitRoot` checks `errors.Is(err, asm.ErrBranchOutOfRange)` at the `Link` call site too and routes it through the same clean fallback, rather than letting it propagate as a hard error the way an unrelated `Link` failure does.
+
+Before that fallback triggers, `asm.Assembler.encode` runs a branch relaxation fixpoint (`asm.Relaxer`, implemented by `asm/arm64.arch.Relax`) between the draft and final encoding passes. Each pass drafts the current instruction list once, collects every intra-Code `B.cond`/`CBZ`/`CBNZ` label branch whose imm19 displacement does not fit, and rewrites all of them together into an inverted-condition branch that skips a following unconditional `B` (imm26, ±128MB) to the original target; it then re-drafts and repeats until a pass finds nothing left to relax. Both replacement instructions are constructed to already be in range, so a given branch relaxes at most once and the loop always terminates, and batching every out-of-range branch within a pass keeps the number of drafts proportional to the number of passes rather than the number of branches; if the unconditional `B` itself would not reach the target (>±128MB), `Relax` returns `false` and `ErrBranchOutOfRange`/the JIT fallback still applies. `TBZ`/`TBNZ` never carry a `LabelOperand` in this codebase (their offset is always a caller-computed immediate — see `asm/arm64/instr.go`), so they never reach `Relax` and the imm14 (±32KB) window has no relaxation path; architectures without a `Relaxer` (amd64) are unaffected — `encode` no-ops the pass.
 
 ## Loops
 
@@ -329,6 +369,13 @@ Ref reads retain loaded refs. `CORO_VALUE` retains the value and releases the ha
 Heap-promoted `i64` values fall back before boxing.
 
 Primitive `ARRAY_SET` and `STRUCT_SET` are terminal mutations. The hot path may perform the store, flush state, and resume threaded execution at the next instruction. Shape, bounds, field-kind, or release failure deoptimizes at the original opcode so the interpreter owns full semantics.
+
+A loop body that inlines two or more branchy calls before a terminal
+`ARRAY_SET`/`STRUCT_SET` can push register pressure past the physical bank.
+The allocator rejects spilling across backward edges, and the compiler disables
+spilling for loop and terminal-mutation roots; register exhaustion then keeps
+threaded dispatch installed (regression test:
+`interp.TestInterpreter_JITArraySetAfterBranchyCallsInLoop`).
 
 Allocation and complex ref-bearing mutations stay threaded.
 

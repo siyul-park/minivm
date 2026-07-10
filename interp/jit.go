@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -112,6 +113,7 @@ type pending struct {
 	label  asm.Label
 	ops    []step
 	tail   []step
+	kind   outcome
 	values []value
 	frames []activation
 	hits   int64
@@ -143,7 +145,7 @@ const (
 	journalBP             // current frame bp; external entry in
 	journalSP             // interpreter sp; external entry in/out
 	journalDepth          // trap-time frame records written; native read/write
-	journalCap            // frame budget len(i.frames)-i.fp; read-only
+	journalCap            // frame budget capped by nativeFrameLimit; read-only
 	journalTrap           // exit kind out: trapNone | trapFallback | trapOverflow | trapYield
 	journalNextIP         // resume/fallback IP out for the single-frame path
 	journalBudget         // back-edges remaining before the next safepoint; native read/write
@@ -169,6 +171,10 @@ const (
 	trapOverflow
 	trapYield
 )
+
+// nativeFrameLimit caps generated call depth to the stack space reserved by
+// the ARM64 invoke trampoline. Deeper calls trap before moving SP.
+const nativeFrameLimit = 128
 
 // loopBudget is how many native loop back-edges run between safepoints. It is
 // independent of tick so a hot loop amortizes the deopt/re-enter cost of a
@@ -265,7 +271,22 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 		return false, nil
 	}
 
-	asmb := asm.New(c.arch)
+	// A trace whose terminal op is ARRAY_SET or STRUCT_SET lowers to a native
+	// fast path that performs the heap store and falls through to the next
+	// threaded instruction on success; a spilled value still live across that
+	// terminal store would leave a stale copy on the VM stack if the native
+	// path took the store and then trapped before writing the spill back.
+	// noSpillArch reports no Frame, which is asm's own contract for
+	// disabling spilling (see asm.Frame's doc comment), so this policy needs
+	// no dedicated asm-level API. Loop back-edges need no interp-side check
+	// here: the assembler's own generic backward-label scan (asm/rewriter.go)
+	// already disables spilling for any Code containing an intra-Code
+	// backward branch — see docs/jit-internals.md for why both layers exist.
+	arch := c.arch
+	if !spillSafe(tree) {
+		arch = noSpillArch{c.arch}
+	}
+	asmb := asm.New(arch)
 	entry := asmb.Label()
 
 	// The declared Program.Globals are out of scope here; New pre-seeds every
@@ -301,19 +322,67 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 	}
 	code, err := asmb.Build()
 	if err != nil {
-		if errors.Is(err, asm.ErrNoRegistersAvailable) {
+		if errors.Is(err, asm.ErrNoRegistersAvailable) || errors.Is(err, asm.ErrBranchOutOfRange) {
 			return false, nil
 		}
 		return false, err
 	}
 	linked, err := asm.Link(c.buffer, c.arch, []*asm.Code{code}, nil)
 	if err != nil {
+		// External relocation re-encoding (asm/link.go's patchExternalRelocs)
+		// can also return ErrBranchOutOfRange, not just Build; treat it the
+		// same as the Build-path case above and fall back to threaded
+		// dispatch instead of propagating a hard error.
+		if errors.Is(err, asm.ErrBranchOutOfRange) {
+			return false, nil
+		}
 		return false, err
 	}
 	mod.entries[a] = native{callable: linked[0].Callable, loop: ctx.loop}
 	mod.emits++
 	mod.bytes += len(code.Bytes)
 	return true, nil
+}
+
+// noSpillArch wraps an asm.Arch to force Build to reject spilling instead of
+// inserting a spill frame. A nil Frame already disables spilling per asm's
+// own contract (see asm.Frame's doc comment), so this policy needs no
+// dedicated asm-level API — it is purely an interp-side JIT policy decision
+// (see spillSafe), not a generic assembler concern.
+type noSpillArch struct{ asm.Arch }
+
+func (noSpillArch) Frame() asm.Frame { return nil }
+
+// spillSafe reports whether the compiled trace tree may use ordinary
+// register spilling. A trace whose terminal op is ARRAY_SET or STRUCT_SET
+// lowers to a native fast path that performs the heap store and falls
+// through to the next threaded instruction on success; a spilled value still
+// live across that terminal store would leave a stale copy on the VM stack if
+// the native path took the store and then trapped before writing the spill
+// back. The scan covers the root trace and every branch the tree may inline
+// as a continuation, not just the root's own last op, because a learned
+// continuation that itself ends in a mutation would otherwise escape the
+// check.
+func spillSafe(tree *tree) bool {
+	if endsInMutation(tree.root) {
+		return false
+	}
+	for _, tr := range tree.branches {
+		if endsInMutation(tr) {
+			return false
+		}
+	}
+	return true
+}
+
+// endsInMutation reports whether t's recorded final op is a heap mutation
+// that lowers as a terminal native fast path (see spillSafe).
+func endsInMutation(t *trace) bool {
+	if t == nil || len(t.ops) == 0 {
+		return false
+	}
+	op := t.ops[len(t.ops)-1].op
+	return op == instr.ARRAY_SET || op == instr.STRUCT_SET
 }
 
 // frame returns the innermost (currently executing) frame.

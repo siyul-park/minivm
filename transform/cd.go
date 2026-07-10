@@ -1,6 +1,8 @@
 package transform
 
 import (
+	"reflect"
+
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
@@ -39,8 +41,8 @@ func (p *ConstantDeduplicationPass) Run(m *pass.Manager, prog *program.Program) 
 		}
 	}
 
-	constIndex, constSize := dedup(constants, constUsed, func(a, b types.Value) bool { return a == b })
-	typeIndex, typesSize := dedup(typs, typeUsed, func(a, b types.Type) bool { return a.Equals(b) })
+	constIndex, constSize := dedupValues(constants, constUsed)
+	typeIndex, typesSize := dedupTypes(typs, typeUsed)
 
 	for i, v := range constIndex {
 		if v >= 0 {
@@ -86,10 +88,43 @@ func (p *ConstantDeduplicationPass) Run(m *pass.Manager, prog *program.Program) 
 	return pass.PreserveNone(), nil
 }
 
-// dedup builds a compaction index for items: each referenced entry (used[i])
-// is renumbered into a dense range with equal entries collapsed to one slot,
-// while unreferenced entries map to -1. Returns the index and compacted size.
-func dedup[T any](items []T, used []bool, eq func(a, b T) bool) ([]int, int) {
+// dedupValues builds a compaction index for constants: each used entry is
+// renumbered into a dense range. Entries whose dynamic type supports ==
+// collapse to one slot per distinct value via a single map pass; entries
+// backed by an uncomparable dynamic type (e.g. an array or map value) keep
+// their own slot, since inserting one into a Go map panics. Unused entries
+// map to -1. Returns the index and compacted size.
+func dedupValues(items []types.Value, used []bool) ([]int, int) {
+	index := make([]int, len(items))
+	seen := make(map[types.Value]int, len(items))
+	size := 0
+	for i, v := range items {
+		index[i] = -1
+		if !used[i] {
+			continue
+		}
+		if typ := reflect.TypeOf(v); typ != nil && !typ.Comparable() {
+			index[i] = size
+			size++
+			continue
+		}
+		if j, ok := seen[v]; ok {
+			index[i] = j
+			continue
+		}
+		seen[v] = size
+		index[i] = size
+		size++
+	}
+	return index, size
+}
+
+// dedupTypes builds a compaction index for types: each used entry is
+// renumbered into a dense range with structurally equal types (per
+// types.Type.Equals) collapsed to one slot. Types have no cheap canonical key
+// to use as a map key, so this stays a pairwise scan. Unused entries map to
+// -1. Returns the index and compacted size.
+func dedupTypes(items []types.Type, used []bool) ([]int, int) {
 	index := make([]int, len(items))
 	for i := range index {
 		index[i] = -1
@@ -103,7 +138,7 @@ func dedup[T any](items []T, used []bool, eq func(a, b T) bool) ([]int, int) {
 			continue
 		}
 		for j := i + 1; j < len(items); j++ {
-			if eq(items[j], items[i]) {
+			if used[j] && items[j].Equals(items[i]) {
 				index[j] = index[i]
 			}
 		}

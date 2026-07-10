@@ -2,6 +2,8 @@
 
 package arm64
 
-func invoke(addr uintptr, ctx uintptr) {
+import "unsafe"
+
+func invoke(addr uintptr, ctx unsafe.Pointer) {
 	panic("not implemented")
 }

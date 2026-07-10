@@ -24,7 +24,7 @@ func (abi) NewCallable(addr unsafe.Pointer) (asm.Callable, error) {
 	return &caller{addr: addr}, nil
 }
 
-func (c *caller) Call(ctx uintptr) error {
+func (c *caller) Call(ctx unsafe.Pointer) error {
 	invoke(uintptr(c.addr), ctx)
 	return nil
 }

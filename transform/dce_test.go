@@ -170,4 +170,19 @@ func TestDeadCodeEliminationPass_Run(t *testing.T) {
 			require.Equal(t, tt.expected, actual)
 		})
 	}
+
+	// A branch to the past-the-end offset is a virtual exit only for top-level
+	// code (program.Verify enforces this). A function constant that branches to
+	// its own end is malformed, and DCE must reject it rather than silently
+	// repairing the offset as if it were a legal virtual exit.
+	t.Run("rejects branch to end inside a function", func(t *testing.T) {
+		fn := &types.Function{Typ: &types.FunctionType{}, Code: instr.Marshal([]instr.Instruction{instr.New(instr.BR, 0)})}
+		prog := program.New(nil, program.WithConstants(fn))
+
+		m := pass.NewManager()
+		pass.Register[*types.Function, []*analysis.BasicBlock](m, analysis.NewBasicBlocksAnalysis())
+
+		_, err := NewDeadCodeEliminationPass().Run(m, prog)
+		require.ErrorIs(t, err, analysis.ErrInvalidJump)
+	})
 }

@@ -109,6 +109,48 @@ func TestProfiler_Flush(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, float64(2), v)
 	})
+
+	t.Run("merges growing sparse instruction ranges", func(t *testing.T) {
+		local := prof.NewCollector()
+		p := prof.New()
+
+		local.Add(7, 10_000, byte(instr.NOP))
+		p.Flush(local)
+		local.Add(7, 20_000, byte(instr.NOP))
+		p.Flush(local)
+
+		v, ok := p.Metric(
+			"vm_func_ip_samples_total",
+			prof.Label{Key: "func", Value: "7"},
+			prof.Label{Key: "ip", Value: "10000"},
+		)
+		require.True(t, ok)
+		require.Equal(t, float64(1), v)
+		v, ok = p.Metric(
+			"vm_func_ip_samples_total",
+			prof.Label{Key: "func", Value: "7"},
+			prof.Label{Key: "ip", Value: "20000"},
+		)
+		require.True(t, ok)
+		require.Equal(t, float64(1), v)
+	})
+
+	t.Run("retains local capacity across repeated flushes", func(t *testing.T) {
+		local := prof.NewCollector()
+		p := prof.New()
+
+		// Grow the local collector once so its backing arrays reach a stable
+		// size, then flush repeatedly at that size. A flush that reset local
+		// by nil-ing its slices would reallocate on every one of these calls.
+		local.Add(3, 1_000, byte(instr.NOP))
+		p.Flush(local)
+
+		allocs := testing.AllocsPerRun(100, func() {
+			local.Add(3, 1_000, byte(instr.NOP))
+			p.Flush(local)
+		})
+		require.Zero(t, allocs)
+	})
 }
 
 func TestProfiler_Metrics(t *testing.T) {

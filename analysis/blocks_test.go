@@ -238,6 +238,18 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 			},
 		},
 		{
+			name: "branch to virtual exit",
+			fn: types.NewFunctionBuilder(nil).Emit(
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.BR_IF, 5),
+				instr.New(instr.I32_CONST, 2),
+			).MustBuild(),
+			blocks: []*BasicBlock{
+				{Start: 0, End: 8, Succs: []int{1}, Preds: nil},
+				{Start: 8, End: 13, Succs: nil, Preds: []int{0}},
+			},
+		},
+		{
 			name: "invalid br target after map lookup",
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.BR, 100),

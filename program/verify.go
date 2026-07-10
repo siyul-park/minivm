@@ -235,16 +235,19 @@ func (c *checker) bounds(ip int, op instr.Opcode) error {
 
 // blocks builds the control-flow graph, splitting the code at branch targets,
 // terminators, and protected-region boundaries, and validates that every branch
-// target lands on an instruction boundary inside the function. Throws and traps
-// transfer out of band, so no edges are added for them; the flow pass seeds
-// catch blocks directly.
+// target lands on an instruction boundary. Top-level branches may target the
+// virtual exit at len(code); function branches must stay inside their body.
+// Throws and traps transfer out of band, so no edges are added for them; the
+// flow pass seeds catch blocks directly.
 func (c *checker) blocks() ([]*block, error) {
 	offsets := []int{0}
 	mark := func(ip, target int) error {
-		if target < 0 || target >= len(c.code) {
+		if target < 0 || target > len(c.code) || (target == len(c.code) && c.slot != 0) {
 			return c.fail(ip, instr.Opcode(c.code[ip]), ErrInvalidJump)
 		}
-		offsets = append(offsets, target)
+		if target < len(c.code) {
+			offsets = append(offsets, target)
+		}
 		return nil
 	}
 	for ip := 0; ip < len(c.code); {
@@ -256,16 +259,17 @@ func (c *checker) blocks() ([]*block, error) {
 				offsets = append(offsets, next)
 			}
 		case instr.BR, instr.BR_IF:
-			if err := mark(ip, next+instr.ReadI16(inst.Operand(0))); err != nil {
-				return nil, err
+			for _, target := range instr.Targets(c.code, ip) {
+				if err := mark(ip, target); err != nil {
+					return nil, err
+				}
 			}
 			if next < len(c.code) {
 				offsets = append(offsets, next)
 			}
 		case instr.BR_TABLE:
-			operands := inst.Operands()
-			for j := 1; j < len(operands); j++ {
-				if err := mark(ip, next+instr.ReadI16(operands[j])); err != nil {
+			for _, target := range instr.Targets(c.code, ip) {
+				if err := mark(ip, target); err != nil {
 					return nil, err
 				}
 			}
@@ -293,24 +297,16 @@ func (c *checker) blocks() ([]*block, error) {
 	}
 	for j, b := range blocks {
 		op, ip := c.last(b)
-		inst := instr.Instruction(c.code[ip:])
 		switch op {
 		case instr.UNREACHABLE, instr.RETURN, instr.THROW:
-		case instr.BR:
-			if err := c.link(blocks, j, ip+inst.Width()+instr.ReadI16(inst.Operand(0))); err != nil {
-				return nil, err
-			}
-		case instr.BR_IF:
-			if err := c.link(blocks, j, ip+inst.Width()+instr.ReadI16(inst.Operand(0))); err != nil {
-				return nil, err
-			}
-			c.chain(blocks, j)
-		case instr.BR_TABLE:
-			operands := inst.Operands()
-			for k := 1; k < len(operands); k++ {
-				if err := c.link(blocks, j, ip+inst.Width()+instr.ReadI16(operands[k])); err != nil {
+		case instr.BR, instr.BR_IF, instr.BR_TABLE:
+			for _, target := range instr.Targets(c.code, ip) {
+				if err := c.link(blocks, j, target); err != nil {
 					return nil, err
 				}
+			}
+			if op == instr.BR_IF {
+				c.chain(blocks, j)
 			}
 		default:
 			c.chain(blocks, j)
@@ -326,6 +322,9 @@ func (c *checker) blocks() ([]*block, error) {
 // link records an edge from block src to the block containing dst, failing when
 // dst is not the start of any block (a jump into the middle of an instruction).
 func (c *checker) link(blocks []*block, src, dst int) error {
+	if dst == len(c.code) && c.slot == 0 {
+		return nil
+	}
 	for i, b := range blocks {
 		if b.start <= dst && dst < b.end {
 			blocks[src].succs = append(blocks[src].succs, i)

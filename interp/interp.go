@@ -685,11 +685,13 @@ func (i *Interpreter) Reset() {
 // installs the result into the dispatch table. Triggered once per function from
 // the Run-loop safepoint when its sample count crosses the threshold.
 func (i *Interpreter) compile(addr int) error {
-	// Always record from the function entry. The safepoint that triggers
+	// Ensure an entry trace is recorded. The safepoint that triggers
 	// compilation lands at an arbitrary IP, but the trace compiler installs a
 	// whole-function native entry, so the Tracer replays from a clean entry
-	// state rather than from wherever sampling happened to stop.
-	if _, err := i.tracer.capture(i, anchor{addr: addr, ip: 0}); err != nil {
+	// state rather than from wherever sampling happened to stop. observe
+	// already captures the entry trace on the first hot entry tick, so
+	// ensureEntry reuses that root here instead of re-walking the function.
+	if _, err := i.tracer.ensureEntry(i, addr); err != nil {
 		return err
 	}
 	if i.cache != nil && !i.dynamic[addr] {
@@ -895,8 +897,8 @@ func (i *Interpreter) safepoint() error {
 // threaded safepoint used to repeat on that lookup are already satisfied.
 func (i *Interpreter) observe(f *frame) error {
 	i.sample(f)
-	if f.ip == 0 && !i.tracer.hasEntry(f.addr) {
-		if _, err := i.tracer.capture(i, anchor{addr: f.addr, ip: 0}); err != nil {
+	if f.ip == 0 {
+		if _, err := i.tracer.ensureEntry(i, f.addr); err != nil {
 			return err
 		}
 	}
@@ -1168,7 +1170,7 @@ func (i *Interpreter) restore(f *frame, addr int) {
 // context resets and fills the journal handed to native code: stack/global base
 // pointers, current frame BP/SP, pointer cells for native fast paths, and the
 // per-call frame budget. It returns &journal[0], passed to native code in X0.
-func (i *Interpreter) context() uintptr {
+func (i *Interpreter) context() unsafe.Pointer {
 	i.journal[journalStack] = 0
 	if len(i.stack) > 0 {
 		i.journal[journalStack] = uint64(uintptr(unsafe.Pointer(&i.stack[0])))
@@ -1194,11 +1196,11 @@ func (i *Interpreter) context() uintptr {
 	}
 
 	i.journal[journalDepth] = 0
-	i.journal[journalCap] = uint64(len(i.frames) - i.fp)
+	i.journal[journalCap] = uint64(min(len(i.frames)-i.fp, nativeFrameLimit))
 	i.journal[journalTrap] = trapNone
 	i.journal[journalBudget] = uint64(i.tick)
 	i.journal[journalActive] = 0
-	return uintptr(unsafe.Pointer(&i.journal[0]))
+	return unsafe.Pointer(&i.journal[0])
 }
 
 func (i *Interpreter) runtimeError(r any) error {

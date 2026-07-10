@@ -144,6 +144,11 @@ func TestEncoder_Encode(t *testing.T) {
 			{"unencodable logical immediate", ANDI(X1, X2, 0), ErrMissingImmediate},
 			{"int destination for SCVTF", SCVTF(X1, X2), asm.ErrInvalidOperand},
 			{"float source for CLZ", CLZ(X1, D2), asm.ErrInvalidOperand},
+			{"B offset unaligned", B(2), asm.ErrBranchOutOfRange},
+			{"B offset exceeds imm26", B(1 << 27), asm.ErrBranchOutOfRange},
+			{"BEQ offset exceeds imm19", BEQ(1 << 21), asm.ErrBranchOutOfRange},
+			{"CBZ offset exceeds imm19", CBZ(X1, 1<<21), asm.ErrBranchOutOfRange},
+			{"TBZ offset exceeds imm14", TBZ(X1, 3, 1<<17), asm.ErrBranchOutOfRange},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {

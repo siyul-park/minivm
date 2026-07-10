@@ -2,6 +2,7 @@ package arm64
 
 import (
 	"errors"
+	"fmt"
 	"math/bits"
 
 	"github.com/siyul-park/minivm/asm"
@@ -760,11 +761,17 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := checkBranchOffset(op, offset, 26); err != nil {
+			return nil, err
+		}
 		return enc(0x14000000 | (uint32(offset/4) & 0x3FFFFFF)), nil
 
 	case OpBL:
 		offset, err := e.decodeBranch(inst)
 		if err != nil {
+			return nil, err
+		}
+		if err := checkBranchOffset(op, offset, 26); err != nil {
 			return nil, err
 		}
 		return enc(0x94000000 | (uint32(offset/4) & 0x3FFFFFF)), nil
@@ -806,6 +813,9 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := checkBranchOffset(op, offset, 19); err != nil {
+			return nil, err
+		}
 		imm19 := (uint32(offset/4) & 0x7FFFF) << 5
 		return enc(base | imm19 | reg(r)), nil
 
@@ -816,6 +826,9 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		}
 		base, err := intBase(0xB5000000, r)
 		if err != nil {
+			return nil, err
+		}
+		if err := checkBranchOffset(op, offset, 19); err != nil {
 			return nil, err
 		}
 		imm19 := (uint32(offset/4) & 0x7FFFF) << 5
@@ -833,6 +846,9 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		if err := validTestBit(r, bit); err != nil {
 			return nil, err
 		}
+		if err := checkBranchOffset(op, offset, 14); err != nil {
+			return nil, err
+		}
 		b5 := (uint32(bit) >> 5) & 1 // b5 lives in bit 31
 		b40 := uint32(bit) & 0x1F    // b40 lives in bits[23:19]
 		imm14 := (uint32(offset/4) & 0x3FFF) << 5
@@ -844,6 +860,9 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 			return nil, err
 		}
 		if err := validTestBit(r, bit); err != nil {
+			return nil, err
+		}
+		if err := checkBranchOffset(op, offset, 14); err != nil {
 			return nil, err
 		}
 		b5 := (uint32(bit) >> 5) & 1
@@ -859,6 +878,9 @@ func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 		OpBVS, OpBVC, OpBHI, OpBLS, OpBGE, OpBLT, OpBGT, OpBLE:
 		offset, err := e.decodeBranch(inst)
 		if err != nil {
+			return nil, err
+		}
+		if err := checkBranchOffset(op, offset, 19); err != nil {
 			return nil, err
 		}
 		cond := condCode[op]
@@ -1396,6 +1418,24 @@ func (e *Encoder) decodeTestBranch(inst asm.Instruction) (r asm.PReg, bit uint8,
 	}
 	packed := immOp.Value
 	return rOp.Reg, uint8(packed & 0xFF), packed >> 8, nil
+}
+
+// checkBranchOffset validates that offset is 4-byte aligned and its
+// instruction-count (offset/4) fits the signed bits-wide immediate field
+// of a PC-relative branch encoding. Without it an out-of-range offset
+// silently truncates to the wrong target. op and bits are folded into the
+// returned error so a caller can tell which branch family and field width
+// rejected the offset.
+func checkBranchOffset(op Op, offset int64, bits uint) error {
+	if offset%4 != 0 {
+		return fmt.Errorf("%w: op=%v offset=%d bits=%d", asm.ErrBranchOutOfRange, op, offset, bits)
+	}
+	units := offset / 4
+	half := int64(1) << (bits - 1)
+	if units < -half || units >= half {
+		return fmt.Errorf("%w: op=%v offset=%d bits=%d", asm.ErrBranchOutOfRange, op, offset, bits)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

@@ -2942,6 +2942,55 @@ func TestWithFrame(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.I32(1), v)
 	})
+
+	t.Run("native recursion respects reserved frame limit", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+
+		b := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32)
+		base := b.Label()
+		b.Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_EQZ)).
+			BrIf(base).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 1)).
+			Emit(instr.New(instr.I32_SUB)).
+			Emit(instr.New(instr.CONST_GET, 0)).
+			Emit(instr.New(instr.CALL)).
+			Emit(instr.New(instr.I32_CONST, 1)).
+			Emit(instr.New(instr.I32_ADD)).
+			Emit(instr.New(instr.RETURN)).
+			Bind(base).
+			Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.RETURN))
+		recurse, err := b.Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, nativeFrameLimit),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(recurse))
+		i := New(prog, WithFrame(nativeFrameLimit+2), WithTick(1), WithThreshold(0))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(nativeFrameLimit), v)
+		require.Equal(t, float64(1), i.samples.Value("vm_jit_emits_total"))
+
+		prog = program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, nativeFrameLimit+1),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		}, program.WithConstants(recurse))
+		i = New(prog, WithFrame(nativeFrameLimit+2), WithTick(1), WithThreshold(0))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrFrameOverflow)
+		require.Equal(t, float64(1), i.samples.Value("vm_jit_emits_total"))
+	})
 }
 
 func TestWithStack(t *testing.T) {
@@ -3048,6 +3097,88 @@ func TestWithThreshold(t *testing.T) {
 		}
 		require.NotNil(t, i.exits[anchor{addr: 0, ip: 0}])
 		require.Equal(t, float64(1), i.samples.Value("vm_jit_emits_total"))
+	})
+
+	t.Run("jits select with comparison condition", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 10),
+			instr.New(instr.I32_CONST, 20),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_LT_S),
+			instr.New(instr.SELECT),
+		})
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(10), v)
+		require.Equal(t, float64(1), i.samples.Value("vm_jit_emits_total"))
+	})
+
+	t.Run("jits oversized top-level code in bounded segments", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		code := make([]instr.Instruction, 0, opLimit+3)
+		for range opLimit/2 + 1 {
+			code = append(code, instr.New(instr.I32_CONST, 1), instr.New(instr.DROP))
+		}
+		code = append(code, instr.New(instr.I32_CONST, 7))
+		i := New(program.New(code), WithTick(1), WithThreshold(0))
+		defer i.Close()
+
+		for range exitThreshold + 3 {
+			i.Reset()
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(7), v)
+		}
+		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(2))
+	})
+
+	t.Run("keeps a learned nested loop resumable", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		b := program.NewBuilder()
+		loop := b.Label()
+		b.Locals(types.TypeI32, types.TypeF64).
+			Emit(instr.I32_CONST, 0).
+			Emit(instr.LOCAL_SET, 0).
+			Emit(instr.F64_CONST, 0).
+			Emit(instr.LOCAL_SET, 1).
+			Bind(loop).
+			Emit(instr.LOCAL_GET, 1).
+			Emit(instr.F64_CONST, math.Float64bits(1)).
+			Emit(instr.F64_ADD).
+			Emit(instr.LOCAL_SET, 1).
+			Emit(instr.LOCAL_GET, 0).
+			Emit(instr.I32_CONST, 1).
+			Emit(instr.I32_ADD).
+			Emit(instr.LOCAL_TEE, 0).
+			Emit(instr.I32_CONST, 4).
+			Emit(instr.I32_LT_S).
+			BrIf(loop).
+			Emit(instr.LOCAL_GET, 1)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+
+		for round := range exitThreshold + 8 {
+			i.Reset()
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.F64(4), value, "round %d", round)
+		}
 	})
 
 	t.Run("warm entry skips sampling", func(t *testing.T) {

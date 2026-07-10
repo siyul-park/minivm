@@ -172,6 +172,20 @@ Block boundaries are:
 - every branch target
 - the byte after `BR`, `BR_IF`, `BR_TABLE`, `UNREACHABLE`, `RETURN`, or `RETURN_CALL`
 
+A branch to the past-the-end offset has no successor block: the analysis models
+it as a virtual exit for any function, top-level or not. `program.Verify` is the
+sole owner of whether that virtual exit is legal, and it only accepts one for
+top-level code (slot `0`); a function body that branches to its own end is
+malformed. `BasicBlocksAnalysis` stays permissive because the JIT needs the
+same CFG shape regardless of scope; `DeadCodeEliminationPass` additionally
+re-checks scope before repairing a branch offset, since blind relocation
+would otherwise silently propagate a target that verification would have
+rejected.
+
+`BR`, `BR_IF`, and `BR_TABLE` targets are computed once in `instr.Targets`
+and reused by `program.Verify` and `BasicBlocksAnalysis`, so the same
+arithmetic is not duplicated at each call site.
+
 Keep these boundary rules consistent with the JIT and verifier.
 
 ## Global Value Numbering

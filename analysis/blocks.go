@@ -29,6 +29,15 @@ func NewBasicBlocksAnalysis() *BasicBlocksAnalysis {
 
 func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*BasicBlock, error) {
 	offsets := []int{0}
+	mark := func(ip, target int) error {
+		if target < 0 || target > len(fn.Code) {
+			return invalidJumpError(ip, target)
+		}
+		if target < len(fn.Code) {
+			offsets = append(offsets, target)
+		}
+		return nil
+	}
 	for ip := 0; ip < len(fn.Code); {
 		inst := instr.Instruction(fn.Code[ip:])
 		next := ip + inst.Width()
@@ -37,30 +46,15 @@ func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*Basic
 			if next < len(fn.Code) {
 				offsets = append(offsets, next)
 			}
-		case instr.BR, instr.BR_IF:
-			offset := ip + inst.Width() + instr.ReadI16(inst.Operand(0))
-			if offset < 0 || offset >= len(fn.Code) {
-				return nil, invalidJumpError(ip, offset)
+		case instr.BR, instr.BR_IF, instr.BR_TABLE:
+			for _, offset := range instr.Targets(fn.Code, ip) {
+				if err := mark(ip, offset); err != nil {
+					return nil, err
+				}
 			}
-			offsets = append(offsets, offset)
-			if next < len(fn.Code) {
+			if inst.Opcode() != instr.BR_TABLE && next < len(fn.Code) {
 				offsets = append(offsets, next)
 			}
-		case instr.BR_TABLE:
-			operands := inst.Operands()
-			count := int(operands[0])
-			for j := range count {
-				offset := ip + inst.Width() + instr.ReadI16(operands[j+1])
-				if offset < 0 || offset >= len(fn.Code) {
-					return nil, invalidJumpError(ip, offset)
-				}
-				offsets = append(offsets, offset)
-			}
-			offset := ip + inst.Width() + instr.ReadI16(operands[len(operands)-1])
-			if offset < 0 || offset >= len(fn.Code) {
-				return nil, invalidJumpError(ip, offset)
-			}
-			offsets = append(offsets, offset)
 		default:
 		}
 		ip = next
@@ -113,28 +107,15 @@ func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*Basic
 		inst := instr.Instruction(fn.Code[ip:])
 		switch inst.Opcode() {
 		case instr.UNREACHABLE, instr.RETURN, instr.THROW:
-		case instr.BR, instr.BR_IF:
-			offset := ip + inst.Width() + instr.ReadI16(inst.Operand(0))
-			if !p.link(blocks, indexByStart, j, offset) {
-				return nil, invalidJumpError(ip, offset)
-			}
-			if inst.Opcode() == instr.BR_IF && j+1 < len(blocks) {
-				blk.Succs = append(blk.Succs, j+1)
-				blocks[j+1].Preds = append(blocks[j+1].Preds, j)
-			}
-		case instr.BR_TABLE:
-			width := inst.Width()
-			operands := inst.Operands()
-			count := int(operands[0])
-			for k := range count {
-				offset := ip + instr.ReadI16(operands[k+1]) + width
+		case instr.BR, instr.BR_IF, instr.BR_TABLE:
+			for _, offset := range instr.Targets(fn.Code, ip) {
 				if !p.link(blocks, indexByStart, j, offset) {
 					return nil, invalidJumpError(ip, offset)
 				}
 			}
-			offset := ip + instr.ReadI16(operands[len(operands)-1]) + width
-			if !p.link(blocks, indexByStart, j, offset) {
-				return nil, invalidJumpError(ip, offset)
+			if inst.Opcode() == instr.BR_IF && j+1 < len(blocks) {
+				blk.Succs = append(blk.Succs, j+1)
+				blocks[j+1].Preds = append(blocks[j+1].Preds, j)
 			}
 		default:
 			if j+1 < len(blocks) {
@@ -153,6 +134,10 @@ func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*Basic
 }
 
 func (p *BasicBlocksAnalysis) link(blocks []*BasicBlock, indexByStart map[int]int, src, dst int) bool {
+	// The past-the-end offset is a virtual exit, not an empty basic block.
+	if dst == blocks[len(blocks)-1].End {
+		return true
+	}
 	if i, ok := indexByStart[dst]; ok {
 		blocks[src].Succs = append(blocks[src].Succs, i)
 		blocks[i].Preds = append(blocks[i].Preds, src)

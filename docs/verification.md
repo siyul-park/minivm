@@ -121,7 +121,16 @@ Branch targets include:
 - `BR_IF`
 - `BR_TABLE`
 
-Each target must land on an instruction boundary.
+Each target must land on an instruction boundary. Top-level code may also
+target the past-the-end offset, which exits the program just like ordinary
+top-level fall-through. Function bodies must target an instruction and still
+terminate explicitly.
+
+Target offsets for `BR`, `BR_IF`, and `BR_TABLE` are computed by the shared
+`instr.Targets(code, ip)` helper, also used by `analysis.BasicBlocksAnalysis`,
+so the verifier and the optimizer/JIT CFG agree on how a target is derived
+from an instruction. `program.Verify` remains the only place that decides
+whether the past-the-end target is *legal* for a given slot.
 
 ### 3. Termination
 

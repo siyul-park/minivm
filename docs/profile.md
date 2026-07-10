@@ -96,6 +96,8 @@ metrics := p.Metrics()
 
 `WithProfiler` attaches a shared profiler. `Interpreter.Close`, `Pool.Put`, and `Pool.Close` flush member-local samples into it.
 
+A pooled interpreter's local `Collector` flushes on every `Put`, so its `reset` after merging keeps the backing arrays it grew to and only zeroes recorded counts, instead of discarding them. This preserves the geometric growth in `Collector`'s internal `grow`; a `Pool` under steady load reaches a stable local capacity and stops allocating on later flush cycles.
+
 ## Reporting API
 
 | API | Use |
