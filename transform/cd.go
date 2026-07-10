@@ -93,7 +93,8 @@ func (p *ConstantDeduplicationPass) Run(m *pass.Manager, prog *program.Program) 
 // slice), which panics under Go's == on the interface; such constants are
 // never deduplicated with each other since they're never equal.
 func valueEqual(a, b types.Value) bool {
-	if !reflect.TypeOf(a).Comparable() {
+	typ := reflect.TypeOf(a)
+	if typ != nil && !typ.Comparable() {
 		return false
 	}
 	return a == b

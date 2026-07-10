@@ -204,8 +204,8 @@ func (a *Assembler) relax(insts []Instruction, labels map[Label]int) ([]Instruct
 }
 
 // spliceInstruction replaces insts[idx] with replacement and shifts every
-// label bound at or after idx by the resulting length delta, preserving
-// every label's logical position in the rewritten stream.
+// label bound after idx by the resulting length delta, preserving every
+// label's logical position in the rewritten stream.
 func spliceInstruction(insts []Instruction, labels map[Label]int, idx int, replacement []Instruction) ([]Instruction, map[Label]int) {
 	delta := len(replacement) - 1
 

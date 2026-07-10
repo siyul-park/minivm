@@ -8,31 +8,6 @@ import "github.com/siyul-park/minivm/asm"
 // itself, so clearing one 4-byte instruction needs +8.
 const skipDisp = 8
 
-// invCond maps each AArch64 conditional-branch opcode to its logical
-// inverse: EQ<->NE, CS<->CC, MI<->PL, VS<->VC, HI<->LS, GE<->LT, GT<->LE.
-var invCond = map[Op]Op{
-	OpBEQ: OpBNE, OpBNE: OpBEQ,
-	OpBCS: OpBCC, OpBCC: OpBCS,
-	OpBMI: OpBPL, OpBPL: OpBMI,
-	OpBVS: OpBVC, OpBVC: OpBVS,
-	OpBHI: OpBLS, OpBLS: OpBHI,
-	OpBGE: OpBLT, OpBLT: OpBGE,
-	OpBGT: OpBLE, OpBLE: OpBGT,
-}
-
-// relaxRangeBits maps each label-branch opcode Relax handles to the bit
-// width of its PC-relative immediate field, matching the widths
-// encoder.go's checkBranchOffset validates for the same opcodes. TBZ/TBNZ
-// are absent: instr.go never exposes a label-carrying constructor for
-// them (TBZ/TBNZ always take a caller-computed immediate offset), so they
-// never reach Relax with a LabelOperand and need no entry here.
-var relaxRangeBits = map[Op]uint{
-	OpBEQ: 19, OpBNE: 19, OpBCS: 19, OpBCC: 19, OpBMI: 19, OpBPL: 19,
-	OpBVS: 19, OpBVC: 19, OpBHI: 19, OpBLS: 19, OpBGE: 19, OpBLT: 19,
-	OpBGT: 19, OpBLE: 19,
-	OpCBZ: 19, OpCBNZ: 19,
-}
-
 // Relax implements asm.Relaxer for arm64. For B.cond and CBZ/CBNZ label
 // branches whose imm19 field (+-1MB) does not fit disp, it rewrites the
 // branch into an inverted-condition branch that skips over an
@@ -45,11 +20,11 @@ var relaxRangeBits = map[Op]uint{
 // (the skip branch's displacement is a fixed 8 bytes; the B's range is
 // checked before committing), so a branch relaxes at most once.
 func (a arch) Relax(inst asm.Instruction, disp int64) ([]asm.Instruction, bool) {
-	bits, ok := relaxRangeBits[Op(inst.Op)]
+	skip, ok := invertBranch(inst)
 	if !ok {
 		return nil, false
 	}
-	if checkBranchOffset(disp, bits) == nil {
+	if checkBranchOffset(disp, 19) == nil {
 		return nil, false
 	}
 
@@ -69,10 +44,6 @@ func (a arch) Relax(inst asm.Instruction, disp int64) ([]asm.Instruction, bool) 
 		return nil, false
 	}
 
-	skip, ok := invertBranch(inst)
-	if !ok {
-		return nil, false
-	}
 	return []asm.Instruction{skip, BLabel(lbl.ID)}, true
 }
 
@@ -87,11 +58,35 @@ func invertBranch(inst asm.Instruction) (asm.Instruction, bool) {
 		return asm.Instruction{Op: uint16(OpCBNZ), Src1: inst.Src1, Src2: asm.Imm(skipDisp)}, true
 	case OpCBNZ:
 		return asm.Instruction{Op: uint16(OpCBZ), Src1: inst.Src1, Src2: asm.Imm(skipDisp)}, true
+	case OpBEQ:
+		return BNE(skipDisp), true
+	case OpBNE:
+		return BEQ(skipDisp), true
+	case OpBCS:
+		return BCC(skipDisp), true
+	case OpBCC:
+		return BCS(skipDisp), true
+	case OpBMI:
+		return BPL(skipDisp), true
+	case OpBPL:
+		return BMI(skipDisp), true
+	case OpBVS:
+		return BVC(skipDisp), true
+	case OpBVC:
+		return BVS(skipDisp), true
+	case OpBHI:
+		return BLS(skipDisp), true
+	case OpBLS:
+		return BHI(skipDisp), true
+	case OpBGE:
+		return BLT(skipDisp), true
+	case OpBLT:
+		return BGE(skipDisp), true
+	case OpBGT:
+		return BLE(skipDisp), true
+	case OpBLE:
+		return BGT(skipDisp), true
 	default:
-		inv, ok := invCond[Op(inst.Op)]
-		if !ok {
-			return asm.Instruction{}, false
-		}
-		return asm.Instruction{Op: uint16(inv), Src2: asm.Imm(skipDisp)}, true
+		return asm.Instruction{}, false
 	}
 }

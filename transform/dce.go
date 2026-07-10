@@ -72,26 +72,20 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager, prog *program.Program) (p
 			switch inst.Opcode() {
 			case instr.BR, instr.BR_IF:
 				target := read + instr.ReadI16(inst.Operand(0)) + inst.Width()
-				for target >= 0 && target < len(offsets) && offsets[target] == -1 {
-					target++
-				}
-				if target < 0 || target >= len(offsets) {
+				if target < 0 || target > len(offsets) {
 					return pass.PreserveNone(), fmt.Errorf("%w: at=%d", analysis.ErrInvalidJump, read)
 				}
-				inst.SetOperand(0, uint64(offsets[target]-write-inst.Width()))
+				inst.SetOperand(0, uint64(p.relocate(offsets, target, len(code))-write-inst.Width()))
 			case instr.BR_TABLE:
 				width := inst.Width()
 				operands := inst.Operands()
 				count := int(operands[0])
 				for j := 0; j <= count; j++ {
 					target := read + instr.ReadI16(operands[j+1]) + width
-					for target >= 0 && target < len(offsets) && offsets[target] == -1 {
-						target++
-					}
-					if target < 0 || target >= len(offsets) {
+					if target < 0 || target > len(offsets) {
 						return pass.PreserveNone(), fmt.Errorf("%w: at=%d", analysis.ErrInvalidJump, read)
 					}
-					inst.SetOperand(j+1, uint64(offsets[target]-write-width))
+					inst.SetOperand(j+1, uint64(p.relocate(offsets, target, len(code))-write-width))
 				}
 			default:
 			}

@@ -144,7 +144,7 @@ const (
 	journalBP             // current frame bp; external entry in
 	journalSP             // interpreter sp; external entry in/out
 	journalDepth          // trap-time frame records written; native read/write
-	journalCap            // frame budget len(i.frames)-i.fp; read-only
+	journalCap            // frame budget capped by nativeFrameLimit; read-only
 	journalTrap           // exit kind out: trapNone | trapFallback | trapOverflow | trapYield
 	journalNextIP         // resume/fallback IP out for the single-frame path
 	journalBudget         // back-edges remaining before the next safepoint; native read/write
@@ -170,6 +170,10 @@ const (
 	trapOverflow
 	trapYield
 )
+
+// nativeFrameLimit caps generated call depth to the stack space reserved by
+// the ARM64 invoke trampoline. Deeper calls trap before moving SP.
+const nativeFrameLimit = 128
 
 // loopBudget is how many native loop back-edges run between safepoints. It is
 // independent of tick so a hot loop amortizes the deopt/re-enter cost of a

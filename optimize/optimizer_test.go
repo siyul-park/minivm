@@ -118,6 +118,26 @@ func TestOptimizer_Optimize(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("O3 preserves a top-level branch to the program end", func(t *testing.T) {
+		b := program.NewBuilder()
+		end := b.Label()
+		b.Emit(instr.I32_CONST, 1)
+		b.BrIf(end)
+		b.Emit(instr.UNREACHABLE)
+		b.Bind(end)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(prog))
+
+		got, err := NewOptimizer(O3).Optimize(prog)
+		require.NoError(t, err)
+		require.NoError(t, program.Verify(got))
+
+		vm := interp.New(got)
+		defer vm.Close()
+		require.NoError(t, vm.Run(context.Background()))
+	})
+
 	t.Run("O3 eliminates a common subexpression and preserves semantics", func(t *testing.T) {
 		build := func() *program.Program {
 			return program.New(

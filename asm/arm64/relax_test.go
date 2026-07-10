@@ -27,14 +27,23 @@ func TestArch_Relax(t *testing.T) {
 	})
 
 	t.Run("out-of-range B.cond inverts condition and preserves target", func(t *testing.T) {
-		for op, inv := range invCond {
-			repl, relaxed := a.Relax(BCondLabel(op, lbl), 1<<20)
-			require.True(t, relaxed, op)
-			require.Len(t, repl, 2, op)
-			require.Equal(t, uint16(inv), repl[0].Op, op)
-			require.Equal(t, asm.Imm(skipDisp), repl[0].Src2, op)
-			require.Equal(t, uint16(OpB), repl[1].Op, op)
-			require.Equal(t, asm.LabelOp(lbl), repl[1].Src2, op)
+		pairs := [][2]Op{
+			{OpBEQ, OpBNE}, {OpBNE, OpBEQ},
+			{OpBCS, OpBCC}, {OpBCC, OpBCS},
+			{OpBMI, OpBPL}, {OpBPL, OpBMI},
+			{OpBVS, OpBVC}, {OpBVC, OpBVS},
+			{OpBHI, OpBLS}, {OpBLS, OpBHI},
+			{OpBGE, OpBLT}, {OpBLT, OpBGE},
+			{OpBGT, OpBLE}, {OpBLE, OpBGT},
+		}
+		for _, pair := range pairs {
+			repl, relaxed := a.Relax(BCondLabel(pair[0], lbl), 1<<20)
+			require.True(t, relaxed, pair[0])
+			require.Len(t, repl, 2, pair[0])
+			require.Equal(t, uint16(pair[1]), repl[0].Op, pair[0])
+			require.Equal(t, asm.Imm(skipDisp), repl[0].Src2, pair[0])
+			require.Equal(t, uint16(OpB), repl[1].Op, pair[0])
+			require.Equal(t, asm.LabelOp(lbl), repl[1].Src2, pair[0])
 		}
 	})
 

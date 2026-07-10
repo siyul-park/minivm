@@ -29,6 +29,15 @@ func NewBasicBlocksAnalysis() *BasicBlocksAnalysis {
 
 func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*BasicBlock, error) {
 	offsets := []int{0}
+	mark := func(ip, target int) error {
+		if target < 0 || target > len(fn.Code) {
+			return invalidJumpError(ip, target)
+		}
+		if target < len(fn.Code) {
+			offsets = append(offsets, target)
+		}
+		return nil
+	}
 	for ip := 0; ip < len(fn.Code); {
 		inst := instr.Instruction(fn.Code[ip:])
 		next := ip + inst.Width()
@@ -39,10 +48,9 @@ func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*Basic
 			}
 		case instr.BR, instr.BR_IF:
 			offset := ip + inst.Width() + instr.ReadI16(inst.Operand(0))
-			if offset < 0 || offset >= len(fn.Code) {
-				return nil, invalidJumpError(ip, offset)
+			if err := mark(ip, offset); err != nil {
+				return nil, err
 			}
-			offsets = append(offsets, offset)
 			if next < len(fn.Code) {
 				offsets = append(offsets, next)
 			}
@@ -51,16 +59,14 @@ func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*Basic
 			count := int(operands[0])
 			for j := range count {
 				offset := ip + inst.Width() + instr.ReadI16(operands[j+1])
-				if offset < 0 || offset >= len(fn.Code) {
-					return nil, invalidJumpError(ip, offset)
+				if err := mark(ip, offset); err != nil {
+					return nil, err
 				}
-				offsets = append(offsets, offset)
 			}
 			offset := ip + inst.Width() + instr.ReadI16(operands[len(operands)-1])
-			if offset < 0 || offset >= len(fn.Code) {
-				return nil, invalidJumpError(ip, offset)
+			if err := mark(ip, offset); err != nil {
+				return nil, err
 			}
-			offsets = append(offsets, offset)
 		default:
 		}
 		ip = next
@@ -153,6 +159,10 @@ func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*Basic
 }
 
 func (p *BasicBlocksAnalysis) link(blocks []*BasicBlock, indexByStart map[int]int, src, dst int) bool {
+	// The past-the-end offset is a virtual exit, not an empty basic block.
+	if dst == blocks[len(blocks)-1].End {
+		return true
+	}
 	if i, ok := indexByStart[dst]; ok {
 		blocks[src].Succs = append(blocks[src].Succs, i)
 		blocks[i].Preds = append(blocks[i].Preds, src)

@@ -104,7 +104,7 @@ General behavior belongs to the threaded interpreter. Native guard failures mate
 
 Trace recording lives in `interp/trace.go`.
 
-Recording clones the interpreter, starts the clone at the requested `(addr, ip)`, and executes threaded closures until it reaches return, loop back-edge, branch exit, unsupported operation, trace limit, or abort condition.
+Recording clones the interpreter, starts the clone at the requested `(addr, ip)`, and executes threaded closures until it reaches return, loop back-edge, branch exit, unsupported operation, trace limit, or abort condition. A backward edge to a different header cuts the linear prefix so that header can become a standalone loop trace with a native safepoint budget. Reaching the trace limit records a partial trace with a resumable cut instead of aborting. Native execution deoptimizes at that cut; when the exit becomes hot, the existing side-exit machinery records and compiles the next bounded continuation.
 
 The live interpreter is not mutated while recording.
 
@@ -118,6 +118,7 @@ Each recorded step stores the data needed for speculative lowering:
 - observed guard values
 - observed heap shape
 - branch target and taken state
+- partial-trace resume boundary
 - selected heap values for read-only fast paths
 
 The tracer aborts before host calls, allocation, and mutating heap operations. These remain interpreter-owned.
@@ -152,7 +153,7 @@ Keep the lowerer interface small. Add architecture hooks only when the architect
 
 Native callables use an AAPCS64-shaped entry.
 
-`Callable.Call(ctx)` passes:
+`Callable.Call(ctx unsafe.Pointer)` passes:
 
 ```text
 &i.journal[0] in X0
@@ -168,7 +169,20 @@ Native code loads VM state from the journal into pinned scratch registers.
 | `scratchSP` | X13 | current stack pointer |
 | `scratchCtrl` | X14 | journal pointer |
 
-The Go trampoline preserves X19-X26. X26 is reserved as the stable spill-frame base, so a native self-call may move SP without changing spill addresses.
+The context stays an `unsafe.Pointer` through the Go call boundary so Go can
+relocate a stack-backed context when the trampoline grows the goroutine stack.
+Converting it to `uintptr` before that stack split would leave native code with
+a stale address.
+
+The Go trampoline preserves X19-X26 and declares an 8,192-byte native reserve:
+`asm.maxSpillSlots` (512) × 8 bytes plus `interp.nativeFrameLimit` (128) × 32
+bytes. Its complete Go frame is 8,272 bytes including the 80-byte trampoline
+area.
+Native code starts at the top of the reserve, so generated SP adjustments stay
+inside memory covered by Go's stack-growth check. X26 is the stable spill-frame
+base, so a native self-call may move SP without changing spill addresses. Keep
+the allocator limit, native frame limit, and `asm/arm64/abi_arm64.s` reserve in
+sync.
 
 Register allocation (`asm/rewriter.go`) is a single linear-scan pass: it spills the vreg with the farthest-away next use to a stack slot at the stream position where pressure was observed. Rewritten labels target the start of any inserted reload/store prefix, and labels on a return target its inserted frame epilogue. Intra-Code calls that return through the shared epilogue reserve the caller's spill area again before continuing.
 
@@ -189,7 +203,7 @@ Header cells come before fixed-stride frame records.
 | `journalBP` | current frame base |
 | `journalSP` | stack pointer |
 | `journalDepth` | number of written frame records |
-| `journalCap` | available frame record capacity |
+| `journalCap` | available frame record capacity, capped at 128 |
 | `journalTrap` | trap state |
 | `journalNextIP` | fallback or resume IP |
 | `journalBudget` | native loop back-edge budget |
@@ -239,7 +253,7 @@ Recorded forward branches become guarded exits or learned branch continuations.
 
 `BR_IF` and `BR_TABLE` emit the recorded path. Unrecorded targets deoptimize.
 
-When a side exit becomes hot, the tracer records that target. A later compile may fold it into the same native callable as a pending block.
+When a side exit becomes hot, the tracer records that target. A later compile may fold it into the same native callable as a pending block. Loop roots are never folded as ordinary continuations: they deoptimize at the header and use their standalone loop entry, which preserves back-edge and safepoint semantics.
 
 Pending blocks reload from VM stack homes, compile hotter exits first, and stop at a bounded pending cap.
 
@@ -340,7 +354,12 @@ Heap-promoted `i64` values fall back before boxing.
 
 Primitive `ARRAY_SET` and `STRUCT_SET` are terminal mutations. The hot path may perform the store, flush state, and resume threaded execution at the next instruction. Shape, bounds, field-kind, or release failure deoptimizes at the original opcode so the interpreter owns full semantics.
 
-A loop body that inlines two or more branchy calls before a terminal `ARRAY_SET`/`STRUCT_SET` can push register pressure past the physical bank; before the register allocator rejected unsafe spilling (see "Trace ABI" above), that shape corrupted the native stack pointer on return from `asm/arm64.invoke` (regression test: `interp.TestInterpreter_JITArraySetAfterBranchyCallsInLoop`). The allocator now falls back to threaded dispatch for any trace that would need to spill across a branch, so the lowerer no longer special-cases pending-branch counts.
+A loop body that inlines two or more branchy calls before a terminal
+`ARRAY_SET`/`STRUCT_SET` can push register pressure past the physical bank.
+The allocator rejects spilling across backward edges, and the compiler disables
+spilling for loop and terminal-mutation roots; register exhaustion then keeps
+threaded dispatch installed (regression test:
+`interp.TestInterpreter_JITArraySetAfterBranchyCallsInLoop`).
 
 Allocation and complex ref-bearing mutations stay threaded.
 

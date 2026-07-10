@@ -141,15 +141,27 @@ func (l arm64Lowerer) enter(ctx *lowering) {
 
 // walk emits the recorded opcode sequence. An entry trace is fully unrolled —
 // forward BR vanishes, forward BR_IF becomes a guard, and the walk succeeds
-// only when the recorded path ends in the entry frame's RETURN. A loop trace
-// additionally closes one back-edge: a BR or BR_IF whose target is the loop
-// header becomes the native back-edge (see backedge).
+// only when the recorded path ends in the entry frame's RETURN. A bounded
+// partial trace exits at its cut so the next segment can be learned as a hot
+// continuation. A loop trace additionally closes one back-edge: a BR or BR_IF
+// whose target is the loop header becomes the native back-edge (see backedge).
 func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step) bool {
 	for idx := 0; idx < len(ops); idx++ {
 		op := ops[idx]
 		f := ctx.frame()
 		if op.fn != f.addr {
 			return false
+		}
+		if op.cut {
+			if idx != len(ops)-1 {
+				return false
+			}
+			label, ok := l.branchOrExit(ctx, op.target, tail)
+			if !ok {
+				return false
+			}
+			ctx.assembler.Emit(arm64.BLabel(label))
+			return true
 		}
 		if ctx.loop && (op.op == instr.BR || op.op == instr.BR_IF) && op.target == ctx.tree.root.anchor.ip {
 			if !l.backedge(ctx, op) {
@@ -589,7 +601,8 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step) bool {
 		ctx.assembler.Emit(arm64.BLabel(label))
 		return true
 	}
-	if ctx.tree.root.kind == completed {
+	// A learned continuation may finish a partial top-level root.
+	if ctx.tree.root.kind == completed || (ctx.tree.root.kind == partial && ctx.frame().addr == 0) {
 		return l.complete(ctx)
 	}
 	return false
@@ -894,7 +907,7 @@ func (l arm64Lowerer) selectOp(ctx *lowering) bool {
 	cond := ctx.pop()
 	v2 := ctx.pop()
 	v1 := ctx.pop()
-	if cond.kind != types.KindI32 || v1.kind != v2.kind || v1.kind == types.KindRef {
+	if cond.kind.Repr() != types.KindI32 || v1.kind != v2.kind || v1.kind == types.KindRef {
 		return false
 	}
 	ctx.assembler.Emit(arm64.CMPI(l.narrow32(cond.reg), 0))
@@ -1767,7 +1780,12 @@ func (l arm64Lowerer) branchClean(ctx *lowering, ip int, tail []step) (asm.Label
 func (l arm64Lowerer) continuation(ctx *lowering, ip int, tail []step, flush bool) (asm.Label, bool) {
 	target := branch{fn: ctx.frame().addr, ip: ip}
 	leg := ctx.branches[target]
-	if leg.trace == nil || l.marked(ctx) || ctx.pendingBranches >= pendingLimit {
+	// Loop roots require the loop lowering mode: it turns their recorded
+	// back-edge into a real native back-edge with a safepoint budget. Inlining
+	// one as an ordinary continuation would instead treat the recorded path as
+	// top-level completion and return after a single iteration. Exit to the
+	// threaded loop header so its independently compiled loop entry runs.
+	if leg.trace == nil || leg.trace.kind == loop || l.marked(ctx) || ctx.pendingBranches >= pendingLimit {
 		return 0, false
 	}
 	if flush && !l.flush(ctx, false) {
@@ -2681,12 +2699,12 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 	}
 	pre := ctx.pre()
 	idx := l.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
-	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-2])
+	a := ctx.assembler
+	fail, ok := l.sideExit(ctx, pre, op.ip)
 	if !ok {
 		return false
 	}
-	a := ctx.assembler
-	fail, ok := l.sideExit(ctx, pre, op.ip)
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-2])
 	if !ok {
 		return false
 	}

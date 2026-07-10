@@ -235,16 +235,19 @@ func (c *checker) bounds(ip int, op instr.Opcode) error {
 
 // blocks builds the control-flow graph, splitting the code at branch targets,
 // terminators, and protected-region boundaries, and validates that every branch
-// target lands on an instruction boundary inside the function. Throws and traps
-// transfer out of band, so no edges are added for them; the flow pass seeds
-// catch blocks directly.
+// target lands on an instruction boundary. Top-level branches may target the
+// virtual exit at len(code); function branches must stay inside their body.
+// Throws and traps transfer out of band, so no edges are added for them; the
+// flow pass seeds catch blocks directly.
 func (c *checker) blocks() ([]*block, error) {
 	offsets := []int{0}
 	mark := func(ip, target int) error {
-		if target < 0 || target >= len(c.code) {
+		if target < 0 || target > len(c.code) || (target == len(c.code) && c.slot != 0) {
 			return c.fail(ip, instr.Opcode(c.code[ip]), ErrInvalidJump)
 		}
-		offsets = append(offsets, target)
+		if target < len(c.code) {
+			offsets = append(offsets, target)
+		}
 		return nil
 	}
 	for ip := 0; ip < len(c.code); {
@@ -326,6 +329,9 @@ func (c *checker) blocks() ([]*block, error) {
 // link records an edge from block src to the block containing dst, failing when
 // dst is not the start of any block (a jump into the middle of an instruction).
 func (c *checker) link(blocks []*block, src, dst int) error {
+	if dst == len(c.code) && c.slot == 0 {
+		return nil
+	}
 	for i, b := range blocks {
 		if b.start <= dst && dst < b.end {
 			blocks[src].succs = append(blocks[src].succs, i)

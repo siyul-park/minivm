@@ -121,7 +121,10 @@ Branch targets include:
 - `BR_IF`
 - `BR_TABLE`
 
-Each target must land on an instruction boundary.
+Each target must land on an instruction boundary. Top-level code may also
+target the past-the-end offset, which exits the program just like ordinary
+top-level fall-through. Function bodies must target an instruction and still
+terminate explicitly.
 
 ### 3. Termination
 

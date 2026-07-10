@@ -53,6 +53,46 @@ func TestTracer_Capture(t *testing.T) {
 		require.Equal(t, instr.YIELD, tr.ops[len(tr.ops)-1].op)
 	})
 
+	t.Run("cuts an oversized trace at a resumable boundary", func(t *testing.T) {
+		code := make([]instr.Instruction, opLimit+1)
+		for j := range code {
+			code[j] = instr.New(instr.NOP)
+		}
+		tracer := NewTracer()
+		i := New(program.New(code), WithTracer(tracer), WithThreshold(-1))
+		defer i.Close()
+
+		tr, err := tracer.capture(i, anchor{addr: 0, ip: 0})
+		require.NoError(t, err)
+		require.Equal(t, partial, tr.kind)
+		require.Len(t, tr.ops, opLimit+1)
+		require.True(t, tr.ops[len(tr.ops)-1].cut)
+		require.Equal(t, opLimit, tr.ops[len(tr.ops)-1].target)
+	})
+
+	t.Run("cuts a non-anchor back edge at its loop header", func(t *testing.T) {
+		b := program.NewBuilder()
+		loop := b.Label()
+		b.Emit(instr.NOP).
+			Bind(loop).
+			Emit(instr.I32_CONST, 1).
+			Emit(instr.DROP).
+			Br(loop)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		tracer := NewTracer()
+		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		defer i.Close()
+
+		tr, err := tracer.capture(i, anchor{addr: 0, ip: 0})
+		require.NoError(t, err)
+		require.Equal(t, partial, tr.kind)
+		require.Len(t, tr.ops, 5)
+		require.Equal(t, instr.BR, tr.ops[len(tr.ops)-2].op)
+		require.True(t, tr.ops[len(tr.ops)-1].cut)
+		require.Equal(t, 1, tr.ops[len(tr.ops)-1].target)
+	})
+
 	t.Run("records terminal set fast paths and rejects remaining array mutators", func(t *testing.T) {
 		tracer := NewTracer()
 		require.False(t, tracer.unrecordable(nil, instr.ARRAY_SET))

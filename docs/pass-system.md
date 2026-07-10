@@ -172,6 +172,9 @@ Block boundaries are:
 - every branch target
 - the byte after `BR`, `BR_IF`, `BR_TABLE`, `UNREACHABLE`, `RETURN`, or `RETURN_CALL`
 
+A branch to the past-the-end offset has no successor block: the analysis models
+it as a virtual exit, while `program.Verify` limits that exit to top-level code.
+
 Keep these boundary rules consistent with the JIT and verifier.
 
 ## Global Value Numbering

@@ -80,18 +80,7 @@ func (c *Collector) Add(fn, ip int, op byte) {
 	if fn < 0 || ip < 0 {
 		return
 	}
-	for len(c.funcs) <= fn {
-		c.funcs = append(c.funcs, function{})
-	}
-	if len(c.funcs[fn].ips) <= ip {
-		n := len(c.funcs[fn].ips) * 2
-		if n < ip+1 {
-			n = ip + 1
-		}
-		ips := make([]uint64, n)
-		copy(ips, c.funcs[fn].ips)
-		c.funcs[fn].ips = ips
-	}
+	c.grow(fn, ip)
 	c.total++
 	c.funcs[fn].count++
 	c.funcs[fn].ips[ip]++
@@ -153,19 +142,12 @@ func (c *Collector) merge(o *Collector) {
 		if fd.count == 0 {
 			continue
 		}
-		for len(c.funcs) <= fn {
-			c.funcs = append(c.funcs, function{})
-		}
+		c.grow(fn, len(fd.ips)-1)
 		c.total += fd.count
 		c.funcs[fn].count += fd.count
 		for offset, n := range fd.ips {
 			if n == 0 {
 				continue
-			}
-			if len(c.funcs[fn].ips) <= offset {
-				ips := make([]uint64, offset+1)
-				copy(ips, c.funcs[fn].ips)
-				c.funcs[fn].ips = ips
 			}
 			c.funcs[fn].ips[offset] += n
 		}
@@ -175,6 +157,27 @@ func (c *Collector) merge(o *Collector) {
 	}
 	for _, m := range o.metrics {
 		c.AddMetric(m.Name, m.Value, m.Labels...)
+	}
+}
+
+func (c *Collector) grow(fn, ip int) {
+	if len(c.funcs) <= fn {
+		n := len(c.funcs) * 2
+		if n < fn+1 {
+			n = fn + 1
+		}
+		funcs := make([]function, n)
+		copy(funcs, c.funcs)
+		c.funcs = funcs
+	}
+	if len(c.funcs[fn].ips) <= ip {
+		n := len(c.funcs[fn].ips) * 2
+		if n < ip+1 {
+			n = ip + 1
+		}
+		ips := make([]uint64, n)
+		copy(ips, c.funcs[fn].ips)
+		c.funcs[fn].ips = ips
 	}
 }
 

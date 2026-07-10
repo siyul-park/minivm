@@ -49,9 +49,9 @@ func TestAssembler_Build(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, linked, 1)
 
-		ctxBuf := []uint64{3, 4, 0}
-		require.NoError(t, linked[0].Callable.Call(uintptr(unsafe.Pointer(&ctxBuf[0]))))
-		require.Equal(t, []uint64{3, 4, 7}, ctxBuf)
+		ctxBuf := [3]uint64{3, 4, 0}
+		require.NoError(t, linked[0].Callable.Call(unsafe.Pointer(&ctxBuf[0])))
+		require.Equal(t, [3]uint64{3, 4, 7}, ctxBuf)
 	})
 
 	t.Run("relaxes an out-of-range CBZ branch", func(t *testing.T) {
@@ -99,11 +99,11 @@ func TestAssembler_Build(t *testing.T) {
 		require.NoError(t, err)
 
 		notTaken := []uint64{1, 0xFF}
-		require.NoError(t, linked[0].Callable.Call(uintptr(unsafe.Pointer(&notTaken[0]))))
+		require.NoError(t, linked[0].Callable.Call(unsafe.Pointer(&notTaken[0])))
 		require.Equal(t, uint64(1), notTaken[1])
 
 		taken := []uint64{0, 0xFF}
-		require.NoError(t, linked[0].Callable.Call(uintptr(unsafe.Pointer(&taken[0]))))
+		require.NoError(t, linked[0].Callable.Call(unsafe.Pointer(&taken[0])))
 		require.Equal(t, uint64(0), taken[1])
 	})
 
@@ -151,11 +151,11 @@ func TestAssembler_Build(t *testing.T) {
 		require.NoError(t, err)
 
 		notTaken := []uint64{1, 0xFF}
-		require.NoError(t, linked[0].Callable.Call(uintptr(unsafe.Pointer(&notTaken[0]))))
+		require.NoError(t, linked[0].Callable.Call(unsafe.Pointer(&notTaken[0])))
 		require.Equal(t, uint64(1), notTaken[1])
 
 		taken := []uint64{0, 0xFF}
-		require.NoError(t, linked[0].Callable.Call(uintptr(unsafe.Pointer(&taken[0]))))
+		require.NoError(t, linked[0].Callable.Call(unsafe.Pointer(&taken[0])))
 		require.Equal(t, uint64(0), taken[1])
 	})
 
@@ -171,7 +171,7 @@ func TestAssembler_Build(t *testing.T) {
 		// value stays live until the final fold, so the allocator must
 		// keep spilling and reloading; a balanced SP frame is proven by
 		// the call returning cleanly with the correct sum.
-		const n = 64
+		const n = 256
 		var want uint64
 		vals := make([]asm.VReg, n)
 		for i := 0; i < n; i++ {
@@ -203,9 +203,15 @@ func TestAssembler_Build(t *testing.T) {
 		linked, err := asm.Link(buf, arch, []*asm.Code{code}, nil)
 		require.NoError(t, err)
 
-		ctxBuf := []uint64{0}
-		require.NoError(t, linked[0].Callable.Call(uintptr(unsafe.Pointer(&ctxBuf[0]))))
-		require.Equal(t, want, ctxBuf[0])
+		for range 64 {
+			ctxBuf := [1]uint64{}
+			done := make(chan error, 1)
+			go func() {
+				done <- linked[0].Callable.Call(unsafe.Pointer(&ctxBuf[0]))
+			}()
+			require.NoError(t, <-done)
+			require.Equal(t, want, ctxBuf[0])
+		}
 	})
 }
 
@@ -286,11 +292,11 @@ func TestLink(t *testing.T) {
 		require.Contains(t, linked[0].Entries, entry)
 
 		ctxBuf := []uint64{0}
-		require.NoError(t, linked[0].Callable.Call(uintptr(unsafe.Pointer(&ctxBuf[0]))))
+		require.NoError(t, linked[0].Callable.Call(unsafe.Pointer(&ctxBuf[0])))
 		require.Equal(t, uint64(3), ctxBuf[0])
 
 		ctxBuf[0] = 41
-		require.NoError(t, linked[0].Entries[entry].Call(uintptr(unsafe.Pointer(&ctxBuf[0]))))
+		require.NoError(t, linked[0].Entries[entry].Call(unsafe.Pointer(&ctxBuf[0])))
 		require.Equal(t, uint64(42), ctxBuf[0])
 	})
 }

@@ -80,7 +80,9 @@ type Frame interface {
 // buffer. Implementations are produced by ABI.NewCallable and returned from
 // Link.
 type Callable interface {
-	Call(ctx uintptr) error
+	// Call invokes the native entry with ctx as its architecture-specific
+	// context. ctx must remain valid until Call returns.
+	Call(ctx unsafe.Pointer) error
 }
 
 var (

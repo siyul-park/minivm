@@ -52,6 +52,7 @@ type step struct {
 	seen  types.Boxed
 	arg   types.Boxed
 	shape shape
+	cut   bool
 
 	fn     int
 	ip     int
@@ -80,6 +81,7 @@ const (
 	loop outcome = iota + 1
 	returned
 	completed
+	partial
 	aborted
 )
 
@@ -103,8 +105,14 @@ func (r *Tracer) exit(i *Interpreter, root anchor, target branch) (int64, error)
 	id := r.exitIndex(tree, target)
 	tree.hits[id]++
 	hits := tree.hits[id]
-	if tree.branches[id] != nil {
+	if branch := tree.branches[id]; branch != nil {
 		r.mu.Unlock()
+		// The first hot exit publishes the standalone loop entry. Later exits
+		// cannot be folded into the parent trace, so recompiling that parent
+		// would only publish the same pair again.
+		if branch.kind == loop && hits != exitThreshold {
+			return 0, nil
+		}
 		return hits, nil
 	}
 	r.mu.Unlock()
@@ -210,6 +218,23 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 
 		r.finish(&clone, &st, op)
 		t.ops = append(t.ops, st)
+		// A backward edge to a different header starts a distinct loop trace.
+		// Stop this linear prefix at the header instead of unrolling the loop up
+		// to opLimit; threaded execution will make that header hot and compile it
+		// with the native back-edge and safepoint budget intact.
+		if (op == instr.BR || op == instr.BR_IF) &&
+			clone.fr.addr == st.fn && clone.fr.ip <= st.ip &&
+			(clone.fr.addr != a.addr || clone.fr.ip != a.ip) {
+			t.ops = append(t.ops, step{
+				fn:     clone.fr.addr,
+				target: clone.fr.ip,
+				depth:  clone.fp - startFP,
+				cut:    true,
+			})
+			t.kind = partial
+			r.store(a, t)
+			return t, nil
+		}
 		// Heap mutations still lower as terminal native fast paths: the hot
 		// path performs the store and resumes at the next threaded instruction;
 		// guard failures resume at the opcode so the interpreter owns the full
@@ -245,7 +270,11 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		}
 	}
 	if len(t.ops) >= opLimit {
-		t.kind = aborted
+		// Preserve the bounded prefix. Its synthetic cut lowers through the same
+		// side-exit path as a guard, so a hot remainder becomes a continuation.
+		f := clone.fr
+		t.ops = append(t.ops, step{fn: f.addr, target: f.ip, depth: clone.fp - startFP, cut: true})
+		t.kind = partial
 	}
 	r.store(a, t)
 	return t, nil

@@ -1196,7 +1196,7 @@ func (i *Interpreter) restore(f *frame, addr int) {
 // context resets and fills the journal handed to native code: stack/global base
 // pointers, current frame BP/SP, pointer cells for native fast paths, and the
 // per-call frame budget. It returns &journal[0], passed to native code in X0.
-func (i *Interpreter) context() uintptr {
+func (i *Interpreter) context() unsafe.Pointer {
 	i.journal[journalStack] = 0
 	if len(i.stack) > 0 {
 		i.journal[journalStack] = uint64(uintptr(unsafe.Pointer(&i.stack[0])))
@@ -1222,11 +1222,11 @@ func (i *Interpreter) context() uintptr {
 	}
 
 	i.journal[journalDepth] = 0
-	i.journal[journalCap] = uint64(len(i.frames) - i.fp)
+	i.journal[journalCap] = uint64(min(len(i.frames)-i.fp, nativeFrameLimit))
 	i.journal[journalTrap] = trapNone
 	i.journal[journalBudget] = uint64(i.tick)
 	i.journal[journalActive] = 0
-	return uintptr(unsafe.Pointer(&i.journal[0]))
+	return unsafe.Pointer(&i.journal[0])
 }
 
 func (i *Interpreter) runtimeError(r any) error {
