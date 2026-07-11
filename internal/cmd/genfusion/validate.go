@@ -81,7 +81,7 @@ func validate(rules []rule) error {
 				return fmt.Errorf("ambiguous fusion patterns %s and %s", otherKey, key)
 			}
 		}
-		if _, err := renderThreadedRule(rule, rule.pattern.width(), ""); err != nil {
+		if _, err := renderFusionRule(rule, rule.pattern.width(), ""); err != nil {
 			return fmt.Errorf("unsupported threaded fusion %s: %w", key, err)
 		}
 		seen[key] = rule
@@ -151,7 +151,7 @@ func (rule rule) delta() (int, bool) {
 		}
 		return 0, true
 	}
-	if arity, _, ok := numericConsumer(consumer); ok {
+	if arity, ok := numericConsumer(consumer); ok {
 		if consumerAt > 2 {
 			return 0, false
 		}

@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testFusionRules(t *testing.T) {
+func TestFusionRules(t *testing.T) {
 	type state struct {
 		err   string
 		ip    int
@@ -1820,7 +1820,9 @@ func testFusionRules(t *testing.T) {
 					index = op
 				}
 			}
-			require.NotNil(t, c.fusion())
+			compile := fusions[c.code[c.ip]]
+			require.NotNil(t, compile)
+			require.NotNil(t, compile(&c))
 
 			var typ types.Type = types.TypeRef
 			var value types.Value = types.Null

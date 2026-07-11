@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
-	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,7 +15,7 @@ import (
 )
 
 func TestRun(t *testing.T) {
-	t.Run("writes deterministic threaded fusion sources", func(t *testing.T) {
+	t.Run("writes deterministic threaded sources", func(t *testing.T) {
 		first, err := generate()
 		require.NoError(t, err)
 		second, err := generate()
@@ -25,23 +27,9 @@ func TestRun(t *testing.T) {
 			paths[idx] = output.path
 		}
 		require.Equal(t, []string{
-			"docs/fusion.md",
-			"interp/fusion_gen.go",
-			"interp/fusion_gen_test.go",
+			"interp/threaded.go",
+			"interp/threaded_test.go",
 		}, paths)
-
-		rules, err := expand(declarations()...)
-		require.NoError(t, err)
-
-		var docs []byte
-		for _, output := range first {
-			if output.path == "docs/fusion.md" {
-				docs = output.data
-				break
-			}
-		}
-		require.Contains(t, string(docs), fmt.Sprintf("| Total | %d |", len(rules)))
-		require.NotContains(t, string(docs), "/Users/")
 	})
 
 	t.Run("checks generated files", func(t *testing.T) {
@@ -49,10 +37,10 @@ func TestRun(t *testing.T) {
 
 		var stdout bytes.Buffer
 		require.NoError(t, run(false, &stdout))
-		require.Contains(t, stdout.String(), "interp/fusion_gen.go")
+		require.Contains(t, stdout.String(), "interp/threaded.go")
 		require.NoError(t, run(true, &stdout))
 
-		path := filepath.Join("interp", "fusion_gen.go")
+		path := filepath.Join("interp", "threaded.go")
 		require.NoError(t, os.WriteFile(path, []byte("stale"), 0o644))
 		require.ErrorContains(t, run(true, &stdout), "is stale")
 	})
@@ -110,9 +98,10 @@ func TestRun(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, string(data), "goto l0")
 		require.Contains(t, string(data), "l0:")
+		require.NotContains(t, string(data), "func (c *threader) fusion")
 		require.NotContains(t, string(data), "candidate0")
 
-		test, err := renderThreadedTest([]rule{
+		test, err := renderFusionTest([]rule{
 			{pattern: fuse(op(instr.I32_CONST), op(instr.I32_ADD)).pattern},
 			{pattern: fuse(op(instr.REF_NULL), op(instr.DROP)).pattern},
 		})
@@ -214,4 +203,58 @@ func TestRun(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, validate(rules))
 	})
+
+	t.Run("maps every valid opcode exactly once", func(t *testing.T) {
+		for value, lowering := range lowerings {
+			op := instr.Opcode(value)
+			if instr.Valid(op) {
+				require.NotNil(t, lowering, instr.TypeOf(op).Mnemonic)
+			} else {
+				require.Nil(t, lowering)
+			}
+		}
+	})
+
+	t.Run("generates no interpreter helpers", func(t *testing.T) {
+		outputs, err := generate()
+		require.NoError(t, err)
+		forbidden := map[string]struct{}{
+			"arrayGetAt": {}, "branchIf": {}, "callHost": {}, "finish": {},
+			"refGet": {}, "releaseArgs": {}, "resume": {}, "ret": {},
+			"structGetAt": {}, "suspend": {}, "tail": {},
+		}
+		for _, output := range outputs {
+			if output.path == "interp/threaded_test.go" {
+				continue
+			}
+			file, err := parser.ParseFile(token.NewFileSet(), output.path, output.data, 0)
+			require.NoError(t, err)
+			ast.Inspect(file, func(node ast.Node) bool {
+				switch node := node.(type) {
+				case *ast.FuncDecl:
+					if node.Recv != nil {
+						for _, field := range node.Recv.List {
+							if star, ok := field.Type.(*ast.StarExpr); ok {
+								if name, ok := star.X.(*ast.Ident); ok {
+									require.NotEqual(t, "Interpreter", name.Name, output.path+":"+node.Name.Name)
+								}
+							}
+						}
+					}
+				case *ast.CallExpr:
+					selector, ok := node.Fun.(*ast.SelectorExpr)
+					if !ok {
+						return true
+					}
+					receiver, ok := selector.X.(*ast.Ident)
+					if ok && receiver.Name == "i" {
+						_, found := forbidden[selector.Sel.Name]
+						require.False(t, found, output.path+":"+selector.Sel.Name)
+					}
+				}
+				return true
+			})
+		}
+	})
+
 }

@@ -13,7 +13,9 @@ Use this guide when adding or changing an opcode. For canonical semantics, keep 
 | Opcode value and append order | `instr/opcode.go` |
 | Mnemonic, operand widths, fixed stack effects | `instr/type.go` |
 | Static validation | `program/verify.go` |
-| Runtime semantics | `interp/threaded.go` |
+| Runtime lowering | `internal/cmd/genfusion/opcodes.go` |
+| Fusion patterns | `internal/cmd/genfusion/rules.go` |
+| Generated runtime semantics | `interp/threaded.go` |
 | ARM64 native lowering | `interp/jit_arm64.go` |
 | Public reference | `docs/instruction-set.md` |
 
@@ -66,10 +68,11 @@ Verifier changes should reject only statically malformed bytecode. Runtime traps
 
 ## Step 4 — Implement Threaded Semantics
 
-Add the threaded handler in `interp/threaded.go` and mirror nearby handlers.
+Add the opcode Jennifer lowering in `internal/cmd/genfusion/opcodes.go`, then run `make generate`. Add a pattern in `internal/cmd/genfusion/rules.go` only when the opcode participates in threaded fusion. Do not edit `interp/threaded.go` directly.
 
 Checklist:
 
+- map the opcode exactly once in `lowerings`
 - advance `c.ip` by the exact instruction width during compilation
 - advance `i.fr.ip` by the exact instruction width during execution
 - check stack underflow and overflow where applicable
@@ -77,7 +80,7 @@ Checklist:
 - release refs when consuming or overwriting them
 - panic with the existing runtime sentinel errors and let `interp.Run` recover
 
-Keep the handler explicit. Do not add helpers unless they remove real duplication or name a meaningful operation.
+Keep the generated handler explicit. Generator-only lowering methods may remove real generation duplication, but generated runtime helpers are not allowed; use existing `Interpreter` methods or emit the opcode logic directly.
 
 ## Step 5 — Add JIT Support When Appropriate
 

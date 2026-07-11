@@ -290,13 +290,13 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	i.module = &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
 	i.instrs[0] = prog.Code
 	i.handlers[0] = prog.Handlers
-	i.coros[0] = containsYield(prog.Code)
+	i.coros[0] = i.yields(prog.Code)
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
 			addr := i.constants[j].Ref()
 			i.instrs[addr] = fn.Code
 			i.handlers[addr] = fn.Handlers
-			i.coros[addr] = containsYield(fn.Code)
+			i.coros[addr] = i.yields(fn.Code)
 		}
 	}
 
@@ -1607,7 +1607,7 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 		exact:     i.tick == 1,
 	}
 	if dynamic {
-		i.coros[addr] = containsYield(fn.Code)
+		i.coros[addr] = i.yields(fn.Code)
 	}
 	i.instrs[addr] = fn.Code
 	i.handlers[addr] = fn.Handlers
@@ -1811,6 +1811,20 @@ func (i *Interpreter) reclaim(addr int, v types.Value) {
 	}
 	i.heap[addr] = nil
 	i.free = append(i.free, addr)
+}
+
+func (i *Interpreter) yields(code []byte) bool {
+	for ip := 0; ip < len(code); {
+		if instr.Opcode(code[ip]) == instr.YIELD {
+			return true
+		}
+		w := instr.Instruction(code[ip:]).Width()
+		if w <= 0 {
+			break
+		}
+		ip += w
+	}
+	return false
 }
 
 func unboxRef[T types.Value](i *Interpreter, val types.Boxed) T {
