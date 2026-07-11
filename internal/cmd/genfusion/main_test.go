@@ -27,7 +27,7 @@ func TestRun(t *testing.T) {
 		require.IsIncreasing(t, paths)
 		require.Contains(t, paths, "docs/fusion.md")
 
-		rules, err := expandAll(declarations())
+		rules, err := expand(declarations()...)
 		require.NoError(t, err)
 		arm64 := 0
 		for _, rule := range rules {
@@ -97,9 +97,9 @@ func TestRun(t *testing.T) {
 			fuse(op(instr.GLOBAL_GET), op(instr.DROP)),
 			fuse(op(instr.LOCAL_GET), op(instr.DROP)),
 		}
-		forward, err := expandAll(declarations)
+		forward, err := expand(declarations...)
 		require.NoError(t, err)
-		reverse, err := expandAll([]declaration{declarations[1], declarations[0]})
+		reverse, err := expand(declarations[1], declarations[0])
 		require.NoError(t, err)
 		require.Equal(t, forward, reverse)
 	})
@@ -138,7 +138,7 @@ func TestRun(t *testing.T) {
 	})
 
 	t.Run("accepts declared stack effects", func(t *testing.T) {
-		rules, err := expandAll(declarations())
+		rules, err := expand(declarations()...)
 		require.NoError(t, err)
 		require.NoError(t, validate(rules))
 	})

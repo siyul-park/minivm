@@ -8,28 +8,10 @@ import (
 	"github.com/siyul-park/minivm/instr"
 )
 
-func expand(declaration declaration) ([]rule, error) {
-	if len(declaration.pattern) > 0 {
-		return []rule{{pattern: declaration.pattern, arm64: declaration.arm64}}, nil
-	}
-	if len(declaration.sources) == 0 || len(declaration.consumers) == 0 {
-		return nil, fmt.Errorf("empty fusion product")
-	}
-	result := make([]rule, 0, len(declaration.sources)*len(declaration.consumers))
-	for _, source := range declaration.sources {
-		for _, consumer := range declaration.consumers {
-			pattern := append([]operation(nil), source...)
-			pattern = append(pattern, consumer...)
-			result = append(result, rule{pattern: pattern, arm64: declaration.arm64})
-		}
-	}
-	return result, nil
-}
-
-func expandAll(declarations []declaration) ([]rule, error) {
+func expand(declarations ...declaration) ([]rule, error) {
 	var result []rule
 	for _, declaration := range declarations {
-		rules, err := expand(declaration)
+		rules, err := declaration.expand()
 		if err != nil {
 			return nil, err
 		}
@@ -39,8 +21,26 @@ func expandAll(declarations []declaration) ([]rule, error) {
 		if len(result[i].pattern) != len(result[j].pattern) {
 			return len(result[i].pattern) > len(result[j].pattern)
 		}
-		return patternKey(result[i].pattern) < patternKey(result[j].pattern)
+		return result[i].pattern.key() < result[j].pattern.key()
 	})
+	return result, nil
+}
+
+func (declaration declaration) expand() ([]rule, error) {
+	if len(declaration.pattern) > 0 {
+		return []rule{{pattern: declaration.pattern, arm64: declaration.arm64}}, nil
+	}
+	if len(declaration.sources) == 0 || len(declaration.consumers) == 0 {
+		return nil, fmt.Errorf("empty fusion product")
+	}
+	result := make([]rule, 0, len(declaration.sources)*len(declaration.consumers))
+	for _, source := range declaration.sources {
+		for _, consumer := range declaration.consumers {
+			pattern := append(pattern(nil), source...)
+			pattern = append(pattern, consumer...)
+			result = append(result, rule{pattern: pattern, arm64: declaration.arm64})
+		}
+	}
 	return result, nil
 }
 
@@ -78,21 +78,21 @@ func validate(rules []rule) error {
 				return fmt.Errorf("ref rule has unsupported trailing operations")
 			}
 		}
-		if delta, ok := renderedStackDelta(rule); ok {
+		if delta, ok := rule.delta(); ok {
 			if err := validateStack(rule.pattern, delta); err != nil {
 				return err
 			}
 		}
-		key := patternKey(rule.pattern)
+		key := rule.pattern.key()
 		if _, ok := seen[key]; ok {
 			return fmt.Errorf("duplicate fusion pattern %s", key)
 		}
 		for otherKey, other := range seen {
-			if patternsOverlap(rule.pattern, other.pattern) {
+			if rule.pattern.overlaps(other.pattern) {
 				return fmt.Errorf("ambiguous fusion patterns %s and %s", otherKey, key)
 			}
 		}
-		if _, err := renderThreadedRule(rule, patternWidth(rule.pattern), ""); err != nil {
+		if _, err := renderThreadedRule(rule, rule.pattern.width(), ""); err != nil {
 			return fmt.Errorf("unsupported threaded fusion %s: %w", key, err)
 		}
 		if rule.arm64 && !supportsARM64(rule.pattern) {
@@ -103,8 +103,8 @@ func validate(rules []rule) error {
 	return nil
 }
 
-func validateStack(pattern []operation, want int) error {
-	pops, pushes, fixed, err := stackEffect(pattern)
+func validateStack(pattern pattern, want int) error {
+	pops, pushes, fixed, err := effect(pattern)
 	if err != nil || !fixed {
 		return err
 	}
@@ -115,7 +115,7 @@ func validateStack(pattern []operation, want int) error {
 	return nil
 }
 
-func stackEffect(pattern []operation) (int, int, bool, error) {
+func effect(pattern pattern) (int, int, bool, error) {
 	var stack []instr.Kind
 	pops := 0
 	for _, operation := range pattern {
@@ -140,7 +140,9 @@ func stackEffect(pattern []operation) (int, int, bool, error) {
 	return pops, len(stack), true, nil
 }
 
-func renderedStackDelta(rule rule) (int, bool) {
+// delta reports the stack delta the rule's generated handler produces, and
+// whether the rule's renderer has a fixed, known delta at all.
+func (rule rule) delta() (int, bool) {
 	pattern := rule.pattern
 	last := len(pattern) - 1
 	branch := pattern[last].op == instr.BR_IF
@@ -188,9 +190,9 @@ func renderedStackDelta(rule rule) (int, bool) {
 	return 0, false
 }
 
-func patternKey(pattern []operation) string {
+func (p pattern) key() string {
 	var key strings.Builder
-	for idx, op := range pattern {
+	for idx, op := range p {
 		if idx > 0 {
 			key.WriteByte('/')
 		}
@@ -202,30 +204,30 @@ func patternKey(pattern []operation) string {
 	return key.String()
 }
 
-func patternsOverlap(a, b []operation) bool {
-	if len(a) != len(b) {
+func (p pattern) overlaps(other pattern) bool {
+	if len(p) != len(other) {
 		return false
 	}
-	for idx := range a {
-		if a[idx].op != b[idx].op || !guardsOverlap(a[idx].guard, b[idx].guard) {
+	for idx := range p {
+		if p[idx].op != other[idx].op || !p[idx].guard.overlaps(other[idx].guard) {
 			return false
 		}
 	}
 	return true
 }
 
-func guardsOverlap(a, b *guard) bool {
-	if a == nil || b == nil {
+func (g *guard) overlaps(other *guard) bool {
+	if g == nil || other == nil {
 		return true
 	}
-	if a.negations == 0 && b.negations == 0 {
-		return a.typeOf == b.typeOf
+	if g.negations == 0 && other.negations == 0 {
+		return g.typeOf == other.typeOf
 	}
-	if a.negations == 1 && b.negations == 1 {
+	if g.negations == 1 && other.negations == 1 {
 		return true
 	}
-	if a.negations == 1 {
-		a, b = b, a
+	if g.negations == 1 {
+		g, other = other, g
 	}
-	return a.typeOf != b.typeOf
+	return g.typeOf != other.typeOf
 }

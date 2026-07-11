@@ -16,7 +16,7 @@ type output struct {
 	data []byte
 }
 
-type renderedNumericSource struct {
+type access struct {
 	pre   []jen.Code
 	check []jen.Code
 	load  []jen.Code
@@ -25,7 +25,7 @@ type renderedNumericSource struct {
 }
 
 func generate() ([]output, error) {
-	rules, err := expandAll(declarations())
+	rules, err := expand(declarations()...)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ Add a pattern only when every expanded concrete combination has one supported re
 	return []byte(strings.ReplaceAll(doc, "§", "`"))
 }
 
-func supportsARM64(pattern []operation) bool {
+func supportsARM64(pattern pattern) bool {
 	if len(pattern) < 2 || len(pattern) > 3 {
 		return false
 	}
@@ -408,7 +408,7 @@ func testRuleKind(rule rule) (string, error) {
 			return "KindRef", nil
 		}
 	}
-	return "", fmt.Errorf("no test kind for %s", patternKey(rule.pattern))
+	return "", fmt.Errorf("no test kind for %s", rule.pattern.key())
 }
 
 func testRuleName(rule rule) string {
@@ -430,7 +430,7 @@ func operationName(operation operation) string {
 	return name + "[" + operation.guard.typeOf.String() + "]"
 }
 
-func testOpcodes(pattern []operation) string {
+func testOpcodes(pattern pattern) string {
 	parts := make([]string, len(pattern))
 	for i, operation := range pattern {
 		parts[i] = "instr." + opcodeName(operation.op)
@@ -460,7 +460,7 @@ func renderThreaded(rules []rule) ([]byte, error) {
 	var cases []jen.Code
 	for _, opcode := range opcodes {
 		cases = append(cases, jen.Case(jen.Qual("github.com/siyul-park/minivm/instr", opcodeName(opcode))).Block(
-			jen.Return(jen.Id("c").Dot(fusionMethodName(opcode)).Call()),
+			jen.Return(jen.Id("c").Dot(handler(opcode)).Call()),
 		))
 	}
 	dispatch := []jen.Code{
@@ -477,13 +477,13 @@ func renderThreaded(rules []rule) ([]byte, error) {
 		for _, rule := range groups[opcode] {
 			label := fmt.Sprintf("l%d", nextLabel)
 			nextLabel++
-			total := patternWidth(rule.pattern)
+			total := rule.pattern.width()
 			statements, err := renderThreadedRule(rule, total, label)
 			if err != nil {
 				return nil, err
 			}
 			if rule.pattern[len(rule.pattern)-1].op == instr.BR_IF {
-				offset := total - opcodeWidth(instr.BR_IF) + 1
+				offset := total - width(instr.BR_IF) + 1
 				statements = append([]jen.Code{jen.Id("offset").Op(":=").Qual("github.com/siyul-park/minivm/instr", "ParseI16").Call(jen.Id("c").Dot("code"), jen.Id("start").Op("+").Lit(offset))}, statements...)
 			}
 			body = append(body, jen.If(jen.Op("!").Parens(renderPattern(rule.pattern))).Block(jen.Goto().Id(label)))
@@ -492,14 +492,14 @@ func renderThreaded(rules []rule) ([]byte, error) {
 		}
 		body = append(body, jen.Return(jen.Nil()))
 		file.Line()
-		file.Func().Params(jen.Id("c").Op("*").Id("threader")).Id(fusionMethodName(opcode)).Params().Func().Params(jen.Op("*").Id("Interpreter")).Block(body...)
+		file.Func().Params(jen.Id("c").Op("*").Id("threader")).Id(handler(opcode)).Params().Func().Params(jen.Op("*").Id("Interpreter")).Block(body...)
 	}
 	return formatGenerated([]byte(file.GoString()))
 }
 
-// fusionMethodName converts an opcode's mnemonic (for example "local.get")
+// handler converts an opcode's mnemonic (for example "local.get")
 // into the per-opcode dispatch method name (for example "fusionLocalGet").
-func fusionMethodName(op instr.Opcode) string {
+func handler(op instr.Opcode) string {
 	var name strings.Builder
 	name.WriteString("fusion")
 	for _, part := range strings.Split(opcodeName(op), "_") {
@@ -538,8 +538,8 @@ func renderThreadedRule(rule rule, total int, label string) ([]jen.Code, error) 
 
 func renderI32ConstBranch(total int) []jen.Code {
 	return []jen.Code{
-		jen.Id("value").Op(":=").Add(numericImmediate("I32", jen.Id("start"))),
-		jen.Id("c").Dot("ip").Op("+=").Lit(opcodeWidth(instr.I32_CONST)),
+		jen.Id("value").Op(":=").Add(immediate("I32", jen.Id("start"))),
+		jen.Id("c").Dot("ip").Op("+=").Lit(width(instr.I32_CONST)),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(
 			jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
 			jen.Id("i").Dot("branchIf").Call(jen.Id("value").Op("!=").Lit(0), jen.Id("offset"), jen.Lit(total)),
@@ -547,13 +547,13 @@ func renderI32ConstBranch(total int) []jen.Code {
 	}
 }
 
-func renderPattern(pattern []operation) jen.Code {
-	total := patternWidth(pattern)
+func renderPattern(pattern pattern) jen.Code {
+	total := pattern.width()
 	condition := jen.Id("start").Op("+").Lit(total).Op("<=").Len(jen.Id("c").Dot("code"))
-	offset := opcodeWidth(pattern[0].op)
+	offset := width(pattern[0].op)
 	for _, operation := range pattern[1:] {
 		condition = condition.Op("&&").Qual("github.com/siyul-park/minivm/instr", "Opcode").Call(jen.Id("c").Dot("code").Index(add(jen.Id("start"), offset))).Op("==").Qual("github.com/siyul-park/minivm/instr", opcodeName(operation.op))
-		offset += opcodeWidth(operation.op)
+		offset += width(operation.op)
 	}
 	return condition
 }
@@ -562,10 +562,10 @@ func opcodeName(op instr.Opcode) string {
 	return strings.ToUpper(strings.ReplaceAll(instr.TypeOf(op).Mnemonic, ".", "_"))
 }
 
-func patternWidth(pattern []operation) int {
+func (p pattern) width() int {
 	total := 0
-	for _, operation := range pattern {
-		total += opcodeWidth(operation.op)
+	for _, operation := range p {
+		total += width(operation.op)
 	}
 	return total
 }
@@ -908,7 +908,7 @@ func renderTailFrame(addr, upvals, ref, typ, locals jen.Code) []jen.Code {
 		jen.Id("locals").Op(":=").Add(locals),
 		jen.Id("c").Dot("ip").Op("+=").Lit(3),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(
-			constantSourceOverflow(),
+			overflow(),
 			jen.If(jen.Id("i").Dot("sp").Op("<").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 			jen.If(jen.Id("i").Dot("fp").Op("==").Lit(1)).Block(
 				jen.If(jen.Id("i").Dot("fp").Op("==").Len(jen.Id("i").Dot("frames"))).Block(jen.Panic(jen.Id("ErrFrameOverflow"))),
@@ -955,7 +955,7 @@ func renderFrameCall(addr, upvals, ref, typ, locals jen.Code) []jen.Code {
 		jen.Id("locals").Op(":=").Add(locals),
 		jen.Id("c").Dot("ip").Op("+=").Lit(3),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(
-			constantSourceOverflow(),
+			overflow(),
 			jen.If(jen.Id("i").Dot("fp").Op("==").Len(jen.Id("i").Dot("frames"))).Block(jen.Panic(jen.Id("ErrFrameOverflow"))),
 			jen.If(jen.Id("i").Dot("sp").Op("<").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 			jen.If(jen.Id("i").Dot("sp").Op("+").Id("locals").Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
@@ -984,7 +984,7 @@ func renderHostCall(tail bool) []jen.Code {
 		jen.Id("returns").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Returns")),
 		jen.Id("c").Dot("ip").Op("+=").Lit(3),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(
-			constantSourceOverflow(),
+			overflow(),
 			jen.If(jen.Id("i").Dot("sp").Op("<").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 			jen.If(jen.Id("i").Dot("sp").Op("+").Id("returns").Op("-").Id("params").Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
 			jen.Id("args").Op(":=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("params").Op(":").Id("i").Dot("sp")),
@@ -1000,7 +1000,7 @@ func renderHostCall(tail bool) []jen.Code {
 		// Tail-host retirement remains explicit in the final handler; no
 		// constant funcref was retained, so only arguments flow to releaseArgs.
 		body[len(body)-1] = jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(
-			constantSourceOverflow(),
+			overflow(),
 			jen.If(jen.Id("i").Dot("sp").Op("<").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 			jen.If(jen.Id("i").Dot("sp").Op("+").Id("returns").Op("-").Id("params").Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
 			jen.Id("args").Op(":=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("params").Op(":").Id("i").Dot("sp")),
@@ -1021,7 +1021,7 @@ func renderClosureNew(label string) jen.Code {
 			jen.Id("captures").Op(":=").Len(jen.Id("fn").Dot("Captures")),
 			jen.Id("c").Dot("ip").Op("+=").Lit(3),
 			jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(
-				constantSourceOverflow(),
+				overflow(),
 				jen.If(jen.Id("i").Dot("sp").Op("<").Id("captures")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 				jen.Id("upvals").Op(":=").Append(jen.Index().Qual("github.com/siyul-park/minivm/types", "Boxed").Values(), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("captures").Op(":").Id("i").Dot("sp")).Op("...")),
 				jen.Id("i").Dot("retain").Call(jen.Id("addr")),
@@ -1036,23 +1036,23 @@ func renderClosureNew(label string) jen.Code {
 	)
 }
 
-func constantSourceOverflow() jen.Code {
+func overflow() jen.Code {
 	return jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow")))
 }
 
 func numericConsumer(op instr.Opcode) (int, string, bool) {
 	if op == instr.I32_EQZ || op == instr.I64_EQZ {
-		return 1, numericConsumerMethod(op), true
+		return 1, methodOf(op), true
 	}
-	for _, family := range numericFamilies() {
+	for _, family := range families() {
 		if slices.Contains(family.binary, op) || slices.Contains(family.compares, op) {
-			return 2, numericConsumerMethod(op), true
+			return 2, methodOf(op), true
 		}
 	}
 	return 0, "", false
 }
 
-func numericConsumerMethod(op instr.Opcode) string {
+func methodOf(op instr.Opcode) string {
 	mnemonic := instr.TypeOf(op).Mnemonic
 	prefix, suffix, _ := strings.Cut(mnemonic, ".")
 	var name strings.Builder
@@ -1100,7 +1100,7 @@ func renderRefFusion(rule rule, total int, label string) ([]jen.Code, error) {
 		return nil, fmt.Errorf("unsupported ref consumer %s", instr.TypeOf(consumer).Mnemonic)
 	}
 	pre = append(pre,
-		jen.Id("c").Dot("ip").Op("+=").Lit(opcodeWidth(source)),
+		jen.Id("c").Dot("ip").Op("+=").Lit(width(source)),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
 	)
 	return pre, nil
@@ -1204,7 +1204,7 @@ func renderThreadedIndex(rule rule, totalWidth int, label string) ([]jen.Code, e
 		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(totalWidth),
 	}
 	pre = append(pre,
-		jen.Id("c").Dot("ip").Op("+=").Lit(opcodeWidth(source)),
+		jen.Id("c").Dot("ip").Op("+=").Lit(width(source)),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
 	)
 	return pre, nil
@@ -1232,16 +1232,16 @@ func renderNumericFusion(rule rule, totalWidth int, label string) ([]jen.Code, e
 	if len(sources) > 2 {
 		return nil, fmt.Errorf("numeric rule has %d sources", len(sources))
 	}
-	if integerTrap(consumer) {
+	if traps(consumer) {
 		return renderIntegerFusion(pattern, sources, method, kind, label)
 	}
 
 	var pre, body []jen.Code
-	var renderedSources []renderedNumericSource
+	var renderedSources []access
 	boxed := consumer == instr.I32_XOR || consumer == instr.I32_AND || consumer == instr.I32_OR
 	offset := 0
 	for idx, source := range sources {
-		rendered, err := renderThreadedNumericSource(source.op, idx, len(sources), offset, kind, boxed, false, label)
+		rendered, err := renderNumericSource(source.op, idx, len(sources), offset, kind, boxed, false, label)
 		if err != nil {
 			return nil, err
 		}
@@ -1275,22 +1275,22 @@ func renderNumericFusion(rule rule, totalWidth int, label string) ([]jen.Code, e
 		}
 	case 1:
 		body = append(body, jen.If(jen.Id("i").Dot("sp").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))))
-		operands = []jen.Code{numericStackValue(kind, jen.Id("i").Dot("sp").Op("-").Lit(1)), jen.Id(numericSourceName(len(sources) - 1))}
+		operands = []jen.Code{numericStackValue(kind, jen.Id("i").Dot("sp").Op("-").Lit(1)), jen.Id(val(len(sources) - 1))}
 	case 2:
-		operands = []jen.Code{jen.Id(numericSourceName(0)), jen.Id(numericSourceName(len(sources) - 1))}
+		operands = []jen.Code{jen.Id(val(0)), jen.Id(val(len(sources) - 1))}
 	}
 	if boxed {
 		switch len(sources) {
 		case 1:
-			operands = []jen.Code{jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)), jen.Id(boxedNumericName(numericSourceName(0)))}
+			operands = []jen.Code{jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)), jen.Id(box(val(0)))}
 		case 2:
-			operands = []jen.Code{jen.Id(boxedNumericName(numericSourceName(0))), jen.Id(boxedNumericName(numericSourceName(1)))}
+			operands = []jen.Code{jen.Id(box(val(0))), jen.Id(box(val(1)))}
 		}
 	}
 	if len(operands) != arity {
 		return nil, fmt.Errorf("%s needs %d operands", instr.TypeOf(consumer).Mnemonic, arity)
 	}
-	body = append(body, jen.Id(numericSourceName(len(sources))).Op(":=").Id("i").Dot(method).Call(operands...))
+	body = append(body, jen.Id(val(len(sources))).Op(":=").Id("i").Dot(method).Call(operands...))
 	if branch {
 		delta := len(sources) - len(operands)
 		if delta > 0 {
@@ -1298,28 +1298,28 @@ func renderNumericFusion(rule rule, totalWidth int, label string) ([]jen.Code, e
 		} else if delta < 0 {
 			body = append(body, jen.Id("i").Dot("sp").Op("-=").Lit(-delta))
 		}
-		body = append(body, jen.Id("i").Dot("branchIf").Call(jen.Id(numericSourceName(len(sources))).Dot("Bool").Call(), jen.Id("offset"), jen.Lit(totalWidth)))
+		body = append(body, jen.Id("i").Dot("branchIf").Call(jen.Id(val(len(sources))).Dot("Bool").Call(), jen.Id("offset"), jen.Lit(totalWidth)))
 	} else {
 		switch len(sources) {
 		case 0:
-			body = append(body, jen.Id("i").Dot("sp").Op("--"), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Id(numericSourceName(len(sources))))
+			body = append(body, jen.Id("i").Dot("sp").Op("--"), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Id(val(len(sources))))
 		case 1:
-			body = append(body, jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Id(numericSourceName(len(sources))))
+			body = append(body, jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Id(val(len(sources))))
 		case 2:
-			body = append(body, jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Id(numericSourceName(len(sources))), jen.Id("i").Dot("sp").Op("++"))
+			body = append(body, jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Id(val(len(sources))), jen.Id("i").Dot("sp").Op("++"))
 		}
 		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(totalWidth))
 	}
-	pre = append(pre, jen.Id("c").Dot("ip").Op("+=").Lit(opcodeWidth(pattern[0].op)))
+	pre = append(pre, jen.Id("c").Dot("ip").Op("+=").Lit(width(pattern[0].op)))
 	pre = append(pre, jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)))
 	return pre, nil
 }
 
-func renderIntegerFusion(pattern, sources []operation, method, kind, label string) ([]jen.Code, error) {
+func renderIntegerFusion(pattern, sources pattern, method, kind, label string) ([]jen.Code, error) {
 	var pre, body []jen.Code
 	offset := 0
 	for number, source := range sources {
-		rendered, err := renderThreadedNumericSource(source.op, number, len(sources), offset, kind, false, true, label)
+		rendered, err := renderNumericSource(source.op, number, len(sources), offset, kind, false, true, label)
 		if err != nil {
 			return nil, err
 		}
@@ -1337,13 +1337,13 @@ func renderIntegerFusion(pattern, sources []operation, method, kind, label strin
 		jen.Id("i").Dot("fr").Dot("ip").Op("++"),
 	)
 	pre = append(pre,
-		jen.Id("c").Dot("ip").Op("+=").Lit(opcodeWidth(pattern[0].op)),
+		jen.Id("c").Dot("ip").Op("+=").Lit(width(pattern[0].op)),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
 	)
 	return pre, nil
 }
 
-func integerTrap(op instr.Opcode) bool {
+func traps(op instr.Opcode) bool {
 	switch op {
 	case instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U,
 		instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U:
@@ -1353,14 +1353,14 @@ func integerTrap(op instr.Opcode) bool {
 	}
 }
 
-func renderThreadedNumericSource(op instr.Opcode, number, count, offset int, kind string, raw, materialize bool, label string) (renderedNumericSource, error) {
-	width := opcodeWidth(op)
-	name := numericSourceName(number)
-	boxed := boxedNumericName(name)
+func renderNumericSource(op instr.Opcode, number, count, offset int, kind string, raw, materialize bool, label string) (access, error) {
+	width := width(op)
+	name := val(number)
+	boxed := box(name)
 	idx := fmt.Sprintf("i%d", number)
 	addr := fmt.Sprintf("i%d", count+number)
 	at := add(jen.Id("start"), offset)
-	result := renderedNumericSource{width: width}
+	result := access{width: width}
 	switch op {
 	case instr.LOCAL_GET, instr.UPVAL_GET:
 		result.pre = append(result.pre, jen.Id(idx).Op(":=").Int().Call(jen.Id("c").Dot("code").Index(jen.Add(at).Op("+").Lit(1))))
@@ -1370,15 +1370,15 @@ func renderThreadedNumericSource(op instr.Opcode, number, count, offset int, kin
 	expected := jen.Qual("github.com/siyul-park/minivm/types", "Kind"+kind)
 	switch op {
 	case instr.LOCAL_GET:
-		result.pre = append(result.pre, numericMetadataCheck("locals", idx, expected, label))
+		result.pre = append(result.pre, check("locals", idx, expected, label))
 		result.check = append(result.check, jen.If(jen.Id("i").Dot("fr").Dot("bp").Op("+").Id(idx).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))))
 		result.load = append(result.load, jen.Id(addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(idx), jen.Id(boxed).Op(":=").Id("i").Dot("stack").Index(jen.Id(addr)))
 	case instr.GLOBAL_GET:
-		result.pre = append(result.pre, numericMetadataCheck("globals", idx, expected, label))
+		result.pre = append(result.pre, check("globals", idx, expected, label))
 		result.check = append(result.check, jen.If(jen.Id(idx).Op(">=").Len(jen.Id("i").Dot("globals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))))
 		result.load = append(result.load, jen.Id(boxed).Op(":=").Id("i").Dot("globals").Index(jen.Id(idx)))
 	case instr.UPVAL_GET:
-		result.pre = append(result.pre, numericMetadataCheck("captures", idx, expected, label))
+		result.pre = append(result.pre, check("captures", idx, expected, label))
 		result.check = append(result.check, jen.If(jen.Id(idx).Op(">=").Len(jen.Id("i").Dot("fr").Dot("upvals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))))
 		result.load = append(result.load, jen.Id(boxed).Op(":=").Id("i").Dot("fr").Dot("upvals").Index(jen.Id(idx)))
 	case instr.CONST_GET:
@@ -1418,52 +1418,52 @@ func renderThreadedNumericSource(op instr.Opcode, number, count, offset int, kin
 		}
 	case instr.I32_CONST, instr.I64_CONST, instr.F32_CONST, instr.F64_CONST:
 		if raw {
-			result.pre = append(result.pre, jen.Id(boxedNumericName(name)).Op(":=").Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(numericImmediate(kind, at)))
+			result.pre = append(result.pre, jen.Id(box(name)).Op(":=").Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(immediate(kind, at)))
 		} else {
-			result.pre = append(result.pre, jen.Id(name).Op(":=").Add(numericImmediate(kind, at)))
+			result.pre = append(result.pre, jen.Id(name).Op(":=").Add(immediate(kind, at)))
 		}
 	default:
-		return renderedNumericSource{}, fmt.Errorf("unsupported numeric source %s", instr.TypeOf(op).Mnemonic)
+		return access{}, fmt.Errorf("unsupported numeric source %s", instr.TypeOf(op).Mnemonic)
 	}
 	if !raw && op != instr.I32_CONST && op != instr.I64_CONST && op != instr.F32_CONST && op != instr.F64_CONST && !(op == instr.CONST_GET && kind == "I64") {
-		result.load = append(result.load, jen.Id(name).Op(":=").Add(numericBoxValue(kind, jen.Id(boxedNumericName(name)))))
+		result.load = append(result.load, jen.Id(name).Op(":=").Add(numericBoxValue(kind, jen.Id(box(name)))))
 	}
 	result.push = append(result.push, jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))))
 	result.push = append(result.push, result.check...)
 	switch op {
 	case instr.LOCAL_GET:
-		result.push = append(result.push, jen.Id(addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(idx), jen.Id(boxedNumericName(name)).Op(":=").Id("i").Dot("stack").Index(jen.Id(addr)))
+		result.push = append(result.push, jen.Id(addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(idx), jen.Id(box(name)).Op(":=").Id("i").Dot("stack").Index(jen.Id(addr)))
 	case instr.GLOBAL_GET:
-		result.push = append(result.push, jen.Id(boxedNumericName(name)).Op(":=").Id("i").Dot("globals").Index(jen.Id(idx)))
+		result.push = append(result.push, jen.Id(box(name)).Op(":=").Id("i").Dot("globals").Index(jen.Id(idx)))
 	case instr.UPVAL_GET:
-		result.push = append(result.push, jen.Id(boxedNumericName(name)).Op(":=").Id("i").Dot("fr").Dot("upvals").Index(jen.Id(idx)))
+		result.push = append(result.push, jen.Id(box(name)).Op(":=").Id("i").Dot("fr").Dot("upvals").Index(jen.Id(idx)))
 	case instr.CONST_GET:
-		result.push = append(result.push, jen.Id(boxedNumericName(name)).Op(":=").Id(boxed))
+		result.push = append(result.push, jen.Id(box(name)).Op(":=").Id(boxed))
 	case instr.I32_CONST:
-		result.push = append(result.push, jen.Id(boxedNumericName(name)).Op(":=").Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(jen.Id(name)))
+		result.push = append(result.push, jen.Id(box(name)).Op(":=").Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(jen.Id(name)))
 	case instr.I64_CONST:
-		result.push = append(result.push, jen.Id(boxedNumericName(name)).Op(":=").Id("i").Dot("boxI64").Call(jen.Id(name)))
+		result.push = append(result.push, jen.Id(box(name)).Op(":=").Id("i").Dot("boxI64").Call(jen.Id(name)))
 	}
 	if kind == "I64" && op != instr.I64_CONST {
-		result.push = append(result.push, jen.Id("i").Dot("retainBox").Call(jen.Id(boxedNumericName(name))))
+		result.push = append(result.push, jen.Id("i").Dot("retainBox").Call(jen.Id(box(name))))
 	}
 	result.push = append(result.push,
-		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Id(boxedNumericName(name)),
+		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Id(box(name)),
 		jen.Id("i").Dot("sp").Op("++"),
 		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(width),
 	)
 	return result, nil
 }
 
-func numericSourceName(number int) string {
+func val(number int) string {
 	return fmt.Sprintf("v%d", number)
 }
 
-func boxedNumericName(source string) string {
+func box(source string) string {
 	return "r" + strings.TrimPrefix(source, "v")
 }
 
-func numericMetadataCheck(field, idx string, expected jen.Code, label string) jen.Code {
+func check(field, idx string, expected jen.Code, label string) jen.Code {
 	return jen.If(jen.Id(idx).Op(">=").Len(jen.Id("c").Dot(field)).Op("||").Id("c").Dot(field).Index(jen.Id(idx)).Dot("Repr").Call().Op("!=").Add(expected)).Block(reject(label))
 }
 
@@ -1508,7 +1508,7 @@ func numericConsumedValue(kind string, index jen.Code) jen.Code {
 	return value.Dot(kind).Call()
 }
 
-func numericImmediate(kind string, at jen.Code) jen.Code {
+func immediate(kind string, at jen.Code) jen.Code {
 	operand := jen.Qual("github.com/siyul-park/minivm/instr", "Instruction").Call(jen.Id("c").Dot("code").Index(jen.Add(at).Op(":"))).Dot("Operand").Call(jen.Lit(0))
 	switch kind {
 	case "I32":
@@ -1522,7 +1522,7 @@ func numericImmediate(kind string, at jen.Code) jen.Code {
 	}
 }
 
-func opcodeWidth(op instr.Opcode) int {
+func width(op instr.Opcode) int {
 	width := 1
 	for _, operand := range instr.TypeOf(op).Widths {
 		width += operand
