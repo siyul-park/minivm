@@ -10,78 +10,152 @@ import (
 
 func TestExpand(t *testing.T) {
 	t.Run("product expands every source and consumer combination", func(t *testing.T) {
-		got, err := expand(Product(
-			Sources(Op(instr.LOCAL_GET), Op(instr.GLOBAL_GET)),
-			Consumers(Op(instr.DROP), Seq(Op(instr.REF_IS_NULL), Op(instr.BR_IF))),
+		got, err := expand(product(
+			sources(op(instr.LOCAL_GET), op(instr.GLOBAL_GET)),
+			consumers(op(instr.DROP), seq(op(instr.REF_IS_NULL), op(instr.BR_IF))),
 		))
 		require.NoError(t, err)
 
-		want := []any{
-			Fuse(Op(instr.LOCAL_GET), Op(instr.DROP)),
-			Fuse(Op(instr.LOCAL_GET), Op(instr.REF_IS_NULL), Op(instr.BR_IF)),
-			Fuse(Op(instr.GLOBAL_GET), Op(instr.DROP)),
-			Fuse(Op(instr.GLOBAL_GET), Op(instr.REF_IS_NULL), Op(instr.BR_IF)),
+		want := []rule{
+			{pattern: fuse(op(instr.LOCAL_GET), op(instr.DROP)).pattern},
+			{pattern: fuse(op(instr.LOCAL_GET), op(instr.REF_IS_NULL), op(instr.BR_IF)).pattern},
+			{pattern: fuse(op(instr.GLOBAL_GET), op(instr.DROP)).pattern},
+			{pattern: fuse(op(instr.GLOBAL_GET), op(instr.REF_IS_NULL), op(instr.BR_IF)).pattern},
 		}
 		require.ElementsMatch(t, want, got)
 	})
 
 	t.Run("preserves exact concrete type guards and negation", func(t *testing.T) {
-		got, err := expand(Product(
-			Sources(
-				Op(instr.CONST_GET, TypeFor[types.String]()),
-				Op(instr.CONST_GET, Not(TypeFor[types.String]())),
+		got, err := expand(product(
+			sources(
+				op(instr.CONST_GET, typeFor[types.String]()),
+				op(instr.CONST_GET, not(typeFor[types.String]())),
 			),
-			Consumers(Op(instr.DROP)),
+			consumers(op(instr.DROP)),
 		))
 		require.NoError(t, err)
 
-		want := []any{
-			Fuse(Op(instr.CONST_GET, TypeFor[types.String]()), Op(instr.DROP)),
-			Fuse(Op(instr.CONST_GET, Not(TypeFor[types.String]())), Op(instr.DROP)),
+		want := []rule{
+			{pattern: fuse(op(instr.CONST_GET, typeFor[types.String]()), op(instr.DROP)).pattern},
+			{pattern: fuse(op(instr.CONST_GET, not(typeFor[types.String]())), op(instr.DROP)).pattern},
 		}
 		require.ElementsMatch(t, want, got)
 	})
 }
 
 func TestValidate(t *testing.T) {
+	t.Run("rejects ARM64 marker without specialization", func(t *testing.T) {
+		rules, err := expand(fuse(op(instr.I32_CONST), op(instr.I32_ADD)).withARM64())
+		require.NoError(t, err)
+		require.ErrorContains(t, validate(rules), "ARM64-marked fusion has no specialization")
+	})
+
 	t.Run("rejects duplicate concrete patterns after product expansion", func(t *testing.T) {
-		rules, err := expand(Product(
-			Sources(Op(instr.LOCAL_GET), Op(instr.LOCAL_GET)),
-			Consumers(Op(instr.DROP)),
+		rules, err := expand(product(
+			sources(op(instr.LOCAL_GET), op(instr.LOCAL_GET)),
+			consumers(op(instr.DROP)),
 		))
 		require.NoError(t, err)
 		require.Error(t, validate(rules))
 	})
 
 	t.Run("rejects variable width opcodes", func(t *testing.T) {
-		rules, err := expand(Fuse(Op(instr.BR_TABLE), Op(instr.DROP)))
+		rules, err := expand(fuse(op(instr.BR_TABLE), op(instr.DROP)))
 		require.NoError(t, err)
 		require.Error(t, validate(rules))
 	})
 
 	t.Run("accepts distinct exact and negated type guards", func(t *testing.T) {
-		rules, err := expand(Product(
-			Sources(
-				Op(instr.CONST_GET, TypeFor[types.String]()),
-				Op(instr.CONST_GET, Not(TypeFor[types.String]())),
+		rules, err := expand(product(
+			sources(
+				op(instr.CONST_GET, typeFor[types.String]()),
+				op(instr.CONST_GET, not(typeFor[types.String]())),
 			),
-			Consumers(Op(instr.DROP)),
+			consumers(op(instr.DROP)),
 		))
 		require.NoError(t, err)
 		require.NoError(t, validate(rules))
 	})
+
+	t.Run("rejects an unguarded pattern that shadows a guarded pattern", func(t *testing.T) {
+		rules := []rule{
+			{pattern: fuse(op(instr.CONST_GET), op(instr.DROP)).pattern},
+			{pattern: fuse(op(instr.CONST_GET, typeFor[types.I32]()), op(instr.DROP)).pattern},
+		}
+		require.ErrorContains(t, validate(rules), "ambiguous")
+	})
+
+	t.Run("rejects overlapping negated guards", func(t *testing.T) {
+		rules := []rule{
+			{pattern: fuse(op(instr.CONST_GET, not(typeFor[types.String]())), op(instr.DROP)).pattern},
+			{pattern: fuse(op(instr.CONST_GET, not(typeFor[types.I32]())), op(instr.DROP)).pattern},
+		}
+		require.ErrorContains(t, validate(rules), "ambiguous")
+	})
+
+	t.Run("rejects nested negation", func(t *testing.T) {
+		rules, err := expand(fuse(op(instr.CONST_GET, not(not(typeFor[types.String]()))), op(instr.DROP)))
+		require.NoError(t, err)
+		require.Error(t, validate(rules))
+	})
+
+	t.Run("rejects guards on runtime-only sources", func(t *testing.T) {
+		rules, err := expand(fuse(op(instr.LOCAL_GET, typeFor[types.String]()), op(instr.DROP)))
+		require.NoError(t, err)
+		require.Error(t, validate(rules))
+	})
+
+	t.Run("rejects multiple guards", func(t *testing.T) {
+		rules, err := expand(fuse(op(instr.CONST_GET, typeFor[types.String](), typeFor[types.I32]()), op(instr.DROP)))
+		require.NoError(t, err)
+		require.Error(t, validate(rules))
+	})
+
+	t.Run("rejects unknown opcodes", func(t *testing.T) {
+		require.ErrorContains(t, validate([]rule{{pattern: fuse(op(instr.Opcode(0xff)), op(instr.DROP)).pattern}}), "unsupported opcode")
+	})
+
+	t.Run("rejects patterns without a threaded renderer", func(t *testing.T) {
+		require.ErrorContains(t, validate([]rule{{pattern: fuse(op(instr.LOCAL_GET), op(instr.CALL)).pattern}}), "unsupported threaded fusion")
+	})
+
+	t.Run("rejects ownership unsafe trailing operations", func(t *testing.T) {
+		fusion := fuse(op(instr.REF_NULL), op(instr.DROP), op(instr.DROP))
+		require.ErrorContains(t, validate([]rule{{pattern: fusion.pattern}}), "unsupported trailing operations")
+	})
 }
 
-func TestGenerate(t *testing.T) {
-	first, err := generate()
-	require.NoError(t, err)
-	second, err := generate()
-	require.NoError(t, err)
-	require.Equal(t, first, second)
-
-	paths := make([]string, len(first))
-	for idx, output := range first {
-		paths[idx] = output.path
+func TestExpandAll(t *testing.T) {
+	declarations := []declaration{
+		fuse(op(instr.GLOBAL_GET), op(instr.DROP)),
+		fuse(op(instr.LOCAL_GET), op(instr.DROP)),
 	}
-	require.IsIncreasing(t, paths)
+	forward, err := expandAll(declarations)
+	require.NoError(t, err)
+	reverse, err := expandAll([]declaration{declarations[1], declarations[0]})
+	require.NoError(t, err)
+	require.Equal(t, forward, reverse)
+}
+
+func TestRenderThreaded(t *testing.T) {
+	data, err := renderThreaded([]rule{
+		{pattern: fuse(op(instr.REF_NULL), op(instr.DROP)).pattern},
+		{pattern: fuse(op(instr.DUP), op(instr.DROP)).pattern},
+	})
+	require.NoError(t, err)
+	require.Contains(t, string(data), "goto l0")
+	require.Contains(t, string(data), "l0:")
+	require.NotContains(t, string(data), "candidate0")
+}
+
+func TestRenderARM64(t *testing.T) {
+	marked := rule{pattern: fuse(op(instr.REF_NULL), op(instr.DROP)).pattern, arm64: true}
+	unmarked := rule{pattern: fuse(op(instr.DUP), op(instr.DROP)).pattern}
+
+	data, err := renderARM64([]rule{marked, unmarked})
+	require.NoError(t, err)
+	require.Contains(t, string(data), "case uint16(instr.REF_NULL)<<8 | uint16(instr.DROP):")
+	require.NotContains(t, string(data), "case uint16(instr.DUP)<<8 | uint16(instr.DROP):")
+	require.Contains(t, string(data), "}\n\nfunc (l arm64Lowerer) match")
+	require.Contains(t, string(data), "}\n\nfunc (l arm64Lowerer) adjacent")
 }

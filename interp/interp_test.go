@@ -1409,6 +1409,14 @@ func TestInterpreter_Run(t *testing.T) {
 		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
 	})
 
+	t.Run("LOCAL_GET rejects undeclared metadata without panicking during threading", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.LOCAL_GET, 0)})
+		i := New(prog, WithTick(1))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrSegmentationFault)
+	})
+
 	t.Run("LOCAL_SET rejects one-past-current local slot", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.DROP),

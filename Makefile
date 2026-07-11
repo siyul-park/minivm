@@ -2,7 +2,7 @@
 
 PROJECT = $(shell basename -s .git $(shell git config --get remote.origin.url))
 
-.PHONY: init generate build clean tidy update sync check test coverage benchmark lint fmt vet doc
+.PHONY: init generate build clean tidy update sync check check-generated check-tidy check-fmt check-arm64 test coverage benchmark benchmark-fusion lint fmt vet doc
 all: lint test build
 
 init:
@@ -17,7 +17,7 @@ install-modules:
 	@go install -v ./...
 
 generate:
-	@go generate ./...
+	@go run ./internal/cmd/genfusion
 
 build:
 	@go clean -cache
@@ -43,7 +43,22 @@ clean-cache:
 sync:
 	@go work sync
 
-check: lint test
+check: check-generated check-tidy check-fmt vet test check-arm64
+	@go build ./...
+
+check-generated:
+	@go run ./internal/cmd/genfusion -check
+
+check-tidy:
+	@go mod tidy -diff
+
+check-fmt:
+	@test -z "$$(gofmt -l .)"
+	@test -z "$$(goimports -l .)"
+
+check-arm64:
+	@GOOS=linux GOARCH=arm64 go build ./...
+	@GOOS=linux GOARCH=arm64 go test -exec=true ./...
 
 test:
 	@go test -race $(test-options) ./...
@@ -54,6 +69,9 @@ coverage:
 benchmark:
 	@go test -run="-" -bench=".*" -benchmem $(test-options) ./...
 	@(cd benchmarks && go test -run="-" -bench=".*" -benchmem $(test-options) ./...)
+
+benchmark-fusion:
+	@(cd benchmarks && go test -run="^$$" -bench="Fusion|RefFusion" -benchmem -count=10 ./...)
 
 lint: fmt vet
 

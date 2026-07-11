@@ -171,7 +171,18 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 			// branches to the head or traps, never falling through.
 			return idx == len(ops)-1
 		}
-		ok := false
+		n, ok := l.fusion(ctx, ops, tail, idx)
+		if !ok {
+			return false
+		}
+		if n > 0 {
+			idx += n - 1
+			if ops[idx].op == instr.RETURN_CALL && ops[idx].callee == ctx.addr {
+				return idx == len(ops)-1
+			}
+			continue
+		}
+		ok = false
 		switch op.op {
 		case instr.NOP, instr.BR:
 			ok = true
@@ -186,9 +197,7 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 		case instr.F64_CONST:
 			ok = l.f64Const(ctx, op)
 		case instr.CONST_GET:
-			fused := idx+1 < len(ops) && ops[idx+1].depth == op.depth &&
-				(ops[idx+1].op == instr.CALL || ops[idx+1].op == instr.RETURN_CALL)
-			ok = l.constGet(ctx, op, fused)
+			ok = l.constGet(ctx, op)
 		case instr.LOCAL_GET:
 			ok = l.localGet(ctx, op)
 		case instr.LOCAL_SET:
@@ -669,10 +678,9 @@ func (l arm64Lowerer) unreachable(ctx *lowering, op step) bool {
 	return l.exit(ctx, op.ip)
 }
 
-// constGet pushes a scalar constant as an unboxed immediate. A function
-// ref feeding the next CALL stays a compile-time marker so the call lowers as
-// a fused direct call; any other ref rejects.
-func (l arm64Lowerer) constGet(ctx *lowering, op step, fused bool) bool {
+// constGet pushes a scalar constant as an unboxed immediate. Refs retain
+// ordinary standalone ownership; generated call fusion owns direct markers.
+func (l arm64Lowerer) constGet(ctx *lowering, op step) bool {
 	f := ctx.frame()
 	idx := int(uint16(f.code[op.ip+1]) | uint16(f.code[op.ip+2])<<8)
 	if idx >= len(ctx.constants) {
@@ -698,24 +706,13 @@ func (l arm64Lowerer) constGet(ctx *lowering, op step, fused bool) bool {
 		return true
 	case types.KindRef:
 		ref := v.Ref()
-		fn := ref
 		if ref < 0 || ref >= len(ctx.heap) {
 			return false
 		}
-		if cl, ok := ctx.heap[fn].(*types.Closure); ok {
-			fn = int(cl.Fn)
-		}
-		if !fused {
-			boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-			ctx.assembler.Emit(arm64.LDI(boxed, uint64(v))...)
-			l.retain(ctx, ref)
-			ctx.push(value{reg: boxed, kind: types.KindRef, raw: false})
-			return true
-		}
-		if ctx.funcs[fn] == nil {
-			return false
-		}
-		ctx.push(value{kind: types.KindRef, raw: true, fn: fn, ref: ref})
+		boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDI(boxed, uint64(v))...)
+		l.retain(ctx, ref)
+		ctx.push(value{reg: boxed, kind: types.KindRef, raw: false})
 		return true
 	}
 	return false

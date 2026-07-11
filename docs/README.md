@@ -12,6 +12,7 @@ This directory uses a single-owner model. Each topic owns one area of behavior; 
 | Value layout and boxed values | `value-representation.md` |
 | Heap ownership, reference counting, GC | `memory-model.md` |
 | Trace JIT internals | `jit-internals.md` |
+| Threaded and ARM64 opcode fusion | `fusion.md` |
 | Profiling and JIT counters | `profile.md` |
 | Pass manager and optimizer levels | `pass-system.md` |
 | Host functions and marshaling | `host-integration.md` |
@@ -32,6 +33,7 @@ Keep detailed explanations in the document that owns the topic. Other documents 
 - Put heap ownership and RC rules in `memory-model.md`.
 - Put boxed value layout and kind rules in `value-representation.md`.
 - Put JIT implementation contracts in `jit-internals.md`.
+- Put generated opcode-fusion rules and backend coverage in `fusion.md`.
 - Put benchmark numbers in `benchmarks.md`.
 - Put host conversion details in `host-integration.md`.
 - Put platform support in `compatibility.md`.

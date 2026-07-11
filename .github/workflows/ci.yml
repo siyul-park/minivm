@@ -36,10 +36,25 @@ jobs:
       - name: Initialize Project
         run: make init
 
-      - name: Run Linter
-        run: make lint
+      - name: Run Checks
+        run: make check
 
-      - name: Run Tests and Generate Coverage
+  coverage:
+    needs: check
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.2'
+
+      - name: Initialize Project
+        run: make init
+
+      - name: Generate Coverage
         run: make coverage
 
       - name: Upload Coverage to Codecov
@@ -63,7 +78,7 @@ jobs:
       - name: Checkout Previous Code
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.base_ref }}
+          ref: ${{ github.event.before }}
           path: previous
 
       - name: Checkout New Code
@@ -85,7 +100,7 @@ jobs:
 
       - name: Run Benchmark (Previous)
         working-directory: previous
-        run: make benchmark test-options="-count=2" | tee benchmark.txt
+        run: make benchmark test-options="-count=10" | tee benchmark.txt
 
       - name: Initialize New Code
         working-directory: new
@@ -93,7 +108,7 @@ jobs:
 
       - name: Run Benchmark (New)
         working-directory: new
-        run: make benchmark test-options="-count=2" | tee benchmark.txt
+        run: make benchmark test-options="-count=10" | tee benchmark.txt
 
       - name: Compare Benchmark Results
         run: benchstat previous/benchmark.txt new/benchmark.txt

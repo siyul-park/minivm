@@ -13,6 +13,7 @@ type threader struct {
 	types     []types.Type
 	constants []types.Boxed
 	heap      []types.Value
+	coros     []bool
 	locals    []types.Kind
 	globals   []types.Kind
 	captures  []types.Kind
@@ -343,51 +344,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 		idx := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 3
 		if idx < len(c.globals) {
-			switch c.globals[idx].Repr() {
-			case types.KindI32:
-				if fused := c.fuseI32(func(i *Interpreter) int32 {
-					if idx >= len(i.globals) {
-						panic(ErrSegmentationFault)
-					}
-					return i.globals[idx].I32()
-				}, c.globals[idx], 3); fused != nil {
-					return fused
-				}
-			case types.KindI64:
-				if fused := c.fuseI64(func(i *Interpreter) int64 {
-					if idx >= len(i.globals) {
-						panic(ErrSegmentationFault)
-					}
-					// borrowI64, not unboxI64: the global slot keeps its own
-					// ownership of a heap-promoted ref; this read only borrows.
-					return i.borrowI64(i.globals[idx])
-				}, 3); fused != nil {
-					return fused
-				}
-			case types.KindF32:
-				if fused := c.fuseF32(func(i *Interpreter) float32 {
-					if idx >= len(i.globals) {
-						panic(ErrSegmentationFault)
-					}
-					return i.globals[idx].F32()
-				}, 3); fused != nil {
-					return fused
-				}
-			case types.KindF64:
-				if fused := c.fuseF64(func(i *Interpreter) float64 {
-					if idx >= len(i.globals) {
-						panic(ErrSegmentationFault)
-					}
-					return i.globals[idx].F64()
-				}, 3); fused != nil {
-					return fused
-				}
-			}
-			// Superinstruction: GLOBAL_GET idx; <CONST|LOCAL_GET|GLOBAL_GET|
-			// UPVAL_GET matching kind>; <binop>.
-			if fused := c.fuseGlobalPair(idx); fused != nil {
-				return fused
-			}
 			// I32/F32/F64 globals never hold a heap ref, so retain is a no-op;
 			// skip it and the Kind branch. I64 may box to a ref, so it keeps
 			// retainBox.
@@ -498,57 +454,10 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	instr.LOCAL_GET: func(c *threader) func(i *Interpreter) {
 		idx := int(c.code[c.ip+1])
 		c.ip += 2
-		switch c.locals[idx].Repr() {
-		case types.KindI32:
-			if fused := c.fuseI32(func(i *Interpreter) int32 {
-				addr := i.fr.bp + idx
-				if addr >= i.sp {
-					panic(ErrSegmentationFault)
-				}
-				return i.stack[addr].I32()
-			}, c.locals[idx], 2); fused != nil {
-				return fused
+		if idx >= len(c.locals) {
+			return func(*Interpreter) {
+				panic(ErrSegmentationFault)
 			}
-		case types.KindI64:
-			if fused := c.fuseI64(func(i *Interpreter) int64 {
-				addr := i.fr.bp + idx
-				if addr >= i.sp {
-					panic(ErrSegmentationFault)
-				}
-				// borrowI64, not unboxI64: the local slot keeps its own
-				// ownership of a heap-promoted ref; this read only borrows.
-				return i.borrowI64(i.stack[addr])
-			}, 2); fused != nil {
-				return fused
-			}
-		case types.KindF32:
-			if fused := c.fuseF32(func(i *Interpreter) float32 {
-				addr := i.fr.bp + idx
-				if addr >= i.sp {
-					panic(ErrSegmentationFault)
-				}
-				return i.stack[addr].F32()
-			}, 2); fused != nil {
-				return fused
-			}
-		case types.KindF64:
-			if fused := c.fuseF64(func(i *Interpreter) float64 {
-				addr := i.fr.bp + idx
-				if addr >= i.sp {
-					panic(ErrSegmentationFault)
-				}
-				return i.stack[addr].F64()
-			}, 2); fused != nil {
-				return fused
-			}
-		}
-		// Superinstruction: LOCAL_GET idx; <kind>.CONST c; <kind binop>.
-		if fused := c.fuseLocalConst(idx); fused != nil {
-			return fused
-		}
-		// Superinstruction: LOCAL_GET idxA; LOCAL_GET idxB; <kind binop>.
-		if fused := c.fuseLocalLocal(idx); fused != nil {
-			return fused
 		}
 		// I32/F32/F64 locals never hold a heap ref, so retain is a no-op; skip
 		// it and the Kind branch. I64 may box to a ref, so it keeps retainBox.
@@ -671,22 +580,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 		}
 		val := c.constants[idx]
 		switch val.Kind() {
-		case types.KindI32:
-			if fused := c.fuseI32Imm(val.I32(), 3); fused != nil {
-				return fused
-			}
-		case types.KindI64:
-			if fused := c.fuseI64Imm(val.I64(), 3); fused != nil {
-				return fused
-			}
-		case types.KindF32:
-			if fused := c.fuseF32Imm(val.F32(), 3); fused != nil {
-				return fused
-			}
-		case types.KindF64:
-			if fused := c.fuseF64Imm(val.F64(), 3); fused != nil {
-				return fused
-			}
 		case types.KindRef:
 			addr := val.Ref()
 			if str, ok := c.heap[addr].(types.String); ok {
@@ -699,9 +592,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 					i.sp++
 					i.fr.ip += 3
 				}
-			}
-			if fused := c.fuseRefImm(addr, 3); fused != nil {
-				return fused
 			}
 			return func(i *Interpreter) {
 				if i.sp == len(i.stack) {
@@ -725,53 +615,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	instr.UPVAL_GET: func(c *threader) func(i *Interpreter) {
 		idx := int(c.code[c.ip+1])
 		c.ip += 2
-		if idx < len(c.captures) {
-			switch c.captures[idx].Repr() {
-			case types.KindI32:
-				if fused := c.fuseI32(func(i *Interpreter) int32 {
-					if idx >= len(i.fr.upvals) {
-						panic(ErrSegmentationFault)
-					}
-					return i.fr.upvals[idx].I32()
-				}, c.captures[idx], 2); fused != nil {
-					return fused
-				}
-			case types.KindI64:
-				if fused := c.fuseI64(func(i *Interpreter) int64 {
-					if idx >= len(i.fr.upvals) {
-						panic(ErrSegmentationFault)
-					}
-					// borrowI64, not unboxI64: the capture slot keeps its own
-					// ownership of a heap-promoted ref; this read only borrows.
-					return i.borrowI64(i.fr.upvals[idx])
-				}, 2); fused != nil {
-					return fused
-				}
-			case types.KindF32:
-				if fused := c.fuseF32(func(i *Interpreter) float32 {
-					if idx >= len(i.fr.upvals) {
-						panic(ErrSegmentationFault)
-					}
-					return i.fr.upvals[idx].F32()
-				}, 2); fused != nil {
-					return fused
-				}
-			case types.KindF64:
-				if fused := c.fuseF64(func(i *Interpreter) float64 {
-					if idx >= len(i.fr.upvals) {
-						panic(ErrSegmentationFault)
-					}
-					return i.fr.upvals[idx].F64()
-				}, 2); fused != nil {
-					return fused
-				}
-			}
-			// Superinstruction: UPVAL_GET idx; <CONST|LOCAL_GET|GLOBAL_GET|
-			// UPVAL_GET matching kind>; <binop>.
-			if fused := c.fuseUpvalPair(idx); fused != nil {
-				return fused
-			}
-		}
 		// I32/F32/F64 captures never hold a heap ref, so retain is a no-op; skip
 		// it and the Kind branch. I64 may box to a ref, so it keeps retainBox.
 		if idx < len(c.captures) {
@@ -999,17 +842,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 		raw := *(*int32)(unsafe.Pointer(&c.code[c.ip+1]))
 		val := types.BoxI32(raw)
 		c.ip += 5
-		if fused := c.fuseI32Imm(raw, 5); fused != nil {
-			return fused
-		}
-		// Superinstruction: I32_CONST c; BR_IF fuses a compile-time-known
-		// branch condition, skipping the push/pop of the boxed boolean
-		// entirely.
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				i.branchIf(raw != 0, offset, 8)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
@@ -1275,16 +1107,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I32_EQZ: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp == 0 {
-					panic(ErrStackUnderflow)
-				}
-				v := i.stack[i.sp-1].I32()
-				i.sp--
-				i.branchIf(v == 0, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
@@ -1296,17 +1118,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I32_EQ: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].I32()
-				lhs := i.stack[i.sp-2].I32()
-				i.sp -= 2
-				i.branchIf(lhs == rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1320,17 +1131,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I32_NE: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].I32()
-				lhs := i.stack[i.sp-2].I32()
-				i.sp -= 2
-				i.branchIf(lhs != rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1344,17 +1144,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I32_LT_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].I32()
-				lhs := i.stack[i.sp-2].I32()
-				i.sp -= 2
-				i.branchIf(lhs < rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1368,17 +1157,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I32_LT_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].I32()
-				lhs := i.stack[i.sp-2].I32()
-				i.sp -= 2
-				i.branchIf(uint32(lhs) < uint32(rhs), offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1392,17 +1170,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I32_GT_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].I32()
-				lhs := i.stack[i.sp-2].I32()
-				i.sp -= 2
-				i.branchIf(lhs > rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1416,17 +1183,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I32_GT_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].I32()
-				lhs := i.stack[i.sp-2].I32()
-				i.sp -= 2
-				i.branchIf(uint32(lhs) > uint32(rhs), offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1440,17 +1196,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I32_LE_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].I32()
-				lhs := i.stack[i.sp-2].I32()
-				i.sp -= 2
-				i.branchIf(lhs <= rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1464,17 +1209,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I32_LE_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].I32()
-				lhs := i.stack[i.sp-2].I32()
-				i.sp -= 2
-				i.branchIf(uint32(lhs) <= uint32(rhs), offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1488,17 +1222,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I32_GE_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].I32()
-				lhs := i.stack[i.sp-2].I32()
-				i.sp -= 2
-				i.branchIf(lhs >= rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1512,17 +1235,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I32_GE_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].I32()
-				lhs := i.stack[i.sp-2].I32()
-				i.sp -= 2
-				i.branchIf(uint32(lhs) >= uint32(rhs), offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1614,9 +1326,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	instr.I64_CONST: func(c *threader) func(i *Interpreter) {
 		val := int64(*(*uint64)(unsafe.Pointer(&c.code[c.ip+1])))
 		c.ip += 9
-		if fused := c.fuseI64(func(*Interpreter) int64 { return val }, 9); fused != nil {
-			return fused
-		}
 		if types.IsBoxable(val) {
 			v := types.BoxI64(val)
 			return func(i *Interpreter) {
@@ -1905,16 +1614,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I64_EQZ: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp == 0 {
-					panic(ErrStackUnderflow)
-				}
-				v := i.unboxI64(i.stack[i.sp-1])
-				i.sp--
-				i.branchIf(v == 0, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp == 0 {
 				panic(ErrStackUnderflow)
@@ -1926,17 +1625,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I64_EQ: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.unboxI64(i.stack[i.sp-1])
-				lhs := i.unboxI64(i.stack[i.sp-2])
-				i.sp -= 2
-				i.branchIf(lhs == rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1950,17 +1638,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I64_NE: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.unboxI64(i.stack[i.sp-1])
-				lhs := i.unboxI64(i.stack[i.sp-2])
-				i.sp -= 2
-				i.branchIf(lhs != rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1974,17 +1651,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I64_LT_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.unboxI64(i.stack[i.sp-1])
-				lhs := i.unboxI64(i.stack[i.sp-2])
-				i.sp -= 2
-				i.branchIf(lhs < rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -1998,17 +1664,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I64_LT_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.unboxI64(i.stack[i.sp-1])
-				lhs := i.unboxI64(i.stack[i.sp-2])
-				i.sp -= 2
-				i.branchIf(uint64(lhs) < uint64(rhs), offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2022,17 +1677,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I64_GT_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.unboxI64(i.stack[i.sp-1])
-				lhs := i.unboxI64(i.stack[i.sp-2])
-				i.sp -= 2
-				i.branchIf(lhs > rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2046,17 +1690,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I64_GT_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.unboxI64(i.stack[i.sp-1])
-				lhs := i.unboxI64(i.stack[i.sp-2])
-				i.sp -= 2
-				i.branchIf(uint64(lhs) > uint64(rhs), offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2070,17 +1703,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I64_LE_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.unboxI64(i.stack[i.sp-1])
-				lhs := i.unboxI64(i.stack[i.sp-2])
-				i.sp -= 2
-				i.branchIf(lhs <= rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2094,17 +1716,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I64_LE_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.unboxI64(i.stack[i.sp-1])
-				lhs := i.unboxI64(i.stack[i.sp-2])
-				i.sp -= 2
-				i.branchIf(uint64(lhs) <= uint64(rhs), offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2118,17 +1729,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I64_GE_S: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.unboxI64(i.stack[i.sp-1])
-				lhs := i.unboxI64(i.stack[i.sp-2])
-				i.sp -= 2
-				i.branchIf(lhs >= rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2142,17 +1742,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.I64_GE_U: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.unboxI64(i.stack[i.sp-1])
-				lhs := i.unboxI64(i.stack[i.sp-2])
-				i.sp -= 2
-				i.branchIf(uint64(lhs) >= uint64(rhs), offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2234,9 +1823,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 		raw := *(*float32)(unsafe.Pointer(&c.code[c.ip+1]))
 		val := types.BoxF32(raw)
 		c.ip += 5
-		if fused := c.fuseF32Imm(raw, 5); fused != nil {
-			return fused
-		}
 		return func(i *Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
@@ -2445,17 +2031,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.F32_EQ: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].F32()
-				lhs := i.stack[i.sp-2].F32()
-				i.sp -= 2
-				i.branchIf(lhs == rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2469,17 +2044,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.F32_NE: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].F32()
-				lhs := i.stack[i.sp-2].F32()
-				i.sp -= 2
-				i.branchIf(lhs != rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2493,17 +2057,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.F32_LT: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].F32()
-				lhs := i.stack[i.sp-2].F32()
-				i.sp -= 2
-				i.branchIf(lhs < rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2517,17 +2070,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.F32_GT: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].F32()
-				lhs := i.stack[i.sp-2].F32()
-				i.sp -= 2
-				i.branchIf(lhs > rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2541,17 +2083,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.F32_LE: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].F32()
-				lhs := i.stack[i.sp-2].F32()
-				i.sp -= 2
-				i.branchIf(lhs <= rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2565,17 +2096,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.F32_GE: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].F32()
-				lhs := i.stack[i.sp-2].F32()
-				i.sp -= 2
-				i.branchIf(lhs >= rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2657,9 +2177,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 		raw := *(*float64)(unsafe.Pointer(&c.code[c.ip+1]))
 		val := types.BoxF64(raw)
 		c.ip += 9
-		if fused := c.fuseF64Imm(raw, 9); fused != nil {
-			return fused
-		}
 		return func(i *Interpreter) {
 			if i.sp == len(i.stack) {
 				panic(ErrStackOverflow)
@@ -2868,17 +2385,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.F64_EQ: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].F64()
-				lhs := i.stack[i.sp-2].F64()
-				i.sp -= 2
-				i.branchIf(lhs == rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2892,17 +2398,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.F64_NE: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].F64()
-				lhs := i.stack[i.sp-2].F64()
-				i.sp -= 2
-				i.branchIf(lhs != rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2916,17 +2411,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.F64_LT: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].F64()
-				lhs := i.stack[i.sp-2].F64()
-				i.sp -= 2
-				i.branchIf(lhs < rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2940,17 +2424,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.F64_GT: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].F64()
-				lhs := i.stack[i.sp-2].F64()
-				i.sp -= 2
-				i.branchIf(lhs > rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2964,17 +2437,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.F64_LE: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].F64()
-				lhs := i.stack[i.sp-2].F64()
-				i.sp -= 2
-				i.branchIf(lhs <= rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -2988,17 +2450,6 @@ var threaded = [256]func(c *threader) func(i *Interpreter){
 	},
 	instr.F64_GE: func(c *threader) func(i *Interpreter) {
 		c.ip++
-		if offset, ok := c.peekBrIf(c.ip); ok {
-			return func(i *Interpreter) {
-				if i.sp < 2 {
-					panic(ErrStackUnderflow)
-				}
-				rhs := i.stack[i.sp-1].F64()
-				lhs := i.stack[i.sp-2].F64()
-				i.sp -= 2
-				i.branchIf(lhs >= rhs, offset, 4)
-			}
-		}
 		return func(i *Interpreter) {
 			if i.sp < 2 {
 				panic(ErrStackUnderflow)
@@ -4905,6 +4356,12 @@ func (c *threader) Compile(code []byte, locals []types.Kind, captures []types.Ki
 	compiled := make([]func(*Interpreter), len(code))
 	for c.ip < len(code) {
 		ip := c.ip
+		if !c.exact {
+			if fn := c.fusion(); fn != nil {
+				compiled[ip] = fn
+				continue
+			}
+		}
 		compiled[ip] = threaded[code[ip]](c)
 	}
 	for ip := 0; ip < len(code); ip++ {

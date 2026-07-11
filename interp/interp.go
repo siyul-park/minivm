@@ -240,6 +240,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		globals:   make([]types.Boxed, len(prog.Globals)),
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
+		coros:     make([]bool, len(prog.Constants)+1),
+		handlers:  make([][]instr.Handler, len(prog.Constants)+1),
 		exits:     map[anchor]func(*Interpreter){},
 		stubs:     make([]func(*Interpreter), len(prog.Constants)+1),
 		tried:     map[int]bool{},
@@ -285,18 +287,18 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 
 	i.base = len(i.heap)
 
-	c := &threader{
-		types:     i.types,
-		constants: i.constants,
-		heap:      i.heap,
-		globals:   types.Kinds(prog.Globals),
-		exact:     opt.tick == 1,
-	}
-
 	i.module = &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
-
 	i.instrs[0] = prog.Code
-	i.code[0] = c.Compile(prog.Code, i.module.LocalKinds(), types.Kinds(i.module.Captures))
+	i.handlers[0] = prog.Handlers
+	i.coros[0] = containsYield(prog.Code)
+	for j, v := range prog.Constants {
+		if fn, ok := v.(*types.Function); ok {
+			addr := i.constants[j].Ref()
+			i.instrs[addr] = fn.Code
+			i.handlers[addr] = fn.Handlers
+			i.coros[addr] = containsYield(fn.Code)
+		}
+	}
 
 	// Declared globals are pre-seeded to the zero Boxed of their declared kind
 	// (Program.Globals, like Locals): numeric slots get a typed zero, ref slots
@@ -307,26 +309,24 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	// bind reads i.globals kinds to thread each constant's GLOBAL_* accesses, so
 	// an unseeded slot would misclassify a ref global as numeric and skip its
 	// retain/release, corrupting the refcount.
-	for j, k := range types.Kinds(prog.Globals) {
-		i.globals[j] = i.zero(k)
+	globals := types.Kinds(prog.Globals)
+	for j, kind := range globals {
+		i.globals[j] = i.zero(kind)
 	}
+
+	c := &threader{
+		types:     i.types,
+		constants: i.constants,
+		heap:      i.heap,
+		coros:     i.coros,
+		globals:   globals,
+		exact:     opt.tick == 1,
+	}
+	i.code[0] = c.Compile(prog.Code, i.module.LocalKinds(), types.Kinds(i.module.Captures))
 
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
 			i.bind(i.constants[j].Ref(), fn, false)
-		}
-	}
-
-	i.coros = make([]bool, len(i.instrs))
-	for addr, code := range i.instrs {
-		i.coros[addr] = containsYield(code)
-	}
-
-	i.handlers = make([][]instr.Handler, len(i.instrs))
-	i.handlers[0] = prog.Handlers
-	for j, v := range prog.Constants {
-		if fn, ok := v.(*types.Function); ok {
-			i.handlers[i.constants[j].Ref()] = fn.Handlers
 		}
 	}
 
@@ -1106,7 +1106,7 @@ func (i *Interpreter) stub(addr int) func(*Interpreter) {
 // deopt rebuilds VM frames from the native journal after a trap. Native frames
 // record themselves while unwinding, so record[depth-1] is the outermost native
 // frame — already live at i.frames[i.fp-1]. Earlier records become deeper VM
-// frames in reverse order, matching the fused direct call in fuse.go (ref
+// frames in reverse order, matching generated fused direct calls (ref
 // unretained, code/upvals restored).
 func (i *Interpreter) deopt() {
 	depth := int(i.journal[journalDepth])
@@ -1123,7 +1123,7 @@ func (i *Interpreter) deopt() {
 	i.restore(outer, fn)
 
 	// Earlier records become fresh frames from outer to inner. Like the fused
-	// direct call in fuse.go, the callee ref was never pushed or retained, so
+	// generated direct call, the callee ref was never pushed or retained, so
 	// release stays false.
 	for n := 1; n < depth; n++ {
 		fn, bp, ip, returns := i.unpack(depth - 1 - n)
@@ -1535,13 +1535,16 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 		types:     i.types,
 		constants: i.constants,
 		heap:      i.heap,
+		coros:     i.coros,
 		globals:   globals,
 		exact:     i.tick == 1,
 	}
+	if dynamic {
+		i.coros[addr] = containsYield(fn.Code)
+	}
 	i.instrs[addr] = fn.Code
-	i.code[addr] = c.Compile(fn.Code, fn.LocalKinds(), types.Kinds(fn.Captures))
 	i.handlers[addr] = fn.Handlers
-	i.coros[addr] = containsYield(fn.Code)
+	i.code[addr] = c.Compile(fn.Code, fn.LocalKinds(), types.Kinds(fn.Captures))
 	if dynamic {
 		i.dynamic[addr] = true
 	}

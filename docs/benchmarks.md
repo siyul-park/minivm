@@ -34,6 +34,9 @@ minivm currently provides ARM64 JIT support only. On ARM64, the default `interp.
 # Full benchmark suite
 make benchmark
 
+# Fusion migration and ref-ownership cases (ten samples for benchstat)
+make benchmark-fusion
+
 # Pure threaded interpreter only
 go test -run="-" -bench="BenchmarkInterpreter_Run/threaded" -benchmem ./interp/...
 
@@ -204,6 +207,7 @@ On x86-64, JIT is not implemented yet. The runtime falls back to threaded execut
 
 - Threaded interpreter, lifecycle, marshal, and traversal benchmarks use `-benchtime=1s`.
 - Cross-runtime and JIT coverage benchmarks use `-benchtime=2s`.
+- Fusion comparisons use `-benchmem -count=10`; compare before and after output with `benchstat`.
 - `BenchmarkInterpreter_Run/threaded` always runs with `WithThreshold(-1)`, so it measures the pure threaded interpreter.
 - The `minivm JIT` rows use default `interp.New`, which enables ARM64 trace compilation.
 - `Interpreter.Reset()` is called between iterations.
