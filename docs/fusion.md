@@ -2,11 +2,11 @@
 
 # Fusion
 
-How minivm generates producer-consumer fusion for the threaded interpreter and ARM64 JIT.
+How minivm generates producer-consumer fusion for the threaded interpreter.
 
 ## When to Read
 
-Read this before changing fusion rules, generated fusion output, threaded lookahead, ARM64 fusion lowering, or ref ownership inside a fused sequence.
+Read this before changing threaded fusion rules, generated handlers, lookahead, or ref ownership inside a fused sequence.
 
 ## Source of Truth
 
@@ -14,74 +14,74 @@ Read this before changing fusion rules, generated fusion output, threaded lookah
 |---|---|
 | Rule declarations, validation, and this document | `internal/cmd/genfusion/` |
 | Threaded generated handlers | `interp/fusion_gen.go` |
-| ARM64 generated lowering | `interp/jit_fusion_gen_arm64.go` |
+| ARM64 trace lowering | `interp/jit_arm64.go` |
 | Standalone semantics | `interp/threaded.go` |
 | Opcode metadata | `instr/type.go` |
 
 ## Model
 
-Fusion rules are passive generator data. Products expand into concrete opcode patterns before validation and rendering. Generated matchers use opcode widths from `instr.Type`, choose the longest applicable specialization, and dispatch directly to closed renderers. Product identities and runtime match/action objects do not survive generation.
+Fusion rules are passive generator data for the threaded interpreter. Products expand into concrete opcode patterns before validation and rendering. Generated matchers use opcode widths from `instr.Type`, choose the longest applicable specialization, and dispatch directly to closed renderers. Product identities and runtime match/action objects do not survive generation.
 
 Standalone opcode execution is the semantic oracle. Fusion preserves results, stack and frame state, instruction pointers, traps and check order, control flow, and final ownership. NOP run compaction remains local to the NOP handler because it is dispatch compaction, not semantic producer-consumer fusion.
 
 ## Generated Support Matrix
 
-Counts come from normalized concrete rules after product expansion. Threaded count includes every rule. ARM64 count includes rules with a native specialization.
+Counts come from normalized concrete rules after product expansion.
 
-| First operation | Threaded | ARM64 |
-|---|---:|---:|
-| `const.get` | 3 | 2 |
-| `const.get[not types.String]` | 3 | 3 |
-| `const.get[types.F32]` | 21 | 0 |
-| `const.get[types.F64]` | 21 | 0 |
-| `const.get[types.I32]` | 37 | 0 |
-| `const.get[types.I64]` | 35 | 0 |
-| `dup` | 3 | 3 |
-| `f32.const` | 21 | 0 |
-| `f32.eq` | 1 | 0 |
-| `f32.ge` | 1 | 0 |
-| `f32.gt` | 1 | 0 |
-| `f32.le` | 1 | 0 |
-| `f32.lt` | 1 | 0 |
-| `f32.ne` | 1 | 0 |
-| `f64.const` | 21 | 0 |
-| `f64.eq` | 1 | 0 |
-| `f64.ge` | 1 | 0 |
-| `f64.gt` | 1 | 0 |
-| `f64.le` | 1 | 0 |
-| `f64.lt` | 1 | 0 |
-| `f64.ne` | 1 | 0 |
-| `global.get` | 563 | 3 |
-| `i32.const` | 38 | 0 |
-| `i32.eq` | 1 | 0 |
-| `i32.eqz` | 1 | 0 |
-| `i32.ge_s` | 1 | 0 |
-| `i32.ge_u` | 1 | 0 |
-| `i32.gt_s` | 1 | 0 |
-| `i32.gt_u` | 1 | 0 |
-| `i32.le_s` | 1 | 0 |
-| `i32.le_u` | 1 | 0 |
-| `i32.lt_s` | 1 | 0 |
-| `i32.lt_u` | 1 | 0 |
-| `i32.ne` | 1 | 0 |
-| `i64.const` | 35 | 0 |
-| `i64.eq` | 1 | 0 |
-| `i64.eqz` | 1 | 0 |
-| `i64.ge_s` | 1 | 0 |
-| `i64.ge_u` | 1 | 0 |
-| `i64.gt_s` | 1 | 0 |
-| `i64.gt_u` | 1 | 0 |
-| `i64.le_s` | 1 | 0 |
-| `i64.le_u` | 1 | 0 |
-| `i64.lt_s` | 1 | 0 |
-| `i64.lt_u` | 1 | 0 |
-| `i64.ne` | 1 | 0 |
-| `local.get` | 339 | 3 |
-| `ref.null` | 3 | 3 |
-| `upval.get` | 563 | 3 |
-| Total | 1740 | 20 |
+| First operation | Threaded |
+|---|---:|
+| `const.get` | 3 |
+| `const.get[not types.String]` | 3 |
+| `const.get[types.F32]` | 21 |
+| `const.get[types.F64]` | 21 |
+| `const.get[types.I32]` | 37 |
+| `const.get[types.I64]` | 35 |
+| `dup` | 3 |
+| `f32.const` | 21 |
+| `f32.eq` | 1 |
+| `f32.ge` | 1 |
+| `f32.gt` | 1 |
+| `f32.le` | 1 |
+| `f32.lt` | 1 |
+| `f32.ne` | 1 |
+| `f64.const` | 21 |
+| `f64.eq` | 1 |
+| `f64.ge` | 1 |
+| `f64.gt` | 1 |
+| `f64.le` | 1 |
+| `f64.lt` | 1 |
+| `f64.ne` | 1 |
+| `global.get` | 563 |
+| `i32.const` | 38 |
+| `i32.eq` | 1 |
+| `i32.eqz` | 1 |
+| `i32.ge_s` | 1 |
+| `i32.ge_u` | 1 |
+| `i32.gt_s` | 1 |
+| `i32.gt_u` | 1 |
+| `i32.le_s` | 1 |
+| `i32.le_u` | 1 |
+| `i32.lt_s` | 1 |
+| `i32.lt_u` | 1 |
+| `i32.ne` | 1 |
+| `i64.const` | 35 |
+| `i64.eq` | 1 |
+| `i64.eqz` | 1 |
+| `i64.ge_s` | 1 |
+| `i64.ge_u` | 1 |
+| `i64.gt_s` | 1 |
+| `i64.gt_u` | 1 |
+| `i64.le_s` | 1 |
+| `i64.le_u` | 1 |
+| `i64.lt_s` | 1 |
+| `i64.lt_u` | 1 |
+| `i64.ne` | 1 |
+| `local.get` | 339 |
+| `ref.null` | 3 |
+| `upval.get` | 563 |
+| Total | 1740 |
 
-Threaded rules cover ref consumption, constant calls and closure creation, numeric operations and comparisons, conditional branches, and constant aggregate indexes. Integer division and remainder use direct fused handlers that preserve standalone trap IP and stack state. ARM64 specializes declared ref consumers and constant direct calls; other patterns retain ordinary trace lowering.
+Rules cover ref consumption, constant calls and closure creation, numeric operations and comparisons, conditional branches, and constant aggregate indexes. Integer division and remainder use direct fused handlers that preserve standalone trap IP and stack state.
 
 ## Threaded Compilation
 
@@ -89,31 +89,27 @@ Threading calls one generated fusion matcher before standalone opcode dispatch. 
 
 Compile-time specialization resolves operands, declared slot kinds, constants, heap objects, and cached coroutine metadata. Final handlers do not dispatch source functions, decode operands, inspect concrete heap types, or rescan bytecode for yields.
 
-## ARM64 Lowering
+## JIT Separation
 
-ARM64 matching runs after frame validation and loop-backedge handling, before standalone opcode lowering. Result contract:
+The generator does not emit architecture-specific code or tests. ARM64 trace fusion is ordinary lowering code in `interp/jit_arm64.go`, next to the standalone operations it combines. This keeps JIT selection, guards, symbolic stack mutation, and emitted instructions in one implementation instead of mirroring them through generator metadata.
 
-| Result | Meaning |
-|---|---|
-| `(0, true)` | no specialization; continue standalone lowering |
-| `(n, true)` | committed `n` recorded steps |
-| `(0, false)` | selected commit failed; reject native compilation |
-
-Preflight may read trace steps, bytecode, constants, heap values, targets, and metadata. It must not mutate symbolic values, allocate registers, emit instructions, create exits, or update journals. Commit begins only after selecting the longest applicable specialization; failure never falls back to a shorter rule. Existing loop-backedge lowering retains priority. Fused conditional lowering materializes its condition explicitly before using the shared branch path.
+Threaded declarations are not a cross-backend registry. An ARM64 specialization is added only when trace lowering benefits from it and is tested through JIT behavior.
 
 ## Ref Ownership
 
 RC elimination is local and proven by each closed renderer. A slot or constant source may be borrowed only when its ref is fully consumed inside the fused sequence. `REF_NULL` may omit its balanced retain/release, and `DUP` may avoid creating temporary ownership when its duplicate is consumed locally.
 
-Borrowed refs never enter the VM stack, symbolic value stack, frame/global/upvalue storage, side exits, deoptimization snapshots, calls, yields, or control-flow boundaries. String constants remain standalone because loading interns them. Declared I64 slots retain numeric ownership rules even when a large current value is heap-promoted.
+Borrowed refs never enter the VM stack, frame/global/upvalue storage, calls, yields, or control-flow boundaries. String constants remain standalone because loading interns them. Declared I64 slots retain numeric ownership rules even when a large current value is heap-promoted.
 
 ## Generation and Checks
 
-`make generate` refreshes generated files and this document. Generated output has stable ordering and contains no timestamp or absolute path. `make check-generated` reports stale output without rewriting it. `make check` also verifies module tidiness, formatting, vet, race tests, native build, and Linux ARM64 production/test compilation.
+`make generate` refreshes threaded generated files and this document. Generated output has stable ordering and contains no timestamp or absolute path. `make check-generated` reports stale output without rewriting it. `make check` also verifies module tidiness, formatting, vet, race tests, native build, and Linux ARM64 production/test compilation.
 
 ## Maintenance Notes
 
-Add a pattern only when every expanded concrete combination has one supported renderer and locally obvious ownership. Reject ambiguous, shadowed, variable-width, backend-incomplete, stack-inconsistent, or ownership-unsafe patterns during generation. Do not add callbacks, code strings, ownership annotations, synthetic opcodes, or runtime rule objects.
+Add a threaded pattern only when every expanded concrete combination has one supported renderer and locally obvious ownership. Reject ambiguous, shadowed, variable-width, stack-inconsistent, or ownership-unsafe patterns during generation. Do not add callbacks, code strings, ownership annotations, synthetic opcodes, runtime rule objects, or architecture-specific output.
+
+Keep ARM64 trace fusion hand-written in `interp/jit_arm64.go`. Do not add architecture flags or renderers to this generator.
 
 ## Related Docs
 

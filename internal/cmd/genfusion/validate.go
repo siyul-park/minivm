@@ -62,12 +62,14 @@ func validate(rules []rule) error {
 		}
 		if want, ok := rule.delta(); ok {
 			pops, pushes, fixed, err := effect(rule.pattern)
-			if err != nil || !fixed {
+			if err != nil {
 				return err
 			}
-			delta := pushes - pops
-			if delta != want {
-				return fmt.Errorf("stack delta %d (pop %d, push %d), want %d", delta, pops, pushes, want)
+			if fixed {
+				delta := pushes - pops
+				if delta != want {
+					return fmt.Errorf("stack delta %d (pop %d, push %d), want %d", delta, pops, pushes, want)
+				}
 			}
 		}
 		key := rule.pattern.key()
@@ -81,9 +83,6 @@ func validate(rules []rule) error {
 		}
 		if _, err := renderThreadedRule(rule, rule.pattern.width(), ""); err != nil {
 			return fmt.Errorf("unsupported threaded fusion %s: %w", key, err)
-		}
-		if rule.arm64 && !supportsARM64(rule.pattern) {
-			return fmt.Errorf("ARM64-marked fusion has no specialization %s", key)
 		}
 		seen[key] = rule
 	}

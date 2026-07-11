@@ -13,7 +13,7 @@ import (
 )
 
 func TestRun(t *testing.T) {
-	t.Run("writes deterministic inline fusion sources", func(t *testing.T) {
+	t.Run("writes deterministic threaded fusion sources", func(t *testing.T) {
 		first, err := generate()
 		require.NoError(t, err)
 		second, err := generate()
@@ -24,17 +24,15 @@ func TestRun(t *testing.T) {
 		for idx, output := range first {
 			paths[idx] = output.path
 		}
-		require.IsIncreasing(t, paths)
-		require.Contains(t, paths, "docs/fusion.md")
+		require.Equal(t, []string{
+			"docs/fusion.md",
+			"interp/fusion_gen.go",
+			"interp/fusion_gen_test.go",
+		}, paths)
 
 		rules, err := expand(declarations()...)
 		require.NoError(t, err)
-		arm64 := 0
-		for _, rule := range rules {
-			if rule.arm64 {
-				arm64++
-			}
-		}
+
 		var docs []byte
 		for _, output := range first {
 			if output.path == "docs/fusion.md" {
@@ -42,7 +40,7 @@ func TestRun(t *testing.T) {
 				break
 			}
 		}
-		require.Contains(t, string(docs), fmt.Sprintf("| Total | %d | %d |", len(rules), arm64))
+		require.Contains(t, string(docs), fmt.Sprintf("| Total | %d |", len(rules)))
 		require.NotContains(t, string(docs), "/Users/")
 	})
 
@@ -125,28 +123,10 @@ func TestRun(t *testing.T) {
 		require.Contains(t, string(test), "WithTick(1)")
 	})
 
-	t.Run("renders declared ARM64 fusion", func(t *testing.T) {
-		marked := rule{pattern: fuse(op(instr.REF_NULL), op(instr.DROP)).pattern, arm64: true}
-		unmarked := rule{pattern: fuse(op(instr.DUP), op(instr.DROP)).pattern}
-
-		data, err := renderARM64([]rule{marked, unmarked})
-		require.NoError(t, err)
-		require.Contains(t, string(data), "case uint16(instr.REF_NULL)<<8 | uint16(instr.DROP):")
-		require.NotContains(t, string(data), "case uint16(instr.DUP)<<8 | uint16(instr.DROP):")
-		require.Contains(t, string(data), "}\n\nfunc (l arm64Lowerer) match")
-		require.Contains(t, string(data), "}\n\nfunc (l arm64Lowerer) adjacent")
-	})
-
 	t.Run("accepts declared stack effects", func(t *testing.T) {
 		rules, err := expand(declarations()...)
 		require.NoError(t, err)
 		require.NoError(t, validate(rules))
-	})
-
-	t.Run("rejects unsupported ARM64 specialization", func(t *testing.T) {
-		rules, err := expand(fuse(op(instr.I32_CONST), op(instr.I32_ADD)).withARM64())
-		require.NoError(t, err)
-		require.ErrorContains(t, validate(rules), "ARM64-marked fusion has no specialization")
 	})
 
 	t.Run("rejects duplicate concrete patterns", func(t *testing.T) {

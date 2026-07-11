@@ -26,12 +26,10 @@ type declaration struct {
 	pattern   pattern
 	sources   []fragment
 	consumers []fragment
-	arm64     bool
 }
 
 type rule struct {
 	pattern pattern
-	arm64   bool
 }
 
 type family struct {
@@ -45,21 +43,21 @@ func declarations() []declaration {
 		product(
 			sources(op(instr.LOCAL_GET), op(instr.GLOBAL_GET), op(instr.UPVAL_GET)),
 			consumers(op(instr.DROP), op(instr.REF_IS_NULL), seq(op(instr.REF_IS_NULL), op(instr.BR_IF))),
-		).withARM64(),
+		),
 		product(
 			sources(op(instr.CONST_GET, not(typeFor[types.String]()))),
 			consumers(op(instr.DROP), op(instr.REF_IS_NULL), seq(op(instr.REF_IS_NULL), op(instr.BR_IF))),
-		).withARM64(),
-		fuse(op(instr.REF_NULL), op(instr.DROP)).withARM64(),
-		fuse(op(instr.REF_NULL), op(instr.REF_IS_NULL)).withARM64(),
-		fuse(op(instr.REF_NULL), op(instr.REF_IS_NULL), op(instr.BR_IF)).withARM64(),
-		fuse(op(instr.DUP), op(instr.DROP)).withARM64(),
-		fuse(op(instr.DUP), op(instr.REF_IS_NULL)).withARM64(),
-		fuse(op(instr.DUP), op(instr.REF_IS_NULL), op(instr.BR_IF)).withARM64(),
+		),
+		fuse(op(instr.REF_NULL), op(instr.DROP)),
+		fuse(op(instr.REF_NULL), op(instr.REF_IS_NULL)),
+		fuse(op(instr.REF_NULL), op(instr.REF_IS_NULL), op(instr.BR_IF)),
+		fuse(op(instr.DUP), op(instr.DROP)),
+		fuse(op(instr.DUP), op(instr.REF_IS_NULL)),
+		fuse(op(instr.DUP), op(instr.REF_IS_NULL), op(instr.BR_IF)),
 	}
 	result = append(result,
-		fuse(op(instr.CONST_GET), op(instr.CALL)).withARM64(),
-		fuse(op(instr.CONST_GET), op(instr.RETURN_CALL)).withARM64(),
+		fuse(op(instr.CONST_GET), op(instr.CALL)),
+		fuse(op(instr.CONST_GET), op(instr.RETURN_CALL)),
 		fuse(op(instr.CONST_GET), op(instr.CLOSURE_NEW)),
 	)
 	return append(result, numeric()...)
@@ -192,14 +190,9 @@ func flatten(fragments []fragment) []operation {
 	return result
 }
 
-func (declaration declaration) withARM64() declaration {
-	declaration.arm64 = true
-	return declaration
-}
-
 func (declaration declaration) expand() ([]rule, error) {
 	if len(declaration.pattern) > 0 {
-		return []rule{{pattern: declaration.pattern, arm64: declaration.arm64}}, nil
+		return []rule{{pattern: declaration.pattern}}, nil
 	}
 	if len(declaration.sources) == 0 || len(declaration.consumers) == 0 {
 		return nil, fmt.Errorf("empty fusion product")
@@ -209,7 +202,7 @@ func (declaration declaration) expand() ([]rule, error) {
 		for _, consumer := range declaration.consumers {
 			pattern := append(pattern(nil), source...)
 			pattern = append(pattern, consumer...)
-			result = append(result, rule{pattern: pattern, arm64: declaration.arm64})
+			result = append(result, rule{pattern: pattern})
 		}
 	}
 	return result, nil

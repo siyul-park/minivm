@@ -149,7 +149,7 @@ type lowerer interface {
 }
 ```
 
-`jit_arm64.go` provides ARM64 construction, constants, offsets, opcode lowering, and `arm64Lowerer.lower`.
+`jit_arm64.go` provides ARM64 construction, constants, offsets, opcode lowering, and `arm64Lowerer.lower`. Short ARM64 trace fusions are written directly in that file beside ordinary lowering; `internal/cmd/genfusion` generates threaded-interpreter fusion only.
 
 Other architectures use stubs, so JIT is unavailable.
 

@@ -635,6 +635,199 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 	return false
 }
 
+// fusion lowers short sequences whose intermediate ref ownership can be
+// eliminated safely. A miss leaves standalone lowering untouched; a selected
+// sequence either commits in full or rejects native compilation.
+func (l arm64Lowerer) fusion(ctx *lowering, ops, tail []step, idx int) (int, bool) {
+	n := l.fusionSize(ctx, ops, idx)
+	if n == 0 {
+		return 0, true
+	}
+	source := ops[idx]
+	consumer := ops[idx+1]
+	if consumer.op == instr.CALL || consumer.op == instr.RETURN_CALL {
+		return l.fuseCall(ctx, source, consumer)
+	}
+	return l.fuseRef(ctx, ops, tail, idx, n)
+}
+
+func (l arm64Lowerer) fuseCall(ctx *lowering, source, call step) (int, bool) {
+	f := ctx.frame()
+	idx := int(uint16(f.code[source.ip+1]) | uint16(f.code[source.ip+2])<<8)
+	if idx >= len(ctx.constants) || ctx.constants[idx].Kind() != types.KindRef {
+		return 0, true
+	}
+	ref := ctx.constants[idx].Ref()
+	if ref < 0 || ref >= len(ctx.heap) {
+		return 0, true
+	}
+	callee := ref
+	switch fn := ctx.heap[ref].(type) {
+	case *types.Closure:
+		callee = int(fn.Fn)
+	case *types.Function:
+	default:
+		return 0, true
+	}
+	if callee < 0 || callee >= len(ctx.funcs) {
+		return 0, true
+	}
+	if callee != call.callee || ctx.funcs[callee] == nil {
+		return 0, true
+	}
+	ctx.push(value{fn: callee, kind: types.KindRef, raw: true, ref: ref})
+	if call.op == instr.CALL {
+		if !l.call(ctx, call) {
+			return 0, false
+		}
+	} else if call.callee == ctx.addr {
+		if !l.tailLoop(ctx, call) {
+			return 0, false
+		}
+	} else if !l.tailMorph(ctx, call) {
+		return 0, false
+	}
+	return 2, true
+}
+
+func (l arm64Lowerer) fuseRef(ctx *lowering, ops, tail []step, idx, n int) (int, bool) {
+	source := ops[idx]
+	consumer := ops[idx+1]
+	f := ctx.frame()
+
+	var reg asm.VReg
+	drop := consumer.op == instr.DROP
+	switch source.op {
+	case instr.LOCAL_GET:
+		slot := int(f.code[source.ip+1])
+		if slot >= len(f.kinds) || f.kinds[slot] != types.KindRef {
+			return 0, true
+		}
+		if drop {
+			return n, true
+		}
+		if !l.loadLocal(ctx, f, slot, source.ip) {
+			return 0, false
+		}
+		reg = f.locals[slot].reg
+	case instr.GLOBAL_GET:
+		slot := int(uint16(f.code[source.ip+1]) | uint16(f.code[source.ip+2])<<8)
+		if slot >= len(ctx.globals) || slot > 4095 || ctx.globals[slot] != types.KindRef {
+			return 0, true
+		}
+		if drop {
+			return n, true
+		}
+		reg = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDR(reg, ctx.pin(scratchGlobals), int16(slot*8)))
+	case instr.UPVAL_GET:
+		slot := int(f.code[source.ip+1])
+		if slot >= len(f.upvals) || f.upvals[slot] != types.KindRef {
+			return 0, true
+		}
+		if drop {
+			return n, true
+		}
+		reg = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDR(reg, l.upvalBase(ctx), int16(slot*8)))
+	case instr.CONST_GET:
+		constant := int(uint16(f.code[source.ip+1]) | uint16(f.code[source.ip+2])<<8)
+		if constant >= len(ctx.constants) || ctx.constants[constant].Kind() != types.KindRef {
+			return 0, true
+		}
+		boxed := ctx.constants[constant]
+		ref := boxed.Ref()
+		if ref < 0 || ref >= len(ctx.heap) {
+			return 0, true
+		}
+		if _, ok := ctx.heap[ref].(types.String); ok {
+			return 0, true
+		}
+		if drop {
+			return n, true
+		}
+		reg = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDI(reg, uint64(boxed))...)
+	case instr.REF_NULL:
+		if drop {
+			return n, true
+		}
+		reg = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDI(reg, uint64(types.BoxedNull))...)
+	case instr.DUP:
+		if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
+			return 0, true
+		}
+		if drop {
+			return n, true
+		}
+		var ok bool
+		reg, ok = l.box(ctx, ctx.values[len(ctx.values)-1])
+		if !ok {
+			return 0, false
+		}
+	default:
+		return 0, true
+	}
+
+	null := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	result := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(null, uint64(types.BoxedNull))...)
+	ctx.assembler.Emit(arm64.CMP(reg, null), arm64.CSET(result, arm64.CondEQ))
+	ctx.push(value{reg: result, kind: types.KindI1, raw: true})
+	if n == 3 && !l.brIf(ctx, ops[idx+2], l.callerTail(ops, idx+2, tail)) {
+		return 0, false
+	}
+	return n, true
+}
+
+func (l arm64Lowerer) fusionSize(ctx *lowering, ops []step, idx int) int {
+	if idx+1 >= len(ops) || !l.consecutive(ops[idx], ops[idx+1]) {
+		return 0
+	}
+	source := ops[idx]
+	consumer := ops[idx+1]
+	if source.op == instr.CONST_GET && (consumer.op == instr.CALL || consumer.op == instr.RETURN_CALL) {
+		return 2
+	}
+	switch source.op {
+	case instr.LOCAL_GET, instr.GLOBAL_GET, instr.UPVAL_GET, instr.CONST_GET, instr.REF_NULL, instr.DUP:
+	default:
+		return 0
+	}
+	if consumer.op == instr.DROP {
+		return 2
+	}
+	if consumer.op != instr.REF_IS_NULL {
+		return 0
+	}
+	if idx+2 >= len(ops) {
+		return 2
+	}
+	branch := ops[idx+2]
+	if !l.consecutive(consumer, branch) || branch.op != instr.BR_IF {
+		return 2
+	}
+	if ctx.loop && branch.target == ctx.tree.root.anchor.ip {
+		return 2
+	}
+	return 3
+}
+
+func (l arm64Lowerer) consecutive(a, b step) bool {
+	if a.fn != b.fn || a.depth != b.depth {
+		return false
+	}
+	width := 1
+	for _, operand := range instr.TypeOf(a.op).Widths {
+		if operand < 0 {
+			return false
+		}
+		width += operand
+	}
+	return b.ip == a.ip+width
+}
+
 func (l arm64Lowerer) i32Const(ctx *lowering, op step) bool {
 	f := ctx.frame()
 	val := binary.LittleEndian.Uint32(f.code[op.ip+1 : op.ip+5])
