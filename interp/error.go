@@ -42,6 +42,7 @@ var (
 	ErrHeapExhausted       = errors.New("heap exhausted")
 	ErrYield               = errors.New("yield")
 	ErrCoroutineDone       = errors.New("coroutine done")
+	ErrInterpreterBusy     = errors.New("interpreter busy")
 	ErrUncaughtException   = errors.New("uncaught exception")
 )
 

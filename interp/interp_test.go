@@ -2496,12 +2496,70 @@ func TestInterpreter_Marshal(t *testing.T) {
 }
 
 func TestInterpreter_Unmarshal(t *testing.T) {
-	i := New(program.New(nil))
-	defer i.Close()
+	t.Run("scalar", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
 
-	var dst int32
-	require.NoError(t, i.Unmarshal(types.I32(7), &dst))
-	require.Equal(t, int32(7), dst)
+		var dst int32
+		require.NoError(t, i.Unmarshal(types.I32(7), &dst))
+		require.Equal(t, int32(7), dst)
+	})
+
+	t.Run("VM function", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32},
+		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
+
+		var add func(int32, int32) (int32, error)
+		require.NoError(t, i.Unmarshal(fn, &add))
+		got, err := add(2, 3)
+		require.NoError(t, err)
+		require.Equal(t, int32(5), got)
+	})
+
+	t.Run("function ref", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
+		).MustBuild()
+		addr, err := i.Alloc(fn)
+		require.NoError(t, err)
+
+		var call func() int32
+		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
+		require.Equal(t, int32(7), call())
+		require.NoError(t, i.Release(addr))
+	})
+
+	t.Run("runtime error", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_DIV_S), instr.New(instr.RETURN),
+		).MustBuild()
+
+		var call func() (int32, error)
+		require.NoError(t, i.Unmarshal(fn, &call))
+		got, err := call()
+		require.Zero(t, got)
+		require.ErrorIs(t, err, ErrDivideByZero)
+
+		got, err = call()
+		require.Zero(t, got)
+		require.ErrorIs(t, err, ErrDivideByZero)
+	})
+
+	t.Run("signature mismatch", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).MustBuild()
+
+		var call func() int64
+		require.ErrorIs(t, i.Unmarshal(fn, &call), ErrTypeMismatch)
+	})
 }
 
 func TestInterpreter_Context(t *testing.T) {

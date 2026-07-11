@@ -418,6 +418,83 @@ func (i *Interpreter) Unmarshal(v types.Value, dst any) error {
 	return i.marshaler.Unmarshal(i, v, dst)
 }
 
+func (i *Interpreter) invoke(val types.Value, params []types.Boxed) (returns []types.Boxed, err error) {
+	if i.ctx != nil || i.fp != 1 {
+		return nil, ErrInterpreterBusy
+	}
+	target, ok := i.callable(val)
+	if !ok {
+		return nil, ErrTypeMismatch
+	}
+	base := i.sp
+	if base+len(params)+1 > len(i.stack) {
+		return nil, ErrStackOverflow
+	}
+	copy(i.stack[base:], params)
+	i.sp += len(params)
+
+	var addr int
+	switch v := val.(type) {
+	case types.Boxed:
+		addr = v.Ref()
+		i.retain(addr)
+	default:
+		addr, err = i.Alloc(target)
+		if err != nil {
+			i.sp = base
+			return nil, err
+		}
+	}
+	i.stack[i.sp] = types.BoxRef(addr)
+	i.sp++
+
+	saved := *i.fr
+	defer func() {
+		if err != nil {
+			for i.fp > 1 {
+				f := &i.frames[i.fp-1]
+				if f.release {
+					i.release(f.ref)
+				}
+				i.fp--
+			}
+			for _, value := range i.stack[base:i.sp] {
+				i.releaseBox(value)
+			}
+		}
+		i.sp = base
+		i.fr = &i.frames[0]
+		*i.fr = saved
+	}()
+
+	i.fr.code = []func(*Interpreter){threaded[instr.CALL](&threader{})}
+	i.fr.ip = 0
+	if err = i.Run(context.Background()); err != nil {
+		return nil, err
+	}
+	returns = append([]types.Boxed(nil), i.stack[base:i.sp]...)
+	return returns, nil
+}
+
+func (i *Interpreter) callable(val types.Value) (types.Value, bool) {
+	if boxed, ok := val.(types.Boxed); ok {
+		if boxed.Kind() != types.KindRef {
+			return nil, false
+		}
+		loaded, err := i.Load(boxed.Ref())
+		if err != nil {
+			return nil, false
+		}
+		val = loaded
+	}
+	switch val.(type) {
+	case *types.Function, *types.Closure:
+		return val, true
+	default:
+		return nil, false
+	}
+}
+
 func (i *Interpreter) Context() context.Context {
 	return i.ctx
 }

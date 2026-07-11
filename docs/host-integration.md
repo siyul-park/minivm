@@ -223,6 +223,16 @@ add := func(a, b int32) (int32, error) {
 fn, err := vm.Marshal(add)
 ```
 
+A VM `*types.Function`, `*types.Closure`, or live function ref can be unmarshaled into a matching Go function type. Each call marshals arguments, runs the VM function on the same interpreter, then unmarshals results.
+
+```go
+var add func(int32, int32) (int32, error)
+err := vm.Unmarshal(vmFunction, &add)
+result, err := add(2, 3)
+```
+
+The Go and VM signatures must map to equal VM function types. A final Go `error` return is host-only: VM traps and bridge errors are returned there. Without a final `error`, those failures panic. Calls must not overlap another `Run` or callable-wrapper call on the same interpreter. Wrappers use the interpreter heap and become invalid when their referenced function no longer survives normal `Release`, `Reset`, or `Close` ownership rules.
+
 VM-native scalar types can reduce conversion overhead.
 
 ```go

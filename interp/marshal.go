@@ -338,7 +338,7 @@ func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*marshalPla
 			VMType:    fnType,
 			Type:      t,
 			marshal:   m.marshalFunc(fnType),
-			unmarshal: (*unmarshalState).unmarshalUnsupported,
+			unmarshal: m.unmarshalFunc(fnType),
 		}, nil
 	case reflect.Array:
 		elemPlan, err := m.compile(t.Elem(), seen)
@@ -1162,6 +1162,61 @@ func (m *codec) marshalMap(mt *types.MapType) marshaler {
 			}
 		}
 		return out, nil
+	}
+}
+
+func (m *codec) unmarshalFunc(fnType *types.FunctionType) unmarshaler {
+	return func(s *unmarshalState, val types.Value, dst reflect.Value) error {
+		target, ok := s.i.callable(val)
+		if !ok || target.Type() == nil || !target.Type().Equals(fnType) {
+			return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, val, dst.Type())
+		}
+
+		typ := dst.Type()
+		hasError := typ.NumOut() > 0 && typ.Out(typ.NumOut()-1).Implements(typeError)
+		dst.Set(reflect.MakeFunc(typ, func(in []reflect.Value) []reflect.Value {
+			out := make([]reflect.Value, typ.NumOut())
+			for idx := range out {
+				out[idx] = reflect.Zero(typ.Out(idx))
+			}
+			fail := func(err error) []reflect.Value {
+				if !hasError {
+					panic(err)
+				}
+				out[len(out)-1] = reflect.ValueOf(err)
+				return out
+			}
+
+			boxed := make([]types.Boxed, len(in))
+			marshal := &marshalState{m: m, i: s.i, seen: make(map[uintptr]bool)}
+			defer marshal.close()
+			for idx := range in {
+				v, err := marshal.boxAs(in[idx], fnType.Params[idx])
+				if err != nil {
+					return fail(fmt.Errorf("function param %d: %w", idx, err))
+				}
+				boxed[idx] = v
+			}
+
+			returns, err := s.i.invoke(val, boxed)
+			if err != nil {
+				return fail(err)
+			}
+			defer func() {
+				for _, value := range returns {
+					s.i.releaseBox(value)
+				}
+			}()
+			for idx := range returns {
+				value := reflect.New(typ.Out(idx))
+				if err := m.Unmarshal(s.i, returns[idx], value.Interface()); err != nil {
+					return fail(fmt.Errorf("function return %d: %w", idx, err))
+				}
+				out[idx] = value.Elem()
+			}
+			return out
+		}))
+		return nil
 	}
 }
 
