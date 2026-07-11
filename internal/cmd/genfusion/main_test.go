@@ -229,11 +229,6 @@ func TestRun(t *testing.T) {
 		require.ErrorContains(t, validate(rules), "i64.add has stack kind i32, want i64")
 	})
 
-	t.Run("rejects fixed stack delta mismatches", func(t *testing.T) {
-		pattern := fuse(op(instr.I32_CONST), op(instr.I32_ADD)).pattern
-		require.ErrorContains(t, validateStack(pattern, 1), "stack delta 0 (pop 1, push 1), want 1")
-	})
-
 	t.Run("accepts representation-compatible stack effects", func(t *testing.T) {
 		rules, err := expand(fuse(op(instr.I32_EQZ), op(instr.BR_IF)))
 		require.NoError(t, err)

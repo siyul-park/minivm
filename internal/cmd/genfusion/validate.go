@@ -26,24 +26,6 @@ func expand(declarations ...declaration) ([]rule, error) {
 	return result, nil
 }
 
-func (declaration declaration) expand() ([]rule, error) {
-	if len(declaration.pattern) > 0 {
-		return []rule{{pattern: declaration.pattern, arm64: declaration.arm64}}, nil
-	}
-	if len(declaration.sources) == 0 || len(declaration.consumers) == 0 {
-		return nil, fmt.Errorf("empty fusion product")
-	}
-	result := make([]rule, 0, len(declaration.sources)*len(declaration.consumers))
-	for _, source := range declaration.sources {
-		for _, consumer := range declaration.consumers {
-			pattern := append(pattern(nil), source...)
-			pattern = append(pattern, consumer...)
-			result = append(result, rule{pattern: pattern, arm64: declaration.arm64})
-		}
-	}
-	return result, nil
-}
-
 func validate(rules []rule) error {
 	seen := make(map[string]rule, len(rules))
 	for _, rule := range rules {
@@ -78,9 +60,14 @@ func validate(rules []rule) error {
 				return fmt.Errorf("ref rule has unsupported trailing operations")
 			}
 		}
-		if delta, ok := rule.delta(); ok {
-			if err := validateStack(rule.pattern, delta); err != nil {
+		if want, ok := rule.delta(); ok {
+			pops, pushes, fixed, err := effect(rule.pattern)
+			if err != nil || !fixed {
 				return err
+			}
+			delta := pushes - pops
+			if delta != want {
+				return fmt.Errorf("stack delta %d (pop %d, push %d), want %d", delta, pops, pushes, want)
 			}
 		}
 		key := rule.pattern.key()
@@ -99,18 +86,6 @@ func validate(rules []rule) error {
 			return fmt.Errorf("ARM64-marked fusion has no specialization %s", key)
 		}
 		seen[key] = rule
-	}
-	return nil
-}
-
-func validateStack(pattern pattern, want int) error {
-	pops, pushes, fixed, err := effect(pattern)
-	if err != nil || !fixed {
-		return err
-	}
-	delta := pushes - pops
-	if delta != want {
-		return fmt.Errorf("stack delta %d (pop %d, push %d), want %d", delta, pops, pushes, want)
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"reflect"
 
 	"github.com/siyul-park/minivm/instr"
@@ -144,11 +145,6 @@ func producers[T types.Value](immediate instr.Opcode) []fragment {
 	}
 }
 
-func (declaration declaration) withARM64() declaration {
-	declaration.arm64 = true
-	return declaration
-}
-
 func fuse(ops ...fragment) declaration {
 	return declaration{pattern: flatten(ops)}
 }
@@ -194,4 +190,27 @@ func flatten(fragments []fragment) []operation {
 		result = append(result, fragment...)
 	}
 	return result
+}
+
+func (declaration declaration) withARM64() declaration {
+	declaration.arm64 = true
+	return declaration
+}
+
+func (declaration declaration) expand() ([]rule, error) {
+	if len(declaration.pattern) > 0 {
+		return []rule{{pattern: declaration.pattern, arm64: declaration.arm64}}, nil
+	}
+	if len(declaration.sources) == 0 || len(declaration.consumers) == 0 {
+		return nil, fmt.Errorf("empty fusion product")
+	}
+	result := make([]rule, 0, len(declaration.sources)*len(declaration.consumers))
+	for _, source := range declaration.sources {
+		for _, consumer := range declaration.consumers {
+			pattern := append(pattern(nil), source...)
+			pattern = append(pattern, consumer...)
+			result = append(result, rule{pattern: pattern, arm64: declaration.arm64})
+		}
+	}
+	return result, nil
 }
