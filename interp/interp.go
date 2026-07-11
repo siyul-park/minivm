@@ -681,19 +681,10 @@ func (i *Interpreter) Reset() {
 	}
 }
 
-// jit lazily builds the native compiler, compiles the function at addr, and
-// installs the result into the dispatch table. Triggered once per function from
-// the Run-loop safepoint when its sample count crosses the threshold.
+// compile lowers traces already recorded for addr and installs the resulting
+// native entries. Recording belongs to observe and side-exit handling because
+// only those paths hold the exact runtime state for their anchor.
 func (i *Interpreter) compile(addr int) error {
-	// Ensure an entry trace is recorded. The safepoint that triggers
-	// compilation lands at an arbitrary IP, but the trace compiler installs a
-	// whole-function native entry, so the Tracer replays from a clean entry
-	// state rather than from wherever sampling happened to stop. observe
-	// already captures the entry trace on the first hot entry tick, so
-	// ensureEntry reuses that root here instead of re-walking the function.
-	if _, err := i.tracer.ensureEntry(i, addr); err != nil {
-		return err
-	}
 	if i.cache != nil && !i.dynamic[addr] {
 		return i.shared(addr)
 	}
@@ -898,7 +889,7 @@ func (i *Interpreter) safepoint() error {
 func (i *Interpreter) observe(f *frame) error {
 	i.sample(f)
 	if f.ip == 0 {
-		if _, err := i.tracer.ensureEntry(i, f.addr); err != nil {
+		if _, err := i.tracer.capture(i, anchor{addr: f.addr, ip: 0}); err != nil {
 			return err
 		}
 	}
@@ -917,14 +908,13 @@ func (i *Interpreter) observe(f *frame) error {
 			if h != f.ip {
 				continue
 			}
-			if !i.tracer.hasLoop(f.addr, f.ip) {
-				if _, err := i.tracer.capture(i, anchor{addr: f.addr, ip: f.ip}); err != nil {
+			t, err := i.tracer.capture(i, anchor{addr: f.addr, ip: f.ip})
+			if err != nil {
+				return err
+			}
+			if t != nil && t.kind != aborted {
+				if err := i.compile(f.addr); err != nil {
 					return err
-				}
-				if i.tracer.hasLoop(f.addr, f.ip) {
-					if err := i.compile(f.addr); err != nil {
-						return err
-					}
 				}
 			}
 			break

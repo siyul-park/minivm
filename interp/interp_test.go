@@ -3087,6 +3087,26 @@ func TestWithThreshold(t *testing.T) {
 		require.Equal(t, types.I32(7), v)
 	})
 
+	t.Run("records entry only from actual entry state", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+			instr.New(instr.NOP),
+		})
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+
+		i.fr.ip = 1
+		require.NoError(t, i.compile(0))
+		i.tracer.mu.Lock()
+		_, recorded := i.tracer.trees[anchor{addr: 0, ip: 0}]
+		i.tracer.mu.Unlock()
+		require.False(t, recorded)
+
+		i.fr.ip = 0
+		require.NoError(t, i.observe(i.fr))
+		require.NotNil(t, i.tracer.rootAt(anchor{addr: 0, ip: 0}))
+	})
+
 	t.Run("jits top-level entry", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),

@@ -13,11 +13,13 @@ import (
 // compiler consumes. One Tracer is shared across a pool so a trace
 // recorded by one member compiles once and serves all.
 type Tracer struct {
-	mu        sync.Mutex
 	exact     [][]func(*Interpreter)
 	loops     map[int][]int
 	trees     map[anchor]*tree
 	blacklist map[anchor]bool
+
+	recordMu sync.Mutex
+	mu       sync.Mutex
 }
 
 type anchor struct {
@@ -128,12 +130,27 @@ func (r *Tracer) exit(i *Interpreter, root anchor, target branch) (int64, error)
 }
 
 func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
+	r.recordMu.Lock()
+	defer r.recordMu.Unlock()
+
 	r.mu.Lock()
 	if r.blacklist[a] {
 		r.mu.Unlock()
 		return nil, nil
 	}
-	tree := r.tree(a)
+	tree := r.trees[a]
+	if tree != nil && tree.root != nil && tree.root.kind != aborted {
+		t := tree.root
+		r.mu.Unlock()
+		return t, nil
+	}
+	if a.ip == 0 && (i.fr == nil || i.fr.addr != a.addr || i.fr.ip != 0) {
+		r.mu.Unlock()
+		return nil, nil
+	}
+	if tree == nil {
+		tree = r.tree(a)
+	}
 	if tree.attempts >= attemptLimit {
 		r.blacklist[a] = true
 		r.mu.Unlock()
@@ -152,14 +169,6 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 	clone := r.clone(i)
 	clone.fr = &clone.frames[i.fp-1]
 	clone.fr.ip = a.ip
-	// An entry anchor replays the function from a clean frame: drop any operands
-	// the sampling safepoint left mid-expression so the trace begins exactly as
-	// a fresh call would, with only params and locals live.
-	if a.ip == 0 && clone.fr.addr == a.addr {
-		if fn, ok := clone.function(a.addr); ok {
-			clone.sp = clone.fr.bp + len(fn.LocalKinds())
-		}
-	}
 
 	t := &trace{anchor: a}
 	startFP := clone.fp
@@ -178,7 +187,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		}
 
 		st := r.op(&clone, op, startFP)
-		if op == instr.CALL && r.recursive(&clone, a) {
+		if op == instr.CALL && r.callsAnchor(&clone, a) {
 			r.skipCall(&clone, a.addr)
 			st.callee = a.addr
 			t.ops = append(t.ops, st)
@@ -188,11 +197,11 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		// back-edge: record it as the entry trace's terminal op without stepping
 		// into the reused frame, so it compiles like a loop without tripping the
 		// ip-0 loop ban (the trace stays kind=returned).
-		if op == instr.RETURN_CALL && a.ip == 0 && r.tailToAnchor(&clone, a) {
+		if op == instr.RETURN_CALL && a.ip == 0 && r.callsAnchor(&clone, a) {
 			st.callee = a.addr
 			t.ops = append(t.ops, st)
 			t.kind = returned
-			r.store(a, t)
+			r.publish(a, tree, t)
 			return t, nil
 		}
 		// YIELD/RESUME and exception-producing ops have side effects a trace
@@ -208,7 +217,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 			}
 			t.ops = append(t.ops, st)
 			t.kind = returned
-			r.store(a, t)
+			r.publish(a, tree, t)
 			return t, nil
 		}
 		if err := r.step(&clone, f.addr, f.ip); err != nil {
@@ -232,7 +241,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 				cut:    true,
 			})
 			t.kind = partial
-			r.store(a, t)
+			r.publish(a, tree, t)
 			return t, nil
 		}
 		// Heap mutations still lower as terminal native fast paths: the hot
@@ -245,27 +254,27 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 				break
 			}
 			t.kind = returned
-			r.store(a, t)
+			r.publish(a, tree, t)
 			return t, nil
 		}
 		switch {
 		case op == instr.RETURN && st.depth == 0:
 			t.kind = returned
-			r.store(a, t)
+			r.publish(a, tree, t)
 			return t, nil
 		case clone.fr.addr >= 0 && clone.fr.addr < len(clone.instrs) && clone.fr.ip >= len(clone.instrs[clone.fr.addr]):
 			if clone.fr.addr == 0 {
 				t.kind = completed
 			}
-			r.store(a, t)
+			r.publish(a, tree, t)
 			return t, nil
 		case clone.fr.addr == a.addr && clone.fr.ip == a.ip:
 			t.kind = loop
-			r.store(a, t)
+			r.publish(a, tree, t)
 			return t, nil
 		case clone.fp < startFP:
 			t.kind = returned
-			r.store(a, t)
+			r.publish(a, tree, t)
 			return t, nil
 		}
 	}
@@ -276,7 +285,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		t.ops = append(t.ops, step{fn: f.addr, target: f.ip, depth: clone.fp - startFP, cut: true})
 		t.kind = partial
 	}
-	r.store(a, t)
+	r.publish(a, tree, t)
 	return t, nil
 }
 
@@ -457,23 +466,9 @@ func (r *Tracer) finish(i *Interpreter, st *step, op instr.Opcode) {
 	}
 }
 
-func (r *Tracer) recursive(i *Interpreter, a anchor) bool {
-	if i.sp == 0 || i.stack[i.sp-1].Kind() != types.KindRef {
-		return false
-	}
-	addr := i.stack[i.sp-1].Ref()
-	if addr != a.addr || addr < 0 || addr >= len(i.heap) {
-		return false
-	}
-	_, ok := i.heap[addr].(*types.Function)
-	return ok
-}
-
-// tailToAnchor reports whether the next RETURN_CALL tail-calls the trace's own
-// anchor function with a plain function ref on top of the stack. Such a tail
-// call closes the trace as a native loop back-edge rather than stepping into a
-// fresh callee body, so the recorder treats it as the entry trace's terminal.
-func (r *Tracer) tailToAnchor(i *Interpreter, a anchor) bool {
+// callsAnchor reports whether the next call targets the trace anchor through a
+// plain function reference on top of the stack.
+func (r *Tracer) callsAnchor(i *Interpreter, a anchor) bool {
 	if i.sp == 0 || i.stack[i.sp-1].Kind() != types.KindRef {
 		return false
 	}
@@ -518,11 +513,12 @@ func (r *Tracer) step(i *Interpreter, addr, ip int) (err error) {
 	return nil
 }
 
-func (r *Tracer) store(a anchor, t *trace) {
+func (r *Tracer) publish(a anchor, tree *tree, t *trace) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	tr := r.tree(a)
-	tr.root = t
+	if r.trees[a] == tree {
+		tree.root = t
+	}
 }
 
 func (r *Tracer) remove(addr int) {
@@ -576,37 +572,6 @@ func (r *Tracer) rootAt(a anchor) *tree {
 		return nil
 	}
 	return t.snapshot()
-}
-
-// ensureEntry returns the recorded entry trace for addr, capturing it once
-// if no non-aborted trace is recorded yet. Both the sampling safepoint
-// (observe) and the one-shot compile trigger (compile) need an entry trace
-// captured before compiling; routing both through this single owner means a
-// trigger that lands after the other already captured the entry reuses that
-// root instead of re-walking the function and inflating attempt/blacklist
-// counters with duplicate work.
-func (r *Tracer) ensureEntry(i *Interpreter, addr int) (*trace, error) {
-	if !r.hasLoop(addr, 0) {
-		if _, err := r.capture(i, anchor{addr: addr, ip: 0}); err != nil {
-			return nil, err
-		}
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	tr := r.trees[anchor{addr: addr, ip: 0}]
-	if tr == nil {
-		return nil, nil
-	}
-	return tr.root, nil
-}
-
-// hasLoop reports whether a non-aborted trace is already recorded at
-// (addr, ip), so the trigger does not re-capture an existing root.
-func (r *Tracer) hasLoop(addr, ip int) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	tree := r.trees[anchor{addr: addr, ip: ip}]
-	return tree != nil && tree.root != nil && tree.root.kind != aborted
 }
 
 // headers returns the loop-header IPs of the function at addr: the targets of

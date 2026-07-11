@@ -1,14 +1,34 @@
 package interp
 
 import (
+	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
+
+type blockingIterator struct {
+	entered chan struct{}
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (i *blockingIterator) Kind() types.Kind { return types.KindRef }
+func (i *blockingIterator) Type() types.Type { return types.NewIteratorType(types.TypeI32) }
+func (i *blockingIterator) String() string   { return "blocking" }
+func (i *blockingIterator) Next() bool       { return false }
+func (i *blockingIterator) Done() bool       { return false }
+
+func (i *blockingIterator) Current() types.Value {
+	i.once.Do(func() { close(i.entered) })
+	<-i.release
+	return types.I32(0)
+}
 
 func TestNewTracer(t *testing.T) {
 	tracer := NewTracer()
@@ -91,6 +111,87 @@ func TestTracer_Capture(t *testing.T) {
 		require.Equal(t, instr.BR, tr.ops[len(tr.ops)-2].op)
 		require.True(t, tr.ops[len(tr.ops)-1].cut)
 		require.Equal(t, 1, tr.ops[len(tr.ops)-1].target)
+	})
+
+	t.Run("records one entry concurrently", func(t *testing.T) {
+		tracer := NewTracer()
+		release := make(chan struct{})
+		iter := &blockingIterator{entered: make(chan struct{}), release: release}
+		prog := program.New(
+			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CORO_VALUE)},
+			program.WithConstants(iter),
+		)
+
+		const workers = attemptLimit + 1
+		interpreters := make([]*Interpreter, workers)
+		errs := make(chan error, workers)
+		start := make(chan struct{})
+		var ready sync.WaitGroup
+		ready.Add(workers)
+		for idx := range workers {
+			i := New(prog, WithTracer(tracer), WithThreshold(-1))
+			interpreters[idx] = i
+			go func() {
+				ready.Done()
+				<-start
+				_, err := tracer.capture(i, anchor{})
+				errs <- err
+			}()
+		}
+		ready.Wait()
+		close(start)
+		<-iter.entered
+
+		deadline := time.Now().Add(100 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			tracer.mu.Lock()
+			attempts := tracer.trees[anchor{}].attempts
+			tracer.mu.Unlock()
+			if attempts > 1 {
+				break
+			}
+			runtime.Gosched()
+		}
+
+		tracer.mu.Lock()
+		attempts := tracer.trees[anchor{}].attempts
+		tracer.mu.Unlock()
+		close(release)
+		for range workers {
+			require.NoError(t, <-errs)
+		}
+		for _, i := range interpreters {
+			require.NoError(t, i.Close())
+		}
+		require.Equal(t, 1, attempts)
+	})
+
+	t.Run("does not deadlock when recording reclaims a function", func(t *testing.T) {
+		tracer := NewTracer()
+		i := New(
+			program.New([]instr.Instruction{instr.New(instr.DROP)}),
+			WithTracer(tracer),
+			WithThreshold(-1),
+		)
+		defer i.Close()
+
+		addr := i.keep(&types.Function{Code: []byte{byte(instr.NOP)}})
+		i.stack[0] = types.BoxRef(addr)
+		i.sp = 1
+
+		done := make(chan error, 1)
+		go func() {
+			_, err := tracer.capture(i, anchor{})
+			done <- err
+		}()
+
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("capture deadlocked while reclaiming a function")
+		}
+		require.NotNil(t, tracer.rootAt(anchor{}))
 	})
 
 	t.Run("records terminal set fast paths and rejects remaining array mutators", func(t *testing.T) {
