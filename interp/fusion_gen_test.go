@@ -3,6 +3,8 @@
 package interp
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
@@ -11,7 +13,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestThreader_FusionRules(t *testing.T) {
+func testFusionRules(t *testing.T) {
+	type state struct {
+		err   string
+		ip    int
+		bp    int
+		fp    int
+		sp    int
+		stack []types.Boxed
+		rc    []int
+		free  []int
+	}
 	tests := []struct {
 		name string
 		ops  []instr.Opcode
@@ -432,6 +444,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "global.get/global.get/i32.add", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I32_ADD}, kind: types.KindI32},
 		{name: "global.get/global.get/i32.sub", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I32_SUB}, kind: types.KindI32},
 		{name: "global.get/global.get/i32.mul", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I32_MUL}, kind: types.KindI32},
+		{name: "global.get/global.get/i32.div_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I32_DIV_S}, kind: types.KindI32},
+		{name: "global.get/global.get/i32.div_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I32_DIV_U}, kind: types.KindI32},
+		{name: "global.get/global.get/i32.rem_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I32_REM_S}, kind: types.KindI32},
+		{name: "global.get/global.get/i32.rem_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I32_REM_U}, kind: types.KindI32},
 		{name: "global.get/global.get/i32.shl", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I32_SHL}, kind: types.KindI32},
 		{name: "global.get/global.get/i32.shr_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I32_SHR_S}, kind: types.KindI32},
 		{name: "global.get/global.get/i32.shr_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I32_SHR_U}, kind: types.KindI32},
@@ -453,6 +469,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "global.get/global.get/i64.add", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I64_ADD}, kind: types.KindI64},
 		{name: "global.get/global.get/i64.sub", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I64_SUB}, kind: types.KindI64},
 		{name: "global.get/global.get/i64.mul", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I64_MUL}, kind: types.KindI64},
+		{name: "global.get/global.get/i64.div_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I64_DIV_S}, kind: types.KindI64},
+		{name: "global.get/global.get/i64.div_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I64_DIV_U}, kind: types.KindI64},
+		{name: "global.get/global.get/i64.rem_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I64_REM_S}, kind: types.KindI64},
+		{name: "global.get/global.get/i64.rem_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I64_REM_U}, kind: types.KindI64},
 		{name: "global.get/global.get/i64.shl", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I64_SHL}, kind: types.KindI64},
 		{name: "global.get/global.get/i64.shr_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I64_SHR_S}, kind: types.KindI64},
 		{name: "global.get/global.get/i64.shr_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.GLOBAL_GET, instr.I64_SHR_U}, kind: types.KindI64},
@@ -508,6 +528,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "global.get/local.get/i32.add", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I32_ADD}, kind: types.KindI32},
 		{name: "global.get/local.get/i32.sub", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I32_SUB}, kind: types.KindI32},
 		{name: "global.get/local.get/i32.mul", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I32_MUL}, kind: types.KindI32},
+		{name: "global.get/local.get/i32.div_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I32_DIV_S}, kind: types.KindI32},
+		{name: "global.get/local.get/i32.div_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I32_DIV_U}, kind: types.KindI32},
+		{name: "global.get/local.get/i32.rem_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I32_REM_S}, kind: types.KindI32},
+		{name: "global.get/local.get/i32.rem_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I32_REM_U}, kind: types.KindI32},
 		{name: "global.get/local.get/i32.shl", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I32_SHL}, kind: types.KindI32},
 		{name: "global.get/local.get/i32.shr_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I32_SHR_S}, kind: types.KindI32},
 		{name: "global.get/local.get/i32.shr_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I32_SHR_U}, kind: types.KindI32},
@@ -529,6 +553,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "global.get/local.get/i64.add", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I64_ADD}, kind: types.KindI64},
 		{name: "global.get/local.get/i64.sub", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I64_SUB}, kind: types.KindI64},
 		{name: "global.get/local.get/i64.mul", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I64_MUL}, kind: types.KindI64},
+		{name: "global.get/local.get/i64.div_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I64_DIV_S}, kind: types.KindI64},
+		{name: "global.get/local.get/i64.div_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I64_DIV_U}, kind: types.KindI64},
+		{name: "global.get/local.get/i64.rem_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I64_REM_S}, kind: types.KindI64},
+		{name: "global.get/local.get/i64.rem_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I64_REM_U}, kind: types.KindI64},
 		{name: "global.get/local.get/i64.shl", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I64_SHL}, kind: types.KindI64},
 		{name: "global.get/local.get/i64.shr_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I64_SHR_S}, kind: types.KindI64},
 		{name: "global.get/local.get/i64.shr_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.LOCAL_GET, instr.I64_SHR_U}, kind: types.KindI64},
@@ -580,6 +608,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "global.get/upval.get/i32.add", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I32_ADD}, kind: types.KindI32},
 		{name: "global.get/upval.get/i32.sub", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I32_SUB}, kind: types.KindI32},
 		{name: "global.get/upval.get/i32.mul", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I32_MUL}, kind: types.KindI32},
+		{name: "global.get/upval.get/i32.div_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I32_DIV_S}, kind: types.KindI32},
+		{name: "global.get/upval.get/i32.div_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I32_DIV_U}, kind: types.KindI32},
+		{name: "global.get/upval.get/i32.rem_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I32_REM_S}, kind: types.KindI32},
+		{name: "global.get/upval.get/i32.rem_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I32_REM_U}, kind: types.KindI32},
 		{name: "global.get/upval.get/i32.shl", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I32_SHL}, kind: types.KindI32},
 		{name: "global.get/upval.get/i32.shr_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I32_SHR_S}, kind: types.KindI32},
 		{name: "global.get/upval.get/i32.shr_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I32_SHR_U}, kind: types.KindI32},
@@ -601,6 +633,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "global.get/upval.get/i64.add", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I64_ADD}, kind: types.KindI64},
 		{name: "global.get/upval.get/i64.sub", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I64_SUB}, kind: types.KindI64},
 		{name: "global.get/upval.get/i64.mul", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I64_MUL}, kind: types.KindI64},
+		{name: "global.get/upval.get/i64.div_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I64_DIV_S}, kind: types.KindI64},
+		{name: "global.get/upval.get/i64.div_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I64_DIV_U}, kind: types.KindI64},
+		{name: "global.get/upval.get/i64.rem_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I64_REM_S}, kind: types.KindI64},
+		{name: "global.get/upval.get/i64.rem_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I64_REM_U}, kind: types.KindI64},
 		{name: "global.get/upval.get/i64.shl", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I64_SHL}, kind: types.KindI64},
 		{name: "global.get/upval.get/i64.shr_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I64_SHR_S}, kind: types.KindI64},
 		{name: "global.get/upval.get/i64.shr_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.UPVAL_GET, instr.I64_SHR_U}, kind: types.KindI64},
@@ -617,6 +653,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "global.get/i32.const/i32.add", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_CONST, instr.I32_ADD}, kind: types.KindI32},
 		{name: "global.get/i32.const/i32.sub", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_CONST, instr.I32_SUB}, kind: types.KindI32},
 		{name: "global.get/i32.const/i32.mul", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_CONST, instr.I32_MUL}, kind: types.KindI32},
+		{name: "global.get/i32.const/i32.div_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_CONST, instr.I32_DIV_S}, kind: types.KindI32},
+		{name: "global.get/i32.const/i32.div_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_CONST, instr.I32_DIV_U}, kind: types.KindI32},
+		{name: "global.get/i32.const/i32.rem_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_CONST, instr.I32_REM_S}, kind: types.KindI32},
+		{name: "global.get/i32.const/i32.rem_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_CONST, instr.I32_REM_U}, kind: types.KindI32},
 		{name: "global.get/i32.const/i32.shl", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_CONST, instr.I32_SHL}, kind: types.KindI32},
 		{name: "global.get/i32.const/i32.shr_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_CONST, instr.I32_SHR_S}, kind: types.KindI32},
 		{name: "global.get/i32.const/i32.shr_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_CONST, instr.I32_SHR_U}, kind: types.KindI32},
@@ -654,6 +694,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "global.get/i64.const/i64.add", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_CONST, instr.I64_ADD}, kind: types.KindI64},
 		{name: "global.get/i64.const/i64.sub", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_CONST, instr.I64_SUB}, kind: types.KindI64},
 		{name: "global.get/i64.const/i64.mul", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_CONST, instr.I64_MUL}, kind: types.KindI64},
+		{name: "global.get/i64.const/i64.div_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_CONST, instr.I64_DIV_S}, kind: types.KindI64},
+		{name: "global.get/i64.const/i64.div_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_CONST, instr.I64_DIV_U}, kind: types.KindI64},
+		{name: "global.get/i64.const/i64.rem_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_CONST, instr.I64_REM_S}, kind: types.KindI64},
+		{name: "global.get/i64.const/i64.rem_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_CONST, instr.I64_REM_U}, kind: types.KindI64},
 		{name: "global.get/i64.const/i64.shl", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_CONST, instr.I64_SHL}, kind: types.KindI64},
 		{name: "global.get/i64.const/i64.shr_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_CONST, instr.I64_SHR_S}, kind: types.KindI64},
 		{name: "global.get/i64.const/i64.shr_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_CONST, instr.I64_SHR_U}, kind: types.KindI64},
@@ -757,6 +801,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "local.get/local.get/i32.add", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I32_ADD}, kind: types.KindI32},
 		{name: "local.get/local.get/i32.sub", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I32_SUB}, kind: types.KindI32},
 		{name: "local.get/local.get/i32.mul", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I32_MUL}, kind: types.KindI32},
+		{name: "local.get/local.get/i32.div_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I32_DIV_S}, kind: types.KindI32},
+		{name: "local.get/local.get/i32.div_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I32_DIV_U}, kind: types.KindI32},
+		{name: "local.get/local.get/i32.rem_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I32_REM_S}, kind: types.KindI32},
+		{name: "local.get/local.get/i32.rem_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I32_REM_U}, kind: types.KindI32},
 		{name: "local.get/local.get/i32.shl", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I32_SHL}, kind: types.KindI32},
 		{name: "local.get/local.get/i32.shr_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I32_SHR_S}, kind: types.KindI32},
 		{name: "local.get/local.get/i32.shr_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I32_SHR_U}, kind: types.KindI32},
@@ -778,6 +826,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "local.get/local.get/i64.add", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I64_ADD}, kind: types.KindI64},
 		{name: "local.get/local.get/i64.sub", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I64_SUB}, kind: types.KindI64},
 		{name: "local.get/local.get/i64.mul", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I64_MUL}, kind: types.KindI64},
+		{name: "local.get/local.get/i64.div_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I64_DIV_S}, kind: types.KindI64},
+		{name: "local.get/local.get/i64.div_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I64_DIV_U}, kind: types.KindI64},
+		{name: "local.get/local.get/i64.rem_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I64_REM_S}, kind: types.KindI64},
+		{name: "local.get/local.get/i64.rem_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I64_REM_U}, kind: types.KindI64},
 		{name: "local.get/local.get/i64.shl", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I64_SHL}, kind: types.KindI64},
 		{name: "local.get/local.get/i64.shr_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I64_SHR_S}, kind: types.KindI64},
 		{name: "local.get/local.get/i64.shr_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.LOCAL_GET, instr.I64_SHR_U}, kind: types.KindI64},
@@ -794,6 +846,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "local.get/i32.const/i32.add", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_CONST, instr.I32_ADD}, kind: types.KindI32},
 		{name: "local.get/i32.const/i32.sub", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_CONST, instr.I32_SUB}, kind: types.KindI32},
 		{name: "local.get/i32.const/i32.mul", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_CONST, instr.I32_MUL}, kind: types.KindI32},
+		{name: "local.get/i32.const/i32.div_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_CONST, instr.I32_DIV_S}, kind: types.KindI32},
+		{name: "local.get/i32.const/i32.div_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_CONST, instr.I32_DIV_U}, kind: types.KindI32},
+		{name: "local.get/i32.const/i32.rem_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_CONST, instr.I32_REM_S}, kind: types.KindI32},
+		{name: "local.get/i32.const/i32.rem_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_CONST, instr.I32_REM_U}, kind: types.KindI32},
 		{name: "local.get/i32.const/i32.shl", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_CONST, instr.I32_SHL}, kind: types.KindI32},
 		{name: "local.get/i32.const/i32.shr_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_CONST, instr.I32_SHR_S}, kind: types.KindI32},
 		{name: "local.get/i32.const/i32.shr_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_CONST, instr.I32_SHR_U}, kind: types.KindI32},
@@ -831,6 +887,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "local.get/i64.const/i64.add", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_CONST, instr.I64_ADD}, kind: types.KindI64},
 		{name: "local.get/i64.const/i64.sub", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_CONST, instr.I64_SUB}, kind: types.KindI64},
 		{name: "local.get/i64.const/i64.mul", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_CONST, instr.I64_MUL}, kind: types.KindI64},
+		{name: "local.get/i64.const/i64.div_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_CONST, instr.I64_DIV_S}, kind: types.KindI64},
+		{name: "local.get/i64.const/i64.div_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_CONST, instr.I64_DIV_U}, kind: types.KindI64},
+		{name: "local.get/i64.const/i64.rem_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_CONST, instr.I64_REM_S}, kind: types.KindI64},
+		{name: "local.get/i64.const/i64.rem_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_CONST, instr.I64_REM_U}, kind: types.KindI64},
 		{name: "local.get/i64.const/i64.shl", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_CONST, instr.I64_SHL}, kind: types.KindI64},
 		{name: "local.get/i64.const/i64.shr_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_CONST, instr.I64_SHR_S}, kind: types.KindI64},
 		{name: "local.get/i64.const/i64.shr_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_CONST, instr.I64_SHR_U}, kind: types.KindI64},
@@ -963,6 +1023,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "upval.get/global.get/i32.add", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I32_ADD}, kind: types.KindI32},
 		{name: "upval.get/global.get/i32.sub", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I32_SUB}, kind: types.KindI32},
 		{name: "upval.get/global.get/i32.mul", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I32_MUL}, kind: types.KindI32},
+		{name: "upval.get/global.get/i32.div_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I32_DIV_S}, kind: types.KindI32},
+		{name: "upval.get/global.get/i32.div_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I32_DIV_U}, kind: types.KindI32},
+		{name: "upval.get/global.get/i32.rem_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I32_REM_S}, kind: types.KindI32},
+		{name: "upval.get/global.get/i32.rem_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I32_REM_U}, kind: types.KindI32},
 		{name: "upval.get/global.get/i32.shl", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I32_SHL}, kind: types.KindI32},
 		{name: "upval.get/global.get/i32.shr_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I32_SHR_S}, kind: types.KindI32},
 		{name: "upval.get/global.get/i32.shr_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I32_SHR_U}, kind: types.KindI32},
@@ -984,6 +1048,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "upval.get/global.get/i64.add", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I64_ADD}, kind: types.KindI64},
 		{name: "upval.get/global.get/i64.sub", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I64_SUB}, kind: types.KindI64},
 		{name: "upval.get/global.get/i64.mul", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I64_MUL}, kind: types.KindI64},
+		{name: "upval.get/global.get/i64.div_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I64_DIV_S}, kind: types.KindI64},
+		{name: "upval.get/global.get/i64.div_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I64_DIV_U}, kind: types.KindI64},
+		{name: "upval.get/global.get/i64.rem_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I64_REM_S}, kind: types.KindI64},
+		{name: "upval.get/global.get/i64.rem_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I64_REM_U}, kind: types.KindI64},
 		{name: "upval.get/global.get/i64.shl", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I64_SHL}, kind: types.KindI64},
 		{name: "upval.get/global.get/i64.shr_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I64_SHR_S}, kind: types.KindI64},
 		{name: "upval.get/global.get/i64.shr_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.GLOBAL_GET, instr.I64_SHR_U}, kind: types.KindI64},
@@ -1039,6 +1107,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "upval.get/local.get/i32.add", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I32_ADD}, kind: types.KindI32},
 		{name: "upval.get/local.get/i32.sub", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I32_SUB}, kind: types.KindI32},
 		{name: "upval.get/local.get/i32.mul", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I32_MUL}, kind: types.KindI32},
+		{name: "upval.get/local.get/i32.div_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I32_DIV_S}, kind: types.KindI32},
+		{name: "upval.get/local.get/i32.div_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I32_DIV_U}, kind: types.KindI32},
+		{name: "upval.get/local.get/i32.rem_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I32_REM_S}, kind: types.KindI32},
+		{name: "upval.get/local.get/i32.rem_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I32_REM_U}, kind: types.KindI32},
 		{name: "upval.get/local.get/i32.shl", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I32_SHL}, kind: types.KindI32},
 		{name: "upval.get/local.get/i32.shr_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I32_SHR_S}, kind: types.KindI32},
 		{name: "upval.get/local.get/i32.shr_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I32_SHR_U}, kind: types.KindI32},
@@ -1060,6 +1132,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "upval.get/local.get/i64.add", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I64_ADD}, kind: types.KindI64},
 		{name: "upval.get/local.get/i64.sub", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I64_SUB}, kind: types.KindI64},
 		{name: "upval.get/local.get/i64.mul", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I64_MUL}, kind: types.KindI64},
+		{name: "upval.get/local.get/i64.div_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I64_DIV_S}, kind: types.KindI64},
+		{name: "upval.get/local.get/i64.div_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I64_DIV_U}, kind: types.KindI64},
+		{name: "upval.get/local.get/i64.rem_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I64_REM_S}, kind: types.KindI64},
+		{name: "upval.get/local.get/i64.rem_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I64_REM_U}, kind: types.KindI64},
 		{name: "upval.get/local.get/i64.shl", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I64_SHL}, kind: types.KindI64},
 		{name: "upval.get/local.get/i64.shr_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I64_SHR_S}, kind: types.KindI64},
 		{name: "upval.get/local.get/i64.shr_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.LOCAL_GET, instr.I64_SHR_U}, kind: types.KindI64},
@@ -1111,6 +1187,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "upval.get/upval.get/i32.add", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I32_ADD}, kind: types.KindI32},
 		{name: "upval.get/upval.get/i32.sub", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I32_SUB}, kind: types.KindI32},
 		{name: "upval.get/upval.get/i32.mul", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I32_MUL}, kind: types.KindI32},
+		{name: "upval.get/upval.get/i32.div_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I32_DIV_S}, kind: types.KindI32},
+		{name: "upval.get/upval.get/i32.div_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I32_DIV_U}, kind: types.KindI32},
+		{name: "upval.get/upval.get/i32.rem_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I32_REM_S}, kind: types.KindI32},
+		{name: "upval.get/upval.get/i32.rem_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I32_REM_U}, kind: types.KindI32},
 		{name: "upval.get/upval.get/i32.shl", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I32_SHL}, kind: types.KindI32},
 		{name: "upval.get/upval.get/i32.shr_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I32_SHR_S}, kind: types.KindI32},
 		{name: "upval.get/upval.get/i32.shr_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I32_SHR_U}, kind: types.KindI32},
@@ -1132,6 +1212,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "upval.get/upval.get/i64.add", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I64_ADD}, kind: types.KindI64},
 		{name: "upval.get/upval.get/i64.sub", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I64_SUB}, kind: types.KindI64},
 		{name: "upval.get/upval.get/i64.mul", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I64_MUL}, kind: types.KindI64},
+		{name: "upval.get/upval.get/i64.div_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I64_DIV_S}, kind: types.KindI64},
+		{name: "upval.get/upval.get/i64.div_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I64_DIV_U}, kind: types.KindI64},
+		{name: "upval.get/upval.get/i64.rem_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I64_REM_S}, kind: types.KindI64},
+		{name: "upval.get/upval.get/i64.rem_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I64_REM_U}, kind: types.KindI64},
 		{name: "upval.get/upval.get/i64.shl", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I64_SHL}, kind: types.KindI64},
 		{name: "upval.get/upval.get/i64.shr_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I64_SHR_S}, kind: types.KindI64},
 		{name: "upval.get/upval.get/i64.shr_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.UPVAL_GET, instr.I64_SHR_U}, kind: types.KindI64},
@@ -1148,6 +1232,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "upval.get/i32.const/i32.add", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_CONST, instr.I32_ADD}, kind: types.KindI32},
 		{name: "upval.get/i32.const/i32.sub", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_CONST, instr.I32_SUB}, kind: types.KindI32},
 		{name: "upval.get/i32.const/i32.mul", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_CONST, instr.I32_MUL}, kind: types.KindI32},
+		{name: "upval.get/i32.const/i32.div_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_CONST, instr.I32_DIV_S}, kind: types.KindI32},
+		{name: "upval.get/i32.const/i32.div_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_CONST, instr.I32_DIV_U}, kind: types.KindI32},
+		{name: "upval.get/i32.const/i32.rem_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_CONST, instr.I32_REM_S}, kind: types.KindI32},
+		{name: "upval.get/i32.const/i32.rem_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_CONST, instr.I32_REM_U}, kind: types.KindI32},
 		{name: "upval.get/i32.const/i32.shl", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_CONST, instr.I32_SHL}, kind: types.KindI32},
 		{name: "upval.get/i32.const/i32.shr_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_CONST, instr.I32_SHR_S}, kind: types.KindI32},
 		{name: "upval.get/i32.const/i32.shr_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_CONST, instr.I32_SHR_U}, kind: types.KindI32},
@@ -1185,6 +1273,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "upval.get/i64.const/i64.add", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_CONST, instr.I64_ADD}, kind: types.KindI64},
 		{name: "upval.get/i64.const/i64.sub", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_CONST, instr.I64_SUB}, kind: types.KindI64},
 		{name: "upval.get/i64.const/i64.mul", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_CONST, instr.I64_MUL}, kind: types.KindI64},
+		{name: "upval.get/i64.const/i64.div_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_CONST, instr.I64_DIV_S}, kind: types.KindI64},
+		{name: "upval.get/i64.const/i64.div_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_CONST, instr.I64_DIV_U}, kind: types.KindI64},
+		{name: "upval.get/i64.const/i64.rem_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_CONST, instr.I64_REM_S}, kind: types.KindI64},
+		{name: "upval.get/i64.const/i64.rem_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_CONST, instr.I64_REM_U}, kind: types.KindI64},
 		{name: "upval.get/i64.const/i64.shl", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_CONST, instr.I64_SHL}, kind: types.KindI64},
 		{name: "upval.get/i64.const/i64.shr_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_CONST, instr.I64_SHR_S}, kind: types.KindI64},
 		{name: "upval.get/i64.const/i64.shr_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_CONST, instr.I64_SHR_U}, kind: types.KindI64},
@@ -1308,6 +1400,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "global.get/i32.add", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_ADD}, kind: types.KindI32},
 		{name: "global.get/i32.sub", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_SUB}, kind: types.KindI32},
 		{name: "global.get/i32.mul", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_MUL}, kind: types.KindI32},
+		{name: "global.get/i32.div_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_DIV_S}, kind: types.KindI32},
+		{name: "global.get/i32.div_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_DIV_U}, kind: types.KindI32},
+		{name: "global.get/i32.rem_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_REM_S}, kind: types.KindI32},
+		{name: "global.get/i32.rem_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_REM_U}, kind: types.KindI32},
 		{name: "global.get/i32.shl", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_SHL}, kind: types.KindI32},
 		{name: "global.get/i32.shr_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_SHR_S}, kind: types.KindI32},
 		{name: "global.get/i32.shr_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I32_SHR_U}, kind: types.KindI32},
@@ -1329,6 +1425,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "global.get/i64.add", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_ADD}, kind: types.KindI64},
 		{name: "global.get/i64.sub", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_SUB}, kind: types.KindI64},
 		{name: "global.get/i64.mul", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_MUL}, kind: types.KindI64},
+		{name: "global.get/i64.div_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_DIV_S}, kind: types.KindI64},
+		{name: "global.get/i64.div_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_DIV_U}, kind: types.KindI64},
+		{name: "global.get/i64.rem_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_REM_S}, kind: types.KindI64},
+		{name: "global.get/i64.rem_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_REM_U}, kind: types.KindI64},
 		{name: "global.get/i64.shl", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_SHL}, kind: types.KindI64},
 		{name: "global.get/i64.shr_s", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_SHR_S}, kind: types.KindI64},
 		{name: "global.get/i64.shr_u", ops: []instr.Opcode{instr.GLOBAL_GET, instr.I64_SHR_U}, kind: types.KindI64},
@@ -1386,6 +1486,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "local.get/i32.add", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_ADD}, kind: types.KindI32},
 		{name: "local.get/i32.sub", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_SUB}, kind: types.KindI32},
 		{name: "local.get/i32.mul", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_MUL}, kind: types.KindI32},
+		{name: "local.get/i32.div_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_DIV_S}, kind: types.KindI32},
+		{name: "local.get/i32.div_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_DIV_U}, kind: types.KindI32},
+		{name: "local.get/i32.rem_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_REM_S}, kind: types.KindI32},
+		{name: "local.get/i32.rem_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_REM_U}, kind: types.KindI32},
 		{name: "local.get/i32.shl", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_SHL}, kind: types.KindI32},
 		{name: "local.get/i32.shr_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_SHR_S}, kind: types.KindI32},
 		{name: "local.get/i32.shr_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.I32_SHR_U}, kind: types.KindI32},
@@ -1407,6 +1511,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "local.get/i64.add", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_ADD}, kind: types.KindI64},
 		{name: "local.get/i64.sub", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_SUB}, kind: types.KindI64},
 		{name: "local.get/i64.mul", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_MUL}, kind: types.KindI64},
+		{name: "local.get/i64.div_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_DIV_S}, kind: types.KindI64},
+		{name: "local.get/i64.div_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_DIV_U}, kind: types.KindI64},
+		{name: "local.get/i64.rem_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_REM_S}, kind: types.KindI64},
+		{name: "local.get/i64.rem_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_REM_U}, kind: types.KindI64},
 		{name: "local.get/i64.shl", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_SHL}, kind: types.KindI64},
 		{name: "local.get/i64.shr_s", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_SHR_S}, kind: types.KindI64},
 		{name: "local.get/i64.shr_u", ops: []instr.Opcode{instr.LOCAL_GET, instr.I64_SHR_U}, kind: types.KindI64},
@@ -1457,6 +1565,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "const.get[types.I32]/i32.add", ops: []instr.Opcode{instr.CONST_GET, instr.I32_ADD}, kind: types.KindI32},
 		{name: "const.get[types.I32]/i32.sub", ops: []instr.Opcode{instr.CONST_GET, instr.I32_SUB}, kind: types.KindI32},
 		{name: "const.get[types.I32]/i32.mul", ops: []instr.Opcode{instr.CONST_GET, instr.I32_MUL}, kind: types.KindI32},
+		{name: "const.get[types.I32]/i32.div_s", ops: []instr.Opcode{instr.CONST_GET, instr.I32_DIV_S}, kind: types.KindI32},
+		{name: "const.get[types.I32]/i32.div_u", ops: []instr.Opcode{instr.CONST_GET, instr.I32_DIV_U}, kind: types.KindI32},
+		{name: "const.get[types.I32]/i32.rem_s", ops: []instr.Opcode{instr.CONST_GET, instr.I32_REM_S}, kind: types.KindI32},
+		{name: "const.get[types.I32]/i32.rem_u", ops: []instr.Opcode{instr.CONST_GET, instr.I32_REM_U}, kind: types.KindI32},
 		{name: "const.get[types.I32]/i32.shl", ops: []instr.Opcode{instr.CONST_GET, instr.I32_SHL}, kind: types.KindI32},
 		{name: "const.get[types.I32]/i32.shr_s", ops: []instr.Opcode{instr.CONST_GET, instr.I32_SHR_S}, kind: types.KindI32},
 		{name: "const.get[types.I32]/i32.shr_u", ops: []instr.Opcode{instr.CONST_GET, instr.I32_SHR_U}, kind: types.KindI32},
@@ -1484,6 +1596,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "const.get[types.I64]/i64.add", ops: []instr.Opcode{instr.CONST_GET, instr.I64_ADD}, kind: types.KindI64},
 		{name: "const.get[types.I64]/i64.sub", ops: []instr.Opcode{instr.CONST_GET, instr.I64_SUB}, kind: types.KindI64},
 		{name: "const.get[types.I64]/i64.mul", ops: []instr.Opcode{instr.CONST_GET, instr.I64_MUL}, kind: types.KindI64},
+		{name: "const.get[types.I64]/i64.div_s", ops: []instr.Opcode{instr.CONST_GET, instr.I64_DIV_S}, kind: types.KindI64},
+		{name: "const.get[types.I64]/i64.div_u", ops: []instr.Opcode{instr.CONST_GET, instr.I64_DIV_U}, kind: types.KindI64},
+		{name: "const.get[types.I64]/i64.rem_s", ops: []instr.Opcode{instr.CONST_GET, instr.I64_REM_S}, kind: types.KindI64},
+		{name: "const.get[types.I64]/i64.rem_u", ops: []instr.Opcode{instr.CONST_GET, instr.I64_REM_U}, kind: types.KindI64},
 		{name: "const.get[types.I64]/i64.shl", ops: []instr.Opcode{instr.CONST_GET, instr.I64_SHL}, kind: types.KindI64},
 		{name: "const.get[types.I64]/i64.shr_s", ops: []instr.Opcode{instr.CONST_GET, instr.I64_SHR_S}, kind: types.KindI64},
 		{name: "const.get[types.I64]/i64.shr_u", ops: []instr.Opcode{instr.CONST_GET, instr.I64_SHR_U}, kind: types.KindI64},
@@ -1539,6 +1655,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "upval.get/i32.add", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_ADD}, kind: types.KindI32},
 		{name: "upval.get/i32.sub", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_SUB}, kind: types.KindI32},
 		{name: "upval.get/i32.mul", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_MUL}, kind: types.KindI32},
+		{name: "upval.get/i32.div_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_DIV_S}, kind: types.KindI32},
+		{name: "upval.get/i32.div_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_DIV_U}, kind: types.KindI32},
+		{name: "upval.get/i32.rem_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_REM_S}, kind: types.KindI32},
+		{name: "upval.get/i32.rem_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_REM_U}, kind: types.KindI32},
 		{name: "upval.get/i32.shl", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_SHL}, kind: types.KindI32},
 		{name: "upval.get/i32.shr_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_SHR_S}, kind: types.KindI32},
 		{name: "upval.get/i32.shr_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.I32_SHR_U}, kind: types.KindI32},
@@ -1560,6 +1680,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "upval.get/i64.add", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_ADD}, kind: types.KindI64},
 		{name: "upval.get/i64.sub", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_SUB}, kind: types.KindI64},
 		{name: "upval.get/i64.mul", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_MUL}, kind: types.KindI64},
+		{name: "upval.get/i64.div_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_DIV_S}, kind: types.KindI64},
+		{name: "upval.get/i64.div_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_DIV_U}, kind: types.KindI64},
+		{name: "upval.get/i64.rem_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_REM_S}, kind: types.KindI64},
+		{name: "upval.get/i64.rem_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_REM_U}, kind: types.KindI64},
 		{name: "upval.get/i64.shl", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_SHL}, kind: types.KindI64},
 		{name: "upval.get/i64.shr_s", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_SHR_S}, kind: types.KindI64},
 		{name: "upval.get/i64.shr_u", ops: []instr.Opcode{instr.UPVAL_GET, instr.I64_SHR_U}, kind: types.KindI64},
@@ -1581,6 +1705,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "i32.const/i32.add", ops: []instr.Opcode{instr.I32_CONST, instr.I32_ADD}, kind: types.KindI32},
 		{name: "i32.const/i32.sub", ops: []instr.Opcode{instr.I32_CONST, instr.I32_SUB}, kind: types.KindI32},
 		{name: "i32.const/i32.mul", ops: []instr.Opcode{instr.I32_CONST, instr.I32_MUL}, kind: types.KindI32},
+		{name: "i32.const/i32.div_s", ops: []instr.Opcode{instr.I32_CONST, instr.I32_DIV_S}, kind: types.KindI32},
+		{name: "i32.const/i32.div_u", ops: []instr.Opcode{instr.I32_CONST, instr.I32_DIV_U}, kind: types.KindI32},
+		{name: "i32.const/i32.rem_s", ops: []instr.Opcode{instr.I32_CONST, instr.I32_REM_S}, kind: types.KindI32},
+		{name: "i32.const/i32.rem_u", ops: []instr.Opcode{instr.I32_CONST, instr.I32_REM_U}, kind: types.KindI32},
 		{name: "i32.const/i32.shl", ops: []instr.Opcode{instr.I32_CONST, instr.I32_SHL}, kind: types.KindI32},
 		{name: "i32.const/i32.shr_s", ops: []instr.Opcode{instr.I32_CONST, instr.I32_SHR_S}, kind: types.KindI32},
 		{name: "i32.const/i32.shr_u", ops: []instr.Opcode{instr.I32_CONST, instr.I32_SHR_U}, kind: types.KindI32},
@@ -1620,6 +1748,10 @@ func TestThreader_FusionRules(t *testing.T) {
 		{name: "i64.const/i64.add", ops: []instr.Opcode{instr.I64_CONST, instr.I64_ADD}, kind: types.KindI64},
 		{name: "i64.const/i64.sub", ops: []instr.Opcode{instr.I64_CONST, instr.I64_SUB}, kind: types.KindI64},
 		{name: "i64.const/i64.mul", ops: []instr.Opcode{instr.I64_CONST, instr.I64_MUL}, kind: types.KindI64},
+		{name: "i64.const/i64.div_s", ops: []instr.Opcode{instr.I64_CONST, instr.I64_DIV_S}, kind: types.KindI64},
+		{name: "i64.const/i64.div_u", ops: []instr.Opcode{instr.I64_CONST, instr.I64_DIV_U}, kind: types.KindI64},
+		{name: "i64.const/i64.rem_s", ops: []instr.Opcode{instr.I64_CONST, instr.I64_REM_S}, kind: types.KindI64},
+		{name: "i64.const/i64.rem_u", ops: []instr.Opcode{instr.I64_CONST, instr.I64_REM_U}, kind: types.KindI64},
 		{name: "i64.const/i64.shl", ops: []instr.Opcode{instr.I64_CONST, instr.I64_SHL}, kind: types.KindI64},
 		{name: "i64.const/i64.shr_s", ops: []instr.Opcode{instr.I64_CONST, instr.I64_SHR_S}, kind: types.KindI64},
 		{name: "i64.const/i64.shr_u", ops: []instr.Opcode{instr.I64_CONST, instr.I64_SHR_U}, kind: types.KindI64},
@@ -1671,6 +1803,8 @@ func TestThreader_FusionRules(t *testing.T) {
 			}
 			prog := program.New(code)
 			c := threader{code: prog.Code}
+			var index instr.Opcode
+			upval := false
 			for _, op := range tt.ops {
 				switch op {
 				case instr.LOCAL_GET:
@@ -1679,11 +1813,123 @@ func TestThreader_FusionRules(t *testing.T) {
 					c.globals = []types.Kind{tt.kind}
 				case instr.UPVAL_GET:
 					c.captures = []types.Kind{tt.kind}
+					upval = true
 				case instr.CONST_GET:
 					c.constants, c.heap, c.coros = constant(tt.kind)
+				case instr.ARRAY_GET, instr.STRUCT_GET:
+					index = op
 				}
 			}
 			require.NotNil(t, c.fusion())
+
+			var typ types.Type = types.TypeRef
+			var value types.Value = types.Null
+			boxed := types.BoxedNull
+			switch tt.kind {
+			case types.KindI32:
+				typ, value = types.TypeI32, types.I32(2)
+				boxed = types.BoxI32(2)
+			case types.KindI64:
+				typ, value = types.TypeI64, types.I64(2)
+				boxed = types.BoxI64(2)
+			case types.KindF32:
+				typ, value = types.TypeF32, types.F32(2)
+				boxed = types.BoxF32(2)
+			case types.KindF64:
+				typ, value = types.TypeF64, types.F64(2)
+				boxed = types.BoxF64(2)
+			default:
+				value = types.NewFunctionBuilder(&types.FunctionType{}).Emit(instr.New(instr.RETURN)).MustBuild()
+			}
+			prog = program.New(code,
+				program.WithLocals(typ),
+				program.WithGlobals(typ),
+				program.WithConstants(value),
+			)
+			if upval {
+				seed := instr.New(instr.REF_NULL)
+				switch tt.kind {
+				case types.KindI32:
+					seed = instr.New(instr.I32_CONST, 2)
+				case types.KindI64:
+					seed = instr.New(instr.I64_CONST, 2)
+				case types.KindF32:
+					seed = instr.New(instr.F32_CONST, 2)
+				case types.KindF64:
+					seed = instr.New(instr.F64_CONST, 2)
+				}
+				body := []instr.Instruction{seed, instr.New(instr.LOCAL_SET, 0)}
+				body = append(body, code...)
+				body = append(body, instr.New(instr.RETURN))
+				fn := types.NewFunctionBuilder(&types.FunctionType{}).
+					WithLocals(typ).
+					WithCaptures(typ).
+					Emit(body...).
+					MustBuild()
+				prog = program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CONST_GET, 1),
+					instr.New(instr.CLOSURE_NEW),
+					instr.New(instr.CALL),
+				},
+					program.WithLocals(typ),
+					program.WithGlobals(typ),
+					program.WithConstants(value, fn),
+				)
+			}
+
+			exact := New(prog, WithTick(1), WithThreshold(-1))
+			defer exact.Close()
+			require.NoError(t, exact.SetLocal(0, boxed))
+			require.NoError(t, exact.SetGlobal(0, boxed))
+			switch index {
+			case instr.ARRAY_GET:
+				require.NoError(t, exact.Push(types.NewArray(types.NewArrayType(types.TypeI32), types.BoxI32(0), types.BoxI32(1), types.BoxI32(2))))
+			case instr.STRUCT_GET:
+				require.NoError(t, exact.Push(types.NewStruct(types.NewStructType(
+					types.NewStructField(types.TypeI32),
+					types.NewStructField(types.TypeI32),
+					types.NewStructField(types.TypeI32),
+				), types.BoxI32(0), types.BoxI32(1), types.BoxI32(2))))
+			}
+			exactErr := exact.Run(context.Background())
+			exactState := state{
+				err:   fmt.Sprint(exactErr),
+				ip:    exact.fr.ip,
+				bp:    exact.fr.bp,
+				fp:    exact.fp,
+				sp:    exact.sp,
+				stack: append([]types.Boxed(nil), exact.stack[:exact.sp]...),
+				rc:    append([]int(nil), exact.rc...),
+				free:  append([]int(nil), exact.free...),
+			}
+
+			fused := New(prog, WithThreshold(-1))
+			defer fused.Close()
+			require.NoError(t, fused.SetLocal(0, boxed))
+			require.NoError(t, fused.SetGlobal(0, boxed))
+			switch index {
+			case instr.ARRAY_GET:
+				require.NoError(t, fused.Push(types.NewArray(types.NewArrayType(types.TypeI32), types.BoxI32(0), types.BoxI32(1), types.BoxI32(2))))
+			case instr.STRUCT_GET:
+				require.NoError(t, fused.Push(types.NewStruct(types.NewStructType(
+					types.NewStructField(types.TypeI32),
+					types.NewStructField(types.TypeI32),
+					types.NewStructField(types.TypeI32),
+				), types.BoxI32(0), types.BoxI32(1), types.BoxI32(2))))
+			}
+			fusedErr := fused.Run(context.Background())
+			fusedState := state{
+				err:   fmt.Sprint(fusedErr),
+				ip:    fused.fr.ip,
+				bp:    fused.fr.bp,
+				fp:    fused.fp,
+				sp:    fused.sp,
+				stack: append([]types.Boxed(nil), fused.stack[:fused.sp]...),
+				rc:    append([]int(nil), fused.rc...),
+				free:  append([]int(nil), fused.free...),
+			}
+			require.Equal(t, exactState, fusedState)
 		})
 	}
 }

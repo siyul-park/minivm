@@ -170,10 +170,10 @@ func numericDeclarations() []declaration {
 func numericFamilies() []numericFamily {
 	return []numericFamily{
 		{sources: numericSources[types.I32](instr.I32_CONST), binary: []instr.Opcode{
-			instr.I32_ADD, instr.I32_SUB, instr.I32_MUL, instr.I32_SHL, instr.I32_SHR_S, instr.I32_SHR_U, instr.I32_XOR, instr.I32_AND, instr.I32_OR, instr.I32_ROTL, instr.I32_ROTR,
+			instr.I32_ADD, instr.I32_SUB, instr.I32_MUL, instr.I32_DIV_S, instr.I32_DIV_U, instr.I32_REM_S, instr.I32_REM_U, instr.I32_SHL, instr.I32_SHR_S, instr.I32_SHR_U, instr.I32_XOR, instr.I32_AND, instr.I32_OR, instr.I32_ROTL, instr.I32_ROTR,
 		}, compares: []instr.Opcode{instr.I32_EQ, instr.I32_NE, instr.I32_LT_S, instr.I32_LT_U, instr.I32_GT_S, instr.I32_GT_U, instr.I32_LE_S, instr.I32_LE_U, instr.I32_GE_S, instr.I32_GE_U}},
 		{sources: numericSources[types.I64](instr.I64_CONST), binary: []instr.Opcode{
-			instr.I64_ADD, instr.I64_SUB, instr.I64_MUL, instr.I64_SHL, instr.I64_SHR_S, instr.I64_SHR_U, instr.I64_XOR, instr.I64_AND, instr.I64_OR, instr.I64_ROTL, instr.I64_ROTR,
+			instr.I64_ADD, instr.I64_SUB, instr.I64_MUL, instr.I64_DIV_S, instr.I64_DIV_U, instr.I64_REM_S, instr.I64_REM_U, instr.I64_SHL, instr.I64_SHR_S, instr.I64_SHR_U, instr.I64_XOR, instr.I64_AND, instr.I64_OR, instr.I64_ROTL, instr.I64_ROTR,
 		}, compares: []instr.Opcode{instr.I64_EQ, instr.I64_NE, instr.I64_LT_S, instr.I64_LT_U, instr.I64_GT_S, instr.I64_GT_U, instr.I64_LE_S, instr.I64_LE_U, instr.I64_GE_S, instr.I64_GE_U}},
 		{sources: numericSources[types.F32](instr.F32_CONST), binary: []instr.Opcode{
 			instr.F32_ADD, instr.F32_SUB, instr.F32_MUL, instr.F32_DIV, instr.F32_REM, instr.F32_MOD, instr.F32_MIN, instr.F32_MAX, instr.F32_COPYSIGN,

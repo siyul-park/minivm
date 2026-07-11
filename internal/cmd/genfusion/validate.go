@@ -72,6 +72,17 @@ func validate(rules []rule) error {
 				}
 			}
 		}
+		if len(rule.pattern) > 2 {
+			consumer := rule.pattern[1].op
+			if consumer == instr.DROP || (consumer == instr.REF_IS_NULL && (len(rule.pattern) != 3 || rule.pattern[2].op != instr.BR_IF)) {
+				return fmt.Errorf("ref rule has unsupported trailing operations")
+			}
+		}
+		if delta, ok := renderedStackDelta(rule); ok {
+			if err := validateStack(rule.pattern, delta); err != nil {
+				return err
+			}
+		}
 		key := patternKey(rule.pattern)
 		if _, ok := seen[key]; ok {
 			return fmt.Errorf("duplicate fusion pattern %s", key)
@@ -90,6 +101,91 @@ func validate(rules []rule) error {
 		seen[key] = rule
 	}
 	return nil
+}
+
+func validateStack(pattern []operation, want int) error {
+	pops, pushes, fixed, err := stackEffect(pattern)
+	if err != nil || !fixed {
+		return err
+	}
+	delta := pushes - pops
+	if delta != want {
+		return fmt.Errorf("stack delta %d (pop %d, push %d), want %d", delta, pops, pushes, want)
+	}
+	return nil
+}
+
+func stackEffect(pattern []operation) (int, int, bool, error) {
+	var stack []instr.Kind
+	pops := 0
+	for _, operation := range pattern {
+		typ := instr.TypeOf(operation.op)
+		if typ.Pop == nil && typ.Push == nil {
+			return 0, 0, false, nil
+		}
+		for _, want := range typ.Pop {
+			if len(stack) == 0 {
+				pops++
+				continue
+			}
+			last := len(stack) - 1
+			got := stack[last]
+			stack = stack[:last]
+			if got != instr.KindAny && want != instr.KindAny && got.Repr() != want.Repr() {
+				return 0, 0, false, fmt.Errorf("%s has stack kind %s, want %s", typ.Mnemonic, got, want)
+			}
+		}
+		stack = append(stack, typ.Push...)
+	}
+	return pops, len(stack), true, nil
+}
+
+func renderedStackDelta(rule rule) (int, bool) {
+	pattern := rule.pattern
+	last := len(pattern) - 1
+	branch := pattern[last].op == instr.BR_IF
+	consumerAt := last
+	if branch {
+		consumerAt--
+	}
+	if consumerAt < 0 {
+		return 0, false
+	}
+	consumer := pattern[consumerAt].op
+	if len(pattern) == 2 && pattern[0].op == instr.I32_CONST && branch {
+		return 0, true
+	}
+	switch consumer {
+	case instr.DROP:
+		if consumerAt != 1 || branch {
+			return 0, false
+		}
+		return 0, true
+	case instr.REF_IS_NULL:
+		if consumerAt != 1 {
+			return 0, false
+		}
+		if branch {
+			return 0, true
+		}
+		return 1, true
+	case instr.ARRAY_GET, instr.STRUCT_GET:
+		if consumerAt != 1 || branch {
+			return 0, false
+		}
+		return 0, true
+	}
+	if arity, _, ok := numericConsumer(consumer); ok {
+		if consumerAt > 2 {
+			return 0, false
+		}
+		delta := consumerAt - arity
+		if !branch {
+			delta++
+		}
+		return delta, true
+	}
+	return 0, false
 }
 
 func patternKey(pattern []operation) string {

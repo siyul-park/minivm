@@ -13,6 +13,8 @@ import (
 )
 
 func TestFusion(t *testing.T) {
+	testFusionRules(t)
+
 	type test struct {
 		name     string
 		prog     *program.Program
