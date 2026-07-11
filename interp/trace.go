@@ -1,7 +1,7 @@
 package interp
 
 import (
-	"fmt"
+	"sort"
 	"sync"
 	"unsafe"
 
@@ -13,10 +13,9 @@ import (
 // compiler consumes. One Tracer is shared across a pool so a trace
 // recorded by one member compiles once and serves all.
 type Tracer struct {
-	exact     [][]func(*Interpreter)
-	loops     map[int][]int
-	trees     map[anchor]*tree
-	blacklist map[anchor]bool
+	exact [][]func(*Interpreter)
+	loops map[int][]int
+	trees map[anchor]*tree
 
 	recordMu sync.Mutex
 	mu       sync.Mutex
@@ -95,9 +94,8 @@ const attemptLimit = 8
 
 func NewTracer() *Tracer {
 	return &Tracer{
-		loops:     map[int][]int{},
-		trees:     map[anchor]*tree{},
-		blacklist: map[anchor]bool{},
+		loops: map[int][]int{},
+		trees: map[anchor]*tree{},
 	}
 }
 
@@ -124,7 +122,9 @@ func (r *Tracer) exit(i *Interpreter, root anchor, target branch) (int64, error)
 		return hits, err
 	}
 	r.mu.Lock()
-	tree.branches[id] = t
+	if r.trees[root] == tree {
+		tree.branches[id] = t
+	}
 	r.mu.Unlock()
 	return hits, nil
 }
@@ -134,12 +134,8 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 	defer r.recordMu.Unlock()
 
 	r.mu.Lock()
-	if r.blacklist[a] {
-		r.mu.Unlock()
-		return nil, nil
-	}
 	tree := r.trees[a]
-	if tree != nil && tree.root != nil && tree.root.kind != aborted {
+	if tree != nil && tree.root != nil {
 		t := tree.root
 		r.mu.Unlock()
 		return t, nil
@@ -152,7 +148,6 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		tree = r.tree(a)
 	}
 	if tree.attempts >= attemptLimit {
-		r.blacklist[a] = true
 		r.mu.Unlock()
 		return nil, nil
 	}
@@ -160,9 +155,6 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 	r.mu.Unlock()
 
 	if a.addr < 0 || a.addr >= len(i.instrs) || a.ip < 0 || a.ip >= len(i.instrs[a.addr]) {
-		r.mu.Lock()
-		r.blacklist[a] = true
-		r.mu.Unlock()
 		return nil, nil
 	}
 
@@ -220,7 +212,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 			r.publish(a, tree, t)
 			return t, nil
 		}
-		if err := r.step(&clone, f.addr, f.ip); err != nil {
+		if !r.step(&clone, f.addr, f.ip) {
 			t.kind = aborted
 			break
 		}
@@ -284,6 +276,9 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		f := clone.fr
 		t.ops = append(t.ops, step{fn: f.addr, target: f.ip, depth: clone.fp - startFP, cut: true})
 		t.kind = partial
+	}
+	if t.kind == aborted {
+		return nil, nil
 	}
 	r.publish(a, tree, t)
 	return t, nil
@@ -503,14 +498,12 @@ func (r *Tracer) skipCall(i *Interpreter, addr int) {
 	i.fr.ip++
 }
 
-func (r *Tracer) step(i *Interpreter, addr, ip int) (err error) {
+func (r *Tracer) step(i *Interpreter, addr, ip int) (ok bool) {
 	defer func() {
-		if v := recover(); v != nil {
-			err = fmt.Errorf("trace aborted: %v", v)
-		}
+		ok = recover() == nil
 	}()
 	i.code[addr][ip](i)
-	return nil
+	return true
 }
 
 func (r *Tracer) publish(a anchor, tree *tree, t *trace) {
@@ -527,11 +520,6 @@ func (r *Tracer) remove(addr int) {
 	for a := range r.trees {
 		if a.addr == addr {
 			delete(r.trees, a)
-		}
-	}
-	for a := range r.blacklist {
-		if a.addr == addr {
-			delete(r.blacklist, a)
 		}
 	}
 	delete(r.loops, addr)
@@ -555,20 +543,21 @@ func (r *Tracer) anchors(addr int) []int {
 	defer r.mu.Unlock()
 	out := make([]int, 0, len(r.trees))
 	for anchor, tree := range r.trees {
-		if anchor.addr == addr && tree.root != nil && tree.root.kind != aborted {
+		if anchor.addr == addr && tree.root != nil {
 			out = append(out, anchor.ip)
 		}
 	}
+	sort.Ints(out)
 	return out
 }
 
-// rootAt returns the recorded tree anchored exactly at a, or nil when none is
-// recorded or its root aborted. The compiler emits one native per usable root.
+// rootAt returns the published tree anchored exactly at a, or nil when none is
+// recorded. Published roots are always usable.
 func (r *Tracer) rootAt(a anchor) *tree {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	t := r.trees[a]
-	if t == nil || t.root == nil || t.root.kind == aborted {
+	if t == nil || t.root == nil {
 		return nil
 	}
 	return t.snapshot()
@@ -699,15 +688,12 @@ func (t *tree) snapshot() *tree {
 	}
 }
 
-// branchIPs returns the learned continuations eligible for inlining into a
-// parent trace. An aborted branch recorded only a partial, unsupported
-// fragment; inlining it would let the walk fall off its end and be mistaken
-// for top-level completion, so it is excluded here rather than filtered by
-// every caller.
+// branchIPs returns learned continuations eligible for inlining into a parent
+// trace. capture publishes only usable traces, so non-nil branches are valid.
 func (t *tree) branchIPs() map[branch]leg {
 	out := map[branch]leg{}
 	for id, tr := range t.branches {
-		if tr != nil && tr.kind != aborted {
+		if tr != nil {
 			out[branch{fn: tr.anchor.addr, ip: tr.anchor.ip}] = leg{trace: tr, hits: t.hits[id]}
 		}
 	}

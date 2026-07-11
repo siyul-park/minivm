@@ -34,7 +34,6 @@ func TestNewTracer(t *testing.T) {
 	tracer := NewTracer()
 	require.NotNil(t, tracer)
 	require.NotNil(t, tracer.trees)
-	require.NotNil(t, tracer.blacklist)
 }
 
 func TestTracer_Capture(t *testing.T) {
@@ -166,6 +165,38 @@ func TestTracer_Capture(t *testing.T) {
 		require.Equal(t, 1, attempts)
 	})
 
+	t.Run("does not publish a side exit to a removed tree", func(t *testing.T) {
+		tracer := NewTracer()
+		release := make(chan struct{})
+		iter := &blockingIterator{entered: make(chan struct{}), release: release}
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.NOP),
+			instr.New(instr.CORO_VALUE),
+		})
+		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		defer i.Close()
+
+		addr := i.keep(iter)
+		i.stack[0] = types.BoxRef(addr)
+		i.sp = 1
+		root := anchor{}
+		tree := tracer.tree(root)
+		tree.root = &trace{anchor: root, kind: completed}
+
+		done := make(chan error, 1)
+		go func() {
+			_, err := tracer.exit(i, root, branch{fn: 0, ip: 1})
+			done <- err
+		}()
+		<-iter.entered
+		tracer.remove(0)
+		close(release)
+		require.NoError(t, <-done)
+
+		require.Empty(t, tree.branches)
+		require.Nil(t, tracer.rootAt(root))
+	})
+
 	t.Run("does not deadlock when recording reclaims a function", func(t *testing.T) {
 		tracer := NewTracer()
 		i := New(
@@ -194,6 +225,28 @@ func TestTracer_Capture(t *testing.T) {
 		require.NotNil(t, tracer.rootAt(anchor{}))
 	})
 
+	t.Run("does not publish aborted traces", func(t *testing.T) {
+		tracer := NewTracer()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.REF_NEW),
+		})
+		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		defer i.Close()
+
+		for range attemptLimit + 1 {
+			tr, err := tracer.capture(i, anchor{})
+			require.NoError(t, err)
+			require.Nil(t, tr)
+		}
+
+		tracer.mu.Lock()
+		attempts := tracer.trees[anchor{}].attempts
+		tracer.mu.Unlock()
+		require.Equal(t, attemptLimit, attempts)
+		require.Nil(t, tracer.rootAt(anchor{}))
+	})
+
 	t.Run("records terminal set fast paths and rejects remaining array mutators", func(t *testing.T) {
 		tracer := NewTracer()
 		require.False(t, tracer.unrecordable(nil, instr.ARRAY_SET))
@@ -207,6 +260,22 @@ func TestTracer_Capture(t *testing.T) {
 		} {
 			require.True(t, tracer.unrecordable(nil, op))
 		}
+	})
+}
+
+func TestTracer(t *testing.T) {
+	t.Run("returns anchors in instruction order", func(t *testing.T) {
+		tracer := NewTracer()
+		const count = 64
+		for ip := count - 1; ip >= 0; ip-- {
+			tracer.trees[anchor{addr: 1, ip: ip}] = &tree{root: &trace{anchor: anchor{addr: 1, ip: ip}, kind: completed}}
+		}
+
+		want := make([]int, count)
+		for ip := range count {
+			want[ip] = ip
+		}
+		require.Equal(t, want, tracer.anchors(1))
 	})
 }
 

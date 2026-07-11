@@ -219,7 +219,7 @@ func (c *compiler) Compile(i *Interpreter, addr int, fn *types.Function) (*modul
 	return mod, err
 }
 
-// emit lowers every non-aborted trace root recorded for addr — the function
+// emit lowers every published trace root recorded for addr — the function
 // entry plus any hot loop headers — into framed native callables, one per
 // anchor. It returns false (emitting nothing) when no usable trace exists or
 // the typed lowerer rejects them all, so the caller can leave threaded dispatch

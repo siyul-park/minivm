@@ -912,7 +912,7 @@ func (i *Interpreter) observe(f *frame) error {
 			if err != nil {
 				return err
 			}
-			if t != nil && t.kind != aborted {
+			if t != nil {
 				if err := i.compile(f.addr); err != nil {
 					return err
 				}
