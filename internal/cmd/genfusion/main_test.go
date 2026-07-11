@@ -22,6 +22,7 @@ func TestRun(t *testing.T) {
 			paths[idx] = output.path
 		}
 		require.IsIncreasing(t, paths)
+		require.Contains(t, paths, "docs/fusion.md")
 	})
 
 	t.Run("checks generated files", func(t *testing.T) {

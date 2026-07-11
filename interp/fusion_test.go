@@ -13,10 +13,13 @@ import (
 )
 
 func TestFusion(t *testing.T) {
-	tests := []struct {
-		name string
-		prog *program.Program
-	}{
+	type test struct {
+		name     string
+		prog     *program.Program
+		fusionAt int
+		stack    int
+	}
+	tests := []test{
 		{
 			name: "string constant preserves interning ownership",
 			prog: program.New([]instr.Instruction{
@@ -74,6 +77,55 @@ func TestFusion(t *testing.T) {
 			}, program.WithLocals(types.TypeI32)),
 		},
 	}
+	integerTests := []struct {
+		name  string
+		op    instr.Opcode
+		kind  types.Kind
+		lhs   int64
+		rhs   int64
+		stack int
+	}{
+		{name: "i32.div_s succeeds", op: instr.I32_DIV_S, kind: types.KindI32, lhs: 21, rhs: 3},
+		{name: "i32.div_u succeeds", op: instr.I32_DIV_U, kind: types.KindI32, lhs: 21, rhs: 3},
+		{name: "i32.rem_s succeeds", op: instr.I32_REM_S, kind: types.KindI32, lhs: 22, rhs: 5},
+		{name: "i32.rem_u succeeds", op: instr.I32_REM_U, kind: types.KindI32, lhs: 22, rhs: 5},
+		{name: "i64.div_s succeeds", op: instr.I64_DIV_S, kind: types.KindI64, lhs: 21, rhs: 3},
+		{name: "i64.div_u succeeds", op: instr.I64_DIV_U, kind: types.KindI64, lhs: 21, rhs: 3},
+		{name: "i64.rem_s succeeds", op: instr.I64_REM_S, kind: types.KindI64, lhs: 22, rhs: 5},
+		{name: "i64.rem_u succeeds", op: instr.I64_REM_U, kind: types.KindI64, lhs: 22, rhs: 5},
+		{name: "i32.div_s traps on zero", op: instr.I32_DIV_S, kind: types.KindI32, lhs: 21},
+		{name: "i32.div_u traps on zero", op: instr.I32_DIV_U, kind: types.KindI32, lhs: 21},
+		{name: "i32.rem_s traps on zero", op: instr.I32_REM_S, kind: types.KindI32, lhs: 21},
+		{name: "i32.rem_u traps on zero", op: instr.I32_REM_U, kind: types.KindI32, lhs: 21},
+		{name: "i64.div_s traps on zero", op: instr.I64_DIV_S, kind: types.KindI64, lhs: 21},
+		{name: "i64.div_u traps on zero", op: instr.I64_DIV_U, kind: types.KindI64, lhs: 21},
+		{name: "i64.rem_s traps on zero", op: instr.I64_REM_S, kind: types.KindI64, lhs: 21},
+		{name: "i64.rem_u traps on zero", op: instr.I64_REM_U, kind: types.KindI64, lhs: 21},
+		{name: "i32.div_s preserves producer overflow", op: instr.I32_DIV_S, kind: types.KindI32, lhs: 21, rhs: 3, stack: 1},
+		{name: "i32.div_u preserves producer overflow", op: instr.I32_DIV_U, kind: types.KindI32, lhs: 21, rhs: 3, stack: 1},
+		{name: "i32.rem_s preserves producer overflow", op: instr.I32_REM_S, kind: types.KindI32, lhs: 21, rhs: 3, stack: 1},
+		{name: "i32.rem_u preserves producer overflow", op: instr.I32_REM_U, kind: types.KindI32, lhs: 21, rhs: 3, stack: 1},
+		{name: "i64.div_s preserves producer overflow", op: instr.I64_DIV_S, kind: types.KindI64, lhs: 21, rhs: 3, stack: 1},
+		{name: "i64.div_u preserves producer overflow", op: instr.I64_DIV_U, kind: types.KindI64, lhs: 21, rhs: 3, stack: 1},
+		{name: "i64.rem_s preserves producer overflow", op: instr.I64_REM_S, kind: types.KindI64, lhs: 21, rhs: 3, stack: 1},
+		{name: "i64.rem_u preserves producer overflow", op: instr.I64_REM_U, kind: types.KindI64, lhs: 21, rhs: 3, stack: 1},
+	}
+	for _, tt := range integerTests {
+		var lhs, rhs instr.Instruction
+		if tt.kind == types.KindI32 {
+			lhs = instr.New(instr.I32_CONST, i32operand(int32(tt.lhs)))
+			rhs = instr.New(instr.I32_CONST, i32operand(int32(tt.rhs)))
+		} else {
+			lhs = instr.New(instr.I64_CONST, i64operand(tt.lhs))
+			rhs = instr.New(instr.I64_CONST, i64operand(tt.rhs))
+		}
+		tests = append(tests, test{
+			name:     tt.name,
+			prog:     program.New([]instr.Instruction{lhs, rhs, instr.New(tt.op)}),
+			fusionAt: len(lhs),
+			stack:    tt.stack,
+		})
+	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -88,7 +140,18 @@ func TestFusion(t *testing.T) {
 				interned map[string]types.Ref
 			}
 
-			threaded := New(tt.prog, WithTick(1), WithThreshold(-1))
+			if tt.fusionAt > 0 {
+				c := threader{code: tt.prog.Code, ip: tt.fusionAt}
+				require.NotNil(t, c.fusion())
+			}
+
+			threadedOptions := []func(*option){WithTick(1), WithThreshold(-1)}
+			fusedOptions := []func(*option){WithThreshold(-1)}
+			if tt.stack > 0 {
+				threadedOptions = append(threadedOptions, WithStack(tt.stack))
+				fusedOptions = append(fusedOptions, WithStack(tt.stack))
+			}
+			threaded := New(tt.prog, threadedOptions...)
 			defer threaded.Close()
 			threadedErr := threaded.Run(context.Background())
 			threadedState := state{
@@ -102,7 +165,7 @@ func TestFusion(t *testing.T) {
 				interned: maps.Clone(threaded.interned),
 			}
 
-			fused := New(tt.prog, WithThreshold(-1))
+			fused := New(tt.prog, fusedOptions...)
 			defer fused.Close()
 			fusedErr := fused.Run(context.Background())
 			fusedState := state{

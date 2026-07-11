@@ -123,6 +123,12 @@ func TestValidate(t *testing.T) {
 		fusion := fuse(op(instr.REF_NULL), op(instr.DROP), op(instr.DROP))
 		require.ErrorContains(t, validate([]rule{{pattern: fusion.pattern}}), "unsupported trailing operations")
 	})
+
+	t.Run("rejects fixed stack kind mismatches", func(t *testing.T) {
+		rules, err := expand(fuse(op(instr.I32_CONST), op(instr.I64_ADD)))
+		require.NoError(t, err)
+		require.ErrorContains(t, validate(rules), "stack")
+	})
 }
 
 func TestExpandAll(t *testing.T) {
@@ -146,6 +152,16 @@ func TestRenderThreaded(t *testing.T) {
 	require.Contains(t, string(data), "goto l0")
 	require.Contains(t, string(data), "l0:")
 	require.NotContains(t, string(data), "candidate0")
+
+	test, err := renderThreadedTest([]rule{
+		{pattern: fuse(op(instr.I32_CONST), op(instr.I32_ADD)).pattern},
+		{pattern: fuse(op(instr.REF_NULL), op(instr.DROP)).pattern},
+	})
+	require.NoError(t, err)
+	require.Contains(t, string(test), "i32.const/i32.add")
+	require.Contains(t, string(test), "ref.null/drop")
+	require.Contains(t, string(test), ".Run(context.Background())")
+	require.Contains(t, string(test), "WithTick(1)")
 }
 
 func TestRenderARM64(t *testing.T) {
