@@ -39,6 +39,7 @@ type loweringState struct {
 }
 
 type callTarget struct {
+	code   jen.Code
 	addr   jen.Code
 	upvals jen.Code
 	ref    jen.Code
@@ -402,11 +403,107 @@ func sourceLower(state *loweringState, source fact) (lowering, error) {
 		return lowering{}, err
 	}
 	if state.standalone {
-		lowered.handler = standaloneCode(source.step, lowered.compile, lowered.push)
+		if source.op == instr.CONST_GET {
+			lowered.handler = constSourceHandler(source, lowered)
+		} else if field, ok := slotField(source.op); ok {
+			lowered.handler = slotSourceHandler(source, lowered, field)
+		} else {
+			lowered.handler = standaloneCode(source.step, lowered.compile, lowered.push)
+		}
 		return lowered, nil
 	}
 	state.pending = append(state.pending, lowered)
 	return lowered, nil
+}
+
+func slotField(op instr.Opcode) (string, bool) {
+	switch op {
+	case instr.LOCAL_GET:
+		return "locals", true
+	case instr.GLOBAL_GET:
+		return "globals", true
+	case instr.UPVAL_GET:
+		return "captures", true
+	default:
+		return "", false
+	}
+}
+
+func slotSourceHandler(source fact, lowered lowering, field string) jen.Code {
+	compile := append([]jen.Code(nil), lowered.compile...)
+	scalar := sourcePush(lowered, false, width(source.op))
+	owned := sourcePush(lowered, true, width(source.op))
+	choose := jen.Switch(jen.Id("c").Dot(field).Index(jen.Id("i0")).Dot("Repr").Call()).Block(
+		jen.Case(
+			jen.Qual("github.com/siyul-park/minivm/types", "KindI32"),
+			jen.Qual("github.com/siyul-park/minivm/types", "KindF32"),
+			jen.Qual("github.com/siyul-park/minivm/types", "KindF64"),
+		).Block(jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(scalar...))),
+	)
+	if source.op == instr.LOCAL_GET {
+		compile = append(compile, choose)
+	} else {
+		compile = append(compile,
+			jen.If(jen.Id("i0").Op("<").Len(jen.Id("c").Dot(field))).Block(choose),
+		)
+	}
+	compile = append(compile,
+		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(owned...)),
+	)
+	return jen.Func().Params(jen.Id("c").Op("*").Id("threader")).Params(
+		jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")),
+	).Block(compile...)
+}
+
+func constSourceHandler(source fact, lowered lowering) jen.Code {
+	compile := append([]jen.Code(nil), lowered.compile...)
+	value := lowered.boxed
+	scalar := sourcePush(lowered, false, width(source.op))
+	owned := append([]jen.Code(nil), lowered.check...)
+	owned = append(owned, lowered.body...)
+	owned = append(owned,
+		jen.Id("i").Dot("retain").Call(jen.Id("addr")),
+		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Add(lowered.boxed),
+		jen.Id("i").Dot("sp").Op("++"),
+		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(width(source.op)),
+	)
+	compile = append(compile,
+		jen.Switch(jen.Add(value).Dot("Kind").Call()).Block(
+			jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(
+				jen.Id("addr").Op(":=").Add(value).Dot("Ref").Call(),
+				jen.If(
+					jen.List(jen.Id("str"), jen.Id("ok")).Op(":=").Id("c").Dot("heap").Index(jen.Id("addr")).Assert(jen.Qual("github.com/siyul-park/minivm/types", "String")),
+					jen.Id("ok"),
+				).Block(
+					jen.Id("text").Op(":=").String().Call(jen.Id("str")),
+					jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(
+						jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
+						jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Qual("github.com/siyul-park/minivm/types", "BoxRef").Call(jen.Int().Call(jen.Id("i").Dot("intern").Call(jen.Id("text")))),
+						jen.Id("i").Dot("sp").Op("++"),
+						jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(width(source.op)),
+					)),
+				),
+				jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(owned...)),
+			),
+		),
+		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(scalar...)),
+	)
+	return jen.Func().Params(jen.Id("c").Op("*").Id("threader")).Params(
+		jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")),
+	).Block(compile...)
+}
+
+func sourcePush(lowered lowering, retain bool, width int) []jen.Code {
+	body := append([]jen.Code(nil), lowered.check...)
+	body = append(body, lowered.body...)
+	if retain {
+		body = append(body, jen.Id("i").Dot("retainBox").Call(lowered.boxed))
+	}
+	return append(body,
+		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Add(lowered.boxed),
+		jen.Id("i").Dot("sp").Op("++"),
+		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(width),
+	)
 }
 
 func kindName(kind instr.Kind) (string, bool) {
@@ -508,16 +605,17 @@ func refLower(state *loweringState, source fact) (lowering, error) {
 			state.pending = []lowering{lowered}
 			return lowered, nil
 		}
-		body = append(body, value.discard...)
 		if value.resident {
 			body = append(body,
 				jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Qual("github.com/siyul-park/minivm/types", "BoxI1").Call(condition),
 			)
+			body = append(body, value.discard...)
 		} else {
 			body = append(body,
 				jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Qual("github.com/siyul-park/minivm/types", "BoxI1").Call(condition),
 				jen.Id("i").Dot("sp").Op("++"),
 			)
+			body = append(body, value.discard...)
 		}
 		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.total))
 	default:
@@ -595,9 +693,7 @@ func callLower(state *loweringState, source fact) (lowering, error) {
 func dynamicCallCode(op instr.Opcode) ([]jen.Code, error) {
 	prefix := []jen.Code{
 		jen.If(jen.Id("i").Dot("sp").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
-		jen.Id("target").Op(":=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)),
-		jen.If(jen.Id("target").Dot("Kind").Call().Op("!=").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
-		jen.Id("addr").Op(":=").Id("target").Dot("Ref").Call(),
+		jen.Id("addr").Op(":=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Dot("Ref").Call(),
 	}
 	if op == instr.CLOSURE_NEW {
 		body := append(prefix,
@@ -611,36 +707,72 @@ func dynamicCallCode(op instr.Opcode) ([]jen.Code, error) {
 	if op != instr.CALL && op != instr.RETURN_CALL {
 		return nil, fmt.Errorf("unsupported call opcode %s", instr.TypeOf(op).Mnemonic)
 	}
+
 	tail := op == instr.RETURN_CALL
-	function := []jen.Code{
-		jen.Id("params").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Params")),
-		jen.Id("returns").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Returns")),
-		jen.Id("locals").Op(":=").Len(jen.Id("fn").Dot("Locals")),
-	}
-	target := callTarget{addr: jen.Id("addr"), upvals: jen.Nil(), ref: jen.Id("addr")}
+	functionTarget := callTarget{code: jen.Id("addr"), addr: jen.Id("addr"), upvals: jen.Nil(), ref: jen.Id("addr")}
+	closureTarget := callTarget{code: jen.Id("fn").Dot("Fn"), addr: jen.Int().Parens(jen.Id("fn").Dot("Fn")), upvals: jen.Id("fn").Dot("Upvals"), ref: jen.Id("addr")}
+	var function, closure []jen.Code
 	if tail {
-		function = append(function, replaceBody(target, 1, true, 1)...)
+		functionBody := []jen.Code{
+			jen.Id("code").Op(":=").Id("addr"),
+			jen.Id("ref").Op(":=").Id("addr"),
+			jen.Var().Id("upvals").Index().Qual("github.com/siyul-park/minivm/types", "Boxed"),
+			jen.Id("params").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Params")),
+			jen.Id("returns").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Returns")),
+			jen.Id("locals").Op(":=").Len(jen.Id("fn").Dot("Locals")),
+		}
+		functionBody = append(functionBody, replaceBody(
+			callTarget{code: jen.Id("code"), addr: jen.Id("code"), upvals: jen.Id("upvals"), ref: jen.Id("ref")},
+			1, true, 1, "inlineTail2",
+		)...)
+		function = []jen.Code{jen.Block(functionBody...)}
+
+		closureBody := []jen.Code{
+			jen.Id("code").Op(":=").Int().Call(jen.Id("fn").Dot("Fn")),
+			jen.Id("ref").Op(":=").Id("addr"),
+			jen.Id("upvals").Op(":=").Id("fn").Dot("Upvals"),
+			jen.Id("params").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Params")),
+			jen.Id("returns").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Returns")),
+			jen.Id("locals").Op(":=").Len(jen.Id("tmpl").Dot("Locals")),
+		}
+		closureBody = append(closureBody, replaceBody(
+			callTarget{code: jen.Id("code"), addr: jen.Id("code"), upvals: jen.Id("upvals"), ref: jen.Id("ref")},
+			1, true, 1, "inlineTail3",
+		)...)
+		closure = []jen.Code{
+			jen.List(jen.Id("tmpl"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(jen.Id("fn").Dot("Fn")).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Function")),
+			jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+			jen.Block(closureBody...),
+		}
 	} else {
-		function = append(function, frameBody(target, 1, true, 1, jen.Id("addr"))...)
+		function = []jen.Code{
+			frameOverflow(),
+			jen.Id("params").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Params")),
+			jen.Id("returns").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Returns")),
+			jen.Id("locals").Op(":=").Len(jen.Id("fn").Dot("Locals")),
+		}
+		function = append(function, frameBody(functionTarget, 1, true, 1, jen.Id("addr"))...)
+		closure = []jen.Code{
+			frameOverflow(),
+			jen.List(jen.Id("tmpl"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(jen.Id("fn").Dot("Fn")).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Function")),
+			jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+			jen.Id("params").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Params")),
+			jen.Id("returns").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Returns")),
+			jen.Id("locals").Op(":=").Len(jen.Id("tmpl").Dot("Locals")),
+		}
+		closure = append(closure, frameBody(closureTarget, 1, true, 1, jen.Int().Parens(jen.Id("fn").Dot("Fn")))...)
 	}
-	closure := []jen.Code{
-		jen.List(jen.Id("tmpl"), jen.Id("ok")).Op(":=").Id("i").Dot("heap").Index(jen.Id("fn").Dot("Fn")).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Function")),
-		jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
+
+	hostCore := []jen.Code{
+		jen.Id("fn").Op(":=").Id("fn"),
 		jen.Id("params").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Params")),
 		jen.Id("returns").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Returns")),
-		jen.Id("locals").Op(":=").Len(jen.Id("tmpl").Dot("Locals")),
 	}
-	target = callTarget{addr: jen.Int().Parens(jen.Id("fn").Dot("Fn")), upvals: jen.Id("fn").Dot("Upvals"), ref: jen.Id("addr")}
+	hostCore = append(hostCore, hostBodyCode(1, 1, tail)...)
+	host := []jen.Code{jen.Block(hostCore...)}
 	if tail {
-		closure = append(closure, replaceBody(target, 1, true, 1)...)
-	} else {
-		closure = append(closure, frameBody(target, 1, true, 1, jen.Int().Parens(jen.Id("fn").Dot("Fn")))...)
+		host = append(host, jen.If(jen.Id("i").Dot("fp").Op(">").Lit(1)).Block(retire()...))
 	}
-	host := []jen.Code{
-		jen.Id("params").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Params")),
-		jen.Id("returns").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Returns")),
-	}
-	host = append(host, hostBody(1, 1, tail)...)
 	body := append(prefix, jen.Switch(jen.Id("fn").Op(":=").Id("i").Dot("heap").Index(jen.Id("addr")).Assert(jen.Type())).Block(
 		jen.Case(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Function")).Block(function...),
 		jen.Case(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Closure")).Block(closure...),
@@ -676,7 +808,7 @@ func branchLower(state *loweringState, source fact) (lowering, error) {
 		body := []jen.Code{
 			jen.If(jen.Id("i").Dot("sp").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 		}
-		condition := jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Dot("I32").Call().Op("!=").Lit(0)
+		condition := jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Dot("I32").Call().Op("!=").Lit(0)
 		body = append(body, branchBody(condition, 1, width(source.op))...)
 		return lowering{source: source.step, first: source.step, handler: standaloneCode(source.step, compile, body)}, nil
 	}
@@ -719,9 +851,8 @@ func branchBody(condition jen.Code, consume, advance int) []jen.Code {
 		}
 	}
 	return []jen.Code{
-		jen.Id("taken").Op(":=").Add(condition),
 		jen.Id("i").Dot("sp").Op("-=").Lit(consume),
-		jen.If(jen.Id("taken")).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
+		jen.If(condition).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
 		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 	}
 }
@@ -737,7 +868,7 @@ func dispatch(tail bool, label string, total int) jen.Code {
 
 func direct(tail bool, label string, total int) []jen.Code {
 	guard := jen.If(jen.Id("addr").Op("<").Len(jen.Id("c").Dot("coros")).Op("&&").Id("c").Dot("coros").Index(jen.Id("addr"))).Block(reject(label))
-	target := callTarget{addr: jen.Id("addr"), upvals: jen.Nil(), ref: jen.Id("addr")}
+	target := callTarget{code: jen.Id("addr"), addr: jen.Id("addr"), upvals: jen.Nil(), ref: jen.Id("addr")}
 	if tail {
 		return append([]jen.Code{guard}, replace(target, jen.Id("fn").Dot("Typ"), jen.Len(jen.Id("fn").Dot("Locals")), total)...)
 	}
@@ -750,7 +881,7 @@ func closure(tail bool, label string, total int) []jen.Code {
 		jen.If(jen.Op("!").Id("ok")).Block(reject(label)),
 		jen.If(jen.Int().Parens(jen.Id("fn").Dot("Fn")).Op("<").Len(jen.Id("c").Dot("coros")).Op("&&").Id("c").Dot("coros").Index(jen.Id("fn").Dot("Fn"))).Block(reject(label)),
 	}
-	target := callTarget{addr: jen.Int().Parens(jen.Id("fn").Dot("Fn")), upvals: jen.Id("fn").Dot("Upvals"), ref: jen.Id("addr")}
+	target := callTarget{code: jen.Id("fn").Dot("Fn"), addr: jen.Int().Parens(jen.Id("fn").Dot("Fn")), upvals: jen.Id("fn").Dot("Upvals"), ref: jen.Id("addr")}
 	if tail {
 		return append(preflight, replace(target, jen.Id("fn").Dot("Typ"), jen.Len(jen.Id("tmpl").Dot("Locals")), total)...)
 	}
@@ -767,21 +898,34 @@ func frame(target callTarget, typ, locals jen.Code, total int) []jen.Code {
 	}
 }
 
+func frameOverflow() jen.Code {
+	return jen.If(jen.Id("i").Dot("fp").Op("==").Len(jen.Id("i").Dot("frames"))).Block(jen.Panic(jen.Id("ErrFrameOverflow")))
+}
+
 func frameBody(target callTarget, targetSlots int, releaseTarget bool, advance int, coroutine jen.Code) []jen.Code {
 	body := []jen.Code{}
 	if targetSlots == 0 {
 		body = append(body, overflow())
 	}
+	if targetSlots == 0 {
+		body = append(body, frameOverflow())
+	}
+	if targetSlots == 1 {
+		body = append(body,
+			jen.If(jen.Id("i").Dot("sp").Op("<=").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
+			jen.If(jen.Id("i").Dot("sp").Op("+").Id("locals").Op("-").Lit(1).Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
+			jen.If(jen.Id("locals").Op(">").Lit(0)).Block(clearRange(jen.Id("i").Dot("sp").Op("-").Lit(1), jen.Id("i").Dot("sp").Op("+").Id("locals").Op("-").Lit(1))),
+		)
+	} else {
+		body = append(body,
+			jen.If(jen.Id("i").Dot("sp").Op("<").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
+			jen.If(jen.Id("i").Dot("sp").Op("+").Id("locals").Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
+			jen.If(jen.Id("locals").Op(">").Lit(0)).Block(clearRange(jen.Id("i").Dot("sp"), jen.Id("i").Dot("sp").Op("+").Id("locals"))),
+		)
+	}
 	body = append(body,
-		jen.If(jen.Id("i").Dot("fp").Op("==").Len(jen.Id("i").Dot("frames"))).Block(jen.Panic(jen.Id("ErrFrameOverflow"))),
-		jen.If(jen.Id("i").Dot("sp").Op("<").Add(adjust(jen.Id("params"), targetSlots))).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
-		jen.If(adjust(jen.Id("i").Dot("sp").Op("+").Id("locals"), -targetSlots).Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
-	)
-	start := func() jen.Code { return adjust(jen.Id("i").Dot("sp"), -targetSlots) }
-	body = append(body,
-		jen.If(jen.Id("locals").Op(">").Lit(0)).Block(clearRange(start(), jen.Add(start()).Op("+").Id("locals"))),
 		jen.Id("f").Op(":=").Op("&").Id("i").Dot("frames").Index(jen.Id("i").Dot("fp")),
-		jen.Id("f").Dot("code").Op("=").Id("i").Dot("code").Index(jen.Add(target.addr)),
+		jen.Id("f").Dot("code").Op("=").Id("i").Dot("code").Index(jen.Add(target.code)),
 		jen.Id("f").Dot("upvals").Op("=").Add(target.upvals),
 		jen.Id("f").Dot("addr").Op("=").Add(target.addr),
 		jen.Id("f").Dot("ref").Op("=").Add(target.ref),
@@ -811,30 +955,72 @@ func replace(target callTarget, typ, locals jen.Code, total int) []jen.Code {
 		jen.Id("returns").Op(":=").Len(jen.Add(typ).Dot("Returns")),
 		jen.Id("locals").Op(":=").Add(locals),
 		jen.Id("c").Dot("ip").Op("+=").Lit(3),
-		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(replaceBody(target, 0, false, total)...)),
+		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(replaceBody(target, 0, false, total, "")...)),
 	}
 }
 
-func replaceBody(target callTarget, targetSlots int, releaseTarget bool, advance int) []jen.Code {
-	body := []jen.Code{}
-	if targetSlots == 0 {
-		body = append(body, overflow())
-	}
-	body = append(body,
-		jen.If(jen.Id("i").Dot("sp").Op("<").Add(adjust(jen.Id("params"), targetSlots))).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
-		jen.If(jen.Id("i").Dot("fp").Op("==").Lit(1)).Block(
-			jen.If(jen.Id("i").Dot("fp").Op("==").Len(jen.Id("i").Dot("frames"))).Block(jen.Panic(jen.Id("ErrFrameOverflow"))),
-			jen.If(adjust(jen.Id("i").Dot("sp").Op("+").Id("locals"), -targetSlots).Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
-			jen.If(jen.Id("locals").Op(">").Lit(0)).Block(clearRange(adjust(jen.Id("i").Dot("sp"), -targetSlots), adjust(jen.Id("i").Dot("sp").Op("+").Id("locals"), -targetSlots))),
-			jen.Id("f").Op(":=").Op("&").Id("i").Dot("frames").Index(jen.Id("i").Dot("fp")),
-			jen.Id("f").Dot("code").Op("=").Id("i").Dot("code").Index(jen.Add(target.addr)),
+func replaceBody(target callTarget, targetSlots int, releaseTarget bool, advance int, label string) []jen.Code {
+	if targetSlots == 1 {
+		body := []jen.Code{
+			jen.If(jen.Id("i").Dot("sp").Op("<=").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
+			jen.Var().Id("f").Op("*").Id("frame"),
+			jen.Var().Id("base").Int(),
+			jen.If(jen.Id("i").Dot("fp").Op("==").Lit(1)).Block(
+				frameOverflow(),
+				jen.If(jen.Id("i").Dot("sp").Op("+").Id("locals").Op("-").Lit(1).Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
+				jen.If(jen.Id("locals").Op(">").Lit(0)).Block(clearRange(jen.Id("i").Dot("sp").Op("-").Lit(1), jen.Id("i").Dot("sp").Op("+").Id("locals").Op("-").Lit(1))),
+				jen.Id("f").Op(":=").Op("&").Id("i").Dot("frames").Index(jen.Id("i").Dot("fp")),
+				jen.Id("f").Dot("code").Op("=").Id("i").Dot("code").Index(jen.Add(target.code)),
+				jen.Id("f").Dot("upvals").Op("=").Add(target.upvals),
+				jen.Id("f").Dot("addr").Op("=").Add(target.addr),
+				jen.Id("f").Dot("ref").Op("=").Add(target.ref),
+				jen.Id("f").Dot("ip").Op("=").Lit(0),
+				jen.Id("f").Dot("bp").Op("=").Id("i").Dot("sp").Op("-").Id("params").Op("-").Lit(1),
+				jen.Id("f").Dot("returns").Op("=").Id("returns"),
+				jen.Id("f").Dot("release").Op("=").Add(boolean(releaseTarget)),
+				jen.Id("i").Dot("sp").Op("=").Id("f").Dot("bp").Op("+").Id("params").Op("+").Id("locals"),
+				jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
+				jen.Id("i").Dot("fp").Op("++"),
+				jen.Id("i").Dot("fr").Op("=").Id("f"),
+				jen.Goto().Id(label),
+			),
+			jen.Id("f").Op("=").Id("i").Dot("fr"),
+			jen.Id("base").Op("=").Id("f").Dot("bp"),
+			jen.If(jen.Id("base").Op("+").Id("params").Op("+").Id("locals").Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
+			jen.Copy(jen.Id("i").Dot("stack").Index(jen.Id("base").Op(":").Id("base").Op("+").Id("params")), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("params").Op("-").Lit(1).Op(":").Id("i").Dot("sp").Op("-").Lit(1))),
+			jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("release").Call(jen.Id("f").Dot("ref"))),
+			jen.If(jen.Id("locals").Op(">").Lit(0)).Block(clearRange(jen.Id("base").Op("+").Id("params"), jen.Id("base").Op("+").Id("params").Op("+").Id("locals"))),
+			jen.Id("f").Dot("code").Op("=").Id("i").Dot("code").Index(jen.Add(target.code)),
 			jen.Id("f").Dot("upvals").Op("=").Add(target.upvals),
 			jen.Id("f").Dot("addr").Op("=").Add(target.addr),
 			jen.Id("f").Dot("ref").Op("=").Add(target.ref),
 			jen.Id("f").Dot("ip").Op("=").Lit(0),
-			jen.Id("f").Dot("bp").Op("=").Add(adjust(jen.Id("i").Dot("sp").Op("-").Id("params"), -targetSlots)),
+			jen.Id("f").Dot("bp").Op("=").Id("base"),
 			jen.Id("f").Dot("returns").Op("=").Id("returns"),
 			jen.Id("f").Dot("release").Op("=").Add(boolean(releaseTarget)),
+			jen.Id("f").Dot("coro").Op("=").Lit(0),
+			jen.Id("i").Dot("sp").Op("=").Id("base").Op("+").Id("params").Op("+").Id("locals"),
+			jen.Id(label).Op(":").Add(jen.Null()),
+		}
+		return body
+	}
+
+	body := []jen.Code{overflow()}
+	body = append(body,
+		jen.If(jen.Id("i").Dot("sp").Op("<").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
+		jen.If(jen.Id("i").Dot("fp").Op("==").Lit(1)).Block(
+			frameOverflow(),
+			jen.If(jen.Id("i").Dot("sp").Op("+").Id("locals").Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
+			jen.If(jen.Id("locals").Op(">").Lit(0)).Block(clearRange(jen.Id("i").Dot("sp"), jen.Id("i").Dot("sp").Op("+").Id("locals"))),
+			jen.Id("f").Op(":=").Op("&").Id("i").Dot("frames").Index(jen.Id("i").Dot("fp")),
+			jen.Id("f").Dot("code").Op("=").Id("i").Dot("code").Index(jen.Add(target.code)),
+			jen.Id("f").Dot("upvals").Op("=").Add(target.upvals),
+			jen.Id("f").Dot("addr").Op("=").Add(target.addr),
+			jen.Id("f").Dot("ref").Op("=").Add(target.ref),
+			jen.Id("f").Dot("ip").Op("=").Lit(0),
+			jen.Id("f").Dot("bp").Op("=").Id("i").Dot("sp").Op("-").Id("params"),
+			jen.Id("f").Dot("returns").Op("=").Id("returns"),
+			jen.Id("f").Dot("release").Op("=").False(),
 			jen.Id("f").Dot("coro").Op("=").Lit(0),
 			jen.Id("i").Dot("sp").Op("=").Id("f").Dot("bp").Op("+").Id("params").Op("+").Id("locals"),
 			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
@@ -845,16 +1031,16 @@ func replaceBody(target callTarget, targetSlots int, releaseTarget bool, advance
 		jen.Id("f").Op(":=").Id("i").Dot("fr"),
 		jen.Id("base").Op(":=").Id("f").Dot("bp"),
 		jen.If(jen.Id("base").Op("+").Id("params").Op("+").Id("locals").Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
-		jen.Copy(jen.Id("i").Dot("stack").Index(jen.Id("base").Op(":").Id("base").Op("+").Id("params")), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("params").Op("-").Lit(targetSlots).Op(":").Id("i").Dot("sp").Op("-").Lit(targetSlots))),
+		jen.Copy(jen.Id("i").Dot("stack").Index(jen.Id("base").Op(":").Id("base").Op("+").Id("params")), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("params").Op(":").Id("i").Dot("sp"))),
 		jen.If(jen.Id("f").Dot("release")).Block(jen.Id("i").Dot("release").Call(jen.Id("f").Dot("ref"))),
 		jen.If(jen.Id("locals").Op(">").Lit(0)).Block(clearRange(jen.Id("base").Op("+").Id("params"), jen.Id("base").Op("+").Id("params").Op("+").Id("locals"))),
-		jen.Id("f").Dot("code").Op("=").Id("i").Dot("code").Index(jen.Add(target.addr)),
+		jen.Id("f").Dot("code").Op("=").Id("i").Dot("code").Index(jen.Add(target.code)),
 		jen.Id("f").Dot("upvals").Op("=").Add(target.upvals),
 		jen.Id("f").Dot("addr").Op("=").Add(target.addr),
 		jen.Id("f").Dot("ref").Op("=").Add(target.ref),
 		jen.Id("f").Dot("ip").Op("=").Lit(0),
 		jen.Id("f").Dot("returns").Op("=").Id("returns"),
-		jen.Id("f").Dot("release").Op("=").Add(boolean(releaseTarget)),
+		jen.Id("f").Dot("release").Op("=").False(),
 		jen.Id("f").Dot("coro").Op("=").Lit(0),
 		jen.Id("i").Dot("sp").Op("=").Id("base").Op("+").Id("params").Op("+").Id("locals"),
 	)
@@ -866,17 +1052,21 @@ func host(tail bool, total int) []jen.Code {
 		jen.Id("params").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Params")),
 		jen.Id("returns").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Returns")),
 		jen.Id("c").Dot("ip").Op("+=").Lit(3),
-		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(hostBody(0, total, tail)...)),
+		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(hostBodyCode(0, total, tail)...)),
 	}
 }
 
-func hostBody(targetSlots, advance int, tail bool) []jen.Code {
+func hostBodyCode(targetSlots, advance int, tail bool) []jen.Code {
 	body := []jen.Code{}
 	if targetSlots == 0 {
 		body = append(body, overflow())
 	}
+	if targetSlots == 1 {
+		body = append(body, jen.If(jen.Id("i").Dot("sp").Op("<=").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))))
+	} else {
+		body = append(body, jen.If(jen.Id("i").Dot("sp").Op("<").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))))
+	}
 	body = append(body,
-		jen.If(jen.Id("i").Dot("sp").Op("<").Lit(targetSlots).Op("+").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 		jen.If(adjust(jen.Id("i").Dot("sp").Op("+").Id("returns").Op("-").Id("params"), -targetSlots).Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
 		jen.Id("args").Op(":=").Id("i").Dot("stack").Index(
 			adjust(jen.Id("i").Dot("sp").Op("-").Id("params"), -targetSlots).Op(":").Add(adjust(jen.Id("i").Dot("sp"), -targetSlots)),
@@ -893,7 +1083,11 @@ func hostBody(targetSlots, advance int, tail bool) []jen.Code {
 		jen.Copy(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("returns").Op(":").Id("i").Dot("sp")), jen.Id("out")),
 	)
 	if tail {
-		body = append(body, jen.If(jen.Id("i").Dot("fp").Op(">").Lit(1)).Block(retire()...))
+		if targetSlots == 1 {
+			body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
+		} else {
+			body = append(body, jen.If(jen.Id("i").Dot("fp").Op(">").Lit(1)).Block(retire()...))
+		}
 	} else {
 		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance))
 	}
@@ -997,6 +1191,10 @@ func bounds(offset, size, length jen.Code) jen.Code {
 
 func overflow() jen.Code {
 	return jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow")))
+}
+
+func overflowAt(offset int) jen.Code {
+	return jen.If(add(jen.Id("i").Dot("sp"), offset).Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow")))
 }
 
 func arity(op instr.Opcode) (int, bool) {
@@ -1428,15 +1626,18 @@ func sourceAccess(source fact, number, offset int, label string, standalone bool
 		at = jen.Id("c").Dot("ip")
 	}
 	result := lowering{source: source.step, first: source.step, boxed: jen.Id(boxed)}
-	result.check = append(result.check, overflow())
+	result.check = append(result.check, overflowAt(number))
 
+	_, slot := slotField(op)
 	rejectBounds := func(field string) jen.Code {
 		condition := jen.Id(idx).Op(">=").Len(jen.Id("c").Dot(field))
 		if source.kind == instr.KindAny {
-			return jen.If(condition).Block(
-				jen.Id("c").Dot("ip").Op("+=").Lit(width),
-				jen.Return(jen.Func().Params(jen.Op("*").Id("Interpreter")).Block(jen.Panic(jen.Id("ErrSegmentationFault")))),
-			)
+			body := []jen.Code{}
+			if !standalone || !slot {
+				body = append(body, jen.Id("c").Dot("ip").Op("+=").Lit(width))
+			}
+			body = append(body, jen.Return(jen.Func().Params(jen.Op("*").Id("Interpreter")).Block(jen.Panic(jen.Id("ErrSegmentationFault")))))
+			return jen.If(condition).Block(body...)
 		}
 		kind, ok := kindName(source.kind)
 		if !ok {
@@ -1452,27 +1653,51 @@ func sourceAccess(source fact, number, offset int, label string, standalone bool
 			jen.Id(idx).Op(":=").Int().Call(jen.Id("c").Dot("code").Index(jen.Add(at).Op("+").Lit(1))),
 		)
 	case instr.GLOBAL_GET, instr.CONST_GET:
-		result.compile = append(result.compile,
-			jen.Id(idx).Op(":=").Qual("github.com/siyul-park/minivm/instr", "ParseU16").Call(jen.Id("c").Dot("code"), jen.Add(at).Op("+").Lit(1)),
-		)
+		if standalone {
+			result.compile = append(result.compile,
+				jen.Id(idx).Op(":=").Int().Call(
+					jen.Op("*").Parens(jen.Op("*").Uint16()).Call(
+						jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Add(at).Op("+").Lit(1)))),
+					),
+				),
+			)
+		} else {
+			result.compile = append(result.compile,
+				jen.Id(idx).Op(":=").Qual("github.com/siyul-park/minivm/instr", "ParseU16").Call(jen.Id("c").Dot("code"), jen.Add(at).Op("+").Lit(1)),
+			)
+		}
+	}
+	if standalone && (slot || op == instr.CONST_GET) {
+		result.compile = append(result.compile, jen.Id("c").Dot("ip").Op("+=").Lit(width))
 	}
 
 	switch op {
 	case instr.LOCAL_GET:
 		result.compile = append(result.compile, rejectBounds("locals"))
-		result.check = append(result.check,
-			jen.Id(addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(idx),
-			jen.If(jen.Id(addr).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
-		)
+		if standalone {
+			result.check = append(result.check,
+				jen.Id(addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(idx),
+				jen.If(jen.Id(addr).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+			)
+		} else {
+			result.check = append(result.check,
+				jen.If(jen.Id("i").Dot("fr").Dot("bp").Op("+").Id(idx).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+			)
+			result.body = append(result.body, jen.Id(addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(idx))
+		}
 		result.body = append(result.body, jen.Id(boxed).Op(":=").Id("i").Dot("stack").Index(jen.Id(addr)))
 	case instr.GLOBAL_GET:
-		result.compile = append(result.compile, rejectBounds("globals"))
+		if !standalone {
+			result.compile = append(result.compile, rejectBounds("globals"))
+		}
 		result.check = append(result.check,
 			jen.If(jen.Id(idx).Op(">=").Len(jen.Id("i").Dot("globals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
 		)
 		result.body = append(result.body, jen.Id(boxed).Op(":=").Id("i").Dot("globals").Index(jen.Id(idx)))
 	case instr.UPVAL_GET:
-		result.compile = append(result.compile, rejectBounds("captures"))
+		if !standalone {
+			result.compile = append(result.compile, rejectBounds("captures"))
+		}
 		result.check = append(result.check,
 			jen.If(jen.Id(idx).Op(">=").Len(jen.Id("i").Dot("fr").Dot("upvals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
 		)
@@ -1482,7 +1707,6 @@ func sourceAccess(source fact, number, offset int, label string, standalone bool
 		if source.kind == instr.KindAny {
 			result.compile = append(result.compile,
 				jen.If(condition).Block(
-					jen.Id("c").Dot("ip").Op("+=").Lit(width),
 					jen.Return(jen.Func().Params(jen.Op("*").Id("Interpreter")).Block(jen.Panic(jen.Id("ErrSegmentationFault")))),
 				),
 			)
@@ -1564,6 +1788,11 @@ func sourceAccess(source fact, number, offset int, label string, standalone bool
 		result.body = append(result.body, jen.Id(name).Op(":=").Add(borrow(source.kind, result.boxed)))
 	}
 
+	if _, ok := slotField(op); ok {
+		retain := source.kind == instr.KindAny || source.kind.Repr() == instr.KindI64 || source.kind.Repr() == instr.KindRef
+		result.push = sourcePush(result, retain, width)
+		return result, nil
+	}
 	result.push = append(result.push, result.check...)
 	result.push = append(result.push, result.body...)
 	if op == instr.CONST_GET && source.kind == instr.KindAny {
@@ -1575,7 +1804,7 @@ func sourceAccess(source fact, number, offset int, label string, standalone bool
 				).Else().Block(jen.Id("i").Dot("retain").Call(jen.Id("addr"))),
 			),
 		)
-	} else if op == instr.LOCAL_GET || op == instr.GLOBAL_GET || op == instr.UPVAL_GET || op == instr.CONST_GET {
+	} else if op == instr.CONST_GET {
 		result.push = append(result.push, jen.Id("i").Dot("retainBox").Call(result.boxed))
 	}
 	result.push = append(result.push,

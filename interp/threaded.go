@@ -99,9 +99,8 @@ var (
 				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
-				taken := i.stack[i.sp-1].I32() != 0
 				i.sp -= 1
-				if taken {
+				if i.stack[i.sp].I32() != 0 {
 					i.fr.ip += offset
 				}
 				i.fr.ip += 3
@@ -154,27 +153,23 @@ var (
 				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
-				target := i.stack[i.sp-1]
-				if target.Kind() != types.KindRef {
-					panic(ErrTypeMismatch)
-				}
-				addr := target.Ref()
+				addr := i.stack[i.sp-1].Ref()
 				switch fn := i.heap[addr].(type) {
 				case *types.Function:
-					params := len(fn.Typ.Params)
-					returns := len(fn.Typ.Returns)
-					locals := len(fn.Locals)
 					if i.fp == len(i.frames) {
 						panic(ErrFrameOverflow)
 					}
-					if i.sp < params+1 {
+					params := len(fn.Typ.Params)
+					returns := len(fn.Typ.Returns)
+					locals := len(fn.Locals)
+					if i.sp <= params {
 						panic(ErrStackUnderflow)
 					}
 					if i.sp+locals-1 > len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if locals > 0 {
-						clear(i.stack[i.sp-1 : i.sp-1+locals])
+						clear(i.stack[i.sp-1 : i.sp+locals-1])
 					}
 					f := &i.frames[i.fp]
 					f.code = i.code[addr]
@@ -194,6 +189,9 @@ var (
 					i.fp++
 					i.fr = f
 				case *types.Closure:
+					if i.fp == len(i.frames) {
+						panic(ErrFrameOverflow)
+					}
 					tmpl, ok := i.heap[fn.Fn].(*types.Function)
 					if !ok {
 						panic(ErrTypeMismatch)
@@ -201,20 +199,17 @@ var (
 					params := len(fn.Typ.Params)
 					returns := len(fn.Typ.Returns)
 					locals := len(tmpl.Locals)
-					if i.fp == len(i.frames) {
-						panic(ErrFrameOverflow)
-					}
-					if i.sp < params+1 {
+					if i.sp <= params {
 						panic(ErrStackUnderflow)
 					}
 					if i.sp+locals-1 > len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if locals > 0 {
-						clear(i.stack[i.sp-1 : i.sp-1+locals])
+						clear(i.stack[i.sp-1 : i.sp+locals-1])
 					}
 					f := &i.frames[i.fp]
-					f.code = i.code[int(fn.Fn)]
+					f.code = i.code[fn.Fn]
 					f.upvals = fn.Upvals
 					f.addr = int(fn.Fn)
 					f.ref = addr
@@ -231,52 +226,55 @@ var (
 					i.fp++
 					i.fr = f
 				case *HostFunction:
-					params := len(fn.Typ.Params)
-					returns := len(fn.Typ.Returns)
-					if i.sp < 1+params {
-						panic(ErrStackUnderflow)
-					}
-					if i.sp+returns-params-1 > len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					args := i.stack[i.sp-params-1 : i.sp-1]
-					out, err := fn.Fn(i, args)
-					if err != nil {
-						panic(err)
-					}
-					for _, value := range args {
-						if value.Kind() != types.KindRef {
-							continue
+					{
+						fn := fn
+						params := len(fn.Typ.Params)
+						returns := len(fn.Typ.Returns)
+						if i.sp <= params {
+							panic(ErrStackUnderflow)
 						}
-						kept := false
-						for _, result := range out {
-							if result == value {
-								kept = true
-								break
+						if i.sp+returns-params-1 > len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						args := i.stack[i.sp-params-1 : i.sp-1]
+						out, err := fn.Fn(i, args)
+						if err != nil {
+							panic(err)
+						}
+						for _, value := range args {
+							if value.Kind() != types.KindRef {
+								continue
+							}
+							kept := false
+							for _, result := range out {
+								if result == value {
+									kept = true
+									break
+								}
+							}
+							if !kept {
+								i.release(value.Ref())
 							}
 						}
-						if !kept {
-							i.release(value.Ref())
-						}
-					}
-					for _, value := range i.stack[i.sp-1 : i.sp] {
-						if value.Kind() != types.KindRef {
-							continue
-						}
-						kept := false
-						for _, result := range out {
-							if result == value {
-								kept = true
-								break
+						for _, value := range i.stack[i.sp-1 : i.sp] {
+							if value.Kind() != types.KindRef {
+								continue
+							}
+							kept := false
+							for _, result := range out {
+								if result == value {
+									kept = true
+									break
+								}
+							}
+							if !kept {
+								i.release(value.Ref())
 							}
 						}
-						if !kept {
-							i.release(value.Ref())
-						}
+						i.sp += returns - params - 1
+						copy(i.stack[i.sp-returns:i.sp], out)
+						i.fr.ip += 1
 					}
-					i.sp += returns - params - 1
-					copy(i.stack[i.sp-returns:i.sp], out)
-					i.fr.ip += 1
 				default:
 					panic(ErrTypeMismatch)
 				}
@@ -351,170 +349,186 @@ var (
 				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
-				target := i.stack[i.sp-1]
-				if target.Kind() != types.KindRef {
-					panic(ErrTypeMismatch)
-				}
-				addr := target.Ref()
+				addr := i.stack[i.sp-1].Ref()
 				switch fn := i.heap[addr].(type) {
 				case *types.Function:
-					params := len(fn.Typ.Params)
-					returns := len(fn.Typ.Returns)
-					locals := len(fn.Locals)
-					if i.sp < params+1 {
-						panic(ErrStackUnderflow)
-					}
-					if i.fp == 1 {
-						if i.fp == len(i.frames) {
-							panic(ErrFrameOverflow)
+					{
+						code := addr
+						ref := addr
+						var upvals []types.Boxed
+						params := len(fn.Typ.Params)
+						returns := len(fn.Typ.Returns)
+						locals := len(fn.Locals)
+						if i.sp <= params {
+							panic(ErrStackUnderflow)
 						}
-						if i.sp+locals-1 > len(i.stack) {
+						var f *frame
+						var base int
+						if i.fp == 1 {
+							if i.fp == len(i.frames) {
+								panic(ErrFrameOverflow)
+							}
+							if i.sp+locals-1 > len(i.stack) {
+								panic(ErrStackOverflow)
+							}
+							if locals > 0 {
+								clear(i.stack[i.sp-1 : i.sp+locals-1])
+							}
+							f := &i.frames[i.fp]
+							f.code = i.code[code]
+							f.upvals = upvals
+							f.addr = code
+							f.ref = ref
+							f.ip = 0
+							f.bp = i.sp - params - 1
+							f.returns = returns
+							f.release = true
+							i.sp = f.bp + params + locals
+							i.fr.ip += 1
+							i.fp++
+							i.fr = f
+							goto inlineTail2
+						}
+						f = i.fr
+						base = f.bp
+						if base+params+locals > len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						if locals > 0 {
-							clear(i.stack[i.sp-1 : i.sp+locals-1])
+						copy(i.stack[base:base+params], i.stack[i.sp-params-1:i.sp-1])
+						if f.release {
+							i.release(f.ref)
 						}
-						f := &i.frames[i.fp]
-						f.code = i.code[addr]
-						f.upvals = nil
-						f.addr = addr
-						f.ref = addr
+						if locals > 0 {
+							clear(i.stack[base+params : base+params+locals])
+						}
+						f.code = i.code[code]
+						f.upvals = upvals
+						f.addr = code
+						f.ref = ref
 						f.ip = 0
-						f.bp = i.sp - params - 1
+						f.bp = base
 						f.returns = returns
 						f.release = true
 						f.coro = 0
-						i.sp = f.bp + params + locals
-						i.fr.ip += 1
-						i.fp++
-						i.fr = f
-						return
+						i.sp = base + params + locals
+					inlineTail2:
 					}
-					f := i.fr
-					base := f.bp
-					if base+params+locals > len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					copy(i.stack[base:base+params], i.stack[i.sp-params-1:i.sp-1])
-					if f.release {
-						i.release(f.ref)
-					}
-					if locals > 0 {
-						clear(i.stack[base+params : base+params+locals])
-					}
-					f.code = i.code[addr]
-					f.upvals = nil
-					f.addr = addr
-					f.ref = addr
-					f.ip = 0
-					f.returns = returns
-					f.release = true
-					f.coro = 0
-					i.sp = base + params + locals
 				case *types.Closure:
 					tmpl, ok := i.heap[fn.Fn].(*types.Function)
 					if !ok {
 						panic(ErrTypeMismatch)
 					}
-					params := len(fn.Typ.Params)
-					returns := len(fn.Typ.Returns)
-					locals := len(tmpl.Locals)
-					if i.sp < params+1 {
-						panic(ErrStackUnderflow)
-					}
-					if i.fp == 1 {
-						if i.fp == len(i.frames) {
-							panic(ErrFrameOverflow)
+					{
+						code := int(fn.Fn)
+						ref := addr
+						upvals := fn.Upvals
+						params := len(fn.Typ.Params)
+						returns := len(fn.Typ.Returns)
+						locals := len(tmpl.Locals)
+						if i.sp <= params {
+							panic(ErrStackUnderflow)
 						}
-						if i.sp+locals-1 > len(i.stack) {
+						var f *frame
+						var base int
+						if i.fp == 1 {
+							if i.fp == len(i.frames) {
+								panic(ErrFrameOverflow)
+							}
+							if i.sp+locals-1 > len(i.stack) {
+								panic(ErrStackOverflow)
+							}
+							if locals > 0 {
+								clear(i.stack[i.sp-1 : i.sp+locals-1])
+							}
+							f := &i.frames[i.fp]
+							f.code = i.code[code]
+							f.upvals = upvals
+							f.addr = code
+							f.ref = ref
+							f.ip = 0
+							f.bp = i.sp - params - 1
+							f.returns = returns
+							f.release = true
+							i.sp = f.bp + params + locals
+							i.fr.ip += 1
+							i.fp++
+							i.fr = f
+							goto inlineTail3
+						}
+						f = i.fr
+						base = f.bp
+						if base+params+locals > len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						if locals > 0 {
-							clear(i.stack[i.sp-1 : i.sp+locals-1])
+						copy(i.stack[base:base+params], i.stack[i.sp-params-1:i.sp-1])
+						if f.release {
+							i.release(f.ref)
 						}
-						f := &i.frames[i.fp]
-						f.code = i.code[int(fn.Fn)]
-						f.upvals = fn.Upvals
-						f.addr = int(fn.Fn)
-						f.ref = addr
+						if locals > 0 {
+							clear(i.stack[base+params : base+params+locals])
+						}
+						f.code = i.code[code]
+						f.upvals = upvals
+						f.addr = code
+						f.ref = ref
 						f.ip = 0
-						f.bp = i.sp - params - 1
+						f.bp = base
 						f.returns = returns
 						f.release = true
 						f.coro = 0
-						i.sp = f.bp + params + locals
-						i.fr.ip += 1
-						i.fp++
-						i.fr = f
-						return
+						i.sp = base + params + locals
+					inlineTail3:
 					}
-					f := i.fr
-					base := f.bp
-					if base+params+locals > len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					copy(i.stack[base:base+params], i.stack[i.sp-params-1:i.sp-1])
-					if f.release {
-						i.release(f.ref)
-					}
-					if locals > 0 {
-						clear(i.stack[base+params : base+params+locals])
-					}
-					f.code = i.code[int(fn.Fn)]
-					f.upvals = fn.Upvals
-					f.addr = int(fn.Fn)
-					f.ref = addr
-					f.ip = 0
-					f.returns = returns
-					f.release = true
-					f.coro = 0
-					i.sp = base + params + locals
 				case *HostFunction:
-					params := len(fn.Typ.Params)
-					returns := len(fn.Typ.Returns)
-					if i.sp < 1+params {
-						panic(ErrStackUnderflow)
-					}
-					if i.sp+returns-params-1 > len(i.stack) {
-						panic(ErrStackOverflow)
-					}
-					args := i.stack[i.sp-params-1 : i.sp-1]
-					out, err := fn.Fn(i, args)
-					if err != nil {
-						panic(err)
-					}
-					for _, value := range args {
-						if value.Kind() != types.KindRef {
-							continue
+					{
+						fn := fn
+						params := len(fn.Typ.Params)
+						returns := len(fn.Typ.Returns)
+						if i.sp <= params {
+							panic(ErrStackUnderflow)
 						}
-						kept := false
-						for _, result := range out {
-							if result == value {
-								kept = true
-								break
+						if i.sp+returns-params-1 > len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						args := i.stack[i.sp-params-1 : i.sp-1]
+						out, err := fn.Fn(i, args)
+						if err != nil {
+							panic(err)
+						}
+						for _, value := range args {
+							if value.Kind() != types.KindRef {
+								continue
+							}
+							kept := false
+							for _, result := range out {
+								if result == value {
+									kept = true
+									break
+								}
+							}
+							if !kept {
+								i.release(value.Ref())
 							}
 						}
-						if !kept {
-							i.release(value.Ref())
-						}
-					}
-					for _, value := range i.stack[i.sp-1 : i.sp] {
-						if value.Kind() != types.KindRef {
-							continue
-						}
-						kept := false
-						for _, result := range out {
-							if result == value {
-								kept = true
-								break
+						for _, value := range i.stack[i.sp-1 : i.sp] {
+							if value.Kind() != types.KindRef {
+								continue
+							}
+							kept := false
+							for _, result := range out {
+								if result == value {
+									kept = true
+									break
+								}
+							}
+							if !kept {
+								i.release(value.Ref())
 							}
 						}
-						if !kept {
-							i.release(value.Ref())
-						}
+						i.sp += returns - params - 1
+						copy(i.stack[i.sp-returns:i.sp], out)
+						i.fr.ip += 1
 					}
-					i.sp += returns - params - 1
-					copy(i.stack[i.sp-returns:i.sp], out)
 					if i.fp > 1 {
 						f := i.fr
 						if i.sp < f.returns {
@@ -749,14 +763,25 @@ var (
 			}
 		},
 		instr.GLOBAL_GET: func(c *threader) func(i *Interpreter) {
-			i0 := instr.ParseU16(c.code, c.ip+1)
-			if i0 >= len(c.globals) {
-				c.ip += 3
-				return func(*Interpreter) {
-					panic(ErrSegmentationFault)
+			i0 := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+			c.ip += 3
+			if i0 < len(c.globals) {
+				switch c.globals[i0].Repr() {
+				case types.KindI32, types.KindF32, types.KindF64:
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.globals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.globals[i0]
+						i.stack[i.sp] = r0
+						i.sp++
+						i.fr.ip += 3
+					}
 				}
 			}
-			c.ip += 3
 			return func(i *Interpreter) {
 				if i.sp == len(i.stack) {
 					panic(ErrStackOverflow)
@@ -844,13 +869,28 @@ var (
 		},
 		instr.LOCAL_GET: func(c *threader) func(i *Interpreter) {
 			i0 := int(c.code[c.ip+1])
+			c.ip += 2
 			if i0 >= len(c.locals) {
-				c.ip += 2
 				return func(*Interpreter) {
 					panic(ErrSegmentationFault)
 				}
 			}
-			c.ip += 2
+			switch c.locals[i0].Repr() {
+			case types.KindI32, types.KindF32, types.KindF64:
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					i2 := i.fr.bp + i0
+					if i2 >= i.sp {
+						panic(ErrSegmentationFault)
+					}
+					r0 := i.stack[i2]
+					i.stack[i.sp] = r0
+					i.sp++
+					i.fr.ip += 2
+				}
+			}
 			return func(i *Interpreter) {
 				if i.sp == len(i.stack) {
 					panic(ErrStackOverflow)
@@ -942,26 +982,41 @@ var (
 			}
 		},
 		instr.CONST_GET: func(c *threader) func(i *Interpreter) {
-			i0 := instr.ParseU16(c.code, c.ip+1)
+			i0 := int(*(*uint16)(unsafe.Pointer(&c.code[c.ip+1])))
+			c.ip += 3
 			if i0 >= len(c.constants) {
-				c.ip += 3
 				return func(*Interpreter) {
 					panic(ErrSegmentationFault)
 				}
 			}
 			r0 := c.constants[i0]
-			c.ip += 3
+			switch r0.Kind() {
+			case types.KindRef:
+				addr := r0.Ref()
+				if str, ok := c.heap[addr].(types.String); ok {
+					text := string(str)
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						i.stack[i.sp] = types.BoxRef(int(i.intern(text)))
+						i.sp++
+						i.fr.ip += 3
+					}
+				}
+				return func(i *Interpreter) {
+					if i.sp == len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					i.retain(addr)
+					i.stack[i.sp] = r0
+					i.sp++
+					i.fr.ip += 3
+				}
+			}
 			return func(i *Interpreter) {
 				if i.sp == len(i.stack) {
 					panic(ErrStackOverflow)
-				}
-				if r0.Kind() == types.KindRef {
-					addr := r0.Ref()
-					if str, ok := c.heap[addr].(types.String); ok {
-						r0 = types.BoxRef(int(i.intern(string(str))))
-					} else {
-						i.retain(addr)
-					}
 				}
 				i.stack[i.sp] = r0
 				i.sp++
@@ -970,13 +1025,24 @@ var (
 		},
 		instr.UPVAL_GET: func(c *threader) func(i *Interpreter) {
 			i0 := int(c.code[c.ip+1])
-			if i0 >= len(c.captures) {
-				c.ip += 2
-				return func(*Interpreter) {
-					panic(ErrSegmentationFault)
+			c.ip += 2
+			if i0 < len(c.captures) {
+				switch c.captures[i0].Repr() {
+				case types.KindI32, types.KindF32, types.KindF64:
+					return func(i *Interpreter) {
+						if i.sp == len(i.stack) {
+							panic(ErrStackOverflow)
+						}
+						if i0 >= len(i.fr.upvals) {
+							panic(ErrSegmentationFault)
+						}
+						r0 := i.fr.upvals[i0]
+						i.stack[i.sp] = r0
+						i.sp++
+						i.fr.ip += 2
+					}
 				}
 			}
-			c.ip += 2
 			return func(i *Interpreter) {
 				if i.sp == len(i.stack) {
 					panic(ErrStackOverflow)
@@ -1164,8 +1230,8 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				value := i.stack[i.sp-1]
-				i.releaseBox(value)
 				i.stack[i.sp-1] = types.BoxI1(value.Ref() == 0)
+				i.releaseBox(value)
 				i.fr.ip += 1
 			}
 		},
@@ -5183,11 +5249,7 @@ var (
 				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
-				target := i.stack[i.sp-1]
-				if target.Kind() != types.KindRef {
-					panic(ErrTypeMismatch)
-				}
-				addr := target.Ref()
+				addr := i.stack[i.sp-1].Ref()
 				fn, ok := i.heap[addr].(*types.Function)
 				if !ok {
 					panic(ErrTypeMismatch)
@@ -5413,7 +5475,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -5444,7 +5506,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -5475,7 +5537,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -5506,7 +5568,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -5537,7 +5599,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -5568,7 +5630,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -5599,7 +5661,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -5630,7 +5692,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -5661,7 +5723,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -5692,7 +5754,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -5723,7 +5785,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -5754,7 +5816,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -5788,7 +5850,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -5827,7 +5889,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -5866,7 +5928,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -5905,7 +5967,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -5944,7 +6006,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -5983,7 +6045,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6022,7 +6084,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6061,7 +6123,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6100,7 +6162,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6139,7 +6201,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6178,7 +6240,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6217,7 +6279,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6256,7 +6318,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6295,7 +6357,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6334,7 +6396,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6373,7 +6435,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6412,7 +6474,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6451,7 +6513,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6490,7 +6552,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6529,7 +6591,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6568,7 +6630,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6607,7 +6669,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6646,7 +6708,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6685,7 +6747,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6724,7 +6786,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6763,7 +6825,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6802,7 +6864,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6841,7 +6903,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6880,7 +6942,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6919,7 +6981,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6958,7 +7020,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -6997,7 +7059,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -7036,13 +7098,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 > v1)
@@ -7076,13 +7138,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
@@ -7116,13 +7178,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 <= v1)
@@ -7156,13 +7218,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
@@ -7196,13 +7258,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 >= v1)
@@ -7236,13 +7298,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
@@ -7276,13 +7338,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 == v1)
@@ -7316,13 +7378,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 != v1)
@@ -7356,13 +7418,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 < v1)
@@ -7396,13 +7458,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 > v1)
@@ -7436,13 +7498,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 <= v1)
@@ -7476,13 +7538,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 >= v1)
@@ -7516,13 +7578,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 == v1)
@@ -7556,13 +7618,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 != v1)
@@ -7596,13 +7658,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 < v1)
@@ -7636,13 +7698,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 > v1)
@@ -7676,13 +7738,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 <= v1)
@@ -7716,13 +7778,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 >= v1)
@@ -7756,13 +7818,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 == v1)
@@ -7796,13 +7858,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 != v1)
@@ -7836,13 +7898,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 < v1)
@@ -7876,13 +7938,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
@@ -7916,13 +7978,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 > v1)
@@ -7956,13 +8018,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
@@ -7996,13 +8058,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 <= v1)
@@ -8036,13 +8098,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
@@ -8076,13 +8138,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 >= v1)
@@ -8116,13 +8178,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
@@ -8156,13 +8218,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 == v1)
@@ -8196,13 +8258,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 != v1)
@@ -8236,13 +8298,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 < v1)
@@ -8276,13 +8338,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
@@ -8316,7 +8378,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8355,7 +8417,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8394,7 +8456,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8433,7 +8495,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8472,7 +8534,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8511,7 +8573,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8550,7 +8612,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8589,7 +8651,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8628,7 +8690,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8667,7 +8729,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8706,7 +8768,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8745,7 +8807,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8784,7 +8846,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8823,7 +8885,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8862,7 +8924,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8901,7 +8963,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8940,7 +9002,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -8979,7 +9041,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -9018,7 +9080,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -9057,7 +9119,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -9096,7 +9158,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -9135,7 +9197,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -9174,7 +9236,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -9213,7 +9275,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -9252,7 +9314,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -9291,7 +9353,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -9330,7 +9392,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -9369,7 +9431,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -9408,7 +9470,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -9447,7 +9509,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -9486,7 +9548,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -9525,7 +9587,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -9561,7 +9623,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -9592,7 +9654,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -9623,7 +9685,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -9654,7 +9716,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
@@ -9685,7 +9747,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -9716,7 +9778,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
@@ -9747,7 +9809,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -9778,7 +9840,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
@@ -9809,7 +9871,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -9840,7 +9902,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
@@ -9871,7 +9933,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -9902,7 +9964,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
@@ -9933,7 +9995,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -9964,7 +10026,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
@@ -9995,7 +10057,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -10026,7 +10088,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
@@ -10057,7 +10119,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -10088,7 +10150,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -10119,7 +10181,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -10150,7 +10212,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
@@ -10184,9 +10246,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10216,9 +10277,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) > uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10248,9 +10308,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10280,9 +10339,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) <= uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10312,9 +10370,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10344,9 +10401,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) >= uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10372,7 +10428,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(v0 + v1)
@@ -10401,7 +10457,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(v0 - v1)
@@ -10430,7 +10486,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(v0 * v1)
@@ -10458,11 +10514,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF32(v1)
@@ -10501,11 +10556,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF32(v1)
@@ -10544,11 +10598,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF32(v1)
@@ -10594,7 +10647,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(min(v0, v1))
@@ -10623,7 +10676,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(max(v0, v1))
@@ -10652,7 +10705,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(float32(math.Copysign(float64(v0), float64(v1))))
@@ -10681,7 +10734,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -10710,7 +10763,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -10739,7 +10792,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -10768,7 +10821,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -10797,7 +10850,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -10826,7 +10879,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -10859,9 +10912,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10891,9 +10943,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10923,9 +10974,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10955,9 +11005,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10987,9 +11036,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -11019,9 +11067,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -11047,7 +11094,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(v0 + v1)
@@ -11076,7 +11123,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(v0 - v1)
@@ -11105,7 +11152,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(v0 * v1)
@@ -11133,11 +11180,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF64(v1)
@@ -11176,11 +11222,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF64(v1)
@@ -11219,11 +11264,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF64(v1)
@@ -11269,7 +11313,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(math.Min(v0, v1))
@@ -11298,7 +11342,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(math.Max(v0, v1))
@@ -11327,7 +11371,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(math.Copysign(v0, v1))
@@ -11356,7 +11400,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -11385,7 +11429,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -11414,7 +11458,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -11443,7 +11487,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -11472,7 +11516,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -11501,7 +11545,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -11534,9 +11578,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -11566,9 +11609,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -11597,7 +11639,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -11634,7 +11676,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -11671,7 +11713,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -11708,7 +11750,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -11745,7 +11787,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -11782,7 +11824,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -11819,7 +11861,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -11856,7 +11898,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -11893,7 +11935,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -11929,18 +11971,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -11980,18 +12020,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -12031,18 +12069,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -12089,7 +12125,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12126,7 +12162,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12163,7 +12199,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12200,7 +12236,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12237,7 +12273,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12274,7 +12310,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12311,7 +12347,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12348,7 +12384,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12385,7 +12421,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12422,7 +12458,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12459,7 +12495,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12496,7 +12532,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12532,18 +12568,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -12583,18 +12617,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -12634,18 +12666,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -12692,7 +12722,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12729,7 +12759,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12766,7 +12796,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12803,7 +12833,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12840,7 +12870,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12877,7 +12907,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12914,7 +12944,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12951,7 +12981,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -12988,7 +13018,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13025,7 +13055,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13062,7 +13092,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13099,7 +13129,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13135,18 +13165,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -13186,18 +13214,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -13237,18 +13263,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -13288,18 +13312,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -13340,7 +13362,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13377,7 +13399,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13414,7 +13436,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13450,7 +13472,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13485,7 +13507,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13520,7 +13542,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13556,7 +13578,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13593,7 +13615,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13630,7 +13652,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13667,7 +13689,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13704,7 +13726,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13741,7 +13763,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13778,7 +13800,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13815,7 +13837,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13852,7 +13874,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13889,7 +13911,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13926,7 +13948,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -13963,7 +13985,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14000,7 +14022,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14037,7 +14059,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14074,7 +14096,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14114,7 +14136,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14165,7 +14187,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14216,7 +14238,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14267,7 +14289,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14315,7 +14337,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14352,7 +14374,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14389,7 +14411,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14426,7 +14448,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14463,7 +14485,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14500,7 +14522,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14537,7 +14559,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14574,7 +14596,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14611,7 +14633,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14648,7 +14670,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14685,7 +14707,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14722,7 +14744,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -14760,9 +14782,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -14792,9 +14813,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -14824,9 +14844,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -14856,9 +14875,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -14887,13 +14905,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 > v1)
@@ -14925,13 +14943,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
@@ -14963,13 +14981,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 <= v1)
@@ -15001,13 +15019,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
@@ -15039,13 +15057,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 >= v1)
@@ -15077,13 +15095,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
@@ -15115,13 +15133,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(v0 + v1)
@@ -15153,13 +15171,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(v0 - v1)
@@ -15191,13 +15209,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(v0 * v1)
@@ -15228,19 +15246,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -15280,19 +15296,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -15332,19 +15346,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -15391,13 +15403,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(min(v0, v1))
@@ -15429,13 +15441,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(max(v0, v1))
@@ -15467,13 +15479,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(float32(math.Copysign(float64(v0), float64(v1))))
@@ -15505,13 +15517,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 == v1)
@@ -15543,13 +15555,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 != v1)
@@ -15581,13 +15593,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 < v1)
@@ -15619,13 +15631,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 > v1)
@@ -15657,13 +15669,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 <= v1)
@@ -15695,13 +15707,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 >= v1)
@@ -15733,13 +15745,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(v0 + v1)
@@ -15771,13 +15783,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(v0 - v1)
@@ -15809,13 +15821,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(v0 * v1)
@@ -15846,19 +15858,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -15898,19 +15908,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -15950,19 +15958,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -16009,13 +16015,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(math.Min(v0, v1))
@@ -16047,13 +16053,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(math.Max(v0, v1))
@@ -16085,13 +16091,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(math.Copysign(v0, v1))
@@ -16123,13 +16129,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 == v1)
@@ -16161,13 +16167,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 != v1)
@@ -16199,13 +16205,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 < v1)
@@ -16237,13 +16243,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 > v1)
@@ -16275,13 +16281,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 <= v1)
@@ -16313,13 +16319,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 >= v1)
@@ -16351,13 +16357,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(v0 + v1)
@@ -16389,13 +16395,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(v0 - v1)
@@ -16427,13 +16433,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(v0 * v1)
@@ -16464,19 +16470,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -16516,19 +16520,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -16568,19 +16570,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -16620,19 +16620,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -16673,13 +16671,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(v0 << (v1 & 31))
@@ -16711,13 +16709,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(v0 >> (v1 & 31))
@@ -16749,13 +16747,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(int32(uint32(v0) >> (v1 & 31)))
@@ -16786,13 +16784,13 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) ^ uint64(r1)&types.VMask))
 					i.stack[i.sp] = v2
@@ -16822,13 +16820,13 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v2 := types.Boxed(uint64(r0) & uint64(r1))
 					i.stack[i.sp] = v2
@@ -16858,13 +16856,13 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v2 := types.Boxed(uint64(r0) | uint64(r1))
 					i.stack[i.sp] = v2
@@ -16895,13 +16893,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), int(v1))))
@@ -16933,13 +16931,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), -int(v1))))
@@ -16971,13 +16969,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 == v1)
@@ -17009,13 +17007,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 != v1)
@@ -17047,13 +17045,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 < v1)
@@ -17085,13 +17083,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
@@ -17123,13 +17121,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 > v1)
@@ -17161,13 +17159,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
@@ -17199,13 +17197,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 <= v1)
@@ -17237,13 +17235,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
@@ -17275,13 +17273,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 >= v1)
@@ -17313,13 +17311,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
@@ -17351,13 +17349,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 + v1)
@@ -17389,13 +17387,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 - v1)
@@ -17427,13 +17425,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 * v1)
@@ -17468,13 +17466,13 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					i.retainBox(r1)
 					i.stack[i.sp] = r1
@@ -17520,13 +17518,13 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					i.retainBox(r1)
 					i.stack[i.sp] = r1
@@ -17572,13 +17570,13 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					i.retainBox(r1)
 					i.stack[i.sp] = r1
@@ -17624,13 +17622,13 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					i.retainBox(r1)
 					i.stack[i.sp] = r1
@@ -17673,13 +17671,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 << (v1 & 63))
@@ -17711,13 +17709,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 >> (v1 & 63))
@@ -17749,13 +17747,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(int64(uint64(v0) >> (v1 & 63)))
@@ -17787,13 +17785,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 ^ v1)
@@ -17825,13 +17823,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 & v1)
@@ -17863,13 +17861,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 | v1)
@@ -17901,13 +17899,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), int(v1))))
@@ -17939,13 +17937,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), -int(v1))))
@@ -17977,13 +17975,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 == v1)
@@ -18015,13 +18013,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 != v1)
@@ -18053,13 +18051,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 < v1)
@@ -18091,13 +18089,13 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
@@ -18129,7 +18127,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18166,7 +18164,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18203,7 +18201,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18240,7 +18238,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18277,7 +18275,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18314,7 +18312,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18351,7 +18349,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18388,7 +18386,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18425,7 +18423,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18461,18 +18459,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -18512,18 +18508,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -18563,18 +18557,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -18621,7 +18613,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18658,7 +18650,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18695,7 +18687,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18732,7 +18724,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18769,7 +18761,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18806,7 +18798,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18843,7 +18835,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18880,7 +18872,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18917,7 +18909,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18954,7 +18946,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -18991,7 +18983,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19028,7 +19020,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19064,18 +19056,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -19115,18 +19105,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -19166,18 +19154,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -19224,7 +19210,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19261,7 +19247,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19298,7 +19284,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19335,7 +19321,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19372,7 +19358,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19409,7 +19395,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19446,7 +19432,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19483,7 +19469,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19520,7 +19506,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19557,7 +19543,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19594,7 +19580,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19631,7 +19617,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19667,18 +19653,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -19718,18 +19702,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -19769,18 +19751,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -19820,18 +19800,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -19872,7 +19850,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19909,7 +19887,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19946,7 +19924,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -19982,7 +19960,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20017,7 +19995,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20052,7 +20030,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20088,7 +20066,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20125,7 +20103,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20162,7 +20140,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20199,7 +20177,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20236,7 +20214,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20273,7 +20251,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20310,7 +20288,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20347,7 +20325,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20384,7 +20362,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20421,7 +20399,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20458,7 +20436,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20495,7 +20473,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20532,7 +20510,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20569,7 +20547,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20606,7 +20584,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20646,7 +20624,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20697,7 +20675,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20748,7 +20726,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20799,7 +20777,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20847,7 +20825,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20884,7 +20862,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20921,7 +20899,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20958,7 +20936,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -20995,7 +20973,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -21032,7 +21010,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -21069,7 +21047,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -21106,7 +21084,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -21143,7 +21121,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -21180,7 +21158,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -21217,7 +21195,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -21254,7 +21232,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -21313,7 +21291,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(v0 + v1)
@@ -21342,7 +21320,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(v0 - v1)
@@ -21371,7 +21349,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(v0 * v1)
@@ -21399,11 +21377,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxI32(v1)
@@ -21442,11 +21419,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxI32(v1)
@@ -21485,11 +21461,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxI32(v1)
@@ -21528,11 +21503,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxI32(v1)
@@ -21572,7 +21546,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(v0 << (v1 & 31))
@@ -21601,7 +21575,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(v0 >> (v1 & 31))
@@ -21630,7 +21604,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(int32(uint32(v0) >> (v1 & 31)))
@@ -21658,7 +21632,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) ^ uint64(r1)&types.VMask))
@@ -21686,7 +21660,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.Boxed(uint64(r0) & uint64(r1))
@@ -21714,7 +21688,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.Boxed(uint64(r0) | uint64(r1))
@@ -21743,7 +21717,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), int(v1))))
@@ -21772,7 +21746,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), -int(v1))))
@@ -21801,7 +21775,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -21830,7 +21804,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -21859,7 +21833,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -21888,7 +21862,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
@@ -21917,7 +21891,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -21946,7 +21920,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
@@ -21975,7 +21949,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -22004,7 +21978,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
@@ -22033,7 +22007,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -22062,7 +22036,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
@@ -22095,9 +22069,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22127,9 +22100,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22159,9 +22131,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22191,9 +22162,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22223,9 +22193,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22255,9 +22224,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22287,9 +22255,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22319,9 +22286,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22351,9 +22317,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22383,9 +22348,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22411,7 +22375,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -22440,7 +22404,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
@@ -22469,7 +22433,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -22498,7 +22462,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
@@ -22527,7 +22491,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -22556,7 +22520,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
@@ -22585,7 +22549,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 + v1)
@@ -22614,7 +22578,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 - v1)
@@ -22643,7 +22607,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 * v1)
@@ -22675,7 +22639,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = i.boxI64(v1)
@@ -22718,7 +22682,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = i.boxI64(v1)
@@ -22761,7 +22725,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = i.boxI64(v1)
@@ -22804,7 +22768,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = i.boxI64(v1)
@@ -22844,7 +22808,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 << (v1 & 63))
@@ -22873,7 +22837,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 >> (v1 & 63))
@@ -22902,7 +22866,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(int64(uint64(v0) >> (v1 & 63)))
@@ -22931,7 +22895,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 ^ v1)
@@ -22960,7 +22924,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 & v1)
@@ -22989,7 +22953,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 | v1)
@@ -23018,7 +22982,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), int(v1))))
@@ -23047,7 +23011,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), -int(v1))))
@@ -23076,7 +23040,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -23105,7 +23069,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -23134,7 +23098,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -23163,7 +23127,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
@@ -23196,9 +23160,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -23228,9 +23191,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -23260,9 +23222,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -23292,9 +23253,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) < uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -23561,7 +23521,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
@@ -23597,7 +23556,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
@@ -23633,7 +23591,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
@@ -23999,7 +23956,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
@@ -24035,7 +23991,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
@@ -24071,7 +24026,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
@@ -24480,7 +24434,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
@@ -24516,7 +24469,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
@@ -24552,7 +24504,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
@@ -24588,7 +24539,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 3
@@ -25658,13 +25608,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -25690,13 +25640,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -25722,13 +25672,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -25754,13 +25704,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -25786,13 +25736,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -25818,13 +25768,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -25850,13 +25800,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -25882,13 +25832,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -25914,13 +25864,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -25946,13 +25896,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -25978,13 +25928,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -26010,13 +25960,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -26045,19 +25995,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 > v1)
@@ -26086,19 +26036,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
@@ -26127,19 +26077,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 <= v1)
@@ -26168,19 +26118,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
@@ -26209,19 +26159,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 >= v1)
@@ -26250,19 +26200,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
@@ -26291,19 +26241,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 == v1)
@@ -26332,19 +26282,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 != v1)
@@ -26373,19 +26323,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 < v1)
@@ -26414,19 +26364,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 > v1)
@@ -26455,19 +26405,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 <= v1)
@@ -26496,19 +26446,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 >= v1)
@@ -26537,19 +26487,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 == v1)
@@ -26578,19 +26528,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 != v1)
@@ -26619,19 +26569,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 < v1)
@@ -26660,19 +26610,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 > v1)
@@ -26701,19 +26651,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 <= v1)
@@ -26742,19 +26692,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 >= v1)
@@ -26783,19 +26733,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 == v1)
@@ -26824,19 +26774,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 != v1)
@@ -26865,19 +26815,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 < v1)
@@ -26906,19 +26856,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
@@ -26947,19 +26897,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 > v1)
@@ -26988,19 +26938,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
@@ -27029,19 +26979,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 <= v1)
@@ -27070,19 +27020,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
@@ -27111,19 +27061,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 >= v1)
@@ -27152,19 +27102,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
@@ -27193,19 +27143,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 == v1)
@@ -27234,19 +27184,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 != v1)
@@ -27275,19 +27225,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 < v1)
@@ -27316,19 +27266,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
@@ -27354,13 +27304,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -27386,13 +27336,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -27418,13 +27368,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -27450,13 +27400,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
@@ -27482,13 +27432,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -27514,13 +27464,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
@@ -27546,13 +27496,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -27578,13 +27528,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
@@ -27610,13 +27560,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -27642,13 +27592,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
@@ -27674,13 +27624,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -27706,13 +27656,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
@@ -27738,13 +27688,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -27770,13 +27720,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
@@ -27802,13 +27752,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -27834,13 +27784,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
@@ -27866,13 +27816,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -27898,13 +27848,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -27930,13 +27880,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -27962,13 +27912,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
@@ -27993,19 +27943,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28026,19 +27975,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) > uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28059,19 +28007,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28092,19 +28039,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) <= uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28125,19 +28071,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28158,19 +28103,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) >= uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28191,13 +28135,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(v0 + v1)
@@ -28221,13 +28165,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(v0 - v1)
@@ -28251,13 +28195,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(v0 * v1)
@@ -28281,16 +28225,15 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF32(v1)
@@ -28325,16 +28268,15 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF32(v1)
@@ -28369,16 +28311,15 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF32(v1)
@@ -28419,13 +28360,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(min(v0, v1))
@@ -28449,13 +28390,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(max(v0, v1))
@@ -28479,13 +28420,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(float32(math.Copysign(float64(v0), float64(v1))))
@@ -28509,13 +28450,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -28539,13 +28480,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -28569,13 +28510,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -28599,13 +28540,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -28629,13 +28570,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -28659,13 +28600,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -28689,19 +28630,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28722,19 +28662,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28755,19 +28694,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28788,19 +28726,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28821,19 +28758,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28854,19 +28790,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28887,13 +28822,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(v0 + v1)
@@ -28917,13 +28852,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(v0 - v1)
@@ -28947,13 +28882,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(v0 * v1)
@@ -28977,16 +28912,15 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF64(v1)
@@ -29021,16 +28955,15 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF64(v1)
@@ -29065,16 +28998,15 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF64(v1)
@@ -29115,13 +29047,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(math.Min(v0, v1))
@@ -29145,13 +29077,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(math.Max(v0, v1))
@@ -29175,13 +29107,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(math.Copysign(v0, v1))
@@ -29205,13 +29137,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -29235,13 +29167,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -29265,13 +29197,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -29295,13 +29227,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -29325,13 +29257,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -29355,13 +29287,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -29385,19 +29317,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -29418,19 +29349,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -29451,19 +29381,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -29484,19 +29413,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -29517,19 +29445,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -29550,19 +29477,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -29586,19 +29512,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 > v1)
@@ -29625,19 +29551,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
@@ -29664,19 +29590,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 <= v1)
@@ -29703,19 +29629,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
@@ -29742,19 +29668,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 >= v1)
@@ -29781,19 +29707,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
@@ -29820,19 +29746,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(v0 + v1)
@@ -29859,19 +29785,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(v0 - v1)
@@ -29898,19 +29824,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(v0 * v1)
@@ -29937,24 +29863,22 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -29990,24 +29914,22 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -30043,24 +29965,22 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -30102,19 +30022,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(min(v0, v1))
@@ -30141,19 +30061,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(max(v0, v1))
@@ -30180,19 +30100,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(float32(math.Copysign(float64(v0), float64(v1))))
@@ -30219,19 +30139,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 == v1)
@@ -30258,19 +30178,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 != v1)
@@ -30297,19 +30217,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 < v1)
@@ -30336,19 +30256,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 > v1)
@@ -30375,19 +30295,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 <= v1)
@@ -30414,19 +30334,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 >= v1)
@@ -30453,19 +30373,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(v0 + v1)
@@ -30492,19 +30412,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(v0 - v1)
@@ -30531,19 +30451,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(v0 * v1)
@@ -30570,24 +30490,22 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -30623,24 +30541,22 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -30676,24 +30592,22 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -30735,19 +30649,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(math.Min(v0, v1))
@@ -30774,19 +30688,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(math.Max(v0, v1))
@@ -30813,19 +30727,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(math.Copysign(v0, v1))
@@ -30852,19 +30766,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 == v1)
@@ -30891,19 +30805,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 != v1)
@@ -30930,19 +30844,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 < v1)
@@ -30969,19 +30883,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 > v1)
@@ -31008,19 +30922,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 <= v1)
@@ -31047,19 +30961,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 >= v1)
@@ -31086,19 +31000,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(v0 + v1)
@@ -31125,19 +31039,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(v0 - v1)
@@ -31164,19 +31078,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(v0 * v1)
@@ -31203,24 +31117,22 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -31256,24 +31168,22 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -31309,24 +31219,22 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -31362,24 +31270,22 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -31415,19 +31321,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(v0 << (v1 & 31))
@@ -31454,19 +31360,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(v0 >> (v1 & 31))
@@ -31493,19 +31399,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(int32(uint32(v0) >> (v1 & 31)))
@@ -31532,18 +31438,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) ^ uint64(r1)&types.VMask))
 					i.stack[i.sp] = v2
@@ -31569,18 +31475,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v2 := types.Boxed(uint64(r0) & uint64(r1))
 					i.stack[i.sp] = v2
@@ -31606,18 +31512,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v2 := types.Boxed(uint64(r0) | uint64(r1))
 					i.stack[i.sp] = v2
@@ -31643,19 +31549,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), int(v1))))
@@ -31682,19 +31588,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), -int(v1))))
@@ -31721,19 +31627,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 == v1)
@@ -31760,19 +31666,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 != v1)
@@ -31799,19 +31705,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 < v1)
@@ -31838,19 +31744,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
@@ -31877,19 +31783,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 > v1)
@@ -31916,19 +31822,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
@@ -31955,19 +31861,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 <= v1)
@@ -31994,19 +31900,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
@@ -32033,19 +31939,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 >= v1)
@@ -32072,19 +31978,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
@@ -32111,19 +32017,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 + v1)
@@ -32150,19 +32056,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 - v1)
@@ -32189,19 +32095,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 * v1)
@@ -32228,22 +32134,22 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					i.retainBox(r1)
 					i.stack[i.sp] = r1
@@ -32281,22 +32187,22 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					i.retainBox(r1)
 					i.stack[i.sp] = r1
@@ -32334,22 +32240,22 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					i.retainBox(r1)
 					i.stack[i.sp] = r1
@@ -32387,22 +32293,22 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					i.retainBox(r1)
 					i.stack[i.sp] = r1
@@ -32440,19 +32346,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 << (v1 & 63))
@@ -32479,19 +32385,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 >> (v1 & 63))
@@ -32518,19 +32424,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(int64(uint64(v0) >> (v1 & 63)))
@@ -32557,19 +32463,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 ^ v1)
@@ -32596,19 +32502,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 & v1)
@@ -32635,19 +32541,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 | v1)
@@ -32674,19 +32580,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), int(v1))))
@@ -32713,19 +32619,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), -int(v1))))
@@ -32752,19 +32658,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 == v1)
@@ -32791,19 +32697,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 != v1)
@@ -32830,19 +32736,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 < v1)
@@ -32869,19 +32775,19 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
@@ -32905,10 +32811,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					if r0.Ref() == 0 {
 						i.fr.ip += offset
@@ -32931,13 +32837,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(v0 + v1)
@@ -32961,13 +32867,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(v0 - v1)
@@ -32991,13 +32897,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(v0 * v1)
@@ -33021,16 +32927,15 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxI32(v1)
@@ -33065,16 +32970,15 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxI32(v1)
@@ -33109,16 +33013,15 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxI32(v1)
@@ -33153,16 +33056,15 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxI32(v1)
@@ -33197,13 +33099,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(v0 << (v1 & 31))
@@ -33227,13 +33129,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(v0 >> (v1 & 31))
@@ -33257,13 +33159,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(int32(uint32(v0) >> (v1 & 31)))
@@ -33287,12 +33189,12 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) ^ uint64(r1)&types.VMask))
@@ -33316,12 +33218,12 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.Boxed(uint64(r0) & uint64(r1))
@@ -33345,12 +33247,12 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.Boxed(uint64(r0) | uint64(r1))
@@ -33374,13 +33276,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), int(v1))))
@@ -33404,13 +33306,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), -int(v1))))
@@ -33434,13 +33336,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -33464,13 +33366,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -33494,13 +33396,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -33524,13 +33426,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
@@ -33554,13 +33456,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -33584,13 +33486,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
@@ -33614,13 +33516,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -33644,13 +33546,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
@@ -33674,13 +33576,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -33704,13 +33606,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
@@ -33734,19 +33636,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33767,19 +33668,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33800,19 +33700,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33833,19 +33732,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33866,19 +33764,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33899,19 +33796,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33932,19 +33828,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33965,19 +33860,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33998,19 +33892,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -34031,19 +33924,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -34064,13 +33956,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -34094,13 +33986,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
@@ -34124,13 +34016,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -34154,13 +34046,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
@@ -34184,13 +34076,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -34214,13 +34106,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
@@ -34244,13 +34136,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 + v1)
@@ -34274,13 +34166,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 - v1)
@@ -34304,13 +34196,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 * v1)
@@ -34334,16 +34226,16 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = i.boxI64(v1)
@@ -34378,16 +34270,16 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = i.boxI64(v1)
@@ -34422,16 +34314,16 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = i.boxI64(v1)
@@ -34466,16 +34358,16 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = i.boxI64(v1)
@@ -34510,13 +34402,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 << (v1 & 63))
@@ -34540,13 +34432,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 >> (v1 & 63))
@@ -34570,13 +34462,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(int64(uint64(v0) >> (v1 & 63)))
@@ -34600,13 +34492,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 ^ v1)
@@ -34630,13 +34522,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 & v1)
@@ -34660,13 +34552,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 | v1)
@@ -34690,13 +34582,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), int(v1))))
@@ -34720,13 +34612,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), -int(v1))))
@@ -34750,13 +34642,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -34780,13 +34672,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -34810,13 +34702,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -34840,13 +34732,13 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
@@ -34870,19 +34762,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -34903,19 +34794,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -34936,19 +34826,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -34969,19 +34858,18 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) < uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -35001,10 +34889,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -35029,10 +34917,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -35057,10 +34945,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -35085,10 +34973,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -35113,10 +35001,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -35141,10 +35029,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -35169,10 +35057,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -35197,10 +35085,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -35225,10 +35113,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -35253,12 +35141,11 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -35290,12 +35177,11 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -35327,12 +35213,11 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -35370,10 +35255,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -35398,10 +35283,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -35426,10 +35311,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -35454,10 +35339,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -35482,10 +35367,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -35510,10 +35395,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -35538,10 +35423,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -35566,10 +35451,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -35594,10 +35479,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F32()
 					if i.sp < 1 {
@@ -35622,10 +35507,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -35650,10 +35535,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -35678,10 +35563,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -35706,12 +35591,11 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -35743,12 +35627,11 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -35780,12 +35663,11 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -35823,10 +35705,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -35851,10 +35733,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -35879,10 +35761,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -35907,10 +35789,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -35935,10 +35817,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -35963,10 +35845,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -35991,10 +35873,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -36019,10 +35901,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -36047,10 +35929,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.F64()
 					if i.sp < 1 {
@@ -36075,8 +35957,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
 					i.fr.ip += 3
@@ -36096,10 +35977,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					i.stack[i.sp] = types.BoxI1(r0.Ref() == 0)
 					i.sp++
@@ -36120,10 +36001,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36148,10 +36029,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36176,10 +36057,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36204,12 +36085,11 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -36241,12 +36121,11 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -36278,12 +36157,11 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -36315,12 +36193,11 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -36352,10 +36229,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36380,10 +36257,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36408,10 +36285,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36436,10 +36313,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -36463,10 +36340,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -36490,10 +36367,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					if i.sp < 1 {
 						panic(ErrStackUnderflow)
@@ -36517,10 +36394,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36545,10 +36422,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36573,10 +36450,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36601,10 +36478,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36629,10 +36506,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36657,10 +36534,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36685,10 +36562,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36713,10 +36590,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36741,10 +36618,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36769,10 +36646,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36797,10 +36674,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36825,10 +36702,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := r0.I32()
 					if i.sp < 1 {
@@ -36853,10 +36730,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -36881,10 +36758,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -36909,10 +36786,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -36937,10 +36814,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					i.retainBox(r0)
 					i.stack[i.sp] = r0
@@ -36974,10 +36851,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					i.retainBox(r0)
 					i.stack[i.sp] = r0
@@ -37011,10 +36888,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					i.retainBox(r0)
 					i.stack[i.sp] = r0
@@ -37048,10 +36925,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					i.retainBox(r0)
 					i.stack[i.sp] = r0
@@ -37085,10 +36962,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -37113,10 +36990,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -37141,10 +37018,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -37169,10 +37046,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -37197,10 +37074,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -37225,10 +37102,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -37253,10 +37130,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -37281,10 +37158,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -37309,10 +37186,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -37337,10 +37214,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -37365,10 +37242,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -37393,10 +37270,10 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i2 := i.fr.bp + i0
-					if i2 >= i.sp {
+					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i2 := i.fr.bp + i0
 					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
 					if i.sp < 1 {
@@ -37435,9 +37312,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37467,9 +37343,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37499,9 +37374,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37531,9 +37405,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37563,9 +37436,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37595,9 +37467,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37627,9 +37498,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37659,9 +37529,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37691,9 +37560,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37723,9 +37591,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37755,9 +37622,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37787,9 +37653,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37819,9 +37684,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37851,9 +37715,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37883,9 +37746,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37915,9 +37777,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37947,9 +37808,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37979,9 +37839,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38011,9 +37870,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38043,9 +37901,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38075,9 +37932,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38107,9 +37963,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38150,9 +38005,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38193,9 +38047,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) > uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38236,9 +38089,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38279,9 +38131,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) <= uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38322,9 +38173,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38365,9 +38215,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) >= uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38408,9 +38257,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38451,9 +38299,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38494,9 +38341,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38537,9 +38383,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) < uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38641,7 +38486,7 @@ var (
 						if base+params+locals > len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						copy(i.stack[base:base+params], i.stack[i.sp-params-0:i.sp-0])
+						copy(i.stack[base:base+params], i.stack[i.sp-params:i.sp])
 						if f.release {
 							i.release(f.ref)
 						}
@@ -38688,7 +38533,7 @@ var (
 								clear(i.stack[i.sp : i.sp+locals])
 							}
 							f := &i.frames[i.fp]
-							f.code = i.code[int(fn.Fn)]
+							f.code = i.code[fn.Fn]
 							f.upvals = fn.Upvals
 							f.addr = int(fn.Fn)
 							f.ref = addr
@@ -38708,14 +38553,14 @@ var (
 						if base+params+locals > len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						copy(i.stack[base:base+params], i.stack[i.sp-params-0:i.sp-0])
+						copy(i.stack[base:base+params], i.stack[i.sp-params:i.sp])
 						if f.release {
 							i.release(f.ref)
 						}
 						if locals > 0 {
 							clear(i.stack[base+params : base+params+locals])
 						}
-						f.code = i.code[int(fn.Fn)]
+						f.code = i.code[fn.Fn]
 						f.upvals = fn.Upvals
 						f.addr = int(fn.Fn)
 						f.ref = addr
@@ -38733,7 +38578,7 @@ var (
 						if i.sp == len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						if i.sp < 0+params {
+						if i.sp < params {
 							panic(ErrStackUnderflow)
 						}
 						if i.sp+returns-params > len(i.stack) {
@@ -38913,7 +38758,7 @@ var (
 							clear(i.stack[i.sp : i.sp+locals])
 						}
 						f := &i.frames[i.fp]
-						f.code = i.code[int(fn.Fn)]
+						f.code = i.code[fn.Fn]
 						f.upvals = fn.Upvals
 						f.addr = int(fn.Fn)
 						f.ref = addr
@@ -38935,7 +38780,7 @@ var (
 						if i.sp == len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						if i.sp < 0+params {
+						if i.sp < params {
 							panic(ErrStackUnderflow)
 						}
 						if i.sp+returns-params > len(i.stack) {
@@ -41774,7 +41619,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -41805,7 +41650,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -41836,7 +41681,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -41867,7 +41712,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -41898,7 +41743,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -41929,7 +41774,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -41960,7 +41805,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -41991,7 +41836,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -42022,7 +41867,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -42053,7 +41898,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -42084,7 +41929,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -42115,7 +41960,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -42149,7 +41994,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42188,7 +42033,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42227,7 +42072,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42266,7 +42111,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42305,7 +42150,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42344,7 +42189,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42383,7 +42228,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42422,7 +42267,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42461,7 +42306,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42500,7 +42345,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42539,7 +42384,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42578,7 +42423,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42617,7 +42462,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42656,7 +42501,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42695,7 +42540,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42734,7 +42579,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42773,7 +42618,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42812,7 +42657,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42851,7 +42696,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42890,7 +42735,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42929,7 +42774,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -42968,7 +42813,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -43007,7 +42852,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -43046,7 +42891,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -43085,7 +42930,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -43124,7 +42969,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -43163,7 +43008,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -43202,7 +43047,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -43241,7 +43086,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -43280,7 +43125,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -43319,7 +43164,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -43358,7 +43203,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -43397,13 +43242,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 > v1)
@@ -43437,13 +43282,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
@@ -43477,13 +43322,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 <= v1)
@@ -43517,13 +43362,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
@@ -43557,13 +43402,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 >= v1)
@@ -43597,13 +43442,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
@@ -43637,13 +43482,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 == v1)
@@ -43677,13 +43522,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 != v1)
@@ -43717,13 +43562,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 < v1)
@@ -43757,13 +43602,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 > v1)
@@ -43797,13 +43642,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 <= v1)
@@ -43837,13 +43682,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 >= v1)
@@ -43877,13 +43722,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 == v1)
@@ -43917,13 +43762,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 != v1)
@@ -43957,13 +43802,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 < v1)
@@ -43997,13 +43842,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 > v1)
@@ -44037,13 +43882,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 <= v1)
@@ -44077,13 +43922,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 >= v1)
@@ -44117,13 +43962,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 == v1)
@@ -44157,13 +44002,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 != v1)
@@ -44197,13 +44042,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 < v1)
@@ -44237,13 +44082,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
@@ -44277,13 +44122,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 > v1)
@@ -44317,13 +44162,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
@@ -44357,13 +44202,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 <= v1)
@@ -44397,13 +44242,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
@@ -44437,13 +44282,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 >= v1)
@@ -44477,13 +44322,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
@@ -44517,13 +44362,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 == v1)
@@ -44557,13 +44402,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 != v1)
@@ -44597,13 +44442,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 < v1)
@@ -44637,13 +44482,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
@@ -44677,7 +44522,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -44716,7 +44561,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -44755,7 +44600,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -44794,7 +44639,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -44833,7 +44678,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -44872,7 +44717,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -44911,7 +44756,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -44950,7 +44795,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -44989,7 +44834,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45028,7 +44873,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45067,7 +44912,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45106,7 +44951,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45145,7 +44990,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45184,7 +45029,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45223,7 +45068,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45262,7 +45107,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45301,7 +45146,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45340,7 +45185,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45379,7 +45224,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45418,7 +45263,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45457,7 +45302,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45496,7 +45341,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45535,7 +45380,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45574,7 +45419,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45613,7 +45458,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45652,7 +45497,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45691,7 +45536,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45730,7 +45575,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45769,7 +45614,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45808,7 +45653,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45847,7 +45692,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45886,7 +45731,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -45922,7 +45767,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -45953,7 +45798,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -45984,7 +45829,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -46015,7 +45860,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
@@ -46046,7 +45891,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -46077,7 +45922,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
@@ -46108,7 +45953,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -46139,7 +45984,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
@@ -46170,7 +46015,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -46201,7 +46046,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
@@ -46232,7 +46077,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -46263,7 +46108,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
@@ -46294,7 +46139,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -46325,7 +46170,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
@@ -46356,7 +46201,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -46387,7 +46232,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
@@ -46418,7 +46263,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -46449,7 +46294,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -46480,7 +46325,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -46511,7 +46356,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
@@ -46545,9 +46390,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -46577,9 +46421,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) > uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -46609,9 +46452,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -46641,9 +46483,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) <= uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -46673,9 +46514,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -46705,9 +46545,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) >= uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -46733,7 +46572,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(v0 + v1)
@@ -46762,7 +46601,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(v0 - v1)
@@ -46791,7 +46630,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(v0 * v1)
@@ -46819,11 +46658,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF32(v1)
@@ -46862,11 +46700,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF32(v1)
@@ -46905,11 +46742,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF32(v1)
@@ -46955,7 +46791,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(min(v0, v1))
@@ -46984,7 +46820,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(max(v0, v1))
@@ -47013,7 +46849,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF32(float32(math.Copysign(float64(v0), float64(v1))))
@@ -47042,7 +46878,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -47071,7 +46907,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -47100,7 +46936,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -47129,7 +46965,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -47158,7 +46994,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -47187,7 +47023,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -47220,9 +47056,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -47252,9 +47087,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -47284,9 +47118,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -47316,9 +47149,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -47348,9 +47180,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -47380,9 +47211,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -47408,7 +47238,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(v0 + v1)
@@ -47437,7 +47267,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(v0 - v1)
@@ -47466,7 +47296,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(v0 * v1)
@@ -47494,11 +47324,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF64(v1)
@@ -47537,11 +47366,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF64(v1)
@@ -47580,11 +47408,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxF64(v1)
@@ -47630,7 +47457,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(math.Min(v0, v1))
@@ -47659,7 +47486,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(math.Max(v0, v1))
@@ -47688,7 +47515,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxF64(math.Copysign(v0, v1))
@@ -47717,7 +47544,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -47746,7 +47573,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -47775,7 +47602,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -47804,7 +47631,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -47833,7 +47660,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -47862,7 +47689,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -47895,9 +47722,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -47927,9 +47753,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -47958,7 +47783,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -47995,7 +47820,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48032,7 +47857,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48069,7 +47894,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48106,7 +47931,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48143,7 +47968,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48180,7 +48005,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48217,7 +48042,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48254,7 +48079,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48290,18 +48115,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -48341,18 +48164,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -48392,18 +48213,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -48450,7 +48269,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48487,7 +48306,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48524,7 +48343,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48561,7 +48380,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48598,7 +48417,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48635,7 +48454,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48672,7 +48491,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48709,7 +48528,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48746,7 +48565,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48783,7 +48602,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48820,7 +48639,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48857,7 +48676,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -48893,18 +48712,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -48944,18 +48761,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -48995,18 +48810,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -49053,7 +48866,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49090,7 +48903,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49127,7 +48940,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49164,7 +48977,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49201,7 +49014,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49238,7 +49051,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49275,7 +49088,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49312,7 +49125,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49349,7 +49162,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49386,7 +49199,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49423,7 +49236,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49460,7 +49273,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49496,18 +49309,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -49547,18 +49358,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -49598,18 +49407,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -49649,18 +49456,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 3
@@ -49701,7 +49506,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49738,7 +49543,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49775,7 +49580,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49811,7 +49616,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49846,7 +49651,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49881,7 +49686,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49917,7 +49722,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49954,7 +49759,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -49991,7 +49796,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50028,7 +49833,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50065,7 +49870,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50102,7 +49907,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50139,7 +49944,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50176,7 +49981,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50213,7 +50018,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50250,7 +50055,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50287,7 +50092,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50324,7 +50129,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50361,7 +50166,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50398,7 +50203,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50435,7 +50240,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50475,7 +50280,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50526,7 +50331,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50577,7 +50382,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50628,7 +50433,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50676,7 +50481,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50713,7 +50518,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50750,7 +50555,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50787,7 +50592,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50824,7 +50629,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50861,7 +50666,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50898,7 +50703,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50935,7 +50740,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -50972,7 +50777,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -51009,7 +50814,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -51046,7 +50851,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -51083,7 +50888,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.globals) {
@@ -51121,9 +50926,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -51153,9 +50957,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -51185,9 +50988,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -51217,9 +51019,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -51248,13 +51049,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 > v1)
@@ -51286,13 +51087,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
@@ -51324,13 +51125,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 <= v1)
@@ -51362,13 +51163,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
@@ -51400,13 +51201,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 >= v1)
@@ -51438,13 +51239,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
@@ -51476,13 +51277,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(v0 + v1)
@@ -51514,13 +51315,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(v0 - v1)
@@ -51552,13 +51353,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(v0 * v1)
@@ -51589,19 +51390,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -51641,19 +51440,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -51693,19 +51490,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -51752,13 +51547,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(min(v0, v1))
@@ -51790,13 +51585,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(max(v0, v1))
@@ -51828,13 +51623,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxF32(float32(math.Copysign(float64(v0), float64(v1))))
@@ -51866,13 +51661,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 == v1)
@@ -51904,13 +51699,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 != v1)
@@ -51942,13 +51737,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 < v1)
@@ -51980,13 +51775,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 > v1)
@@ -52018,13 +51813,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 <= v1)
@@ -52056,13 +51851,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 >= v1)
@@ -52094,13 +51889,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(v0 + v1)
@@ -52132,13 +51927,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(v0 - v1)
@@ -52170,13 +51965,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(v0 * v1)
@@ -52207,19 +52002,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -52259,19 +52052,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -52311,19 +52102,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -52370,13 +52159,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(math.Min(v0, v1))
@@ -52408,13 +52197,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(math.Max(v0, v1))
@@ -52446,13 +52235,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxF64(math.Copysign(v0, v1))
@@ -52484,13 +52273,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 == v1)
@@ -52522,13 +52311,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 != v1)
@@ -52560,13 +52349,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 < v1)
@@ -52598,13 +52387,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 > v1)
@@ -52636,13 +52425,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 <= v1)
@@ -52674,13 +52463,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 >= v1)
@@ -52712,13 +52501,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(v0 + v1)
@@ -52750,13 +52539,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(v0 - v1)
@@ -52788,13 +52577,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(v0 * v1)
@@ -52825,19 +52614,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -52877,19 +52664,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -52929,19 +52714,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -52981,19 +52764,17 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -53034,13 +52815,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(v0 << (v1 & 31))
@@ -53072,13 +52853,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(v0 >> (v1 & 31))
@@ -53110,13 +52891,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(int32(uint32(v0) >> (v1 & 31)))
@@ -53147,13 +52928,13 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) ^ uint64(r1)&types.VMask))
 					i.stack[i.sp] = v2
@@ -53183,13 +52964,13 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v2 := types.Boxed(uint64(r0) & uint64(r1))
 					i.stack[i.sp] = v2
@@ -53219,13 +53000,13 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v2 := types.Boxed(uint64(r0) | uint64(r1))
 					i.stack[i.sp] = v2
@@ -53256,13 +53037,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), int(v1))))
@@ -53294,13 +53075,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), -int(v1))))
@@ -53332,13 +53113,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 == v1)
@@ -53370,13 +53151,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 != v1)
@@ -53408,13 +53189,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 < v1)
@@ -53446,13 +53227,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
@@ -53484,13 +53265,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 > v1)
@@ -53522,13 +53303,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
@@ -53560,13 +53341,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 <= v1)
@@ -53598,13 +53379,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
@@ -53636,13 +53417,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 >= v1)
@@ -53674,13 +53455,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
@@ -53712,13 +53493,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 + v1)
@@ -53750,13 +53531,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 - v1)
@@ -53788,13 +53569,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 * v1)
@@ -53829,13 +53610,13 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					i.retainBox(r1)
 					i.stack[i.sp] = r1
@@ -53881,13 +53662,13 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					i.retainBox(r1)
 					i.stack[i.sp] = r1
@@ -53933,13 +53714,13 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					i.retainBox(r1)
 					i.stack[i.sp] = r1
@@ -53985,13 +53766,13 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					i.retainBox(r1)
 					i.stack[i.sp] = r1
@@ -54034,13 +53815,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 << (v1 & 63))
@@ -54072,13 +53853,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 >> (v1 & 63))
@@ -54110,13 +53891,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(int64(uint64(v0) >> (v1 & 63)))
@@ -54148,13 +53929,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 ^ v1)
@@ -54186,13 +53967,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 & v1)
@@ -54224,13 +54005,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(v0 | v1)
@@ -54262,13 +54043,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), int(v1))))
@@ -54300,13 +54081,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), -int(v1))))
@@ -54338,13 +54119,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 == v1)
@@ -54376,13 +54157,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 != v1)
@@ -54414,13 +54195,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 < v1)
@@ -54452,13 +54233,13 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					i3 := i.fr.bp + i1
-					if i3 >= i.sp {
+					if i.fr.bp+i1 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
+					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
@@ -54490,7 +54271,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -54527,7 +54308,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -54564,7 +54345,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -54601,7 +54382,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -54638,7 +54419,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -54675,7 +54456,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -54712,7 +54493,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -54749,7 +54530,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -54786,7 +54567,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -54822,18 +54603,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -54873,18 +54652,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -54924,18 +54701,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -54982,7 +54757,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55019,7 +54794,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55056,7 +54831,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55093,7 +54868,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55130,7 +54905,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55167,7 +54942,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55204,7 +54979,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55241,7 +55016,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55278,7 +55053,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55315,7 +55090,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55352,7 +55127,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55389,7 +55164,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55425,18 +55200,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -55476,18 +55249,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -55527,18 +55298,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -55585,7 +55354,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55622,7 +55391,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55659,7 +55428,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55696,7 +55465,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55733,7 +55502,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55770,7 +55539,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55807,7 +55576,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55844,7 +55613,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55881,7 +55650,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55918,7 +55687,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55955,7 +55724,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -55992,7 +55761,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56028,18 +55797,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -56079,18 +55846,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -56130,18 +55895,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -56181,18 +55944,16 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					i.retainBox(r1)
 					i.stack[i.sp] = r1
 					i.sp++
 					i.fr.ip += 2
@@ -56233,7 +55994,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56270,7 +56031,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56307,7 +56068,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56343,7 +56104,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56378,7 +56139,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56413,7 +56174,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56449,7 +56210,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56486,7 +56247,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56523,7 +56284,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56560,7 +56321,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56597,7 +56358,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56634,7 +56395,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56671,7 +56432,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56708,7 +56469,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56745,7 +56506,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56782,7 +56543,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56819,7 +56580,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56856,7 +56617,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56893,7 +56654,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56930,7 +56691,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -56967,7 +56728,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57007,7 +56768,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57058,7 +56819,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57109,7 +56870,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57160,7 +56921,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57208,7 +56969,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57245,7 +57006,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57282,7 +57043,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57319,7 +57080,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57356,7 +57117,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57393,7 +57154,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57430,7 +57191,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57467,7 +57228,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57504,7 +57265,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57541,7 +57302,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57578,7 +57339,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57615,7 +57376,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if i1 >= len(i.fr.upvals) {
@@ -57674,7 +57435,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(v0 + v1)
@@ -57703,7 +57464,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(v0 - v1)
@@ -57732,7 +57493,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(v0 * v1)
@@ -57760,11 +57521,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxI32(v1)
@@ -57803,11 +57563,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxI32(v1)
@@ -57846,11 +57605,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxI32(v1)
@@ -57889,11 +57647,10 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = types.BoxI32(v1)
@@ -57933,7 +57690,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(v0 << (v1 & 31))
@@ -57962,7 +57719,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(v0 >> (v1 & 31))
@@ -57991,7 +57748,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(int32(uint32(v0) >> (v1 & 31)))
@@ -58019,7 +57776,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) ^ uint64(r1)&types.VMask))
@@ -58047,7 +57804,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.Boxed(uint64(r0) & uint64(r1))
@@ -58075,7 +57832,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.Boxed(uint64(r0) | uint64(r1))
@@ -58104,7 +57861,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), int(v1))))
@@ -58133,7 +57890,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI32(int32(bits.RotateLeft32(uint32(v0), -int(v1))))
@@ -58162,7 +57919,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -58191,7 +57948,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -58220,7 +57977,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -58249,7 +58006,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
@@ -58278,7 +58035,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -58307,7 +58064,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
@@ -58336,7 +58093,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -58365,7 +58122,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
@@ -58394,7 +58151,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -58423,7 +58180,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
@@ -58456,9 +58213,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58488,9 +58244,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58520,9 +58275,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58552,9 +58306,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58584,9 +58337,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58616,9 +58368,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58648,9 +58399,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58680,9 +58430,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58712,9 +58461,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58744,9 +58492,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58772,7 +58519,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
@@ -58801,7 +58548,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
@@ -58830,7 +58577,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
@@ -58859,7 +58606,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
@@ -58888,7 +58635,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
@@ -58917,7 +58664,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
@@ -58946,7 +58693,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 + v1)
@@ -58975,7 +58722,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 - v1)
@@ -59004,7 +58751,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 * v1)
@@ -59036,7 +58783,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = i.boxI64(v1)
@@ -59079,7 +58826,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = i.boxI64(v1)
@@ -59122,7 +58869,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = i.boxI64(v1)
@@ -59165,7 +58912,7 @@ var (
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					i.stack[i.sp] = i.boxI64(v1)
@@ -59205,7 +58952,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 << (v1 & 63))
@@ -59234,7 +58981,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 >> (v1 & 63))
@@ -59263,7 +59010,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(int64(uint64(v0) >> (v1 & 63)))
@@ -59292,7 +59039,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 ^ v1)
@@ -59321,7 +59068,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 & v1)
@@ -59350,7 +59097,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(v0 | v1)
@@ -59379,7 +59126,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), int(v1))))
@@ -59408,7 +59155,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := i.boxI64(int64(bits.RotateLeft64(uint64(v0), -int(v1))))
@@ -59437,7 +59184,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
@@ -59466,7 +59213,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
@@ -59495,7 +59242,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
@@ -59524,7 +59271,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == len(i.stack) {
+					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
@@ -59557,9 +59304,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -59589,9 +59335,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -59621,9 +59366,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -59653,9 +59397,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) < uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -59922,7 +59665,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -59958,7 +59700,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -59994,7 +59735,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -60360,7 +60100,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -60396,7 +60135,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -60432,7 +60170,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -60841,7 +60578,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -60877,7 +60613,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -60913,7 +60648,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -60949,7 +60683,6 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -62068,9 +61801,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62092,9 +61824,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62116,9 +61847,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62140,9 +61870,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62164,9 +61893,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62188,9 +61916,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62212,9 +61939,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62236,9 +61962,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62260,9 +61985,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62284,9 +62008,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62973,9 +62696,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-1].I32() == 0)
-					taken := v0.Bool()
 					i.sp -= 1
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -62997,9 +62719,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].I32() == i.stack[i.sp-1].I32())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63021,9 +62742,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].I32() != i.stack[i.sp-1].I32())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63045,9 +62765,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].I32() < i.stack[i.sp-1].I32())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63069,9 +62788,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(uint32(i.stack[i.sp-2].I32()) < uint32(i.stack[i.sp-1].I32()))
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63093,9 +62811,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].I32() > i.stack[i.sp-1].I32())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63117,9 +62834,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(uint32(i.stack[i.sp-2].I32()) > uint32(i.stack[i.sp-1].I32()))
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63141,9 +62857,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].I32() <= i.stack[i.sp-1].I32())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63165,9 +62880,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(uint32(i.stack[i.sp-2].I32()) <= uint32(i.stack[i.sp-1].I32()))
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63189,9 +62903,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].I32() >= i.stack[i.sp-1].I32())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63213,9 +62926,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(uint32(i.stack[i.sp-2].I32()) >= uint32(i.stack[i.sp-1].I32()))
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63241,9 +62953,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63265,9 +62976,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) > uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63289,9 +62999,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63313,9 +63022,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) <= uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63337,9 +63045,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63361,9 +63068,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) >= uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63385,9 +63091,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63409,9 +63114,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63433,9 +63137,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63457,9 +63160,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) < uint64(v0))
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63992,9 +63694,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == 0)
-					taken := v0.Bool()
 					i.sp -= 1
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64016,9 +63717,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) == i.unboxI64(i.stack[i.sp-1]))
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64040,9 +63740,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) != i.unboxI64(i.stack[i.sp-1]))
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64064,9 +63763,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) < i.unboxI64(i.stack[i.sp-1]))
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64088,9 +63786,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-2])) < uint64(i.unboxI64(i.stack[i.sp-1])))
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64112,9 +63809,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) > i.unboxI64(i.stack[i.sp-1]))
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64136,9 +63832,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-2])) > uint64(i.unboxI64(i.stack[i.sp-1])))
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64160,9 +63855,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) <= i.unboxI64(i.stack[i.sp-1]))
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64184,9 +63878,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-2])) <= uint64(i.unboxI64(i.stack[i.sp-1])))
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64208,9 +63901,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) >= i.unboxI64(i.stack[i.sp-1]))
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64232,9 +63924,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-2])) >= uint64(i.unboxI64(i.stack[i.sp-1])))
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64260,9 +63951,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -64284,9 +63974,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -64308,9 +63997,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -64332,9 +64020,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -64356,9 +64043,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -64380,9 +64066,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -64722,9 +64407,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F32() == i.stack[i.sp-1].F32())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64746,9 +64430,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F32() != i.stack[i.sp-1].F32())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64770,9 +64453,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F32() < i.stack[i.sp-1].F32())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64794,9 +64476,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F32() > i.stack[i.sp-1].F32())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64818,9 +64499,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F32() <= i.stack[i.sp-1].F32())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64842,9 +64522,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F32() >= i.stack[i.sp-1].F32())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64870,9 +64549,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -64894,9 +64572,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -64918,9 +64595,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -64942,9 +64618,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -64966,9 +64641,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -64990,9 +64664,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
-					taken := v1.Bool()
 					i.sp -= 1
-					if taken {
+					if v1.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -65332,9 +65005,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F64() == i.stack[i.sp-1].F64())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -65356,9 +65028,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F64() != i.stack[i.sp-1].F64())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -65380,9 +65051,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F64() < i.stack[i.sp-1].F64())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -65404,9 +65074,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F64() > i.stack[i.sp-1].F64())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -65428,9 +65097,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F64() <= i.stack[i.sp-1].F64())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -65452,9 +65120,8 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F64() >= i.stack[i.sp-1].F64())
-					taken := v0.Bool()
 					i.sp -= 2
-					if taken {
+					if v0.Bool() {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
