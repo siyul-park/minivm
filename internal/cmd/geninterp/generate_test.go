@@ -249,6 +249,23 @@ func TestGenerate(t *testing.T) {
 		}
 	})
 
+	t.Run("shares index lowerings", func(t *testing.T) {
+		data, err := os.ReadFile("lower.go")
+		require.NoError(t, err)
+		source := string(data)
+		for _, mapping := range []string{
+			"instr.ARRAY_GET:           indexLower",
+			"instr.STRUCT_GET:          indexLower",
+		} {
+			require.Contains(t, source, mapping)
+		}
+		for _, function := range []string{
+			"func arrayGet(", "func structGet(", "func indexSequence(",
+		} {
+			require.NotContains(t, source, function)
+		}
+	})
+
 	t.Run("maps every opcode once", func(t *testing.T) {
 		for value, lowering := range lowerers {
 			op := instr.Opcode(value)

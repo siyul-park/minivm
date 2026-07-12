@@ -39769,20 +39769,20 @@ var (
 				goto l66
 			}
 			{
-				idx := instr.ParseU16(c.code, start+1)
-				if idx >= len(c.constants) {
+				i0 := instr.ParseU16(c.code, start+1)
+				if i0 >= len(c.constants) {
 					goto l66
 				}
-				constant, ok := types.Unbox(c.constants[idx]).(types.I32)
-				if !ok {
+				r0 := c.constants[i0]
+				if r0.Kind() != types.KindI32 {
 					goto l66
 				}
-				index := int(constant)
 				c.ip += 3
 				return func(i *Interpreter) {
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
+					v0 := r0.I32()
 					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
@@ -39794,40 +39794,40 @@ var (
 					var result types.Boxed
 					switch array := i.heap[addr].(type) {
 					case types.TypedArray[bool]:
-						if index < 0 || index+1 > len(array) {
+						if int(v0) < 0 || int(v0)+1 > len(array) {
 							panic(ErrIndexOutOfRange)
 						}
-						result = types.BoxI1(array[index])
+						result = types.BoxI1(array[int(v0)])
 					case types.TypedArray[int8]:
-						if index < 0 || index+1 > len(array) {
+						if int(v0) < 0 || int(v0)+1 > len(array) {
 							panic(ErrIndexOutOfRange)
 						}
-						result = types.BoxI8(array[index])
+						result = types.BoxI8(array[int(v0)])
 					case types.TypedArray[int32]:
-						if index < 0 || index+1 > len(array) {
+						if int(v0) < 0 || int(v0)+1 > len(array) {
 							panic(ErrIndexOutOfRange)
 						}
-						result = types.BoxI32(array[index])
+						result = types.BoxI32(array[int(v0)])
 					case types.TypedArray[int64]:
-						if index < 0 || index+1 > len(array) {
+						if int(v0) < 0 || int(v0)+1 > len(array) {
 							panic(ErrIndexOutOfRange)
 						}
-						result = i.boxI64(array[index])
+						result = i.boxI64(array[int(v0)])
 					case types.TypedArray[float32]:
-						if index < 0 || index+1 > len(array) {
+						if int(v0) < 0 || int(v0)+1 > len(array) {
 							panic(ErrIndexOutOfRange)
 						}
-						result = types.BoxF32(array[index])
+						result = types.BoxF32(array[int(v0)])
 					case types.TypedArray[float64]:
-						if index < 0 || index+1 > len(array) {
+						if int(v0) < 0 || int(v0)+1 > len(array) {
 							panic(ErrIndexOutOfRange)
 						}
-						result = types.BoxF64(array[index])
+						result = types.BoxF64(array[int(v0)])
 					case *types.Array:
-						if index < 0 || index+1 > len(array.Elems) {
+						if int(v0) < 0 || int(v0)+1 > len(array.Elems) {
 							panic(ErrIndexOutOfRange)
 						}
-						result = array.Elems[index]
+						result = array.Elems[int(v0)]
 						i.retainBox(result)
 					default:
 						panic(ErrTypeMismatch)
@@ -39844,20 +39844,20 @@ var (
 				goto l67
 			}
 			{
-				idx := instr.ParseU16(c.code, start+1)
-				if idx >= len(c.constants) {
+				i0 := instr.ParseU16(c.code, start+1)
+				if i0 >= len(c.constants) {
 					goto l67
 				}
-				constant, ok := types.Unbox(c.constants[idx]).(types.I32)
-				if !ok {
+				r0 := c.constants[i0]
+				if r0.Kind() != types.KindI32 {
 					goto l67
 				}
-				index := int(constant)
 				c.ip += 3
 				return func(i *Interpreter) {
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
+					v0 := r0.I32()
 					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
@@ -39869,39 +39869,39 @@ var (
 					var result types.Boxed
 					switch value := i.heap[addr].(type) {
 					case *types.Struct:
-						if index < 0 || index >= len(value.Typ.Fields) {
+						if int(v0) < 0 || int(v0) >= len(value.Typ.Fields) {
 							panic(ErrSegmentationFault)
 						}
-						switch value.Typ.Fields[index].Kind {
+						switch value.Typ.Fields[int(v0)].Kind {
 						case types.KindI32:
-							result = types.BoxI32(int32(uint32(value.Data[index])))
+							result = types.BoxI32(int32(uint32(value.Data[int(v0)])))
 						case types.KindI8:
-							result = types.BoxI8(int8(uint32(value.Data[index])))
+							result = types.BoxI8(int8(uint32(value.Data[int(v0)])))
 						case types.KindI1:
-							result = types.BoxI1(value.Data[index] != 0)
+							result = types.BoxI1(value.Data[int(v0)] != 0)
 						case types.KindI64:
-							result = i.boxI64(int64(value.Data[index]))
+							result = i.boxI64(int64(value.Data[int(v0)]))
 						case types.KindF32:
-							result = types.BoxF32(math.Float32frombits(uint32(value.Data[index])))
+							result = types.BoxF32(math.Float32frombits(uint32(value.Data[int(v0)])))
 						case types.KindF64:
-							result = types.BoxF64(math.Float64frombits(value.Data[index]))
+							result = types.BoxF64(math.Float64frombits(value.Data[int(v0)]))
 						case types.KindRef:
-							result = types.Boxed(value.Data[index])
+							result = types.Boxed(value.Data[int(v0)])
 							i.retainBox(result)
 						default:
 							panic(ErrTypeMismatch)
 						}
 					case *HostObject:
-						if index < 0 || index >= len(value.Typ.Fields) {
+						if int(v0) < 0 || int(v0) >= len(value.Typ.Fields) {
 							panic(ErrSegmentationFault)
 						}
-						switch value.Typ.Fields[index].Kind {
+						switch value.Typ.Fields[int(v0)].Kind {
 						case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-							result = value.Field(index)
+							result = value.Field(int(v0))
 						case types.KindI64:
-							result = i.boxI64(int64(value.Raw(index)))
+							result = i.boxI64(int64(value.Raw(int(v0))))
 						case types.KindRef:
-							result = types.Boxed(value.Raw(index))
+							result = types.Boxed(value.Raw(int(v0)))
 							i.retainBox(result)
 						default:
 							panic(ErrTypeMismatch)
@@ -62154,7 +62154,7 @@ var (
 				goto l10
 			}
 			{
-				index := int(int32(instr.Instruction(c.code[start:]).Operand(0)))
+				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
 					if i.sp == len(i.stack) {
@@ -62171,40 +62171,40 @@ var (
 					var result types.Boxed
 					switch array := i.heap[addr].(type) {
 					case types.TypedArray[bool]:
-						if index < 0 || index+1 > len(array) {
+						if int(v0) < 0 || int(v0)+1 > len(array) {
 							panic(ErrIndexOutOfRange)
 						}
-						result = types.BoxI1(array[index])
+						result = types.BoxI1(array[int(v0)])
 					case types.TypedArray[int8]:
-						if index < 0 || index+1 > len(array) {
+						if int(v0) < 0 || int(v0)+1 > len(array) {
 							panic(ErrIndexOutOfRange)
 						}
-						result = types.BoxI8(array[index])
+						result = types.BoxI8(array[int(v0)])
 					case types.TypedArray[int32]:
-						if index < 0 || index+1 > len(array) {
+						if int(v0) < 0 || int(v0)+1 > len(array) {
 							panic(ErrIndexOutOfRange)
 						}
-						result = types.BoxI32(array[index])
+						result = types.BoxI32(array[int(v0)])
 					case types.TypedArray[int64]:
-						if index < 0 || index+1 > len(array) {
+						if int(v0) < 0 || int(v0)+1 > len(array) {
 							panic(ErrIndexOutOfRange)
 						}
-						result = i.boxI64(array[index])
+						result = i.boxI64(array[int(v0)])
 					case types.TypedArray[float32]:
-						if index < 0 || index+1 > len(array) {
+						if int(v0) < 0 || int(v0)+1 > len(array) {
 							panic(ErrIndexOutOfRange)
 						}
-						result = types.BoxF32(array[index])
+						result = types.BoxF32(array[int(v0)])
 					case types.TypedArray[float64]:
-						if index < 0 || index+1 > len(array) {
+						if int(v0) < 0 || int(v0)+1 > len(array) {
 							panic(ErrIndexOutOfRange)
 						}
-						result = types.BoxF64(array[index])
+						result = types.BoxF64(array[int(v0)])
 					case *types.Array:
-						if index < 0 || index+1 > len(array.Elems) {
+						if int(v0) < 0 || int(v0)+1 > len(array.Elems) {
 							panic(ErrIndexOutOfRange)
 						}
-						result = array.Elems[index]
+						result = array.Elems[int(v0)]
 						i.retainBox(result)
 					default:
 						panic(ErrTypeMismatch)
@@ -62221,7 +62221,7 @@ var (
 				goto l11
 			}
 			{
-				index := int(int32(instr.Instruction(c.code[start:]).Operand(0)))
+				v0 := int32(instr.Instruction(c.code[start:]).Operand(0))
 				c.ip += 5
 				return func(i *Interpreter) {
 					if i.sp == len(i.stack) {
@@ -62238,39 +62238,39 @@ var (
 					var result types.Boxed
 					switch value := i.heap[addr].(type) {
 					case *types.Struct:
-						if index < 0 || index >= len(value.Typ.Fields) {
+						if int(v0) < 0 || int(v0) >= len(value.Typ.Fields) {
 							panic(ErrSegmentationFault)
 						}
-						switch value.Typ.Fields[index].Kind {
+						switch value.Typ.Fields[int(v0)].Kind {
 						case types.KindI32:
-							result = types.BoxI32(int32(uint32(value.Data[index])))
+							result = types.BoxI32(int32(uint32(value.Data[int(v0)])))
 						case types.KindI8:
-							result = types.BoxI8(int8(uint32(value.Data[index])))
+							result = types.BoxI8(int8(uint32(value.Data[int(v0)])))
 						case types.KindI1:
-							result = types.BoxI1(value.Data[index] != 0)
+							result = types.BoxI1(value.Data[int(v0)] != 0)
 						case types.KindI64:
-							result = i.boxI64(int64(value.Data[index]))
+							result = i.boxI64(int64(value.Data[int(v0)]))
 						case types.KindF32:
-							result = types.BoxF32(math.Float32frombits(uint32(value.Data[index])))
+							result = types.BoxF32(math.Float32frombits(uint32(value.Data[int(v0)])))
 						case types.KindF64:
-							result = types.BoxF64(math.Float64frombits(value.Data[index]))
+							result = types.BoxF64(math.Float64frombits(value.Data[int(v0)]))
 						case types.KindRef:
-							result = types.Boxed(value.Data[index])
+							result = types.Boxed(value.Data[int(v0)])
 							i.retainBox(result)
 						default:
 							panic(ErrTypeMismatch)
 						}
 					case *HostObject:
-						if index < 0 || index >= len(value.Typ.Fields) {
+						if int(v0) < 0 || int(v0) >= len(value.Typ.Fields) {
 							panic(ErrSegmentationFault)
 						}
-						switch value.Typ.Fields[index].Kind {
+						switch value.Typ.Fields[int(v0)].Kind {
 						case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-							result = value.Field(index)
+							result = value.Field(int(v0))
 						case types.KindI64:
-							result = i.boxI64(int64(value.Raw(index)))
+							result = i.boxI64(int64(value.Raw(int(v0))))
 						case types.KindRef:
-							result = types.Boxed(value.Raw(index))
+							result = types.Boxed(value.Raw(int(v0)))
 							i.retainBox(result)
 						default:
 							panic(ErrTypeMismatch)
