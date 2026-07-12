@@ -39,48 +39,22 @@ func (c *compiler) compileCFG(i *Interpreter, addr int, fn *types.Function) (*mo
 		return mod, false, nil
 	}
 
-	asmb := asm.New(c.arch)
-	entry := asmb.Label()
-
-	// The declared Program.Globals are out of scope here; New pre-seeds every
-	// slot to the zero Boxed of its declared kind, so the runtime values carry
-	// the declared kinds at all times (mirrors emitRoot).
-	globals := make([]types.Kind, len(i.globals))
-	for j, g := range i.globals {
-		globals[j] = g.Kind()
-	}
-
-	funcs := make(map[int]*types.Function)
-	for fnAddr := range i.instrs {
-		if target, ok := i.function(fnAddr); ok {
-			funcs[fnAddr] = target
-		}
-	}
-
-	ctx := &lowering{
-		assembler: asmb,
-		funcs:     funcs,
-		queued:    map[branch]asm.Label{},
-		tails:     map[*step]asm.Label{},
-		constants: i.constants,
-		globals:   globals,
-		heap:      i.heap,
-		scratch:   c.scratchRegs[:scratchCount],
-		entry:     entry,
-		head:      asmb.Label(),
-		addr:      addr,
-	}
-	if fn.Typ != nil {
-		ctx.returns = len(fn.Typ.Returns)
-	}
-	ctx.frames = append(ctx.frames, newActivation(addr, fn, 0, 0))
-	kinds, ok := blockKinds(fn, blocks, i.constants, globals, i.heap)
+	ctx := c.newLowering(i, addr, fn, c.arch)
+	globals := ctx.globals
+	facts, ok := blockFacts(fn, blocks, i.constants, globals, i.heap)
 	if !ok {
 		return mod, false, nil
 	}
+	kinds := make([][]types.Kind, len(facts))
+	for block, state := range facts {
+		kinds[block] = make([]types.Kind, len(state))
+		for slot, fact := range state {
+			kinds[block][slot] = fact.kind
+		}
+	}
 	labels := make([]asm.Label, len(blocks))
 	for j := range labels {
-		labels[j] = asmb.Label()
+		labels[j] = ctx.assembler.Label()
 	}
 
 	if !c.lowerer.lowerCFG(ctx, blocks, kinds, labels) {

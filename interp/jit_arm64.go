@@ -190,56 +190,86 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 		switch op.op {
 		case instr.NOP, instr.BR:
 			ok = true
+		case instr.I32_CONST,
+			instr.I64_CONST,
+			instr.F32_CONST,
+			instr.F64_CONST,
+			instr.CONST_GET,
+			instr.LOCAL_GET,
+			instr.LOCAL_SET,
+			instr.LOCAL_TEE,
+			instr.GLOBAL_GET,
+			instr.GLOBAL_SET,
+			instr.GLOBAL_TEE,
+			instr.DROP,
+			instr.DUP,
+			instr.SWAP,
+			instr.SELECT,
+			instr.I32_ADD,
+			instr.I32_SUB,
+			instr.I32_MUL,
+			instr.I32_AND,
+			instr.I32_OR,
+			instr.I32_XOR,
+			instr.I32_EQZ,
+			instr.I32_EQ,
+			instr.I32_NE,
+			instr.I32_LT_S,
+			instr.I32_LE_S,
+			instr.I32_GT_S,
+			instr.I32_GE_S,
+			instr.I32_LT_U,
+			instr.I32_LE_U,
+			instr.I32_GT_U,
+			instr.I32_GE_U,
+			instr.I64_ADD,
+			instr.I64_SUB,
+			instr.I64_MUL,
+			instr.I64_AND,
+			instr.I64_OR,
+			instr.I64_XOR,
+			instr.I64_EQZ,
+			instr.I64_EQ,
+			instr.I64_NE,
+			instr.I64_LT_S,
+			instr.I64_LE_S,
+			instr.I64_GT_S,
+			instr.I64_GE_S,
+			instr.I64_LT_U,
+			instr.I64_LE_U,
+			instr.I64_GT_U,
+			instr.I64_GE_U,
+			instr.F32_ADD,
+			instr.F32_SUB,
+			instr.F32_MUL,
+			instr.F32_DIV,
+			instr.F32_EQ,
+			instr.F32_NE,
+			instr.F32_LT,
+			instr.F32_GT,
+			instr.F32_LE,
+			instr.F32_GE,
+			instr.F64_ADD,
+			instr.F64_SUB,
+			instr.F64_MUL,
+			instr.F64_DIV,
+			instr.F64_EQ,
+			instr.F64_NE,
+			instr.F64_LT,
+			instr.F64_GT,
+			instr.F64_LE,
+			instr.F64_GE,
+			instr.ARRAY_GET:
+			handled, emitted := l.emitStep(ctx, op, false)
+			ok = handled && emitted
 		case instr.UNREACHABLE:
 			ok = l.unreachable(ctx, op)
-		case instr.I32_CONST:
-			ok = l.i32Const(ctx, op)
-		case instr.I64_CONST:
-			ok = l.i64Const(ctx, op)
-		case instr.F32_CONST:
-			ok = l.f32Const(ctx, op)
-		case instr.F64_CONST:
-			ok = l.f64Const(ctx, op)
-		case instr.CONST_GET:
-			ok = l.constGet(ctx, op)
-		case instr.LOCAL_GET:
-			ok = l.localGet(ctx, op)
-		case instr.LOCAL_SET:
-			ok = l.localSet(ctx, op, true)
-		case instr.LOCAL_TEE:
-			ok = l.localSet(ctx, op, false)
-		case instr.GLOBAL_GET:
-			ok = l.globalGet(ctx, op)
-		case instr.GLOBAL_SET:
-			ok = l.globalSet(ctx, op, true)
-		case instr.GLOBAL_TEE:
-			ok = l.globalSet(ctx, op, false)
-		case instr.DROP:
-			ok = l.drop(ctx, op)
-		case instr.DUP:
-			ok = l.dup(ctx)
-		case instr.SWAP:
-			ok = l.swap(ctx)
-		case instr.SELECT:
-			ok = l.selectOp(ctx)
 		case instr.BR_TABLE:
 			ok = l.brTable(ctx, op, l.callerTail(ops, idx, tail))
 		case instr.UPVAL_GET:
 			ok = l.upvalGet(ctx, op)
 		case instr.UPVAL_SET:
 			ok = l.upvalSet(ctx, op)
-		case instr.I32_ADD:
-			ok = l.i32Binary(ctx, arm64.ADD)
-		case instr.I32_SUB:
-			ok = l.i32Binary(ctx, arm64.SUB)
-		case instr.I32_MUL:
-			ok = l.i32Binary(ctx, arm64.MUL)
-		case instr.I32_AND:
-			ok = l.i32Bitwise(ctx, arm64.AND)
-		case instr.I32_OR:
-			ok = l.i32Bitwise(ctx, arm64.ORR)
-		case instr.I32_XOR:
-			ok = l.i32Bitwise(ctx, arm64.EOR)
 		case instr.I32_DIV_S:
 			ok = l.i32Divide(ctx, op, arm64.SDIV, l.sign32, false)
 		case instr.I32_DIV_U:
@@ -254,78 +284,16 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 			ok = l.i32Shift(ctx, arm64.ASR, l.sign32)
 		case instr.I32_SHR_U:
 			ok = l.i32Shift(ctx, arm64.LSR, l.zero32)
-		case instr.I32_EQZ:
-			ok = l.i32Eqz(ctx)
-		case instr.I32_EQ:
-			ok = l.i32Cmp(ctx, arm64.CondEQ)
-		case instr.I32_NE:
-			ok = l.i32Cmp(ctx, arm64.CondNE)
-		case instr.I32_LT_S:
-			ok = l.i32Cmp(ctx, arm64.CondLT)
-		case instr.I32_LE_S:
-			ok = l.i32Cmp(ctx, arm64.CondLE)
-		case instr.I32_GT_S:
-			ok = l.i32Cmp(ctx, arm64.CondGT)
-		case instr.I32_GE_S:
-			ok = l.i32Cmp(ctx, arm64.CondGE)
-		case instr.I32_LT_U:
-			ok = l.i32Cmp(ctx, arm64.CondCC)
-		case instr.I32_LE_U:
-			ok = l.i32Cmp(ctx, arm64.CondLS)
-		case instr.I32_GT_U:
-			ok = l.i32Cmp(ctx, arm64.CondHI)
-		case instr.I32_GE_U:
-			ok = l.i32Cmp(ctx, arm64.CondCS)
-		case instr.F64_ADD:
-			ok = l.f64Binary(ctx, arm64.FADD)
-		case instr.F64_SUB:
-			ok = l.f64Binary(ctx, arm64.FSUB)
-		case instr.F64_MUL:
-			ok = l.f64Binary(ctx, arm64.FMUL)
-		case instr.F64_DIV:
-			ok = l.f64Binary(ctx, arm64.FDIV)
 		case instr.F64_REM, instr.F64_MOD:
 			if !l.exit(ctx, op.ip) {
 				return false
 			}
 			return idx == len(ops)-1
-		case instr.F64_EQ:
-			ok = l.f64Cmp(ctx, arm64.CondEQ)
-		case instr.F64_NE:
-			ok = l.f64Cmp(ctx, arm64.CondNE)
-		case instr.F64_LT:
-			ok = l.f64Cmp(ctx, arm64.CondMI)
-		case instr.F64_GT:
-			ok = l.f64Cmp(ctx, arm64.CondGT)
-		case instr.F64_LE:
-			ok = l.f64Cmp(ctx, arm64.CondLS)
-		case instr.F64_GE:
-			ok = l.f64Cmp(ctx, arm64.CondGE)
-		case instr.F32_ADD:
-			ok = l.f32Binary(ctx, arm64.FADD)
-		case instr.F32_SUB:
-			ok = l.f32Binary(ctx, arm64.FSUB)
-		case instr.F32_MUL:
-			ok = l.f32Binary(ctx, arm64.FMUL)
-		case instr.F32_DIV:
-			ok = l.f32Binary(ctx, arm64.FDIV)
 		case instr.F32_REM, instr.F32_MOD:
 			if !l.exit(ctx, op.ip) {
 				return false
 			}
 			return idx == len(ops)-1
-		case instr.F32_EQ:
-			ok = l.f32Cmp(ctx, arm64.CondEQ)
-		case instr.F32_NE:
-			ok = l.f32Cmp(ctx, arm64.CondNE)
-		case instr.F32_LT:
-			ok = l.f32Cmp(ctx, arm64.CondMI)
-		case instr.F32_GT:
-			ok = l.f32Cmp(ctx, arm64.CondGT)
-		case instr.F32_LE:
-			ok = l.f32Cmp(ctx, arm64.CondLS)
-		case instr.F32_GE:
-			ok = l.f32Cmp(ctx, arm64.CondGE)
 		case instr.I32_TO_F64_S:
 			ok = l.i32ToF64(ctx, l.sign32)
 		case instr.I32_TO_F64_U:
@@ -346,12 +314,6 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 			ok = l.f32ToF64(ctx)
 		case instr.F64_TO_F32:
 			ok = l.f64ToF32(ctx)
-		case instr.I64_ADD:
-			ok = l.i64Binary(ctx, op, arm64.ADD, true)
-		case instr.I64_SUB:
-			ok = l.i64Binary(ctx, op, arm64.SUB, true)
-		case instr.I64_MUL:
-			ok = l.i64Binary(ctx, op, arm64.MUL, true)
 		case instr.I64_DIV_S:
 			ok = l.i64Divide(ctx, op, arm64.SDIV, false)
 		case instr.I64_DIV_U:
@@ -366,28 +328,6 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 			ok = l.i64Shift(ctx, op, arm64.ASR, false)
 		case instr.I64_SHR_U:
 			ok = l.i64Shift(ctx, op, arm64.LSR, true)
-		case instr.I64_EQ:
-			ok = l.i64Cmp(ctx, arm64.CondEQ)
-		case instr.I64_NE:
-			ok = l.i64Cmp(ctx, arm64.CondNE)
-		case instr.I64_EQZ:
-			ok = l.i64Eqz(ctx)
-		case instr.I64_LT_S:
-			ok = l.i64Cmp(ctx, arm64.CondLT)
-		case instr.I64_LE_S:
-			ok = l.i64Cmp(ctx, arm64.CondLE)
-		case instr.I64_GT_S:
-			ok = l.i64Cmp(ctx, arm64.CondGT)
-		case instr.I64_GE_S:
-			ok = l.i64Cmp(ctx, arm64.CondGE)
-		case instr.I64_LT_U:
-			ok = l.i64Cmp(ctx, arm64.CondCC)
-		case instr.I64_LE_U:
-			ok = l.i64Cmp(ctx, arm64.CondLS)
-		case instr.I64_GT_U:
-			ok = l.i64Cmp(ctx, arm64.CondHI)
-		case instr.I64_GE_U:
-			ok = l.i64Cmp(ctx, arm64.CondCS)
 		case instr.I32_TO_I64_S:
 			ok = l.i32ToI64(ctx, l.sign32)
 		case instr.I32_TO_I64_U:
@@ -410,12 +350,6 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 			ok = l.f64ToI64(ctx, op, arm64.FCVTZS)
 		case instr.F64_TO_I64_U:
 			ok = l.f64ToI64(ctx, op, arm64.FCVTZU)
-		case instr.I64_AND:
-			ok = l.i64Binary(ctx, op, arm64.AND, false)
-		case instr.I64_OR:
-			ok = l.i64Binary(ctx, op, arm64.ORR, false)
-		case instr.I64_XOR:
-			ok = l.i64Binary(ctx, op, arm64.EOR, false)
 		case instr.I32_CLZ:
 			ok = l.countZeros(ctx, types.KindI32, false)
 		case instr.I32_CTZ:
@@ -507,11 +441,6 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 			ok = l.refGet(ctx, op)
 		case instr.ARRAY_LEN:
 			ok = l.arrayLen(ctx, op)
-		case instr.ARRAY_GET:
-			if !l.arrayGet(ctx, op) {
-				return false
-			}
-			ok = true
 		case instr.ARRAY_SET:
 			if !l.arraySet(ctx, op) {
 				return false

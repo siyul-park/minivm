@@ -87,16 +87,15 @@ The published native code is shared. The dispatch table remains interpreter-loca
 
 `compiler` is private to `interp` and lives in `jit.go`.
 
-`Compile(i, addr, fn)` is trace-only. It does not run a static method compiler or block planner.
+Trace and whole-CFG frontends keep distinct control-flow drivers, but share compiler setup, native context construction, build/link rejection, accounting, and publication.
 
-For each usable root, it:
+For each usable root or CFG entry, the compiler:
 
-1. finds the trace tree for `(addr, ip)`
-2. skips aborted roots, side exits, and entry-anchored loops
-3. builds a `lowering`
-4. calls the architecture `lowerer`
-5. links the callable into `module.entries`
-6. records loop roots in `module.loops`
+1. builds one shared `lowering` context
+2. lets the selected frontend driver emit control flow
+3. routes ordinary opcodes through the single ARM64 `emitStep` dispatcher
+4. materializes queued side exits through one cold-path implementation
+5. builds, links, and publishes the callable through one compiler shell
 
 General behavior belongs to the threaded interpreter. Native guard failures materialize VM state into the journal and resume threaded execution.
 
@@ -104,7 +103,7 @@ General behavior belongs to the threaded interpreter. Native guard failures mate
 
 Hot functions and call-free top-level modules first attempt a conservative whole-CFG compilation. Each verified basic block reloads its entry operands from canonical VM stack slots, keeps registers block-local, and flushes values before every edge. Native branches connect blocks directly; backward edges spend the journal safepoint budget. Top-level modules containing `CALL` or `RETURN_CALL` remain trace-compiled because their module-entry ABI does not yet own cross-function frame teardown safely. Unsupported opcodes return through an exact-IP fallback, while structural uncertainty rejects the baseline and leaves trace compilation available. A deoptimizing installed CFG is never rebuilt as the same CFG because the existing entry stub makes subsequent exit-triggered attempts trace-only.
 
-CFG dataflow preserves compile-time refs loaded by `CONST_GET`. A primitive typed-array constant can therefore stay as an unmaterialized marker until `ARRAY_GET`: lowering checks the current heap cell's interface type and index bounds, then reads the current slice data directly. The hot path avoids redundant retain/release traffic. Before a possible fallback, the marker is written to its canonical stack slot without ownership; the cold exit retains it only when control actually transfers to threaded execution. Replacing the heap cell after compilation remains visible because native code reloads the current cell on every access.
+CFG dataflow preserves full block-entry facts: runtime kind, direct-call signature, and explicitly-known constant-ref provenance. Conflicting provenance is weakened to unknown at joins instead of overloading ref zero as an unknown sentinel. A primitive typed-array constant can therefore stay as an unmaterialized marker until `ARRAY_GET`: lowering checks the current heap cell's interface type and index bounds, then reads the current slice data directly. The hot path avoids redundant retain/release traffic. Before a possible fallback, the marker is written to its canonical stack slot without ownership; the cold exit retains it only when control actually transfers to threaded execution. Replacing the heap cell after compilation remains visible because native code reloads the current cell on every access.
 
 ## Tracer
 
@@ -155,7 +154,7 @@ type lowerer interface {
 }
 ```
 
-`jit_arm64.go` provides ARM64 construction, constants, offsets, opcode lowering, and `arm64Lowerer.lower`. Short ARM64 trace fusions are written directly in that file beside ordinary lowering; `internal/cmd/geninterp` generates threaded-interpreter fusion only.
+`jit_arm64.go` owns trace control-flow scheduling and shared ARM64 helpers. `jit_arm64_cfg.go` owns only canonical CFG block/edge traversal. `jit_arm64_step.go` contains the single non-control opcode dispatcher used by both paths. Short trace fusions remain beside trace scheduling; `internal/cmd/geninterp` generates threaded-interpreter fusion only.
 
 Other architectures use stubs, so JIT is unavailable.
 

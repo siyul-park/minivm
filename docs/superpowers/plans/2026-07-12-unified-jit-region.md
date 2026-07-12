@@ -1,6 +1,6 @@
 # Unified JIT Region Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Remove duplicated CFG/trace JIT machinery while preserving semantics, ABI, deoptimization, ownership, spill safety, and performance.
 
@@ -24,10 +24,10 @@
 
 **Produces:** one helper that owns assembler creation, lowering callback, Build, Link, rejection classification, accounting, and native publication.
 
-- [ ] Add focused compiler tests for clean rejection and module accounting.
-- [ ] Extract common context/setup and compile/link helper without changing lowerers.
-- [ ] Run `go test ./interp -run 'Test.*JIT|Test.*CFG'`.
-- [ ] Commit `refactor(interp): unify jit compile shell`.
+- [x] Add focused compiler tests for clean rejection and module accounting.
+- [x] Extract common context/setup and compile/link helper without changing lowerers.
+- [x] Run `go test ./interp -run 'Test.*JIT|Test.*CFG'`.
+- [x] Commit `refactor(interp): unify jit compile shell`.
 
 ### Task 2: Shared side exits
 
@@ -35,10 +35,10 @@
 
 **Produces:** one `queueExit` API supporting current state or supplied pre-state plus optional cold retain; one exit materializer.
 
-- [ ] Add/retain exact-IP and typed-array ownership regression tests.
-- [ ] Replace `sideExit`, `cfgExit`, and direct exit appends with shared helpers.
-- [ ] Run focused deopt/array/JIT tests.
-- [ ] Commit `refactor(interp): unify jit side exits`.
+- [x] Add/retain exact-IP and typed-array ownership regression tests.
+- [x] Replace `sideExit`, `cfgExit`, and direct exit appends with shared helpers.
+- [x] Run focused deopt/array/JIT tests.
+- [x] Commit `refactor(interp): unify jit side exits`.
 
 ### Task 3: Preserve CFG facts
 
@@ -46,10 +46,10 @@
 
 **Produces:** CFG block entry facts retaining kind, function signature, and constant-ref provenance with explicit unknown state.
 
-- [ ] Add merge tests for equal and conflicting provenance.
-- [ ] Change `blockKinds` into full fact analysis and remove ambiguous zero sentinel semantics.
-- [ ] Run CFG analysis and interpreter tests.
-- [ ] Commit `refactor(interp): preserve cfg value facts`.
+- [x] Add merge tests for equal and conflicting provenance.
+- [x] Change `blockKinds` into full fact analysis and remove ambiguous zero sentinel semantics.
+- [x] Run CFG analysis and interpreter tests.
+- [x] Commit `refactor(interp): preserve cfg value facts`.
 
 ### Task 4: One non-control opcode emitter
 
@@ -57,11 +57,11 @@
 
 **Produces:** one `emitStep` switch used by trace and CFG; CFG-specific constant/array wrappers removed.
 
-- [ ] Add a source invariant test preventing a second ARM64 non-control opcode switch.
-- [ ] Move CFG metadata preparation before lowering.
-- [ ] Route both drivers through `emitStep` and delete `cfgOp`, `cfgConstGet`, `cfgArrayGet`.
-- [ ] Run all focused JIT tests.
-- [ ] Commit `refactor(interp): share jit opcode lowering`.
+- [x] Add a source invariant test preventing a second ARM64 non-control opcode switch.
+- [x] Move CFG metadata preparation before lowering.
+- [x] Route both drivers through `emitStep` and delete `cfgOp`, `cfgConstGet`, `cfgArrayGet`.
+- [x] Run all focused JIT tests.
+- [x] Commit `refactor(interp): share jit opcode lowering`.
 
 ### Task 5: Thin region drivers and cleanup
 
@@ -69,19 +69,19 @@
 
 **Produces:** minimal private region/block input, reduced CFG driver, no duplicated compiler orchestration, fewer symbols and lines.
 
-- [ ] Wrap CFG blocks and trace roots in minimal private region descriptors only where it removes parameters/state.
-- [ ] Merge identical entry/exit/control helpers; retain genuinely distinct trace continuation and CFG edge logic.
-- [ ] Delete obsolete files/symbols and update docs.
-- [ ] Compare JIT LOC/symbol counts against baseline and ensure net reduction.
-- [ ] Commit `refactor(interp): converge cfg and trace jit pipelines`.
+- [x] Wrap CFG blocks and trace roots in minimal private region descriptors only where it removes parameters/state.
+- [x] Merge identical entry/exit/control helpers; retain genuinely distinct trace continuation and CFG edge logic.
+- [x] Delete obsolete files/symbols and update docs.
+- [x] Compare JIT LOC/symbol counts against baseline and ensure net reduction.
+- [x] Commit `refactor(interp): converge cfg and trace jit pipelines`.
 
 ### Task 6: Completion gate
 
 **Files:** all modified files, `docs/benchmarks.md` if measurements change.
 
-- [ ] Run `gofmt` and `go vet ./...`.
-- [ ] Run `go test -race ./...`.
-- [ ] Run `GOARCH=amd64 go test ./...`.
-- [ ] Run tl2g correctness and benchmark commands using the local minivm replacement.
-- [ ] Verify no temporary instrumentation, adapters, or dirty generated files remain.
-- [ ] Commit any final docs/test cleanup and push `feat/cfg-jit`.
+- [x] Run `gofmt` and `go vet ./...`.
+- [x] Run `go test -race ./...`.
+- [x] Run `GOARCH=amd64 go test ./...`.
+- [x] Run tl2g correctness and benchmark commands using the local minivm replacement.
+- [x] Verify no temporary instrumentation, adapters, or dirty generated files remain.
+- [x] Commit any final docs/test cleanup and push `feat/cfg-jit`.

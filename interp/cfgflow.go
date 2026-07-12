@@ -7,15 +7,33 @@ import (
 )
 
 type cfgSlot struct {
-	kind types.Kind
-	sig  *types.FunctionType
-	ref  int
+	kind     types.Kind
+	sig      *types.FunctionType
+	ref      int
+	refKnown bool
 }
 
-// blockKinds computes the exact operand kinds needed to reload each CFG block.
+func mergeCFGSlot(dst *cfgSlot, src cfgSlot) (bool, bool) {
+	if dst.kind != src.kind {
+		return false, false
+	}
+	changed := false
+	if dst.sig != nil && dst.sig != src.sig {
+		dst.sig = nil
+		changed = true
+	}
+	if dst.refKnown && (!src.refKnown || dst.ref != src.ref) {
+		dst.ref = 0
+		dst.refKnown = false
+		changed = true
+	}
+	return changed, true
+}
+
+// blockFacts computes the exact operand facts needed to reload each CFG block.
 // It intentionally accepts less than the verifier: values whose runtime kind
 // cannot be represented statically keep the function on the trace/threaded path.
-func blockKinds(fn *types.Function, blocks []*analysis.BasicBlock, constants []types.Boxed, globals []types.Kind, heap []types.Value) ([][]types.Kind, bool) {
+func blockFacts(fn *types.Function, blocks []*analysis.BasicBlock, constants []types.Boxed, globals []types.Kind, heap []types.Value) ([][]cfgSlot, bool) {
 	if len(blocks) == 0 {
 		return nil, true
 	}
@@ -43,17 +61,11 @@ func blockKinds(fn *types.Function, blocks []*analysis.BasicBlock, constants []t
 			}
 			changed := false
 			for j := range state {
-				if states[succ][j].kind != state[j].kind {
+				merged, ok := mergeCFGSlot(&states[succ][j], state[j])
+				if !ok {
 					return nil, false
 				}
-				if states[succ][j].sig != nil && states[succ][j].sig != state[j].sig {
-					states[succ][j].sig = nil
-					changed = true
-				}
-				if states[succ][j].ref != 0 && states[succ][j].ref != state[j].ref {
-					states[succ][j].ref = 0
-					changed = true
-				}
+				changed = changed || merged
 			}
 			if changed {
 				work = append(work, succ)
@@ -61,15 +73,12 @@ func blockKinds(fn *types.Function, blocks []*analysis.BasicBlock, constants []t
 		}
 	}
 
-	out := make([][]types.Kind, len(blocks))
+	out := make([][]cfgSlot, len(blocks))
 	for idx, state := range states {
 		if !seen[idx] {
 			return nil, false
 		}
-		out[idx] = make([]types.Kind, len(state))
-		for j, slot := range state {
-			out[idx][j] = slot.kind
-		}
+		out[idx] = append([]cfgSlot(nil), state...)
 	}
 	return out, true
 }
@@ -108,8 +117,8 @@ func cfgArrayKind(heap []types.Value, ref int) (types.Kind, bool) {
 }
 
 func applyKind(fn *types.Function, locals []types.Type, constants []types.Boxed, globals []types.Kind, heap []types.Value, state *[]cfgSlot, inst instr.Instruction) bool {
-	push := func(kind types.Kind, sig *types.FunctionType, ref int) {
-		*state = append(*state, cfgSlot{kind: kind, sig: sig, ref: ref})
+	push := func(kind types.Kind, sig *types.FunctionType, ref int, refKnown bool) {
+		*state = append(*state, cfgSlot{kind: kind, sig: sig, ref: ref, refKnown: refKnown})
 	}
 	pop := func(n int) bool {
 		if len(*state) < n {
@@ -127,7 +136,7 @@ func applyKind(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		if idx >= len(locals) {
 			return false
 		}
-		push(locals[idx].Kind(), funcSignature(locals[idx]), 0)
+		push(locals[idx].Kind(), funcSignature(locals[idx]), 0, false)
 		return true
 	case instr.LOCAL_TEE:
 		return len(*state) > 0
@@ -136,14 +145,14 @@ func applyKind(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		if idx >= len(fn.Captures) {
 			return false
 		}
-		push(fn.Captures[idx].Kind(), funcSignature(fn.Captures[idx]), 0)
+		push(fn.Captures[idx].Kind(), funcSignature(fn.Captures[idx]), 0, false)
 		return true
 	case instr.GLOBAL_GET:
 		idx := int(inst.Operand(0))
 		if idx >= len(globals) {
 			return false
 		}
-		push(globals[idx], nil, 0)
+		push(globals[idx], nil, 0, false)
 		return true
 	case instr.GLOBAL_TEE:
 		return len(*state) > 0
@@ -156,7 +165,7 @@ func applyKind(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		if constants[idx].Kind() == types.KindRef {
 			ref = constants[idx].Ref()
 		}
-		push(constants[idx].Kind(), constFuncSignature(constants[idx], heap), ref)
+		push(constants[idx].Kind(), constFuncSignature(constants[idx], heap), ref, constants[idx].Kind() == types.KindRef)
 		return true
 	case instr.DUP:
 		if len(*state) == 0 {
@@ -181,19 +190,22 @@ func applyKind(fn *types.Function, locals []types.Type, constants []types.Boxed,
 			return false
 		}
 		*state = (*state)[:n-3]
-		push(a.kind, nil, 0)
+		push(a.kind, nil, 0, false)
 		return true
 	case instr.ARRAY_GET:
 		if len(*state) < 2 {
 			return false
 		}
 		n := len(*state)
-		ref := (*state)[n-2].ref
-		kind, ok := cfgArrayKind(heap, ref)
+		array := (*state)[n-2]
+		if !array.refKnown {
+			return false
+		}
+		kind, ok := cfgArrayKind(heap, array.ref)
 		if !ok || !pop(2) {
 			return false
 		}
-		push(kind, nil, 0)
+		push(kind, nil, 0, false)
 		return true
 	case instr.CALL, instr.RETURN_CALL:
 		if len(*state) == 0 {
@@ -205,7 +217,7 @@ func applyKind(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		}
 		if inst.Opcode() == instr.CALL {
 			for _, typ := range sig.Returns {
-				push(typ.Kind(), funcSignature(typ), 0)
+				push(typ.Kind(), funcSignature(typ), 0, false)
 			}
 		}
 		return true
@@ -223,7 +235,7 @@ func applyKind(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		if kind == instr.KindAny {
 			return false
 		}
-		push(types.Kind(kind), nil, 0)
+		push(types.Kind(kind), nil, 0, false)
 	}
 	return true
 }

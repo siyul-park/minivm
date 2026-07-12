@@ -213,6 +213,38 @@ func (c *compiler) Close() error {
 	return c.buffer.Free()
 }
 
+func (c *compiler) newLowering(i *Interpreter, addr int, fn *types.Function, arch asm.Arch) *lowering {
+	asmb := asm.New(arch)
+	globals := make([]types.Kind, len(i.globals))
+	for idx, global := range i.globals {
+		globals[idx] = global.Kind()
+	}
+	funcs := make(map[int]*types.Function)
+	for fnAddr := range i.instrs {
+		if target, ok := i.function(fnAddr); ok {
+			funcs[fnAddr] = target
+		}
+	}
+	ctx := &lowering{
+		assembler: asmb,
+		funcs:     funcs,
+		queued:    map[branch]asm.Label{},
+		tails:     map[*step]asm.Label{},
+		constants: i.constants,
+		globals:   globals,
+		heap:      i.heap,
+		scratch:   c.scratchRegs[:scratchCount],
+		entry:     asmb.Label(),
+		head:      asmb.Label(),
+		addr:      addr,
+	}
+	if fn.Typ != nil {
+		ctx.returns = len(fn.Typ.Returns)
+	}
+	ctx.frames = append(ctx.frames, newActivation(addr, fn, 0, 0))
+	return ctx
+}
+
 func (c *compiler) publish(mod *module, a anchor, ctx *lowering, arch asm.Arch, n native) (bool, error) {
 	code, err := ctx.assembler.Build()
 	if err != nil {
@@ -314,37 +346,10 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 	if !spillSafe(tree) {
 		arch = noSpillArch{c.arch}
 	}
-	asmb := asm.New(arch)
-	entry := asmb.Label()
-
-	// The declared Program.Globals are out of scope here; New pre-seeds every
-	// slot to the zero Boxed of its declared kind, so the runtime values carry
-	// the declared kinds at all times.
-	globals := make([]types.Kind, len(i.globals))
-	for j, g := range i.globals {
-		globals[j] = g.Kind()
-	}
-
-	ctx := &lowering{
-		assembler: asmb,
-		tree:      tree,
-		branches:  tree.branchIPs(),
-		funcs:     funcs,
-		queued:    map[branch]asm.Label{},
-		tails:     map[*step]asm.Label{},
-		constants: i.constants,
-		globals:   globals,
-		heap:      i.heap,
-		scratch:   c.scratchRegs[:scratchCount],
-		entry:     entry,
-		head:      asmb.Label(),
-		addr:      addr,
-		loop:      tree.root.kind == loop,
-	}
-	if fn.Typ != nil {
-		ctx.returns = len(fn.Typ.Returns)
-	}
-	ctx.frames = append(ctx.frames, newActivation(addr, fn, 0, 0))
+	ctx := c.newLowering(i, addr, fn, arch)
+	ctx.tree = tree
+	ctx.branches = tree.branchIPs()
+	ctx.loop = tree.root.kind == loop
 	if !c.lowerer.lower(ctx) {
 		return false, nil
 	}
