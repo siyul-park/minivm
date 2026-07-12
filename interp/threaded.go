@@ -149,28 +149,32 @@ var (
 			}
 		},
 		instr.CALL: func(c *threader) func(i *Interpreter) {
-			c.ip++
+			c.ip += 1
 			return func(i *Interpreter) {
 				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
-				addr := i.stack[i.sp-1].Ref()
+				target := i.stack[i.sp-1]
+				if target.Kind() != types.KindRef {
+					panic(ErrTypeMismatch)
+				}
+				addr := target.Ref()
 				switch fn := i.heap[addr].(type) {
 				case *types.Function:
-					if i.fp == len(i.frames) {
-						panic(ErrFrameOverflow)
-					}
 					params := len(fn.Typ.Params)
 					returns := len(fn.Typ.Returns)
 					locals := len(fn.Locals)
-					if i.sp <= params {
+					if i.fp == len(i.frames) {
+						panic(ErrFrameOverflow)
+					}
+					if i.sp < 1+params {
 						panic(ErrStackUnderflow)
 					}
 					if i.sp+locals-1 > len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if locals > 0 {
-						clear(i.stack[i.sp-1 : i.sp+locals-1])
+						clear(i.stack[i.sp-1 : i.sp-1+locals])
 					}
 					f := &i.frames[i.fp]
 					f.code = i.code[addr]
@@ -186,13 +190,10 @@ var (
 						f.coro = i.alloc(&Coroutine{typ: fn.Typ})
 					}
 					i.sp = f.bp + params + locals
-					i.fr.ip++
+					i.fr.ip += 1
 					i.fp++
 					i.fr = f
 				case *types.Closure:
-					if i.fp == len(i.frames) {
-						panic(ErrFrameOverflow)
-					}
 					tmpl, ok := i.heap[fn.Fn].(*types.Function)
 					if !ok {
 						panic(ErrTypeMismatch)
@@ -200,17 +201,20 @@ var (
 					params := len(fn.Typ.Params)
 					returns := len(fn.Typ.Returns)
 					locals := len(tmpl.Locals)
-					if i.sp <= params {
+					if i.fp == len(i.frames) {
+						panic(ErrFrameOverflow)
+					}
+					if i.sp < 1+params {
 						panic(ErrStackUnderflow)
 					}
 					if i.sp+locals-1 > len(i.stack) {
 						panic(ErrStackOverflow)
 					}
 					if locals > 0 {
-						clear(i.stack[i.sp-1 : i.sp+locals-1])
+						clear(i.stack[i.sp-1 : i.sp-1+locals])
 					}
 					f := &i.frames[i.fp]
-					f.code = i.code[fn.Fn]
+					f.code = i.code[int(fn.Fn)]
 					f.upvals = fn.Upvals
 					f.addr = int(fn.Fn)
 					f.ref = addr
@@ -219,63 +223,60 @@ var (
 					f.returns = returns
 					f.release = true
 					f.coro = 0
-					if int(fn.Fn) < len(i.coros) && i.coros[fn.Fn] {
+					if int(fn.Fn) < len(i.coros) && i.coros[int(fn.Fn)] {
 						f.coro = i.alloc(&Coroutine{typ: fn.Typ})
 					}
 					i.sp = f.bp + params + locals
-					i.fr.ip++
+					i.fr.ip += 1
 					i.fp++
 					i.fr = f
 				case *HostFunction:
-					{
-						fn := fn
-						params := len(fn.Typ.Params)
-						returns := len(fn.Typ.Returns)
-						if i.sp <= params {
-							panic(ErrStackUnderflow)
-						}
-						if i.sp+returns-params-1 > len(i.stack) {
-							panic(ErrStackOverflow)
-						}
-						args := i.stack[i.sp-params-1 : i.sp-1]
-						out, err := fn.Fn(i, args)
-						if err != nil {
-							panic(err)
-						}
-						for _, value := range args {
-							if value.Kind() != types.KindRef {
-								continue
-							}
-							kept := false
-							for _, result := range out {
-								if result == value {
-									kept = true
-									break
-								}
-							}
-							if !kept {
-								i.release(value.Ref())
-							}
-						}
-						for _, value := range i.stack[i.sp-1 : i.sp] {
-							if value.Kind() != types.KindRef {
-								continue
-							}
-							kept := false
-							for _, result := range out {
-								if result == value {
-									kept = true
-									break
-								}
-							}
-							if !kept {
-								i.release(value.Ref())
-							}
-						}
-						i.sp += returns - params - 1
-						copy(i.stack[i.sp-returns:i.sp], out)
-						i.fr.ip++
+					params := len(fn.Typ.Params)
+					returns := len(fn.Typ.Returns)
+					if i.sp < 1+params {
+						panic(ErrStackUnderflow)
 					}
+					if i.sp+returns-params-1 > len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					args := i.stack[i.sp-params-1 : i.sp-1]
+					out, err := fn.Fn(i, args)
+					if err != nil {
+						panic(err)
+					}
+					for _, value := range args {
+						if value.Kind() != types.KindRef {
+							continue
+						}
+						kept := false
+						for _, result := range out {
+							if result == value {
+								kept = true
+								break
+							}
+						}
+						if !kept {
+							i.release(value.Ref())
+						}
+					}
+					for _, value := range i.stack[i.sp-1 : i.sp] {
+						if value.Kind() != types.KindRef {
+							continue
+						}
+						kept := false
+						for _, result := range out {
+							if result == value {
+								kept = true
+								break
+							}
+						}
+						if !kept {
+							i.release(value.Ref())
+						}
+					}
+					i.sp += returns - params - 1
+					copy(i.stack[i.sp-returns:i.sp], out)
+					i.fr.ip += 1
 				default:
 					panic(ErrTypeMismatch)
 				}
@@ -345,212 +346,194 @@ var (
 			}
 		},
 		instr.RETURN_CALL: func(c *threader) func(i *Interpreter) {
-			c.ip++
+			c.ip += 1
 			return func(i *Interpreter) {
 				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
-				addr := i.stack[i.sp-1].Ref()
+				target := i.stack[i.sp-1]
+				if target.Kind() != types.KindRef {
+					panic(ErrTypeMismatch)
+				}
+				addr := target.Ref()
 				switch fn := i.heap[addr].(type) {
 				case *types.Function:
-					{
-						code := addr
-						ref := addr
-						var upvals []types.Boxed
-						params := len(fn.Typ.Params)
-						returns := len(fn.Typ.Returns)
-						locals := len(fn.Locals)
-						if i.sp <= params {
-							panic(ErrStackUnderflow)
+					params := len(fn.Typ.Params)
+					returns := len(fn.Typ.Returns)
+					locals := len(fn.Locals)
+					if i.sp < 1+params {
+						panic(ErrStackUnderflow)
+					}
+					if i.fp == 1 {
+						if i.fp == len(i.frames) {
+							panic(ErrFrameOverflow)
 						}
-						var f *frame
-						var base int
-						if i.fp == 1 {
-							if i.fp == len(i.frames) {
-								panic(ErrFrameOverflow)
-							}
-							if i.sp+locals-1 > len(i.stack) {
-								panic(ErrStackOverflow)
-							}
-							if locals > 0 {
-								clear(i.stack[i.sp-1 : i.sp+locals-1])
-							}
-							f := &i.frames[i.fp]
-							f.code = i.code[code]
-							f.upvals = upvals
-							f.addr = code
-							f.ref = ref
-							f.ip = 0
-							f.bp = i.sp - params - 1
-							f.returns = returns
-							f.release = true
-							i.sp = f.bp + params + locals
-							i.fr.ip++
-							i.fp++
-							i.fr = f
-							goto inlineTail2
-						}
-						f = i.fr
-						base = f.bp
-						if base+params+locals > len(i.stack) {
+						if i.sp+locals-1 > len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						copy(i.stack[base:base+params], i.stack[i.sp-params-1:i.sp-1])
-						if f.release {
-							i.release(f.ref)
-						}
 						if locals > 0 {
-							clear(i.stack[base+params : base+params+locals])
+							clear(i.stack[i.sp-1 : i.sp+locals-1])
 						}
-						f.code = i.code[code]
-						f.upvals = upvals
-						f.addr = code
-						f.ref = ref
+						f := &i.frames[i.fp]
+						f.code = i.code[addr]
+						f.upvals = nil
+						f.addr = addr
+						f.ref = addr
 						f.ip = 0
-						f.bp = base
+						f.bp = i.sp - params - 1
 						f.returns = returns
 						f.release = true
 						f.coro = 0
-						i.sp = base + params + locals
-					inlineTail2:
+						i.sp = f.bp + params + locals
+						i.fr.ip += 1
+						i.fp++
+						i.fr = f
+						return
 					}
+					f := i.fr
+					base := f.bp
+					if base+params+locals > len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					copy(i.stack[base:base+params], i.stack[i.sp-params-1:i.sp-1])
+					if f.release {
+						i.release(f.ref)
+					}
+					if locals > 0 {
+						clear(i.stack[base+params : base+params+locals])
+					}
+					f.code = i.code[addr]
+					f.upvals = nil
+					f.addr = addr
+					f.ref = addr
+					f.ip = 0
+					f.returns = returns
+					f.release = true
+					f.coro = 0
+					i.sp = base + params + locals
 				case *types.Closure:
 					tmpl, ok := i.heap[fn.Fn].(*types.Function)
 					if !ok {
 						panic(ErrTypeMismatch)
 					}
-					{
-						code := int(fn.Fn)
-						ref := addr
-						upvals := fn.Upvals
-						params := len(fn.Typ.Params)
-						returns := len(fn.Typ.Returns)
-						locals := len(tmpl.Locals)
-						if i.sp <= params {
-							panic(ErrStackUnderflow)
+					params := len(fn.Typ.Params)
+					returns := len(fn.Typ.Returns)
+					locals := len(tmpl.Locals)
+					if i.sp < 1+params {
+						panic(ErrStackUnderflow)
+					}
+					if i.fp == 1 {
+						if i.fp == len(i.frames) {
+							panic(ErrFrameOverflow)
 						}
-						var f *frame
-						var base int
-						if i.fp == 1 {
-							if i.fp == len(i.frames) {
-								panic(ErrFrameOverflow)
-							}
-							if i.sp+locals-1 > len(i.stack) {
-								panic(ErrStackOverflow)
-							}
-							if locals > 0 {
-								clear(i.stack[i.sp-1 : i.sp+locals-1])
-							}
-							f := &i.frames[i.fp]
-							f.code = i.code[code]
-							f.upvals = upvals
-							f.addr = code
-							f.ref = ref
-							f.ip = 0
-							f.bp = i.sp - params - 1
-							f.returns = returns
-							f.release = true
-							i.sp = f.bp + params + locals
-							i.fr.ip++
-							i.fp++
-							i.fr = f
-							goto inlineTail3
-						}
-						f = i.fr
-						base = f.bp
-						if base+params+locals > len(i.stack) {
+						if i.sp+locals-1 > len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						copy(i.stack[base:base+params], i.stack[i.sp-params-1:i.sp-1])
-						if f.release {
-							i.release(f.ref)
-						}
 						if locals > 0 {
-							clear(i.stack[base+params : base+params+locals])
+							clear(i.stack[i.sp-1 : i.sp+locals-1])
 						}
-						f.code = i.code[code]
-						f.upvals = upvals
-						f.addr = code
-						f.ref = ref
+						f := &i.frames[i.fp]
+						f.code = i.code[int(fn.Fn)]
+						f.upvals = fn.Upvals
+						f.addr = int(fn.Fn)
+						f.ref = addr
 						f.ip = 0
-						f.bp = base
+						f.bp = i.sp - params - 1
 						f.returns = returns
 						f.release = true
 						f.coro = 0
-						i.sp = base + params + locals
-					inlineTail3:
+						i.sp = f.bp + params + locals
+						i.fr.ip += 1
+						i.fp++
+						i.fr = f
+						return
 					}
+					f := i.fr
+					base := f.bp
+					if base+params+locals > len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					copy(i.stack[base:base+params], i.stack[i.sp-params-1:i.sp-1])
+					if f.release {
+						i.release(f.ref)
+					}
+					if locals > 0 {
+						clear(i.stack[base+params : base+params+locals])
+					}
+					f.code = i.code[int(fn.Fn)]
+					f.upvals = fn.Upvals
+					f.addr = int(fn.Fn)
+					f.ref = addr
+					f.ip = 0
+					f.returns = returns
+					f.release = true
+					f.coro = 0
+					i.sp = base + params + locals
 				case *HostFunction:
-					{
-						fn := fn
-						params := len(fn.Typ.Params)
-						returns := len(fn.Typ.Returns)
-						if i.sp <= params {
+					params := len(fn.Typ.Params)
+					returns := len(fn.Typ.Returns)
+					if i.sp < 1+params {
+						panic(ErrStackUnderflow)
+					}
+					if i.sp+returns-params-1 > len(i.stack) {
+						panic(ErrStackOverflow)
+					}
+					args := i.stack[i.sp-params-1 : i.sp-1]
+					out, err := fn.Fn(i, args)
+					if err != nil {
+						panic(err)
+					}
+					for _, value := range args {
+						if value.Kind() != types.KindRef {
+							continue
+						}
+						kept := false
+						for _, result := range out {
+							if result == value {
+								kept = true
+								break
+							}
+						}
+						if !kept {
+							i.release(value.Ref())
+						}
+					}
+					for _, value := range i.stack[i.sp-1 : i.sp] {
+						if value.Kind() != types.KindRef {
+							continue
+						}
+						kept := false
+						for _, result := range out {
+							if result == value {
+								kept = true
+								break
+							}
+						}
+						if !kept {
+							i.release(value.Ref())
+						}
+					}
+					i.sp += returns - params - 1
+					copy(i.stack[i.sp-returns:i.sp], out)
+					if i.fp > 1 {
+						f := i.fr
+						if i.sp < f.returns {
 							panic(ErrStackUnderflow)
 						}
-						if i.sp+returns-params-1 > len(i.stack) {
-							panic(ErrStackOverflow)
+						switch f.returns {
+						case 0:
+						case 1:
+							i.stack[f.bp] = i.stack[i.sp-1]
+						default:
+							copy(i.stack[f.bp:f.bp+f.returns], i.stack[i.sp-f.returns:i.sp])
 						}
-						args := i.stack[i.sp-params-1 : i.sp-1]
-						out, err := fn.Fn(i, args)
-						if err != nil {
-							panic(err)
+						i.sp = f.bp + f.returns
+						if f.release {
+							i.release(f.ref)
 						}
-						for _, value := range args {
-							if value.Kind() != types.KindRef {
-								continue
-							}
-							kept := false
-							for _, result := range out {
-								if result == value {
-									kept = true
-									break
-								}
-							}
-							if !kept {
-								i.release(value.Ref())
-							}
-						}
-						for _, value := range i.stack[i.sp-1 : i.sp] {
-							if value.Kind() != types.KindRef {
-								continue
-							}
-							kept := false
-							for _, result := range out {
-								if result == value {
-									kept = true
-									break
-								}
-							}
-							if !kept {
-								i.release(value.Ref())
-							}
-						}
-						i.sp += returns - params - 1
-						copy(i.stack[i.sp-returns:i.sp], out)
-						i.fr.ip++
-					}
-					if i.fp > 1 {
-						{
-							f := i.fr
-							if i.sp < f.returns {
-								panic(ErrStackUnderflow)
-							}
-							switch f.returns {
-							case 0:
-							case 1:
-								i.stack[f.bp] = i.stack[i.sp-1]
-							default:
-								copy(i.stack[f.bp:f.bp+f.returns], i.stack[i.sp-f.returns:i.sp])
-							}
-							i.sp = f.bp + f.returns
-							if f.release {
-								i.release(f.ref)
-							}
-							f.code = nil
-							i.fp--
-							i.fr = &i.frames[i.fp-1]
-						}
+						f.code = nil
+						i.fp--
+						i.fr = &i.frames[i.fp-1]
 					}
 				default:
 					panic(ErrTypeMismatch)
@@ -5195,31 +5178,31 @@ var (
 			}
 		},
 		instr.CLOSURE_NEW: func(c *threader) func(i *Interpreter) {
-			c.ip++
+			c.ip += 1
 			return func(i *Interpreter) {
 				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
-				ref := i.stack[i.sp-1]
-				if ref.Kind() != types.KindRef {
+				target := i.stack[i.sp-1]
+				if target.Kind() != types.KindRef {
 					panic(ErrTypeMismatch)
 				}
-				addr := ref.Ref()
+				addr := target.Ref()
 				fn, ok := i.heap[addr].(*types.Function)
 				if !ok {
 					panic(ErrTypeMismatch)
 				}
-				n := len(fn.Captures)
-				if i.sp < n+1 {
+				captures := len(fn.Captures)
+				if i.sp < captures+1 {
 					panic(ErrStackUnderflow)
 				}
-				upvals := make([]types.Boxed, n)
-				copy(upvals, i.stack[i.sp-1-n:i.sp-1])
-				cl := types.NewClosure(fn.Typ, types.Ref(addr), upvals)
-				caddr := i.keep(cl)
-				i.sp -= n
-				i.stack[i.sp-1] = types.BoxRef(caddr)
-				i.fr.ip++
+				base := i.sp - captures - 1
+				upvals := append([]types.Boxed{}, i.stack[base:base+captures]...)
+				closure := types.NewClosure(fn.Typ, types.Ref(addr), upvals)
+				i.sp = base
+				i.stack[i.sp] = types.BoxRef(i.keep(closure))
+				i.sp++
+				i.fr.ip += 1
 			}
 		},
 		instr.MAP_ITER: func(c *threader) func(i *Interpreter) {
@@ -38528,7 +38511,7 @@ var (
 						if i.sp == len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						if i.sp < params {
+						if i.sp < 0+params {
 							panic(ErrStackUnderflow)
 						}
 						if i.fp == 1 {
@@ -38546,7 +38529,8 @@ var (
 							f.upvals = nil
 							f.addr = addr
 							f.ref = addr
-							f.bp = i.sp - params
+							f.ip = 0
+							f.bp = i.sp - params - 0
 							f.returns = returns
 							f.release = false
 							f.coro = 0
@@ -38561,7 +38545,7 @@ var (
 						if base+params+locals > len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						copy(i.stack[base:base+params], i.stack[i.sp-params:i.sp])
+						copy(i.stack[base:base+params], i.stack[i.sp-params-0:i.sp-0])
 						if f.release {
 							i.release(f.ref)
 						}
@@ -38594,7 +38578,7 @@ var (
 						if i.sp == len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						if i.sp < params {
+						if i.sp < 0+params {
 							panic(ErrStackUnderflow)
 						}
 						if i.fp == 1 {
@@ -38612,7 +38596,8 @@ var (
 							f.upvals = fn.Upvals
 							f.addr = int(fn.Fn)
 							f.ref = addr
-							f.bp = i.sp - params
+							f.ip = 0
+							f.bp = i.sp - params - 0
 							f.returns = returns
 							f.release = false
 							f.coro = 0
@@ -38627,7 +38612,7 @@ var (
 						if base+params+locals > len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						copy(i.stack[base:base+params], i.stack[i.sp-params:i.sp])
+						copy(i.stack[base:base+params], i.stack[i.sp-params-0:i.sp-0])
 						if f.release {
 							i.release(f.ref)
 						}
@@ -38652,13 +38637,13 @@ var (
 						if i.sp == len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						if i.sp < params {
+						if i.sp < 0+params {
 							panic(ErrStackUnderflow)
 						}
 						if i.sp+returns-params > len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						args := i.stack[i.sp-params : i.sp]
+						args := i.stack[i.sp-params-0 : i.sp-0]
 						out, err := fn.Fn(i, args)
 						if err != nil {
 							panic(err)
@@ -38678,7 +38663,7 @@ var (
 								i.release(value.Ref())
 							}
 						}
-						i.sp += returns - params
+						i.sp += returns - params - 0
 						copy(i.stack[i.sp-returns:i.sp], out)
 						if i.fp > 1 {
 							f := i.fr
@@ -38730,13 +38715,14 @@ var (
 						if i.sp == len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						if i.sp < captures {
+						if i.sp < captures+0 {
 							panic(ErrStackUnderflow)
 						}
-						upvals := append([]types.Boxed{}, i.stack[i.sp-captures:i.sp]...)
+						base := i.sp - captures - 0
+						upvals := append([]types.Boxed{}, i.stack[base:base+captures]...)
 						i.retain(addr)
 						closure := types.NewClosure(fn.Typ, types.Ref(addr), upvals)
-						i.sp -= captures
+						i.sp = base
 						i.stack[i.sp] = types.BoxRef(i.keep(closure))
 						i.sp++
 						i.fr.ip += 4
@@ -38778,7 +38764,7 @@ var (
 						if i.fp == len(i.frames) {
 							panic(ErrFrameOverflow)
 						}
-						if i.sp < params {
+						if i.sp < 0+params {
 							panic(ErrStackUnderflow)
 						}
 						if i.sp+locals > len(i.stack) {
@@ -38793,7 +38779,7 @@ var (
 						f.addr = addr
 						f.ref = addr
 						f.ip = 0
-						f.bp = i.sp - params
+						f.bp = i.sp - params - 0
 						f.returns = returns
 						f.release = false
 						f.coro = 0
@@ -38821,7 +38807,7 @@ var (
 						if i.fp == len(i.frames) {
 							panic(ErrFrameOverflow)
 						}
-						if i.sp < params {
+						if i.sp < 0+params {
 							panic(ErrStackUnderflow)
 						}
 						if i.sp+locals > len(i.stack) {
@@ -38836,7 +38822,7 @@ var (
 						f.addr = int(fn.Fn)
 						f.ref = addr
 						f.ip = 0
-						f.bp = i.sp - params
+						f.bp = i.sp - params - 0
 						f.returns = returns
 						f.release = false
 						f.coro = 0
@@ -38853,13 +38839,13 @@ var (
 						if i.sp == len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						if i.sp < params {
+						if i.sp < 0+params {
 							panic(ErrStackUnderflow)
 						}
 						if i.sp+returns-params > len(i.stack) {
 							panic(ErrStackOverflow)
 						}
-						args := i.stack[i.sp-params : i.sp]
+						args := i.stack[i.sp-params-0 : i.sp-0]
 						out, err := fn.Fn(i, args)
 						if err != nil {
 							panic(err)
@@ -38879,7 +38865,7 @@ var (
 								i.release(value.Ref())
 							}
 						}
-						i.sp += returns - params
+						i.sp += returns - params - 0
 						copy(i.stack[i.sp-returns:i.sp], out)
 						i.fr.ip += 4
 					}
