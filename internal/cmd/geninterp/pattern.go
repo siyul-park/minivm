@@ -9,9 +9,10 @@ import (
 )
 
 type step struct {
-	op  instr.Opcode
-	typ reflect.Type
-	not bool
+	op   instr.Opcode
+	typ  reflect.Type
+	kind instr.Kind
+	not  bool
 }
 
 type pattern []step
@@ -156,13 +157,13 @@ func seq(parts ...pattern) pattern {
 }
 
 func op(code instr.Opcode) pattern {
-	return pattern{{op: code}}
+	return pattern{{op: code, kind: instr.KindAny}}
 }
 
 func constant[T types.Value]() pattern {
-	return pattern{{op: instr.CONST_GET, typ: reflect.TypeFor[T]()}}
+	return pattern{{op: instr.CONST_GET, typ: reflect.TypeFor[T](), kind: instr.KindAny}}
 }
 
 func except[T types.Value]() pattern {
-	return pattern{{op: instr.CONST_GET, typ: reflect.TypeFor[T](), not: true}}
+	return pattern{{op: instr.CONST_GET, typ: reflect.TypeFor[T](), kind: instr.KindAny, not: true}}
 }

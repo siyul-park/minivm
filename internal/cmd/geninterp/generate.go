@@ -65,11 +65,12 @@ func declare(file *jen.File) {
 func handlers() jen.Code {
 	table := jen.Index(jen.Lit(256)).Func().Params(jen.Id("c").Op("*").Id("threader")).Func().Params(jen.Id("i").Op("*").Id("Interpreter"))
 	return table.ValuesFunc(func(group *jen.Group) {
-		for opcode, lowering := range lowerings {
-			if lowering == nil {
+		for opcode, lower := range lowerers {
+			if lower == nil {
 				continue
 			}
-			group.Line().Qual("github.com/siyul-park/minivm/instr", symbol(instr.Opcode(opcode))).Op(":").Add(lowering())
+			op := instr.Opcode(opcode)
+			group.Line().Qual("github.com/siyul-park/minivm/instr", symbol(op)).Op(":").Add(standalone(op))
 		}
 	})
 }
@@ -148,10 +149,10 @@ func fusions(patterns []pattern) (jen.Code, error) {
 			continue
 		}
 		body := []jen.Code{jen.Id("start").Op(":=").Id("c").Dot("ip")}
-		for index, pattern := range patterns {
-			label := fmt.Sprintf("l%d", index)
+		for indexSequence, pattern := range patterns {
+			label := fmt.Sprintf("l%d", indexSequence)
 			total := pattern.width()
-			statements, err := fusion(pattern, total, label)
+			statements, err := compose(pattern, total, label)
 			if err != nil {
 				return nil, err
 			}

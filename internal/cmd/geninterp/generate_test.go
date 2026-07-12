@@ -23,8 +23,8 @@ func TestGenerate(t *testing.T) {
 		require.Equal(t, first, second)
 
 		paths := make([]string, len(first))
-		for index, output := range first {
-			paths[index] = output.path
+		for indexSequence, output := range first {
+			paths[indexSequence] = output.path
 		}
 		require.Equal(t, []string{"interp/threaded.go"}, paths)
 	})
@@ -73,7 +73,7 @@ func TestGenerate(t *testing.T) {
 		require.Equal(t, catalog(), catalog())
 	})
 
-	t.Run("renders fusion tables", func(t *testing.T) {
+	t.Run("renders compose tables", func(t *testing.T) {
 		patterns := []pattern{
 			seq(op(instr.REF_NULL), op(instr.DROP)),
 			seq(op(instr.DUP), op(instr.DROP)),
@@ -82,7 +82,7 @@ func TestGenerate(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, string(data), "goto l0")
 		require.Contains(t, string(data), "l0:")
-		require.NotContains(t, string(data), "func (c *threader) fusion")
+		require.NotContains(t, string(data), "func (c *threader) compose")
 		require.NotContains(t, string(data), "candidate0")
 
 	})
@@ -131,8 +131,8 @@ func TestGenerate(t *testing.T) {
 		require.ErrorContains(t, validate([]pattern{seq(op(instr.Opcode(0xff)), op(instr.DROP))}), "unsupported opcode")
 	})
 
-	t.Run("rejects missing lowerings", func(t *testing.T) {
-		require.ErrorContains(t, validate([]pattern{seq(op(instr.LOCAL_GET), op(instr.CALL))}), "unsupported fusion")
+	t.Run("rejects missing lowerers", func(t *testing.T) {
+		require.ErrorContains(t, validate([]pattern{seq(op(instr.LOCAL_GET), op(instr.CALL))}), "unsupported compose")
 	})
 
 	t.Run("rejects unsupported trailing operations", func(t *testing.T) {
@@ -187,7 +187,7 @@ func TestGenerate(t *testing.T) {
 	})
 
 	t.Run("maps every opcode once", func(t *testing.T) {
-		for value, lowering := range lowerings {
+		for value, lowering := range lowerers {
 			op := instr.Opcode(value)
 			if instr.Valid(op) {
 				require.NotNil(t, lowering, instr.TypeOf(op).Mnemonic)

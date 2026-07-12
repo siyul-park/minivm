@@ -9,250 +9,271 @@ import (
 	"github.com/siyul-park/minivm/instr"
 )
 
-type access struct {
-	pre   []jen.Code
-	check []jen.Code
-	load  []jen.Code
-	push  []jen.Code
-	width int
+type lowering struct {
+	source  step
+	compile []jen.Code
+	check   []jen.Code
+	body    []jen.Code
+	discard []jen.Code
+	push    []jen.Code
+	raw     jen.Code
+	boxed   jen.Code
+	handler jen.Code
 }
 
-var lowerings = [256]func() jen.Code{
-	instr.ARRAY_APPEND:        arrayAppend,
-	instr.ARRAY_COPY:          arrayCopy,
-	instr.ARRAY_DELETE:        arrayDelete,
-	instr.ARRAY_FILL:          arrayFill,
-	instr.ARRAY_GET:           arrayGet,
-	instr.ARRAY_LEN:           arrayLen,
-	instr.ARRAY_NEW:           arrayNew,
-	instr.ARRAY_NEW_DEFAULT:   arrayNewDefault,
-	instr.ARRAY_SET:           arraySet,
-	instr.ARRAY_SLICE:         arraySlice,
-	instr.BR:                  br,
-	instr.BR_IF:               brIf,
-	instr.BR_TABLE:            brTable,
-	instr.CALL:                callOp,
-	instr.CLOSURE_NEW:         closureNew,
-	instr.CONST_GET:           constGet,
-	instr.CORO_DONE:           coroDone,
-	instr.CORO_VALUE:          coroValue,
-	instr.DROP:                drop,
-	instr.DUP:                 dup,
-	instr.ERROR_CODE:          errorCode,
-	instr.ERROR_GET:           errorGet,
-	instr.ERROR_NEW:           errorNew,
-	instr.F32_ABS:             f32Abs,
-	instr.F32_ADD:             f32Add,
-	instr.F32_CEIL:            f32Ceil,
-	instr.F32_CONST:           f32Const,
-	instr.F32_COPYSIGN:        f32Copysign,
-	instr.F32_DIV:             f32Div,
-	instr.F32_EQ:              f32Eq,
-	instr.F32_FLOOR:           f32Floor,
-	instr.F32_GE:              f32Ge,
-	instr.F32_GT:              f32Gt,
-	instr.F32_LE:              f32Le,
-	instr.F32_LT:              f32Lt,
-	instr.F32_MAX:             f32Max,
-	instr.F32_MIN:             f32Min,
-	instr.F32_MOD:             f32Mod,
-	instr.F32_MUL:             f32Mul,
-	instr.F32_NE:              f32Ne,
-	instr.F32_NEAREST:         f32Nearest,
-	instr.F32_NEG:             f32Neg,
-	instr.F32_REINTERPRET_I32: f32ReinterpretI32,
-	instr.F32_REM:             f32Rem,
-	instr.F32_SQRT:            f32Sqrt,
-	instr.F32_SUB:             f32Sub,
-	instr.F32_TO_F64:          f32ToF64,
-	instr.F32_TO_I32_S:        f32ToI32S,
-	instr.F32_TO_I32_U:        f32ToI32U,
-	instr.F32_TO_I64_S:        f32ToI64S,
-	instr.F32_TO_I64_U:        f32ToI64U,
-	instr.F32_TRUNC:           f32Trunc,
-	instr.F64_ABS:             f64Abs,
-	instr.F64_ADD:             f64Add,
-	instr.F64_CEIL:            f64Ceil,
-	instr.F64_CONST:           f64Const,
-	instr.F64_COPYSIGN:        f64Copysign,
-	instr.F64_DIV:             f64Div,
-	instr.F64_EQ:              f64Eq,
-	instr.F64_FLOOR:           f64Floor,
-	instr.F64_GE:              f64Ge,
-	instr.F64_GT:              f64Gt,
-	instr.F64_LE:              f64Le,
-	instr.F64_LT:              f64Lt,
-	instr.F64_MAX:             f64Max,
-	instr.F64_MIN:             f64Min,
-	instr.F64_MOD:             f64Mod,
-	instr.F64_MUL:             f64Mul,
-	instr.F64_NE:              f64Ne,
-	instr.F64_NEAREST:         f64Nearest,
-	instr.F64_NEG:             f64Neg,
-	instr.F64_REINTERPRET_I64: f64ReinterpretI64,
-	instr.F64_REM:             f64Rem,
-	instr.F64_SQRT:            f64Sqrt,
-	instr.F64_SUB:             f64Sub,
-	instr.F64_TO_F32:          f64ToF32,
-	instr.F64_TO_I32_S:        f64ToI32S,
-	instr.F64_TO_I32_U:        f64ToI32U,
-	instr.F64_TO_I64_S:        f64ToI64S,
-	instr.F64_TO_I64_U:        f64ToI64U,
-	instr.F64_TRUNC:           f64Trunc,
-	instr.GLOBAL_GET:          globalGet,
-	instr.GLOBAL_SET:          globalSet,
-	instr.GLOBAL_TEE:          globalTee,
-	instr.I32_ADD:             i32Add,
-	instr.I32_AND:             i32And,
-	instr.I32_CLZ:             i32Clz,
-	instr.I32_CONST:           i32Const,
-	instr.I32_CTZ:             i32Ctz,
-	instr.I32_DIV_S:           i32DivS,
-	instr.I32_DIV_U:           i32DivU,
-	instr.I32_EQ:              i32Eq,
-	instr.I32_EQZ:             i32Eqz,
-	instr.I32_EXTEND16_S:      i32Extend16S,
-	instr.I32_EXTEND8_S:       i32Extend8S,
-	instr.I32_GE_S:            i32GeS,
-	instr.I32_GE_U:            i32GeU,
-	instr.I32_GT_S:            i32GtS,
-	instr.I32_GT_U:            i32GtU,
-	instr.I32_LE_S:            i32LeS,
-	instr.I32_LE_U:            i32LeU,
-	instr.I32_LT_S:            i32LtS,
-	instr.I32_LT_U:            i32LtU,
-	instr.I32_MUL:             i32Mul,
-	instr.I32_NE:              i32Ne,
-	instr.I32_OR:              i32Or,
-	instr.I32_POPCNT:          i32Popcnt,
-	instr.I32_REINTERPRET_F32: i32ReinterpretF32,
-	instr.I32_REM_S:           i32RemS,
-	instr.I32_REM_U:           i32RemU,
-	instr.I32_ROTL:            i32Rotl,
-	instr.I32_ROTR:            i32Rotr,
-	instr.I32_SHL:             i32Shl,
-	instr.I32_SHR_S:           i32ShrS,
-	instr.I32_SHR_U:           i32ShrU,
-	instr.I32_SUB:             i32Sub,
-	instr.I32_TO_F32_S:        i32ToF32S,
-	instr.I32_TO_F32_U:        i32ToF32U,
-	instr.I32_TO_F64_S:        i32ToF64S,
-	instr.I32_TO_F64_U:        i32ToF64U,
-	instr.I32_TO_I64_S:        i32ToI64S,
-	instr.I32_TO_I64_U:        i32ToI64U,
-	instr.I32_XOR:             i32Xor,
-	instr.I64_ADD:             i64Add,
-	instr.I64_AND:             i64And,
-	instr.I64_CLZ:             i64Clz,
-	instr.I64_CONST:           i64Const,
-	instr.I64_CTZ:             i64Ctz,
-	instr.I64_DIV_S:           i64DivS,
-	instr.I64_DIV_U:           i64DivU,
-	instr.I64_EQ:              i64Eq,
-	instr.I64_EQZ:             i64Eqz,
-	instr.I64_EXTEND16_S:      i64Extend16S,
-	instr.I64_EXTEND32_S:      i64Extend32S,
-	instr.I64_EXTEND8_S:       i64Extend8S,
-	instr.I64_GE_S:            i64GeS,
-	instr.I64_GE_U:            i64GeU,
-	instr.I64_GT_S:            i64GtS,
-	instr.I64_GT_U:            i64GtU,
-	instr.I64_LE_S:            i64LeS,
-	instr.I64_LE_U:            i64LeU,
-	instr.I64_LT_S:            i64LtS,
-	instr.I64_LT_U:            i64LtU,
-	instr.I64_MUL:             i64Mul,
-	instr.I64_NE:              i64Ne,
-	instr.I64_OR:              i64Or,
-	instr.I64_POPCNT:          i64Popcnt,
-	instr.I64_REINTERPRET_F64: i64ReinterpretF64,
-	instr.I64_REM_S:           i64RemS,
-	instr.I64_REM_U:           i64RemU,
-	instr.I64_ROTL:            i64Rotl,
-	instr.I64_ROTR:            i64Rotr,
-	instr.I64_SHL:             i64Shl,
-	instr.I64_SHR_S:           i64ShrS,
-	instr.I64_SHR_U:           i64ShrU,
-	instr.I64_SUB:             i64Sub,
-	instr.I64_TO_F32_S:        i64ToF32S,
-	instr.I64_TO_F32_U:        i64ToF32U,
-	instr.I64_TO_F64_S:        i64ToF64S,
-	instr.I64_TO_F64_U:        i64ToF64U,
-	instr.I64_TO_I32:          i64ToI32,
-	instr.I64_XOR:             i64Xor,
-	instr.LOCAL_GET:           localGet,
-	instr.LOCAL_SET:           localSet,
-	instr.LOCAL_TEE:           localTee,
-	instr.MAP_CLEAR:           mapClear,
-	instr.MAP_DELETE:          mapDelete,
-	instr.MAP_GET:             mapGet,
-	instr.MAP_ITER:            mapIter,
-	instr.MAP_KEYS:            mapKeys,
-	instr.MAP_LEN:             mapLen,
-	instr.MAP_LOOKUP:          mapLookup,
-	instr.MAP_NEW:             mapNew,
-	instr.MAP_NEW_DEFAULT:     mapNewDefault,
-	instr.MAP_SET:             mapSet,
-	instr.NOP:                 nop,
-	instr.REF_CAST:            refCast,
-	instr.REF_EQ:              refEq,
-	instr.REF_GET:             refGet,
-	instr.REF_IS_NULL:         refIsNull,
-	instr.REF_NE:              refNe,
-	instr.REF_NEW:             refNew,
-	instr.REF_NULL:            refNull,
-	instr.REF_SET:             refSet,
-	instr.REF_TEST:            refTest,
-	instr.RESUME:              resume,
-	instr.RETURN:              returnOp,
-	instr.RETURN_CALL:         returnCall,
-	instr.SELECT:              selectOp,
-	instr.STRING_CONCAT:       stringConcat,
-	instr.STRING_ENCODE_UTF32: stringEncodeUtf32,
-	instr.STRING_EQ:           stringEq,
-	instr.STRING_GE:           stringGe,
-	instr.STRING_GT:           stringGt,
-	instr.STRING_ITER:         stringIter,
-	instr.STRING_LE:           stringLe,
-	instr.STRING_LEN:          stringLen,
-	instr.STRING_LT:           stringLt,
-	instr.STRING_NE:           stringNe,
-	instr.STRING_NEW_UTF32:    stringNewUtf32,
-	instr.STRUCT_GET:          structGet,
-	instr.STRUCT_NEW:          structNew,
-	instr.STRUCT_NEW_DEFAULT:  structNewDefault,
-	instr.STRUCT_SET:          structSet,
-	instr.SWAP:                swap,
-	instr.THROW:               throw,
-	instr.UNREACHABLE:         unreachable,
-	instr.UPVAL_GET:           upvalGet,
-	instr.UPVAL_SET:           upvalSet,
-	instr.YIELD:               yield,
+var lowerers = [256]func(step, []lowering, int, string) ([]lowering, lowering, error){
+	instr.ARRAY_APPEND:        wrap(arrayAppend),
+	instr.ARRAY_COPY:          wrap(arrayCopy),
+	instr.ARRAY_DELETE:        wrap(arrayDelete),
+	instr.ARRAY_FILL:          wrap(arrayFill),
+	instr.ARRAY_GET:           wrap(arrayGet),
+	instr.ARRAY_LEN:           wrap(arrayLen),
+	instr.ARRAY_NEW:           wrap(arrayNew),
+	instr.ARRAY_NEW_DEFAULT:   wrap(arrayNewDefault),
+	instr.ARRAY_SET:           wrap(arraySet),
+	instr.ARRAY_SLICE:         wrap(arraySlice),
+	instr.BR:                  wrap(br),
+	instr.BR_IF:               wrap(brIf),
+	instr.BR_TABLE:            wrap(brTable),
+	instr.CALL:                wrap(callOp),
+	instr.CLOSURE_NEW:         wrap(closureNew),
+	instr.CONST_GET:           wrap(constGet),
+	instr.CORO_DONE:           wrap(coroDone),
+	instr.CORO_VALUE:          wrap(coroValue),
+	instr.DROP:                wrap(drop),
+	instr.DUP:                 wrap(dup),
+	instr.ERROR_CODE:          wrap(errorCode),
+	instr.ERROR_GET:           wrap(errorGet),
+	instr.ERROR_NEW:           wrap(errorNew),
+	instr.F32_ABS:             wrap(f32Abs),
+	instr.F32_ADD:             wrap(f32Add),
+	instr.F32_CEIL:            wrap(f32Ceil),
+	instr.F32_CONST:           wrap(f32Const),
+	instr.F32_COPYSIGN:        wrap(f32Copysign),
+	instr.F32_DIV:             wrap(f32Div),
+	instr.F32_EQ:              wrap(f32Eq),
+	instr.F32_FLOOR:           wrap(f32Floor),
+	instr.F32_GE:              wrap(f32Ge),
+	instr.F32_GT:              wrap(f32Gt),
+	instr.F32_LE:              wrap(f32Le),
+	instr.F32_LT:              wrap(f32Lt),
+	instr.F32_MAX:             wrap(f32Max),
+	instr.F32_MIN:             wrap(f32Min),
+	instr.F32_MOD:             wrap(f32Mod),
+	instr.F32_MUL:             wrap(f32Mul),
+	instr.F32_NE:              wrap(f32Ne),
+	instr.F32_NEAREST:         wrap(f32Nearest),
+	instr.F32_NEG:             wrap(f32Neg),
+	instr.F32_REINTERPRET_I32: wrap(f32ReinterpretI32),
+	instr.F32_REM:             wrap(f32Rem),
+	instr.F32_SQRT:            wrap(f32Sqrt),
+	instr.F32_SUB:             wrap(f32Sub),
+	instr.F32_TO_F64:          wrap(f32ToF64),
+	instr.F32_TO_I32_S:        wrap(f32ToI32S),
+	instr.F32_TO_I32_U:        wrap(f32ToI32U),
+	instr.F32_TO_I64_S:        wrap(f32ToI64S),
+	instr.F32_TO_I64_U:        wrap(f32ToI64U),
+	instr.F32_TRUNC:           wrap(f32Trunc),
+	instr.F64_ABS:             wrap(f64Abs),
+	instr.F64_ADD:             wrap(f64Add),
+	instr.F64_CEIL:            wrap(f64Ceil),
+	instr.F64_CONST:           wrap(f64Const),
+	instr.F64_COPYSIGN:        wrap(f64Copysign),
+	instr.F64_DIV:             wrap(f64Div),
+	instr.F64_EQ:              wrap(f64Eq),
+	instr.F64_FLOOR:           wrap(f64Floor),
+	instr.F64_GE:              wrap(f64Ge),
+	instr.F64_GT:              wrap(f64Gt),
+	instr.F64_LE:              wrap(f64Le),
+	instr.F64_LT:              wrap(f64Lt),
+	instr.F64_MAX:             wrap(f64Max),
+	instr.F64_MIN:             wrap(f64Min),
+	instr.F64_MOD:             wrap(f64Mod),
+	instr.F64_MUL:             wrap(f64Mul),
+	instr.F64_NE:              wrap(f64Ne),
+	instr.F64_NEAREST:         wrap(f64Nearest),
+	instr.F64_NEG:             wrap(f64Neg),
+	instr.F64_REINTERPRET_I64: wrap(f64ReinterpretI64),
+	instr.F64_REM:             wrap(f64Rem),
+	instr.F64_SQRT:            wrap(f64Sqrt),
+	instr.F64_SUB:             wrap(f64Sub),
+	instr.F64_TO_F32:          wrap(f64ToF32),
+	instr.F64_TO_I32_S:        wrap(f64ToI32S),
+	instr.F64_TO_I32_U:        wrap(f64ToI32U),
+	instr.F64_TO_I64_S:        wrap(f64ToI64S),
+	instr.F64_TO_I64_U:        wrap(f64ToI64U),
+	instr.F64_TRUNC:           wrap(f64Trunc),
+	instr.GLOBAL_GET:          wrap(globalGet),
+	instr.GLOBAL_SET:          wrap(globalSet),
+	instr.GLOBAL_TEE:          wrap(globalTee),
+	instr.I32_ADD:             wrap(i32Add),
+	instr.I32_AND:             wrap(i32And),
+	instr.I32_CLZ:             wrap(i32Clz),
+	instr.I32_CONST:           wrap(i32Const),
+	instr.I32_CTZ:             wrap(i32Ctz),
+	instr.I32_DIV_S:           wrap(i32DivS),
+	instr.I32_DIV_U:           wrap(i32DivU),
+	instr.I32_EQ:              wrap(i32Eq),
+	instr.I32_EQZ:             wrap(i32Eqz),
+	instr.I32_EXTEND16_S:      wrap(i32Extend16S),
+	instr.I32_EXTEND8_S:       wrap(i32Extend8S),
+	instr.I32_GE_S:            wrap(i32GeS),
+	instr.I32_GE_U:            wrap(i32GeU),
+	instr.I32_GT_S:            wrap(i32GtS),
+	instr.I32_GT_U:            wrap(i32GtU),
+	instr.I32_LE_S:            wrap(i32LeS),
+	instr.I32_LE_U:            wrap(i32LeU),
+	instr.I32_LT_S:            wrap(i32LtS),
+	instr.I32_LT_U:            wrap(i32LtU),
+	instr.I32_MUL:             wrap(i32Mul),
+	instr.I32_NE:              wrap(i32Ne),
+	instr.I32_OR:              wrap(i32Or),
+	instr.I32_POPCNT:          wrap(i32Popcnt),
+	instr.I32_REINTERPRET_F32: wrap(i32ReinterpretF32),
+	instr.I32_REM_S:           wrap(i32RemS),
+	instr.I32_REM_U:           wrap(i32RemU),
+	instr.I32_ROTL:            wrap(i32Rotl),
+	instr.I32_ROTR:            wrap(i32Rotr),
+	instr.I32_SHL:             wrap(i32Shl),
+	instr.I32_SHR_S:           wrap(i32ShrS),
+	instr.I32_SHR_U:           wrap(i32ShrU),
+	instr.I32_SUB:             wrap(i32Sub),
+	instr.I32_TO_F32_S:        wrap(i32ToF32S),
+	instr.I32_TO_F32_U:        wrap(i32ToF32U),
+	instr.I32_TO_F64_S:        wrap(i32ToF64S),
+	instr.I32_TO_F64_U:        wrap(i32ToF64U),
+	instr.I32_TO_I64_S:        wrap(i32ToI64S),
+	instr.I32_TO_I64_U:        wrap(i32ToI64U),
+	instr.I32_XOR:             wrap(i32Xor),
+	instr.I64_ADD:             wrap(i64Add),
+	instr.I64_AND:             wrap(i64And),
+	instr.I64_CLZ:             wrap(i64Clz),
+	instr.I64_CONST:           wrap(i64Const),
+	instr.I64_CTZ:             wrap(i64Ctz),
+	instr.I64_DIV_S:           wrap(i64DivS),
+	instr.I64_DIV_U:           wrap(i64DivU),
+	instr.I64_EQ:              wrap(i64Eq),
+	instr.I64_EQZ:             wrap(i64Eqz),
+	instr.I64_EXTEND16_S:      wrap(i64Extend16S),
+	instr.I64_EXTEND32_S:      wrap(i64Extend32S),
+	instr.I64_EXTEND8_S:       wrap(i64Extend8S),
+	instr.I64_GE_S:            wrap(i64GeS),
+	instr.I64_GE_U:            wrap(i64GeU),
+	instr.I64_GT_S:            wrap(i64GtS),
+	instr.I64_GT_U:            wrap(i64GtU),
+	instr.I64_LE_S:            wrap(i64LeS),
+	instr.I64_LE_U:            wrap(i64LeU),
+	instr.I64_LT_S:            wrap(i64LtS),
+	instr.I64_LT_U:            wrap(i64LtU),
+	instr.I64_MUL:             wrap(i64Mul),
+	instr.I64_NE:              wrap(i64Ne),
+	instr.I64_OR:              wrap(i64Or),
+	instr.I64_POPCNT:          wrap(i64Popcnt),
+	instr.I64_REINTERPRET_F64: wrap(i64ReinterpretF64),
+	instr.I64_REM_S:           wrap(i64RemS),
+	instr.I64_REM_U:           wrap(i64RemU),
+	instr.I64_ROTL:            wrap(i64Rotl),
+	instr.I64_ROTR:            wrap(i64Rotr),
+	instr.I64_SHL:             wrap(i64Shl),
+	instr.I64_SHR_S:           wrap(i64ShrS),
+	instr.I64_SHR_U:           wrap(i64ShrU),
+	instr.I64_SUB:             wrap(i64Sub),
+	instr.I64_TO_F32_S:        wrap(i64ToF32S),
+	instr.I64_TO_F32_U:        wrap(i64ToF32U),
+	instr.I64_TO_F64_S:        wrap(i64ToF64S),
+	instr.I64_TO_F64_U:        wrap(i64ToF64U),
+	instr.I64_TO_I32:          wrap(i64ToI32),
+	instr.I64_XOR:             wrap(i64Xor),
+	instr.LOCAL_GET:           wrap(localGet),
+	instr.LOCAL_SET:           wrap(localSet),
+	instr.LOCAL_TEE:           wrap(localTee),
+	instr.MAP_CLEAR:           wrap(mapClear),
+	instr.MAP_DELETE:          wrap(mapDelete),
+	instr.MAP_GET:             wrap(mapGet),
+	instr.MAP_ITER:            wrap(mapIter),
+	instr.MAP_KEYS:            wrap(mapKeys),
+	instr.MAP_LEN:             wrap(mapLen),
+	instr.MAP_LOOKUP:          wrap(mapLookup),
+	instr.MAP_NEW:             wrap(mapNew),
+	instr.MAP_NEW_DEFAULT:     wrap(mapNewDefault),
+	instr.MAP_SET:             wrap(mapSet),
+	instr.NOP:                 wrap(nop),
+	instr.REF_CAST:            wrap(refCast),
+	instr.REF_EQ:              wrap(refEq),
+	instr.REF_GET:             wrap(refGet),
+	instr.REF_IS_NULL:         wrap(refIsNull),
+	instr.REF_NE:              wrap(refNe),
+	instr.REF_NEW:             wrap(refNew),
+	instr.REF_NULL:            wrap(refNull),
+	instr.REF_SET:             wrap(refSet),
+	instr.REF_TEST:            wrap(refTest),
+	instr.RESUME:              wrap(resume),
+	instr.RETURN:              wrap(returnOp),
+	instr.RETURN_CALL:         wrap(returnCall),
+	instr.SELECT:              wrap(selectOp),
+	instr.STRING_CONCAT:       wrap(stringConcat),
+	instr.STRING_ENCODE_UTF32: wrap(stringEncodeUtf32),
+	instr.STRING_EQ:           wrap(stringEq),
+	instr.STRING_GE:           wrap(stringGe),
+	instr.STRING_GT:           wrap(stringGt),
+	instr.STRING_ITER:         wrap(stringIter),
+	instr.STRING_LE:           wrap(stringLe),
+	instr.STRING_LEN:          wrap(stringLen),
+	instr.STRING_LT:           wrap(stringLt),
+	instr.STRING_NE:           wrap(stringNe),
+	instr.STRING_NEW_UTF32:    wrap(stringNewUtf32),
+	instr.STRUCT_GET:          wrap(structGet),
+	instr.STRUCT_NEW:          wrap(structNew),
+	instr.STRUCT_NEW_DEFAULT:  wrap(structNewDefault),
+	instr.STRUCT_SET:          wrap(structSet),
+	instr.SWAP:                wrap(swap),
+	instr.THROW:               wrap(throw),
+	instr.UNREACHABLE:         wrap(unreachable),
+	instr.UPVAL_GET:           wrap(upvalGet),
+	instr.UPVAL_SET:           wrap(upvalSet),
+	instr.YIELD:               wrap(yield),
 }
 
-func fusion(pattern pattern, total int, label string) ([]jen.Code, error) {
+func wrap(handler func() jen.Code) func(step, []lowering, int, string) ([]lowering, lowering, error) {
+	return func(source step, pending []lowering, _ int, _ string) ([]lowering, lowering, error) {
+		return pending, lowering{source: source, handler: handler()}, nil
+	}
+}
+
+func standalone(op instr.Opcode) jen.Code {
+	_, lowered, err := lowerers[op](step{op: op, kind: instr.KindAny}, nil, 0, "")
+	if err != nil {
+		panic(err)
+	}
+	if lowered.handler == nil {
+		panic(fmt.Sprintf("no standalone lowering for %s", instr.TypeOf(op).Mnemonic))
+	}
+	return lowered.handler
+}
+
+func compose(pattern pattern, total int, label string) ([]jen.Code, error) {
 	last := pattern[len(pattern)-1].op
 	consumer := last
 	if last == instr.BR_IF && len(pattern) > 1 {
 		consumer = pattern[len(pattern)-2].op
 	}
-	if lowerings[consumer] == nil {
+	if lowerers[consumer] == nil {
 		return nil, fmt.Errorf("no lowering for %s", instr.TypeOf(consumer).Mnemonic)
 	}
 	if consumer == instr.CALL || consumer == instr.RETURN_CALL || consumer == instr.CLOSURE_NEW {
-		return call(pattern, label)
+		return callSequence(pattern, label)
 	}
 	if consumer == instr.DROP || consumer == instr.REF_IS_NULL {
-		return reference(pattern, total, label)
+		return refSequence(pattern, total, label)
 	}
 	if consumer == instr.ARRAY_GET || consumer == instr.STRUCT_GET {
-		return index(pattern, total, label)
+		return indexSequence(pattern, total, label)
 	}
 	if len(pattern) == 2 && pattern[0].op == instr.I32_CONST && last == instr.BR_IF {
 		return branch(total), nil
 	}
 	if _, ok := arity(consumer); ok {
-		return arithmetic(pattern, total, label)
+		return numericSequence(pattern, total, label)
 	}
 	return nil, fmt.Errorf("no fusion lowering for %s", instr.TypeOf(consumer).Mnemonic)
 }
@@ -272,7 +293,7 @@ func branch(total int) []jen.Code {
 // call emits compile-time target resolution followed by target-specific
 // final handlers. Source semantics are repeated in each handler; generated
 // code has no source callback, runtime target switch, or yield scan.
-func call(pattern pattern, label string) ([]jen.Code, error) {
+func callSequence(pattern pattern, label string) ([]jen.Code, error) {
 	if len(pattern) != 2 || pattern[0].op != instr.CONST_GET {
 		return nil, fmt.Errorf("unsupported constant call pattern")
 	}
@@ -509,7 +530,7 @@ func arity(op instr.Opcode) (int, bool) {
 	return 0, false
 }
 
-func reference(pattern pattern, total int, label string) ([]jen.Code, error) {
+func refSequence(pattern pattern, total int, label string) ([]jen.Code, error) {
 	if len(pattern) < 2 {
 		return nil, fmt.Errorf("ref pattern has no consumer")
 	}
@@ -605,7 +626,7 @@ func metadata(field, label string) jen.Code {
 }
 
 // index emits direct constant-index ARRAY_GET and STRUCT_GET handlers.
-func index(pattern pattern, totalWidth int, label string) ([]jen.Code, error) {
+func indexSequence(pattern pattern, totalWidth int, label string) ([]jen.Code, error) {
 	if len(pattern) != 2 {
 		return nil, fmt.Errorf("index fusion needs two opcodes")
 	}
@@ -728,8 +749,8 @@ func lookup(op instr.Opcode, index jen.Code, total int) []jen.Code {
 }
 
 // arithmetic emits preflight plus one concrete runtime handler for a
-// normalized pattern. Every source access is inline in that handler.
-func arithmetic(pattern pattern, totalWidth int, label string) ([]jen.Code, error) {
+// normalized pattern. Every source lowering is inline in that handler.
+func numericSequence(pattern pattern, totalWidth int, label string) ([]jen.Code, error) {
 	branch := len(pattern) > 0 && pattern[len(pattern)-1].op == instr.BR_IF
 	consumerAt := len(pattern) - 1
 	if branch {
@@ -749,21 +770,21 @@ func arithmetic(pattern pattern, totalWidth int, label string) ([]jen.Code, erro
 		return nil, fmt.Errorf("numeric pattern has %d sources", len(sources))
 	}
 	if traps(consumer) {
-		return integer(pattern, sources, kind, label)
+		return trappedNumericSequence(pattern, sources, kind, label)
 	}
 
 	var pre, body []jen.Code
-	var renderedSources []access
+	var renderedSources []lowering
 	boxed := consumer == instr.I32_XOR || consumer == instr.I32_AND || consumer == instr.I32_OR
 	offset := 0
 	for idx, source := range sources {
-		rendered, err := operand(source.op, idx, len(sources), offset, kind, boxed, false, label)
+		rendered, err := sourceAccess(source.op, idx, len(sources), offset, kind, boxed, false, label)
 		if err != nil {
 			return nil, err
 		}
-		pre = append(pre, rendered.pre...)
+		pre = append(pre, rendered.compile...)
 		renderedSources = append(renderedSources, rendered)
-		offset += rendered.width
+		offset += width(rendered.source.op)
 	}
 	// Each source contributes its stack-slot overflow check, then its own
 	// bounds/metadata check, then its load, in the same flat order the
@@ -774,7 +795,7 @@ func arithmetic(pattern pattern, totalWidth int, label string) ([]jen.Code, erro
 			jen.Panic(jen.Id("ErrStackOverflow")),
 		))
 		body = append(body, rendered.check...)
-		body = append(body, rendered.load...)
+		body = append(body, rendered.body...)
 	}
 
 	var operands []jen.Code
@@ -834,17 +855,17 @@ func arithmetic(pattern pattern, totalWidth int, label string) ([]jen.Code, erro
 	return pre, nil
 }
 
-func integer(pattern, sources pattern, kind, label string) ([]jen.Code, error) {
+func trappedNumericSequence(pattern, sources pattern, kind, label string) ([]jen.Code, error) {
 	var pre, body []jen.Code
 	offset := 0
 	for number, source := range sources {
-		rendered, err := operand(source.op, number, len(sources), offset, kind, false, true, label)
+		rendered, err := sourceAccess(source.op, number, len(sources), offset, kind, false, true, label)
 		if err != nil {
 			return nil, err
 		}
-		pre = append(pre, rendered.pre...)
+		pre = append(pre, rendered.compile...)
 		body = append(body, rendered.push...)
-		offset += rendered.width
+		offset += width(rendered.source.op)
 	}
 	body = append(body,
 		jen.If(jen.Id("i").Dot("sp").Op("<").Lit(2)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
@@ -1081,36 +1102,36 @@ func traps(op instr.Opcode) bool {
 	}
 }
 
-func operand(op instr.Opcode, number, count, offset int, kind string, raw, materialize bool, label string) (access, error) {
+func sourceAccess(op instr.Opcode, number, count, offset int, kind string, raw, materialize bool, label string) (lowering, error) {
 	width := width(op)
 	name := slot(number)
 	boxed := box(name)
 	idx := fmt.Sprintf("i%d", number)
 	addr := fmt.Sprintf("i%d", count+number)
 	at := add(jen.Id("start"), offset)
-	result := access{width: width}
+	result := lowering{source: step{op: op, kind: instr.KindAny}}
 	switch op {
 	case instr.LOCAL_GET, instr.UPVAL_GET:
-		result.pre = append(result.pre, jen.Id(idx).Op(":=").Int().Call(jen.Id("c").Dot("code").Index(jen.Add(at).Op("+").Lit(1))))
+		result.compile = append(result.compile, jen.Id(idx).Op(":=").Int().Call(jen.Id("c").Dot("code").Index(jen.Add(at).Op("+").Lit(1))))
 	case instr.GLOBAL_GET, instr.CONST_GET:
-		result.pre = append(result.pre, jen.Id(idx).Op(":=").Qual("github.com/siyul-park/minivm/instr", "ParseU16").Call(jen.Id("c").Dot("code"), jen.Add(at).Op("+").Lit(1)))
+		result.compile = append(result.compile, jen.Id(idx).Op(":=").Qual("github.com/siyul-park/minivm/instr", "ParseU16").Call(jen.Id("c").Dot("code"), jen.Add(at).Op("+").Lit(1)))
 	}
 	expected := jen.Qual("github.com/siyul-park/minivm/types", "Kind"+kind)
 	switch op {
 	case instr.LOCAL_GET:
-		result.pre = append(result.pre, check("locals", idx, expected, label))
+		result.compile = append(result.compile, check("locals", idx, expected, label))
 		result.check = append(result.check, jen.If(jen.Id("i").Dot("fr").Dot("bp").Op("+").Id(idx).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))))
-		result.load = append(result.load, jen.Id(addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(idx), jen.Id(boxed).Op(":=").Id("i").Dot("stack").Index(jen.Id(addr)))
+		result.body = append(result.body, jen.Id(addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(idx), jen.Id(boxed).Op(":=").Id("i").Dot("stack").Index(jen.Id(addr)))
 	case instr.GLOBAL_GET:
-		result.pre = append(result.pre, check("globals", idx, expected, label))
+		result.compile = append(result.compile, check("globals", idx, expected, label))
 		result.check = append(result.check, jen.If(jen.Id(idx).Op(">=").Len(jen.Id("i").Dot("globals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))))
-		result.load = append(result.load, jen.Id(boxed).Op(":=").Id("i").Dot("globals").Index(jen.Id(idx)))
+		result.body = append(result.body, jen.Id(boxed).Op(":=").Id("i").Dot("globals").Index(jen.Id(idx)))
 	case instr.UPVAL_GET:
-		result.pre = append(result.pre, check("captures", idx, expected, label))
+		result.compile = append(result.compile, check("captures", idx, expected, label))
 		result.check = append(result.check, jen.If(jen.Id(idx).Op(">=").Len(jen.Id("i").Dot("fr").Dot("upvals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))))
-		result.load = append(result.load, jen.Id(boxed).Op(":=").Id("i").Dot("fr").Dot("upvals").Index(jen.Id(idx)))
+		result.body = append(result.body, jen.Id(boxed).Op(":=").Id("i").Dot("fr").Dot("upvals").Index(jen.Id(idx)))
 	case instr.CONST_GET:
-		result.pre = append(result.pre,
+		result.compile = append(result.compile,
 			jen.If(jen.Id(idx).Op(">=").Len(jen.Id("c").Dot("constants"))).Block(reject(label)),
 			jen.Id(boxed).Op(":=").Id("c").Dot("constants").Index(jen.Id(idx)),
 		)
@@ -1122,11 +1143,11 @@ func operand(op instr.Opcode, number, count, offset int, kind string, raw, mater
 				reference = jen.Null()
 				constant = "_"
 			} else {
-				result.pre = append(result.pre, jen.Var().Id(name).Int64())
+				result.compile = append(result.compile, jen.Var().Id(name).Int64())
 				inline = jen.Id(name).Op("=").Id(boxed).Dot("I64").Call()
 				reference = jen.Id(name).Op("=").Int64().Call(jen.Id("constantI64"))
 			}
-			result.pre = append(result.pre,
+			result.compile = append(result.compile,
 				jen.Switch(jen.Id(boxed).Dot("Kind").Call()).Block(
 					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI64")).Block(inline),
 					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(
@@ -1140,21 +1161,21 @@ func operand(op instr.Opcode, number, count, offset int, kind string, raw, mater
 				),
 			)
 		} else {
-			result.pre = append(result.pre,
+			result.compile = append(result.compile,
 				jen.If(jen.Id(boxed).Dot("Kind").Call().Op("!=").Add(expected)).Block(reject(label)),
 			)
 		}
 	case instr.I32_CONST, instr.I64_CONST, instr.F32_CONST, instr.F64_CONST:
 		if raw {
-			result.pre = append(result.pre, jen.Id(box(name)).Op(":=").Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(immediate(kind, at)))
+			result.compile = append(result.compile, jen.Id(box(name)).Op(":=").Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(immediate(kind, at)))
 		} else {
-			result.pre = append(result.pre, jen.Id(name).Op(":=").Add(immediate(kind, at)))
+			result.compile = append(result.compile, jen.Id(name).Op(":=").Add(immediate(kind, at)))
 		}
 	default:
-		return access{}, fmt.Errorf("unsupported numeric source %s", instr.TypeOf(op).Mnemonic)
+		return lowering{}, fmt.Errorf("unsupported numeric source %s", instr.TypeOf(op).Mnemonic)
 	}
 	if !raw && op != instr.I32_CONST && op != instr.I64_CONST && op != instr.F32_CONST && op != instr.F64_CONST && !(op == instr.CONST_GET && kind == "I64") {
-		result.load = append(result.load, jen.Id(name).Op(":=").Add(borrow(kind, jen.Id(box(name)))))
+		result.body = append(result.body, jen.Id(name).Op(":=").Add(borrow(kind, jen.Id(box(name)))))
 	}
 	result.push = append(result.push, jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))))
 	result.push = append(result.push, result.check...)
