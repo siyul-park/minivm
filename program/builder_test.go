@@ -8,17 +8,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuilder_Const(t *testing.T) {
-	b := NewBuilder()
+type constantValue struct{ id byte }
 
-	require.Equal(t, 0, b.Const(types.String("a")))
-	require.Equal(t, 1, b.Const(types.String("b")))
-	require.Equal(t, 0, b.Const(types.String("a")))
+func (*constantValue) Kind() types.Kind { return types.KindRef }
+func (*constantValue) Type() types.Type { return types.TypeRef }
+func (*constantValue) String() string   { return "constant" }
+
+func TestBuilder_Const(t *testing.T) {
+	t.Run("reuses comparable values", func(t *testing.T) {
+		b := NewBuilder()
+
+		require.Equal(t, 0, b.Const(types.String("a")))
+		require.Equal(t, 1, b.Const(types.String("b")))
+		require.Equal(t, 0, b.Const(types.String("a")))
+	})
+
+	t.Run("rejects nil", func(t *testing.T) {
+		require.Equal(t, -1, NewBuilder().Const(nil))
+	})
+
+	t.Run("uses pointer identity", func(t *testing.T) {
+		b := NewBuilder()
+		first := &constantValue{id: 1}
+		second := &constantValue{id: 2}
+
+		require.Equal(t, 0, b.Const(first))
+		require.Equal(t, 0, b.Const(first))
+		require.Equal(t, 1, b.Const(second))
+	})
 }
 
 func TestBuilder_Type(t *testing.T) {
 	b := NewBuilder()
 
+	require.Equal(t, -1, b.Type(nil))
 	require.Equal(t, 0, b.Type(types.TypeI32))
 	require.Equal(t, 1, b.Type(types.NewArrayType(types.TypeI32)))
 	require.Equal(t, 0, b.Type(types.TypeI32))

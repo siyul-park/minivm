@@ -1,6 +1,8 @@
 package program
 
 import (
+	"reflect"
+
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/types"
 )
@@ -16,17 +18,10 @@ type Builder struct {
 	typs      []types.Type
 	locals    []types.Type
 	globals   []types.Type
-
-	constIndex map[string]int
-	typeIndex  map[string]int
 }
 
 func NewBuilder() *Builder {
-	return &Builder{
-		code:       instr.NewBuilder(),
-		constIndex: map[string]int{},
-		typeIndex:  map[string]int{},
-	}
+	return &Builder{code: instr.NewBuilder()}
 }
 
 // Emit appends one instruction built from op and operands.
@@ -78,29 +73,45 @@ func (b *Builder) ConstGet(v types.Value) *Builder {
 	return b.Emit(instr.CONST_GET, uint64(b.Const(v)))
 }
 
-// Const interns v into the constant pool and returns its index, reusing an
-// existing slot when an equal value is already present.
+// Const interns v into the constant pool and returns its index. Comparable
+// values reuse equal slots; pointer values therefore use identity. Values that
+// cannot be compared are appended because their String form is diagnostic, not
+// an equality contract.
 func (b *Builder) Const(v types.Value) int {
-	key := v.String()
-	if idx, ok := b.constIndex[key]; ok {
-		return idx
+	typ := reflect.TypeOf(v)
+	if typ == nil {
+		return -1
+	}
+	comparable := typ.Comparable()
+	if comparable {
+		for idx, existing := range b.constants {
+			typ := reflect.TypeOf(existing)
+			if typ == nil || !typ.Comparable() {
+				continue
+			}
+			if existing == v {
+				return idx
+			}
+		}
 	}
 	idx := len(b.constants)
 	b.constants = append(b.constants, v)
-	b.constIndex[key] = idx
 	return idx
 }
 
 // Type interns t into the type pool and returns its index, reusing an existing
 // slot when an equal type is already present.
 func (b *Builder) Type(t types.Type) int {
-	key := t.String()
-	if idx, ok := b.typeIndex[key]; ok {
-		return idx
+	if t == nil {
+		return -1
+	}
+	for idx, existing := range b.typs {
+		if existing.Equals(t) {
+			return idx
+		}
 	}
 	idx := len(b.typs)
 	b.typs = append(b.typs, t)
-	b.typeIndex[key] = idx
 	return idx
 }
 
