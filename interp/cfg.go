@@ -5,21 +5,13 @@ import (
 
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/asm"
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/types"
 )
 
-// compileCFG lowers fn's whole control-flow graph into one framed native
-// callable, without a recorded trace to drive lowering. Phase 2 accepts only
-// the narrowest useful shape — a function whose body is exactly one
-// straight-line, RETURN-terminated basic block — and returns ok=false for
-// everything else (an indeterminate stack shape, more than one basic block, or
-// an opcode the arch lowerer does not statically support) so the caller falls
-// back to the existing trace-based Compile path. A multi-block function is
-// Phase 3 work: lowerCFG would need each block's entry height reconciled
-// across every branch edge before it could jump between native blocks, and
-// only blockHeights' side of that (computing the heights) exists yet.
+// compileCFG lowers a verified function's whole control-flow graph into one
+// framed native callable. Structural uncertainty rejects the attempt; individual
+// unsupported opcodes lower to exact-IP threaded fallbacks.
 func (c *compiler) compileCFG(i *Interpreter, addr int, fn *types.Function) (*module, bool, error) {
 	mod := &module{entries: map[anchor]native{}}
 	if fn == nil || len(fn.Code) == 0 {
@@ -36,14 +28,6 @@ func (c *compiler) compileCFG(i *Interpreter, addr int, fn *types.Function) (*mo
 		return mod, false, nil
 	}
 	if _, ok := blockHeights(fn, blocks, i.constants, i.heap); !ok {
-		return mod, false, nil
-	}
-	// Phase 3: see the doc comment above — a multi-block function stays on
-	// the trace-based Compile path until branch lowering exists here.
-	if len(blocks) != 1 {
-		return mod, false, nil
-	}
-	if lastInstruction(fn, blocks[0]).Opcode() != instr.RETURN {
 		return mod, false, nil
 	}
 
@@ -74,8 +58,16 @@ func (c *compiler) compileCFG(i *Interpreter, addr int, fn *types.Function) (*mo
 		ctx.returns = len(fn.Typ.Returns)
 	}
 	ctx.frames = append(ctx.frames, newActivation(addr, fn, 0, 0))
+	kinds, ok := blockKinds(fn, blocks, i.constants, globals, i.heap)
+	if !ok {
+		return mod, false, nil
+	}
+	labels := make([]asm.Label, len(blocks))
+	for j := range labels {
+		labels[j] = asmb.Label()
+	}
 
-	if !c.lowerer.lowerCFG(ctx, blocks[0]) {
+	if !c.lowerer.lowerCFG(ctx, blocks, kinds, labels) {
 		return mod, false, nil
 	}
 	code, err := asmb.Build()
@@ -99,15 +91,4 @@ func (c *compiler) compileCFG(i *Interpreter, addr int, fn *types.Function) (*mo
 	mod.emits++
 	mod.bytes += len(code.Bytes)
 	return mod, true, nil
-}
-
-// lastInstruction decodes b's terminal instruction, the one compileCFG must
-// confirm is RETURN before accepting b as Phase 2's supported shape.
-func lastInstruction(fn *types.Function, b *analysis.BasicBlock) instr.Instruction {
-	var last instr.Instruction
-	for ip := b.Start; ip < b.End; {
-		last = instr.Instruction(fn.Code[ip:])
-		ip += last.Width()
-	}
-	return last
 }

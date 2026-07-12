@@ -15,7 +15,7 @@ import (
 // statically decoded basic block instead of a recorded trace tree.
 type lowerer interface {
 	lower(ctx *lowering) bool
-	lowerCFG(ctx *lowering, block *analysis.BasicBlock) bool
+	lowerCFG(ctx *lowering, blocks []*analysis.BasicBlock, kinds [][]types.Kind, labels []asm.Label) bool
 }
 
 type compiler struct {

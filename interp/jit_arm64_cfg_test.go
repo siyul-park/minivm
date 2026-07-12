@@ -70,7 +70,7 @@ func TestCompiler_CompileCFG(t *testing.T) {
 		require.Equal(t, int32(14), got.I32())
 	})
 
-	t.Run("multi-block function is rejected", func(t *testing.T) {
+	t.Run("multi-block function compiles", func(t *testing.T) {
 		b := types.NewFunctionBuilder(&types.FunctionType{
 			Params:  []types.Type{types.TypeI32},
 			Returns: []types.Type{types.TypeI32},
@@ -94,13 +94,73 @@ func TestCompiler_CompileCFG(t *testing.T) {
 
 		_, ok, err := c.compileCFG(i, 1, fn)
 		require.NoError(t, err)
-		require.False(t, ok)
+		require.True(t, ok)
 	})
 
-	t.Run("unsupported opcode is rejected", func(t *testing.T) {
-		// I32_DIV_S needs an observed divisor for its guarded fast path
-		// (docs/jit-internals.md's speculation contract), which lowerCFG has no
-		// recorded trace to supply, so it is outside Phase 2 coverage.
+	t.Run("branches and loops match threaded execution", func(t *testing.T) {
+		calleeBuilder := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).WithLocals(types.TypeI32)
+		loop := calleeBuilder.Label()
+		done := calleeBuilder.Label()
+		calleeBuilder.Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.LOCAL_SET, 1)).
+			Bind(loop).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_EQZ)).
+			BrIf(done).
+			Emit(instr.New(instr.LOCAL_GET, 1)).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_ADD)).
+			Emit(instr.New(instr.LOCAL_SET, 1)).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 1)).
+			Emit(instr.New(instr.I32_SUB)).
+			Emit(instr.New(instr.LOCAL_SET, 0)).
+			Br(loop).
+			Bind(done).
+			Emit(instr.New(instr.LOCAL_GET, 1)).
+			Emit(instr.New(instr.RETURN))
+		callee := calleeBuilder.MustBuild()
+
+		b := program.NewBuilder()
+		b.Globals(types.TypeI32)
+		idx := b.Const(callee)
+		b.Emit(instr.I32_CONST, 5).
+			Emit(instr.CONST_GET, uint64(idx)).
+			Emit(instr.CALL).
+			Emit(instr.GLOBAL_SET, 0)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		threaded := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Global(0)
+		require.NoError(t, err)
+
+		jit := New(prog, WithThreshold(-1))
+		defer jit.Close()
+		c, err := newCompiler()
+		require.NoError(t, err)
+		defer c.Close()
+		addr := int(jit.constants[idx].Ref())
+		fn, ok := jit.function(addr)
+		require.True(t, ok)
+		mod, ok, err := c.compileCFG(jit, addr, fn)
+		require.NoError(t, err)
+		require.True(t, ok)
+		jit.install(mod, false)
+		require.NoError(t, jit.Run(context.Background()))
+		got, err := jit.Global(0)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("unsupported opcode compiles an exact fallback", func(t *testing.T) {
+		// I32_DIV_S needs runtime trap semantics the baseline lowerer does not
+		// duplicate, so the CFG exits at that opcode and threaded dispatch owns it.
 		fn := types.NewFunctionBuilder(&types.FunctionType{
 			Params:  []types.Type{types.TypeI32, types.TypeI32},
 			Returns: []types.Type{types.TypeI32},
@@ -120,6 +180,6 @@ func TestCompiler_CompileCFG(t *testing.T) {
 
 		_, ok, err := c.compileCFG(i, 1, fn)
 		require.NoError(t, err)
-		require.False(t, ok)
+		require.True(t, ok)
 	})
 }
