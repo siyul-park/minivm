@@ -213,6 +213,28 @@ func (c *compiler) Close() error {
 	return c.buffer.Free()
 }
 
+func (c *compiler) publish(mod *module, a anchor, ctx *lowering, arch asm.Arch, n native) (bool, error) {
+	code, err := ctx.assembler.Build()
+	if err != nil {
+		if errors.Is(err, asm.ErrNoRegistersAvailable) || errors.Is(err, asm.ErrBranchOutOfRange) {
+			return false, nil
+		}
+		return false, err
+	}
+	linked, err := asm.Link(c.buffer, arch, []*asm.Code{code}, nil)
+	if err != nil {
+		if errors.Is(err, asm.ErrBranchOutOfRange) {
+			return false, nil
+		}
+		return false, err
+	}
+	n.callable = linked[0].Callable
+	mod.entries[a] = n
+	mod.emits++
+	mod.bytes += len(code.Bytes)
+	return true, nil
+}
+
 // Compile attempts to lower the recorded entry trace for fn into one native
 // callable. Without a usable trace, unsupported op, or rejected observed shape,
 // it emits nothing and leaves threaded dispatch in place.
@@ -326,28 +348,7 @@ func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *m
 	if !c.lowerer.lower(ctx) {
 		return false, nil
 	}
-	code, err := asmb.Build()
-	if err != nil {
-		if errors.Is(err, asm.ErrNoRegistersAvailable) || errors.Is(err, asm.ErrBranchOutOfRange) {
-			return false, nil
-		}
-		return false, err
-	}
-	linked, err := asm.Link(c.buffer, c.arch, []*asm.Code{code}, nil)
-	if err != nil {
-		// External relocation re-encoding (asm/link.go's patchExternalRelocs)
-		// can also return ErrBranchOutOfRange, not just Build; treat it the
-		// same as the Build-path case above and fall back to threaded
-		// dispatch instead of propagating a hard error.
-		if errors.Is(err, asm.ErrBranchOutOfRange) {
-			return false, nil
-		}
-		return false, err
-	}
-	mod.entries[a] = native{callable: linked[0].Callable, loop: ctx.loop}
-	mod.emits++
-	mod.bytes += len(code.Bytes)
-	return true, nil
+	return c.publish(mod, a, ctx, c.arch, native{loop: ctx.loop})
 }
 
 // noSpillArch wraps an asm.Arch to force Build to reject spilling instead of
@@ -434,6 +435,19 @@ func (ctx *lowering) sp() int {
 // snapshot deep-copies operand and frame state for a pending branch. Callers
 // must flush VM stack homes before snapshot; re-entry reloads locals on demand,
 // so stale register/local loaded state must stay dropped.
+// queueExit records a cold fallback after the caller has materialized VM stack state.
+// values may be nil to snapshot the current symbolic stack; retain is applied only
+// on the cold path before returning to threaded execution.
+func (ctx *lowering) queueExit(values []value, resume, retain int) asm.Label {
+	if values != nil {
+		ctx.values = append(ctx.values[:0], values...)
+	}
+	label := ctx.assembler.Label()
+	stack, frames := ctx.snapshot()
+	ctx.exits = append(ctx.exits, sideExit{label: label, values: stack, frames: frames, resume: resume, retain: retain})
+	return label
+}
+
 func (ctx *lowering) snapshot() ([]value, []activation) {
 	values := make([]value, len(ctx.values))
 	for i, v := range ctx.values {

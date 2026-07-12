@@ -113,15 +113,7 @@ func (l arm64Lowerer) lower(ctx *lowering) bool {
 			return false
 		}
 	}
-	for _, e := range ctx.exits {
-		ctx.values = e.values
-		ctx.frames = e.frames
-		ctx.assembler.Bind(e.label)
-		if e.retain > 0 {
-			l.retain(ctx, e.retain)
-		}
-		l.trapFlushed(ctx, trapFallback, e.resume)
-	}
+	l.materializeExits(ctx)
 	return true
 }
 
@@ -140,6 +132,18 @@ func (l arm64Lowerer) enter(ctx *lowering) {
 	active := ctx.pinTo(arm64.X15)
 	a.Emit(arm64.LDR(active, vCtrl, int16(journalActive*8)))
 	a.Bind(ctx.head)
+}
+
+func (l arm64Lowerer) materializeExits(ctx *lowering) {
+	for _, exit := range ctx.exits {
+		ctx.values = exit.values
+		ctx.frames = exit.frames
+		ctx.assembler.Bind(exit.label)
+		if exit.retain > 0 {
+			l.retain(ctx, exit.retain)
+		}
+		l.trapFlushed(ctx, trapFallback, exit.resume)
+	}
 }
 
 // walk emits the recorded opcode sequence. An entry trace is fully unrolled —
@@ -1939,10 +1943,7 @@ func (l arm64Lowerer) branchClean(ctx *lowering, ip int, tail []step) (asm.Label
 	if label, ok := l.continuation(ctx, ip, tail, false); ok {
 		return label, true
 	}
-	label := ctx.assembler.Label()
-	values, frames := ctx.snapshot()
-	ctx.exits = append(ctx.exits, sideExit{label: label, values: values, frames: frames, resume: ip})
-	return label, true
+	return ctx.queueExit(nil, ip, 0), true
 }
 
 // continuation materializes the current symbolic state and returns a native
@@ -2446,9 +2447,7 @@ func (l arm64Lowerer) sideExit(ctx *lowering, pre []value, resume int) (asm.Labe
 	if !l.flush(ctx, false) {
 		return 0, false
 	}
-	label := ctx.assembler.Label()
-	values, frames := ctx.snapshot()
-	ctx.exits = append(ctx.exits, sideExit{label: label, values: values, frames: frames, resume: resume})
+	label := ctx.queueExit(nil, resume, 0)
 	ctx.values = append(ctx.values[:0], pre...)
 	return label, true
 }

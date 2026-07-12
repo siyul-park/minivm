@@ -32,15 +32,7 @@ func (l arm64Lowerer) lowerCFG(ctx *lowering, blocks []*analysis.BasicBlock, kin
 			return false
 		}
 	}
-	for _, exit := range ctx.exits {
-		ctx.values = exit.values
-		ctx.frames = exit.frames
-		ctx.assembler.Bind(exit.label)
-		if exit.retain > 0 {
-			l.retain(ctx, exit.retain)
-		}
-		l.trapFlushed(ctx, trapFallback, exit.resume)
-	}
+	l.materializeExits(ctx)
 	return true
 }
 
@@ -366,10 +358,7 @@ func (l arm64Lowerer) cfgArrayGet(ctx *lowering, op step) bool {
 }
 
 func (l arm64Lowerer) cfgExit(ctx *lowering, resume, retain int) asm.Label {
-	label := ctx.assembler.Label()
-	values, frames := ctx.snapshot()
-	ctx.exits = append(ctx.exits, sideExit{label: label, values: values, frames: frames, resume: resume, retain: retain})
-	return label
+	return ctx.queueExit(nil, resume, retain)
 }
 
 func (l arm64Lowerer) cfgTarget(ctx *lowering, inst instr.Instruction) (int, bool) {

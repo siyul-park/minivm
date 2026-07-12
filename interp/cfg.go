@@ -1,8 +1,6 @@
 package interp
 
 import (
-	"errors"
-
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
@@ -88,25 +86,6 @@ func (c *compiler) compileCFG(i *Interpreter, addr int, fn *types.Function) (*mo
 	if !c.lowerer.lowerCFG(ctx, blocks, kinds, labels) {
 		return mod, false, nil
 	}
-	code, err := asmb.Build()
-	if err != nil {
-		if errors.Is(err, asm.ErrNoRegistersAvailable) || errors.Is(err, asm.ErrBranchOutOfRange) {
-			return mod, false, nil
-		}
-		return mod, false, err
-	}
-	linked, err := asm.Link(c.buffer, c.arch, []*asm.Code{code}, nil)
-	if err != nil {
-		// See emitRoot: Link's external relocation re-encoding can also return
-		// ErrBranchOutOfRange, so it gets the same clean fallback as Build.
-		if errors.Is(err, asm.ErrBranchOutOfRange) {
-			return mod, false, nil
-		}
-		return mod, false, err
-	}
-	a := anchor{addr: addr, ip: 0}
-	mod.entries[a] = native{callable: linked[0].Callable, cfg: true}
-	mod.emits++
-	mod.bytes += len(code.Bytes)
-	return mod, true, nil
+	ok, err = c.publish(mod, anchor{addr: addr, ip: 0}, ctx, c.arch, native{cfg: true})
+	return mod, ok, err
 }
