@@ -512,56 +512,6 @@ func refHandler(op instr.Opcode) jen.Code {
 	}
 }
 
-func composeRef(pattern pattern, total int, label string) ([]jen.Code, bool, error) {
-	if len(pattern) < 2 || len(pattern) > 3 {
-		return nil, false, nil
-	}
-	consumer := pattern[1]
-	if consumer.op != instr.DROP && consumer.op != instr.REF_IS_NULL {
-		return nil, false, nil
-	}
-	branch := len(pattern) == 3 && pattern[2].op == instr.BR_IF
-	if len(pattern) == 3 && !branch {
-		return nil, true, fmt.Errorf("ref pattern has unsupported trailing operations")
-	}
-	source := pattern[0]
-	source.kind = instr.KindRef
-	source.boxed = true
-	var pending []lowering
-	var err error
-	pending, _, err = lowerers[source.op](source, pending, 0, label)
-	if err != nil {
-		return nil, true, err
-	}
-	var lowered lowering
-	pending, lowered, err = refLower(consumer, pending, map[bool]int{true: 0, false: total}[branch], label)
-	if err != nil {
-		return nil, true, err
-	}
-	if branch {
-		_, lowered, err = branchLower(pattern[2], pending, total, label)
-		if err != nil {
-			return nil, true, err
-		}
-	}
-	return lowered.compile, true, nil
-}
-
-func composeDirectBranch(pattern pattern, total int, label string) ([]jen.Code, bool, error) {
-	if len(pattern) != 2 || pattern[0].op != instr.I32_CONST || pattern[1].op != instr.BR_IF {
-		return nil, false, nil
-	}
-	source := pattern[0]
-	source.kind = instr.KindI32
-	_, lowered, err := lowerers[source.op](source, nil, 0, label)
-	if err != nil {
-		return nil, true, err
-	}
-	condition := lowering{source: lowered.source, compile: lowered.compile, check: lowered.check, body: lowered.body, raw: jen.Add(lowered.raw).Op("!=").Lit(0)}
-	_, result, err := branchLower(pattern[1], []lowering{condition}, total, label)
-	return result.compile, true, err
-}
-
 func indexLower(source step, pending []lowering, total int, _ string) ([]lowering, lowering, error) {
 	if len(pending) == 0 {
 		return pending, lowering{source: source, handler: indexHandler(source.op)}, nil
@@ -657,23 +607,6 @@ func indexHandler(op instr.Opcode) jen.Code {
 	default:
 		panic(fmt.Sprintf("unsupported index opcode %s", instr.TypeOf(op).Mnemonic))
 	}
-}
-
-func composeIndex(pattern pattern, total int, label string) ([]jen.Code, bool, error) {
-	if len(pattern) != 2 || pattern[1].op != instr.ARRAY_GET && pattern[1].op != instr.STRUCT_GET {
-		return nil, false, nil
-	}
-	source := pattern[0]
-	source.kind = instr.KindI32
-	pending, _, err := lowerers[source.op](source, nil, 0, label)
-	if err != nil {
-		return nil, true, err
-	}
-	_, lowered, err := indexLower(pattern[1], pending, total, label)
-	if err != nil {
-		return nil, true, err
-	}
-	return lowered.compile, true, nil
 }
 
 func callLower(source step, pending []lowering, _ int, label string) ([]lowering, lowering, error) {
@@ -906,28 +839,6 @@ func callHandler(op instr.Opcode) jen.Code {
 	}
 }
 
-func composeCall(pattern pattern, label string) ([]jen.Code, bool, error) {
-	if len(pattern) != 2 || pattern[0].op != instr.CONST_GET {
-		return nil, false, nil
-	}
-	consumer := pattern[1]
-	if consumer.op != instr.CALL && consumer.op != instr.RETURN_CALL && consumer.op != instr.CLOSURE_NEW {
-		return nil, false, nil
-	}
-	target := pattern[0]
-	target.kind = instr.KindRef
-	target.boxed = true
-	pending, _, err := lowerers[target.op](target, nil, 0, label)
-	if err != nil {
-		return nil, true, err
-	}
-	_, lowered, err := callLower(consumer, pending, 0, label)
-	if err != nil {
-		return nil, true, err
-	}
-	return lowered.compile, true, nil
-}
-
 func numericLower(source step, pending []lowering, total int, label string) ([]lowering, lowering, error) {
 	if total == 0 {
 		lowered := lowering{source: source}
@@ -945,11 +856,15 @@ func branchLower(source step, pending []lowering, total int, label string) ([]lo
 			return nil, lowering{source: source, compile: body}, err
 		}
 		if consumer.raw != nil {
+			condition := consumer.raw
+			if consumer.source.op == instr.I32_CONST {
+				condition = jen.Add(condition).Op("!=").Lit(0)
+			}
 			compile := append([]jen.Code(nil), consumer.compile...)
 			body := append([]jen.Code(nil), consumer.check...)
 			body = append(body, consumer.body...)
 			body = append(body,
-				jen.If(consumer.raw).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
+				jen.If(condition).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
 				jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(total),
 			)
 			compile = append(compile,
@@ -960,56 +875,6 @@ func branchLower(source step, pending []lowering, total int, label string) ([]lo
 		}
 	}
 	return pending, lowering{source: source, handler: brIf()}, nil
-}
-
-func composeNumeric(pattern pattern, total int, label string) ([]jen.Code, bool, error) {
-	consumerAt := len(pattern) - 1
-	branch := pattern[consumerAt].op == instr.BR_IF
-	if branch {
-		consumerAt--
-	}
-	if consumerAt < 0 {
-		return nil, false, nil
-	}
-	consumer := pattern[consumerAt]
-	if _, ok := arity(consumer.op); !ok {
-		return nil, false, nil
-	}
-	kind, ok := numberKind(consumer.op)
-	if !ok {
-		return nil, false, nil
-	}
-
-	var pending []lowering
-	offset := 0
-	boxed := consumer.op == instr.I32_XOR || consumer.op == instr.I32_AND || consumer.op == instr.I32_OR
-	materialize := traps(consumer.op)
-	for _, source := range pattern[:consumerAt] {
-		source.kind = kind
-		source.boxed = boxed
-		source.materialize = materialize
-		var err error
-		pending, _, err = lowerers[source.op](source, pending, offset, label)
-		if err != nil {
-			return nil, true, err
-		}
-		offset += width(source.op)
-	}
-
-	var lowered lowering
-	var err error
-	if branch {
-		pending, _, err = numericLower(consumer, pending, 0, label)
-		if err == nil {
-			_, lowered, err = branchLower(pattern[len(pattern)-1], pending, total, label)
-		}
-	} else {
-		_, lowered, err = numericLower(consumer, pending, total, label)
-	}
-	if err != nil {
-		return nil, true, err
-	}
-	return lowered.compile, true, nil
 }
 
 func numberKind(op instr.Opcode) (instr.Kind, bool) {
@@ -1031,42 +896,98 @@ func numberKind(op instr.Opcode) (instr.Kind, bool) {
 	}
 }
 
+func prepare(source pattern) (pattern, error) {
+	steps := append(pattern(nil), source...)
+	if len(steps) == 0 {
+		return nil, fmt.Errorf("empty fusion pattern")
+	}
+
+	consumerAt := len(steps) - 1
+	branch := steps[consumerAt].op == instr.BR_IF
+	if branch {
+		consumerAt--
+	}
+	if consumerAt < 0 {
+		return nil, fmt.Errorf("fusion pattern has no consumer")
+	}
+	consumer := steps[consumerAt].op
+
+	if _, ok := arity(consumer); ok {
+		kind, ok := numberKind(consumer)
+		if !ok {
+			return nil, fmt.Errorf("unsupported numeric consumer %s", instr.TypeOf(consumer).Mnemonic)
+		}
+		boxed := consumer == instr.I32_XOR || consumer == instr.I32_AND || consumer == instr.I32_OR
+		materialize := traps(consumer)
+		for index := range steps[:consumerAt] {
+			steps[index].kind = kind
+			steps[index].boxed = boxed
+			steps[index].materialize = materialize
+		}
+		return steps, nil
+	}
+
+	switch consumer {
+	case instr.DROP, instr.REF_IS_NULL:
+		if consumerAt != 1 {
+			return nil, fmt.Errorf("unsupported ref fusion pattern")
+		}
+		steps[0].kind = instr.KindRef
+		steps[0].boxed = true
+	case instr.ARRAY_GET, instr.STRUCT_GET:
+		if consumerAt != 1 {
+			return nil, fmt.Errorf("unsupported index fusion pattern")
+		}
+		steps[0].kind = instr.KindI32
+	case instr.CALL, instr.RETURN_CALL, instr.CLOSURE_NEW:
+		if consumerAt != 1 || steps[0].op != instr.CONST_GET {
+			return nil, fmt.Errorf("unsupported constant call pattern")
+		}
+		steps[0].kind = instr.KindRef
+		steps[0].boxed = true
+	case instr.I32_CONST:
+		if !branch || consumerAt != 0 {
+			return nil, fmt.Errorf("unsupported direct branch pattern")
+		}
+		steps[0].kind = instr.KindI32
+	default:
+		return nil, fmt.Errorf("no fusion lowering for %s", instr.TypeOf(consumer).Mnemonic)
+	}
+	return steps, nil
+}
+
 func compose(pattern pattern, total int, label string) ([]jen.Code, error) {
-	if body, ok, err := composeNumeric(pattern, total, label); ok {
-		return body, err
-	}
-	if body, ok, err := composeRef(pattern, total, label); ok {
-		return body, err
-	}
-	if body, ok, err := composeDirectBranch(pattern, total, label); ok {
-		return body, err
-	}
-	if body, ok, err := composeIndex(pattern, total, label); ok {
-		return body, err
-	}
-	if body, ok, err := composeCall(pattern, label); ok {
-		return body, err
-	}
-	last := pattern[len(pattern)-1].op
-	consumer := last
-	if last == instr.BR_IF && len(pattern) > 1 {
-		consumer = pattern[len(pattern)-2].op
-	}
-	if lowerers[consumer] == nil {
-		return nil, fmt.Errorf("no lowering for %s", instr.TypeOf(consumer).Mnemonic)
-	}
-	pending := make([]lowering, 0, len(pattern)-1)
-	for _, source := range pattern[:len(pattern)-1] {
-		pending = append(pending, lowering{source: source})
-	}
-	_, lowered, err := lowerers[last](pattern[len(pattern)-1], pending, total, label)
+	steps, err := prepare(pattern)
 	if err != nil {
 		return nil, err
 	}
-	if lowered.handler == nil && len(lowered.compile) > 0 {
-		return lowered.compile, nil
+
+	var pending []lowering
+	var lowered lowering
+	offset := 0
+	for index, source := range steps {
+		lower := lowerers[source.op]
+		if lower == nil {
+			return nil, fmt.Errorf("no lowering for %s", instr.TypeOf(source.op).Mnemonic)
+		}
+		arg := 0
+		if source.kind != instr.KindAny {
+			arg = offset
+		}
+		if index == len(steps)-1 {
+			arg = total
+		}
+		pending, lowered, err = lower(source, pending, arg, label)
+		if err != nil {
+			return nil, err
+		}
+		offset += width(source.op)
 	}
-	return nil, fmt.Errorf("no fusion lowering for %s", instr.TypeOf(consumer).Mnemonic)
+	if lowered.handler != nil || len(lowered.compile) == 0 {
+		consumer := steps[len(steps)-1].op
+		return nil, fmt.Errorf("no fusion lowering for %s", instr.TypeOf(consumer).Mnemonic)
+	}
+	return lowered.compile, nil
 }
 
 func dispatch(tail bool, label string) jen.Code {

@@ -285,6 +285,20 @@ func TestGenerate(t *testing.T) {
 		}
 	})
 
+	t.Run("uses one composition loop", func(t *testing.T) {
+		data, err := os.ReadFile("lower.go")
+		require.NoError(t, err)
+		source := string(data)
+		require.Contains(t, source, "func prepare(")
+		for _, function := range []string{
+			"func composeNumeric(", "func composeRef(",
+			"func composeDirectBranch(", "func composeIndex(",
+			"func composeCall(",
+		} {
+			require.NotContains(t, source, function)
+		}
+	})
+
 	t.Run("maps every opcode once", func(t *testing.T) {
 		for value, lowering := range lowerers {
 			op := instr.Opcode(value)
