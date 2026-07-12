@@ -151,7 +151,7 @@ func TestGenerate(t *testing.T) {
 			seq(op(instr.REF_NULL), op(instr.DROP)),
 			seq(op(instr.DUP), op(instr.DROP)),
 		}
-		data, err := source(patterns)
+		data, err := render(patterns)
 		require.NoError(t, err)
 		require.Contains(t, string(data), "goto l0")
 		require.Contains(t, string(data), "l0:")
@@ -248,15 +248,29 @@ func TestGenerate(t *testing.T) {
 
 	t.Run("uses role based lowering names", func(t *testing.T) {
 		types := make(map[string]struct{})
+		fields := make(map[string][]string)
 		values := make(map[string]struct{})
 		functions := make(map[string]*ast.FuncDecl)
-		for _, path := range []string{"pattern.go", "lower.go", "validate.go"} {
+		for _, path := range []string{"pattern.go", "lower.go", "validate.go", "generate.go"} {
 			file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 			require.NoError(t, err)
 			ast.Inspect(file, func(node ast.Node) bool {
 				switch node := node.(type) {
 				case *ast.TypeSpec:
 					types[node.Name.Name] = struct{}{}
+					structure, ok := node.Type.(*ast.StructType)
+					if !ok {
+						break
+					}
+					for _, field := range structure.Fields.List {
+						if len(field.Names) > 0 {
+							for _, name := range field.Names {
+								fields[node.Name.Name] = append(fields[node.Name.Name], name.Name)
+							}
+						} else if name, ok := field.Type.(*ast.Ident); ok {
+							fields[node.Name.Name] = append(fields[node.Name.Name], name.Name)
+						}
+					}
 				case *ast.ValueSpec:
 					for _, name := range node.Names {
 						values[name.Name] = struct{}{}
@@ -271,11 +285,19 @@ func TestGenerate(t *testing.T) {
 		for _, name := range []string{"match", "step", "value", "state", "target", "loader", "lowerer"} {
 			require.Contains(t, types, name)
 		}
+		require.Equal(t, []string{"op", "typ", "exclude"}, fields["match"])
+		require.Equal(t, []string{"match", "kind", "boxed", "commit"}, fields["step"])
+		require.Equal(t, []string{"op", "head", "compile", "check", "body", "drop", "push", "raw", "boxed", "resident", "handler"}, fields["value"])
+		require.Equal(t, []string{"stack", "offset", "width", "label", "standalone"}, fields["state"])
+		require.Equal(t, []string{"code", "addr", "upvals", "ref"}, fields["target"])
+		require.Equal(t, []string{"slot", "width", "raw", "boxed", "index", "addr", "pos", "label", "standalone"}, fields["loader"])
 		require.Contains(t, values, "lowerers")
 		for _, name := range []string{
 			"compose", "lower", "resolve", "lowerSource", "lowerRef", "lowerIndex",
 			"lowerCall", "lowerNumeric", "lowerBranch", "load", "materialize",
 			"dynamicCall", "branch", "lookup", "numeric", "checked", "validateStack",
+			"produceRef", "consumeRef", "enter", "frame", "reuse", "replace",
+			"host", "invoke", "closureNew", "create", "render", "declare", "matches",
 		} {
 			require.Contains(t, functions, name)
 		}
@@ -288,7 +310,8 @@ func TestGenerate(t *testing.T) {
 			"standalone", "prepare", "sourceLower", "refSource", "refLower", "indexLower",
 			"callLower", "numericLower", "branchLower", "sourceAccess", "sourcePush",
 			"dynamicCallCode", "branchBody", "indexCode", "numericCode",
-			"trappedNumericCode", "validateEffect",
+			"trappedNumericCode", "validateEffect", "frameBody", "replaceBody",
+			"hostBodyCode", "createBody", "source", "threader",
 		} {
 			require.NotContains(t, functions, name)
 		}
@@ -312,12 +335,12 @@ func TestGenerate(t *testing.T) {
 	})
 
 	t.Run("maps every opcode once", func(t *testing.T) {
-		for value, lowering := range lowerers {
-			op := instr.Opcode(value)
+		for code, emit := range lowerers {
+			op := instr.Opcode(code)
 			if instr.Valid(op) {
-				require.NotNil(t, lowering, instr.TypeOf(op).Mnemonic)
+				require.NotNil(t, emit, instr.TypeOf(op).Mnemonic)
 			} else {
-				require.Nil(t, lowering)
+				require.Nil(t, emit)
 			}
 		}
 	})

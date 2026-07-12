@@ -68,7 +68,7 @@ Verifier changes should reject only statically malformed bytecode. Runtime traps
 
 ## Step 4 — Implement Threaded Semantics
 
-Add one opcode emitter in `internal/cmd/geninterp/lower.go`, map it once in `lowerers`, then run `make generate`. The emitter receives a `loweringState` and must define the opcode semantics once for standalone materialization and fused composition. Add a pattern in `internal/cmd/geninterp/pattern.go` only when the opcode participates in threaded fusion. Patterns select sequences and compile-time guards; they never define opcode behavior. Do not edit `interp/threaded.go` directly.
+Add one opcode emitter in `internal/cmd/geninterp/lower.go`, map it once in `lowerers`, then run `make generate`. The emitter receives a `state` and must define the opcode semantics once for standalone materialization and fused composition. Add a pattern in `internal/cmd/geninterp/pattern.go` only when the opcode participates in threaded fusion. Patterns select sequences and compile-time guards; they never define opcode behavior. Do not edit `interp/threaded.go` directly.
 
 Checklist:
 

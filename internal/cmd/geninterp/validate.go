@@ -9,13 +9,13 @@ import (
 
 func (p pattern) key() string {
 	var key strings.Builder
-	for index, step := range p {
+	for index, current := range p {
 		if index > 0 {
 			key.WriteByte('/')
 		}
-		fmt.Fprintf(&key, "%d", step.op)
-		if step.typ != nil {
-			fmt.Fprintf(&key, ":%t:%s", step.not, step.typ)
+		fmt.Fprintf(&key, "%d", current.op)
+		if current.typ != nil {
+			fmt.Fprintf(&key, ":%t:%s", current.exclude, current.typ)
 		}
 	}
 	return key.String()
@@ -33,20 +33,20 @@ func (p pattern) overlaps(other pattern) bool {
 	return true
 }
 
-func (s step) overlaps(other step) bool {
-	if s.typ == nil || other.typ == nil {
+func (m match) overlaps(other match) bool {
+	if m.typ == nil || other.typ == nil {
 		return true
 	}
-	if !s.not && !other.not {
-		return s.typ == other.typ
+	if !m.exclude && !other.exclude {
+		return m.typ == other.typ
 	}
-	if s.not && other.not {
+	if m.exclude && other.exclude {
 		return true
 	}
-	if s.not {
-		s, other = other, s
+	if m.exclude {
+		m, other = other, m
 	}
-	return s.typ != other.typ
+	return m.typ != other.typ
 }
 
 func validate(patterns []pattern) error {
@@ -55,26 +55,26 @@ func validate(patterns []pattern) error {
 		if len(pattern) == 0 {
 			return fmt.Errorf("empty fusion pattern")
 		}
-		for _, step := range pattern {
-			if !instr.Valid(step.op) {
-				return fmt.Errorf("unsupported opcode %d", step.op)
+		for _, current := range pattern {
+			if !instr.Valid(current.op) {
+				return fmt.Errorf("unsupported opcode %d", current.op)
 			}
-			typ := instr.TypeOf(step.op)
-			for _, width := range typ.Widths {
-				if width < 0 {
+			typ := instr.TypeOf(current.op)
+			for _, size := range typ.Widths {
+				if size < 0 {
 					return fmt.Errorf("%s has variable-width operands", typ.Mnemonic)
 				}
 			}
-			if step.typ != nil || step.not {
-				if step.typ == nil {
+			if current.typ != nil || current.exclude {
+				if current.typ == nil {
 					return fmt.Errorf("%s has invalid guard", typ.Mnemonic)
 				}
-				if step.op != instr.CONST_GET {
+				if current.op != instr.CONST_GET {
 					return fmt.Errorf("%s cannot resolve a type guard", typ.Mnemonic)
 				}
 			}
 		}
-		if err := validateEffect(pattern); err != nil {
+		if err := validateStack(pattern); err != nil {
 			return err
 		}
 		key := pattern.key()
@@ -94,10 +94,10 @@ func validate(patterns []pattern) error {
 	return nil
 }
 
-func validateEffect(pattern pattern) error {
+func validateStack(pattern pattern) error {
 	var stack []instr.Kind
-	for _, step := range pattern {
-		typ := instr.TypeOf(step.op)
+	for _, current := range pattern {
+		typ := instr.TypeOf(current.op)
 		if typ.Pop == nil && typ.Push == nil {
 			return nil
 		}
