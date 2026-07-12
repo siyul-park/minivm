@@ -1969,6 +1969,71 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("fused ref drops preserve exact ownership", func(t *testing.T) {
+		type snapshot struct {
+			sp       int
+			stack    []types.Boxed
+			live     int
+			interned int
+		}
+		run := func(t *testing.T, prog *program.Program, opts ...func(*option)) snapshot {
+			t.Helper()
+			i := New(prog, opts...)
+			defer i.Close()
+			require.NoError(t, i.Run(context.Background()))
+			live := 0
+			for _, rc := range i.rc[1:] {
+				if rc > 0 {
+					live += rc
+				}
+			}
+			return snapshot{
+				sp:       i.sp,
+				stack:    append([]types.Boxed(nil), i.stack[:i.sp]...),
+				live:     live,
+				interned: len(i.interned),
+			}
+		}
+
+		fn := types.NewFunctionBuilder(nil).Emit(instr.New(instr.RETURN)).MustBuild()
+		cases := []struct {
+			name string
+			prog *program.Program
+		}{
+			{
+				name: "local ref",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 7),
+					instr.New(instr.REF_NEW),
+					instr.New(instr.LOCAL_SET, 0),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.DROP),
+				}, program.WithLocals(types.TypeRef)),
+			},
+			{
+				name: "function constant",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.DROP),
+				}, program.WithConstants(fn)),
+			},
+			{
+				name: "string constant",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.DROP),
+				}, program.WithConstants(types.String("value"))),
+			},
+		}
+		for _, tt := range cases {
+			t.Run(tt.name, func(t *testing.T) {
+				exact := run(t, tt.prog, WithTick(1))
+				fused := run(t, tt.prog, WithThreshold(-1))
+				require.Equal(t, exact, fused)
+			})
+		}
+	})
+
 	t.Run("fused numeric traps preserve exact state", func(t *testing.T) {
 		type snapshot struct {
 			ip    int

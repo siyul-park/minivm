@@ -24344,7 +24344,7 @@ var (
 			}
 			{
 				i0 := instr.ParseU16(c.code, start+1)
-				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindI32 {
+				if i0 >= len(c.globals) || c.globals[i0].Repr() != types.KindRef {
 					goto l517
 				}
 				c.ip += 3
@@ -36067,7 +36067,7 @@ var (
 			}
 			{
 				i0 := int(c.code[start+1])
-				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindI32 {
+				if i0 >= len(c.locals) || c.locals[i0].Repr() != types.KindRef {
 					goto l293
 				}
 				c.ip += 2
@@ -41701,7 +41701,14 @@ var (
 					goto l118
 				}
 				r0 := c.constants[i0]
-				if r0.Kind() != types.KindI32 {
+				if r0.Kind() != types.KindRef {
+					goto l118
+				}
+				c0 := r0.Ref()
+				if c0 < 0 || c0 >= len(c.heap) {
+					goto l118
+				}
+				if _, ok := c.heap[c0].(types.String); ok {
 					goto l118
 				}
 				c.ip += 3
@@ -60698,7 +60705,7 @@ var (
 			}
 			{
 				i0 := int(c.code[start+1])
-				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindI32 {
+				if i0 >= len(c.captures) || c.captures[i0].Repr() != types.KindRef {
 					goto l517
 				}
 				c.ip += 2

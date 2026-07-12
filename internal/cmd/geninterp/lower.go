@@ -316,6 +316,9 @@ func compose(pattern pattern, total int, label string) ([]jen.Code, error) {
 		consumer := facts[len(facts)-1].op
 		return nil, fmt.Errorf("no fusion lowering for %s", instr.TypeOf(consumer).Mnemonic)
 	}
+	if len(state.pending) != 0 {
+		return nil, fmt.Errorf("fusion leaves %d pending values", len(state.pending))
+	}
 	return lowered.compile, nil
 }
 
@@ -366,18 +369,19 @@ func prepare(source pattern) ([]fact, error) {
 }
 
 func fusionInput(op instr.Opcode) (instr.Kind, int, bool) {
-	pop := instr.TypeOf(op).Pop
-	if len(pop) > 0 {
-		return pop[0], len(pop), true
-	}
 	switch op {
+	case instr.DROP, instr.REF_IS_NULL:
+		return instr.KindRef, 1, true
 	case instr.ARRAY_GET, instr.STRUCT_GET:
 		return instr.KindI32, 1, true
 	case instr.CALL, instr.RETURN_CALL, instr.CLOSURE_NEW:
 		return instr.KindRef, 1, true
-	default:
+	}
+	pop := instr.TypeOf(op).Pop
+	if len(pop) == 0 || pop[0] == instr.KindAny {
 		return instr.KindAny, 0, false
 	}
+	return pop[0], len(pop), true
 }
 
 func sourceLower(state *loweringState, source fact) (lowering, error) {
@@ -520,6 +524,7 @@ func refLower(state *loweringState, source fact) (lowering, error) {
 		return lowering{}, fmt.Errorf("unsupported ref consumer %s", instr.TypeOf(source.op).Mnemonic)
 	}
 
+	state.pending = nil
 	if state.standalone {
 		return lowering{source: source.step, first: source.step, handler: standaloneCode(source.step, compile, body)}, nil
 	}
@@ -552,6 +557,7 @@ func indexLower(state *loweringState, source fact) (lowering, error) {
 		jen.Id("c").Dot("ip").Op("+=").Lit(width(index.first.op)),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
 	)
+	state.pending = nil
 	return lowering{source: source.step, first: index.first, compile: compile}, nil
 }
 
@@ -582,6 +588,7 @@ func callLower(state *loweringState, source fact) (lowering, error) {
 	default:
 		return lowering{}, fmt.Errorf("unsupported call opcode %s", instr.TypeOf(source.op).Mnemonic)
 	}
+	state.pending = nil
 	return lowering{source: source.step, first: target.first, compile: compile}, nil
 }
 
@@ -654,7 +661,11 @@ func numericLower(state *loweringState, source fact) (lowering, error) {
 		return lowered, nil
 	}
 	body, err := numericCode(source.step, state.pending, state.total, state.label, false)
-	return lowering{source: source.step, first: first, compile: body}, err
+	if err != nil {
+		return lowering{}, err
+	}
+	state.pending = nil
+	return lowering{source: source.step, first: first, compile: body}, nil
 }
 
 func branchLower(state *loweringState, source fact) (lowering, error) {
@@ -675,7 +686,11 @@ func branchLower(state *loweringState, source fact) (lowering, error) {
 	consumer := state.pending[len(state.pending)-1]
 	if _, ok := arity(consumer.source.op); ok {
 		body, err := numericCode(consumer.source, state.pending[:len(state.pending)-1], state.total, state.label, true)
-		return lowering{source: source.step, first: consumer.first, compile: body}, err
+		if err != nil {
+			return lowering{}, err
+		}
+		state.pending = nil
+		return lowering{source: source.step, first: consumer.first, compile: body}, nil
 	}
 	if consumer.raw == nil {
 		return lowering{}, fmt.Errorf("%s has no branch condition", instr.TypeOf(consumer.source.op).Mnemonic)
@@ -692,6 +707,7 @@ func branchLower(state *loweringState, source fact) (lowering, error) {
 		jen.Id("c").Dot("ip").Op("+=").Lit(width(consumer.first.op)),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
 	)
+	state.pending = nil
 	return lowering{source: source.step, first: consumer.first, compile: compile}, nil
 }
 

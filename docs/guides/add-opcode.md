@@ -73,11 +73,11 @@ Add one opcode emitter in `internal/cmd/geninterp/lower.go`, map it once in `low
 Checklist:
 
 - map the opcode exactly once in `lowerers` and avoid standalone/fusion semantic copies
-- advance `c.ip` by the exact instruction width during compilation
+- advance `c.ip` by the first absorbed instruction width during fusion compilation
 - advance `i.fr.ip` by the exact instruction width during execution
 - check stack underflow and overflow where applicable
-- retain refs when copying or exposing them
-- release refs when consuming or overwriting them
+- retain borrowed storage refs only when materializing them on the VM stack
+- release owned resident refs when consuming or overwriting them
 - panic with the existing runtime sentinel errors and let `interp.Run` recover
 
 Keep the generated handler explicit. Generator-only lowering methods may remove real generation duplication, but generated runtime helpers are not allowed; use existing `Interpreter` methods or emit the opcode logic directly.

@@ -169,6 +169,17 @@ func TestGenerate(t *testing.T) {
 		require.Contains(t, file.GoString(), "c.ip += 2")
 	})
 
+	t.Run("uses ref representation for drop fusion", func(t *testing.T) {
+		pattern := seq(op(instr.LOCAL_GET), op(instr.DROP))
+		body, err := compose(pattern, pattern.width(), "")
+		require.NoError(t, err)
+		file := jen.NewFile("review")
+		file.Func().Id("render").Params().Block(body...)
+		source := file.GoString()
+		require.Contains(t, source, "types.KindRef")
+		require.NotContains(t, source, "types.KindI32")
+	})
+
 	t.Run("accepts the catalog", func(t *testing.T) {
 		require.NoError(t, validate(catalog()))
 	})
