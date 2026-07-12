@@ -16,10 +16,7 @@ For user-facing performance results, see `docs/benchmarks.md`. For sampling and 
 | threaded behavior | `interp/threaded.go` |
 | trace recording | `interp/trace.go` |
 | architecture-neutral compiler | `interp/jit.go`, `interp/jit_plan.go` |
-| ARM64 orchestration and control flow | `interp/jit_arm64.go` |
-| ARM64 numeric lowering | `interp/jit_num_arm64.go` |
-| ARM64 calls and frames | `interp/jit_call_arm64.go` |
-| ARM64 heap lowering | `interp/jit_heap_arm64.go` |
+| ARM64 lowering | `interp/jit_arm64.go` |
 | callable ABI | `asm/` |
 | value layout | `docs/value-representation.md` |
 | heap ownership | `docs/memory-model.md` |
@@ -143,7 +140,7 @@ A pool shares one `Tracer`. Tree mutations are locked. `rootAt` returns a stable
 
 `jit.go` is architecture-neutral. Build-tagged `lower(*lowering, plan)` implementations consume the normalized plan directly; unsupported architectures never construct a compiler.
 
-ARM64 lowering is split by role: `jit_arm64.go` owns orchestration, the single opcode dispatcher, state, and control flow; `jit_num_arm64.go` owns numeric operations; `jit_call_arm64.go` owns calls, frames, and deoptimization; `jit_heap_arm64.go` owns heap and reference operations.
+`jit_arm64.go` owns all ARM64 lowering: orchestration, the single opcode dispatcher, control flow, numeric operations, calls, frames, deoptimization, heap access, and reference ownership.
 
 Every plan block passes through one `emitBlock` path and every edge carries an explicit block ID or an unresolved threaded-fallback anchor. Bytecode locations describe source positions only; block IDs preserve distinct inlined contexts even when they share the same `(function, IP)`. A state-backed block reloads VM homes, while a profiled successor may continue with the current symbolic state.
 
@@ -425,7 +422,7 @@ When changing JIT internals:
 - deoptimize before behavior the JIT cannot fully own
 - prefer one simple terminal fallback over duplicated semantics
 - keep architecture-neutral code in `jit.go`
-- keep ARM64 details in the owning `jit_*_arm64.go` role file
+- keep ARM64 lowering in `interp/jit_arm64.go`
 - keep journal layout explicit and stable
 - preserve interpreter/JIT stack and ref ownership symmetry
 - use short, standard names such as `trace`, `root`, `entry`, `loop`, `module`, `lowering`, `guard`, `exit`, `frame`, and `value`
