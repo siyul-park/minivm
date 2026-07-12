@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/asm"
@@ -28,18 +29,20 @@ type Interpreter struct {
 	samples  *prof.Collector
 	exits    map[anchor]func(*Interpreter)
 	stubs    []func(*Interpreter)
+	natives  []unsafe.Pointer
 	tried    map[int]bool
 	journal  []uint64
 
-	types     []types.Type
-	constants []types.Boxed
-	globals   []types.Boxed
-	instrs    [][]byte
-	code      [][]func(*Interpreter)
-	coros     []bool
-	handlers  [][]instr.Handler
-	module    *types.Function
-	dynamic   map[int]bool
+	types       []types.Type
+	constants   []types.Boxed
+	globals     []types.Boxed
+	globalKinds []types.Kind
+	instrs      [][]byte
+	code        [][]func(*Interpreter)
+	coros       []bool
+	handlers    [][]instr.Handler
+	module      *types.Function
+	dynamic     map[int]bool
 
 	frames   []frame
 	fr       *frame
@@ -123,6 +126,8 @@ func WithCache(c *Cache) func(*option) {
 	return func(o *option) { o.cache = c }
 }
 
+// WithTracer shares tracing state with interpreters for the same program.
+// A tracer already bound to another program is isolated automatically.
 func WithTracer(t *Tracer) func(*option) {
 	return func(o *option) { o.tracer = t }
 }
@@ -197,8 +202,9 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	}
 
 	tracer := opt.tracer
-	if tracer == nil {
+	if tracer == nil || !tracer.bind(prog) {
 		tracer = NewTracer()
+		tracer.bind(prog)
 	}
 	samples := opt.samples
 	if samples == nil {
@@ -244,6 +250,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		handlers:  make([][]instr.Handler, len(prog.Constants)+1),
 		exits:     map[anchor]func(*Interpreter){},
 		stubs:     make([]func(*Interpreter), len(prog.Constants)+1),
+		natives:   make([]unsafe.Pointer, len(prog.Constants)+1),
 		tried:     map[int]bool{},
 		dynamic:   map[int]bool{},
 		journal:   make([]uint64, journalHead+journalStride*opt.frame),
@@ -309,8 +316,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	// bind reads i.globals kinds to thread each constant's GLOBAL_* accesses, so
 	// an unseeded slot would misclassify a ref global as numeric and skip its
 	// retain/release, corrupting the refcount.
-	globals := types.Kinds(prog.Globals)
-	for j, kind := range globals {
+	i.globalKinds = types.Kinds(prog.Globals)
+	for j, kind := range i.globalKinds {
 		i.globals[j] = i.zero(kind)
 	}
 
@@ -319,7 +326,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		constants: i.constants,
 		heap:      i.heap,
 		coros:     i.coros,
-		globals:   globals,
+		globals:   i.globalKinds,
 		exact:     opt.tick == 1,
 	}
 	i.code[0] = c.Compile(prog.Code, i.module.LocalKinds(), types.Kinds(i.module.Captures))
@@ -776,8 +783,10 @@ func (i *Interpreter) compile(addr int) error {
 	if i.compiler == nil {
 		return nil
 	}
-	mod, err := i.build(i.compiler, addr)
+	i.samples.AddMetric("vm_jit_attempts_total", 1)
+	mod, err := i.compiler.Compile(i, addr)
 	if err != nil {
+		i.samples.AddMetric("vm_jit_errors_total", 1)
 		return err
 	}
 	if mod == nil {
@@ -798,8 +807,10 @@ func (i *Interpreter) shared(addr int) error {
 		i.cache.ready(addr)
 		return nil
 	}
-	mod, err := i.build(compiler, addr)
+	i.samples.AddMetric("vm_jit_attempts_total", 1)
+	mod, err := compiler.Compile(i, addr)
 	if err != nil {
+		i.samples.AddMetric("vm_jit_errors_total", 1)
 		_ = compiler.Close()
 		i.cache.ready(addr)
 		return err
@@ -809,10 +820,10 @@ func (i *Interpreter) shared(addr int) error {
 		i.cache.fail(addr)
 		return nil
 	}
-	i.samples.AddMetric("vm_jit_emits_total", float64(mod.emits))
+	i.samples.AddMetric("vm_jit_emits_total", float64(len(mod.entries)))
 	i.samples.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
 	var buf *asm.Buffer
-	if mod.emits > 0 {
+	if len(mod.entries) > 0 {
 		buf = compiler.buffer
 	} else {
 		_ = compiler.Close()
@@ -821,26 +832,12 @@ func (i *Interpreter) shared(addr int) error {
 	return nil
 }
 
-func (i *Interpreter) build(c *compiler, addr int) (*module, error) {
-	fn, ok := i.function(addr)
-	if !ok {
-		return nil, nil
-	}
-	i.samples.AddMetric("vm_jit_attempts_total", 1)
-	mod, err := c.Compile(i, addr, fn)
-	if err != nil {
-		i.samples.AddMetric("vm_jit_errors_total", 1)
-		return nil, err
-	}
-	return mod, nil
-}
-
 // install accounts a successful Compile and rewires the dispatch table: a
 // trace entry replaces the function's first opcode handler and keeps the
 // shadowed threaded handler for guard fallback.
 func (i *Interpreter) install(mod *module, account bool) {
 	if account {
-		i.samples.AddMetric("vm_jit_emits_total", float64(mod.emits))
+		i.samples.AddMetric("vm_jit_emits_total", float64(len(mod.entries)))
 		i.samples.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
 	}
 	for a, entry := range mod.entries {
@@ -859,9 +856,12 @@ func (i *Interpreter) install(mod *module, account bool) {
 				i.stubs[a.addr] = i.exits[a]
 			}
 		}
-		if entry.loop {
+		if entry.kind == entryFunction {
+			atomic.StorePointer(&i.natives[a.addr], entry.callable.Addr())
+		}
+		if entry.kind == entryLoop {
 			i.code[a.addr][a.ip] = i.loop(entry.callable)
-		} else if a.addr == 0 {
+		} else if entry.kind == entryModule {
 			i.code[a.addr][a.ip] = i.start(a, entry.callable)
 		} else {
 			i.code[a.addr][a.ip] = i.call(a, entry.callable)
@@ -1128,7 +1128,7 @@ func (i *Interpreter) loop(callable asm.Callable) func(*Interpreter) {
 }
 
 func (i *Interpreter) exit(root anchor) {
-	hits, err := i.tracer.exit(i, root, branch{fn: i.fr.addr, ip: i.fr.ip})
+	hits, err := i.tracer.exit(i, root, anchor{addr: i.fr.addr, ip: i.fr.ip})
 	if err != nil {
 		panic(err)
 	}
@@ -1145,8 +1145,10 @@ func (i *Interpreter) exit(root anchor) {
 	if i.compiler == nil {
 		return
 	}
-	mod, err := i.build(i.compiler, root.addr)
+	i.samples.AddMetric("vm_jit_attempts_total", 1)
+	mod, err := i.compiler.Compile(i, root.addr)
 	if err != nil {
+		i.samples.AddMetric("vm_jit_errors_total", 1)
 		panic(err)
 	}
 	if mod != nil {
@@ -1260,6 +1262,10 @@ func (i *Interpreter) context() unsafe.Pointer {
 	i.journal[journalHeap] = 0
 	if len(i.heap) > 0 {
 		i.journal[journalHeap] = uint64(uintptr(unsafe.Pointer(&i.heap[0])))
+	}
+	i.journal[journalNatives] = 0
+	if len(i.natives) > 0 {
+		i.journal[journalNatives] = uint64(uintptr(unsafe.Pointer(&i.natives[0])))
 	}
 
 	i.journal[journalDepth] = 0
@@ -1591,19 +1597,12 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if addr >= len(i.coros) {
 		i.coros = append(i.coros, make([]bool, n-len(i.coros))...)
 	}
-	// The declared Program.Globals are out of scope here; New pre-seeds every
-	// slot to the zero Boxed of its declared kind, so the runtime values carry
-	// the declared kinds at all times.
-	globals := make([]types.Kind, len(i.globals))
-	for j, g := range i.globals {
-		globals[j] = g.Kind()
-	}
 	c := &threader{
 		types:     i.types,
 		constants: i.constants,
 		heap:      i.heap,
 		coros:     i.coros,
-		globals:   globals,
+		globals:   i.globalKinds,
 		exact:     i.tick == 1,
 	}
 	if dynamic {

@@ -1,8 +1,6 @@
 package interp
 
 import (
-	"encoding/binary"
-	"sort"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/asm"
@@ -14,7 +12,7 @@ import (
 // arm64Lowerer is the AArch64 JIT lowerer.
 type arm64Lowerer struct{}
 
-// Boxing masks used by scalar trace lowering.
+// Boxing masks used by scalar lowering.
 const (
 	maskI32 = uint64(0xFFFFFFFF)
 	maskI64 = uint64(0x0001_FFFF_FFFF_FFFF)
@@ -22,7 +20,7 @@ const (
 	boxableWidth = uint8(49)
 )
 
-// Boxing tags used by scalar trace lowering, derived from the canonical Kind
+// Boxing tags used by scalar lowering, derived from the Kind
 // tag layout so they track any reordering of the Kind enum. i1/i8 share the i32
 // representation and box through tagI32.
 var (
@@ -50,8 +48,6 @@ const (
 )
 
 var (
-	_ lowerer = arm64Lowerer{}
-
 	heapI32       = itab(types.I32(0))
 	heapF32       = itab(types.F32(0))
 	heapF64       = itab(types.F64(0))
@@ -74,51 +70,52 @@ func newCompiler() (*compiler, error) {
 		return nil, err
 	}
 	return &compiler{
-		lowerer:     arm64Lowerer{},
 		arch:        arm64.New(),
 		buffer:      buffer,
 		scratchRegs: []asm.PReg{arm64.X10, arm64.X11, arm64.X12, arm64.X13, arm64.X14},
 	}, nil
 }
 
-// lower lowers a recorded entry trace tree into one framed native callable.
-// The hot path follows the recorded opcodes linearly with scalars unboxed in
-// registers; recorded branch directions, observed call targets, and narrow
-// value guards exit through the journal and resume through threaded dispatch.
-// Returns false whenever the trace touches an opcode, kind, or shape the
-// typed lowerer does not support; the caller leaves threaded dispatch installed.
-func (l arm64Lowerer) lower(ctx *lowering) bool {
+// lower emits one plan through the common block pipeline.
+func lower(ctx *lowering, plan plan) bool {
+	l := arm64Lowerer{}
 	l.enter(ctx)
-	// A loop root re-enters the live frame at the header: bind the back-edge
-	// target after the prologue so each iteration reloads its loop-carried
-	// locals from the VM stack (flushed at the back-edge) without a memory-free
-	// register fixpoint. An entry trace binds it too, so a self tail-call that
-	// loops back to the function entry has a branch target (see tailLoop). The
-	// label is harmless when no back-edge references it.
-	ctx.back = ctx.assembler.Label()
+	ctx.blocks = plan.blocks
+	ctx.kind = plan.kind
+	for id, block := range ctx.blocks {
+		if !block.tail && block.state != nil {
+			ctx.labels[id] = ctx.assembler.Label()
+		}
+	}
+	root := plan.root
+	if _, ok := ctx.labels[root]; !ok {
+		ctx.labels[root] = ctx.assembler.Label()
+	}
+	ctx.back = ctx.labels[root]
 	ctx.assembler.Bind(ctx.back)
-	if !l.walk(ctx, ctx.tree.root.ops, nil, ctx.tree.root.kind) {
+	if !l.emitBlock(ctx, root, nil) {
 		return false
 	}
-	for n := 0; n < len(ctx.pending); n++ {
-		sort.SliceStable(ctx.pending[n:], func(i, j int) bool {
-			return ctx.pending[n+i].hits > ctx.pending[n+j].hits
-		})
-		p := ctx.pending[n]
-		ctx.values = p.values
-		ctx.frames = p.frames
-		ctx.assembler.Bind(p.label)
-		l.reload(ctx)
-		if !l.walk(ctx, p.ops, p.tail, p.kind) {
+	for id, block := range ctx.blocks {
+		if id == root || block.tail || block.state == nil {
+			continue
+		}
+		ctx.assembler.Bind(ctx.labels[id])
+		if !l.emitBlock(ctx, id, nil) {
 			return false
 		}
 	}
-	for _, e := range ctx.exits {
-		ctx.values = e.values
-		ctx.frames = e.frames
-		ctx.assembler.Bind(e.label)
-		l.trapFlushed(ctx, trapFallback, e.resume)
+	for n := 0; n < len(ctx.work); n++ {
+		work := ctx.work[n]
+		ctx.values = work.values
+		ctx.frames = work.frames
+		ctx.assembler.Bind(work.label)
+		l.reload(ctx)
+		if !l.emitBlock(ctx, work.block, work.tail) {
+			return false
+		}
 	}
+	l.materializeExits(ctx)
 	return true
 }
 
@@ -139,41 +136,30 @@ func (l arm64Lowerer) enter(ctx *lowering) {
 	a.Bind(ctx.head)
 }
 
-// walk emits the recorded opcode sequence. An entry trace is fully unrolled —
-// forward BR vanishes, forward BR_IF becomes a guard, and the walk succeeds
-// only when the recorded path ends in the entry frame's RETURN. A bounded
-// partial trace exits at its cut so the next segment can be learned as a hot
-// continuation. A loop trace additionally closes one back-edge: a BR or BR_IF
-// whose target is the loop header becomes the native back-edge (see backedge).
-func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
+func (l arm64Lowerer) materializeExits(ctx *lowering) {
+	for _, exit := range ctx.exits {
+		ctx.values = exit.values
+		ctx.frames = exit.frames
+		ctx.assembler.Bind(exit.label)
+		if exit.retain > 0 {
+			l.retain(ctx, exit.retain)
+		}
+		l.trapFlushed(ctx, trapFallback, exit.resume)
+	}
+}
+
+// steps emits the ordinary operations of one normalized block. Control flow
+// is owned by the block terminator and never appears here.
+func (l arm64Lowerer) steps(ctx *lowering, ops []step) (bool, bool) {
 	for idx := 0; idx < len(ops); idx++ {
 		op := ops[idx]
 		f := ctx.frame()
 		if op.fn != f.addr {
-			return false
+			return false, false
 		}
-		if op.cut {
-			if idx != len(ops)-1 {
-				return false
-			}
-			label, ok := l.branchOrExit(ctx, op.target, tail)
-			if !ok {
-				return false
-			}
-			ctx.assembler.Emit(arm64.BLabel(label))
-			return true
-		}
-		if ctx.loop && (op.op == instr.BR || op.op == instr.BR_IF) && op.target == ctx.tree.root.anchor.ip {
-			if !l.backedge(ctx, op) {
-				return false
-			}
-			// The back-edge is the loop trace's terminal op: control either
-			// branches to the head or traps, never falling through.
-			return idx == len(ops)-1
-		}
-		consumed, ok := l.fuse(ctx, ops, tail, idx)
+		consumed, ok := l.fuse(ctx, ops, idx)
 		if !ok {
-			return false
+			return false, false
 		}
 		if consumed > 0 {
 			idx += consumed - 1
@@ -181,10 +167,8 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 		}
 		ok = false
 		switch op.op {
-		case instr.NOP, instr.BR:
+		case instr.NOP:
 			ok = true
-		case instr.UNREACHABLE:
-			ok = l.unreachable(ctx, op)
 		case instr.I32_CONST:
 			ok = l.i32Const(ctx, op)
 		case instr.I64_CONST:
@@ -194,7 +178,11 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 		case instr.F64_CONST:
 			ok = l.f64Const(ctx, op)
 		case instr.CONST_GET:
-			ok = l.constGet(ctx, op)
+			if op.known {
+				ok = l.constGetKnown(ctx, op)
+			} else {
+				ok = l.constGet(ctx, op)
+			}
 		case instr.LOCAL_GET:
 			ok = l.localGet(ctx, op)
 		case instr.LOCAL_SET:
@@ -215,12 +203,6 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 			ok = l.swap(ctx)
 		case instr.SELECT:
 			ok = l.selectOp(ctx)
-		case instr.BR_TABLE:
-			ok = l.brTable(ctx, op, l.callerTail(ops, idx, tail))
-		case instr.UPVAL_GET:
-			ok = l.upvalGet(ctx, op)
-		case instr.UPVAL_SET:
-			ok = l.upvalSet(ctx, op)
 		case instr.I32_ADD:
 			ok = l.i32Binary(ctx, arm64.ADD)
 		case instr.I32_SUB:
@@ -233,20 +215,6 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 			ok = l.i32Bitwise(ctx, arm64.ORR)
 		case instr.I32_XOR:
 			ok = l.i32Bitwise(ctx, arm64.EOR)
-		case instr.I32_DIV_S:
-			ok = l.i32Divide(ctx, op, arm64.SDIV, l.sign32, false)
-		case instr.I32_DIV_U:
-			ok = l.i32Divide(ctx, op, arm64.UDIV, l.zero32, false)
-		case instr.I32_REM_S:
-			ok = l.i32Divide(ctx, op, arm64.SDIV, l.sign32, true)
-		case instr.I32_REM_U:
-			ok = l.i32Divide(ctx, op, arm64.UDIV, l.zero32, true)
-		case instr.I32_SHL:
-			ok = l.i32Shift(ctx, arm64.LSL, l.zero32)
-		case instr.I32_SHR_S:
-			ok = l.i32Shift(ctx, arm64.ASR, l.sign32)
-		case instr.I32_SHR_U:
-			ok = l.i32Shift(ctx, arm64.LSR, l.zero32)
 		case instr.I32_EQZ:
 			ok = l.i32Eqz(ctx)
 		case instr.I32_EQ:
@@ -269,31 +237,40 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 			ok = l.i32Cmp(ctx, arm64.CondHI)
 		case instr.I32_GE_U:
 			ok = l.i32Cmp(ctx, arm64.CondCS)
-		case instr.F64_ADD:
-			ok = l.f64Binary(ctx, arm64.FADD)
-		case instr.F64_SUB:
-			ok = l.f64Binary(ctx, arm64.FSUB)
-		case instr.F64_MUL:
-			ok = l.f64Binary(ctx, arm64.FMUL)
-		case instr.F64_DIV:
-			ok = l.f64Binary(ctx, arm64.FDIV)
-		case instr.F64_REM, instr.F64_MOD:
-			if !l.exit(ctx, op.ip) {
-				return false
-			}
-			return idx == len(ops)-1
-		case instr.F64_EQ:
-			ok = l.f64Cmp(ctx, arm64.CondEQ)
-		case instr.F64_NE:
-			ok = l.f64Cmp(ctx, arm64.CondNE)
-		case instr.F64_LT:
-			ok = l.f64Cmp(ctx, arm64.CondMI)
-		case instr.F64_GT:
-			ok = l.f64Cmp(ctx, arm64.CondGT)
-		case instr.F64_LE:
-			ok = l.f64Cmp(ctx, arm64.CondLS)
-		case instr.F64_GE:
-			ok = l.f64Cmp(ctx, arm64.CondGE)
+		case instr.I64_ADD:
+			ok = l.i64Binary(ctx, op, arm64.ADD, true)
+		case instr.I64_SUB:
+			ok = l.i64Binary(ctx, op, arm64.SUB, true)
+		case instr.I64_MUL:
+			ok = l.i64Binary(ctx, op, arm64.MUL, true)
+		case instr.I64_AND:
+			ok = l.i64Binary(ctx, op, arm64.AND, false)
+		case instr.I64_OR:
+			ok = l.i64Binary(ctx, op, arm64.ORR, false)
+		case instr.I64_XOR:
+			ok = l.i64Binary(ctx, op, arm64.EOR, false)
+		case instr.I64_EQZ:
+			ok = l.i64Eqz(ctx)
+		case instr.I64_EQ:
+			ok = l.i64Cmp(ctx, arm64.CondEQ)
+		case instr.I64_NE:
+			ok = l.i64Cmp(ctx, arm64.CondNE)
+		case instr.I64_LT_S:
+			ok = l.i64Cmp(ctx, arm64.CondLT)
+		case instr.I64_LE_S:
+			ok = l.i64Cmp(ctx, arm64.CondLE)
+		case instr.I64_GT_S:
+			ok = l.i64Cmp(ctx, arm64.CondGT)
+		case instr.I64_GE_S:
+			ok = l.i64Cmp(ctx, arm64.CondGE)
+		case instr.I64_LT_U:
+			ok = l.i64Cmp(ctx, arm64.CondCC)
+		case instr.I64_LE_U:
+			ok = l.i64Cmp(ctx, arm64.CondLS)
+		case instr.I64_GT_U:
+			ok = l.i64Cmp(ctx, arm64.CondHI)
+		case instr.I64_GE_U:
+			ok = l.i64Cmp(ctx, arm64.CondCS)
 		case instr.F32_ADD:
 			ok = l.f32Binary(ctx, arm64.FADD)
 		case instr.F32_SUB:
@@ -302,11 +279,6 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 			ok = l.f32Binary(ctx, arm64.FMUL)
 		case instr.F32_DIV:
 			ok = l.f32Binary(ctx, arm64.FDIV)
-		case instr.F32_REM, instr.F32_MOD:
-			if !l.exit(ctx, op.ip) {
-				return false
-			}
-			return idx == len(ops)-1
 		case instr.F32_EQ:
 			ok = l.f32Cmp(ctx, arm64.CondEQ)
 		case instr.F32_NE:
@@ -319,6 +291,62 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 			ok = l.f32Cmp(ctx, arm64.CondLS)
 		case instr.F32_GE:
 			ok = l.f32Cmp(ctx, arm64.CondGE)
+		case instr.F64_ADD:
+			ok = l.f64Binary(ctx, arm64.FADD)
+		case instr.F64_SUB:
+			ok = l.f64Binary(ctx, arm64.FSUB)
+		case instr.F64_MUL:
+			ok = l.f64Binary(ctx, arm64.FMUL)
+		case instr.F64_DIV:
+			ok = l.f64Binary(ctx, arm64.FDIV)
+		case instr.F64_EQ:
+			ok = l.f64Cmp(ctx, arm64.CondEQ)
+		case instr.F64_NE:
+			ok = l.f64Cmp(ctx, arm64.CondNE)
+		case instr.F64_LT:
+			ok = l.f64Cmp(ctx, arm64.CondMI)
+		case instr.F64_GT:
+			ok = l.f64Cmp(ctx, arm64.CondGT)
+		case instr.F64_LE:
+			ok = l.f64Cmp(ctx, arm64.CondLS)
+		case instr.F64_GE:
+			ok = l.f64Cmp(ctx, arm64.CondGE)
+		case instr.ARRAY_GET:
+			if ctx.count() >= 2 && ctx.values[len(ctx.values)-2].raw && ctx.values[len(ctx.values)-2].ref > 0 {
+				ok = l.arrayGetKnown(ctx, op)
+			} else {
+				ok = l.arrayGet(ctx, op)
+			}
+		case instr.UNREACHABLE:
+			ok = l.unreachable(ctx, op)
+		case instr.UPVAL_GET:
+			ok = l.upvalGet(ctx, op)
+		case instr.UPVAL_SET:
+			ok = l.upvalSet(ctx, op)
+		case instr.I32_DIV_S:
+			ok = l.i32Divide(ctx, op, arm64.SDIV, l.sign32, false)
+		case instr.I32_DIV_U:
+			ok = l.i32Divide(ctx, op, arm64.UDIV, l.zero32, false)
+		case instr.I32_REM_S:
+			ok = l.i32Divide(ctx, op, arm64.SDIV, l.sign32, true)
+		case instr.I32_REM_U:
+			ok = l.i32Divide(ctx, op, arm64.UDIV, l.zero32, true)
+		case instr.I32_SHL:
+			ok = l.i32Shift(ctx, arm64.LSL, l.zero32)
+		case instr.I32_SHR_S:
+			ok = l.i32Shift(ctx, arm64.ASR, l.sign32)
+		case instr.I32_SHR_U:
+			ok = l.i32Shift(ctx, arm64.LSR, l.zero32)
+		case instr.F64_REM, instr.F64_MOD:
+			if !l.exit(ctx, op.ip) {
+				return false, false
+			}
+			return true, idx == len(ops)-1
+		case instr.F32_REM, instr.F32_MOD:
+			if !l.exit(ctx, op.ip) {
+				return false, false
+			}
+			return true, idx == len(ops)-1
 		case instr.I32_TO_F64_S:
 			ok = l.i32ToF64(ctx, l.sign32)
 		case instr.I32_TO_F64_U:
@@ -339,12 +367,6 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 			ok = l.f32ToF64(ctx)
 		case instr.F64_TO_F32:
 			ok = l.f64ToF32(ctx)
-		case instr.I64_ADD:
-			ok = l.i64Binary(ctx, op, arm64.ADD, true)
-		case instr.I64_SUB:
-			ok = l.i64Binary(ctx, op, arm64.SUB, true)
-		case instr.I64_MUL:
-			ok = l.i64Binary(ctx, op, arm64.MUL, true)
 		case instr.I64_DIV_S:
 			ok = l.i64Divide(ctx, op, arm64.SDIV, false)
 		case instr.I64_DIV_U:
@@ -359,28 +381,6 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 			ok = l.i64Shift(ctx, op, arm64.ASR, false)
 		case instr.I64_SHR_U:
 			ok = l.i64Shift(ctx, op, arm64.LSR, true)
-		case instr.I64_EQ:
-			ok = l.i64Cmp(ctx, arm64.CondEQ)
-		case instr.I64_NE:
-			ok = l.i64Cmp(ctx, arm64.CondNE)
-		case instr.I64_EQZ:
-			ok = l.i64Eqz(ctx)
-		case instr.I64_LT_S:
-			ok = l.i64Cmp(ctx, arm64.CondLT)
-		case instr.I64_LE_S:
-			ok = l.i64Cmp(ctx, arm64.CondLE)
-		case instr.I64_GT_S:
-			ok = l.i64Cmp(ctx, arm64.CondGT)
-		case instr.I64_GE_S:
-			ok = l.i64Cmp(ctx, arm64.CondGE)
-		case instr.I64_LT_U:
-			ok = l.i64Cmp(ctx, arm64.CondCC)
-		case instr.I64_LE_U:
-			ok = l.i64Cmp(ctx, arm64.CondLS)
-		case instr.I64_GT_U:
-			ok = l.i64Cmp(ctx, arm64.CondHI)
-		case instr.I64_GE_U:
-			ok = l.i64Cmp(ctx, arm64.CondCS)
 		case instr.I32_TO_I64_S:
 			ok = l.i32ToI64(ctx, l.sign32)
 		case instr.I32_TO_I64_U:
@@ -403,12 +403,6 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 			ok = l.f64ToI64(ctx, op, arm64.FCVTZS)
 		case instr.F64_TO_I64_U:
 			ok = l.f64ToI64(ctx, op, arm64.FCVTZU)
-		case instr.I64_AND:
-			ok = l.i64Binary(ctx, op, arm64.AND, false)
-		case instr.I64_OR:
-			ok = l.i64Binary(ctx, op, arm64.ORR, false)
-		case instr.I64_XOR:
-			ok = l.i64Binary(ctx, op, arm64.EOR, false)
 		case instr.I32_CLZ:
 			ok = l.countZeros(ctx, types.KindI32, false)
 		case instr.I32_CTZ:
@@ -500,26 +494,21 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 			ok = l.refGet(ctx, op)
 		case instr.ARRAY_LEN:
 			ok = l.arrayLen(ctx, op)
-		case instr.ARRAY_GET:
-			if !l.arrayGet(ctx, op) {
-				return false
-			}
-			ok = true
 		case instr.ARRAY_SET:
 			if !l.arraySet(ctx, op) {
-				return false
+				return false, false
 			}
-			return idx == len(ops)-1
+			return true, idx == len(ops)-1
 		case instr.STRUCT_GET:
 			if !l.structGet(ctx, op) {
-				return false
+				return false, false
 			}
 			ok = true
 		case instr.STRUCT_SET:
 			if !l.structSet(ctx, op) {
-				return false
+				return false, false
 			}
-			return idx == len(ops)-1
+			return true, idx == len(ops)-1
 		case instr.ERROR_GET:
 			ok = l.errorGet(ctx, op)
 		case instr.CORO_DONE:
@@ -544,38 +533,40 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 			instr.MAP_KEYS,
 			instr.MAP_ITER:
 			if !l.exit(ctx, op.ip) {
-				return false
+				return false, false
 			}
-			return idx == len(ops)-1
+			return true, idx == len(ops)-1
 		case instr.ERROR_NEW, instr.ERROR_CODE, instr.THROW:
 			// Allocation and handler landing stay interpreter-owned. Resume at
 			// op.ip because each threaded handler performs its own IP update or
 			// handler transfer.
 			if !l.exit(ctx, op.ip) {
-				return false
+				return false, false
 			}
-			return idx == len(ops)-1
+			return true, idx == len(ops)-1
 		case instr.YIELD, instr.RESUME:
 			// True suspension points: deopt to the threaded handler, which runs
 			// the real suspend/resume. Resume at op.ip (not op.ip+1) because the
 			// YIELD and RESUME handlers perform their own ip advance.
 			if !l.exit(ctx, op.ip) {
-				return false
+				return false, false
 			}
-			return idx == len(ops)-1
-		case instr.BR_IF:
-			ok = l.brIf(ctx, op, l.callerTail(ops, idx, tail))
+			return true, idx == len(ops)-1
 		case instr.CALL:
-			ok = l.call(ctx, op)
+			if op.known {
+				ok = l.directCall(ctx, op)
+			} else {
+				ok = l.call(ctx, op)
+			}
 		case instr.RETURN_CALL:
 			// A tail call back to the trace anchor closes the loop with a native
 			// back-edge (terminal); a tail call to another function morphs the
 			// current frame into the callee in place and keeps walking.
 			if op.callee == ctx.addr {
 				if !l.tailLoop(ctx, op) {
-					return false
+					return false, false
 				}
-				return idx == len(ops)-1
+				return true, idx == len(ops)-1
 			}
 			ok = l.tailMorph(ctx, op)
 		case instr.RETURN:
@@ -584,58 +575,21 @@ func (l arm64Lowerer) walk(ctx *lowering, ops, tail []step, kind outcome) bool {
 				break
 			}
 			if !l.ret(ctx) {
-				return false
+				return false, false
 			}
-			return idx == len(ops)-1
+			return true, idx == len(ops)-1
 		}
 		if !ok {
-			return false
+			return false, false
 		}
 	}
-	if len(tail) > 0 {
-		label, ok := ctx.tails[&tail[0]]
-		if !l.flush(ctx, false) {
-			return false
-		}
-		if !ok {
-			label = ctx.assembler.Label()
-			ctx.tails[&tail[0]] = label
-			p := pending{label: label, ops: tail}
-			p.values, p.frames = ctx.snapshot()
-			ctx.pending = append(ctx.pending, p)
-		}
-		ctx.assembler.Emit(arm64.BLabel(label))
-		return true
-	}
-	// A fragment whose ops ran out without hitting an explicit terminal case
-	// above (RETURN, ARRAY_SET/STRUCT_SET, a tail loop back-edge, ...) may
-	// fall through as done here — reporting trapNone and returning to the
-	// caller — whenever its own recorded outcome says the recorded path
-	// genuinely ended cleanly: completed (reached the top-level function's
-	// end) or returned (e.g. a nested inlined callee's RETURN popped back to
-	// the caller, handled by the RETURN case's stitch()+break above, leaving
-	// the caller's remaining ops as the fragment's natural end). A tail
-	// fragment's zero-value kind (see the pending literal above, which
-	// doesn't set kind) is likewise not aborted and may fall through.
-	//
-	// Only aborted must never fall through: it recorded a prefix and hit an
-	// unsupported op, so completing here would silently execute a caller's
-	// entry-trace-shaped ending against the wrong path. A partial fragment
-	// always ends in its own recorded cut step (handled above) and never
-	// reaches this point. Checking the root's kind instead of the current
-	// fragment's own kind was the bug this replaced: a side-exit
-	// continuation that itself aborted could be lowered as if it had
-	// completed normally, because the entry root's kind is completed.
-	if kind != aborted {
-		return l.complete(ctx)
-	}
-	return false
+	return false, true
 }
 
 // fuse lowers short sequences whose intermediate ref ownership can be
 // eliminated safely. It returns the number of steps lowered; a miss leaves
 // standalone lowering untouched, while false rejects native compilation.
-func (l arm64Lowerer) fuse(ctx *lowering, ops, tail []step, idx int) (int, bool) {
+func (l arm64Lowerer) fuse(ctx *lowering, ops []step, idx int) (int, bool) {
 	if idx+1 >= len(ops) || !l.adjacent(ops[idx], ops[idx+1]) {
 		return 0, true
 	}
@@ -644,17 +598,16 @@ func (l arm64Lowerer) fuse(ctx *lowering, ops, tail []step, idx int) (int, bool)
 	if l.target(ctx, source, consumer) {
 		return 1, true
 	}
-	return l.consume(ctx, ops, tail, idx)
+	return l.consume(ctx, ops, idx)
 }
 
 // target replaces a constant function load with a raw call marker. CALL and
-// RETURN_CALL remain in walk, which owns frame and terminal control flow.
+// RETURN_CALL remain in steps, which owns frame-changing operations.
 func (l arm64Lowerer) target(ctx *lowering, source, consumer step) bool {
 	if source.op != instr.CONST_GET || (consumer.op != instr.CALL && consumer.op != instr.RETURN_CALL) {
 		return false
 	}
-	frame := ctx.frame()
-	constant := int(uint16(frame.code[source.ip+1]) | uint16(frame.code[source.ip+2])<<8)
+	constant := int(source.args[0])
 	if constant >= len(ctx.constants) || ctx.constants[constant].Kind() != types.KindRef {
 		return false
 	}
@@ -670,33 +623,27 @@ func (l arm64Lowerer) target(ctx *lowering, source, consumer step) bool {
 	default:
 		return false
 	}
-	if callee < 0 || callee >= len(ctx.funcs) || callee != consumer.callee || ctx.funcs[callee] == nil {
+	if callee != consumer.callee || resolve(ctx.module, ctx.heap, callee) == nil {
 		return false
 	}
 	ctx.push(value{fn: callee, kind: types.KindRef, raw: true, ref: ref})
 	return true
 }
 
-func (l arm64Lowerer) consume(ctx *lowering, ops, tail []step, idx int) (int, bool) {
+func (l arm64Lowerer) consume(ctx *lowering, ops []step, idx int) (int, bool) {
 	source := ops[idx]
 	consumer := ops[idx+1]
 	if consumer.op != instr.DROP && consumer.op != instr.REF_IS_NULL {
 		return 0, true
 	}
 	frame := ctx.frame()
-	consumed := 2
-	if consumer.op == instr.REF_IS_NULL && idx+2 < len(ops) {
-		branch := ops[idx+2]
-		if l.adjacent(consumer, branch) && branch.op == instr.BR_IF && (!ctx.loop || branch.target != ctx.tree.root.anchor.ip) {
-			consumed = 3
-		}
-	}
+	const consumed = 2
 
 	var reg asm.VReg
 	drop := consumer.op == instr.DROP
 	switch source.op {
 	case instr.LOCAL_GET:
-		slot := int(frame.code[source.ip+1])
+		slot := int(source.args[0])
 		if slot >= len(frame.kinds) || frame.kinds[slot] != types.KindRef {
 			return 0, true
 		}
@@ -708,7 +655,7 @@ func (l arm64Lowerer) consume(ctx *lowering, ops, tail []step, idx int) (int, bo
 		}
 		reg = frame.locals[slot].reg
 	case instr.GLOBAL_GET:
-		slot := int(uint16(frame.code[source.ip+1]) | uint16(frame.code[source.ip+2])<<8)
+		slot := int(source.args[0])
 		if slot >= len(ctx.globals) || slot > 4095 || ctx.globals[slot] != types.KindRef {
 			return 0, true
 		}
@@ -718,7 +665,7 @@ func (l arm64Lowerer) consume(ctx *lowering, ops, tail []step, idx int) (int, bo
 		reg = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(reg, ctx.pin(scratchGlobals), int16(slot*8)))
 	case instr.UPVAL_GET:
-		slot := int(frame.code[source.ip+1])
+		slot := int(source.args[0])
 		if slot >= len(frame.upvals) || frame.upvals[slot] != types.KindRef {
 			return 0, true
 		}
@@ -728,7 +675,7 @@ func (l arm64Lowerer) consume(ctx *lowering, ops, tail []step, idx int) (int, bo
 		reg = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(reg, l.upvalBase(ctx), int16(slot*8)))
 	case instr.CONST_GET:
-		constant := int(uint16(frame.code[source.ip+1]) | uint16(frame.code[source.ip+2])<<8)
+		constant := int(source.args[0])
 		if constant >= len(ctx.constants) || ctx.constants[constant].Kind() != types.KindRef {
 			return 0, true
 		}
@@ -772,9 +719,6 @@ func (l arm64Lowerer) consume(ctx *lowering, ops, tail []step, idx int) (int, bo
 	ctx.assembler.Emit(arm64.LDI(null, uint64(types.BoxedNull))...)
 	ctx.assembler.Emit(arm64.CMP(reg, null), arm64.CSET(result, arm64.CondEQ))
 	ctx.push(value{reg: result, kind: types.KindI1, raw: true})
-	if consumed == 3 && !l.brIf(ctx, ops[idx+2], l.callerTail(ops, idx+2, tail)) {
-		return 0, false
-	}
 	return consumed, true
 }
 
@@ -793,8 +737,7 @@ func (l arm64Lowerer) adjacent(a, b step) bool {
 }
 
 func (l arm64Lowerer) i32Const(ctx *lowering, op step) bool {
-	f := ctx.frame()
-	val := binary.LittleEndian.Uint32(f.code[op.ip+1 : op.ip+5])
+	val := uint32(op.args[0])
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDI(dst, uint64(val))...)
 	ctx.push(value{reg: dst, kind: types.KindI32, raw: true, known: true, imm: int64(int32(val))})
@@ -802,8 +745,7 @@ func (l arm64Lowerer) i32Const(ctx *lowering, op step) bool {
 }
 
 func (l arm64Lowerer) i64Const(ctx *lowering, op step) bool {
-	f := ctx.frame()
-	val := int64(binary.LittleEndian.Uint64(f.code[op.ip+1 : op.ip+9]))
+	val := int64(op.args[0])
 	if !types.IsBoxable(val) {
 		return false
 	}
@@ -814,8 +756,7 @@ func (l arm64Lowerer) i64Const(ctx *lowering, op step) bool {
 }
 
 func (l arm64Lowerer) f32Const(ctx *lowering, op step) bool {
-	f := ctx.frame()
-	bits := binary.LittleEndian.Uint32(f.code[op.ip+1 : op.ip+5])
+	bits := uint32(op.args[0])
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDI(dst, uint64(bits))...)
 	ctx.push(value{reg: dst, kind: types.KindF32, raw: true})
@@ -823,8 +764,7 @@ func (l arm64Lowerer) f32Const(ctx *lowering, op step) bool {
 }
 
 func (l arm64Lowerer) f64Const(ctx *lowering, op step) bool {
-	f := ctx.frame()
-	bits := binary.LittleEndian.Uint64(f.code[op.ip+1 : op.ip+9])
+	bits := op.args[0]
 	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDI(dst, bits)...)
 	ctx.push(value{reg: dst, kind: types.KindF64, raw: true})
@@ -838,8 +778,7 @@ func (l arm64Lowerer) unreachable(ctx *lowering, op step) bool {
 // constGet pushes a scalar constant as an unboxed immediate. Refs retain
 // ordinary standalone ownership; call-target fusion owns direct markers.
 func (l arm64Lowerer) constGet(ctx *lowering, op step) bool {
-	f := ctx.frame()
-	idx := int(uint16(f.code[op.ip+1]) | uint16(f.code[op.ip+2])<<8)
+	idx := int(op.args[0])
 	if idx >= len(ctx.constants) {
 		return false
 	}
@@ -869,7 +808,7 @@ func (l arm64Lowerer) constGet(ctx *lowering, op step) bool {
 		boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDI(boxed, uint64(v))...)
 		l.retain(ctx, ref)
-		ctx.push(value{reg: boxed, kind: types.KindRef, raw: false})
+		ctx.push(value{reg: boxed, kind: types.KindRef, raw: false, ref: ref})
 		return true
 	}
 	return false
@@ -877,7 +816,7 @@ func (l arm64Lowerer) constGet(ctx *lowering, op step) bool {
 
 func (l arm64Lowerer) localGet(ctx *lowering, op step) bool {
 	f := ctx.frame()
-	idx := int(f.code[op.ip+1])
+	idx := int(op.args[0])
 	if idx >= len(f.kinds) {
 		return false
 	}
@@ -896,7 +835,7 @@ func (l arm64Lowerer) localGet(ctx *lowering, op step) bool {
 
 func (l arm64Lowerer) localSet(ctx *lowering, op step, pop bool) bool {
 	f := ctx.frame()
-	idx := int(f.code[op.ip+1])
+	idx := int(op.args[0])
 	if idx >= len(f.kinds) || ctx.count() < 1 {
 		return false
 	}
@@ -1016,8 +955,7 @@ func (l arm64Lowerer) globalSet(ctx *lowering, op step, pop bool) bool {
 // input is seeded via SetGlobal before Run, so the entry trace already observes
 // it. Out-of-range indices and offsets past the 12-bit LDR/STR limit reject.
 func (l arm64Lowerer) global(ctx *lowering, op step) (int, types.Kind, bool) {
-	f := ctx.frame()
-	idx := int(uint16(f.code[op.ip+1]) | uint16(f.code[op.ip+2])<<8)
+	idx := int(op.args[0])
 	if idx >= len(ctx.globals) || idx > 4095 {
 		return 0, 0, false
 	}
@@ -1087,6 +1025,609 @@ func (l arm64Lowerer) selectOp(ctx *lowering) bool {
 	ctx.assembler.Emit(arm64.CSEL(dst, v1.reg, v2.reg, arm64.CondNE))
 	ctx.push(value{reg: dst, kind: v1.kind, raw: true})
 	return true
+}
+
+// base returns &stack[bp] for slot-relative loads and stores.
+func (l arm64Lowerer) base(ctx *lowering, vStack asm.VReg) asm.VReg {
+	a := ctx.assembler
+	vBP := ctx.pin(scratchBP)
+	off := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LSLI(off, vBP, 3))
+	addr := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ADD(addr, vStack, off))
+	return addr
+}
+
+// operands pops a typed binary-op pair after checking both kinds.
+func (l arm64Lowerer) operands(ctx *lowering, kind types.Kind) (value, value, bool) {
+	if ctx.count() < 2 || !l.kinds(ctx, kind, 2) {
+		return value{}, value{}, false
+	}
+	b := ctx.pop()
+	a := ctx.pop()
+	return b, a, true
+}
+
+// kinds reports whether the top n operands are all raw and computable as kind.
+// The match is by representation, so the narrow integer kinds (i1, i8) satisfy
+// an i32 operand exactly as they do in the interpreter; for every other kind
+// Repr is the identity, so the check stays exact.
+func (l arm64Lowerer) kinds(ctx *lowering, kind types.Kind, n int) bool {
+	for k := 0; k < n; k++ {
+		v := ctx.values[len(ctx.values)-1-k]
+		if v.kind.Repr() != kind.Repr() || !v.raw {
+			return false
+		}
+	}
+	return true
+}
+
+// args verifies the top params operands match the callee's declared
+// parameter kinds.
+func (l arm64Lowerer) args(ctx *lowering, target *types.Function, params int) bool {
+	kinds := target.LocalKinds()
+	if len(kinds) < params {
+		return false
+	}
+	for k := 0; k < params; k++ {
+		v := ctx.values[len(ctx.values)-params+k]
+		if v.kind != kinds[k] {
+			return false
+		}
+		if v.kind == types.KindRef {
+			if v.raw {
+				return false
+			}
+			continue
+		}
+		if !v.raw {
+			return false
+		}
+	}
+	return true
+}
+
+// marked reports whether a raw ref marker blocks deferred continuation reload.
+func (l arm64Lowerer) marked(ctx *lowering) bool {
+	for _, v := range ctx.values {
+		if v.kind == types.KindRef && v.raw {
+			return true
+		}
+	}
+	return false
+}
+
+// clean reports whether a branch can skip the hot-path flush: no live operand
+// or dirty local will be reloaded from VM stack homes later in the trace.
+func (l arm64Lowerer) clean(ctx *lowering) bool {
+	if ctx.count() != 0 {
+		return false
+	}
+	for fi := range ctx.frames {
+		f := &ctx.frames[fi]
+		for idx := range f.dirty {
+			if f.dirty[idx] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// setBool pushes a comparison/test result as i1: every caller is an
+// eqz/eq/lt/.../is_null/test whose result kind is i1 (matching the interpreter,
+// which boxes these through BoxI1). The 0/1 flag still satisfies any later
+// i32 operand because kinds compares by representation.
+func (l arm64Lowerer) setBool(ctx *lowering, cond uint8) {
+	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.CSET(flag, cond))
+	ctx.push(value{reg: flag, kind: types.KindI1, raw: true})
+}
+
+// sign32 sign-extends a raw i32's low lane for signed division and
+// shifts; zero32 zero-extends it for their unsigned counterparts.
+func (l arm64Lowerer) sign32(ctx *lowering, v asm.VReg) asm.VReg {
+	out := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.SXTW(out, v))
+	return out
+}
+
+func (l arm64Lowerer) zero32(ctx *lowering, v asm.VReg) asm.VReg {
+	out := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ANDI(out, v, maskI32))
+	return out
+}
+
+func (arm64Lowerer) narrow32(v asm.VReg) asm.VReg {
+	return asm.NewVReg(v.ID(), v.Type(), asm.Width32)
+}
+
+func (l arm64Lowerer) constGetKnown(ctx *lowering, op step) bool {
+	idx := int(op.args[0])
+	if idx >= len(ctx.constants) {
+		return false
+	}
+	boxed := ctx.constants[idx]
+	if boxed.Kind() != types.KindRef {
+		return l.constGet(ctx, op)
+	}
+	ref := boxed.Ref()
+	if ref <= 0 || ref >= len(ctx.heap) {
+		return false
+	}
+	switch ctx.heap[ref].(type) {
+	case types.TypedArray[bool], types.TypedArray[int8], types.TypedArray[int32],
+		types.TypedArray[float32], types.TypedArray[float64]:
+		ctx.push(value{kind: types.KindRef, raw: true, ref: ref})
+		return true
+	default:
+		return l.constGet(ctx, op)
+	}
+}
+
+func (l arm64Lowerer) arrayGetKnown(ctx *lowering, op step) bool {
+	if ctx.count() < 2 || ctx.values[len(ctx.values)-1].kind != types.KindI32 {
+		return false
+	}
+	marker := ctx.values[len(ctx.values)-2]
+	constant := marker.ref
+	if !marker.raw || constant <= 0 || constant >= len(ctx.heap) {
+		return false
+	}
+
+	var kind types.Kind
+	var want uintptr
+	var scale uint8
+	switch value := ctx.heap[constant].(type) {
+	case types.TypedArray[bool]:
+		kind, want = types.KindI1, itab(value)
+	case types.TypedArray[int8]:
+		kind, want = types.KindI8, itab(value)
+	case types.TypedArray[int32]:
+		kind, want, scale = types.KindI32, itab(value), 2
+	case types.TypedArray[float32]:
+		kind, want, scale = types.KindF32, itab(value), 2
+	case types.TypedArray[float64]:
+		kind, want, scale = types.KindF64, itab(value), 3
+	default:
+		return false
+	}
+
+	pre := append([]value(nil), ctx.values...)
+	boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(boxed, uint64(types.BoxRef(constant)))...)
+	ctx.values[len(ctx.values)-2] = value{reg: boxed, kind: types.KindRef, raw: false, ref: constant}
+	if !l.flush(ctx, false) {
+		return false
+	}
+	clear(ctx.frame().loaded)
+	clear(ctx.frame().dirty)
+	fail := ctx.queueExit(nil, op.ip, constant)
+
+	a := ctx.assembler
+	heap := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journalHeap*8)))
+	off := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDI(off, uint64(constant))...)
+	a.Emit(arm64.LSLI(off, off, 4))
+	cell := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ADD(cell, heap, off))
+	actual := a.Reg(asm.RegTypeInt, asm.Width64)
+	data := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(actual, cell, 0), arm64.LDR(data, cell, 8))
+	l.guardItab(ctx, actual, want, fail)
+
+	idx := l.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
+	dataPtr, n := l.sliceHeader(ctx, data, 0)
+	l.guardIndex(ctx, idx, n, fail)
+	result := a.Reg(asm.RegTypeInt, asm.Width64)
+	switch kind {
+	case types.KindI1:
+		elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ADD(elemAddr, dataPtr, idx))
+		a.Emit(arm64.LDRB(result, elemAddr, 0))
+	case types.KindI8:
+		elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
+		elem := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ADD(elemAddr, dataPtr, idx))
+		a.Emit(arm64.LDRB(elem, elemAddr, 0))
+		a.Emit(arm64.SXTB(result, elem))
+	case types.KindI32, types.KindF32:
+		elemOff := a.Reg(asm.RegTypeInt, asm.Width64)
+		elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LSLI(elemOff, idx, scale))
+		a.Emit(arm64.ADD(elemAddr, dataPtr, elemOff))
+		a.Emit(arm64.LDRSW(result, elemAddr, 0))
+	case types.KindF64:
+		elemOff := a.Reg(asm.RegTypeInt, asm.Width64)
+		elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LSLI(elemOff, idx, scale))
+		a.Emit(arm64.ADD(elemAddr, dataPtr, elemOff))
+		a.Emit(arm64.LDR(result, elemAddr, 0))
+	}
+	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: kind, raw: true})
+	return true
+}
+
+const branchTableLimit = 32
+
+func (l arm64Lowerer) enterBlock(ctx *lowering, state []slot) {
+	ctx.values = ctx.values[:0]
+	for _, slot := range state {
+		ctx.values = append(ctx.values, value{kind: slot.kind, ref: slot.ref, raw: slot.refKnown})
+	}
+	frame := ctx.frame()
+	clear(frame.loaded)
+	clear(frame.dirty)
+	l.reload(ctx)
+}
+
+func (l arm64Lowerer) emitBlock(ctx *lowering, id int, tail []int) bool {
+	if id < 0 || id >= len(ctx.blocks) {
+		return false
+	}
+	block := ctx.blocks[id]
+	if block.state != nil {
+		l.enterBlock(ctx, block.state)
+	}
+	done, ok := l.steps(ctx, block.steps)
+	if !ok {
+		return false
+	}
+	if done {
+		return true
+	}
+	if block.term.kind == terminateFallthrough && len(tail) > 0 {
+		return l.follow(ctx, tail)
+	}
+	return l.term(ctx, block, tail)
+}
+
+func (l arm64Lowerer) term(ctx *lowering, block block, tail []int) bool {
+	switch block.term.kind {
+	case terminateFallthrough:
+		return true
+	case terminateBranch:
+		if len(block.term.edges) != 1 {
+			return false
+		}
+		target := block.term.edges[0]
+		if block.term.hot == 0 {
+			return l.next(ctx, block.anchor, target, tail)
+		}
+		if !l.flush(ctx, false) {
+			return false
+		}
+		return l.path(ctx, block.anchor, target, tail)
+	case terminateBranchIf:
+		return l.conditional(ctx, block, tail)
+	case terminateBranchTable:
+		return l.table(ctx, block, tail)
+	case terminateReturn:
+		if len(ctx.frames) > 1 {
+			if !l.stitch(ctx) {
+				return false
+			}
+			if len(tail) > 0 {
+				return l.follow(ctx, tail)
+			}
+			if ctx.kind == entryModule {
+				return l.complete(ctx)
+			}
+			return l.ret(ctx)
+		}
+		return l.ret(ctx)
+	case terminateComplete:
+		return l.complete(ctx)
+	case terminateFallback:
+		return l.exit(ctx, block.term.ip)
+	default:
+		return false
+	}
+}
+
+func (l arm64Lowerer) conditional(ctx *lowering, block block, tail []int) bool {
+	if len(block.term.edges) != 2 || ctx.count() < 1 || !l.kinds(ctx, types.KindI32, 1) {
+		return false
+	}
+	cond := ctx.pop()
+	if block.term.hot >= 0 && block.term.hot < len(block.term.edges) {
+		cold := 1 - block.term.hot
+		clean := l.clean(ctx)
+		if !clean && !l.flush(ctx, false) {
+			return false
+		}
+		target := block.term.edges[cold]
+		label, ok := l.label(ctx, target, join(target.tail, tail))
+		if !ok {
+			return false
+		}
+		if block.term.hot == 1 {
+			ctx.assembler.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), label))
+		} else {
+			ctx.assembler.Emit(arm64.CBZLabel(l.narrow32(cond.reg), label))
+		}
+		return l.next(ctx, block.anchor, block.term.edges[block.term.hot], tail)
+	}
+
+	if !l.flush(ctx, false) {
+		return false
+	}
+	taken := ctx.assembler.Label()
+	ctx.assembler.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), taken))
+	if !l.path(ctx, block.anchor, block.term.edges[1], tail) {
+		return false
+	}
+	ctx.assembler.Bind(taken)
+	return l.path(ctx, block.anchor, block.term.edges[0], tail)
+}
+
+func (l arm64Lowerer) table(ctx *lowering, block block, tail []int) bool {
+	if len(block.term.edges) == 0 || len(block.term.edges)-1 > branchTableLimit || ctx.count() < 1 || !l.kinds(ctx, types.KindI32, 1) {
+		return false
+	}
+	cond := ctx.pop()
+	value := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ANDI(value, cond.reg, maskI32))
+	if !l.flush(ctx, false) {
+		return false
+	}
+	labels := make([]asm.Label, len(block.term.edges))
+	for idx := range labels {
+		labels[idx] = ctx.assembler.Label()
+	}
+	for idx := 0; idx < len(labels)-1; idx++ {
+		ctx.assembler.Emit(arm64.CMPI(value, uint16(idx)))
+		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, labels[idx]))
+	}
+	ctx.assembler.Emit(arm64.BLabel(labels[len(labels)-1]))
+	for idx, label := range labels {
+		ctx.assembler.Bind(label)
+		if !l.path(ctx, block.anchor, block.term.edges[idx], tail) {
+			return false
+		}
+	}
+	return true
+}
+
+func (l arm64Lowerer) next(ctx *lowering, from anchor, target edge, tail []int) bool {
+	tail = join(target.tail, tail)
+	target.tail = nil
+	if target.anchor.addr == from.addr && target.anchor.ip <= from.ip {
+		if !l.flush(ctx, false) {
+			return false
+		}
+		return l.path(ctx, from, target, tail)
+	}
+	if target.block == noBlock {
+		return l.exit(ctx, target.anchor.ip)
+	}
+	return l.emitBlock(ctx, target.block, tail)
+}
+
+func (l arm64Lowerer) follow(ctx *lowering, tail []int) bool {
+	if len(tail) == 0 {
+		return true
+	}
+	if !l.flush(ctx, false) {
+		return false
+	}
+	id := tail[0]
+	if id < 0 || id >= len(ctx.blocks) || !ctx.blocks[id].tail {
+		return false
+	}
+	label := ctx.assembler.Label()
+	work := work{label: label, block: id, tail: tail[1:]}
+	work.values, work.frames = ctx.snapshot()
+	ctx.work = append(ctx.work, work)
+	ctx.assembler.Emit(arm64.BLabel(label))
+	return true
+}
+
+func join(steps, tail []int) []int {
+	if len(steps) == 0 {
+		return tail
+	}
+	if len(tail) == 0 {
+		return steps
+	}
+	return append(append([]int(nil), steps...), tail...)
+}
+
+func (l arm64Lowerer) path(ctx *lowering, from anchor, target edge, tail []int) bool {
+	tail = join(target.tail, tail)
+	target.tail = nil
+	label, ok := l.label(ctx, target, tail)
+	if !ok {
+		return false
+	}
+	if target.anchor.addr == from.addr && target.anchor.ip <= from.ip {
+		a := ctx.assembler
+		vCtrl := ctx.pin(scratchCtrl)
+		budget := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LDR(budget, vCtrl, int16(journalBudget*8)))
+		a.Emit(arm64.SUBI(budget, budget, 1))
+		a.Emit(arm64.STR(budget, vCtrl, int16(journalBudget*8)))
+		a.Emit(arm64.CBNZLabel(budget, label))
+		l.trapFlushed(ctx, trapYield, target.anchor.ip)
+		return true
+	}
+	ctx.assembler.Emit(arm64.BLabel(label))
+	return true
+}
+
+func (l arm64Lowerer) label(ctx *lowering, target edge, tail []int) (asm.Label, bool) {
+	if target.block == noBlock {
+		return ctx.queueExit(nil, target.anchor.ip, 0), true
+	}
+	if target.block < 0 || target.block >= len(ctx.blocks) {
+		return 0, false
+	}
+	block := ctx.blocks[target.block]
+	if block.state != nil {
+		return ctx.labels[target.block], true
+	}
+	if l.marked(ctx) || ctx.scheduled >= continuationLimit {
+		return ctx.queueExit(nil, target.anchor.ip, 0), true
+	}
+	label := ctx.assembler.Label()
+	work := work{label: label, block: target.block, tail: tail}
+	work.values, work.frames = ctx.snapshot()
+	ctx.work = append(ctx.work, work)
+	ctx.scheduled++
+	return label, true
+}
+
+func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
+	target := resolve(ctx.module, ctx.heap, op.callee)
+	if op.callee == ctx.addr || target == nil || target.Typ == nil || ctx.count() < 1 {
+		return false
+	}
+	params := len(target.Typ.Params)
+	if ctx.count() < params+1 {
+		return false
+	}
+	for _, typ := range target.Typ.Returns {
+		switch typ.Kind() {
+		case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
+		default:
+			return false
+		}
+	}
+
+	a := ctx.assembler
+	vCtrl := ctx.pin(scratchCtrl)
+	natives := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(natives, vCtrl, int16(journalNatives*8)))
+	callee := a.Reg(asm.RegTypeInt, asm.Width64)
+	if op.callee > 4095 {
+		return false
+	}
+	a.Emit(arm64.LDR(callee, natives, int16(op.callee*8)))
+	ready := a.Label()
+	a.Emit(arm64.CBNZLabel(callee, ready))
+	if !l.exit(ctx, op.ip) {
+		return false
+	}
+	a.Bind(ready)
+
+	marker := ctx.pop()
+	if marker.fn != op.callee || ctx.count() < params || !l.args(ctx, target, params) {
+		return false
+	}
+	if !l.flush(ctx, false) {
+		return false
+	}
+
+	active := ctx.pinTo(arm64.X15)
+	limit := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(limit, vCtrl, int16(journalCap*8)))
+	a.Emit(arm64.CMP(active, limit))
+	hasFrame := a.Label()
+	a.Emit(arm64.BCondLabel(arm64.OpBCC, hasFrame))
+	l.overflow(ctx, op)
+	a.Bind(hasFrame)
+	a.Emit(arm64.ADDI(active, active, 1))
+	a.Emit(arm64.STR(active, vCtrl, int16(journalActive*8)))
+
+	vBP := ctx.pin(scratchBP)
+	nextSP := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ADDI(nextSP, vBP, uint16(ctx.sp())))
+	oldBP := ctx.scratch[scratchBP]
+	oldSP := ctx.scratch[scratchSP]
+	a.Emit(
+		arm64.SUBI(arm64.SP, arm64.SP, 32),
+		arm64.STP(oldBP, oldSP, arm64.SP, 0),
+		arm64.STR(arm64.LR, arm64.SP, 16),
+	)
+	calleeBP := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.SUBI(calleeBP, nextSP, uint16(params)))
+	a.Emit(arm64.MOV(ctx.pinTo(oldBP), calleeBP))
+
+	localKinds := target.LocalKinds()
+	if len(localKinds) > params {
+		stack := ctx.pin(scratchStack)
+		base := l.base(ctx, stack)
+		for idx := params; idx < len(localKinds); idx++ {
+			zero, ok := zeroValue(localKinds[idx])
+			if !ok {
+				return false
+			}
+			reg := a.Reg(asm.RegTypeInt, asm.Width64)
+			a.Emit(arm64.LDI(reg, uint64(zero))...)
+			a.Emit(arm64.STR(reg, base, int16((ctx.sp()-params+idx)*8)))
+		}
+	}
+	calleeSP := calleeBP
+	if len(localKinds) > 0 {
+		calleeSP = a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ADDI(calleeSP, calleeBP, uint16(len(localKinds))))
+	}
+	a.Emit(arm64.MOV(ctx.pinTo(oldSP), calleeSP))
+	a.Emit(arm64.MOV(arm64.X0, vCtrl))
+	a.Emit(arm64.BLR(callee))
+
+	vCtrl = ctx.pin(scratchCtrl)
+	trap := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(trap, vCtrl, int16(journalTrap*8)))
+	normal := a.Label()
+	a.Emit(arm64.CBZLabel(trap, normal), arm64.LDR(oldBP, arm64.SP, 0))
+	l.unwind(ctx, vCtrl, op.ip+1)
+	a.Emit(
+		arm64.LDR(arm64.LR, arm64.SP, 16),
+		arm64.ADDI(arm64.SP, arm64.SP, 32),
+		arm64.RET(),
+	)
+	a.Bind(normal)
+
+	active = ctx.pinTo(arm64.X15)
+	a.Emit(arm64.SUBI(active, active, 1))
+	a.Emit(arm64.STR(active, vCtrl, int16(journalActive*8)))
+	a.Emit(
+		arm64.LDP(oldBP, oldSP, arm64.SP, 0),
+		arm64.LDR(arm64.LR, arm64.SP, 16),
+		arm64.ADDI(arm64.SP, arm64.SP, 32),
+	)
+
+	rets := target.Typ.Returns
+	regs := make([]asm.VReg, len(rets))
+	for idx := range rets {
+		if idx >= len(arm64.IntRets) {
+			return false
+		}
+		regs[idx] = ctx.pinTo(arm64.IntRets[idx])
+	}
+	ctx.values = ctx.values[:len(ctx.values)-params]
+	for fi := range ctx.frames {
+		clear(ctx.frames[fi].loaded)
+		clear(ctx.frames[fi].dirty)
+	}
+	l.reload(ctx)
+	for idx, typ := range rets {
+		ctx.push(value{reg: regs[idx], kind: typ.Kind(), raw: true})
+	}
+	return true
+}
+
+func zeroValue(kind types.Kind) (types.Boxed, bool) {
+	switch kind {
+	case types.KindI1:
+		return types.BoxI1(false), true
+	case types.KindI8:
+		return types.BoxI8(0), true
+	case types.KindI32:
+		return types.BoxI32(0), true
+	case types.KindI64:
+		return types.BoxI64(0), true
+	case types.KindF32:
+		return types.BoxF32(0), true
+	case types.KindF64:
+		return types.BoxF64(0), true
+	case types.KindRef:
+		return types.BoxedNull, true
+	default:
+		return 0, false
+	}
 }
 
 func (l arm64Lowerer) i32Binary(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
@@ -1801,187 +2342,6 @@ func (l arm64Lowerer) sign64(ctx *lowering, v asm.VReg) asm.VReg {
 	return out
 }
 
-// callerTail returns the remaining recorded caller path after the current
-// inlined frame returns. A non-empty tail marks the branch as caller-dependent,
-// so it falls back instead of ending at the callee RETURN.
-//
-// ops is only the fragment being walked; tail is that fragment's own
-// continuation — the caller path a pending leg still owes. When the current
-// frame's return is not represented inside ops (every remaining step sits at the
-// branch's depth or deeper), the resume point lives in tail, so a branch nested
-// inside a learned leg must inherit tail rather than truncate at the leg's end.
-// Chaining the within-ops suffix onto tail keeps that caller path whole.
-func (l arm64Lowerer) callerTail(ops []step, idx int, tail []step) []step {
-	depth := ops[idx].depth
-	for at := idx + 1; at < len(ops); at++ {
-		if ops[at].depth < depth {
-			if len(tail) == 0 {
-				return ops[at:]
-			}
-			return append(append([]step(nil), ops[at:]...), tail...)
-		}
-	}
-	return tail
-}
-
-// brIf lets the recorded direction fall through and branches on divergence.
-func (l arm64Lowerer) brIf(ctx *lowering, op step, tail []step) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindI32, 1) {
-		return false
-	}
-	cond := ctx.pop()
-	taken := op.taken
-	diverge := op.target
-	if taken {
-		diverge = op.ip + 3
-	}
-
-	if l.clean(ctx) {
-		label, ok := l.branchClean(ctx, diverge, tail)
-		if !ok {
-			return false
-		}
-		if taken {
-			ctx.assembler.Emit(arm64.CBZLabel(l.narrow32(cond.reg), label))
-		} else {
-			ctx.assembler.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), label))
-		}
-		return true
-	}
-
-	label, ok := l.branchOrExit(ctx, diverge, tail)
-	if !ok {
-		return false
-	}
-	if taken {
-		ctx.assembler.Emit(arm64.CBZLabel(l.narrow32(cond.reg), label))
-	} else {
-		ctx.assembler.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), label))
-	}
-	return true
-}
-
-func (l arm64Lowerer) brTable(ctx *lowering, op step, tail []step) bool {
-	if ctx.count() < 1 || !l.kinds(ctx, types.KindI32, 1) {
-		return false
-	}
-	f := ctx.frame()
-	count := int(f.code[op.ip+1])
-	width := count*2 + 4
-	targets := make([]int, count+1)
-	for i := range targets {
-		at := op.ip + 2 + i*2
-		targets[i] = op.ip + width + int(int16(binary.LittleEndian.Uint16(f.code[at:at+2])))
-	}
-
-	cond := ctx.pop()
-	condI32 := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ANDI(condI32, cond.reg, maskI32))
-	clean := l.clean(ctx)
-	if !clean && !l.flush(ctx, false) {
-		return false
-	}
-
-	next := ctx.assembler.Label()
-	for idx := 0; idx < count; idx++ {
-		if targets[idx] == op.target {
-			ctx.assembler.Emit(arm64.CMPI(condI32, uint16(idx)))
-			ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, next))
-			continue
-		}
-		skip := ctx.assembler.Label()
-		ctx.assembler.Emit(arm64.CMPI(condI32, uint16(idx)))
-		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, skip))
-		var label asm.Label
-		var ok bool
-		if clean {
-			label, ok = l.branchClean(ctx, targets[idx], tail)
-		} else {
-			label, ok = l.branchOrExit(ctx, targets[idx], tail)
-		}
-		if !ok {
-			return false
-		}
-		ctx.assembler.Emit(arm64.BLabel(label))
-		ctx.assembler.Bind(skip)
-	}
-	if targets[count] != op.target {
-		var label asm.Label
-		var ok bool
-		if clean {
-			label, ok = l.branchClean(ctx, targets[count], tail)
-		} else {
-			label, ok = l.branchOrExit(ctx, targets[count], tail)
-		}
-		if !ok {
-			return false
-		}
-		ctx.assembler.Emit(arm64.BLabel(label))
-	}
-	ctx.assembler.Bind(next)
-	return true
-}
-
-// branchOrExit returns a learned continuation label, or a deopt label.
-func (l arm64Lowerer) branchOrExit(ctx *lowering, ip int, tail []step) (asm.Label, bool) {
-	if label, ok := l.continuation(ctx, ip, tail, true); ok {
-		return label, true
-	}
-	return l.sideExit(ctx, ctx.values, ip)
-}
-
-// branchClean returns a learned continuation or deopt label when the caller has
-// already proven branch flush would be a no-op.
-func (l arm64Lowerer) branchClean(ctx *lowering, ip int, tail []step) (asm.Label, bool) {
-	if label, ok := l.continuation(ctx, ip, tail, false); ok {
-		return label, true
-	}
-	label := ctx.assembler.Label()
-	values, frames := ctx.snapshot()
-	ctx.exits = append(ctx.exits, sideExit{label: label, values: values, frames: frames, resume: ip})
-	return label, true
-}
-
-// continuation materializes the current symbolic state and returns a native
-// label for a learned branch target, or false when the target is not eligible
-// (no learned trace, a marked stack, or too many pending continuations).
-// Flushed callers write VM stack homes before jumping to the reloading branch
-// body; clean callers skip the no-op flush after proving those homes are
-// already current. Caller-tailed continuations compile as distinct pending
-// blocks because the same branch target may need different caller remainders.
-func (l arm64Lowerer) continuation(ctx *lowering, ip int, tail []step, flush bool) (asm.Label, bool) {
-	target := branch{fn: ctx.frame().addr, ip: ip}
-	leg := ctx.branches[target]
-	// Loop roots require the loop lowering mode: it turns their recorded
-	// back-edge into a real native back-edge with a safepoint budget. Inlining
-	// one as an ordinary continuation would instead treat the recorded path as
-	// top-level completion and return after a single iteration. Exit to the
-	// threaded loop header so its independently compiled loop entry runs.
-	// An aborted leg recorded only a partial, unsupported fragment (already
-	// excluded from ctx.branches by tree.branchIPs); the check is repeated
-	// here as a direct safeguard against inlining it as a continuation.
-	if leg.trace == nil || leg.trace.kind == loop || leg.trace.kind == aborted || l.marked(ctx) || ctx.pendingBranches >= pendingLimit {
-		return 0, false
-	}
-	if flush && !l.flush(ctx, false) {
-		return 0, false
-	}
-	if len(tail) == 0 {
-		if label, ok := ctx.queued[target]; ok {
-			return label, true
-		}
-	}
-	label := ctx.assembler.Label()
-	if len(tail) == 0 {
-		ctx.queued[target] = label
-	}
-	p := pending{label: label, ops: leg.trace.ops, tail: tail, kind: leg.trace.kind, hits: leg.hits}
-	p.values, p.frames = ctx.snapshot()
-	ctx.pending = append(ctx.pending, p)
-	ctx.pendingBranches++
-	return label, true
-}
-
 // call lowers a recorded CALL. The callee marker must resolve to an observed
 // function ref: a self-call becomes a framed native BL into this trace's own
 // head, and non-self callees inline as fused frames the deopt path can rebuild.
@@ -1993,7 +2353,7 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 	if v.kind != types.KindRef {
 		return false
 	}
-	target := ctx.funcs[op.callee]
+	target := resolve(ctx.module, ctx.heap, op.callee)
 	if target == nil || target.Typ == nil {
 		return false
 	}
@@ -2219,7 +2579,7 @@ func (l arm64Lowerer) tailTarget(ctx *lowering, op step) (*types.Function, int, 
 	if v.kind != types.KindRef {
 		return nil, 0, false
 	}
-	target := ctx.funcs[op.callee]
+	target := resolve(ctx.module, ctx.heap, op.callee)
 	if target == nil || target.Typ == nil || len(target.Captures) > 0 {
 		return nil, 0, false
 	}
@@ -2317,7 +2677,7 @@ func (l arm64Lowerer) tailLoop(ctx *lowering, op step) bool {
 // tailMorph lowers a tail call to a different function by reusing the current
 // frame in place: the activation is replaced by the callee at the same base,
 // its params seeded from the arguments and its other locals reset, then the
-// walk continues into the callee's body. The frame record save/unwind writes
+// step emission continues into the callee's body. The frame record save/unwind writes
 // describes the callee, so a later trap rebuilds the reused frame as the callee
 // exactly as threaded tail() leaves it.
 func (l arm64Lowerer) tailMorph(ctx *lowering, op step) bool {
@@ -2396,7 +2756,7 @@ func (l arm64Lowerer) complete(ctx *lowering) bool {
 	sp := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.ADDI(sp, vBP, uint16(ctx.sp())))
 	a.Emit(arm64.STR(sp, vCtrl, int16(journalSP*8)))
-	l.report(ctx, vCtrl, trapNone, len(ctx.frame().code))
+	l.report(ctx, vCtrl, trapNone, ctx.frame().end)
 	a.Emit(
 		arm64.RET(),
 	)
@@ -2443,45 +2803,9 @@ func (l arm64Lowerer) sideExit(ctx *lowering, pre []value, resume int) (asm.Labe
 	if !l.flush(ctx, false) {
 		return 0, false
 	}
-	label := ctx.assembler.Label()
-	values, frames := ctx.snapshot()
-	ctx.exits = append(ctx.exits, sideExit{label: label, values: values, frames: frames, resume: resume})
+	label := ctx.queueExit(nil, resume, 0)
 	ctx.values = append(ctx.values[:0], pre...)
 	return label, true
-}
-
-// backedge closes one loop iteration at a header-targeted branch. An
-// unconditional BR always loops; a BR_IF loops while its condition still
-// matches the recorded direction and otherwise exits to the fallthrough. Loop
-// carried locals are committed to the VM stack before any split so both the
-// looping and the exit path read them back consistently.
-func (l arm64Lowerer) backedge(ctx *lowering, op step) bool {
-	header := ctx.tree.root.anchor.ip
-	a := ctx.assembler
-	if op.op == instr.BR_IF {
-		if ctx.count() < 1 || !l.kinds(ctx, types.KindI32, 1) {
-			return false
-		}
-		cond := ctx.pop()
-		if !l.flush(ctx, true) {
-			return false
-		}
-		exit := a.Label()
-		if op.taken {
-			a.Emit(arm64.CBZLabel(l.narrow32(cond.reg), exit))
-		} else {
-			a.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), exit))
-		}
-		if !l.iterate(ctx, header) {
-			return false
-		}
-		a.Bind(exit)
-		return l.exit(ctx, op.ip+3)
-	}
-	if !l.flush(ctx, true) {
-		return false
-	}
-	return l.iterate(ctx, header)
 }
 
 // iterate spends one unit of the safepoint budget at a loop back-edge:
@@ -2622,7 +2946,7 @@ func (l arm64Lowerer) loadLocal(ctx *lowering, f *activation, idx, ip int) bool 
 
 func (l arm64Lowerer) upvalGet(ctx *lowering, op step) bool {
 	f := ctx.frame()
-	idx := int(f.code[op.ip+1])
+	idx := int(op.args[0])
 	if idx >= len(f.upvals) {
 		return false
 	}
@@ -2647,7 +2971,7 @@ func (l arm64Lowerer) upvalGet(ctx *lowering, op step) bool {
 
 func (l arm64Lowerer) upvalSet(ctx *lowering, op step) bool {
 	f := ctx.frame()
-	idx := int(f.code[op.ip+1])
+	idx := int(op.args[0])
 	if idx >= len(f.upvals) || ctx.count() < 1 {
 		return false
 	}
@@ -3592,119 +3916,4 @@ func (arm64Lowerer) rcBase(ctx *lowering) asm.VReg {
 	base := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(base, ctx.pin(scratchCtrl), int16(journalRC*8)))
 	return base
-}
-
-// base returns &stack[bp] for slot-relative loads and stores.
-func (l arm64Lowerer) base(ctx *lowering, vStack asm.VReg) asm.VReg {
-	a := ctx.assembler
-	vBP := ctx.pin(scratchBP)
-	off := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LSLI(off, vBP, 3))
-	addr := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.ADD(addr, vStack, off))
-	return addr
-}
-
-// operands pops a typed binary-op pair after checking both kinds.
-func (l arm64Lowerer) operands(ctx *lowering, kind types.Kind) (value, value, bool) {
-	if ctx.count() < 2 || !l.kinds(ctx, kind, 2) {
-		return value{}, value{}, false
-	}
-	b := ctx.pop()
-	a := ctx.pop()
-	return b, a, true
-}
-
-// kinds reports whether the top n operands are all raw and computable as kind.
-// The match is by representation, so the narrow integer kinds (i1, i8) satisfy
-// an i32 operand exactly as they do in the interpreter; for every other kind
-// Repr is the identity, so the check stays exact.
-func (l arm64Lowerer) kinds(ctx *lowering, kind types.Kind, n int) bool {
-	for k := 0; k < n; k++ {
-		v := ctx.values[len(ctx.values)-1-k]
-		if v.kind.Repr() != kind.Repr() || !v.raw {
-			return false
-		}
-	}
-	return true
-}
-
-// args verifies the top params operands match the callee's declared
-// parameter kinds.
-func (l arm64Lowerer) args(ctx *lowering, target *types.Function, params int) bool {
-	kinds := target.LocalKinds()
-	if len(kinds) < params {
-		return false
-	}
-	for k := 0; k < params; k++ {
-		v := ctx.values[len(ctx.values)-params+k]
-		if v.kind != kinds[k] {
-			return false
-		}
-		if v.kind == types.KindRef {
-			if v.raw {
-				return false
-			}
-			continue
-		}
-		if !v.raw {
-			return false
-		}
-	}
-	return true
-}
-
-// marked reports whether a raw ref marker blocks pending continuation reload.
-func (l arm64Lowerer) marked(ctx *lowering) bool {
-	for _, v := range ctx.values {
-		if v.kind == types.KindRef && v.raw {
-			return true
-		}
-	}
-	return false
-}
-
-// clean reports whether a branch can skip the hot-path flush: no live operand
-// or dirty local will be reloaded from VM stack homes later in the trace.
-func (l arm64Lowerer) clean(ctx *lowering) bool {
-	if ctx.count() != 0 {
-		return false
-	}
-	for fi := range ctx.frames {
-		f := &ctx.frames[fi]
-		for idx := range f.dirty {
-			if f.dirty[idx] {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-// setBool pushes a comparison/test result as i1: every caller is an
-// eqz/eq/lt/.../is_null/test whose result kind is i1 (matching the interpreter,
-// which boxes these through BoxI1). The 0/1 flag still satisfies any later
-// i32 operand because kinds compares by representation.
-func (l arm64Lowerer) setBool(ctx *lowering, cond uint8) {
-	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.CSET(flag, cond))
-	ctx.push(value{reg: flag, kind: types.KindI1, raw: true})
-}
-
-// sign32 sign-extends a raw i32's low lane for signed division and
-// shifts; zero32 zero-extends it for their unsigned counterparts.
-func (l arm64Lowerer) sign32(ctx *lowering, v asm.VReg) asm.VReg {
-	out := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.SXTW(out, v))
-	return out
-}
-
-func (l arm64Lowerer) zero32(ctx *lowering, v asm.VReg) asm.VReg {
-	out := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ANDI(out, v, maskI32))
-	return out
-}
-
-func (arm64Lowerer) narrow32(v asm.VReg) asm.VReg {
-	return asm.NewVReg(v.ID(), v.Type(), asm.Width32)
 }

@@ -28,6 +28,11 @@ func NewBasicBlocksAnalysis() *BasicBlocksAnalysis {
 }
 
 func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*BasicBlock, error) {
+	return Blocks(fn)
+}
+
+// Blocks builds the control-flow blocks for fn.
+func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 	offsets := []int{0}
 	mark := func(ip, target int) error {
 		if target < 0 || target > len(fn.Code) {
@@ -109,7 +114,7 @@ func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*Basic
 		case instr.UNREACHABLE, instr.RETURN, instr.THROW:
 		case instr.BR, instr.BR_IF, instr.BR_TABLE:
 			for _, offset := range instr.Targets(fn.Code, ip) {
-				if !p.link(blocks, indexByStart, j, offset) {
+				if !link(blocks, indexByStart, j, offset) {
 					return nil, invalidJumpError(ip, offset)
 				}
 			}
@@ -133,7 +138,7 @@ func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*Basic
 	return blocks, nil
 }
 
-func (p *BasicBlocksAnalysis) link(blocks []*BasicBlock, indexByStart map[int]int, src, dst int) bool {
+func link(blocks []*BasicBlock, indexByStart map[int]int, src, dst int) bool {
 	// The past-the-end offset is a virtual exit, not an empty basic block.
 	if dst == blocks[len(blocks)-1].End {
 		return true

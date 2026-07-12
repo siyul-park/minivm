@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/asm/arm64"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -119,8 +120,8 @@ func TestInterpreter_JITArraySetAfterBranchyCallsInLoop(t *testing.T) {
 // miscompile where a captured side-exit fragment that recorded a few
 // supported opcodes and then aborted on an unsupported one (MAP_NEW_DEFAULT
 // is not recordable) could be mistaken for a normal top-level completion:
-// the walk that lowers a learned branch continuation used to check the
-// entry root's own outcome instead of the fragment actually being walked, so
+// lowering a learned continuation used to check the entry root rather than
+// the current block, so
 // an aborted fragment whose ops simply ran out could fall through as if it
 // had returned normally. The x>0 path (taken while warming up) compiles as
 // the JIT entry trace; the x<=0 path is hit often enough at runtime to cross
@@ -232,4 +233,191 @@ func TestNativeStackReserve(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, frameVal, reserve+saveAreaBytes,
 		"the trampoline's TEXT frame size must equal the reserve plus the callee-saved save area")
+}
+
+// TestCompiler_Compile covers compiler-selected static plans and verifies that
+// their native entries match threaded execution.
+func TestCompiler_Compile(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	t.Run("straight-line arithmetic function compiles and matches threaded execution", func(t *testing.T) {
+		// (a + b) * 2, exercising I32_ADD, I32_CONST, and I32_MUL — all within
+		// the shared plan lowerer's scalar coverage — inside a single RETURN-terminated block.
+		callee := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32, types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_MUL),
+			instr.New(instr.RETURN),
+		).MustBuild()
+
+		b := program.NewBuilder()
+		b.Globals(types.TypeI32)
+		idx := b.Const(callee)
+		// CALL pops the callee off the top of the stack, so the ref goes last:
+		// args first (in declared param order), then CONST_GET of the function.
+		b.Emit(instr.I32_CONST, 3).
+			Emit(instr.I32_CONST, 4).
+			Emit(instr.CONST_GET, uint64(idx)).
+			Emit(instr.CALL).
+			Emit(instr.GLOBAL_SET, 0)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		c, err := newCompiler()
+		require.NoError(t, err)
+		defer c.Close()
+
+		addr := int(i.constants[idx].Ref())
+		mod, err := c.Compile(i, addr)
+		require.NoError(t, err)
+		require.NotEmpty(t, mod.entries)
+		i.install(mod, false)
+
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.Global(0)
+		require.NoError(t, err)
+		require.Equal(t, int32(14), got.I32())
+	})
+
+	t.Run("multi-block function compiles", func(t *testing.T) {
+		b := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		})
+		alt := b.Label()
+		b.Emit(instr.New(instr.LOCAL_GET, 0)).
+			BrIf(alt).
+			Emit(instr.New(instr.I32_CONST, 1)).
+			Emit(instr.New(instr.RETURN)).
+			Bind(alt).
+			Emit(instr.New(instr.I32_CONST, 2)).
+			Emit(instr.New(instr.RETURN))
+		fn := b.MustBuild()
+
+		i := New(program.New(nil))
+		defer i.Close()
+
+		c, err := newCompiler()
+		require.NoError(t, err)
+		defer c.Close()
+
+		plans, err := staticPlan(&compileInput{address: 1, function: fn})
+		require.NoError(t, err)
+		require.NotEmpty(t, plans)
+	})
+
+	t.Run("branches and loops match threaded execution", func(t *testing.T) {
+		calleeBuilder := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).WithLocals(types.TypeI32)
+		loop := calleeBuilder.Label()
+		done := calleeBuilder.Label()
+		calleeBuilder.Emit(instr.New(instr.I32_CONST, 0)).
+			Emit(instr.New(instr.LOCAL_SET, 1)).
+			Bind(loop).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_EQZ)).
+			BrIf(done).
+			Emit(instr.New(instr.LOCAL_GET, 1)).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_ADD)).
+			Emit(instr.New(instr.LOCAL_SET, 1)).
+			Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.I32_CONST, 1)).
+			Emit(instr.New(instr.I32_SUB)).
+			Emit(instr.New(instr.LOCAL_SET, 0)).
+			Br(loop).
+			Bind(done).
+			Emit(instr.New(instr.LOCAL_GET, 1)).
+			Emit(instr.New(instr.RETURN))
+		callee := calleeBuilder.MustBuild()
+
+		b := program.NewBuilder()
+		b.Globals(types.TypeI32)
+		idx := b.Const(callee)
+		b.Emit(instr.I32_CONST, 5).
+			Emit(instr.CONST_GET, uint64(idx)).
+			Emit(instr.CALL).
+			Emit(instr.GLOBAL_SET, 0)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		threaded := New(prog, WithThreshold(-1))
+		defer threaded.Close()
+		require.NoError(t, threaded.Run(context.Background()))
+		want, err := threaded.Global(0)
+		require.NoError(t, err)
+
+		jit := New(prog, WithThreshold(-1))
+		defer jit.Close()
+		c, err := newCompiler()
+		require.NoError(t, err)
+		defer c.Close()
+		addr := int(jit.constants[idx].Ref())
+		mod, err := c.Compile(jit, addr)
+		require.NoError(t, err)
+		require.NotEmpty(t, mod.entries)
+		jit.install(mod, false)
+		require.NoError(t, jit.Run(context.Background()))
+		got, err := jit.Global(0)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("unsupported opcode compiles an exact fallback", func(t *testing.T) {
+		// I32_DIV_S needs runtime trap semantics the baseline lowerer does not
+		// duplicate, so the plan exits at that opcode and threaded dispatch owns it.
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params:  []types.Type{types.TypeI32, types.TypeI32},
+			Returns: []types.Type{types.TypeI32},
+		}).Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.I32_DIV_S),
+			instr.New(instr.RETURN),
+		).MustBuild()
+
+		i := New(program.New(nil))
+		defer i.Close()
+
+		c, err := newCompiler()
+		require.NoError(t, err)
+		defer c.Close()
+
+		plans, err := staticPlan(&compileInput{address: 1, function: fn})
+		require.NoError(t, err)
+		require.NotEmpty(t, plans)
+	})
+}
+
+func TestArm64Lowerer_QueuesEachState(t *testing.T) {
+	target := edge{anchor: anchor{addr: 1, ip: 2}, block: 0}
+	ctx := &lowering{
+		assembler: asm.New(arm64.New()),
+		blocks:    []block{{anchor: target.anchor}},
+		labels:    map[int]asm.Label{},
+	}
+	lowerer := arm64Lowerer{}
+
+	ctx.values = []value{{kind: types.KindI32, raw: true, known: true, imm: 1}}
+	first, ok := lowerer.label(ctx, target, nil)
+	require.True(t, ok)
+
+	ctx.values = []value{{kind: types.KindI32, raw: true, known: true, imm: 2}}
+	second, ok := lowerer.label(ctx, target, nil)
+	require.True(t, ok)
+
+	require.NotEqual(t, first, second)
+	require.Len(t, ctx.work, 2)
 }

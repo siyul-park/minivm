@@ -28,3 +28,5 @@ func (c *caller) Call(ctx unsafe.Pointer) error {
 	invoke(uintptr(c.addr), ctx)
 	return nil
 }
+
+func (c *caller) Addr() unsafe.Pointer { return c.addr }

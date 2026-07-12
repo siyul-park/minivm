@@ -185,7 +185,7 @@ func TestTracer_Capture(t *testing.T) {
 
 		done := make(chan error, 1)
 		go func() {
-			_, err := tracer.exit(i, root, branch{fn: 0, ip: 1})
+			_, err := tracer.exit(i, root, anchor{addr: 0, ip: 1})
 			done <- err
 		}()
 		<-iter.entered
@@ -319,6 +319,24 @@ func TestTracer_Headers(t *testing.T) {
 			require.Equal(t, want, got)
 		}
 	})
+}
+
+func TestTracer_IsolatesPrograms(t *testing.T) {
+	tracer := NewTracer()
+	first := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)})
+	second := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 2)})
+
+	left := New(first, WithTracer(tracer), WithThreshold(-1))
+	defer left.Close()
+	before := tracer.codes(left)
+
+	right := New(second, WithTracer(tracer), WithThreshold(-1))
+	defer right.Close()
+	after := right.tracer.codes(right)
+
+	require.Same(t, tracer, left.tracer)
+	require.NotSame(t, tracer, right.tracer)
+	require.NotSame(t, &before[0][0], &after[0][0])
 }
 
 func TestTracer_Remove(t *testing.T) {

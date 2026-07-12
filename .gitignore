@@ -38,3 +38,5 @@ dist/
 .codex/config.toml
 .codegraph/
 .superpowers/
+# Local agent plans
+docs/superpowers/

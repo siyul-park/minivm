@@ -196,10 +196,12 @@ Loop-anchored trace compilation lets hot loop bodies run in native code between 
 
 | Workload | Mode | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| `branchy_batch_tree_evaluation` | threaded | 1,807 | 0 | 0 |
-| `branchy_batch_tree_evaluation` | JIT | 1,203 | 0 | 0 |
+| `branchy_batch_tree_evaluation` | threaded | 1,568 | 0 | 0 |
+| `branchy_batch_tree_evaluation` | baseline CFG tier | 1,386 | 0 | 0 |
 
-The JIT row stays faster by keeping warm-entry fallback checks dense and skipping no-op safepoints when no context cancellation, fuel, hook, profiler, or shared cache coordination is active.
+The whole-CFG tier is about 12% faster on this workload while preserving zero steady-state allocations.
+
+A tl2g regression model with 30 trees exposed a separate baseline gap: its evaluator is a call-free top-level loop over primitive typed-array constants, so the earlier CFG gate never attempted it and trace execution took about 103,800 ns for one prediction. Allowing call-free module CFGs and fusing constant typed-array reads reduced `BenchmarkPredictSingle/regression` to 2,901–2,914 ns/op. With adaptive batch workers, `BenchmarkPredictBatch/regression/200` measured 131,290–138,331 ns/op (about 656–692 ns/row), 2,960 B/op, and 19 allocs/op on Apple M4 Pro. These numbers include tl2g's output allocation, pool coordination, row copying, and objective dispatch.
 
 On x86-64, JIT is not implemented yet. The runtime falls back to threaded execution.
 
