@@ -830,7 +830,7 @@ func (i *Interpreter) build(c *compiler, addr int) (*module, error) {
 		return nil, nil
 	}
 	i.samples.AddMetric("vm_jit_attempts_total", 1)
-	if addr != 0 && i.stub(addr) == nil {
+	if i.stub(addr) == nil {
 		i.samples.AddMetric("vm_jit_cfg_attempts_total", 1)
 		mod, ok, err := c.compileCFG(i, addr, fn)
 		if err != nil {

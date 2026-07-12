@@ -36,6 +36,9 @@ func (l arm64Lowerer) lowerCFG(ctx *lowering, blocks []*analysis.BasicBlock, kin
 		ctx.values = exit.values
 		ctx.frames = exit.frames
 		ctx.assembler.Bind(exit.label)
+		if exit.retain > 0 {
+			l.retain(ctx, exit.retain)
+		}
 		l.trapFlushed(ctx, trapFallback, exit.resume)
 	}
 	return true
@@ -118,7 +121,7 @@ func (l arm64Lowerer) cfgOp(ctx *lowering, op step) (bool, bool) {
 	case instr.F64_CONST:
 		ok = l.f64Const(ctx, op)
 	case instr.CONST_GET:
-		ok = l.constGet(ctx, op)
+		ok = l.cfgConstGet(ctx, op)
 	case instr.LOCAL_GET:
 		ok = l.localGet(ctx, op)
 	case instr.LOCAL_SET:
@@ -247,10 +250,126 @@ func (l arm64Lowerer) cfgOp(ctx *lowering, op step) (bool, bool) {
 		ok = l.f64Cmp(ctx, arm64.CondLS)
 	case instr.F64_GE:
 		ok = l.f64Cmp(ctx, arm64.CondGE)
+	case instr.ARRAY_GET:
+		ok = l.cfgArrayGet(ctx, op)
 	default:
 		return l.exit(ctx, op.ip), true
 	}
 	return ok, false
+}
+
+func (l arm64Lowerer) cfgConstGet(ctx *lowering, op step) bool {
+	idx := int(instr.Instruction(ctx.frame().code[op.ip:]).Operand(0))
+	if idx >= len(ctx.constants) {
+		return false
+	}
+	boxed := ctx.constants[idx]
+	if boxed.Kind() != types.KindRef {
+		return l.constGet(ctx, op)
+	}
+	ref := boxed.Ref()
+	if ref <= 0 || ref >= len(ctx.heap) {
+		return false
+	}
+	switch ctx.heap[ref].(type) {
+	case types.TypedArray[bool], types.TypedArray[int8], types.TypedArray[int32],
+		types.TypedArray[float32], types.TypedArray[float64]:
+		ctx.push(value{kind: types.KindRef, raw: true, ref: ref})
+		return true
+	default:
+		return l.constGet(ctx, op)
+	}
+}
+
+func (l arm64Lowerer) cfgArrayGet(ctx *lowering, op step) bool {
+	if ctx.count() < 2 || ctx.values[len(ctx.values)-1].kind != types.KindI32 {
+		return false
+	}
+	marker := ctx.values[len(ctx.values)-2]
+	constant := marker.ref
+	if !marker.raw || constant <= 0 || constant >= len(ctx.heap) {
+		return false
+	}
+
+	var kind types.Kind
+	var want uintptr
+	var scale uint8
+	switch value := ctx.heap[constant].(type) {
+	case types.TypedArray[bool]:
+		kind, want = types.KindI1, itab(value)
+	case types.TypedArray[int8]:
+		kind, want = types.KindI8, itab(value)
+	case types.TypedArray[int32]:
+		kind, want, scale = types.KindI32, itab(value), 2
+	case types.TypedArray[float32]:
+		kind, want, scale = types.KindF32, itab(value), 2
+	case types.TypedArray[float64]:
+		kind, want, scale = types.KindF64, itab(value), 3
+	default:
+		return false
+	}
+
+	pre := append([]value(nil), ctx.values...)
+	boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(boxed, uint64(types.BoxRef(constant)))...)
+	ctx.values[len(ctx.values)-2] = value{reg: boxed, kind: types.KindRef, raw: false, ref: constant}
+	if !l.flush(ctx, false) {
+		return false
+	}
+	clear(ctx.frame().loaded)
+	clear(ctx.frame().dirty)
+	fail := l.cfgExit(ctx, op.ip, constant)
+
+	a := ctx.assembler
+	heap := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(heap, ctx.pin(scratchCtrl), int16(journalHeap*8)))
+	off := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDI(off, uint64(constant))...)
+	a.Emit(arm64.LSLI(off, off, 4))
+	cell := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ADD(cell, heap, off))
+	actual := a.Reg(asm.RegTypeInt, asm.Width64)
+	data := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(actual, cell, 0), arm64.LDR(data, cell, 8))
+	l.guardItab(ctx, actual, want, fail)
+
+	idx := l.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
+	dataPtr, n := l.sliceHeader(ctx, data, 0)
+	l.guardIndex(ctx, idx, n, fail)
+	result := a.Reg(asm.RegTypeInt, asm.Width64)
+	switch kind {
+	case types.KindI1:
+		elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ADD(elemAddr, dataPtr, idx))
+		a.Emit(arm64.LDRB(result, elemAddr, 0))
+	case types.KindI8:
+		elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
+		elem := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ADD(elemAddr, dataPtr, idx))
+		a.Emit(arm64.LDRB(elem, elemAddr, 0))
+		a.Emit(arm64.SXTB(result, elem))
+	case types.KindI32, types.KindF32:
+		elemOff := a.Reg(asm.RegTypeInt, asm.Width64)
+		elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LSLI(elemOff, idx, scale))
+		a.Emit(arm64.ADD(elemAddr, dataPtr, elemOff))
+		a.Emit(arm64.LDRSW(result, elemAddr, 0))
+	case types.KindF64:
+		elemOff := a.Reg(asm.RegTypeInt, asm.Width64)
+		elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LSLI(elemOff, idx, scale))
+		a.Emit(arm64.ADD(elemAddr, dataPtr, elemOff))
+		a.Emit(arm64.LDR(result, elemAddr, 0))
+	}
+	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: kind, raw: true})
+	return true
+}
+
+func (l arm64Lowerer) cfgExit(ctx *lowering, resume, retain int) asm.Label {
+	label := ctx.assembler.Label()
+	values, frames := ctx.snapshot()
+	ctx.exits = append(ctx.exits, sideExit{label: label, values: values, frames: frames, resume: resume, retain: retain})
+	return label
 }
 
 func (l arm64Lowerer) cfgTarget(ctx *lowering, inst instr.Instruction) (int, bool) {
@@ -482,6 +601,9 @@ func (l arm64Lowerer) cfgTable(ctx *lowering, op step, from int, labels []asm.La
 
 func (l arm64Lowerer) cfgEdge(ctx *lowering, target, from int, labels []asm.Label, index map[int]int) bool {
 	if target == len(ctx.frame().code) {
+		if ctx.addr == 0 {
+			return l.complete(ctx)
+		}
 		return l.ret(ctx)
 	}
 	idx, ok := index[target]

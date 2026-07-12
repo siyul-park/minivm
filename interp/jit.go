@@ -128,6 +128,7 @@ type sideExit struct {
 	values []value
 	frames []activation
 	resume int
+	retain int
 }
 
 const (

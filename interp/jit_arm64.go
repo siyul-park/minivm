@@ -117,6 +117,9 @@ func (l arm64Lowerer) lower(ctx *lowering) bool {
 		ctx.values = e.values
 		ctx.frames = e.frames
 		ctx.assembler.Bind(e.label)
+		if e.retain > 0 {
+			l.retain(ctx, e.retain)
+		}
 		l.trapFlushed(ctx, trapFallback, e.resume)
 	}
 	return true
@@ -869,7 +872,7 @@ func (l arm64Lowerer) constGet(ctx *lowering, op step) bool {
 		boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDI(boxed, uint64(v))...)
 		l.retain(ctx, ref)
-		ctx.push(value{reg: boxed, kind: types.KindRef, raw: false})
+		ctx.push(value{reg: boxed, kind: types.KindRef, raw: false, ref: ref})
 		return true
 	}
 	return false

@@ -102,7 +102,9 @@ General behavior belongs to the threaded interpreter. Native guard failures mate
 
 ## Whole-CFG Baseline
 
-Hot non-module functions first attempt a conservative whole-CFG compilation. Each verified basic block reloads its entry operands from canonical VM stack slots, keeps registers block-local, and flushes values before every edge. Native branches connect blocks directly; backward edges spend the journal safepoint budget. Unsupported opcodes return through an exact-IP fallback, while structural uncertainty rejects the baseline and leaves trace compilation available. A deoptimizing installed CFG is never rebuilt as the same CFG because the existing entry stub makes subsequent exit-triggered attempts trace-only.
+Hot functions and call-free top-level modules first attempt a conservative whole-CFG compilation. Each verified basic block reloads its entry operands from canonical VM stack slots, keeps registers block-local, and flushes values before every edge. Native branches connect blocks directly; backward edges spend the journal safepoint budget. Top-level modules containing `CALL` or `RETURN_CALL` remain trace-compiled because their module-entry ABI does not yet own cross-function frame teardown safely. Unsupported opcodes return through an exact-IP fallback, while structural uncertainty rejects the baseline and leaves trace compilation available. A deoptimizing installed CFG is never rebuilt as the same CFG because the existing entry stub makes subsequent exit-triggered attempts trace-only.
+
+CFG dataflow preserves compile-time refs loaded by `CONST_GET`. A primitive typed-array constant can therefore stay as an unmaterialized marker until `ARRAY_GET`: lowering checks the current heap cell's interface type and index bounds, then reads the current slice data directly. The hot path avoids redundant retain/release traffic. Before a possible fallback, the marker is written to its canonical stack slot without ownership; the cold exit retains it only when control actually transfers to threaded execution. Replacing the heap cell after compilation remains visible because native code reloads the current cell on every access.
 
 ## Tracer
 

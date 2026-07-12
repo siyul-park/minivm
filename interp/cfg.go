@@ -5,6 +5,7 @@ import (
 
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/types"
 )
@@ -19,6 +20,15 @@ func (c *compiler) compileCFG(i *Interpreter, addr int, fn *types.Function) (*mo
 	}
 	if len(c.scratchRegs) < scratchCount {
 		return mod, false, nil
+	}
+	if addr == 0 {
+		for ip := 0; ip < len(fn.Code); {
+			inst := instr.Instruction(fn.Code[ip:])
+			if inst.Opcode() == instr.CALL || inst.Opcode() == instr.RETURN_CALL {
+				return mod, false, nil
+			}
+			ip += inst.Width()
+		}
 	}
 
 	m := pass.NewManager()

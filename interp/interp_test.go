@@ -3417,7 +3417,12 @@ func TestWithThreshold(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, types.I32(7), v)
 		}
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(2))
+		emits := i.samples.Value("vm_jit_emits_total")
+		if i.samples.Value("vm_jit_cfg_attempts_total") > 0 {
+			require.GreaterOrEqual(t, emits, float64(1))
+		} else {
+			require.GreaterOrEqual(t, emits, float64(2))
+		}
 	})
 
 	t.Run("keeps a learned nested loop resumable", func(t *testing.T) {
@@ -3574,7 +3579,9 @@ func TestWithThreshold(t *testing.T) {
 		for _, ip := range i.tracer.anchors(0) {
 			looped = looped || ip > 0
 		}
-		require.True(t, looped)
+		if i.samples.Value("vm_jit_cfg_attempts_total") == 0 {
+			require.True(t, looped)
+		}
 		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
 	})
 
@@ -5594,6 +5601,51 @@ func TestWithThreshold(t *testing.T) {
 			require.Equal(t, types.I32(111), v)
 		}
 		require.Equal(t, hits, i.tracer.rootAt(root).hits[id])
+	})
+
+	t.Run("jits top-level typed-array loop as cfg", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+
+		b := program.NewBuilder()
+		b.Locals(types.TypeI32, types.TypeI32)
+		values := b.Const(types.TypedArray[int32]{1, 2, 3, 4})
+		loop := b.Label()
+		b.Bind(loop)
+		b.Emit(instr.CONST_GET, uint64(values))
+		b.Emit(instr.LOCAL_GET, 0)
+		b.Emit(instr.ARRAY_GET)
+		b.Emit(instr.LOCAL_GET, 1)
+		b.Emit(instr.I32_ADD)
+		b.Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.LOCAL_GET, 0)
+		b.Emit(instr.I32_CONST, 1)
+		b.Emit(instr.I32_ADD)
+		b.Emit(instr.LOCAL_TEE, 0)
+		b.Emit(instr.I32_CONST, 4)
+		b.Emit(instr.I32_LT_S)
+		b.BrIf(loop)
+		b.Emit(instr.LOCAL_GET, 1)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, int32(10), got.I32())
+		require.Greater(t, i.samples.Value("vm_jit_cfg_attempts_total"), float64(0))
+		require.Equal(t, float64(0), i.samples.Value("vm_jit_cfg_rejected_total"))
+
+		ref := i.constants[values].Ref()
+		require.NoError(t, i.Store(ref, types.TypedArray[int32]{10, 20, 30, 40}))
+		i.Reset()
+		require.NoError(t, i.Run(context.Background()))
+		got, err = i.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, int32(100), got.I32())
 	})
 }
 
