@@ -153,6 +153,39 @@ func TestGenerate(t *testing.T) {
 		}))
 	})
 
+	t.Run("uses one opcode lowering path", func(t *testing.T) {
+		file, err := parser.ParseFile(token.NewFileSet(), "lower.go", nil, 0)
+		require.NoError(t, err)
+
+		types := make(map[string]struct{})
+		values := make(map[string]struct{})
+		functions := make(map[string]struct{})
+		for _, declaration := range file.Decls {
+			switch declaration := declaration.(type) {
+			case *ast.GenDecl:
+				for _, specification := range declaration.Specs {
+					switch specification := specification.(type) {
+					case *ast.TypeSpec:
+						types[specification.Name.Name] = struct{}{}
+					case *ast.ValueSpec:
+						for _, name := range specification.Names {
+							values[name.Name] = struct{}{}
+						}
+					}
+				}
+			case *ast.FuncDecl:
+				functions[declaration.Name.Name] = struct{}{}
+			}
+		}
+
+		require.Contains(t, types, "lowering")
+		require.Contains(t, values, "lowerers")
+		require.Contains(t, functions, "compose")
+		for _, name := range []string{"fusion", "call", "reference", "index", "arithmetic", "integer", "operand"} {
+			require.NotContains(t, functions, name)
+		}
+	})
+
 	t.Run("maps every opcode once", func(t *testing.T) {
 		for value, lowering := range lowerings {
 			op := instr.Opcode(value)
