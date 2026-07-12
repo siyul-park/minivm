@@ -9,17 +9,44 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+type anchor struct {
+	addr int
+	ip   int
+}
+
+type shape struct {
+	itab uintptr
+	typ  uintptr
+}
+
+type step struct {
+	op    instr.Opcode
+	args  [2]uint64
+	seen  types.Boxed
+	arg   types.Boxed
+	shape shape
+
+	fn     int
+	ip     int
+	depth  int
+	callee int
+	ref    int
+	known  bool
+}
+
 type planner interface {
 	plan(*compileInput) ([]plan, error)
 }
 
 type compileInput struct {
-	interpreter *Interpreter
-	address     int
-	function    *types.Function
-	globals     []types.Kind
-	functions   map[int]*types.Function
-	installed   bool
+	tracer    *Tracer
+	address   int
+	function  *types.Function
+	constants []types.Boxed
+	globals   []types.Kind
+	heap      []types.Value
+	functions map[int]*types.Function
+	installed bool
 }
 
 type plan struct {
@@ -36,19 +63,18 @@ type entry struct {
 type entryKind uint8
 
 const (
-	entryFunction entryKind = iota
+	entryInvalid entryKind = iota
+	entryFunction
 	entryLoop
 	entryModule
 )
 
 type block struct {
-	address   int
-	offset    int
-	hits      int64
-	canonical bool
-	state     state
-	steps     []step
-	term      terminator
+	anchor anchor
+	hits   int64
+	state  *state
+	steps  []step
+	term   terminator
 }
 
 type state struct {
@@ -66,7 +92,9 @@ type slot struct {
 type terminator struct {
 	kind    terminatorKind
 	ip      int
+	hot     int
 	targets []int
+	tail    []block
 }
 
 type terminatorKind uint8
@@ -104,24 +132,20 @@ func newCompileInput(i *Interpreter, addr int) (*compileInput, bool) {
 		}
 	}
 	return &compileInput{
-		interpreter: i,
-		address:     addr,
-		function:    fn,
-		globals:     globals,
-		functions:   functions,
-		installed:   i.stub(addr) != nil,
+		tracer:    i.tracer,
+		address:   addr,
+		function:  fn,
+		constants: i.constants,
+		globals:   globals,
+		heap:      i.heap,
+		functions: functions,
+		installed: i.stub(addr) != nil,
 	}, true
 }
 
 func (p plan) valid() bool {
 	if len(p.blocks) == 0 {
 		return false
-	}
-	canonical := p.blocks[0].canonical
-	for _, block := range p.blocks[1:] {
-		if block.canonical != canonical {
-			return false
-		}
 	}
 	switch p.entry.kind {
 	case entryFunction:
@@ -139,31 +163,41 @@ func (p plan) valid() bool {
 	default:
 		return false
 	}
-	offsets := make(map[anchor]struct{}, len(p.blocks))
+	seen := make(map[anchor]struct{}, len(p.blocks))
 	for _, block := range p.blocks {
-		addr := block.address
-		if addr == 0 && p.entry.anchor.addr != 0 {
-			addr = p.entry.anchor.addr
-		}
-		a := anchor{addr: addr, ip: block.offset}
-		if _, ok := offsets[a]; ok {
+		if _, ok := seen[block.anchor]; ok {
 			return false
 		}
-		offsets[a] = struct{}{}
+		seen[block.anchor] = struct{}{}
 	}
-	if _, ok := offsets[p.entry.anchor]; !ok {
-		return false
-	}
-	for _, block := range p.blocks {
-		addr := block.address
-		if addr == 0 && p.entry.anchor.addr != 0 {
-			addr = p.entry.anchor.addr
-		}
-		for _, target := range block.term.targets {
-			if _, ok := offsets[anchor{addr: addr, ip: target}]; !ok {
+	work := append([]block(nil), p.blocks...)
+	for len(work) > 0 {
+		block := work[len(work)-1]
+		work = work[:len(work)-1]
+		switch block.term.kind {
+		case terminateFallthrough, terminateReturn, terminateComplete, terminateFallback:
+			if len(block.term.targets) != 0 {
 				return false
 			}
+		case terminateBranch:
+			if len(block.term.targets) != 1 {
+				return false
+			}
+		case terminateBranchIf:
+			if len(block.term.targets) != 2 {
+				return false
+			}
+		case terminateBranchTable:
+			if len(block.term.targets) == 0 {
+				return false
+			}
+		default:
+			return false
 		}
+		work = append(work, block.term.tail...)
+	}
+	if _, ok := seen[p.entry.anchor]; !ok {
+		return false
 	}
 	return true
 }
@@ -190,10 +224,7 @@ func (staticPlanner) plan(input *compileInput) ([]plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	constants, heap := []types.Boxed(nil), []types.Value(nil)
-	if input.interpreter != nil {
-		constants, heap = input.interpreter.constants, input.interpreter.heap
-	}
+	constants, heap := input.constants, input.heap
 	facts, ok := planStates(input.function, blocks, constants, input.globals, heap)
 	if !ok {
 		return nil, nil
@@ -205,14 +236,22 @@ func (staticPlanner) plan(input *compileInput) ([]plan, error) {
 	}
 	result := plan{entry: entry{anchor: anchor{addr: input.address}, kind: entryType}}
 	result.blocks = make([]block, len(blocks))
+	locals := localTypes(input.function)
 	for idx, source := range blocks {
-		target := block{address: input.address, offset: source.Start, canonical: true}
-		target.state.slots = make([]slot, len(facts[idx]))
-		copy(target.state.slots, facts[idx])
+		target := block{anchor: anchor{addr: input.address, ip: source.Start}, state: &state{}}
+		target.state.slots = append([]slot(nil), facts[idx]...)
+		flow := append([]slot(nil), facts[idx]...)
 		for ip := source.Start; ip < source.End; {
 			inst := instr.Instruction(input.function.Code[ip:])
 			next := ip + inst.Width()
-			step := step{op: inst.Opcode(), fn: input.address, ip: ip}
+			step := step{op: inst.Opcode(), args: args(inst), fn: input.address, ip: ip}
+			if (inst.Opcode() == instr.CALL || inst.Opcode() == instr.RETURN_CALL) && len(flow) > 0 {
+				callee := flow[len(flow)-1]
+				if callee.calleeKnown {
+					step.callee = callee.callee
+					step.known = true
+				}
+			}
 			if inst.Opcode() == instr.CONST_GET {
 				constant := int(inst.Operand(0))
 				if constant < len(constants) && constants[constant].Kind() == types.KindRef {
@@ -222,15 +261,18 @@ func (staticPlanner) plan(input *compileInput) ([]plan, error) {
 			}
 			switch inst.Opcode() {
 			case instr.BR:
-				target.term = terminator{kind: terminateBranch, ip: ip, targets: instr.Targets(input.function.Code, ip)}
+				target.term = terminator{kind: terminateBranch, ip: ip, hot: -1, targets: instr.Targets(input.function.Code, ip)}
 			case instr.BR_IF:
-				target.term = terminator{kind: terminateBranchIf, ip: ip, targets: append(instr.Targets(input.function.Code, ip), next)}
+				target.term = terminator{kind: terminateBranchIf, ip: ip, hot: -1, targets: append(instr.Targets(input.function.Code, ip), next)}
 			case instr.BR_TABLE:
-				target.term = terminator{kind: terminateBranchTable, ip: ip, targets: instr.Targets(input.function.Code, ip)}
+				target.term = terminator{kind: terminateBranchTable, ip: ip, hot: -1, targets: instr.Targets(input.function.Code, ip)}
 			case instr.RETURN:
 				target.term = terminator{kind: terminateReturn, ip: ip}
 			default:
 				target.steps = append(target.steps, step)
+			}
+			if !applyPlanStep(input.function, locals, constants, input.globals, heap, &flow, inst) {
+				return nil, nil
 			}
 			ip = next
 		}
@@ -242,7 +284,7 @@ func (staticPlanner) plan(input *compileInput) ([]plan, error) {
 					target.term = terminator{kind: terminateReturn, ip: source.End}
 				}
 			} else {
-				target.term = terminator{kind: terminateBranch, ip: source.End, targets: []int{source.End}}
+				target.term = terminator{kind: terminateBranch, ip: source.End, hot: -1, targets: []int{source.End}}
 			}
 		}
 		result.blocks[idx] = target
@@ -256,13 +298,13 @@ func (staticPlanner) plan(input *compileInput) ([]plan, error) {
 type tracePlanner struct{}
 
 func (tracePlanner) plan(input *compileInput) ([]plan, error) {
-	if input == nil || input.interpreter == nil || input.interpreter.tracer == nil || input.function == nil {
+	if input == nil || input.tracer == nil || input.function == nil {
 		return nil, nil
 	}
 	var plans []plan
-	for _, ip := range input.interpreter.tracer.anchors(input.address) {
+	for _, ip := range input.tracer.anchors(input.address) {
 		a := anchor{addr: input.address, ip: ip}
-		tree := input.interpreter.tracer.rootAt(a)
+		tree := input.tracer.rootAt(a)
 		if tree == nil || tree.root == nil || tree.root.kind == aborted {
 			continue
 		}
@@ -277,8 +319,13 @@ func (tracePlanner) plan(input *compileInput) ([]plan, error) {
 			kind = entryLoop
 		}
 		planned := plan{entry: entry{anchor: a, kind: kind}}
-		planned.blocks = append(planned.blocks, traceBlock(tree.root, 0))
-		var continuations []block
+		planned.blocks = append(planned.blocks, split(tree.root, 0, input.functions)...)
+
+		type leg struct {
+			trace *trace
+			hits  int64
+		}
+		var legs []leg
 		for id, tr := range tree.branches {
 			if tr == nil || tr.kind == loop || tr.kind == aborted {
 				continue
@@ -287,18 +334,30 @@ func (tracePlanner) plan(input *compileInput) ([]plan, error) {
 			if id >= 0 && id < len(tree.hits) {
 				hits = tree.hits[id]
 			}
-			continuations = append(continuations, traceBlock(tr, hits))
+			legs = append(legs, leg{trace: tr, hits: hits})
 		}
-		sort.SliceStable(continuations, func(i, j int) bool {
-			if continuations[i].hits != continuations[j].hits {
-				return continuations[i].hits > continuations[j].hits
+		sort.SliceStable(legs, func(i, j int) bool {
+			if legs[i].hits != legs[j].hits {
+				return legs[i].hits > legs[j].hits
 			}
-			if continuations[i].address != continuations[j].address {
-				return continuations[i].address < continuations[j].address
+			if legs[i].trace.anchor.addr != legs[j].trace.anchor.addr {
+				return legs[i].trace.anchor.addr < legs[j].trace.anchor.addr
 			}
-			return continuations[i].offset < continuations[j].offset
+			return legs[i].trace.anchor.ip < legs[j].trace.anchor.ip
 		})
-		planned.blocks = append(planned.blocks, continuations...)
+		seen := make(map[anchor]bool, len(planned.blocks))
+		for _, block := range planned.blocks {
+			seen[block.anchor] = true
+		}
+		for _, leg := range legs {
+			for _, block := range split(leg.trace, leg.hits, input.functions) {
+				if seen[block.anchor] {
+					continue
+				}
+				seen[block.anchor] = true
+				planned.blocks = append(planned.blocks, block)
+			}
+		}
 		planned.spill = planSpill(planned.blocks)
 		if planned.valid() {
 			plans = append(plans, planned)
@@ -307,39 +366,113 @@ func (tracePlanner) plan(input *compileInput) ([]plan, error) {
 	return plans, nil
 }
 
-func traceBlock(tr *trace, hits int64) block {
-	result := block{
-		address: tr.anchor.addr,
-		offset:  tr.anchor.ip,
-		hits:    hits,
-		steps:   append([]step(nil), tr.ops...),
+func split(tr *trace, hits int64, functions map[int]*types.Function) []block {
+	if tr == nil {
+		return nil
+	}
+	current := block{anchor: tr.anchor, hits: hits}
+	var blocks []block
+	commit := func() {
+		blocks = append(blocks, current)
+	}
+	for idx, op := range tr.ops {
+		if op.cut {
+			current.term = terminator{kind: terminateFallback, ip: op.target, hot: -1}
+			commit()
+			return blocks
+		}
+		switch op.op {
+		case instr.BR:
+			current.term = terminator{kind: terminateBranch, ip: op.ip, hot: 0, targets: []int{op.target}}
+			commit()
+		case instr.BR_IF:
+			next := op.ip + 3
+			hot := 1
+			if op.taken {
+				hot = 0
+			}
+			current.term = terminator{kind: terminateBranchIf, ip: op.ip, hot: hot, targets: []int{op.target, next}, tail: suffix(tr, idx, functions)}
+			commit()
+		case instr.BR_TABLE:
+			var targets []int
+			if fn := functions[op.fn]; fn != nil {
+				targets = instr.Targets(fn.Code, op.ip)
+			}
+			hot := -1
+			for n, target := range targets {
+				if target == op.target {
+					hot = n
+					break
+				}
+			}
+			current.term = terminator{kind: terminateBranchTable, ip: op.ip, hot: hot, targets: targets, tail: suffix(tr, idx, functions)}
+			commit()
+		case instr.RETURN:
+			if op.depth == 0 {
+				current.term = terminator{kind: terminateReturn, ip: op.ip, hot: -1}
+				commit()
+				return blocks
+			}
+			current.steps = append(current.steps, op.step)
+			continue
+		default:
+			current.steps = append(current.steps, op.step)
+			continue
+		}
+		if idx+1 >= len(tr.ops) {
+			return blocks
+		}
+		next := tr.ops[idx+1]
+		current = block{anchor: anchor{addr: next.fn, ip: next.ip}}
+	}
+	if len(blocks) > 0 && len(current.steps) == 0 && current.term.kind == terminateFallthrough {
+		return blocks
 	}
 	switch tr.kind {
 	case returned:
-		result.term = terminator{kind: terminateReturn}
+		current.term = terminator{kind: terminateFallthrough, hot: -1}
 	case completed:
-		result.term = terminator{kind: terminateComplete}
+		current.term = terminator{kind: terminateComplete, hot: -1}
 	case partial:
 		resume := tr.anchor.ip
 		if len(tr.ops) > 0 {
 			resume = tr.ops[len(tr.ops)-1].target
 		}
-		result.term = terminator{kind: terminateFallback, ip: resume}
+		current.term = terminator{kind: terminateFallback, ip: resume, hot: -1}
 	case loop:
-		result.term = terminator{kind: terminateBranch, ip: tr.anchor.ip, targets: []int{tr.anchor.ip}}
+		current.term = terminator{kind: terminateBranch, ip: tr.anchor.ip, hot: 0, targets: []int{tr.anchor.ip}}
 	default:
-		result.term = terminator{kind: terminateFallback, ip: tr.anchor.ip}
+		current.term = terminator{kind: terminateFallback, ip: tr.anchor.ip, hot: -1}
 	}
-	return result
+	commit()
+	return blocks
+}
+
+func suffix(tr *trace, idx int, functions map[int]*types.Function) []block {
+	depth := tr.ops[idx].depth
+	for at := idx + 1; at < len(tr.ops); at++ {
+		if tr.ops[at].depth >= depth {
+			continue
+		}
+		tail := &trace{
+			anchor: anchor{addr: tr.ops[at].fn, ip: tr.ops[at].ip},
+			ops:    append([]record(nil), tr.ops[at:]...),
+			kind:   tr.kind,
+		}
+		return split(tail, 0, functions)
+	}
+	return nil
 }
 
 func planSpill(blocks []block) spillPolicy {
 	for _, block := range blocks {
-		if len(block.steps) == 0 {
-			continue
+		if len(block.steps) > 0 {
+			switch block.steps[len(block.steps)-1].op {
+			case instr.ARRAY_SET, instr.STRUCT_SET:
+				return spillForbidden
+			}
 		}
-		switch block.steps[len(block.steps)-1].op {
-		case instr.ARRAY_SET, instr.STRUCT_SET:
+		if planSpill(block.term.tail) == spillForbidden {
 			return spillForbidden
 		}
 	}
@@ -572,6 +705,17 @@ func arrayKind(heap []types.Value, array slot) (types.Kind, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func args(inst instr.Instruction) [2]uint64 {
+	var args [2]uint64
+	for idx, width := range inst.Type().Widths {
+		if idx >= len(args) || width < 0 {
+			break
+		}
+		args[idx] = inst.Operand(idx)
+	}
+	return args
 }
 
 func localTypes(fn *types.Function) []types.Type {

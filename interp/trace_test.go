@@ -185,7 +185,7 @@ func TestTracer_Capture(t *testing.T) {
 
 		done := make(chan error, 1)
 		go func() {
-			_, err := tracer.exit(i, root, branch{fn: 0, ip: 1})
+			_, err := tracer.exit(i, root, anchor{addr: 0, ip: 1})
 			done <- err
 		}()
 		<-iter.entered

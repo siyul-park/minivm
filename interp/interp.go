@@ -1124,7 +1124,7 @@ func (i *Interpreter) loop(callable asm.Callable) func(*Interpreter) {
 }
 
 func (i *Interpreter) exit(root anchor) {
-	hits, err := i.tracer.exit(i, root, branch{fn: i.fr.addr, ip: i.fr.ip})
+	hits, err := i.tracer.exit(i, root, anchor{addr: i.fr.addr, ip: i.fr.ip})
 	if err != nil {
 		panic(err)
 	}

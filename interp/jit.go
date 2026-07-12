@@ -39,7 +39,8 @@ type native struct {
 type lowering struct {
 	assembler *asm.Assembler
 	root      block
-	branches  map[branch]block
+	blocks    map[anchor]block
+	labels    map[anchor]asm.Label
 	funcs     map[int]*types.Function
 	constants []types.Boxed
 	globals   []types.Kind
@@ -54,8 +55,7 @@ type lowering struct {
 	work      []work
 	scheduled int
 	exits     []sideExit
-	queued    map[branch]asm.Label
-	tails     map[*step]asm.Label
+	queued    map[anchor]asm.Label
 	saved     []value
 
 	addr    int
@@ -107,7 +107,7 @@ type activation struct {
 type work struct {
 	label  asm.Label
 	block  block
-	tail   []step
+	tail   []block
 	values []value
 	frames []activation
 	hits   int64
@@ -207,13 +207,13 @@ func (c *compiler) newLowering(input *compileInput, arch asm.Arch) *lowering {
 	asmb := asm.New(arch)
 	ctx := &lowering{
 		assembler: asmb,
+		blocks:    map[anchor]block{},
+		labels:    map[anchor]asm.Label{},
 		funcs:     input.functions,
-		branches:  map[branch]block{},
-		queued:    map[branch]asm.Label{},
-		tails:     map[*step]asm.Label{},
-		constants: input.interpreter.constants,
+		queued:    map[anchor]asm.Label{},
+		constants: input.constants,
 		globals:   input.globals,
-		heap:      input.interpreter.heap,
+		heap:      input.heap,
 		scratch:   c.scratchRegs[:scratchCount],
 		entry:     asmb.Label(),
 		head:      asmb.Label(),
@@ -257,6 +257,7 @@ func (c *compiler) Compile(i *Interpreter, addr int) (*module, error) {
 	planners := [...]planner{staticPlanner{}, tracePlanner{}}
 	for _, planner := range planners {
 		plans, err := planner.plan(input)
+
 		if err != nil {
 			return nil, err
 		}

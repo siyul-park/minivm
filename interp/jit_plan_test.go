@@ -16,48 +16,68 @@ func TestPlan(t *testing.T) {
 		want bool
 	}{
 		{
+			name: "invalid entry",
+			plan: plan{entry: entry{anchor: anchor{addr: 1}}, blocks: []block{{anchor: anchor{addr: 1}, term: terminator{kind: terminateReturn}}}},
+			want: false,
+		},
+		{
+			name: "invalid branch targets",
+			plan: plan{entry: entry{anchor: anchor{addr: 1}, kind: entryFunction}, blocks: []block{{anchor: anchor{addr: 1}, term: terminator{kind: terminateBranchIf, targets: []int{4}}}}},
+			want: false,
+		},
+		{
+			name: "invalid tail",
+			plan: plan{
+				entry: entry{anchor: anchor{addr: 1}, kind: entryFunction},
+				blocks: []block{{
+					anchor: anchor{addr: 1},
+					term: terminator{
+						kind:    terminateBranch,
+						targets: []int{4},
+						tail:    []block{{term: terminator{kind: terminateBranchIf, targets: []int{8}}}},
+					},
+				}},
+			},
+			want: false,
+		},
+		{
 			name: "function",
-			plan: plan{entry: entry{anchor: anchor{addr: 1}, kind: entryFunction}, blocks: []block{{offset: 0, term: terminator{kind: terminateReturn}}}},
+			plan: plan{entry: entry{anchor: anchor{addr: 1}, kind: entryFunction}, blocks: []block{{anchor: anchor{addr: 1}, term: terminator{kind: terminateReturn}}}},
 			want: true,
 		},
 		{
 			name: "loop",
-			plan: plan{entry: entry{anchor: anchor{addr: 1, ip: 4}, kind: entryLoop}, blocks: []block{{offset: 4, term: terminator{kind: terminateBranch, targets: []int{4}}}}},
+			plan: plan{entry: entry{anchor: anchor{addr: 1, ip: 4}, kind: entryLoop}, blocks: []block{{anchor: anchor{addr: 1, ip: 4}, term: terminator{kind: terminateBranch, targets: []int{4}}}}},
 			want: true,
 		},
 		{
 			name: "module",
-			plan: plan{entry: entry{anchor: anchor{}, kind: entryModule}, blocks: []block{{offset: 0, term: terminator{kind: terminateComplete}}}},
+			plan: plan{entry: entry{anchor: anchor{}, kind: entryModule}, blocks: []block{{anchor: anchor{}, term: terminator{kind: terminateComplete}}}},
 			want: true,
 		},
 		{
 			name: "missing entry",
-			plan: plan{entry: entry{anchor: anchor{addr: 1}, kind: entryFunction}, blocks: []block{{offset: 4, term: terminator{kind: terminateReturn}}}},
+			plan: plan{entry: entry{anchor: anchor{addr: 1}, kind: entryFunction}, blocks: []block{{anchor: anchor{addr: 1, ip: 4}, term: terminator{kind: terminateReturn}}}},
 			want: false,
 		},
 		{
 			name: "duplicate block",
-			plan: plan{entry: entry{anchor: anchor{addr: 1}, kind: entryFunction}, blocks: []block{{offset: 0}, {offset: 0}}},
+			plan: plan{entry: entry{anchor: anchor{addr: 1}, kind: entryFunction}, blocks: []block{{anchor: anchor{addr: 1}}, {anchor: anchor{addr: 1}}}},
 			want: false,
 		},
 		{
-			name: "missing target",
-			plan: plan{entry: entry{anchor: anchor{addr: 1}, kind: entryFunction}, blocks: []block{{offset: 0, term: terminator{kind: terminateBranch, targets: []int{4}}}}},
-			want: false,
+			name: "fallback target",
+			plan: plan{entry: entry{anchor: anchor{addr: 1}, kind: entryFunction}, blocks: []block{{anchor: anchor{addr: 1}, term: terminator{kind: terminateBranch, targets: []int{4}}}}},
+			want: true,
 		},
 		{
 			name: "invalid function anchor",
-			plan: plan{entry: entry{anchor: anchor{addr: 1, ip: 4}, kind: entryFunction}, blocks: []block{{offset: 4}}},
+			plan: plan{entry: entry{anchor: anchor{addr: 1, ip: 4}, kind: entryFunction}, blocks: []block{{anchor: anchor{addr: 1, ip: 4}}}},
 			want: false,
 		},
 		{
 			name: "invalid loop anchor",
-			plan: plan{entry: entry{anchor: anchor{addr: 1}, kind: entryLoop}, blocks: []block{{offset: 0}}},
-			want: false,
-		},
-		{
-			name: "mixed block state",
-			plan: plan{entry: entry{anchor: anchor{addr: 1}, kind: entryFunction}, blocks: []block{{offset: 0, canonical: true}, {offset: 4}}},
+			plan: plan{entry: entry{anchor: anchor{addr: 1}, kind: entryLoop}, blocks: []block{{anchor: anchor{addr: 1}}}},
 			want: false,
 		},
 	}
@@ -67,6 +87,29 @@ func TestPlan(t *testing.T) {
 			require.Equal(t, tt.want, tt.plan.valid())
 		})
 	}
+
+	t.Run("normalized blocks", func(t *testing.T) {
+		static := plan{
+			entry: entry{anchor: anchor{addr: 1}, kind: entryFunction},
+			blocks: []block{{
+				anchor: anchor{addr: 1},
+				state:  &state{},
+				term:   terminator{kind: terminateReturn},
+			}},
+		}
+		observed := plan{
+			entry: entry{anchor: anchor{addr: 1}, kind: entryFunction},
+			blocks: []block{{
+				anchor: anchor{addr: 1},
+				term:   terminator{kind: terminateReturn},
+			}},
+		}
+
+		require.True(t, static.valid())
+		require.True(t, observed.valid())
+		require.NotNil(t, static.blocks[0].state)
+		require.Nil(t, observed.blocks[0].state)
+	})
 
 	t.Run("slot merge", func(t *testing.T) {
 		dst := slot{kind: types.KindRef, ref: 7, refKnown: true, callee: 7, calleeKnown: true}
@@ -113,20 +156,40 @@ func TestStaticPlan(t *testing.T) {
 	require.Equal(t, entryFunction, plans[0].entry.kind)
 	require.Equal(t, terminateBranchIf, plans[0].blocks[0].term.kind)
 	require.Len(t, plans[0].blocks[0].term.targets, 2)
+
+	t.Run("direct call facts", func(t *testing.T) {
+		callee := &types.Function{Typ: &types.FunctionType{}}
+		caller := &types.Function{
+			Typ:  &types.FunctionType{},
+			Code: instr.Marshal([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.RETURN)}),
+		}
+		input := &compileInput{
+			address:   1,
+			function:  caller,
+			constants: []types.Boxed{types.BoxRef(2)},
+			heap:      []types.Value{nil, nil, callee},
+		}
+
+		plans, err := (staticPlanner{}).plan(input)
+		require.NoError(t, err)
+		require.Len(t, plans, 1)
+		require.Equal(t, uint64(0), plans[0].blocks[0].steps[0].args[0])
+		require.Equal(t, 2, plans[0].blocks[0].steps[1].callee)
+	})
 }
 
 func TestTracePlan(t *testing.T) {
 	root := &trace{
 		anchor: anchor{addr: 1},
-		ops: []step{
-			{op: instr.I32_CONST, fn: 1, ip: 0},
-			{op: instr.BR_IF, fn: 1, ip: 5, target: 12, taken: true},
+		ops: []record{
+			{step: step{op: instr.I32_CONST, fn: 1, ip: 0}},
+			{step: step{op: instr.BR_IF, fn: 1, ip: 5}, target: 12, taken: true},
 		},
 		kind: returned,
 	}
 	continuation := &trace{
 		anchor: anchor{addr: 1, ip: 12},
-		ops:    []step{{op: instr.RETURN, fn: 1, ip: 12}},
+		ops:    []record{{step: step{op: instr.RETURN, fn: 1, ip: 12}}},
 		kind:   returned,
 	}
 	tracer := NewTracer()
@@ -134,18 +197,23 @@ func TestTracePlan(t *testing.T) {
 		root:     root,
 		branches: map[int]*trace{0: continuation},
 		hits:     []int64{9},
-		exits:    map[branch]int{{fn: 1, ip: 12}: 0},
+		exits:    map[anchor]int{{addr: 1, ip: 12}: 0},
 	}
 	input := &compileInput{
-		interpreter: &Interpreter{tracer: tracer},
-		address:     1,
-		function:    &types.Function{Code: []byte{byte(instr.NOP)}},
+		tracer:   tracer,
+		address:  1,
+		function: &types.Function{Code: []byte{byte(instr.NOP)}},
 	}
 
 	plans, err := (tracePlanner{}).plan(input)
 	require.NoError(t, err)
 	require.Len(t, plans, 1)
 	require.True(t, plans[0].valid())
-	require.Len(t, plans[0].blocks, 2)
-	require.Equal(t, int64(9), plans[0].blocks[1].hits)
+	require.GreaterOrEqual(t, len(plans[0].blocks), 2)
+	require.Equal(t, terminateBranchIf, plans[0].blocks[0].term.kind)
+	require.Equal(t, uint64(0), plans[0].blocks[0].steps[0].args[0])
+	for _, op := range plans[0].blocks[0].steps {
+		require.NotEqual(t, instr.BR_IF, op.op)
+	}
+	require.Equal(t, int64(9), plans[0].blocks[len(plans[0].blocks)-1].hits)
 }

@@ -119,8 +119,8 @@ func TestInterpreter_JITArraySetAfterBranchyCallsInLoop(t *testing.T) {
 // miscompile where a captured side-exit fragment that recorded a few
 // supported opcodes and then aborted on an unsupported one (MAP_NEW_DEFAULT
 // is not recordable) could be mistaken for a normal top-level completion:
-// the walk that lowers a learned branch continuation used to check the
-// entry root's own outcome instead of the fragment actually being walked, so
+// lowering a learned continuation used to check the entry root rather than
+// the current block, so
 // an aborted fragment whose ops simply ran out could fall through as if it
 // had returned normally. The x>0 path (taken while warming up) compiles as
 // the JIT entry trace; the x<=0 path is hit often enough at runtime to cross

@@ -237,7 +237,7 @@ func TestPool_Get(t *testing.T) {
 		require.NoError(t, err)
 		defer p.Put(i)
 		root := anchor{addr: 0, ip: 0}
-		target := branch{fn: 0, ip: 0}
+		target := anchor{addr: 0, ip: 0}
 
 		for range exitThreshold*2 - 1 {
 			_, err := i.tracer.exit(i, root, target)

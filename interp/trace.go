@@ -21,21 +21,6 @@ type Tracer struct {
 	mu       sync.Mutex
 }
 
-type anchor struct {
-	addr int
-	ip   int
-}
-
-type branch struct {
-	fn int
-	ip int
-}
-
-type shape struct {
-	itab uintptr
-	typ  uintptr
-}
-
 type iface struct {
 	itab uintptr
 	_    uintptr
@@ -43,26 +28,16 @@ type iface struct {
 
 type outcome int
 
-type step struct {
-	op    instr.Opcode
-	seen  types.Boxed
-	arg   types.Boxed
-	shape shape
-	cut   bool
-
-	fn     int
-	ip     int
-	depth  int
+type record struct {
+	step
+	cut    bool
 	target int
 	taken  bool
-	callee int
-	ref    int
-	known  bool
 }
 
 type trace struct {
 	anchor anchor
-	ops    []step
+	ops    []record
 	kind   outcome
 }
 
@@ -70,7 +45,7 @@ type tree struct {
 	root     *trace
 	branches map[int]*trace
 	hits     []int64
-	exits    map[branch]int
+	exits    map[anchor]int
 
 	attempts int
 }
@@ -96,7 +71,7 @@ func NewTracer() *Tracer {
 	}
 }
 
-func (r *Tracer) exit(i *Interpreter, root anchor, target branch) (int64, error) {
+func (r *Tracer) exit(i *Interpreter, root anchor, target anchor) (int64, error) {
 	r.mu.Lock()
 	tree := r.tree(root)
 	id := r.exitIndex(tree, target)
@@ -114,7 +89,7 @@ func (r *Tracer) exit(i *Interpreter, root anchor, target branch) (int64, error)
 	}
 	r.mu.Unlock()
 
-	t, err := r.capture(i, anchor{addr: target.fn, ip: target.ip})
+	t, err := r.capture(i, anchor{addr: target.addr, ip: target.ip})
 	if err != nil {
 		return hits, err
 	}
@@ -223,10 +198,9 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		if (op == instr.BR || op == instr.BR_IF) &&
 			clone.fr.addr == st.fn && clone.fr.ip <= st.ip &&
 			(clone.fr.addr != a.addr || clone.fr.ip != a.ip) {
-			t.ops = append(t.ops, step{
-				fn:     clone.fr.addr,
+			t.ops = append(t.ops, record{
+				step:   step{fn: clone.fr.addr, depth: clone.fp - startFP},
 				target: clone.fr.ip,
-				depth:  clone.fp - startFP,
 				cut:    true,
 			})
 			t.kind = partial
@@ -271,7 +245,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		// Preserve the bounded prefix. Its synthetic cut lowers through the same
 		// side-exit path as a guard, so a hot remainder becomes a continuation.
 		f := clone.fr
-		t.ops = append(t.ops, step{fn: f.addr, target: f.ip, depth: clone.fp - startFP, cut: true})
+		t.ops = append(t.ops, record{step: step{fn: f.addr, depth: clone.fp - startFP}, target: f.ip, cut: true})
 		t.kind = partial
 	}
 	if t.kind == aborted {
@@ -365,14 +339,15 @@ func (r *Tracer) codes(i *Interpreter) [][]func(*Interpreter) {
 	return r.exact
 }
 
-func (r *Tracer) op(i *Interpreter, op instr.Opcode, startFP int) step {
+func (r *Tracer) op(i *Interpreter, op instr.Opcode, startFP int) record {
 	f := i.fr
-	st := step{
+	st := record{step: step{
 		op:    op,
+		args:  args(instr.Instruction(i.instrs[f.addr][f.ip:])),
 		fn:    f.addr,
 		ip:    f.ip,
 		depth: i.fp - startFP,
-	}
+	}}
 	switch op {
 	case instr.I32_DIV_S,
 		instr.I32_DIV_U,
@@ -441,7 +416,7 @@ func (r *Tracer) shape(i *Interpreter, v types.Boxed) shape {
 	return out
 }
 
-func (r *Tracer) finish(i *Interpreter, st *step, op instr.Opcode) {
+func (r *Tracer) finish(i *Interpreter, st *record, op instr.Opcode) {
 	switch op {
 	case instr.BR_IF:
 		if i.fr.addr == st.fn && i.fr.ip == st.target {
@@ -528,7 +503,7 @@ func (r *Tracer) tree(a anchor) *tree {
 	if tr == nil {
 		tr = &tree{
 			branches: map[int]*trace{},
-			exits:    map[branch]int{},
+			exits:    map[anchor]int{},
 		}
 		r.trees[a] = tr
 	}
@@ -607,7 +582,7 @@ func (r *Tracer) headers(i *Interpreter, addr int) []int {
 	return hs
 }
 
-func (r *Tracer) exitIndex(tree *tree, target branch) int {
+func (r *Tracer) exitIndex(tree *tree, target anchor) int {
 	if idx, ok := tree.exits[target]; ok {
 		return idx
 	}

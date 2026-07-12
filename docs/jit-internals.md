@@ -38,7 +38,7 @@ The threaded interpreter is the source of correctness. Native code is an optimiz
 Default rules:
 
 - preserve threaded and JIT semantic parity
-- prefer simple trace lowering over broad static compilation
+- normalize every frontend into one small plan before architecture lowering
 - keep fallback behavior explicit
 - keep architecture-specific code isolated
 - use short, standard names
@@ -97,7 +97,7 @@ Both planners return the same private `plan` model: ABI-classified entry, blocks
 
 ## Static Planner
 
-The static planner analyzes basic blocks with one forward fixpoint that tracks stack kind, constant-ref provenance, and direct-call targets. It emits canonical blocks whose entry state is reloaded from VM stack homes. Unsupported instructions become exact-IP fallback boundaries when the surrounding function remains structurally valid.
+The static planner analyzes basic blocks with one forward fixpoint that tracks stack kind, constant-ref provenance, and direct-call targets. It emits ordinary plan blocks with explicit entry state, decoded operands, and terminators. Unsupported instructions become exact-IP fallback boundaries when the surrounding function remains structurally valid.
 
 Top-level modules containing `CALL` or `RETURN_CALL` are rejected because module entry does not implement the framed native-call ABI. Primitive typed-array constants remain ownership-neutral markers until `ARRAY_GET`; native code reloads the current heap cell, guards its shape and index, and retains the marker only on a cold fallback.
 
@@ -146,9 +146,9 @@ type lowerer interface {
 }
 ```
 
-`jit_arm64.go` owns ARM64 lowering. Every plan block passes through one `emitBlock` path and every ordinary opcode through one `emitStep` dispatcher. Canonical blocks reload their declared entry state; observed blocks use the same helpers while preserving guarded branch and inlined-frame behavior.
+`jit_arm64.go` owns ARM64 lowering. Every plan block passes through one `emitBlock` path, every operation through one step dispatcher, and every edge through one terminator path. The backend reads decoded plan operands and targets only; it does not inspect bytecode or planner identity. A block with entry state reloads VM homes, while a profiled successor may continue with the current symbolic state.
 
-Learned continuations need the symbolic state that exists only at their branch point. Lowering therefore keeps a planner-neutral deferred worklist containing plan blocks, labels, symbolic snapshots, and hit ordering. It contains no trace tree, CFG node, or planner-specific type.
+Learned continuations need the symbolic state that exists only at their branch point. Their caller suffixes are normalized into nested plan blocks before lowering. The backend keeps a planner-neutral deferred worklist containing blocks, labels, symbolic snapshots, and hit ordering; it contains no trace tree, CFG node, raw branch step, or planner-specific type.
 
 ## Trace ABI
 
@@ -251,7 +251,7 @@ A call may lower to native `BL` when the observed target is a JIT-eligible `*typ
 
 Unsupported targets fall back, including host calls, allocation, heap mutation, maps, unsupported functions, and unsupported closures.
 
-Whole-CFG call sites recognize direct `CONST_GET function; CALL` pairs. Each interpreter owns a fixed-size `natives` slot array; installing or synchronizing a CFG entry publishes its executable address atomically. The caller loads the slot at runtime and uses `BLR`, so compile order does not matter: a null slot falls back at the CALL, while a later callee installation is visible without recompiling the caller. Self-recursion remains on the established trace self-call path, and `RETURN_CALL` remains threaded.
+Static plans recognize direct `CONST_GET function; CALL` pairs. Each interpreter owns a fixed-size `natives` slot array; installing or synchronizing a function entry publishes its executable address atomically. The caller loads the slot at runtime and uses `BLR`, so compile order does not matter: a null slot falls back at the CALL, while a later callee installation is visible without recompiling the caller. Self-recursion remains on the established trace self-call path, and `RETURN_CALL` remains threaded.
 
 Native calls are frame-aware. The lowering checks frame budget, increments native depth, saves caller state, enters the callee trace, and restores caller state on return.
 
