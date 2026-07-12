@@ -3,19 +3,13 @@ package interp
 import (
 	"errors"
 
-	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/asm"
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/types"
 )
 
-// lowerer is the architecture-specific JIT lowerer. compiler owns the
-// recorded-trace orchestration and delegates native-code emission to the target
-// backend. lowerCFG is compileCFG's counterpart to lower: it walks one
-// statically decoded basic block instead of a recorded trace tree.
+// lowerer emits a backend-neutral plan for one target architecture.
 type lowerer interface {
-	lower(ctx *lowering) bool
-	lowerCFG(ctx *lowering, blocks []*analysis.BasicBlock, kinds [][]types.Kind, labels []asm.Label) bool
+	lower(ctx *lowering, plan plan) bool
 }
 
 type compiler struct {
@@ -25,9 +19,9 @@ type compiler struct {
 	scratchRegs []asm.PReg
 }
 
-// pendingLimit caps learned branch continuations emitted into one native
+// continuationLimit caps deferred learned continuations in one native
 // callable; beyond this the guard keeps the old deopt fallback.
-const pendingLimit = 256
+const continuationLimit = 256
 
 type module struct {
 	entries map[anchor]native
@@ -37,18 +31,15 @@ type module struct {
 
 type native struct {
 	callable asm.Callable
-	loop     bool
-	cfg      bool
+	entry    entryKind
 }
 
-// lowering carries the symbolic interpreter state for one trace
-// compilation: typed operand values, the inline frame chain, and the recorded
-// branch continuations still waiting for emission. The arch lowerer mutates it
-// while emitting; compiler builds it and links the result.
+// lowering carries symbolic values, inlined activations, deferred blocks, and
+// cold exits while one plan is emitted. It contains no planner source objects.
 type lowering struct {
 	assembler *asm.Assembler
-	tree      *tree
-	branches  map[branch]leg
+	root      block
+	branches  map[branch]block
 	funcs     map[int]*types.Function
 	constants []types.Boxed
 	globals   []types.Kind
@@ -58,18 +49,18 @@ type lowering struct {
 	head      asm.Label
 	back      asm.Label
 
-	values          []value
-	frames          []activation
-	pending         []pending
-	pendingBranches int
-	exits           []sideExit
-	queued          map[branch]asm.Label
-	tails           map[*step]asm.Label
-	saved           []value
+	values    []value
+	frames    []activation
+	work      []work
+	scheduled int
+	exits     []sideExit
+	queued    map[branch]asm.Label
+	tails     map[*step]asm.Label
+	saved     []value
 
 	addr    int
 	returns int
-	loop    bool
+	kind    entryKind
 }
 
 // value is one typed operand: a register plus the runtime kind the trace
@@ -108,16 +99,15 @@ type activation struct {
 	returns  int
 }
 
-// pending is the cold continuation of a guarded branch: state was
-// flushed to the VM stack at the guard, so the body re-enters at label with
+// work is a deferred block whose branch point produced its symbolic state:
+// stack homes are current, so the block re-enters at label with
 // every local unloaded and every operand awaiting reload. If the branch
 // returned from an inlined callee, tail keeps the caller path that must run
-// after the pending body stitches back into the caller frame.
-type pending struct {
+// after the deferred block stitches back into the caller frame.
+type work struct {
 	label  asm.Label
-	ops    []step
+	block  block
 	tail   []step
-	kind   outcome
 	values []value
 	frames []activation
 	hits   int64
@@ -213,35 +203,26 @@ func (c *compiler) Close() error {
 	return c.buffer.Free()
 }
 
-func (c *compiler) newLowering(i *Interpreter, addr int, fn *types.Function, arch asm.Arch) *lowering {
+func (c *compiler) newLowering(input *compileInput, arch asm.Arch) *lowering {
 	asmb := asm.New(arch)
-	globals := make([]types.Kind, len(i.globals))
-	for idx, global := range i.globals {
-		globals[idx] = global.Kind()
-	}
-	funcs := make(map[int]*types.Function)
-	for fnAddr := range i.instrs {
-		if target, ok := i.function(fnAddr); ok {
-			funcs[fnAddr] = target
-		}
-	}
 	ctx := &lowering{
 		assembler: asmb,
-		funcs:     funcs,
+		funcs:     input.functions,
+		branches:  map[branch]block{},
 		queued:    map[branch]asm.Label{},
 		tails:     map[*step]asm.Label{},
-		constants: i.constants,
-		globals:   globals,
-		heap:      i.heap,
+		constants: input.interpreter.constants,
+		globals:   input.globals,
+		heap:      input.interpreter.heap,
 		scratch:   c.scratchRegs[:scratchCount],
 		entry:     asmb.Label(),
 		head:      asmb.Label(),
-		addr:      addr,
+		addr:      input.address,
 	}
-	if fn.Typ != nil {
-		ctx.returns = len(fn.Typ.Returns)
+	if input.function.Typ != nil {
+		ctx.returns = len(input.function.Typ.Returns)
 	}
-	ctx.frames = append(ctx.frames, newActivation(addr, fn, 0, 0))
+	ctx.frames = append(ctx.frames, newActivation(input.address, input.function, 0, 0))
 	return ctx
 }
 
@@ -267,135 +248,61 @@ func (c *compiler) publish(mod *module, a anchor, ctx *lowering, arch asm.Arch, 
 	return true, nil
 }
 
-// Compile attempts to lower the recorded entry trace for fn into one native
-// callable. Without a usable trace, unsupported op, or rejected observed shape,
-// it emits nothing and leaves threaded dispatch in place.
-func (c *compiler) Compile(i *Interpreter, addr int, fn *types.Function) (*module, error) {
-	mod := &module{entries: map[anchor]native{}}
-	if fn == nil || len(fn.Code) == 0 {
-		return mod, nil
+// Compile selects and lowers the first planner family that emits native code.
+func (c *compiler) Compile(i *Interpreter, addr int) (*module, error) {
+	input, ok := newCompileInput(i, addr)
+	if !ok {
+		return nil, nil
 	}
-	_, err := c.emit(i, addr, fn, mod)
-	return mod, err
-}
-
-// emit lowers every published trace root recorded for addr — the function
-// entry plus any hot loop headers — into framed native callables, one per
-// anchor. It returns false (emitting nothing) when no usable trace exists or
-// the typed lowerer rejects them all, so the caller can leave threaded dispatch
-// installed.
-func (c *compiler) emit(i *Interpreter, addr int, fn *types.Function, mod *module) (bool, error) {
-	if i.tracer == nil {
-		return false, nil
-	}
-	anchors := i.tracer.anchors(addr)
-	if len(anchors) == 0 {
-		return false, nil
-	}
-	funcs := map[int]*types.Function{}
-	for addr := range i.instrs {
-		if fn, ok := i.function(addr); ok {
-			funcs[addr] = fn
-		}
-	}
-	any := false
-	for _, ip := range anchors {
-		ok, err := c.emitRoot(i, addr, fn, mod, anchor{addr: addr, ip: ip}, funcs)
+	planners := [...]planner{staticPlanner{}, tracePlanner{}}
+	for _, planner := range planners {
+		plans, err := planner.plan(input)
 		if err != nil {
-			return false, err
+			return nil, err
 		}
-		any = any || ok
+		mod := &module{entries: map[anchor]native{}}
+		for _, plan := range plans {
+			if !plan.valid() {
+				continue
+			}
+			ok, err := c.compile(input, plan, mod)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+		}
+		if mod.emits > 0 {
+			return mod, nil
+		}
 	}
-	return any, nil
+	return &module{entries: map[anchor]native{}}, nil
 }
 
-// emitRoot lowers the single trace root anchored at a into one framed native
-// callable keyed by a. An entry root (a.ip == 0) compiles the whole function
-// from a clean frame; a loop root compiles one iteration with a native
-// back-edge re-entered mid-function at a.ip.
-func (c *compiler) emitRoot(i *Interpreter, addr int, fn *types.Function, mod *module, a anchor, funcs map[int]*types.Function) (bool, error) {
-	tree := i.tracer.rootAt(a)
-	if tree == nil {
-		return false, nil
-	}
-	// Only the function entry and genuine loop headers compile to standalone
-	// native callables. Other non-zero anchors are side-exit branches the
-	// recorder stored as top-level trees; they are inlined into the entry trace
-	// through branchIPs, never installed on their own. A loop whose header is the
-	// function entry (ip 0) has no distinct entry trace to anchor the re-entry
-	// state and is left to threaded dispatch for now.
-	if (a.ip != 0) != (tree.root.kind == loop) {
-		return false, nil
-	}
+func (c *compiler) compile(input *compileInput, plan plan, mod *module) (bool, error) {
 	if len(c.scratchRegs) < scratchCount {
 		return false, nil
 	}
-
-	// A trace whose terminal op is ARRAY_SET or STRUCT_SET lowers to a native
-	// fast path that performs the heap store and falls through to the next
-	// threaded instruction on success; a spilled value still live across that
-	// terminal store would leave a stale copy on the VM stack if the native
-	// path took the store and then trapped before writing the spill back.
-	// noSpillArch reports no Frame, which is asm's own contract for
-	// disabling spilling (see asm.Frame's doc comment), so this policy needs
-	// no dedicated asm-level API. Loop back-edges need no interp-side check
-	// here: the assembler's own generic backward-label scan (asm/rewriter.go)
-	// already disables spilling for any Code containing an intra-Code
-	// backward branch — see docs/jit-internals.md for why both layers exist.
 	arch := c.arch
-	if !spillSafe(tree) {
+	if plan.spill == spillForbidden {
 		arch = noSpillArch{c.arch}
 	}
-	ctx := c.newLowering(i, addr, fn, arch)
-	ctx.tree = tree
-	ctx.branches = tree.branchIPs()
-	ctx.loop = tree.root.kind == loop
-	if !c.lowerer.lower(ctx) {
+	ctx := c.newLowering(input, arch)
+	if !c.lowerer.lower(ctx, plan) {
 		return false, nil
 	}
-	return c.publish(mod, a, ctx, c.arch, native{loop: ctx.loop})
+	return c.publish(mod, plan.entry.anchor, ctx, c.arch, native{entry: plan.entry.kind})
 }
 
 // noSpillArch wraps an asm.Arch to force Build to reject spilling instead of
 // inserting a spill frame. A nil Frame already disables spilling per asm's
 // own contract (see asm.Frame's doc comment), so this policy needs no
 // dedicated asm-level API — it is purely an interp-side JIT policy decision
-// (see spillSafe), not a generic assembler concern.
+// (see planSpill), not a generic assembler concern.
 type noSpillArch struct{ asm.Arch }
 
 func (noSpillArch) Frame() asm.Frame { return nil }
-
-// spillSafe reports whether the compiled trace tree may use ordinary
-// register spilling. A trace whose terminal op is ARRAY_SET or STRUCT_SET
-// lowers to a native fast path that performs the heap store and falls
-// through to the next threaded instruction on success; a spilled value still
-// live across that terminal store would leave a stale copy on the VM stack if
-// the native path took the store and then trapped before writing the spill
-// back. The scan covers the root trace and every branch the tree may inline
-// as a continuation, not just the root's own last op, because a learned
-// continuation that itself ends in a mutation would otherwise escape the
-// check.
-func spillSafe(tree *tree) bool {
-	if endsInMutation(tree.root) {
-		return false
-	}
-	for _, tr := range tree.branches {
-		if endsInMutation(tr) {
-			return false
-		}
-	}
-	return true
-}
-
-// endsInMutation reports whether t's recorded final op is a heap mutation
-// that lowers as a terminal native fast path (see spillSafe).
-func endsInMutation(t *trace) bool {
-	if t == nil || len(t.ops) == 0 {
-		return false
-	}
-	op := t.ops[len(t.ops)-1].op
-	return op == instr.ARRAY_SET || op == instr.STRUCT_SET
-}
 
 // frame returns the innermost (currently executing) frame.
 func (ctx *lowering) frame() *activation {
@@ -437,7 +344,7 @@ func (ctx *lowering) sp() int {
 	return f.base + len(f.kinds) + (len(ctx.values) - f.opBase)
 }
 
-// snapshot deep-copies operand and frame state for a pending branch. Callers
+// snapshot deep-copies operand and frame state for a deferred branch. Callers
 // must flush VM stack homes before snapshot; re-entry reloads locals on demand,
 // so stale register/local loaded state must stay dropped.
 // queueExit records a cold fallback after the caller has materialized VM stack state.

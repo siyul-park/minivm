@@ -31,11 +31,6 @@ type branch struct {
 	ip int
 }
 
-type leg struct {
-	trace *trace
-	hits  int64
-}
-
 type shape struct {
 	itab uintptr
 	typ  uintptr
@@ -61,6 +56,8 @@ type step struct {
 	target int
 	taken  bool
 	callee int
+	ref    int
+	known  bool
 }
 
 type trace struct {
@@ -686,18 +683,6 @@ func (t *tree) snapshot() *tree {
 		branches: branches,
 		hits:     append([]int64(nil), t.hits...),
 	}
-}
-
-// branchIPs returns learned continuations eligible for inlining into a parent
-// trace. capture publishes only usable traces, so non-nil branches are valid.
-func (t *tree) branchIPs() map[branch]leg {
-	out := map[branch]leg{}
-	for id, tr := range t.branches {
-		if tr != nil {
-			out[branch{fn: tr.anchor.addr, ip: tr.anchor.ip}] = leg{trace: tr, hits: t.hits[id]}
-		}
-	}
-	return out
 }
 
 func itab(v types.Value) uintptr {

@@ -779,8 +779,10 @@ func (i *Interpreter) compile(addr int) error {
 	if i.compiler == nil {
 		return nil
 	}
-	mod, err := i.build(i.compiler, addr)
+	i.samples.AddMetric("vm_jit_attempts_total", 1)
+	mod, err := i.compiler.Compile(i, addr)
 	if err != nil {
+		i.samples.AddMetric("vm_jit_errors_total", 1)
 		return err
 	}
 	if mod == nil {
@@ -801,8 +803,10 @@ func (i *Interpreter) shared(addr int) error {
 		i.cache.ready(addr)
 		return nil
 	}
-	mod, err := i.build(compiler, addr)
+	i.samples.AddMetric("vm_jit_attempts_total", 1)
+	mod, err := compiler.Compile(i, addr)
 	if err != nil {
+		i.samples.AddMetric("vm_jit_errors_total", 1)
 		_ = compiler.Close()
 		i.cache.ready(addr)
 		return err
@@ -822,32 +826,6 @@ func (i *Interpreter) shared(addr int) error {
 	}
 	i.cache.publish(addr, mod, buf)
 	return nil
-}
-
-func (i *Interpreter) build(c *compiler, addr int) (*module, error) {
-	fn, ok := i.function(addr)
-	if !ok {
-		return nil, nil
-	}
-	i.samples.AddMetric("vm_jit_attempts_total", 1)
-	if i.stub(addr) == nil {
-		i.samples.AddMetric("vm_jit_cfg_attempts_total", 1)
-		mod, ok, err := c.compileCFG(i, addr, fn)
-		if err != nil {
-			i.samples.AddMetric("vm_jit_errors_total", 1)
-			return nil, err
-		}
-		if ok {
-			return mod, nil
-		}
-		i.samples.AddMetric("vm_jit_cfg_rejected_total", 1)
-	}
-	mod, err := c.Compile(i, addr, fn)
-	if err != nil {
-		i.samples.AddMetric("vm_jit_errors_total", 1)
-		return nil, err
-	}
-	return mod, nil
 }
 
 // install accounts a successful Compile and rewires the dispatch table: a
@@ -874,12 +852,12 @@ func (i *Interpreter) install(mod *module, account bool) {
 				i.stubs[a.addr] = i.exits[a]
 			}
 		}
-		if entry.cfg && a.ip == 0 {
+		if entry.entry == entryFunction {
 			atomic.StorePointer(&i.natives[a.addr], entry.callable.Addr())
 		}
-		if entry.loop {
+		if entry.entry == entryLoop {
 			i.code[a.addr][a.ip] = i.loop(entry.callable)
-		} else if a.addr == 0 {
+		} else if entry.entry == entryModule {
 			i.code[a.addr][a.ip] = i.start(a, entry.callable)
 		} else {
 			i.code[a.addr][a.ip] = i.call(a, entry.callable)
@@ -1163,8 +1141,10 @@ func (i *Interpreter) exit(root anchor) {
 	if i.compiler == nil {
 		return
 	}
-	mod, err := i.build(i.compiler, root.addr)
+	i.samples.AddMetric("vm_jit_attempts_total", 1)
+	mod, err := i.compiler.Compile(i, root.addr)
 	if err != nil {
+		i.samples.AddMetric("vm_jit_errors_total", 1)
 		panic(err)
 	}
 	if mod != nil {

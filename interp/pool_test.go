@@ -286,12 +286,7 @@ func TestPool_Get(t *testing.T) {
 		require.NoError(t, p.Close())
 		attempts, ok := metrics.Metric("vm_jit_attempts_total")
 		require.True(t, ok)
-		cfg, _ := metrics.Metric("vm_jit_cfg_attempts_total")
-		if cfg > 0 {
-			require.Equal(t, float64(1), attempts)
-		} else {
-			require.Equal(t, float64(2), attempts)
-		}
+		require.Equal(t, float64(1), attempts)
 	})
 }
 
