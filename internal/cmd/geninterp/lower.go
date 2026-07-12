@@ -20,7 +20,24 @@ type lowering struct {
 	handler jen.Code
 }
 
-var lowerers = [256]func(step, []lowering, int, string) ([]lowering, lowering, error){
+type fact struct {
+	step
+	kind   instr.Kind
+	boxed  bool
+	commit bool
+}
+
+type loweringState struct {
+	pending    []lowering
+	offset     int
+	total      int
+	label      string
+	standalone bool
+}
+
+type lowerer func(*loweringState, fact) (lowering, error)
+
+var lowerers = [256]lowerer{
 	instr.ARRAY_APPEND:        wrap(arrayAppend),
 	instr.ARRAY_COPY:          wrap(arrayCopy),
 	instr.ARRAY_DELETE:        wrap(arrayDelete),
@@ -233,14 +250,15 @@ var lowerers = [256]func(step, []lowering, int, string) ([]lowering, lowering, e
 	instr.YIELD:               wrap(yield),
 }
 
-func wrap(handler func() jen.Code) func(step, []lowering, int, string) ([]lowering, lowering, error) {
-	return func(source step, pending []lowering, _ int, _ string) ([]lowering, lowering, error) {
-		return pending, lowering{source: source, handler: handler()}, nil
+func wrap(handler func() jen.Code) lowerer {
+	return func(_ *loweringState, source fact) (lowering, error) {
+		return lowering{source: source.step, handler: handler()}, nil
 	}
 }
 
 func standalone(op instr.Opcode) jen.Code {
-	_, lowered, err := lowerers[op](step{op: op, kind: instr.KindAny}, nil, width(op), "")
+	state := loweringState{total: width(op), standalone: true}
+	lowered, err := lowerers[op](&state, fact{step: step{op: op}, kind: instr.KindAny})
 	if err != nil {
 		panic(err)
 	}
@@ -256,54 +274,49 @@ func standalone(op instr.Opcode) jen.Code {
 }
 
 func compose(pattern pattern, total int, label string) ([]jen.Code, error) {
-	steps, err := prepare(pattern)
+	facts, err := prepare(pattern)
 	if err != nil {
 		return nil, err
 	}
 
-	var pending []lowering
+	state := loweringState{total: total, label: label}
 	var lowered lowering
-	offset := 0
-	for index, source := range steps {
+	for _, source := range facts {
 		lower := lowerers[source.op]
 		if lower == nil {
 			return nil, fmt.Errorf("no lowering for %s", instr.TypeOf(source.op).Mnemonic)
 		}
-		switch {
-		case index == len(steps)-1:
-			pending, lowered, err = lower(source, pending, total, label)
-		case source.kind != instr.KindAny:
-			pending, lowered, err = lower(source, pending, offset, label)
-		default:
-			pending, lowered, err = lower(source, pending, 0, label)
-		}
+		lowered, err = lower(&state, source)
 		if err != nil {
 			return nil, err
 		}
-		offset += width(source.op)
+		state.offset += width(source.op)
 	}
 	if lowered.handler != nil || len(lowered.compile) == 0 {
-		consumer := steps[len(steps)-1].op
+		consumer := facts[len(facts)-1].op
 		return nil, fmt.Errorf("no fusion lowering for %s", instr.TypeOf(consumer).Mnemonic)
 	}
 	return lowered.compile, nil
 }
 
-func prepare(source pattern) (pattern, error) {
-	steps := append(pattern(nil), source...)
-	if len(steps) == 0 {
+func prepare(source pattern) ([]fact, error) {
+	facts := make([]fact, len(source))
+	for index, current := range source {
+		facts[index] = fact{step: current, kind: instr.KindAny}
+	}
+	if len(facts) == 0 {
 		return nil, fmt.Errorf("empty fusion pattern")
 	}
 
-	consumerAt := len(steps) - 1
-	branch := steps[consumerAt].op == instr.BR_IF
+	consumerAt := len(facts) - 1
+	branch := facts[consumerAt].op == instr.BR_IF
 	if branch {
 		consumerAt--
 	}
 	if consumerAt < 0 {
 		return nil, fmt.Errorf("fusion pattern has no consumer")
 	}
-	consumer := steps[consumerAt].op
+	consumer := facts[consumerAt].op
 
 	if _, ok := arity(consumer); ok {
 		kind, ok := numberKind(consumer)
@@ -312,12 +325,12 @@ func prepare(source pattern) (pattern, error) {
 		}
 		boxed := consumer == instr.I32_XOR || consumer == instr.I32_AND || consumer == instr.I32_OR
 		commit := traps(consumer)
-		for index := range steps[:consumerAt] {
-			steps[index].kind = kind
-			steps[index].boxed = boxed
-			steps[index].commit = commit
+		for index := range facts[:consumerAt] {
+			facts[index].kind = kind
+			facts[index].boxed = boxed
+			facts[index].commit = commit
 		}
-		return steps, nil
+		return facts, nil
 	}
 
 	switch consumer {
@@ -325,28 +338,28 @@ func prepare(source pattern) (pattern, error) {
 		if consumerAt != 1 {
 			return nil, fmt.Errorf("unsupported ref fusion pattern")
 		}
-		steps[0].kind = instr.KindRef
-		steps[0].boxed = true
+		facts[0].kind = instr.KindRef
+		facts[0].boxed = true
 	case instr.ARRAY_GET, instr.STRUCT_GET:
 		if consumerAt != 1 {
 			return nil, fmt.Errorf("unsupported index fusion pattern")
 		}
-		steps[0].kind = instr.KindI32
+		facts[0].kind = instr.KindI32
 	case instr.CALL, instr.RETURN_CALL, instr.CLOSURE_NEW:
-		if consumerAt != 1 || steps[0].op != instr.CONST_GET {
+		if consumerAt != 1 || facts[0].op != instr.CONST_GET {
 			return nil, fmt.Errorf("unsupported constant call pattern")
 		}
-		steps[0].kind = instr.KindRef
-		steps[0].boxed = true
+		facts[0].kind = instr.KindRef
+		facts[0].boxed = true
 	case instr.I32_CONST:
 		if !branch || consumerAt != 0 {
 			return nil, fmt.Errorf("unsupported direct branch pattern")
 		}
-		steps[0].kind = instr.KindI32
+		facts[0].kind = instr.KindI32
 	default:
 		return nil, fmt.Errorf("no fusion lowering for %s", instr.TypeOf(consumer).Mnemonic)
 	}
-	return steps, nil
+	return facts, nil
 }
 
 func numberKind(op instr.Opcode) (instr.Kind, bool) {
@@ -368,17 +381,17 @@ func numberKind(op instr.Opcode) (instr.Kind, bool) {
 	}
 }
 
-func sourceLower(source step, pending []lowering, offset int, label string) ([]lowering, lowering, error) {
-	if source.kind == instr.KindAny {
-		return pending, lowering{source: source, handler: sourceHandler(source.op)}, nil
+func sourceLower(state *loweringState, source fact) (lowering, error) {
+	if state.standalone {
+		return lowering{source: source.step, handler: sourceHandler(source.op)}, nil
 	}
-	lowered, err := sourceAccess(source, len(pending), offset, label)
+	lowered, err := sourceAccess(source, len(state.pending), state.offset, state.label)
 	if err != nil {
-		return nil, lowering{}, err
+		return lowering{}, err
 	}
-	lowered.source = source
-	pending = append(pending, lowered)
-	return pending, lowered, nil
+	lowered.source = source.step
+	state.pending = append(state.pending, lowered)
+	return lowered, nil
 }
 
 func sourceHandler(op instr.Opcode) jen.Code {
@@ -510,11 +523,11 @@ func kindName(kind instr.Kind) (string, bool) {
 	}
 }
 
-func refSource(source step, pending []lowering, _ int, _ string) ([]lowering, lowering, error) {
-	if source.kind == instr.KindAny {
-		return pending, lowering{source: source, handler: refHandler(source.op)}, nil
+func refSource(state *loweringState, source fact) (lowering, error) {
+	if state.standalone {
+		return lowering{source: source.step, handler: refHandler(source.op)}, nil
 	}
-	lowered := lowering{source: source}
+	lowered := lowering{source: source.step}
 	switch source.op {
 	case instr.REF_NULL:
 		lowered.boxed = jen.Qual("github.com/siyul-park/minivm/types", "BoxedNull")
@@ -541,41 +554,46 @@ func refSource(source step, pending []lowering, _ int, _ string) ([]lowering, lo
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"),
 		)
 	default:
-		return nil, lowering{}, fmt.Errorf("unsupported ref source %s", instr.TypeOf(source.op).Mnemonic)
+		return lowering{}, fmt.Errorf("unsupported ref source %s", instr.TypeOf(source.op).Mnemonic)
 	}
-	return append(pending, lowered), lowered, nil
+	state.pending = append(state.pending, lowered)
+	return lowered, nil
 }
 
-func refLower(source step, pending []lowering, total int, _ string) ([]lowering, lowering, error) {
-	if len(pending) == 0 {
-		return pending, lowering{source: source, handler: refHandler(source.op)}, nil
+func refLower(state *loweringState, source fact) (lowering, error) {
+	if state.standalone {
+		return lowering{source: source.step, handler: refHandler(source.op)}, nil
 	}
-	value := pending[len(pending)-1]
+	if len(state.pending) == 0 {
+		return lowering{}, fmt.Errorf("%s needs one pending value", instr.TypeOf(source.op).Mnemonic)
+	}
+	value := state.pending[len(state.pending)-1]
 	compile := append([]jen.Code(nil), value.compile...)
 	body := append([]jen.Code(nil), value.check...)
 	switch source.op {
 	case instr.DROP:
-		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(total))
+		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.total))
 	case instr.REF_IS_NULL:
 		body = append(body, value.body...)
 		condition := jen.Add(value.boxed).Dot("Ref").Call().Op("==").Lit(0)
-		if total == 0 {
+		if state.offset+width(source.op) < state.total {
 			lowered := lowering{source: value.source, compile: compile, check: value.check, body: value.body, raw: condition}
-			return []lowering{lowered}, lowered, nil
+			state.pending = []lowering{lowered}
+			return lowered, nil
 		}
 		body = append(body,
 			jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Qual("github.com/siyul-park/minivm/types", "BoxI1").Call(condition),
 			jen.Id("i").Dot("sp").Op("++"),
-			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(total),
+			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.total),
 		)
 	default:
-		return nil, lowering{}, fmt.Errorf("unsupported ref consumer %s", instr.TypeOf(source.op).Mnemonic)
+		return lowering{}, fmt.Errorf("unsupported ref consumer %s", instr.TypeOf(source.op).Mnemonic)
 	}
 	compile = append(compile,
 		jen.Id("c").Dot("ip").Op("+=").Lit(width(value.source.op)),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
 	)
-	return nil, lowering{source: source, compile: compile}, nil
+	return lowering{source: source.step, compile: compile}, nil
 }
 
 func refHandler(op instr.Opcode) jen.Code {
@@ -615,23 +633,23 @@ func refHandler(op instr.Opcode) jen.Code {
 	}
 }
 
-func indexLower(source step, pending []lowering, total int, _ string) ([]lowering, lowering, error) {
-	if len(pending) == 0 {
-		return pending, lowering{source: source, handler: indexHandler(source.op)}, nil
+func indexLower(state *loweringState, source fact) (lowering, error) {
+	if state.standalone {
+		return lowering{source: source.step, handler: indexHandler(source.op)}, nil
 	}
-	if len(pending) != 1 {
-		return nil, lowering{}, fmt.Errorf("%s needs one constant index", instr.TypeOf(source.op).Mnemonic)
+	if len(state.pending) != 1 {
+		return lowering{}, fmt.Errorf("%s needs one constant index", instr.TypeOf(source.op).Mnemonic)
 	}
-	index := pending[0]
+	index := state.pending[0]
 	compile := append([]jen.Code(nil), index.compile...)
 	body := append([]jen.Code(nil), index.check...)
 	body = append(body, index.body...)
-	body = append(body, indexCode(source.op, jen.Int().Call(index.raw), total)...)
+	body = append(body, indexCode(source.op, jen.Int().Call(index.raw), state.total)...)
 	compile = append(compile,
 		jen.Id("c").Dot("ip").Op("+=").Lit(width(index.source.op)),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
 	)
-	return nil, lowering{source: source, compile: compile}, nil
+	return lowering{source: source.step, compile: compile}, nil
 }
 
 func indexHandler(op instr.Opcode) jen.Code {
@@ -712,30 +730,30 @@ func indexHandler(op instr.Opcode) jen.Code {
 	}
 }
 
-func callLower(source step, pending []lowering, _ int, label string) ([]lowering, lowering, error) {
-	if len(pending) == 0 {
-		return pending, lowering{source: source, handler: callHandler(source.op)}, nil
+func callLower(state *loweringState, source fact) (lowering, error) {
+	if state.standalone {
+		return lowering{source: source.step, handler: callHandler(source.op)}, nil
 	}
-	if len(pending) != 1 || pending[0].source.op != instr.CONST_GET {
-		return nil, lowering{}, fmt.Errorf("%s needs one constant target", instr.TypeOf(source.op).Mnemonic)
+	if len(state.pending) != 1 || state.pending[0].source.op != instr.CONST_GET {
+		return lowering{}, fmt.Errorf("%s needs one constant target", instr.TypeOf(source.op).Mnemonic)
 	}
-	target := pending[0]
+	target := state.pending[0]
 	compile := append([]jen.Code(nil), target.compile...)
 	compile = append(compile,
 		jen.Id("addr").Op(":=").Add(target.boxed).Dot("Ref").Call(),
-		jen.If(jen.Id("addr").Op("<").Lit(0).Op("||").Id("addr").Op(">=").Len(jen.Id("c").Dot("heap"))).Block(reject(label)),
+		jen.If(jen.Id("addr").Op("<").Lit(0).Op("||").Id("addr").Op(">=").Len(jen.Id("c").Dot("heap"))).Block(reject(state.label)),
 	)
 	switch source.op {
 	case instr.CALL:
-		compile = append(compile, dispatch(false, label))
+		compile = append(compile, dispatch(false, state.label))
 	case instr.RETURN_CALL:
-		compile = append(compile, dispatch(true, label))
+		compile = append(compile, dispatch(true, state.label))
 	case instr.CLOSURE_NEW:
-		compile = append(compile, create(label))
+		compile = append(compile, create(state.label))
 	default:
-		return nil, lowering{}, fmt.Errorf("unsupported call opcode %s", instr.TypeOf(source.op).Mnemonic)
+		return lowering{}, fmt.Errorf("unsupported call opcode %s", instr.TypeOf(source.op).Mnemonic)
 	}
-	return nil, lowering{source: source, compile: compile}, nil
+	return lowering{source: source.step, compile: compile}, nil
 }
 
 func callHandler(op instr.Opcode) jen.Code {
@@ -942,84 +960,22 @@ func callHandler(op instr.Opcode) jen.Code {
 	}
 }
 
-func numericLower(source step, pending []lowering, total int, label string) ([]lowering, lowering, error) {
-	if total == 0 {
-		lowered := lowering{source: source}
-		return append(pending, lowered), lowered, nil
+func numericLower(state *loweringState, source fact) (lowering, error) {
+	if !state.standalone && state.offset+width(source.op) < state.total {
+		lowered := lowering{source: source.step}
+		state.pending = append(state.pending, lowered)
+		return lowered, nil
 	}
-	if len(pending) == 0 {
-		body, err := standaloneNumericCode(source.op)
-		return nil, lowering{source: source, compile: body}, err
-	}
-	body, err := numericCode(source, pending, total, label, false)
-	return nil, lowering{source: source, compile: body}, err
+	body, err := numericCode(source.step, state.pending, state.total, state.label, false)
+	return lowering{source: source.step, compile: body}, err
 }
 
-func standaloneNumericCode(op instr.Opcode) ([]jen.Code, error) {
-	arity, ok := arity(op)
-	if !ok {
-		return nil, fmt.Errorf("unsupported numeric opcode %s", instr.TypeOf(op).Mnemonic)
-	}
-	kind, _ := number(op)
-	body := []jen.Code{
-		jen.If(jen.Id("i").Dot("sp").Op("<").Lit(arity)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
-	}
-	if arity == 1 {
-		body = append(body,
-			jen.Id("v").Op(":=").Add(take(kind, jen.Id("i").Dot("sp").Op("-").Lit(1))),
-			jen.Block(
-				jen.Id("v").Op(":=").Id("v"),
-				jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Add(apply(op, jen.Id("v"))),
-			),
-		)
-	} else {
-		boxed := op == instr.I32_XOR || op == instr.I32_AND || op == instr.I32_OR
-		rhs := take(kind, jen.Id("i").Dot("sp").Op("-").Lit(1))
-		lhs := take(kind, jen.Id("i").Dot("sp").Op("-").Lit(2))
-		if boxed {
-			rhs = jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1))
-			lhs = jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(2))
-		}
-		body = append(body,
-			jen.Id("rhs").Op(":=").Add(rhs),
-			jen.Id("lhs").Op(":=").Add(lhs),
-		)
-		if traps(op) {
-			body = append(body,
-				jen.Var().Id("result").Qual("github.com/siyul-park/minivm/types", "Boxed"),
-				jen.Block(
-					jen.Id("lhs").Op(":=").Id("lhs"),
-					jen.Id("rhs").Op(":=").Id("rhs"),
-					jen.If(jen.Id("rhs").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrDivideByZero"))),
-					jen.Id("result").Op("=").Add(apply(op, jen.Id("lhs"), jen.Id("rhs"))),
-				),
-				jen.Id("i").Dot("sp").Op("--"),
-				jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Id("result"),
-			)
-		} else {
-			body = append(body,
-				jen.Id("i").Dot("sp").Op("--"),
-				jen.Block(
-					jen.Id("lhs").Op(":=").Id("lhs"),
-					jen.Id("rhs").Op(":=").Id("rhs"),
-					jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Add(apply(op, jen.Id("lhs"), jen.Id("rhs"))),
-				),
-			)
-		}
-	}
-	body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("++"))
-	return []jen.Code{
-		jen.Id("c").Dot("ip").Op("++"),
-		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
-	}, nil
-}
-
-func branchLower(source step, pending []lowering, total int, label string) ([]lowering, lowering, error) {
-	if len(pending) > 0 {
-		consumer := pending[len(pending)-1]
+func branchLower(state *loweringState, source fact) (lowering, error) {
+	if len(state.pending) > 0 {
+		consumer := state.pending[len(state.pending)-1]
 		if _, ok := arity(consumer.source.op); ok {
-			body, err := numericCode(consumer.source, pending[:len(pending)-1], total, label, true)
-			return nil, lowering{source: source, compile: body}, err
+			body, err := numericCode(consumer.source, state.pending[:len(state.pending)-1], state.total, state.label, true)
+			return lowering{source: source.step, compile: body}, err
 		}
 		if consumer.raw != nil {
 			condition := consumer.raw
@@ -1031,16 +987,16 @@ func branchLower(source step, pending []lowering, total int, label string) ([]lo
 			body = append(body, consumer.body...)
 			body = append(body,
 				jen.If(condition).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
-				jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(total),
+				jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.total),
 			)
 			compile = append(compile,
 				jen.Id("c").Dot("ip").Op("+=").Lit(width(consumer.source.op)),
 				jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
 			)
-			return nil, lowering{source: source, compile: compile}, nil
+			return lowering{source: source.step, compile: compile}, nil
 		}
 	}
-	return pending, lowering{source: source, handler: brIf()}, nil
+	return lowering{source: source.step, handler: brIf()}, nil
 }
 
 func dispatch(tail bool, label string) jen.Code {
@@ -1364,7 +1320,7 @@ func numericCode(consumer step, sources []lowering, total int, label string, bra
 	if missing > 0 {
 		body = append(body, jen.If(jen.Id("i").Dot("sp").Op("<").Lit(missing)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))))
 		for index := missing; index > 0; index-- {
-			operands = append(operands, peek(kind, jen.Id("i").Dot("sp").Op("-").Lit(index)))
+			operands = append(operands, take(kind, jen.Id("i").Dot("sp").Op("-").Lit(index)))
 		}
 	}
 	boxed := consumer.op == instr.I32_XOR || consumer.op == instr.I32_AND || consumer.op == instr.I32_OR
@@ -1663,7 +1619,7 @@ func traps(op instr.Opcode) bool {
 	}
 }
 
-func sourceAccess(source step, number, offset int, label string) (lowering, error) {
+func sourceAccess(source fact, number, offset int, label string) (lowering, error) {
 	op := source.op
 	kind, ok := kindName(source.kind)
 	if !ok {
@@ -1675,7 +1631,7 @@ func sourceAccess(source step, number, offset int, label string) (lowering, erro
 	idx := fmt.Sprintf("i%d", number)
 	addr := fmt.Sprintf("i%d", 2+number)
 	at := add(jen.Id("start"), offset)
-	result := lowering{source: source, raw: jen.Id(name), boxed: jen.Id(boxed)}
+	result := lowering{source: source.step, raw: jen.Id(name), boxed: jen.Id(boxed)}
 	result.check = append(result.check, jen.If(add(jen.Id("i").Dot("sp"), number).Op("==").Len(jen.Id("i").Dot("stack"))).Block(
 		jen.Panic(jen.Id("ErrStackOverflow")),
 	))
