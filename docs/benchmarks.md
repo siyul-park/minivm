@@ -196,10 +196,10 @@ Loop-anchored trace compilation lets hot loop bodies run in native code between 
 
 | Workload | Mode | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| `branchy_batch_tree_evaluation` | threaded | 1,807 | 0 | 0 |
-| `branchy_batch_tree_evaluation` | JIT | 1,203 | 0 | 0 |
+| `branchy_batch_tree_evaluation` | threaded | 1,568 | 0 | 0 |
+| `branchy_batch_tree_evaluation` | baseline CFG tier | 1,386 | 0 | 0 |
 
-The JIT row stays faster by keeping warm-entry fallback checks dense and skipping no-op safepoints when no context cancellation, fuel, hook, profiler, or shared cache coordination is active.
+The whole-CFG tier is about 12% faster on this workload while preserving zero steady-state allocations. The remaining gap to native tree evaluators is dominated by per-function call and canonical stack traffic rather than path-dependent trace warmup.
 
 On x86-64, JIT is not implemented yet. The runtime falls back to threaded execution.
 
