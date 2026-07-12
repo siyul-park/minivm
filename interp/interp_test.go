@@ -1969,6 +1969,77 @@ func TestInterpreter_Run(t *testing.T) {
 		}
 	})
 
+	t.Run("fused numeric traps preserve exact state", func(t *testing.T) {
+		type snapshot struct {
+			ip    int
+			fp    int
+			sp    int
+			stack []types.Boxed
+			live  int
+		}
+		run := func(t *testing.T, prog *program.Program, opts ...func(*option)) (snapshot, error) {
+			t.Helper()
+			i := New(prog, opts...)
+			defer i.Close()
+			err := i.Run(context.Background())
+			live := 0
+			for _, rc := range i.rc[1:] {
+				if rc > 0 {
+					live += rc
+				}
+			}
+			return snapshot{
+				ip:    i.fr.ip,
+				fp:    i.fp,
+				sp:    i.sp,
+				stack: append([]types.Boxed(nil), i.stack[:i.sp]...),
+				live:  live,
+			}, err
+		}
+
+		huge := int64(1) << 50
+		cases := []struct {
+			name string
+			prog *program.Program
+		}{
+			{
+				name: "i32 constants",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I32_CONST, 90),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.I32_DIV_S),
+				}),
+			},
+			{
+				name: "promoted i64 constants",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, i64operand(huge)),
+					instr.New(instr.I64_CONST, 0),
+					instr.New(instr.I64_DIV_S),
+				}),
+			},
+			{
+				name: "promoted i64 local",
+				prog: program.New([]instr.Instruction{
+					instr.New(instr.I64_CONST, i64operand(huge)),
+					instr.New(instr.LOCAL_SET, 0),
+					instr.New(instr.LOCAL_GET, 0),
+					instr.New(instr.I64_CONST, 0),
+					instr.New(instr.I64_DIV_S),
+				}, program.WithLocals(types.TypeI64)),
+			},
+		}
+		for _, tt := range cases {
+			t.Run(tt.name, func(t *testing.T) {
+				exact, exactErr := run(t, tt.prog, WithTick(1))
+				fused, fusedErr := run(t, tt.prog, WithThreshold(-1))
+				require.ErrorIs(t, exactErr, ErrDivideByZero)
+				require.ErrorIs(t, fusedErr, ErrDivideByZero)
+				require.Equal(t, exact, fused)
+			})
+		}
+	})
+
 	t.Run("promoted I64 local keeps a balanced refcount across fused const-binop and local-local binop", func(t *testing.T) {
 		huge := int64(1) << 50
 		prog := program.New([]instr.Instruction{

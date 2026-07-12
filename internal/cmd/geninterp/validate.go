@@ -74,7 +74,7 @@ func validate(patterns []pattern) error {
 				}
 			}
 		}
-		if _, _, _, err := effect(pattern); err != nil {
+		if err := validateEffect(pattern); err != nil {
 			return err
 		}
 		key := pattern.key()
@@ -94,27 +94,25 @@ func validate(patterns []pattern) error {
 	return nil
 }
 
-func effect(pattern pattern) (int, int, bool, error) {
+func validateEffect(pattern pattern) error {
 	var stack []instr.Kind
-	pops := 0
 	for _, step := range pattern {
 		typ := instr.TypeOf(step.op)
 		if typ.Pop == nil && typ.Push == nil {
-			return 0, 0, false, nil
+			return nil
 		}
 		for _, want := range typ.Pop {
 			if len(stack) == 0 {
-				pops++
 				continue
 			}
 			last := len(stack) - 1
 			got := stack[last]
 			stack = stack[:last]
 			if got != instr.KindAny && want != instr.KindAny && got.Repr() != want.Repr() {
-				return 0, 0, false, fmt.Errorf("%s has stack kind %s, want %s", typ.Mnemonic, got, want)
+				return fmt.Errorf("%s has stack kind %s, want %s", typ.Mnemonic, got, want)
 			}
 		}
 		stack = append(stack, typ.Push...)
 	}
-	return pops, len(stack), true, nil
+	return nil
 }
