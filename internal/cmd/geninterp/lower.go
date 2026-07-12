@@ -45,6 +45,18 @@ type callTarget struct {
 	ref    jen.Code
 }
 
+type sourceContext struct {
+	number     int
+	width      int
+	name       string
+	boxed      string
+	index      string
+	addr       string
+	at         jen.Code
+	label      string
+	standalone bool
+}
+
 type lowerer func(*loweringState, fact) (lowering, error)
 
 var lowerers = [256]lowerer{
@@ -1615,202 +1627,249 @@ func traps(op instr.Opcode) bool {
 }
 
 func sourceAccess(source fact, number, offset int, label string, standalone bool) (lowering, error) {
-	op := source.op
-	width := width(op)
+	context := newSourceContext(source.op, number, offset, label, standalone)
+	result := lowering{source: source.step, first: source.step, boxed: jen.Id(context.boxed)}
+	result.check = append(result.check, overflowAt(number))
+
+	slot := context.decode(&result, source.op)
+	if standalone && (slot || source.op == instr.CONST_GET) {
+		result.compile = append(result.compile, jen.Id("c").Dot("ip").Op("+=").Lit(context.width))
+	}
+
+	var err error
+	switch source.op {
+	case instr.LOCAL_GET, instr.GLOBAL_GET, instr.UPVAL_GET:
+		err = context.loadSlot(&result, source)
+	case instr.CONST_GET:
+		err = context.loadConstant(&result, source)
+	case instr.I32_CONST, instr.I64_CONST, instr.F32_CONST, instr.F64_CONST:
+		err = context.loadImmediate(&result, source)
+	default:
+		err = fmt.Errorf("unsupported source opcode %s", instr.TypeOf(source.op).Mnemonic)
+	}
+	if err != nil {
+		return lowering{}, err
+	}
+	return context.finish(result, source)
+}
+
+func newSourceContext(op instr.Opcode, number, offset int, label string, standalone bool) sourceContext {
 	name := slot(number)
-	boxed := box(name)
-	idx := fmt.Sprintf("i%d", number)
-	addr := fmt.Sprintf("i%d", 2+number)
 	at := add(jen.Id("start"), offset)
 	if standalone {
 		at = jen.Id("c").Dot("ip")
 	}
-	result := lowering{source: source.step, first: source.step, boxed: jen.Id(boxed)}
-	result.check = append(result.check, overflowAt(number))
-
-	_, slot := slotField(op)
-	rejectBounds := func(field string) jen.Code {
-		condition := jen.Id(idx).Op(">=").Len(jen.Id("c").Dot(field))
-		if source.kind == instr.KindAny {
-			body := []jen.Code{}
-			if !standalone || !slot {
-				body = append(body, jen.Id("c").Dot("ip").Op("+=").Lit(width))
-			}
-			body = append(body, jen.Return(jen.Func().Params(jen.Op("*").Id("Interpreter")).Block(jen.Panic(jen.Id("ErrSegmentationFault")))))
-			return jen.If(condition).Block(body...)
-		}
-		kind, ok := kindName(source.kind)
-		if !ok {
-			return jen.Null()
-		}
-		expected := jen.Qual("github.com/siyul-park/minivm/types", "Kind"+kind)
-		return check(field, idx, expected, label)
+	return sourceContext{
+		number:     number,
+		width:      width(op),
+		name:       name,
+		boxed:      box(name),
+		index:      fmt.Sprintf("i%d", number),
+		addr:       fmt.Sprintf("i%d", 2+number),
+		at:         at,
+		label:      label,
+		standalone: standalone,
 	}
+}
 
+func (c sourceContext) decode(result *lowering, op instr.Opcode) bool {
 	switch op {
 	case instr.LOCAL_GET, instr.UPVAL_GET:
 		result.compile = append(result.compile,
-			jen.Id(idx).Op(":=").Int().Call(jen.Id("c").Dot("code").Index(jen.Add(at).Op("+").Lit(1))),
+			jen.Id(c.index).Op(":=").Int().Call(jen.Id("c").Dot("code").Index(jen.Add(c.at).Op("+").Lit(1))),
 		)
 	case instr.GLOBAL_GET, instr.CONST_GET:
-		if standalone {
+		if c.standalone {
 			result.compile = append(result.compile,
-				jen.Id(idx).Op(":=").Int().Call(
+				jen.Id(c.index).Op(":=").Int().Call(
 					jen.Op("*").Parens(jen.Op("*").Uint16()).Call(
-						jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Add(at).Op("+").Lit(1)))),
+						jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Add(c.at).Op("+").Lit(1)))),
 					),
 				),
 			)
 		} else {
 			result.compile = append(result.compile,
-				jen.Id(idx).Op(":=").Qual("github.com/siyul-park/minivm/instr", "ParseU16").Call(jen.Id("c").Dot("code"), jen.Add(at).Op("+").Lit(1)),
+				jen.Id(c.index).Op(":=").Qual("github.com/siyul-park/minivm/instr", "ParseU16").Call(jen.Id("c").Dot("code"), jen.Add(c.at).Op("+").Lit(1)),
 			)
 		}
 	}
-	if standalone && (slot || op == instr.CONST_GET) {
-		result.compile = append(result.compile, jen.Id("c").Dot("ip").Op("+=").Lit(width))
+	_, ok := slotField(op)
+	return ok
+}
+
+func (c sourceContext) loadSlot(result *lowering, source fact) error {
+	field, _ := slotField(source.op)
+	if source.op == instr.LOCAL_GET || !c.standalone {
+		guard, err := c.bounds(source, field)
+		if err != nil {
+			return err
+		}
+		result.compile = append(result.compile, guard)
 	}
 
-	switch op {
+	switch source.op {
 	case instr.LOCAL_GET:
-		result.compile = append(result.compile, rejectBounds("locals"))
-		if standalone {
+		if c.standalone {
 			result.check = append(result.check,
-				jen.Id(addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(idx),
-				jen.If(jen.Id(addr).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+				jen.Id(c.addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(c.index),
+				jen.If(jen.Id(c.addr).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
 			)
 		} else {
 			result.check = append(result.check,
-				jen.If(jen.Id("i").Dot("fr").Dot("bp").Op("+").Id(idx).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+				jen.If(jen.Id("i").Dot("fr").Dot("bp").Op("+").Id(c.index).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
 			)
-			result.body = append(result.body, jen.Id(addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(idx))
+			result.body = append(result.body, jen.Id(c.addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(c.index))
 		}
-		result.body = append(result.body, jen.Id(boxed).Op(":=").Id("i").Dot("stack").Index(jen.Id(addr)))
+		result.body = append(result.body, jen.Id(c.boxed).Op(":=").Id("i").Dot("stack").Index(jen.Id(c.addr)))
 	case instr.GLOBAL_GET:
-		if !standalone {
-			result.compile = append(result.compile, rejectBounds("globals"))
-		}
 		result.check = append(result.check,
-			jen.If(jen.Id(idx).Op(">=").Len(jen.Id("i").Dot("globals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+			jen.If(jen.Id(c.index).Op(">=").Len(jen.Id("i").Dot("globals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
 		)
-		result.body = append(result.body, jen.Id(boxed).Op(":=").Id("i").Dot("globals").Index(jen.Id(idx)))
+		result.body = append(result.body, jen.Id(c.boxed).Op(":=").Id("i").Dot("globals").Index(jen.Id(c.index)))
 	case instr.UPVAL_GET:
-		if !standalone {
-			result.compile = append(result.compile, rejectBounds("captures"))
-		}
 		result.check = append(result.check,
-			jen.If(jen.Id(idx).Op(">=").Len(jen.Id("i").Dot("fr").Dot("upvals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+			jen.If(jen.Id(c.index).Op(">=").Len(jen.Id("i").Dot("fr").Dot("upvals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
 		)
-		result.body = append(result.body, jen.Id(boxed).Op(":=").Id("i").Dot("fr").Dot("upvals").Index(jen.Id(idx)))
-	case instr.CONST_GET:
-		condition := jen.Id(idx).Op(">=").Len(jen.Id("c").Dot("constants"))
-		if source.kind == instr.KindAny {
-			result.compile = append(result.compile,
-				jen.If(condition).Block(
-					jen.Return(jen.Func().Params(jen.Op("*").Id("Interpreter")).Block(jen.Panic(jen.Id("ErrSegmentationFault")))),
+		result.body = append(result.body, jen.Id(c.boxed).Op(":=").Id("i").Dot("fr").Dot("upvals").Index(jen.Id(c.index)))
+	}
+	return nil
+}
+
+func (c sourceContext) bounds(source fact, field string) (jen.Code, error) {
+	condition := jen.Id(c.index).Op(">=").Len(jen.Id("c").Dot(field))
+	if source.kind == instr.KindAny {
+		body := []jen.Code{}
+		if !c.standalone {
+			body = append(body, jen.Id("c").Dot("ip").Op("+=").Lit(c.width))
+		}
+		body = append(body,
+			jen.Return(jen.Func().Params(jen.Op("*").Id("Interpreter")).Block(jen.Panic(jen.Id("ErrSegmentationFault")))),
+		)
+		return jen.If(condition).Block(body...), nil
+	}
+	name, ok := kindName(source.kind)
+	if !ok {
+		return nil, fmt.Errorf("unsupported source kind %s", source.kind)
+	}
+	expected := jen.Qual("github.com/siyul-park/minivm/types", "Kind"+name)
+	return check(field, c.index, expected, c.label), nil
+}
+
+func (c sourceContext) loadConstant(result *lowering, source fact) error {
+	condition := jen.Id(c.index).Op(">=").Len(jen.Id("c").Dot("constants"))
+	if source.kind == instr.KindAny {
+		result.compile = append(result.compile,
+			jen.If(condition).Block(
+				jen.Return(jen.Func().Params(jen.Op("*").Id("Interpreter")).Block(jen.Panic(jen.Id("ErrSegmentationFault")))),
+			),
+		)
+	} else {
+		result.compile = append(result.compile, jen.If(condition).Block(reject(c.label)))
+	}
+	result.compile = append(result.compile, jen.Id(c.boxed).Op(":=").Id("c").Dot("constants").Index(jen.Id(c.index)))
+	if source.kind == instr.KindAny {
+		return nil
+	}
+
+	name, ok := kindName(source.kind)
+	if !ok {
+		return fmt.Errorf("unsupported source kind %s", source.kind)
+	}
+	expected := jen.Qual("github.com/siyul-park/minivm/types", "Kind"+name)
+	if name == "I64" {
+		result.compile = append(result.compile,
+			jen.Switch(jen.Id(c.boxed).Dot("Kind").Call()).Block(
+				jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI64")),
+				jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(
+					jen.Id("constantRef").Op(":=").Id(c.boxed).Dot("Ref").Call(),
+					jen.If(jen.Id("constantRef").Op("<").Lit(0).Op("||").Id("constantRef").Op(">=").Len(jen.Id("c").Dot("heap"))).Block(reject(c.label)),
+					jen.List(jen.Id("_"), jen.Id("ok")).Op(":=").Id("c").Dot("heap").Index(jen.Id("constantRef")).Assert(jen.Qual("github.com/siyul-park/minivm/types", "I64")),
+					jen.If(jen.Op("!").Id("ok")).Block(reject(c.label)),
 				),
-			)
-		} else {
-			result.compile = append(result.compile, jen.If(condition).Block(reject(label)))
-		}
-		result.compile = append(result.compile, jen.Id(boxed).Op(":=").Id("c").Dot("constants").Index(jen.Id(idx)))
-		if source.kind != instr.KindAny {
-			kind, ok := kindName(source.kind)
-			if !ok {
-				return lowering{}, fmt.Errorf("unsupported source kind %s", source.kind)
-			}
-			expected := jen.Qual("github.com/siyul-park/minivm/types", "Kind"+kind)
-			if kind == "I64" {
-				result.compile = append(result.compile,
-					jen.Switch(jen.Id(boxed).Dot("Kind").Call()).Block(
-						jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI64")),
-						jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(
-							jen.Id("constantRef").Op(":=").Id(boxed).Dot("Ref").Call(),
-							jen.If(jen.Id("constantRef").Op("<").Lit(0).Op("||").Id("constantRef").Op(">=").Len(jen.Id("c").Dot("heap"))).Block(reject(label)),
-							jen.List(jen.Id("_"), jen.Id("ok")).Op(":=").Id("c").Dot("heap").Index(jen.Id("constantRef")).Assert(jen.Qual("github.com/siyul-park/minivm/types", "I64")),
-							jen.If(jen.Op("!").Id("ok")).Block(reject(label)),
-						),
-						jen.Default().Block(reject(label)),
-					),
-				)
-			} else {
-				result.compile = append(result.compile,
-					jen.If(jen.Id(boxed).Dot("Kind").Call().Op("!=").Add(expected)).Block(reject(label)),
-				)
-			}
-			if kind == "Ref" && source.typ != nil {
-				name := source.typ.Name()
-				if name == "" {
-					return lowering{}, fmt.Errorf("unsupported constant guard %s", source.typ)
-				}
-				ref := fmt.Sprintf("c%d", number)
-				result.compile = append(result.compile,
-					jen.Id(ref).Op(":=").Id(boxed).Dot("Ref").Call(),
-					jen.If(jen.Id(ref).Op("<").Lit(0).Op("||").Id(ref).Op(">=").Len(jen.Id("c").Dot("heap"))).Block(reject(label)),
-				)
-				guard := jen.List(jen.Id("_"), jen.Id("ok")).Op(":=").Id("c").Dot("heap").Index(jen.Id(ref)).Assert(jen.Qual("github.com/siyul-park/minivm/types", name))
-				if source.not {
-					result.compile = append(result.compile, jen.If(guard, jen.Id("ok")).Block(reject(label)))
-				} else {
-					result.compile = append(result.compile, guard, jen.If(jen.Op("!").Id("ok")).Block(reject(label)))
-				}
-			}
-		}
-	case instr.I32_CONST, instr.I64_CONST, instr.F32_CONST, instr.F64_CONST:
-		if _, ok := kindName(source.kind); !ok {
-			return lowering{}, fmt.Errorf("unsupported source kind %s", source.kind)
-		}
-		if source.boxed {
-			result.boxed = jen.Id(boxed)
-			result.compile = append(result.compile,
-				jen.Id(boxed).Op(":=").Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(immediate(source.kind, at)),
-			)
-			break
-		}
-		result.raw = jen.Id(name)
-		result.compile = append(result.compile, jen.Id(name).Op(":=").Add(immediate(source.kind, at)))
-		switch op {
-		case instr.I32_CONST:
-			result.boxed = jen.Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(jen.Id(name))
-		case instr.I64_CONST:
-			result.boxed = jen.Id("i").Dot("boxI64").Call(jen.Id(name))
-		case instr.F32_CONST:
-			result.boxed = jen.Qual("github.com/siyul-park/minivm/types", "BoxF32").Call(jen.Id(name))
-		case instr.F64_CONST:
-			result.boxed = jen.Qual("github.com/siyul-park/minivm/types", "BoxF64").Call(jen.Id(name))
-		}
-	default:
-		return lowering{}, fmt.Errorf("unsupported source opcode %s", instr.TypeOf(op).Mnemonic)
+				jen.Default().Block(reject(c.label)),
+			),
+		)
+	} else {
+		result.compile = append(result.compile,
+			jen.If(jen.Id(c.boxed).Dot("Kind").Call().Op("!=").Add(expected)).Block(reject(c.label)),
+		)
 	}
+	if name != "Ref" || source.typ == nil {
+		return nil
+	}
+	guardName := source.typ.Name()
+	if guardName == "" {
+		return fmt.Errorf("unsupported constant guard %s", source.typ)
+	}
+	ref := fmt.Sprintf("c%d", c.number)
+	result.compile = append(result.compile,
+		jen.Id(ref).Op(":=").Id(c.boxed).Dot("Ref").Call(),
+		jen.If(jen.Id(ref).Op("<").Lit(0).Op("||").Id(ref).Op(">=").Len(jen.Id("c").Dot("heap"))).Block(reject(c.label)),
+	)
+	guard := jen.List(jen.Id("_"), jen.Id("ok")).Op(":=").Id("c").Dot("heap").Index(jen.Id(ref)).Assert(jen.Qual("github.com/siyul-park/minivm/types", guardName))
+	if source.not {
+		result.compile = append(result.compile, jen.If(guard, jen.Id("ok")).Block(reject(c.label)))
+	} else {
+		result.compile = append(result.compile, guard, jen.If(jen.Op("!").Id("ok")).Block(reject(c.label)))
+	}
+	return nil
+}
 
+func (c sourceContext) loadImmediate(result *lowering, source fact) error {
+	if _, ok := kindName(source.kind); !ok {
+		return fmt.Errorf("unsupported source kind %s", source.kind)
+	}
+	if source.boxed {
+		result.boxed = jen.Id(c.boxed)
+		result.compile = append(result.compile,
+			jen.Id(c.boxed).Op(":=").Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(immediate(source.kind, c.at)),
+		)
+		return nil
+	}
+	result.raw = jen.Id(c.name)
+	result.compile = append(result.compile, jen.Id(c.name).Op(":=").Add(immediate(source.kind, c.at)))
+	switch source.op {
+	case instr.I32_CONST:
+		result.boxed = jen.Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(jen.Id(c.name))
+	case instr.I64_CONST:
+		result.boxed = jen.Id("i").Dot("boxI64").Call(jen.Id(c.name))
+	case instr.F32_CONST:
+		result.boxed = jen.Qual("github.com/siyul-park/minivm/types", "BoxF32").Call(jen.Id(c.name))
+	case instr.F64_CONST:
+		result.boxed = jen.Qual("github.com/siyul-park/minivm/types", "BoxF64").Call(jen.Id(c.name))
+	}
+	return nil
+}
+
+func (c sourceContext) finish(result lowering, source fact) (lowering, error) {
 	if source.kind != instr.KindAny && !source.boxed && !source.commit && result.raw == nil {
-		result.raw = jen.Id(name)
-		result.body = append(result.body, jen.Id(name).Op(":=").Add(borrow(source.kind, result.boxed)))
+		result.raw = jen.Id(c.name)
+		result.body = append(result.body, jen.Id(c.name).Op(":=").Add(borrow(source.kind, result.boxed)))
 	}
 
-	if _, ok := slotField(op); ok {
+	if _, ok := slotField(source.op); ok {
 		retain := source.kind == instr.KindAny || source.kind.Repr() == instr.KindI64 || source.kind.Repr() == instr.KindRef
-		result.push = sourcePush(result, retain, width)
+		result.push = sourcePush(result, retain, c.width)
 		return result, nil
 	}
 	result.push = append(result.push, result.check...)
 	result.push = append(result.push, result.body...)
-	if op == instr.CONST_GET && source.kind == instr.KindAny {
+	if source.op == instr.CONST_GET && source.kind == instr.KindAny {
 		result.push = append(result.push,
-			jen.If(jen.Id(boxed).Dot("Kind").Call().Op("==").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(
-				jen.Id("addr").Op(":=").Id(boxed).Dot("Ref").Call(),
+			jen.If(jen.Id(c.boxed).Dot("Kind").Call().Op("==").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(
+				jen.Id("addr").Op(":=").Id(c.boxed).Dot("Ref").Call(),
 				jen.If(jen.List(jen.Id("str"), jen.Id("ok")).Op(":=").Id("c").Dot("heap").Index(jen.Id("addr")).Assert(jen.Qual("github.com/siyul-park/minivm/types", "String")), jen.Id("ok")).Block(
-					jen.Id(boxed).Op("=").Qual("github.com/siyul-park/minivm/types", "BoxRef").Call(jen.Int().Call(jen.Id("i").Dot("intern").Call(jen.String().Call(jen.Id("str"))))),
+					jen.Id(c.boxed).Op("=").Qual("github.com/siyul-park/minivm/types", "BoxRef").Call(jen.Int().Call(jen.Id("i").Dot("intern").Call(jen.String().Call(jen.Id("str"))))),
 				).Else().Block(jen.Id("i").Dot("retain").Call(jen.Id("addr"))),
 			),
 		)
-	} else if op == instr.CONST_GET {
+	} else if source.op == instr.CONST_GET {
 		result.push = append(result.push, jen.Id("i").Dot("retainBox").Call(result.boxed))
 	}
 	result.push = append(result.push,
 		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Add(result.boxed),
 		jen.Id("i").Dot("sp").Op("++"),
-		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(width),
+		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(c.width),
 	)
 	return result, nil
 }
