@@ -3,6 +3,7 @@ package interp
 import (
 	"errors"
 
+	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/types"
@@ -10,9 +11,11 @@ import (
 
 // lowerer is the architecture-specific JIT lowerer. compiler owns the
 // recorded-trace orchestration and delegates native-code emission to the target
-// backend.
+// backend. lowerCFG is compileCFG's counterpart to lower: it walks one
+// statically decoded basic block instead of a recorded trace tree.
 type lowerer interface {
 	lower(ctx *lowering) bool
+	lowerCFG(ctx *lowering, block *analysis.BasicBlock) bool
 }
 
 type compiler struct {
