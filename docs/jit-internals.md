@@ -129,7 +129,7 @@ The tracer aborts before host calls, allocation, and mutating heap operations. T
 
 Every recorded `trace` has one outcome: `loop`, `returned`, `completed`, `partial`, or `aborted`. The trace frontend maps usable outcomes to plan terminators and excludes aborted fragments from learned continuations. When an observed block runs out of steps, lowering decides completion from that block's terminator, never from the root trace. This prevents an unsupported side fragment from being mistaken for normal completion.
 
-`Tracer.capture` serializes recording and returns an already-published root when one exists, so sampling and compilation cannot record the same entry concurrently. A tracer is bound to one `program.Program`; reusing it with a different program creates an isolated tracer instead of sharing bytecode, tree, or loop caches across programs.
+`Tracer.capture` serializes recording and returns an already-published root when one exists, so sampling and compilation cannot record the same entry concurrently. A tracer is bound to one `program.Program`; binding it to a different program clears exact bytecode, tree, and loop caches before reuse.
 
 `Tracer.headers` (the static loop-header scan) uses `instr.Targets(code, ip)` rather than switching on `BR`/`BR_IF` directly, so a loop formed only through a backward `BR_TABLE` case target is recognized as a header too.
 
