@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFusionRules(t *testing.T) {
+func TestFusion(t *testing.T) {
 	type state struct {
 		err   string
 		ip    int

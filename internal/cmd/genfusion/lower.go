@@ -17,17 +17,7 @@ type access struct {
 	width int
 }
 
-type lower struct {
-	rule  *rule
-	total int
-	label string
-	code  []jen.Code
-	err   error
-}
-
-type lowering func(*lower) jen.Code
-
-var lowerings = [256]lowering{
+var lowerings = [256]func() jen.Code{
 	instr.ARRAY_APPEND:        lowerArrayAppend,
 	instr.ARRAY_COPY:          lowerArrayCopy,
 	instr.ARRAY_DELETE:        lowerArrayDelete,
@@ -240,42 +230,34 @@ var lowerings = [256]lowering{
 	instr.YIELD:               lowerYield,
 }
 
-func (l *lower) fused(op instr.Opcode) bool {
-	if l.rule == nil {
-		return false
-	}
-	l.code, l.err = lowerFusion(op, *l.rule, l.total, l.label)
-	return true
-}
-
-func lowerFusion(op instr.Opcode, rule rule, total int, label string) ([]jen.Code, error) {
-	last := rule.pattern[len(rule.pattern)-1].op
+func fusion(pattern pattern, total int, label string) ([]jen.Code, error) {
+	last := pattern[len(pattern)-1].op
 	consumer := last
-	if last == instr.BR_IF && len(rule.pattern) > 1 {
-		consumer = rule.pattern[len(rule.pattern)-2].op
+	if last == instr.BR_IF && len(pattern) > 1 {
+		consumer = pattern[len(pattern)-2].op
 	}
-	if op != consumer {
-		return nil, fmt.Errorf("lower %s for %s", instr.TypeOf(op).Mnemonic, instr.TypeOf(consumer).Mnemonic)
+	if lowerings[consumer] == nil {
+		return nil, fmt.Errorf("no lowering for %s", instr.TypeOf(consumer).Mnemonic)
 	}
 	if consumer == instr.CALL || consumer == instr.RETURN_CALL || consumer == instr.CLOSURE_NEW {
-		return renderCall(rule, label)
+		return call(pattern, label)
 	}
 	if consumer == instr.DROP || consumer == instr.REF_IS_NULL {
-		return renderRefFusion(rule, total, label)
+		return reference(pattern, total, label)
 	}
 	if consumer == instr.ARRAY_GET || consumer == instr.STRUCT_GET {
-		return renderIndexFusion(rule, total, label)
+		return index(pattern, total, label)
 	}
-	if len(rule.pattern) == 2 && rule.pattern[0].op == instr.I32_CONST && last == instr.BR_IF {
-		return renderI32ConstBranch(total), nil
+	if len(pattern) == 2 && pattern[0].op == instr.I32_CONST && last == instr.BR_IF {
+		return branch(total), nil
 	}
-	if _, ok := numericConsumer(consumer); ok {
-		return renderNumericFusion(rule, total, label)
+	if _, ok := arity(consumer); ok {
+		return arithmetic(pattern, total, label)
 	}
-	return nil, fmt.Errorf("no threaded renderer for %s", instr.TypeOf(consumer).Mnemonic)
+	return nil, fmt.Errorf("no fusion lowering for %s", instr.TypeOf(consumer).Mnemonic)
 }
 
-func renderI32ConstBranch(total int) []jen.Code {
+func branch(total int) []jen.Code {
 	return []jen.Code{
 		jen.Id("value").Op(":=").Add(immediate("I32", jen.Id("start"))),
 		jen.Id("c").Dot("ip").Op("+=").Lit(width(instr.I32_CONST)),
@@ -287,14 +269,14 @@ func renderI32ConstBranch(total int) []jen.Code {
 	}
 }
 
-// renderCall emits compile-time target resolution followed by target-specific
+// call emits compile-time target resolution followed by target-specific
 // final handlers. Source semantics are repeated in each handler; generated
 // code has no source callback, runtime target switch, or yield scan.
-func renderCall(rule rule, label string) ([]jen.Code, error) {
-	if len(rule.pattern) != 2 || rule.pattern[0].op != instr.CONST_GET {
+func call(pattern pattern, label string) ([]jen.Code, error) {
+	if len(pattern) != 2 || pattern[0].op != instr.CONST_GET {
 		return nil, fmt.Errorf("unsupported constant call pattern")
 	}
-	consumer := rule.pattern[1].op
+	consumer := pattern[1].op
 	if consumer != instr.CALL && consumer != instr.RETURN_CALL && consumer != instr.CLOSURE_NEW {
 		return nil, fmt.Errorf("unsupported constant call consumer %s", instr.TypeOf(consumer).Mnemonic)
 	}
@@ -310,45 +292,45 @@ func renderCall(rule rule, label string) ([]jen.Code, error) {
 
 	switch consumer {
 	case instr.CALL:
-		code = append(code, renderCallSwitch(false, label))
+		code = append(code, dispatch(false, label))
 	case instr.RETURN_CALL:
-		code = append(code, renderCallSwitch(true, label))
+		code = append(code, dispatch(true, label))
 	case instr.CLOSURE_NEW:
-		code = append(code, renderClosureNew(label))
+		code = append(code, create(label))
 	}
 	return code, nil
 }
 
-func renderCallSwitch(tail bool, label string) jen.Code {
+func dispatch(tail bool, label string) jen.Code {
 	return jen.Switch(jen.Id("fn").Op(":=").Id("c").Dot("heap").Index(jen.Id("addr")).Assert(jen.Type())).Block(
-		jen.Case(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Function")).Block(renderFunctionCall(tail, label)...),
-		jen.Case(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Closure")).Block(renderClosureCall(tail, label)...),
-		jen.Case(jen.Op("*").Id("HostFunction")).Block(renderHostCall(tail)...),
+		jen.Case(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Function")).Block(direct(tail, label)...),
+		jen.Case(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Closure")).Block(closure(tail, label)...),
+		jen.Case(jen.Op("*").Id("HostFunction")).Block(host(tail)...),
 		jen.Default().Block(reject(label)),
 	)
 }
 
-func renderFunctionCall(tail bool, label string) []jen.Code {
+func direct(tail bool, label string) []jen.Code {
 	guard := jen.If(jen.Id("addr").Op("<").Len(jen.Id("c").Dot("coros")).Op("&&").Id("c").Dot("coros").Index(jen.Id("addr"))).Block(reject(label))
 	if tail {
-		return append([]jen.Code{guard}, renderTailFrame(jen.Id("addr"), jen.Nil(), jen.Id("addr"), jen.Id("fn").Dot("Typ"), jen.Len(jen.Id("fn").Dot("Locals")))...)
+		return append([]jen.Code{guard}, replace(jen.Id("addr"), jen.Nil(), jen.Id("addr"), jen.Id("fn").Dot("Typ"), jen.Len(jen.Id("fn").Dot("Locals")))...)
 	}
-	return append([]jen.Code{guard}, renderFrameCall(jen.Id("addr"), jen.Nil(), jen.Id("addr"), jen.Id("fn").Dot("Typ"), jen.Len(jen.Id("fn").Dot("Locals")))...)
+	return append([]jen.Code{guard}, frame(jen.Id("addr"), jen.Nil(), jen.Id("addr"), jen.Id("fn").Dot("Typ"), jen.Len(jen.Id("fn").Dot("Locals")))...)
 }
 
-func renderClosureCall(tail bool, label string) []jen.Code {
+func closure(tail bool, label string) []jen.Code {
 	preflight := []jen.Code{
 		jen.Id("tmpl").Op(",").Id("ok").Op(":=").Id("c").Dot("heap").Index(jen.Id("fn").Dot("Fn")).Assert(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Function")),
 		jen.If(jen.Op("!").Id("ok")).Block(reject(label)),
 		jen.If(jen.Int().Parens(jen.Id("fn").Dot("Fn")).Op("<").Len(jen.Id("c").Dot("coros")).Op("&&").Id("c").Dot("coros").Index(jen.Id("fn").Dot("Fn"))).Block(reject(label)),
 	}
 	if tail {
-		return append(preflight, renderTailFrame(jen.Int().Parens(jen.Id("fn").Dot("Fn")), jen.Id("fn").Dot("Upvals"), jen.Id("addr"), jen.Id("fn").Dot("Typ"), jen.Len(jen.Id("tmpl").Dot("Locals")))...)
+		return append(preflight, replace(jen.Int().Parens(jen.Id("fn").Dot("Fn")), jen.Id("fn").Dot("Upvals"), jen.Id("addr"), jen.Id("fn").Dot("Typ"), jen.Len(jen.Id("tmpl").Dot("Locals")))...)
 	}
-	return append(preflight, renderFrameCall(jen.Int().Parens(jen.Id("fn").Dot("Fn")), jen.Id("fn").Dot("Upvals"), jen.Id("addr"), jen.Id("fn").Dot("Typ"), jen.Len(jen.Id("tmpl").Dot("Locals")))...)
+	return append(preflight, frame(jen.Int().Parens(jen.Id("fn").Dot("Fn")), jen.Id("fn").Dot("Upvals"), jen.Id("addr"), jen.Id("fn").Dot("Typ"), jen.Len(jen.Id("tmpl").Dot("Locals")))...)
 }
 
-func renderTailFrame(addr, upvals, ref, typ, locals jen.Code) []jen.Code {
+func replace(addr, upvals, ref, typ, locals jen.Code) []jen.Code {
 	return []jen.Code{
 		jen.Id("params").Op(":=").Len(jen.Add(typ).Dot("Params")),
 		jen.Id("returns").Op(":=").Len(jen.Add(typ).Dot("Returns")),
@@ -395,7 +377,7 @@ func renderTailFrame(addr, upvals, ref, typ, locals jen.Code) []jen.Code {
 	}
 }
 
-func renderFrameCall(addr, upvals, ref, typ, locals jen.Code) []jen.Code {
+func frame(addr, upvals, ref, typ, locals jen.Code) []jen.Code {
 	return []jen.Code{
 		jen.Id("params").Op(":=").Len(jen.Add(typ).Dot("Params")),
 		jen.Id("returns").Op(":=").Len(jen.Add(typ).Dot("Returns")),
@@ -425,7 +407,7 @@ func renderFrameCall(addr, upvals, ref, typ, locals jen.Code) []jen.Code {
 	}
 }
 
-func renderHostCall(tail bool) []jen.Code {
+func host(tail bool) []jen.Code {
 	body := []jen.Code{
 		overflow(),
 		jen.If(jen.Id("i").Dot("sp").Op("<").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
@@ -433,7 +415,7 @@ func renderHostCall(tail bool) []jen.Code {
 		jen.Id("args").Op(":=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("params").Op(":").Id("i").Dot("sp")),
 		jen.Id("out").Op(",").Id("err").Op(":=").Id("fn").Dot("Fn").Call(jen.Id("i"), jen.Id("args")),
 		jen.If(jen.Id("err").Op("!=").Nil()).Block(jen.Panic(jen.Id("err"))),
-		releaseArgs(jen.Id("args"), jen.Id("out")),
+		release(jen.Id("args"), jen.Id("out")),
 		jen.Id("i").Dot("sp").Op("+=").Id("returns").Op("-").Id("params"),
 		jen.Copy(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("returns").Op(":").Id("i").Dot("sp")), jen.Id("out")),
 	}
@@ -450,7 +432,7 @@ func renderHostCall(tail bool) []jen.Code {
 	}
 }
 
-func releaseArgs(args, returns jen.Code) jen.Code {
+func release(args, returns jen.Code) jen.Code {
 	return jen.For(jen.List(jen.Id("_"), jen.Id("value")).Op(":=").Range().Add(args)).Block(
 		jen.If(jen.Id("value").Dot("Kind").Call().Op("!=").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(jen.Continue()),
 		jen.Id("kept").Op(":=").False(),
@@ -484,7 +466,7 @@ func retire() []jen.Code {
 	}
 }
 
-func renderClosureNew(label string) jen.Code {
+func create(label string) jen.Code {
 	return jen.Switch(jen.Id("fn").Op(":=").Id("c").Dot("heap").Index(jen.Id("addr")).Assert(jen.Type())).Block(
 		jen.Case(jen.Op("*").Qual("github.com/siyul-park/minivm/types", "Function")).Block(
 			jen.Id("captures").Op(":=").Len(jen.Id("fn").Dot("Captures")),
@@ -515,30 +497,29 @@ func overflow() jen.Code {
 	return jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow")))
 }
 
-func numericConsumer(op instr.Opcode) (int, bool) {
+func arity(op instr.Opcode) (int, bool) {
 	if op == instr.I32_EQZ || op == instr.I64_EQZ {
 		return 1, true
 	}
-	for _, family := range numericFamilies {
-		if slices.Contains(family.binary, op) || slices.Contains(family.compares, op) {
+	for _, family := range families {
+		if slices.Contains(family.binary, op) || slices.Contains(family.compare, op) {
 			return 2, true
 		}
 	}
 	return 0, false
 }
 
-func renderRefFusion(rule rule, total int, label string) ([]jen.Code, error) {
-	pattern := rule.pattern
+func reference(pattern pattern, total int, label string) ([]jen.Code, error) {
 	if len(pattern) < 2 {
-		return nil, fmt.Errorf("ref rule has no consumer")
+		return nil, fmt.Errorf("ref pattern has no consumer")
 	}
 	if len(pattern) > 3 || len(pattern) == 3 && pattern[2].op != instr.BR_IF {
-		return nil, fmt.Errorf("ref rule has unsupported trailing operations")
+		return nil, fmt.Errorf("ref pattern has unsupported trailing operations")
 	}
 	source := pattern[0].op
 	consumer := pattern[1].op
 	branch := len(pattern) == 3 && pattern[2].op == instr.BR_IF
-	pre, body, value, err := renderRefSource(source, label)
+	pre, body, value, err := resolve(source, label)
 	if err != nil {
 		return nil, err
 	}
@@ -569,13 +550,13 @@ func renderRefFusion(rule rule, total int, label string) ([]jen.Code, error) {
 	return pre, nil
 }
 
-func renderRefSource(op instr.Opcode, label string) ([]jen.Code, []jen.Code, jen.Code, error) {
+func resolve(op instr.Opcode, label string) ([]jen.Code, []jen.Code, jen.Code, error) {
 	overflow := jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow")))
 	switch op {
 	case instr.LOCAL_GET:
 		return []jen.Code{
 				jen.Id("idx").Op(":=").Int().Call(jen.Id("c").Dot("code").Index(jen.Id("start").Op("+").Lit(1))),
-				refMetadata("locals", label),
+				metadata("locals", label),
 			}, []jen.Code{
 				overflow,
 				jen.Id("addr").Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id("idx"),
@@ -584,7 +565,7 @@ func renderRefSource(op instr.Opcode, label string) ([]jen.Code, []jen.Code, jen
 	case instr.GLOBAL_GET:
 		return []jen.Code{
 				jen.Id("idx").Op(":=").Qual("github.com/siyul-park/minivm/instr", "ParseU16").Call(jen.Id("c").Dot("code"), jen.Id("start").Op("+").Lit(1)),
-				refMetadata("globals", label),
+				metadata("globals", label),
 			}, []jen.Code{
 				overflow,
 				jen.If(jen.Id("idx").Op(">=").Len(jen.Id("i").Dot("globals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
@@ -592,7 +573,7 @@ func renderRefSource(op instr.Opcode, label string) ([]jen.Code, []jen.Code, jen
 	case instr.UPVAL_GET:
 		return []jen.Code{
 				jen.Id("idx").Op(":=").Int().Call(jen.Id("c").Dot("code").Index(jen.Id("start").Op("+").Lit(1))),
-				refMetadata("captures", label),
+				metadata("captures", label),
 			}, []jen.Code{
 				overflow,
 				jen.If(jen.Id("idx").Op(">=").Len(jen.Id("i").Dot("fr").Dot("upvals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
@@ -619,17 +600,17 @@ func renderRefSource(op instr.Opcode, label string) ([]jen.Code, []jen.Code, jen
 	}
 }
 
-func refMetadata(field, label string) jen.Code {
+func metadata(field, label string) jen.Code {
 	return jen.If(jen.Id("idx").Op(">=").Len(jen.Id("c").Dot(field)).Op("||").Id("c").Dot(field).Index(jen.Id("idx")).Op("!=").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(reject(label))
 }
 
-// renderIndexFusion emits direct constant-index ARRAY_GET and STRUCT_GET handlers.
-func renderIndexFusion(rule rule, totalWidth int, label string) ([]jen.Code, error) {
-	if len(rule.pattern) != 2 {
+// index emits direct constant-index ARRAY_GET and STRUCT_GET handlers.
+func index(pattern pattern, totalWidth int, label string) ([]jen.Code, error) {
+	if len(pattern) != 2 {
 		return nil, fmt.Errorf("index fusion needs two opcodes")
 	}
-	source := rule.pattern[0].op
-	consumer := rule.pattern[1].op
+	source := pattern[0].op
+	consumer := pattern[1].op
 	if consumer != instr.ARRAY_GET && consumer != instr.STRUCT_GET {
 		return nil, fmt.Errorf("unsupported index consumer %s", instr.TypeOf(consumer).Mnemonic)
 	}
@@ -652,7 +633,7 @@ func renderIndexFusion(rule rule, totalWidth int, label string) ([]jen.Code, err
 	default:
 		return nil, fmt.Errorf("unsupported index source %s", instr.TypeOf(source).Mnemonic)
 	}
-	body := renderIndexGet(consumer, jen.Id("index"), totalWidth)
+	body := lookup(consumer, jen.Id("index"), totalWidth)
 	pre = append(pre,
 		jen.Id("c").Dot("ip").Op("+=").Lit(width(source)),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
@@ -660,7 +641,7 @@ func renderIndexFusion(rule rule, totalWidth int, label string) ([]jen.Code, err
 	return pre, nil
 }
 
-func renderIndexGet(op instr.Opcode, index jen.Code, total int) []jen.Code {
+func lookup(op instr.Opcode, index jen.Code, total int) []jen.Code {
 	body := []jen.Code{
 		jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
 		jen.If(jen.Id("i").Dot("sp").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
@@ -746,30 +727,29 @@ func renderIndexGet(op instr.Opcode, index jen.Code, total int) []jen.Code {
 	)
 }
 
-// renderNumericFusion emits preflight plus one concrete runtime handler for a
-// normalized rule. Every source access is inline in that handler.
-func renderNumericFusion(rule rule, totalWidth int, label string) ([]jen.Code, error) {
-	pattern := rule.pattern
+// arithmetic emits preflight plus one concrete runtime handler for a
+// normalized pattern. Every source access is inline in that handler.
+func arithmetic(pattern pattern, totalWidth int, label string) ([]jen.Code, error) {
 	branch := len(pattern) > 0 && pattern[len(pattern)-1].op == instr.BR_IF
 	consumerAt := len(pattern) - 1
 	if branch {
 		consumerAt--
 	}
 	if consumerAt < 0 {
-		return nil, fmt.Errorf("numeric rule has no consumer")
+		return nil, fmt.Errorf("numeric pattern has no consumer")
 	}
 	consumer := pattern[consumerAt].op
-	arity, ok := numericConsumer(consumer)
+	arity, ok := arity(consumer)
 	if !ok {
 		return nil, fmt.Errorf("unsupported numeric consumer %s", instr.TypeOf(consumer).Mnemonic)
 	}
-	kind, _ := numericKind(consumer)
+	kind, _ := number(consumer)
 	sources := pattern[:consumerAt]
 	if len(sources) > 2 {
-		return nil, fmt.Errorf("numeric rule has %d sources", len(sources))
+		return nil, fmt.Errorf("numeric pattern has %d sources", len(sources))
 	}
 	if traps(consumer) {
-		return renderIntegerFusion(pattern, sources, kind, label)
+		return integer(pattern, sources, kind, label)
 	}
 
 	var pre, body []jen.Code
@@ -777,7 +757,7 @@ func renderNumericFusion(rule rule, totalWidth int, label string) ([]jen.Code, e
 	boxed := consumer == instr.I32_XOR || consumer == instr.I32_AND || consumer == instr.I32_OR
 	offset := 0
 	for idx, source := range sources {
-		rendered, err := renderNumericSource(source.op, idx, len(sources), offset, kind, boxed, false, label)
+		rendered, err := operand(source.op, idx, len(sources), offset, kind, boxed, false, label)
 		if err != nil {
 			return nil, err
 		}
@@ -802,31 +782,31 @@ func renderNumericFusion(rule rule, totalWidth int, label string) ([]jen.Code, e
 	case 0:
 		body = append(body, jen.If(jen.Id("i").Dot("sp").Op("<").Lit(arity)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))))
 		if arity == 1 {
-			operands = []jen.Code{numericStackValue(kind, jen.Id("i").Dot("sp").Op("-").Lit(1))}
+			operands = []jen.Code{peek(kind, jen.Id("i").Dot("sp").Op("-").Lit(1))}
 		} else {
 			operands = []jen.Code{
-				numericStackValue(kind, jen.Id("i").Dot("sp").Op("-").Lit(2)),
-				numericStackValue(kind, jen.Id("i").Dot("sp").Op("-").Lit(1)),
+				peek(kind, jen.Id("i").Dot("sp").Op("-").Lit(2)),
+				peek(kind, jen.Id("i").Dot("sp").Op("-").Lit(1)),
 			}
 		}
 	case 1:
 		body = append(body, jen.If(jen.Id("i").Dot("sp").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))))
-		operands = []jen.Code{numericStackValue(kind, jen.Id("i").Dot("sp").Op("-").Lit(1)), jen.Id(val(len(sources) - 1))}
+		operands = []jen.Code{peek(kind, jen.Id("i").Dot("sp").Op("-").Lit(1)), jen.Id(slot(len(sources) - 1))}
 	case 2:
-		operands = []jen.Code{jen.Id(val(0)), jen.Id(val(len(sources) - 1))}
+		operands = []jen.Code{jen.Id(slot(0)), jen.Id(slot(len(sources) - 1))}
 	}
 	if boxed {
 		switch len(sources) {
 		case 1:
-			operands = []jen.Code{jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)), jen.Id(box(val(0)))}
+			operands = []jen.Code{jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)), jen.Id(box(slot(0)))}
 		case 2:
-			operands = []jen.Code{jen.Id(box(val(0))), jen.Id(box(val(1)))}
+			operands = []jen.Code{jen.Id(box(slot(0))), jen.Id(box(slot(1)))}
 		}
 	}
 	if len(operands) != arity {
 		return nil, fmt.Errorf("%s needs %d operands", instr.TypeOf(consumer).Mnemonic, arity)
 	}
-	body = append(body, jen.Id(val(len(sources))).Op(":=").Add(numericResult(consumer, operands...)))
+	body = append(body, jen.Id(slot(len(sources))).Op(":=").Add(apply(consumer, operands...)))
 	if branch {
 		delta := len(sources) - len(operands)
 		if delta > 0 {
@@ -835,17 +815,17 @@ func renderNumericFusion(rule rule, totalWidth int, label string) ([]jen.Code, e
 			body = append(body, jen.Id("i").Dot("sp").Op("-=").Lit(-delta))
 		}
 		body = append(body,
-			jen.If(jen.Id(val(len(sources))).Dot("Bool").Call()).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
+			jen.If(jen.Id(slot(len(sources))).Dot("Bool").Call()).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
 			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(totalWidth),
 		)
 	} else {
 		switch len(sources) {
 		case 0:
-			body = append(body, jen.Id("i").Dot("sp").Op("--"), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Id(val(len(sources))))
+			body = append(body, jen.Id("i").Dot("sp").Op("--"), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Id(slot(len(sources))))
 		case 1:
-			body = append(body, jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Id(val(len(sources))))
+			body = append(body, jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Id(slot(len(sources))))
 		case 2:
-			body = append(body, jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Id(val(len(sources))), jen.Id("i").Dot("sp").Op("++"))
+			body = append(body, jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Id(slot(len(sources))), jen.Id("i").Dot("sp").Op("++"))
 		}
 		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(totalWidth))
 	}
@@ -854,11 +834,11 @@ func renderNumericFusion(rule rule, totalWidth int, label string) ([]jen.Code, e
 	return pre, nil
 }
 
-func renderIntegerFusion(pattern, sources pattern, kind, label string) ([]jen.Code, error) {
+func integer(pattern, sources pattern, kind, label string) ([]jen.Code, error) {
 	var pre, body []jen.Code
 	offset := 0
 	for number, source := range sources {
-		rendered, err := renderNumericSource(source.op, number, len(sources), offset, kind, false, true, label)
+		rendered, err := operand(source.op, number, len(sources), offset, kind, false, true, label)
 		if err != nil {
 			return nil, err
 		}
@@ -868,10 +848,10 @@ func renderIntegerFusion(pattern, sources pattern, kind, label string) ([]jen.Co
 	}
 	body = append(body,
 		jen.If(jen.Id("i").Dot("sp").Op("<").Lit(2)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
-		jen.Id("rhs").Op(":=").Add(numericConsumedValue(kind, jen.Id("i").Dot("sp").Op("-").Lit(1))),
-		jen.Id("lhs").Op(":=").Add(numericConsumedValue(kind, jen.Id("i").Dot("sp").Op("-").Lit(2))),
+		jen.Id("rhs").Op(":=").Add(take(kind, jen.Id("i").Dot("sp").Op("-").Lit(1))),
+		jen.Id("lhs").Op(":=").Add(take(kind, jen.Id("i").Dot("sp").Op("-").Lit(2))),
 		jen.If(jen.Id("rhs").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrDivideByZero"))),
-		jen.Id("result").Op(":=").Add(numericResult(pattern[len(pattern)-1].op, jen.Id("lhs"), jen.Id("rhs"))),
+		jen.Id("result").Op(":=").Add(apply(pattern[len(pattern)-1].op, jen.Id("lhs"), jen.Id("rhs"))),
 		jen.Id("i").Dot("sp").Op("--"),
 		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Id("result"),
 		jen.Id("i").Dot("fr").Dot("ip").Op("++"),
@@ -883,7 +863,7 @@ func renderIntegerFusion(pattern, sources pattern, kind, label string) ([]jen.Co
 	return pre, nil
 }
 
-func numericResult(op instr.Opcode, values ...jen.Code) jen.Code {
+func apply(op instr.Opcode, values ...jen.Code) jen.Code {
 	lhs := values[0]
 	if len(values) == 1 {
 		switch op {
@@ -1103,9 +1083,9 @@ func traps(op instr.Opcode) bool {
 	}
 }
 
-func renderNumericSource(op instr.Opcode, number, count, offset int, kind string, raw, materialize bool, label string) (access, error) {
+func operand(op instr.Opcode, number, count, offset int, kind string, raw, materialize bool, label string) (access, error) {
 	width := width(op)
-	name := val(number)
+	name := slot(number)
 	boxed := box(name)
 	idx := fmt.Sprintf("i%d", number)
 	addr := fmt.Sprintf("i%d", count+number)
@@ -1176,7 +1156,7 @@ func renderNumericSource(op instr.Opcode, number, count, offset int, kind string
 		return access{}, fmt.Errorf("unsupported numeric source %s", instr.TypeOf(op).Mnemonic)
 	}
 	if !raw && op != instr.I32_CONST && op != instr.I64_CONST && op != instr.F32_CONST && op != instr.F64_CONST && !(op == instr.CONST_GET && kind == "I64") {
-		result.load = append(result.load, jen.Id(name).Op(":=").Add(numericBoxValue(kind, jen.Id(box(name)))))
+		result.load = append(result.load, jen.Id(name).Op(":=").Add(borrow(kind, jen.Id(box(name)))))
 	}
 	result.push = append(result.push, jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))))
 	result.push = append(result.push, result.check...)
@@ -1209,7 +1189,7 @@ func renderNumericSource(op instr.Opcode, number, count, offset int, kind string
 	return result, nil
 }
 
-func val(number int) string {
+func slot(number int) string {
 	return fmt.Sprintf("v%d", number)
 }
 
@@ -1228,7 +1208,7 @@ func reject(label string) jen.Code {
 	return jen.Return(jen.Nil())
 }
 
-func numericKind(op instr.Opcode) (string, bool) {
+func number(op instr.Opcode) (string, bool) {
 	prefix, _, _ := strings.Cut(instr.TypeOf(op).Mnemonic, ".")
 	switch prefix {
 	case "i32":
@@ -1243,18 +1223,18 @@ func numericKind(op instr.Opcode) (string, bool) {
 	return "", false
 }
 
-func numericBoxValue(kind string, value jen.Code) jen.Code {
+func borrow(kind string, value jen.Code) jen.Code {
 	if kind == "I64" {
 		return jen.Id("i").Dot("borrowI64").Call(value)
 	}
 	return jen.Add(value).Dot(kind).Call()
 }
 
-func numericStackValue(kind string, index jen.Code) jen.Code {
-	return numericBoxValue(kind, jen.Id("i").Dot("stack").Index(index))
+func peek(kind string, index jen.Code) jen.Code {
+	return borrow(kind, jen.Id("i").Dot("stack").Index(index))
 }
 
-func numericConsumedValue(kind string, index jen.Code) jen.Code {
+func take(kind string, index jen.Code) jen.Code {
 	value := jen.Id("i").Dot("stack").Index(index)
 	if kind == "I64" {
 		return jen.Id("i").Dot("unboxI64").Call(value)
@@ -1291,10 +1271,7 @@ func add(value jen.Code, offset int) *jen.Statement {
 	return jen.Add(value).Op("+").Lit(offset)
 }
 
-func lowerArrayAppend(l *lower) jen.Code {
-	if l.fused(instr.ARRAY_APPEND) {
-		return jen.Null()
-	}
+func lowerArrayAppend() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(1))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("n")).Op(":=").List(jen.Id("int").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call())),
@@ -1321,10 +1298,7 @@ func lowerArrayAppend(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerArrayCopy(l *lower) jen.Code {
-	if l.fused(instr.ARRAY_COPY) {
-		return jen.Null()
-	}
+func lowerArrayCopy() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(5))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("size")).Op(":=").List(jen.Id("int").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call())),
@@ -1421,10 +1395,7 @@ func lowerArrayCopy(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerArrayDelete(l *lower) jen.Code {
-	if l.fused(instr.ARRAY_DELETE) {
-		return jen.Null()
-	}
+func lowerArrayDelete() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call())),
@@ -1489,10 +1460,7 @@ func lowerArrayDelete(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerArrayFill(l *lower) jen.Code {
-	if l.fused(instr.ARRAY_FILL) {
-		return jen.Null()
-	}
+func lowerArrayFill() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(4))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("size")).Op(":=").List(jen.Id("int").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call())),
@@ -1552,10 +1520,7 @@ func lowerArrayFill(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerArrayGet(l *lower) jen.Code {
-	if l.fused(instr.ARRAY_GET) {
-		return jen.Null()
-	}
+func lowerArrayGet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.Var().Add(jen.List(jen.Id("val"))).Add(jen.Id("types").Dot("Boxed")),
 			jen.Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
@@ -1591,10 +1556,7 @@ func lowerArrayGet(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerArrayLen(l *lower) jen.Code {
-	if l.fused(instr.ARRAY_LEN) {
-		return jen.Null()
-	}
+func lowerArrayLen() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.Var().Add(jen.List(jen.Id("n"))).Add(jen.Id("int32")),
@@ -1610,10 +1572,7 @@ func lowerArrayLen(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerArrayNew(l *lower) jen.Code {
-	if l.fused(instr.ARRAY_NEW) {
-		return jen.Null()
-	}
+func lowerArrayNew() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Op("*").Add(jen.Parens(jen.Op("*").Add(jen.Id("uint16"))).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
 		jen.If(jen.Id("idx").Op(">=").Add(jen.Id("len").Call(jen.Id("c").Dot("types")))).Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))))),
@@ -1677,10 +1636,7 @@ func lowerArrayNew(l *lower) jen.Code {
 				jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))))
 }
 
-func lowerArrayNewDefault(l *lower) jen.Code {
-	if l.fused(instr.ARRAY_NEW_DEFAULT) {
-		return jen.Null()
-	}
+func lowerArrayNewDefault() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Op("*").Add(jen.Parens(jen.Op("*").Add(jen.Id("uint16"))).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
 		jen.If(jen.Id("idx").Op(">=").Add(jen.Id("len").Call(jen.Id("c").Dot("types")))).Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))))),
@@ -1730,10 +1686,7 @@ func lowerArrayNewDefault(l *lower) jen.Code {
 				jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))))
 }
 
-func lowerArraySet(l *lower) jen.Code {
-	if l.fused(instr.ARRAY_SET) {
-		return jen.Null()
-	}
+func lowerArraySet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(3))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("val")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -1784,10 +1737,7 @@ func lowerArraySet(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerArraySlice(l *lower) jen.Code {
-	if l.fused(instr.ARRAY_SLICE) {
-		return jen.Null()
-	}
+func lowerArraySlice() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(3))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("end")).Op(":=").List(jen.Id("int").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call())),
@@ -1833,20 +1783,14 @@ func lowerArraySlice(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerBr(l *lower) jen.Code {
-	if l.fused(instr.BR) {
-		return jen.Null()
-	}
+func lowerBr() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("offset")).Op(":=").List(jen.Id("instr").Dot("ParseI16").Call(jen.Id("c").Dot("code"), jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1)))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.List(jen.Id("f")).Op(":=").List(jen.Id("i").Dot("fr")),
 			jen.List(jen.Id("f").Dot("ip")).Op("+=").List(jen.Id("offset").Op("+").Add(jen.Lit(3))))))
 }
 
-func lowerBrIf(l *lower) jen.Code {
-	if l.fused(instr.BR_IF) {
-		return jen.Null()
-	}
+func lowerBrIf() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("offset")).Op(":=").List(jen.Id("instr").Dot("ParseI16").Call(jen.Id("c").Dot("code"), jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1)))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
@@ -1856,10 +1800,7 @@ func lowerBrIf(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))
 }
 
-func lowerBrTable(l *lower) jen.Code {
-	if l.fused(instr.BR_TABLE) {
-		return jen.Null()
-	}
+func lowerBrTable() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("count")).Op(":=").List(jen.Id("int").Call(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))),
 		jen.List(jen.Id("offsets")).Op(":=").List(jen.Id("make").Call(jen.Index().Add(jen.Id("int")), jen.Id("count").Op("+").Add(jen.Lit(1)))),
 		jen.For(jen.List(jen.Id("i")).Op(":=").List(jen.Lit(0)), jen.Id("i").Op("<").Add(jen.Id("len").Call(jen.Id("offsets"))), jen.Id("i").Op("++")).Block(jen.List(jen.Id("at")).Op(":=").List(jen.Id("c").Dot("ip").Op("+").Add(jen.Id("i").Op("*").Add(jen.Lit(2))).Op("+").Add(jen.Lit(2))),
@@ -1872,10 +1813,7 @@ func lowerBrTable(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Id("offsets").Index(jen.Id("cond")).Op("+").Add(jen.Id("count").Op("*").Add(jen.Lit(2))).Op("+").Add(jen.Lit(4))))))
 }
 
-func lowerCall(l *lower) jen.Code {
-	if l.fused(instr.CALL) {
-		return jen.Null()
-	}
+func lowerCall() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("addr")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("Ref").Call()),
@@ -1953,10 +1891,7 @@ func lowerCall(l *lower) jen.Code {
 				jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch")))))))
 }
 
-func lowerClosureNew(l *lower) jen.Code {
-	if l.fused(instr.CLOSURE_NEW) {
-		return jen.Null()
-	}
+func lowerClosureNew() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("ref")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -1975,10 +1910,7 @@ func lowerClosureNew(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerConstGet(l *lower) jen.Code {
-	if l.fused(instr.CONST_GET) {
-		return jen.Null()
-	}
+func lowerConstGet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Op("*").Add(jen.Parens(jen.Op("*").Add(jen.Id("uint16"))).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
 		jen.If(jen.Id("idx").Op(">=").Add(jen.Id("len").Call(jen.Id("c").Dot("constants")))).Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))))),
@@ -2000,10 +1932,7 @@ func lowerConstGet(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))
 }
 
-func lowerCoroDone(l *lower) jen.Code {
-	if l.fused(instr.CORO_DONE) {
-		return jen.Null()
-	}
+func lowerCoroDone() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("ref")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -2016,10 +1945,7 @@ func lowerCoroDone(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerCoroValue(l *lower) jen.Code {
-	if l.fused(instr.CORO_VALUE) {
-		return jen.Null()
-	}
+func lowerCoroValue() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("box")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -2038,10 +1964,7 @@ func lowerCoroValue(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerDrop(l *lower) jen.Code {
-	if l.fused(instr.DROP) {
-		return jen.Null()
-	}
+func lowerDrop() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("val")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -2050,10 +1973,7 @@ func lowerDrop(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerDup(l *lower) jen.Code {
-	if l.fused(instr.DUP) {
-		return jen.Null()
-	}
+func lowerDup() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Id("len").Call(jen.Id("i").Dot("stack")))).Block(jen.Id("panic").Call(jen.Id("ErrStackOverflow"))),
@@ -2064,10 +1984,7 @@ func lowerDup(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerErrorCode(l *lower) jen.Code {
-	if l.fused(instr.ERROR_CODE) {
-		return jen.Null()
-	}
+func lowerErrorCode() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("box")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -2080,10 +1997,7 @@ func lowerErrorCode(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerErrorGet(l *lower) jen.Code {
-	if l.fused(instr.ERROR_GET) {
-		return jen.Null()
-	}
+func lowerErrorGet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("box")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -2097,10 +2011,7 @@ func lowerErrorGet(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerErrorNew(l *lower) jen.Code {
-	if l.fused(instr.ERROR_NEW) {
-		return jen.Null()
-	}
+func lowerErrorNew() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("code")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -2112,10 +2023,7 @@ func lowerErrorNew(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Abs(l *lower) jen.Code {
-	if l.fused(instr.F32_ABS) {
-		return jen.Null()
-	}
+func lowerF32Abs() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2124,10 +2032,7 @@ func lowerF32Abs(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Add(l *lower) jen.Code {
-	if l.fused(instr.F32_ADD) {
-		return jen.Null()
-	}
+func lowerF32Add() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2139,10 +2044,7 @@ func lowerF32Add(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Ceil(l *lower) jen.Code {
-	if l.fused(instr.F32_CEIL) {
-		return jen.Null()
-	}
+func lowerF32Ceil() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2151,10 +2053,7 @@ func lowerF32Ceil(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Const(l *lower) jen.Code {
-	if l.fused(instr.F32_CONST) {
-		return jen.Null()
-	}
+func lowerF32Const() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("raw")).Op(":=").List(jen.Op("*").Add(jen.Parens(jen.Op("*").Add(jen.Id("float32"))).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1)))))))),
 		jen.List(jen.Id("val")).Op(":=").List(jen.Id("types").Dot("BoxF32").Call(jen.Id("raw"))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(5)),
@@ -2164,10 +2063,7 @@ func lowerF32Const(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(5)))))
 }
 
-func lowerF32Copysign(l *lower) jen.Code {
-	if l.fused(instr.F32_COPYSIGN) {
-		return jen.Null()
-	}
+func lowerF32Copysign() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2179,10 +2075,7 @@ func lowerF32Copysign(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Div(l *lower) jen.Code {
-	if l.fused(instr.F32_DIV) {
-		return jen.Null()
-	}
+func lowerF32Div() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2197,10 +2090,7 @@ func lowerF32Div(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Eq(l *lower) jen.Code {
-	if l.fused(instr.F32_EQ) {
-		return jen.Null()
-	}
+func lowerF32Eq() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2212,10 +2102,7 @@ func lowerF32Eq(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Floor(l *lower) jen.Code {
-	if l.fused(instr.F32_FLOOR) {
-		return jen.Null()
-	}
+func lowerF32Floor() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2224,10 +2111,7 @@ func lowerF32Floor(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Ge(l *lower) jen.Code {
-	if l.fused(instr.F32_GE) {
-		return jen.Null()
-	}
+func lowerF32Ge() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2239,10 +2123,7 @@ func lowerF32Ge(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Gt(l *lower) jen.Code {
-	if l.fused(instr.F32_GT) {
-		return jen.Null()
-	}
+func lowerF32Gt() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2254,10 +2135,7 @@ func lowerF32Gt(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Le(l *lower) jen.Code {
-	if l.fused(instr.F32_LE) {
-		return jen.Null()
-	}
+func lowerF32Le() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2269,10 +2147,7 @@ func lowerF32Le(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Lt(l *lower) jen.Code {
-	if l.fused(instr.F32_LT) {
-		return jen.Null()
-	}
+func lowerF32Lt() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2284,10 +2159,7 @@ func lowerF32Lt(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Max(l *lower) jen.Code {
-	if l.fused(instr.F32_MAX) {
-		return jen.Null()
-	}
+func lowerF32Max() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2299,10 +2171,7 @@ func lowerF32Max(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Min(l *lower) jen.Code {
-	if l.fused(instr.F32_MIN) {
-		return jen.Null()
-	}
+func lowerF32Min() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2314,10 +2183,7 @@ func lowerF32Min(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Mod(l *lower) jen.Code {
-	if l.fused(instr.F32_MOD) {
-		return jen.Null()
-	}
+func lowerF32Mod() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2334,10 +2200,7 @@ func lowerF32Mod(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Mul(l *lower) jen.Code {
-	if l.fused(instr.F32_MUL) {
-		return jen.Null()
-	}
+func lowerF32Mul() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2349,10 +2212,7 @@ func lowerF32Mul(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Ne(l *lower) jen.Code {
-	if l.fused(instr.F32_NE) {
-		return jen.Null()
-	}
+func lowerF32Ne() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2364,10 +2224,7 @@ func lowerF32Ne(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Nearest(l *lower) jen.Code {
-	if l.fused(instr.F32_NEAREST) {
-		return jen.Null()
-	}
+func lowerF32Nearest() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2376,10 +2233,7 @@ func lowerF32Nearest(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Neg(l *lower) jen.Code {
-	if l.fused(instr.F32_NEG) {
-		return jen.Null()
-	}
+func lowerF32Neg() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2388,10 +2242,7 @@ func lowerF32Neg(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32ReinterpretI32(l *lower) jen.Code {
-	if l.fused(instr.F32_REINTERPRET_I32) {
-		return jen.Null()
-	}
+func lowerF32ReinterpretI32() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -2400,10 +2251,7 @@ func lowerF32ReinterpretI32(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Rem(l *lower) jen.Code {
-	if l.fused(instr.F32_REM) {
-		return jen.Null()
-	}
+func lowerF32Rem() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2418,10 +2266,7 @@ func lowerF32Rem(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Sqrt(l *lower) jen.Code {
-	if l.fused(instr.F32_SQRT) {
-		return jen.Null()
-	}
+func lowerF32Sqrt() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2430,10 +2275,7 @@ func lowerF32Sqrt(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Sub(l *lower) jen.Code {
-	if l.fused(instr.F32_SUB) {
-		return jen.Null()
-	}
+func lowerF32Sub() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2445,10 +2287,7 @@ func lowerF32Sub(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32ToF64(l *lower) jen.Code {
-	if l.fused(instr.F32_TO_F64) {
-		return jen.Null()
-	}
+func lowerF32ToF64() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2457,10 +2296,7 @@ func lowerF32ToF64(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32ToI32S(l *lower) jen.Code {
-	if l.fused(instr.F32_TO_I32_S) {
-		return jen.Null()
-	}
+func lowerF32ToI32S() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2474,10 +2310,7 @@ func lowerF32ToI32S(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32ToI32U(l *lower) jen.Code {
-	if l.fused(instr.F32_TO_I32_U) {
-		return jen.Null()
-	}
+func lowerF32ToI32U() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2490,10 +2323,7 @@ func lowerF32ToI32U(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32ToI64S(l *lower) jen.Code {
-	if l.fused(instr.F32_TO_I64_S) {
-		return jen.Null()
-	}
+func lowerF32ToI64S() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2506,10 +2336,7 @@ func lowerF32ToI64S(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32ToI64U(l *lower) jen.Code {
-	if l.fused(instr.F32_TO_I64_U) {
-		return jen.Null()
-	}
+func lowerF32ToI64U() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2521,10 +2348,7 @@ func lowerF32ToI64U(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF32Trunc(l *lower) jen.Code {
-	if l.fused(instr.F32_TRUNC) {
-		return jen.Null()
-	}
+func lowerF32Trunc() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -2533,10 +2357,7 @@ func lowerF32Trunc(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Abs(l *lower) jen.Code {
-	if l.fused(instr.F64_ABS) {
-		return jen.Null()
-	}
+func lowerF64Abs() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2545,10 +2366,7 @@ func lowerF64Abs(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Add(l *lower) jen.Code {
-	if l.fused(instr.F64_ADD) {
-		return jen.Null()
-	}
+func lowerF64Add() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2560,10 +2378,7 @@ func lowerF64Add(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Ceil(l *lower) jen.Code {
-	if l.fused(instr.F64_CEIL) {
-		return jen.Null()
-	}
+func lowerF64Ceil() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2572,10 +2387,7 @@ func lowerF64Ceil(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Const(l *lower) jen.Code {
-	if l.fused(instr.F64_CONST) {
-		return jen.Null()
-	}
+func lowerF64Const() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("raw")).Op(":=").List(jen.Op("*").Add(jen.Parens(jen.Op("*").Add(jen.Id("float64"))).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1)))))))),
 		jen.List(jen.Id("val")).Op(":=").List(jen.Id("types").Dot("BoxF64").Call(jen.Id("raw"))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(9)),
@@ -2585,10 +2397,7 @@ func lowerF64Const(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(9)))))
 }
 
-func lowerF64Copysign(l *lower) jen.Code {
-	if l.fused(instr.F64_COPYSIGN) {
-		return jen.Null()
-	}
+func lowerF64Copysign() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2600,10 +2409,7 @@ func lowerF64Copysign(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Div(l *lower) jen.Code {
-	if l.fused(instr.F64_DIV) {
-		return jen.Null()
-	}
+func lowerF64Div() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2618,10 +2424,7 @@ func lowerF64Div(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Eq(l *lower) jen.Code {
-	if l.fused(instr.F64_EQ) {
-		return jen.Null()
-	}
+func lowerF64Eq() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2633,10 +2436,7 @@ func lowerF64Eq(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Floor(l *lower) jen.Code {
-	if l.fused(instr.F64_FLOOR) {
-		return jen.Null()
-	}
+func lowerF64Floor() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2645,10 +2445,7 @@ func lowerF64Floor(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Ge(l *lower) jen.Code {
-	if l.fused(instr.F64_GE) {
-		return jen.Null()
-	}
+func lowerF64Ge() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2660,10 +2457,7 @@ func lowerF64Ge(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Gt(l *lower) jen.Code {
-	if l.fused(instr.F64_GT) {
-		return jen.Null()
-	}
+func lowerF64Gt() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2675,10 +2469,7 @@ func lowerF64Gt(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Le(l *lower) jen.Code {
-	if l.fused(instr.F64_LE) {
-		return jen.Null()
-	}
+func lowerF64Le() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2690,10 +2481,7 @@ func lowerF64Le(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Lt(l *lower) jen.Code {
-	if l.fused(instr.F64_LT) {
-		return jen.Null()
-	}
+func lowerF64Lt() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2705,10 +2493,7 @@ func lowerF64Lt(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Max(l *lower) jen.Code {
-	if l.fused(instr.F64_MAX) {
-		return jen.Null()
-	}
+func lowerF64Max() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2720,10 +2505,7 @@ func lowerF64Max(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Min(l *lower) jen.Code {
-	if l.fused(instr.F64_MIN) {
-		return jen.Null()
-	}
+func lowerF64Min() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2735,10 +2517,7 @@ func lowerF64Min(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Mod(l *lower) jen.Code {
-	if l.fused(instr.F64_MOD) {
-		return jen.Null()
-	}
+func lowerF64Mod() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2755,10 +2534,7 @@ func lowerF64Mod(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Mul(l *lower) jen.Code {
-	if l.fused(instr.F64_MUL) {
-		return jen.Null()
-	}
+func lowerF64Mul() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2770,10 +2546,7 @@ func lowerF64Mul(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Ne(l *lower) jen.Code {
-	if l.fused(instr.F64_NE) {
-		return jen.Null()
-	}
+func lowerF64Ne() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2785,10 +2558,7 @@ func lowerF64Ne(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Nearest(l *lower) jen.Code {
-	if l.fused(instr.F64_NEAREST) {
-		return jen.Null()
-	}
+func lowerF64Nearest() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2797,10 +2567,7 @@ func lowerF64Nearest(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Neg(l *lower) jen.Code {
-	if l.fused(instr.F64_NEG) {
-		return jen.Null()
-	}
+func lowerF64Neg() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2809,10 +2576,7 @@ func lowerF64Neg(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64ReinterpretI64(l *lower) jen.Code {
-	if l.fused(instr.F64_REINTERPRET_I64) {
-		return jen.Null()
-	}
+func lowerF64ReinterpretI64() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -2821,10 +2585,7 @@ func lowerF64ReinterpretI64(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Rem(l *lower) jen.Code {
-	if l.fused(instr.F64_REM) {
-		return jen.Null()
-	}
+func lowerF64Rem() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2839,10 +2600,7 @@ func lowerF64Rem(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Sqrt(l *lower) jen.Code {
-	if l.fused(instr.F64_SQRT) {
-		return jen.Null()
-	}
+func lowerF64Sqrt() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2851,10 +2609,7 @@ func lowerF64Sqrt(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Sub(l *lower) jen.Code {
-	if l.fused(instr.F64_SUB) {
-		return jen.Null()
-	}
+func lowerF64Sub() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2866,10 +2621,7 @@ func lowerF64Sub(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64ToF32(l *lower) jen.Code {
-	if l.fused(instr.F64_TO_F32) {
-		return jen.Null()
-	}
+func lowerF64ToF32() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2878,10 +2630,7 @@ func lowerF64ToF32(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64ToI32S(l *lower) jen.Code {
-	if l.fused(instr.F64_TO_I32_S) {
-		return jen.Null()
-	}
+func lowerF64ToI32S() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2895,10 +2644,7 @@ func lowerF64ToI32S(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64ToI32U(l *lower) jen.Code {
-	if l.fused(instr.F64_TO_I32_U) {
-		return jen.Null()
-	}
+func lowerF64ToI32U() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2911,10 +2657,7 @@ func lowerF64ToI32U(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64ToI64S(l *lower) jen.Code {
-	if l.fused(instr.F64_TO_I64_S) {
-		return jen.Null()
-	}
+func lowerF64ToI64S() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2927,10 +2670,7 @@ func lowerF64ToI64S(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64ToI64U(l *lower) jen.Code {
-	if l.fused(instr.F64_TO_I64_U) {
-		return jen.Null()
-	}
+func lowerF64ToI64U() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2942,10 +2682,7 @@ func lowerF64ToI64U(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerF64Trunc(l *lower) jen.Code {
-	if l.fused(instr.F64_TRUNC) {
-		return jen.Null()
-	}
+func lowerF64Trunc() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -2954,10 +2691,7 @@ func lowerF64Trunc(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerGlobalGet(l *lower) jen.Code {
-	if l.fused(instr.GLOBAL_GET) {
-		return jen.Null()
-	}
+func lowerGlobalGet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Op("*").Add(jen.Parens(jen.Op("*").Add(jen.Id("uint16"))).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
 		jen.If(jen.Id("idx").Op("<").Add(jen.Id("len").Call(jen.Id("c").Dot("globals")))).Block(jen.Switch(jen.Id("c").Dot("globals").Index(jen.Id("idx")).Dot("Repr").Call()).Block(jen.Case(jen.Id("types").Dot("KindI32"), jen.Id("types").Dot("KindF32"), jen.Id("types").Dot("KindF64")).Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Id("len").Call(jen.Id("i").Dot("stack")))).Block(jen.Id("panic").Call(jen.Id("ErrStackOverflow"))),
@@ -2974,10 +2708,7 @@ func lowerGlobalGet(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))
 }
 
-func lowerGlobalSet(l *lower) jen.Code {
-	if l.fused(instr.GLOBAL_SET) {
-		return jen.Null()
-	}
+func lowerGlobalSet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Op("*").Add(jen.Parens(jen.Op("*").Add(jen.Id("uint16"))).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
 		jen.If(jen.Id("idx").Op("<").Add(jen.Id("len").Call(jen.Id("c").Dot("globals")))).Block(jen.Switch(jen.Id("c").Dot("globals").Index(jen.Id("idx")).Dot("Repr").Call()).Block(jen.Case(jen.Id("types").Dot("KindI32"), jen.Id("types").Dot("KindF32"), jen.Id("types").Dot("KindF64")).Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
@@ -2995,10 +2726,7 @@ func lowerGlobalSet(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))
 }
 
-func lowerGlobalTee(l *lower) jen.Code {
-	if l.fused(instr.GLOBAL_TEE) {
-		return jen.Null()
-	}
+func lowerGlobalTee() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Op("*").Add(jen.Parens(jen.Op("*").Add(jen.Id("uint16"))).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
 		jen.If(jen.Id("idx").Op("<").Add(jen.Id("len").Call(jen.Id("c").Dot("globals")))).Block(jen.Switch(jen.Id("c").Dot("globals").Index(jen.Id("idx")).Dot("Repr").Call()).Block(jen.Case(jen.Id("types").Dot("KindI32"), jen.Id("types").Dot("KindF32"), jen.Id("types").Dot("KindF64")).Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
@@ -3015,10 +2743,7 @@ func lowerGlobalTee(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))
 }
 
-func lowerI32Add(l *lower) jen.Code {
-	if l.fused(instr.I32_ADD) {
-		return jen.Null()
-	}
+func lowerI32Add() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3030,10 +2755,7 @@ func lowerI32Add(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32And(l *lower) jen.Code {
-	if l.fused(instr.I32_AND) {
-		return jen.Null()
-	}
+func lowerI32And() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -3045,10 +2767,7 @@ func lowerI32And(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32Clz(l *lower) jen.Code {
-	if l.fused(instr.I32_CLZ) {
-		return jen.Null()
-	}
+func lowerI32Clz() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3057,10 +2776,7 @@ func lowerI32Clz(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32Const(l *lower) jen.Code {
-	if l.fused(instr.I32_CONST) {
-		return jen.Null()
-	}
+func lowerI32Const() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("raw")).Op(":=").List(jen.Op("*").Add(jen.Parens(jen.Op("*").Add(jen.Id("int32"))).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1)))))))),
 		jen.List(jen.Id("val")).Op(":=").List(jen.Id("types").Dot("BoxI32").Call(jen.Id("raw"))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(5)),
@@ -3070,10 +2786,7 @@ func lowerI32Const(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(5)))))
 }
 
-func lowerI32Ctz(l *lower) jen.Code {
-	if l.fused(instr.I32_CTZ) {
-		return jen.Null()
-	}
+func lowerI32Ctz() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3082,10 +2795,7 @@ func lowerI32Ctz(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32DivS(l *lower) jen.Code {
-	if l.fused(instr.I32_DIV_S) {
-		return jen.Null()
-	}
+func lowerI32DivS() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3100,10 +2810,7 @@ func lowerI32DivS(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32DivU(l *lower) jen.Code {
-	if l.fused(instr.I32_DIV_U) {
-		return jen.Null()
-	}
+func lowerI32DivU() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3118,10 +2825,7 @@ func lowerI32DivU(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32Eq(l *lower) jen.Code {
-	if l.fused(instr.I32_EQ) {
-		return jen.Null()
-	}
+func lowerI32Eq() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3133,10 +2837,7 @@ func lowerI32Eq(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32Eqz(l *lower) jen.Code {
-	if l.fused(instr.I32_EQZ) {
-		return jen.Null()
-	}
+func lowerI32Eqz() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3145,10 +2846,7 @@ func lowerI32Eqz(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32Extend16S(l *lower) jen.Code {
-	if l.fused(instr.I32_EXTEND16_S) {
-		return jen.Null()
-	}
+func lowerI32Extend16S() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3157,10 +2855,7 @@ func lowerI32Extend16S(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32Extend8S(l *lower) jen.Code {
-	if l.fused(instr.I32_EXTEND8_S) {
-		return jen.Null()
-	}
+func lowerI32Extend8S() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3169,10 +2864,7 @@ func lowerI32Extend8S(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32GeS(l *lower) jen.Code {
-	if l.fused(instr.I32_GE_S) {
-		return jen.Null()
-	}
+func lowerI32GeS() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3184,10 +2876,7 @@ func lowerI32GeS(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32GeU(l *lower) jen.Code {
-	if l.fused(instr.I32_GE_U) {
-		return jen.Null()
-	}
+func lowerI32GeU() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3199,10 +2888,7 @@ func lowerI32GeU(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32GtS(l *lower) jen.Code {
-	if l.fused(instr.I32_GT_S) {
-		return jen.Null()
-	}
+func lowerI32GtS() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3214,10 +2900,7 @@ func lowerI32GtS(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32GtU(l *lower) jen.Code {
-	if l.fused(instr.I32_GT_U) {
-		return jen.Null()
-	}
+func lowerI32GtU() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3229,10 +2912,7 @@ func lowerI32GtU(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32LeS(l *lower) jen.Code {
-	if l.fused(instr.I32_LE_S) {
-		return jen.Null()
-	}
+func lowerI32LeS() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3244,10 +2924,7 @@ func lowerI32LeS(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32LeU(l *lower) jen.Code {
-	if l.fused(instr.I32_LE_U) {
-		return jen.Null()
-	}
+func lowerI32LeU() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3259,10 +2936,7 @@ func lowerI32LeU(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32LtS(l *lower) jen.Code {
-	if l.fused(instr.I32_LT_S) {
-		return jen.Null()
-	}
+func lowerI32LtS() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3274,10 +2948,7 @@ func lowerI32LtS(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32LtU(l *lower) jen.Code {
-	if l.fused(instr.I32_LT_U) {
-		return jen.Null()
-	}
+func lowerI32LtU() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3289,10 +2960,7 @@ func lowerI32LtU(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32Mul(l *lower) jen.Code {
-	if l.fused(instr.I32_MUL) {
-		return jen.Null()
-	}
+func lowerI32Mul() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3304,10 +2972,7 @@ func lowerI32Mul(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32Ne(l *lower) jen.Code {
-	if l.fused(instr.I32_NE) {
-		return jen.Null()
-	}
+func lowerI32Ne() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3319,10 +2984,7 @@ func lowerI32Ne(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32Or(l *lower) jen.Code {
-	if l.fused(instr.I32_OR) {
-		return jen.Null()
-	}
+func lowerI32Or() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -3338,10 +3000,7 @@ func lowerI32Or(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32Popcnt(l *lower) jen.Code {
-	if l.fused(instr.I32_POPCNT) {
-		return jen.Null()
-	}
+func lowerI32Popcnt() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3350,10 +3009,7 @@ func lowerI32Popcnt(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32ReinterpretF32(l *lower) jen.Code {
-	if l.fused(instr.I32_REINTERPRET_F32) {
-		return jen.Null()
-	}
+func lowerI32ReinterpretF32() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F32").Call()),
@@ -3362,10 +3018,7 @@ func lowerI32ReinterpretF32(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32RemS(l *lower) jen.Code {
-	if l.fused(instr.I32_REM_S) {
-		return jen.Null()
-	}
+func lowerI32RemS() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3380,10 +3033,7 @@ func lowerI32RemS(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32RemU(l *lower) jen.Code {
-	if l.fused(instr.I32_REM_U) {
-		return jen.Null()
-	}
+func lowerI32RemU() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3398,10 +3048,7 @@ func lowerI32RemU(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32Rotl(l *lower) jen.Code {
-	if l.fused(instr.I32_ROTL) {
-		return jen.Null()
-	}
+func lowerI32Rotl() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3413,10 +3060,7 @@ func lowerI32Rotl(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32Rotr(l *lower) jen.Code {
-	if l.fused(instr.I32_ROTR) {
-		return jen.Null()
-	}
+func lowerI32Rotr() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3428,10 +3072,7 @@ func lowerI32Rotr(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32Shl(l *lower) jen.Code {
-	if l.fused(instr.I32_SHL) {
-		return jen.Null()
-	}
+func lowerI32Shl() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3443,10 +3084,7 @@ func lowerI32Shl(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32ShrS(l *lower) jen.Code {
-	if l.fused(instr.I32_SHR_S) {
-		return jen.Null()
-	}
+func lowerI32ShrS() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3458,10 +3096,7 @@ func lowerI32ShrS(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32ShrU(l *lower) jen.Code {
-	if l.fused(instr.I32_SHR_U) {
-		return jen.Null()
-	}
+func lowerI32ShrU() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3473,10 +3108,7 @@ func lowerI32ShrU(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32Sub(l *lower) jen.Code {
-	if l.fused(instr.I32_SUB) {
-		return jen.Null()
-	}
+func lowerI32Sub() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3488,10 +3120,7 @@ func lowerI32Sub(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32ToF32S(l *lower) jen.Code {
-	if l.fused(instr.I32_TO_F32_S) {
-		return jen.Null()
-	}
+func lowerI32ToF32S() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3500,10 +3129,7 @@ func lowerI32ToF32S(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32ToF32U(l *lower) jen.Code {
-	if l.fused(instr.I32_TO_F32_U) {
-		return jen.Null()
-	}
+func lowerI32ToF32U() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3512,10 +3138,7 @@ func lowerI32ToF32U(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32ToF64S(l *lower) jen.Code {
-	if l.fused(instr.I32_TO_F64_S) {
-		return jen.Null()
-	}
+func lowerI32ToF64S() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3524,10 +3147,7 @@ func lowerI32ToF64S(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32ToF64U(l *lower) jen.Code {
-	if l.fused(instr.I32_TO_F64_U) {
-		return jen.Null()
-	}
+func lowerI32ToF64U() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3536,10 +3156,7 @@ func lowerI32ToF64U(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32ToI64S(l *lower) jen.Code {
-	if l.fused(instr.I32_TO_I64_S) {
-		return jen.Null()
-	}
+func lowerI32ToI64S() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3548,10 +3165,7 @@ func lowerI32ToI64S(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32ToI64U(l *lower) jen.Code {
-	if l.fused(instr.I32_TO_I64_U) {
-		return jen.Null()
-	}
+func lowerI32ToI64U() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -3560,10 +3174,7 @@ func lowerI32ToI64U(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI32Xor(l *lower) jen.Code {
-	if l.fused(instr.I32_XOR) {
-		return jen.Null()
-	}
+func lowerI32Xor() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -3579,10 +3190,7 @@ func lowerI32Xor(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Add(l *lower) jen.Code {
-	if l.fused(instr.I64_ADD) {
-		return jen.Null()
-	}
+func lowerI64Add() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3594,10 +3202,7 @@ func lowerI64Add(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64And(l *lower) jen.Code {
-	if l.fused(instr.I64_AND) {
-		return jen.Null()
-	}
+func lowerI64And() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3609,10 +3214,7 @@ func lowerI64And(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Clz(l *lower) jen.Code {
-	if l.fused(instr.I64_CLZ) {
-		return jen.Null()
-	}
+func lowerI64Clz() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3621,10 +3223,7 @@ func lowerI64Clz(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Const(l *lower) jen.Code {
-	if l.fused(instr.I64_CONST) {
-		return jen.Null()
-	}
+func lowerI64Const() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("val")).Op(":=").List(jen.Id("int64").Call(jen.Op("*").Add(jen.Parens(jen.Op("*").Add(jen.Id("uint64"))).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(9)),
 		jen.If(jen.Id("types").Dot("IsBoxable").Call(jen.Id("val"))).Block(jen.List(jen.Id("v")).Op(":=").List(jen.Id("types").Dot("BoxI64").Call(jen.Id("val"))),
@@ -3639,10 +3238,7 @@ func lowerI64Const(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(9)))))
 }
 
-func lowerI64Ctz(l *lower) jen.Code {
-	if l.fused(instr.I64_CTZ) {
-		return jen.Null()
-	}
+func lowerI64Ctz() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3651,10 +3247,7 @@ func lowerI64Ctz(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64DivS(l *lower) jen.Code {
-	if l.fused(instr.I64_DIV_S) {
-		return jen.Null()
-	}
+func lowerI64DivS() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3669,10 +3262,7 @@ func lowerI64DivS(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64DivU(l *lower) jen.Code {
-	if l.fused(instr.I64_DIV_U) {
-		return jen.Null()
-	}
+func lowerI64DivU() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3687,10 +3277,7 @@ func lowerI64DivU(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Eq(l *lower) jen.Code {
-	if l.fused(instr.I64_EQ) {
-		return jen.Null()
-	}
+func lowerI64Eq() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3702,10 +3289,7 @@ func lowerI64Eq(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Eqz(l *lower) jen.Code {
-	if l.fused(instr.I64_EQZ) {
-		return jen.Null()
-	}
+func lowerI64Eqz() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3714,10 +3298,7 @@ func lowerI64Eqz(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Extend16S(l *lower) jen.Code {
-	if l.fused(instr.I64_EXTEND16_S) {
-		return jen.Null()
-	}
+func lowerI64Extend16S() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3726,10 +3307,7 @@ func lowerI64Extend16S(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Extend32S(l *lower) jen.Code {
-	if l.fused(instr.I64_EXTEND32_S) {
-		return jen.Null()
-	}
+func lowerI64Extend32S() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3738,10 +3316,7 @@ func lowerI64Extend32S(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Extend8S(l *lower) jen.Code {
-	if l.fused(instr.I64_EXTEND8_S) {
-		return jen.Null()
-	}
+func lowerI64Extend8S() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3750,10 +3325,7 @@ func lowerI64Extend8S(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64GeS(l *lower) jen.Code {
-	if l.fused(instr.I64_GE_S) {
-		return jen.Null()
-	}
+func lowerI64GeS() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3765,10 +3337,7 @@ func lowerI64GeS(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64GeU(l *lower) jen.Code {
-	if l.fused(instr.I64_GE_U) {
-		return jen.Null()
-	}
+func lowerI64GeU() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3780,10 +3349,7 @@ func lowerI64GeU(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64GtS(l *lower) jen.Code {
-	if l.fused(instr.I64_GT_S) {
-		return jen.Null()
-	}
+func lowerI64GtS() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3795,10 +3361,7 @@ func lowerI64GtS(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64GtU(l *lower) jen.Code {
-	if l.fused(instr.I64_GT_U) {
-		return jen.Null()
-	}
+func lowerI64GtU() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3810,10 +3373,7 @@ func lowerI64GtU(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64LeS(l *lower) jen.Code {
-	if l.fused(instr.I64_LE_S) {
-		return jen.Null()
-	}
+func lowerI64LeS() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3825,10 +3385,7 @@ func lowerI64LeS(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64LeU(l *lower) jen.Code {
-	if l.fused(instr.I64_LE_U) {
-		return jen.Null()
-	}
+func lowerI64LeU() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3840,10 +3397,7 @@ func lowerI64LeU(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64LtS(l *lower) jen.Code {
-	if l.fused(instr.I64_LT_S) {
-		return jen.Null()
-	}
+func lowerI64LtS() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3855,10 +3409,7 @@ func lowerI64LtS(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64LtU(l *lower) jen.Code {
-	if l.fused(instr.I64_LT_U) {
-		return jen.Null()
-	}
+func lowerI64LtU() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3870,10 +3421,7 @@ func lowerI64LtU(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Mul(l *lower) jen.Code {
-	if l.fused(instr.I64_MUL) {
-		return jen.Null()
-	}
+func lowerI64Mul() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3885,10 +3433,7 @@ func lowerI64Mul(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Ne(l *lower) jen.Code {
-	if l.fused(instr.I64_NE) {
-		return jen.Null()
-	}
+func lowerI64Ne() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3900,10 +3445,7 @@ func lowerI64Ne(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Or(l *lower) jen.Code {
-	if l.fused(instr.I64_OR) {
-		return jen.Null()
-	}
+func lowerI64Or() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3915,10 +3457,7 @@ func lowerI64Or(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Popcnt(l *lower) jen.Code {
-	if l.fused(instr.I64_POPCNT) {
-		return jen.Null()
-	}
+func lowerI64Popcnt() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3927,10 +3466,7 @@ func lowerI64Popcnt(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64ReinterpretF64(l *lower) jen.Code {
-	if l.fused(instr.I64_REINTERPRET_F64) {
-		return jen.Null()
-	}
+func lowerI64ReinterpretF64() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("F64").Call()),
@@ -3939,10 +3475,7 @@ func lowerI64ReinterpretF64(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64RemS(l *lower) jen.Code {
-	if l.fused(instr.I64_REM_S) {
-		return jen.Null()
-	}
+func lowerI64RemS() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3957,10 +3490,7 @@ func lowerI64RemS(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64RemU(l *lower) jen.Code {
-	if l.fused(instr.I64_REM_U) {
-		return jen.Null()
-	}
+func lowerI64RemU() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3975,10 +3505,7 @@ func lowerI64RemU(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Rotl(l *lower) jen.Code {
-	if l.fused(instr.I64_ROTL) {
-		return jen.Null()
-	}
+func lowerI64Rotl() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -3990,10 +3517,7 @@ func lowerI64Rotl(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Rotr(l *lower) jen.Code {
-	if l.fused(instr.I64_ROTR) {
-		return jen.Null()
-	}
+func lowerI64Rotr() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -4005,10 +3529,7 @@ func lowerI64Rotr(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Shl(l *lower) jen.Code {
-	if l.fused(instr.I64_SHL) {
-		return jen.Null()
-	}
+func lowerI64Shl() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -4020,10 +3541,7 @@ func lowerI64Shl(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64ShrS(l *lower) jen.Code {
-	if l.fused(instr.I64_SHR_S) {
-		return jen.Null()
-	}
+func lowerI64ShrS() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -4035,10 +3553,7 @@ func lowerI64ShrS(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64ShrU(l *lower) jen.Code {
-	if l.fused(instr.I64_SHR_U) {
-		return jen.Null()
-	}
+func lowerI64ShrU() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -4050,10 +3565,7 @@ func lowerI64ShrU(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Sub(l *lower) jen.Code {
-	if l.fused(instr.I64_SUB) {
-		return jen.Null()
-	}
+func lowerI64Sub() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -4065,10 +3577,7 @@ func lowerI64Sub(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64ToF32S(l *lower) jen.Code {
-	if l.fused(instr.I64_TO_F32_S) {
-		return jen.Null()
-	}
+func lowerI64ToF32S() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -4077,10 +3586,7 @@ func lowerI64ToF32S(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64ToF32U(l *lower) jen.Code {
-	if l.fused(instr.I64_TO_F32_U) {
-		return jen.Null()
-	}
+func lowerI64ToF32U() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -4089,10 +3595,7 @@ func lowerI64ToF32U(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64ToF64S(l *lower) jen.Code {
-	if l.fused(instr.I64_TO_F64_S) {
-		return jen.Null()
-	}
+func lowerI64ToF64S() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -4101,10 +3604,7 @@ func lowerI64ToF64S(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64ToF64U(l *lower) jen.Code {
-	if l.fused(instr.I64_TO_F64_U) {
-		return jen.Null()
-	}
+func lowerI64ToF64U() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -4113,10 +3613,7 @@ func lowerI64ToF64U(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64ToI32(l *lower) jen.Code {
-	if l.fused(instr.I64_TO_I32) {
-		return jen.Null()
-	}
+func lowerI64ToI32() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -4125,10 +3622,7 @@ func lowerI64ToI32(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerI64Xor(l *lower) jen.Code {
-	if l.fused(instr.I64_XOR) {
-		return jen.Null()
-	}
+func lowerI64Xor() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("rhs")).Op(":=").List(jen.Id("i").Dot("unboxI64").Call(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -4140,10 +3634,7 @@ func lowerI64Xor(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerLocalGet(l *lower) jen.Code {
-	if l.fused(instr.LOCAL_GET) {
-		return jen.Null()
-	}
+func lowerLocalGet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(2)),
 		jen.If(jen.Id("idx").Op(">=").Add(jen.Id("len").Call(jen.Id("c").Dot("locals")))).Block(jen.Return(jen.Func().Params(jen.Op("*").Add(jen.Id("Interpreter"))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))))),
@@ -4163,10 +3654,7 @@ func lowerLocalGet(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(2)))))
 }
 
-func lowerLocalSet(l *lower) jen.Code {
-	if l.fused(instr.LOCAL_SET) {
-		return jen.Null()
-	}
+func lowerLocalSet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(2)),
 		jen.If(jen.Id("idx").Op("<").Add(jen.Id("len").Call(jen.Id("c").Dot("locals")))).Block(jen.Switch(jen.Id("c").Dot("locals").Index(jen.Id("idx")).Dot("Repr").Call()).Block(jen.Case(jen.Id("types").Dot("KindI32"), jen.Id("types").Dot("KindF32"), jen.Id("types").Dot("KindF64")).Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
@@ -4186,10 +3674,7 @@ func lowerLocalSet(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(2)))))
 }
 
-func lowerLocalTee(l *lower) jen.Code {
-	if l.fused(instr.LOCAL_TEE) {
-		return jen.Null()
-	}
+func lowerLocalTee() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(2)),
 		jen.If(jen.Id("idx").Op("<").Add(jen.Id("len").Call(jen.Id("c").Dot("locals")))).Block(jen.Switch(jen.Id("c").Dot("locals").Index(jen.Id("idx")).Dot("Repr").Call()).Block(jen.Case(jen.Id("types").Dot("KindI32"), jen.Id("types").Dot("KindF32"), jen.Id("types").Dot("KindF64")).Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
@@ -4208,10 +3693,7 @@ func lowerLocalTee(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(2)))))
 }
 
-func lowerMapClear(l *lower) jen.Code {
-	if l.fused(instr.MAP_CLEAR) {
-		return jen.Null()
-	}
+func lowerMapClear() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(1))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("ref")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -4231,10 +3713,7 @@ func lowerMapClear(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerMapDelete(l *lower) jen.Code {
-	if l.fused(instr.MAP_DELETE) {
-		return jen.Null()
-	}
+func lowerMapDelete() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("key")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -4278,10 +3757,7 @@ func lowerMapDelete(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerMapGet(l *lower) jen.Code {
-	if l.fused(instr.MAP_GET) {
-		return jen.Null()
-	}
+func lowerMapGet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("key")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -4327,10 +3803,7 @@ func lowerMapGet(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerMapIter(l *lower) jen.Code {
-	if l.fused(instr.MAP_ITER) {
-		return jen.Null()
-	}
+func lowerMapIter() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(1))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("ref")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -4347,10 +3820,7 @@ func lowerMapIter(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerMapKeys(l *lower) jen.Code {
-	if l.fused(instr.MAP_KEYS) {
-		return jen.Null()
-	}
+func lowerMapKeys() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(1))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("ref")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -4388,10 +3858,7 @@ func lowerMapKeys(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerMapLen(l *lower) jen.Code {
-	if l.fused(instr.MAP_LEN) {
-		return jen.Null()
-	}
+func lowerMapLen() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(1))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("ref")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -4411,10 +3878,7 @@ func lowerMapLen(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerMapLookup(l *lower) jen.Code {
-	if l.fused(instr.MAP_LOOKUP) {
-		return jen.Null()
-	}
+func lowerMapLookup() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("key")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -4462,10 +3926,7 @@ func lowerMapLookup(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerMapNew(l *lower) jen.Code {
-	if l.fused(instr.MAP_NEW) {
-		return jen.Null()
-	}
+func lowerMapNew() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Op("*").Add(jen.Parens(jen.Op("*").Add(jen.Id("uint16"))).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
 		jen.If(jen.Id("idx").Op(">=").Add(jen.Id("len").Call(jen.Id("c").Dot("types")))).Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))))),
@@ -4523,10 +3984,7 @@ func lowerMapNew(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))
 }
 
-func lowerMapNewDefault(l *lower) jen.Code {
-	if l.fused(instr.MAP_NEW_DEFAULT) {
-		return jen.Null()
-	}
+func lowerMapNewDefault() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Op("*").Add(jen.Parens(jen.Op("*").Add(jen.Id("uint16"))).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
 		jen.If(jen.Id("idx").Op(">=").Add(jen.Id("len").Call(jen.Id("c").Dot("types")))).Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))))),
@@ -4539,10 +3997,7 @@ func lowerMapNewDefault(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))
 }
 
-func lowerMapSet(l *lower) jen.Code {
-	if l.fused(instr.MAP_SET) {
-		return jen.Null()
-	}
+func lowerMapSet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(3))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("value")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -4592,10 +4047,7 @@ func lowerMapSet(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerNop(l *lower) jen.Code {
-	if l.fused(instr.NOP) {
-		return jen.Null()
-	}
+func lowerNop() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("skip")).Op(":=").List(jen.Lit(0)),
 		jen.For(jen.Op("!").Add(jen.Id("c").Dot("exact")).Op("&&").Add(jen.Id("c").Dot("ip").Op("+").Add(jen.Id("skip")).Op("<").Add(jen.Id("len").Call(jen.Id("c").Dot("code")))).Op("&&").Add(jen.Id("instr").Dot("Opcode").Call(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Id("skip")))).Op("==").Add(jen.Id("instr").Dot("NOP")))).Block(jen.Id("skip").Op("++")),
 		jen.If(jen.Id("c").Dot("exact")).Block(jen.List(jen.Id("skip")).Op("=").List(jen.Lit(1))),
@@ -4603,10 +4055,7 @@ func lowerNop(l *lower) jen.Code {
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Id("skip")))))
 }
 
-func lowerRefCast(l *lower) jen.Code {
-	if l.fused(instr.REF_CAST) {
-		return jen.Null()
-	}
+func lowerRefCast() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Op("*").Add(jen.Parens(jen.Op("*").Add(jen.Id("uint16"))).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
 		jen.If(jen.Id("idx").Op(">=").Add(jen.Id("len").Call(jen.Id("c").Dot("types")))).Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))))),
@@ -4619,10 +4068,7 @@ func lowerRefCast(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))
 }
 
-func lowerRefEq(l *lower) jen.Code {
-	if l.fused(instr.REF_EQ) {
-		return jen.Null()
-	}
+func lowerRefEq() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v1")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -4634,10 +4080,7 @@ func lowerRefEq(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerRefGet(l *lower) jen.Code {
-	if l.fused(instr.REF_GET) {
-		return jen.Null()
-	}
+func lowerRefGet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.Var().Add(jen.List(jen.Id("val"))).Add(jen.Id("types").Dot("Boxed")),
 			jen.Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
@@ -4655,10 +4098,7 @@ func lowerRefGet(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerRefIsNull(l *lower) jen.Code {
-	if l.fused(instr.REF_IS_NULL) {
-		return jen.Null()
-	}
+func lowerRefIsNull() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("val")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -4667,10 +4107,7 @@ func lowerRefIsNull(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerRefNe(l *lower) jen.Code {
-	if l.fused(instr.REF_NE) {
-		return jen.Null()
-	}
+func lowerRefNe() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v1")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -4682,10 +4119,7 @@ func lowerRefNe(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerRefNew(l *lower) jen.Code {
-	if l.fused(instr.REF_NEW) {
-		return jen.Null()
-	}
+func lowerRefNew() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -4694,10 +4128,7 @@ func lowerRefNew(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerRefNull(l *lower) jen.Code {
-	if l.fused(instr.REF_NULL) {
-		return jen.Null()
-	}
+func lowerRefNull() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Id("len").Call(jen.Id("i").Dot("stack")))).Block(jen.Id("panic").Call(jen.Id("ErrStackOverflow"))),
 			jen.Id("i").Dot("retain").Call(jen.Lit(0)),
@@ -4706,10 +4137,7 @@ func lowerRefNull(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerRefSet(l *lower) jen.Code {
-	if l.fused(instr.REF_SET) {
-		return jen.Null()
-	}
+func lowerRefSet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("value")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -4723,10 +4151,7 @@ func lowerRefSet(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerRefTest(l *lower) jen.Code {
-	if l.fused(instr.REF_TEST) {
-		return jen.Null()
-	}
+func lowerRefTest() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Op("*").Add(jen.Parens(jen.Op("*").Add(jen.Id("uint16"))).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
 		jen.If(jen.Id("idx").Op(">=").Add(jen.Id("len").Call(jen.Id("c").Dot("types")))).Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))))),
@@ -4742,10 +4167,7 @@ func lowerRefTest(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))
 }
 
-func lowerResume(l *lower) jen.Code {
-	if l.fused(instr.RESUME) {
-		return jen.Null()
-	}
+func lowerResume() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.If(jen.Id("i").Dot("fp").Op("==").Add(jen.Id("len").Call(jen.Id("i").Dot("frames")))).Block(jen.Id("panic").Call(jen.Id("ErrFrameOverflow"))),
@@ -4803,10 +4225,7 @@ func lowerResume(l *lower) jen.Code {
 				jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))))))))
 }
 
-func lowerReturn(l *lower) jen.Code {
-	if l.fused(instr.RETURN) {
-		return jen.Null()
-	}
+func lowerReturn() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("fp").Op("==").Add(jen.Lit(1))).Block(jen.Id("panic").Call(jen.Id("ErrFrameUnderflow"))),
 			jen.If(jen.Id("i").Dot("fr").Dot("coro").Op("!=").Add(jen.Lit(0))).Block(jen.Block(jen.List(jen.Id("f")).Op(":=").List(jen.Id("i").Dot("fr")),
@@ -4842,10 +4261,7 @@ func lowerReturn(l *lower) jen.Code {
 				jen.List(jen.Id("i").Dot("fr")).Op("=").List(jen.Op("&").Add(jen.Id("i").Dot("frames").Index(jen.Id("i").Dot("fp").Op("-").Add(jen.Lit(1)))))))))
 }
 
-func lowerReturnCall(l *lower) jen.Code {
-	if l.fused(instr.RETURN_CALL) {
-		return jen.Null()
-	}
+func lowerReturnCall() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("addr")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("Ref").Call()),
@@ -4975,10 +4391,7 @@ func lowerReturnCall(l *lower) jen.Code {
 				jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch")))))))
 }
 
-func lowerSelect(l *lower) jen.Code {
-	if l.fused(instr.SELECT) {
-		return jen.Null()
-	}
+func lowerSelect() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(3))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("cond")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
@@ -4994,10 +4407,7 @@ func lowerSelect(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerStringConcat(l *lower) jen.Code {
-	if l.fused(instr.STRING_CONCAT) {
-		return jen.Null()
-	}
+func lowerStringConcat() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v1")).Op(":=").List(jen.Id("unboxRef").Index(jen.Id("types").Dot("String")).Call(jen.Id("i"), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -5007,10 +4417,7 @@ func lowerStringConcat(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerStringEncodeUtf32(l *lower) jen.Code {
-	if l.fused(instr.STRING_ENCODE_UTF32) {
-		return jen.Null()
-	}
+func lowerStringEncodeUtf32() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("val")).Op(":=").List(jen.Id("unboxRef").Index(jen.Id("types").Dot("String")).Call(jen.Id("i"), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -5018,10 +4425,7 @@ func lowerStringEncodeUtf32(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerStringEq(l *lower) jen.Code {
-	if l.fused(instr.STRING_EQ) {
-		return jen.Null()
-	}
+func lowerStringEq() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v1")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -5033,10 +4437,7 @@ func lowerStringEq(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerStringGe(l *lower) jen.Code {
-	if l.fused(instr.STRING_GE) {
-		return jen.Null()
-	}
+func lowerStringGe() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v1")).Op(":=").List(jen.Id("unboxRef").Index(jen.Id("types").Dot("String")).Call(jen.Id("i"), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -5046,10 +4447,7 @@ func lowerStringGe(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerStringGt(l *lower) jen.Code {
-	if l.fused(instr.STRING_GT) {
-		return jen.Null()
-	}
+func lowerStringGt() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v1")).Op(":=").List(jen.Id("unboxRef").Index(jen.Id("types").Dot("String")).Call(jen.Id("i"), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -5059,10 +4457,7 @@ func lowerStringGt(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerStringIter(l *lower) jen.Code {
-	if l.fused(instr.STRING_ITER) {
-		return jen.Null()
-	}
+func lowerStringIter() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("ref")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -5076,10 +4471,7 @@ func lowerStringIter(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerStringLe(l *lower) jen.Code {
-	if l.fused(instr.STRING_LE) {
-		return jen.Null()
-	}
+func lowerStringLe() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v1")).Op(":=").List(jen.Id("unboxRef").Index(jen.Id("types").Dot("String")).Call(jen.Id("i"), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -5089,10 +4481,7 @@ func lowerStringLe(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerStringLen(l *lower) jen.Code {
-	if l.fused(instr.STRING_LEN) {
-		return jen.Null()
-	}
+func lowerStringLen() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("unboxRef").Index(jen.Id("types").Dot("String")).Call(jen.Id("i"), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -5100,10 +4489,7 @@ func lowerStringLen(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerStringLt(l *lower) jen.Code {
-	if l.fused(instr.STRING_LT) {
-		return jen.Null()
-	}
+func lowerStringLt() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v1")).Op(":=").List(jen.Id("unboxRef").Index(jen.Id("types").Dot("String")).Call(jen.Id("i"), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -5113,10 +4499,7 @@ func lowerStringLt(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerStringNe(l *lower) jen.Code {
-	if l.fused(instr.STRING_NE) {
-		return jen.Null()
-	}
+func lowerStringNe() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("v1")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -5128,10 +4511,7 @@ func lowerStringNe(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerStringNewUtf32(l *lower) jen.Code {
-	if l.fused(instr.STRING_NEW_UTF32) {
-		return jen.Null()
-	}
+func lowerStringNewUtf32() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("val")).Op(":=").List(jen.Id("unboxRef").Index(jen.Id("types").Dot("TypedArray").Index(jen.Id("int32"))).Call(jen.Id("i"), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))),
@@ -5139,10 +4519,7 @@ func lowerStringNewUtf32(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerStructGet(l *lower) jen.Code {
-	if l.fused(instr.STRUCT_GET) {
-		return jen.Null()
-	}
+func lowerStructGet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.Var().Add(jen.List(jen.Id("val"))).Add(jen.Id("types").Dot("Boxed")),
 			jen.Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
@@ -5181,10 +4558,7 @@ func lowerStructGet(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerStructNew(l *lower) jen.Code {
-	if l.fused(instr.STRUCT_NEW) {
-		return jen.Null()
-	}
+func lowerStructNew() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Op("*").Add(jen.Parens(jen.Op("*").Add(jen.Id("uint16"))).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
 		jen.If(jen.Id("idx").Op(">=").Add(jen.Id("len").Call(jen.Id("c").Dot("types")))).Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))))),
@@ -5202,10 +4576,7 @@ func lowerStructNew(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))
 }
 
-func lowerStructNewDefault(l *lower) jen.Code {
-	if l.fused(instr.STRUCT_NEW_DEFAULT) {
-		return jen.Null()
-	}
+func lowerStructNewDefault() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Op("*").Add(jen.Parens(jen.Op("*").Add(jen.Id("uint16"))).Call(jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
 		jen.If(jen.Id("idx").Op(">=").Add(jen.Id("len").Call(jen.Id("c").Dot("types")))).Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))))),
@@ -5218,10 +4589,7 @@ func lowerStructNewDefault(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))
 }
 
-func lowerStructSet(l *lower) jen.Code {
-	if l.fused(instr.STRUCT_SET) {
-		return jen.Null()
-	}
+func lowerStructSet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(3))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("val")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
@@ -5257,20 +4625,14 @@ func lowerStructSet(l *lower) jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerSwap(l *lower) jen.Code {
-	if l.fused(instr.SWAP) {
-		return jen.Null()
-	}
+func lowerSwap() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(2)))).Op("=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(2))), jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func lowerThrow(l *lower) jen.Code {
-	if l.fused(instr.THROW) {
-		return jen.Null()
-	}
+func lowerThrow() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.Id("i").Dot("sp").Op("--"),
@@ -5280,19 +4642,13 @@ func lowerThrow(l *lower) jen.Code {
 			jen.Id("panic").Call(jen.Id("escape").Values(jen.Id("i").Dot("uncaught").Call(jen.Id("exc")))))))
 }
 
-func lowerUnreachable(l *lower) jen.Code {
-	if l.fused(instr.UNREACHABLE) {
-		return jen.Null()
-	}
+func lowerUnreachable() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.Id("i").Dot("fr").Dot("ip").Op("++"),
 			jen.Id("panic").Call(jen.Id("ErrUnreachableExecuted")))))
 }
 
-func lowerUpvalGet(l *lower) jen.Code {
-	if l.fused(instr.UPVAL_GET) {
-		return jen.Null()
-	}
+func lowerUpvalGet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(2)),
 		jen.If(jen.Id("idx").Op("<").Add(jen.Id("len").Call(jen.Id("c").Dot("captures")))).Block(jen.Switch(jen.Id("c").Dot("captures").Index(jen.Id("idx")).Dot("Repr").Call()).Block(jen.Case(jen.Id("types").Dot("KindI32"), jen.Id("types").Dot("KindF32"), jen.Id("types").Dot("KindF64")).Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Id("len").Call(jen.Id("i").Dot("stack")))).Block(jen.Id("panic").Call(jen.Id("ErrStackOverflow"))),
@@ -5309,10 +4665,7 @@ func lowerUpvalGet(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(2)))))
 }
 
-func lowerUpvalSet(l *lower) jen.Code {
-	if l.fused(instr.UPVAL_SET) {
-		return jen.Null()
-	}
+func lowerUpvalSet() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("idx")).Op(":=").List(jen.Id("int").Call(jen.Id("c").Dot("code").Index(jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1))))),
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(2)),
 		jen.If(jen.Id("idx").Op("<").Add(jen.Id("len").Call(jen.Id("c").Dot("captures")))).Block(jen.Switch(jen.Id("c").Dot("captures").Index(jen.Id("idx")).Dot("Repr").Call()).Block(jen.Case(jen.Id("types").Dot("KindI32"), jen.Id("types").Dot("KindF32"), jen.Id("types").Dot("KindF64")).Block(jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
@@ -5330,10 +4683,7 @@ func lowerUpvalSet(l *lower) jen.Code {
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(2)))))
 }
 
-func lowerYield(l *lower) jen.Code {
-	if l.fused(instr.YIELD) {
-		return jen.Null()
-	}
+func lowerYield() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"),
