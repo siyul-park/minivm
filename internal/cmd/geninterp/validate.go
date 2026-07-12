@@ -7,53 +7,6 @@ import (
 	"github.com/siyul-park/minivm/instr"
 )
 
-func (p pattern) delta() (int, bool) {
-	last := len(p) - 1
-	branch := p[last].op == instr.BR_IF
-	consumerAt := last
-	if branch {
-		consumerAt--
-	}
-	if consumerAt < 0 {
-		return 0, false
-	}
-	consumer := p[consumerAt].op
-	if len(p) == 2 && p[0].op == instr.I32_CONST && branch {
-		return 0, true
-	}
-	switch consumer {
-	case instr.DROP:
-		if consumerAt != 1 || branch {
-			return 0, false
-		}
-		return 0, true
-	case instr.REF_IS_NULL:
-		if consumerAt != 1 {
-			return 0, false
-		}
-		if branch {
-			return 0, true
-		}
-		return 1, true
-	case instr.ARRAY_GET, instr.STRUCT_GET:
-		if consumerAt != 1 || branch {
-			return 0, false
-		}
-		return 0, true
-	}
-	if arity, ok := arity(consumer); ok {
-		if consumerAt > 2 {
-			return 0, false
-		}
-		delta := consumerAt - arity
-		if !branch {
-			delta++
-		}
-		return delta, true
-	}
-	return 0, false
-}
-
 func (p pattern) key() string {
 	var key strings.Builder
 	for index, step := range p {
@@ -127,14 +80,8 @@ func validate(patterns []pattern) error {
 				return fmt.Errorf("ref pattern has unsupported trailing operations")
 			}
 		}
-		if want, ok := pattern.delta(); ok {
-			pops, pushes, fixed, err := effect(pattern)
-			if err != nil {
-				return err
-			}
-			if fixed && pushes-pops != want {
-				return fmt.Errorf("stack delta %d (pop %d, push %d), want %d", pushes-pops, pops, pushes, want)
-			}
+		if _, _, _, err := effect(pattern); err != nil {
+			return err
 		}
 		key := pattern.key()
 		if _, ok := seen[key]; ok {

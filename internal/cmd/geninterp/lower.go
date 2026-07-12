@@ -336,67 +336,46 @@ func prepare(source pattern) ([]fact, error) {
 		return nil, fmt.Errorf("fusion pattern has no consumer")
 	}
 	consumer := facts[consumerAt].op
-
-	if _, ok := arity(consumer); ok {
-		kind, ok := numberKind(consumer)
-		if !ok {
-			return nil, fmt.Errorf("unsupported numeric consumer %s", instr.TypeOf(consumer).Mnemonic)
+	if consumerAt == 0 {
+		if !branch {
+			return nil, fmt.Errorf("fusion pattern has no source")
 		}
-		boxed := consumer == instr.I32_XOR || consumer == instr.I32_AND || consumer == instr.I32_OR
-		commit := traps(consumer)
-		for index := range facts[:consumerAt] {
-			facts[index].kind = kind
-			facts[index].boxed = boxed
-			facts[index].commit = commit
+		push := instr.TypeOf(consumer).Push
+		if len(push) == 0 || push[len(push)-1].Repr() != instr.KindI32 {
+			return nil, fmt.Errorf("%s cannot feed br_if", instr.TypeOf(consumer).Mnemonic)
 		}
+		facts[0].kind = push[len(push)-1].Repr()
 		return facts, nil
 	}
 
-	switch consumer {
-	case instr.DROP, instr.REF_IS_NULL:
-		if consumerAt != 1 {
-			return nil, fmt.Errorf("unsupported ref fusion pattern")
-		}
-		facts[0].kind = instr.KindRef
-		facts[0].boxed = true
-	case instr.ARRAY_GET, instr.STRUCT_GET:
-		if consumerAt != 1 {
-			return nil, fmt.Errorf("unsupported index fusion pattern")
-		}
-		facts[0].kind = instr.KindI32
-	case instr.CALL, instr.RETURN_CALL, instr.CLOSURE_NEW:
-		if consumerAt != 1 || facts[0].op != instr.CONST_GET {
-			return nil, fmt.Errorf("unsupported constant call pattern")
-		}
-		facts[0].kind = instr.KindRef
-		facts[0].boxed = true
-	case instr.I32_CONST:
-		if !branch || consumerAt != 0 {
-			return nil, fmt.Errorf("unsupported direct branch pattern")
-		}
-		facts[0].kind = instr.KindI32
-	default:
+	kind, count, ok := fusionInput(consumer)
+	if !ok {
 		return nil, fmt.Errorf("no fusion lowering for %s", instr.TypeOf(consumer).Mnemonic)
+	}
+	if consumerAt > count {
+		return nil, fmt.Errorf("%s accepts at most %d fused sources", instr.TypeOf(consumer).Mnemonic, count)
+	}
+	boxed := kind.Repr() == instr.KindRef || consumer == instr.I32_XOR || consumer == instr.I32_AND || consumer == instr.I32_OR
+	for index := range facts[:consumerAt] {
+		facts[index].kind = kind.Repr()
+		facts[index].boxed = boxed
+		facts[index].commit = traps(consumer)
 	}
 	return facts, nil
 }
 
-func numberKind(op instr.Opcode) (instr.Kind, bool) {
-	kind, ok := number(op)
-	if !ok {
-		return instr.KindAny, false
+func fusionInput(op instr.Opcode) (instr.Kind, int, bool) {
+	pop := instr.TypeOf(op).Pop
+	if len(pop) > 0 {
+		return pop[0], len(pop), true
 	}
-	switch kind {
-	case "I32":
-		return instr.KindI32, true
-	case "I64":
-		return instr.KindI64, true
-	case "F32":
-		return instr.KindF32, true
-	case "F64":
-		return instr.KindF64, true
+	switch op {
+	case instr.ARRAY_GET, instr.STRUCT_GET:
+		return instr.KindI32, 1, true
+	case instr.CALL, instr.RETURN_CALL, instr.CLOSURE_NEW:
+		return instr.KindRef, 1, true
 	default:
-		return instr.KindAny, false
+		return instr.KindAny, 0, false
 	}
 }
 
