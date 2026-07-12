@@ -64,48 +64,48 @@ var lowerers = [256]lowerer{
 	instr.ARRAY_COPY:          bind(arrayCopy),
 	instr.ARRAY_DELETE:        bind(arrayDelete),
 	instr.ARRAY_FILL:          bind(arrayFill),
-	instr.ARRAY_GET:           lowerIndex,
+	instr.ARRAY_GET:           index,
 	instr.ARRAY_LEN:           bind(arrayLen),
 	instr.ARRAY_NEW:           bind(arrayNew),
 	instr.ARRAY_NEW_DEFAULT:   bind(arrayNewDefault),
 	instr.ARRAY_SET:           bind(arraySet),
 	instr.ARRAY_SLICE:         bind(arraySlice),
 	instr.BR:                  bind(br),
-	instr.BR_IF:               lowerBranch,
+	instr.BR_IF:               branch,
 	instr.BR_TABLE:            bind(brTable),
-	instr.CALL:                lowerCall,
-	instr.CLOSURE_NEW:         lowerCall,
-	instr.CONST_GET:           lowerSource,
+	instr.CALL:                call,
+	instr.CLOSURE_NEW:         call,
+	instr.CONST_GET:           source,
 	instr.CORO_DONE:           bind(coroDone),
 	instr.CORO_VALUE:          bind(coroValue),
-	instr.DROP:                lowerRef,
-	instr.DUP:                 lowerRef,
+	instr.DROP:                ref,
+	instr.DUP:                 ref,
 	instr.ERROR_CODE:          bind(errorCode),
 	instr.ERROR_GET:           bind(errorGet),
 	instr.ERROR_NEW:           bind(errorNew),
 	instr.F32_ABS:             bind(f32Abs),
-	instr.F32_ADD:             lowerNumeric,
+	instr.F32_ADD:             scalar,
 	instr.F32_CEIL:            bind(f32Ceil),
-	instr.F32_CONST:           lowerSource,
-	instr.F32_COPYSIGN:        lowerNumeric,
-	instr.F32_DIV:             lowerNumeric,
-	instr.F32_EQ:              lowerNumeric,
+	instr.F32_CONST:           source,
+	instr.F32_COPYSIGN:        scalar,
+	instr.F32_DIV:             scalar,
+	instr.F32_EQ:              scalar,
 	instr.F32_FLOOR:           bind(f32Floor),
-	instr.F32_GE:              lowerNumeric,
-	instr.F32_GT:              lowerNumeric,
-	instr.F32_LE:              lowerNumeric,
-	instr.F32_LT:              lowerNumeric,
-	instr.F32_MAX:             lowerNumeric,
-	instr.F32_MIN:             lowerNumeric,
-	instr.F32_MOD:             lowerNumeric,
-	instr.F32_MUL:             lowerNumeric,
-	instr.F32_NE:              lowerNumeric,
+	instr.F32_GE:              scalar,
+	instr.F32_GT:              scalar,
+	instr.F32_LE:              scalar,
+	instr.F32_LT:              scalar,
+	instr.F32_MAX:             scalar,
+	instr.F32_MIN:             scalar,
+	instr.F32_MOD:             scalar,
+	instr.F32_MUL:             scalar,
+	instr.F32_NE:              scalar,
 	instr.F32_NEAREST:         bind(f32Nearest),
 	instr.F32_NEG:             bind(f32Neg),
 	instr.F32_REINTERPRET_I32: bind(f32ReinterpretI32),
-	instr.F32_REM:             lowerNumeric,
+	instr.F32_REM:             scalar,
 	instr.F32_SQRT:            bind(f32Sqrt),
-	instr.F32_SUB:             lowerNumeric,
+	instr.F32_SUB:             scalar,
 	instr.F32_TO_F64:          bind(f32ToF64),
 	instr.F32_TO_I32_S:        bind(f32ToI32S),
 	instr.F32_TO_I32_U:        bind(f32ToI32U),
@@ -113,116 +113,116 @@ var lowerers = [256]lowerer{
 	instr.F32_TO_I64_U:        bind(f32ToI64U),
 	instr.F32_TRUNC:           bind(f32Trunc),
 	instr.F64_ABS:             bind(f64Abs),
-	instr.F64_ADD:             lowerNumeric,
+	instr.F64_ADD:             scalar,
 	instr.F64_CEIL:            bind(f64Ceil),
-	instr.F64_CONST:           lowerSource,
-	instr.F64_COPYSIGN:        lowerNumeric,
-	instr.F64_DIV:             lowerNumeric,
-	instr.F64_EQ:              lowerNumeric,
+	instr.F64_CONST:           source,
+	instr.F64_COPYSIGN:        scalar,
+	instr.F64_DIV:             scalar,
+	instr.F64_EQ:              scalar,
 	instr.F64_FLOOR:           bind(f64Floor),
-	instr.F64_GE:              lowerNumeric,
-	instr.F64_GT:              lowerNumeric,
-	instr.F64_LE:              lowerNumeric,
-	instr.F64_LT:              lowerNumeric,
-	instr.F64_MAX:             lowerNumeric,
-	instr.F64_MIN:             lowerNumeric,
-	instr.F64_MOD:             lowerNumeric,
-	instr.F64_MUL:             lowerNumeric,
-	instr.F64_NE:              lowerNumeric,
+	instr.F64_GE:              scalar,
+	instr.F64_GT:              scalar,
+	instr.F64_LE:              scalar,
+	instr.F64_LT:              scalar,
+	instr.F64_MAX:             scalar,
+	instr.F64_MIN:             scalar,
+	instr.F64_MOD:             scalar,
+	instr.F64_MUL:             scalar,
+	instr.F64_NE:              scalar,
 	instr.F64_NEAREST:         bind(f64Nearest),
 	instr.F64_NEG:             bind(f64Neg),
 	instr.F64_REINTERPRET_I64: bind(f64ReinterpretI64),
-	instr.F64_REM:             lowerNumeric,
+	instr.F64_REM:             scalar,
 	instr.F64_SQRT:            bind(f64Sqrt),
-	instr.F64_SUB:             lowerNumeric,
+	instr.F64_SUB:             scalar,
 	instr.F64_TO_F32:          bind(f64ToF32),
 	instr.F64_TO_I32_S:        bind(f64ToI32S),
 	instr.F64_TO_I32_U:        bind(f64ToI32U),
 	instr.F64_TO_I64_S:        bind(f64ToI64S),
 	instr.F64_TO_I64_U:        bind(f64ToI64U),
 	instr.F64_TRUNC:           bind(f64Trunc),
-	instr.GLOBAL_GET:          lowerSource,
+	instr.GLOBAL_GET:          source,
 	instr.GLOBAL_SET:          bind(globalSet),
 	instr.GLOBAL_TEE:          bind(globalTee),
-	instr.I32_ADD:             lowerNumeric,
-	instr.I32_AND:             lowerNumeric,
+	instr.I32_ADD:             scalar,
+	instr.I32_AND:             scalar,
 	instr.I32_CLZ:             bind(i32Clz),
-	instr.I32_CONST:           lowerSource,
+	instr.I32_CONST:           source,
 	instr.I32_CTZ:             bind(i32Ctz),
-	instr.I32_DIV_S:           lowerNumeric,
-	instr.I32_DIV_U:           lowerNumeric,
-	instr.I32_EQ:              lowerNumeric,
-	instr.I32_EQZ:             lowerNumeric,
+	instr.I32_DIV_S:           scalar,
+	instr.I32_DIV_U:           scalar,
+	instr.I32_EQ:              scalar,
+	instr.I32_EQZ:             scalar,
 	instr.I32_EXTEND16_S:      bind(i32Extend16S),
 	instr.I32_EXTEND8_S:       bind(i32Extend8S),
-	instr.I32_GE_S:            lowerNumeric,
-	instr.I32_GE_U:            lowerNumeric,
-	instr.I32_GT_S:            lowerNumeric,
-	instr.I32_GT_U:            lowerNumeric,
-	instr.I32_LE_S:            lowerNumeric,
-	instr.I32_LE_U:            lowerNumeric,
-	instr.I32_LT_S:            lowerNumeric,
-	instr.I32_LT_U:            lowerNumeric,
-	instr.I32_MUL:             lowerNumeric,
-	instr.I32_NE:              lowerNumeric,
-	instr.I32_OR:              lowerNumeric,
+	instr.I32_GE_S:            scalar,
+	instr.I32_GE_U:            scalar,
+	instr.I32_GT_S:            scalar,
+	instr.I32_GT_U:            scalar,
+	instr.I32_LE_S:            scalar,
+	instr.I32_LE_U:            scalar,
+	instr.I32_LT_S:            scalar,
+	instr.I32_LT_U:            scalar,
+	instr.I32_MUL:             scalar,
+	instr.I32_NE:              scalar,
+	instr.I32_OR:              scalar,
 	instr.I32_POPCNT:          bind(i32Popcnt),
 	instr.I32_REINTERPRET_F32: bind(i32ReinterpretF32),
-	instr.I32_REM_S:           lowerNumeric,
-	instr.I32_REM_U:           lowerNumeric,
-	instr.I32_ROTL:            lowerNumeric,
-	instr.I32_ROTR:            lowerNumeric,
-	instr.I32_SHL:             lowerNumeric,
-	instr.I32_SHR_S:           lowerNumeric,
-	instr.I32_SHR_U:           lowerNumeric,
-	instr.I32_SUB:             lowerNumeric,
+	instr.I32_REM_S:           scalar,
+	instr.I32_REM_U:           scalar,
+	instr.I32_ROTL:            scalar,
+	instr.I32_ROTR:            scalar,
+	instr.I32_SHL:             scalar,
+	instr.I32_SHR_S:           scalar,
+	instr.I32_SHR_U:           scalar,
+	instr.I32_SUB:             scalar,
 	instr.I32_TO_F32_S:        bind(i32ToF32S),
 	instr.I32_TO_F32_U:        bind(i32ToF32U),
 	instr.I32_TO_F64_S:        bind(i32ToF64S),
 	instr.I32_TO_F64_U:        bind(i32ToF64U),
 	instr.I32_TO_I64_S:        bind(i32ToI64S),
 	instr.I32_TO_I64_U:        bind(i32ToI64U),
-	instr.I32_XOR:             lowerNumeric,
-	instr.I64_ADD:             lowerNumeric,
-	instr.I64_AND:             lowerNumeric,
+	instr.I32_XOR:             scalar,
+	instr.I64_ADD:             scalar,
+	instr.I64_AND:             scalar,
 	instr.I64_CLZ:             bind(i64Clz),
-	instr.I64_CONST:           lowerSource,
+	instr.I64_CONST:           source,
 	instr.I64_CTZ:             bind(i64Ctz),
-	instr.I64_DIV_S:           lowerNumeric,
-	instr.I64_DIV_U:           lowerNumeric,
-	instr.I64_EQ:              lowerNumeric,
-	instr.I64_EQZ:             lowerNumeric,
+	instr.I64_DIV_S:           scalar,
+	instr.I64_DIV_U:           scalar,
+	instr.I64_EQ:              scalar,
+	instr.I64_EQZ:             scalar,
 	instr.I64_EXTEND16_S:      bind(i64Extend16S),
 	instr.I64_EXTEND32_S:      bind(i64Extend32S),
 	instr.I64_EXTEND8_S:       bind(i64Extend8S),
-	instr.I64_GE_S:            lowerNumeric,
-	instr.I64_GE_U:            lowerNumeric,
-	instr.I64_GT_S:            lowerNumeric,
-	instr.I64_GT_U:            lowerNumeric,
-	instr.I64_LE_S:            lowerNumeric,
-	instr.I64_LE_U:            lowerNumeric,
-	instr.I64_LT_S:            lowerNumeric,
-	instr.I64_LT_U:            lowerNumeric,
-	instr.I64_MUL:             lowerNumeric,
-	instr.I64_NE:              lowerNumeric,
-	instr.I64_OR:              lowerNumeric,
+	instr.I64_GE_S:            scalar,
+	instr.I64_GE_U:            scalar,
+	instr.I64_GT_S:            scalar,
+	instr.I64_GT_U:            scalar,
+	instr.I64_LE_S:            scalar,
+	instr.I64_LE_U:            scalar,
+	instr.I64_LT_S:            scalar,
+	instr.I64_LT_U:            scalar,
+	instr.I64_MUL:             scalar,
+	instr.I64_NE:              scalar,
+	instr.I64_OR:              scalar,
 	instr.I64_POPCNT:          bind(i64Popcnt),
 	instr.I64_REINTERPRET_F64: bind(i64ReinterpretF64),
-	instr.I64_REM_S:           lowerNumeric,
-	instr.I64_REM_U:           lowerNumeric,
-	instr.I64_ROTL:            lowerNumeric,
-	instr.I64_ROTR:            lowerNumeric,
-	instr.I64_SHL:             lowerNumeric,
-	instr.I64_SHR_S:           lowerNumeric,
-	instr.I64_SHR_U:           lowerNumeric,
-	instr.I64_SUB:             lowerNumeric,
+	instr.I64_REM_S:           scalar,
+	instr.I64_REM_U:           scalar,
+	instr.I64_ROTL:            scalar,
+	instr.I64_ROTR:            scalar,
+	instr.I64_SHL:             scalar,
+	instr.I64_SHR_S:           scalar,
+	instr.I64_SHR_U:           scalar,
+	instr.I64_SUB:             scalar,
 	instr.I64_TO_F32_S:        bind(i64ToF32S),
 	instr.I64_TO_F32_U:        bind(i64ToF32U),
 	instr.I64_TO_F64_S:        bind(i64ToF64S),
 	instr.I64_TO_F64_U:        bind(i64ToF64U),
 	instr.I64_TO_I32:          bind(i64ToI32),
-	instr.I64_XOR:             lowerNumeric,
-	instr.LOCAL_GET:           lowerSource,
+	instr.I64_XOR:             scalar,
+	instr.LOCAL_GET:           source,
 	instr.LOCAL_SET:           bind(localSet),
 	instr.LOCAL_TEE:           bind(localTee),
 	instr.MAP_CLEAR:           bind(mapClear),
@@ -239,15 +239,15 @@ var lowerers = [256]lowerer{
 	instr.REF_CAST:            bind(refCast),
 	instr.REF_EQ:              bind(refEq),
 	instr.REF_GET:             bind(refGet),
-	instr.REF_IS_NULL:         lowerRef,
+	instr.REF_IS_NULL:         ref,
 	instr.REF_NE:              bind(refNe),
 	instr.REF_NEW:             bind(refNew),
-	instr.REF_NULL:            lowerRef,
+	instr.REF_NULL:            ref,
 	instr.REF_SET:             bind(refSet),
 	instr.REF_TEST:            bind(refTest),
 	instr.RESUME:              bind(resume),
 	instr.RETURN:              bind(returnOp),
-	instr.RETURN_CALL:         lowerCall,
+	instr.RETURN_CALL:         call,
 	instr.SELECT:              bind(selectOp),
 	instr.STRING_CONCAT:       bind(stringConcat),
 	instr.STRING_ENCODE_UTF32: bind(stringEncodeUtf32),
@@ -260,14 +260,14 @@ var lowerers = [256]lowerer{
 	instr.STRING_LT:           bind(stringLt),
 	instr.STRING_NE:           bind(stringNe),
 	instr.STRING_NEW_UTF32:    bind(stringNewUtf32),
-	instr.STRUCT_GET:          lowerIndex,
+	instr.STRUCT_GET:          index,
 	instr.STRUCT_NEW:          bind(structNew),
 	instr.STRUCT_NEW_DEFAULT:  bind(structNewDefault),
 	instr.STRUCT_SET:          bind(structSet),
 	instr.SWAP:                bind(swap),
 	instr.THROW:               bind(throw),
 	instr.UNREACHABLE:         bind(unreachable),
-	instr.UPVAL_GET:           lowerSource,
+	instr.UPVAL_GET:           source,
 	instr.UPVAL_SET:           bind(upvalSet),
 	instr.YIELD:               bind(yield),
 }
@@ -397,7 +397,7 @@ func input(op instr.Opcode) (instr.Kind, int, bool) {
 	return pop[0], len(pop), true
 }
 
-func lowerSource(state *state, current step) (value, error) {
+func source(state *state, current step) (value, error) {
 	if state.standalone {
 		switch current.op {
 		case instr.I32_CONST:
@@ -535,18 +535,18 @@ func kindName(kind instr.Kind) (string, bool) {
 	}
 }
 
-func lowerRef(state *state, current step) (value, error) {
+func ref(state *state, current step) (value, error) {
 	switch current.op {
 	case instr.REF_NULL, instr.DUP:
-		return produceRef(state, current)
+		return produce(state, current)
 	case instr.DROP, instr.REF_IS_NULL:
-		return consumeRef(state, current)
+		return consume(state, current)
 	default:
 		return value{}, fmt.Errorf("unsupported ref opcode %s", instr.TypeOf(current.op).Mnemonic)
 	}
 }
 
-func produceRef(state *state, current step) (value, error) {
+func produce(state *state, current step) (value, error) {
 	result := value{op: current.op, head: current.op}
 	switch current.op {
 	case instr.REF_NULL:
@@ -585,7 +585,7 @@ func produceRef(state *state, current step) (value, error) {
 	return result, nil
 }
 
-func consumeRef(state *state, current step) (value, error) {
+func consume(state *state, current step) (value, error) {
 	if state.standalone {
 		state.stack = []value{{
 			op:       current.op,
@@ -652,7 +652,7 @@ func consumeRef(state *state, current step) (value, error) {
 	return value{op: current.op, head: input.head, compile: compile}, nil
 }
 
-func lowerIndex(state *state, current step) (value, error) {
+func index(state *state, current step) (value, error) {
 	if state.standalone {
 		body := []jen.Code{
 			jen.If(jen.Id("i").Dot("sp").Op("<").Lit(2)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
@@ -678,7 +678,7 @@ func lowerIndex(state *state, current step) (value, error) {
 	return value{op: current.op, head: index.head, compile: compile}, nil
 }
 
-func lowerCall(state *state, current step) (value, error) {
+func call(state *state, current step) (value, error) {
 	if state.standalone {
 		body, err := dynamicCall(current.op)
 		if err != nil {
@@ -801,7 +801,7 @@ func dynamicCall(op instr.Opcode) ([]jen.Code, error) {
 	return body, nil
 }
 
-func lowerNumeric(state *state, current step) (value, error) {
+func scalar(state *state, current step) (value, error) {
 	head := current.op
 	if len(state.stack) > 0 {
 		head = state.stack[0].head
@@ -819,7 +819,7 @@ func lowerNumeric(state *state, current step) (value, error) {
 	return value{op: current.op, head: head, compile: body}, nil
 }
 
-func lowerBranch(state *state, current step) (value, error) {
+func branch(state *state, current step) (value, error) {
 	if state.standalone {
 		compile := []jen.Code{
 			jen.Id("offset").Op(":=").Qual("github.com/siyul-park/minivm/instr", "ParseI16").Call(jen.Id("c").Dot("code"), jen.Id("c").Dot("ip").Op("+").Lit(1)),
@@ -828,7 +828,7 @@ func lowerBranch(state *state, current step) (value, error) {
 			jen.If(jen.Id("i").Dot("sp").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 		}
 		condition := jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Dot("I32").Call().Op("!=").Lit(0)
-		body = append(body, branch(condition, 1, width(current.op))...)
+		body = append(body, jump(condition, 1, width(current.op))...)
 		return value{op: current.op, head: current.op, handler: handler(current.op, compile, body)}, nil
 	}
 	if len(state.stack) == 0 {
@@ -853,7 +853,7 @@ func lowerBranch(state *state, current step) (value, error) {
 	compile := append([]jen.Code(nil), consumer.compile...)
 	body := append([]jen.Code(nil), consumer.check...)
 	body = append(body, consumer.body...)
-	body = append(body, branch(condition, 0, state.width)...)
+	body = append(body, jump(condition, 0, state.width)...)
 	compile = append(compile,
 		jen.Id("c").Dot("ip").Op("+=").Lit(width(consumer.head)),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
@@ -862,7 +862,7 @@ func lowerBranch(state *state, current step) (value, error) {
 	return value{op: current.op, head: consumer.head, compile: compile}, nil
 }
 
-func branch(condition jen.Code, consume, advance int) []jen.Code {
+func jump(condition jen.Code, consume, advance int) []jen.Code {
 	if consume == 0 {
 		return []jen.Code{
 			jen.If(condition).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
@@ -1308,7 +1308,7 @@ func lookup(op instr.Opcode, index jen.Code, advance int) []jen.Code {
 }
 
 // numeric emits one numeric operation from virtual and resident operands.
-func numeric(consumer instr.Opcode, inputs []value, advance int, label string, jump bool) ([]jen.Code, error) {
+func numeric(consumer instr.Opcode, inputs []value, advance int, label string, conditional bool) ([]jen.Code, error) {
 	arity, ok := arity(consumer)
 	if !ok {
 		return nil, fmt.Errorf("unsupported numeric consumer %s", instr.TypeOf(consumer).Mnemonic)
@@ -1355,8 +1355,8 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, j
 
 	result := temp(len(inputs))
 	body = append(body, jen.Id(result).Op(":=").Add(apply(consumer, operands...)))
-	if jump {
-		body = append(body, branch(jen.Id(result).Dot("Bool").Call(), missing, advance)...)
+	if conditional {
+		body = append(body, jump(jen.Id(result).Dot("Bool").Call(), missing, advance)...)
 	} else {
 		delta := len(inputs) - arity + 1
 		if delta > 0 {

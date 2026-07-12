@@ -293,25 +293,26 @@ func TestGenerate(t *testing.T) {
 		require.Equal(t, []string{"slot", "width", "raw", "boxed", "index", "addr", "pos", "label", "standalone"}, fields["loader"])
 		require.Contains(t, values, "lowerers")
 		for _, name := range []string{
-			"compose", "lower", "resolve", "lowerSource", "lowerRef", "lowerIndex",
-			"lowerCall", "lowerNumeric", "lowerBranch", "load", "materialize",
-			"dynamicCall", "branch", "lookup", "numeric", "checked", "validateStack",
-			"produceRef", "consumeRef", "enter", "frame", "reuse", "replace",
-			"host", "invoke", "closureNew", "create", "render", "declare", "matches",
+			"lower", "compose", "resolve", "source", "ref", "produce", "consume",
+			"index", "call", "scalar", "branch", "load", "materialize", "jump",
+			"validateStack", "render", "declare", "matches",
 		} {
 			require.Contains(t, functions, name)
 		}
+
 		for _, name := range []string{
 			"fact", "lowering", "loweringState", "callTarget", "sourceContext",
 		} {
 			require.NotContains(t, types, name)
 		}
 		for _, name := range []string{
-			"standalone", "prepare", "sourceLower", "refSource", "refLower", "indexLower",
-			"callLower", "numericLower", "branchLower", "sourceAccess", "sourcePush",
+			"lowerSource", "lowerRef", "produceRef", "consumeRef", "lowerIndex",
+			"lowerCall", "lowerNumeric", "lowerBranch", "standalone", "prepare",
+			"sourceLower", "refSource", "refLower", "indexLower", "callLower",
+			"numericLower", "branchLower", "sourceAccess", "sourcePush",
 			"dynamicCallCode", "branchBody", "indexCode", "numericCode",
 			"trappedNumericCode", "validateEffect", "frameBody", "replaceBody",
-			"hostBodyCode", "createBody", "source", "threader",
+			"hostBodyCode", "createBody", "threader",
 		} {
 			require.NotContains(t, functions, name)
 		}
