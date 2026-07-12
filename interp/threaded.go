@@ -38504,15 +38504,15 @@ var (
 				goto l33
 			}
 			{
-				idx := int(uint16(c.code[c.ip+1]) | uint16(c.code[c.ip+2])<<8)
-				if idx >= len(c.constants) {
+				i0 := instr.ParseU16(c.code, start+1)
+				if i0 >= len(c.constants) {
 					goto l33
 				}
-				boxed := c.constants[idx]
-				if boxed.Kind() != types.KindRef {
+				r0 := c.constants[i0]
+				if r0.Kind() != types.KindRef {
 					goto l33
 				}
-				addr := boxed.Ref()
+				addr := r0.Ref()
 				if addr < 0 || addr >= len(c.heap) {
 					goto l33
 				}
@@ -38711,15 +38711,15 @@ var (
 				goto l34
 			}
 			{
-				idx := int(uint16(c.code[c.ip+1]) | uint16(c.code[c.ip+2])<<8)
-				if idx >= len(c.constants) {
+				i0 := instr.ParseU16(c.code, start+1)
+				if i0 >= len(c.constants) {
 					goto l34
 				}
-				boxed := c.constants[idx]
-				if boxed.Kind() != types.KindRef {
+				r0 := c.constants[i0]
+				if r0.Kind() != types.KindRef {
 					goto l34
 				}
-				addr := boxed.Ref()
+				addr := r0.Ref()
 				if addr < 0 || addr >= len(c.heap) {
 					goto l34
 				}
@@ -38751,15 +38751,15 @@ var (
 				goto l35
 			}
 			{
-				idx := int(uint16(c.code[c.ip+1]) | uint16(c.code[c.ip+2])<<8)
-				if idx >= len(c.constants) {
+				i0 := instr.ParseU16(c.code, start+1)
+				if i0 >= len(c.constants) {
 					goto l35
 				}
-				boxed := c.constants[idx]
-				if boxed.Kind() != types.KindRef {
+				r0 := c.constants[i0]
+				if r0.Kind() != types.KindRef {
 					goto l35
 				}
-				addr := boxed.Ref()
+				addr := r0.Ref()
 				if addr < 0 || addr >= len(c.heap) {
 					goto l35
 				}

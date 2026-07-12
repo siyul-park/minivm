@@ -266,6 +266,25 @@ func TestGenerate(t *testing.T) {
 		}
 	})
 
+	t.Run("shares call lowerings", func(t *testing.T) {
+		data, err := os.ReadFile("lower.go")
+		require.NoError(t, err)
+		source := string(data)
+		for _, mapping := range []string{
+			"instr.CALL:                callLower",
+			"instr.CLOSURE_NEW:         callLower",
+			"instr.RETURN_CALL:         callLower",
+		} {
+			require.Contains(t, source, mapping)
+		}
+		for _, function := range []string{
+			"func callOp(", "func closureNew(", "func returnCall(",
+			"func callSequence(",
+		} {
+			require.NotContains(t, source, function)
+		}
+	})
+
 	t.Run("maps every opcode once", func(t *testing.T) {
 		for value, lowering := range lowerers {
 			op := instr.Opcode(value)
