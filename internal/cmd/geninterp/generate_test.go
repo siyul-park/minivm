@@ -246,32 +246,53 @@ func TestGenerate(t *testing.T) {
 		}))
 	})
 
-	t.Run("uses unified lowering architecture", func(t *testing.T) {
-		file, err := parser.ParseFile(token.NewFileSet(), "lower.go", nil, 0)
-		require.NoError(t, err)
-
+	t.Run("uses role based lowering names", func(t *testing.T) {
 		types := make(map[string]struct{})
 		values := make(map[string]struct{})
 		functions := make(map[string]*ast.FuncDecl)
-		ast.Inspect(file, func(node ast.Node) bool {
-			switch node := node.(type) {
-			case *ast.TypeSpec:
-				types[node.Name.Name] = struct{}{}
-			case *ast.ValueSpec:
-				for _, name := range node.Names {
-					values[name.Name] = struct{}{}
+		for _, path := range []string{"pattern.go", "lower.go", "validate.go"} {
+			file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			require.NoError(t, err)
+			ast.Inspect(file, func(node ast.Node) bool {
+				switch node := node.(type) {
+				case *ast.TypeSpec:
+					types[node.Name.Name] = struct{}{}
+				case *ast.ValueSpec:
+					for _, name := range node.Names {
+						values[name.Name] = struct{}{}
+					}
+				case *ast.FuncDecl:
+					functions[node.Name.Name] = node
 				}
-			case *ast.FuncDecl:
-				functions[node.Name.Name] = node
-			}
-			return true
-		})
+				return true
+			})
+		}
 
-		for _, name := range []string{"fact", "lowerer", "lowering", "loweringState"} {
+		for _, name := range []string{"match", "step", "value", "state", "target", "loader", "lowerer"} {
 			require.Contains(t, types, name)
 		}
 		require.Contains(t, values, "lowerers")
-		for _, name := range []string{"compose", "standalone"} {
+		for _, name := range []string{
+			"compose", "lower", "resolve", "lowerSource", "lowerRef", "lowerIndex",
+			"lowerCall", "lowerNumeric", "lowerBranch", "load", "materialize",
+			"dynamicCall", "branch", "lookup", "numeric", "checked", "validateStack",
+		} {
+			require.Contains(t, functions, name)
+		}
+		for _, name := range []string{
+			"fact", "lowering", "loweringState", "callTarget", "sourceContext",
+		} {
+			require.NotContains(t, types, name)
+		}
+		for _, name := range []string{
+			"standalone", "prepare", "sourceLower", "refSource", "refLower", "indexLower",
+			"callLower", "numericLower", "branchLower", "sourceAccess", "sourcePush",
+			"dynamicCallCode", "branchBody", "indexCode", "numericCode",
+			"trappedNumericCode", "validateEffect",
+		} {
+			require.NotContains(t, functions, name)
+		}
+		for _, name := range []string{"compose", "lower"} {
 			fn := functions[name]
 			require.NotNil(t, fn)
 			uses := false
@@ -287,15 +308,6 @@ func TestGenerate(t *testing.T) {
 				return true
 			})
 			require.True(t, uses, name)
-		}
-
-		for _, name := range []string{
-			"callHandler", "callSequence", "composeCall", "composeDirectBranch",
-			"composeIndex", "composeNumeric", "composeRef", "indexHandler",
-			"indexSequence", "refHandler", "refSequence", "sourceHandler",
-			"standaloneNumericCode", "brIf",
-		} {
-			require.NotContains(t, functions, name)
 		}
 	})
 
