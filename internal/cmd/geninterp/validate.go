@@ -74,12 +74,6 @@ func validate(patterns []pattern) error {
 				}
 			}
 		}
-		if len(pattern) > 2 {
-			consumer := pattern[1].op
-			if consumer == instr.DROP || (consumer == instr.REF_IS_NULL && (len(pattern) != 3 || pattern[2].op != instr.BR_IF)) {
-				return fmt.Errorf("ref pattern has unsupported trailing operations")
-			}
-		}
 		if _, _, _, err := effect(pattern); err != nil {
 			return err
 		}

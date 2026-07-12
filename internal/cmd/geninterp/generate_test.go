@@ -207,10 +207,10 @@ func TestGenerate(t *testing.T) {
 		require.ErrorContains(t, validate([]pattern{seq(op(instr.LOCAL_GET), op(instr.CALL))}), "unsupported fusion")
 	})
 
-	t.Run("rejects unsupported trailing operations", func(t *testing.T) {
+	t.Run("rejects unresolved trailing operations", func(t *testing.T) {
 		require.ErrorContains(t, validate([]pattern{
 			seq(op(instr.REF_NULL), op(instr.DROP), op(instr.REF_IS_NULL)),
-		}), "unsupported trailing operations")
+		}), "unsupported fusion")
 	})
 
 	t.Run("rejects stack kind mismatches", func(t *testing.T) {
@@ -272,7 +272,7 @@ func TestGenerate(t *testing.T) {
 			"callHandler", "callSequence", "composeCall", "composeDirectBranch",
 			"composeIndex", "composeNumeric", "composeRef", "indexHandler",
 			"indexSequence", "refHandler", "refSequence", "sourceHandler",
-			"standaloneNumericCode",
+			"standaloneNumericCode", "brIf",
 		} {
 			require.NotContains(t, functions, name)
 		}

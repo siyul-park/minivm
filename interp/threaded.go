@@ -99,9 +99,9 @@ var (
 				if i.sp == 0 {
 					panic(ErrStackUnderflow)
 				}
-				i.sp--
-				cond := i.stack[i.sp].I32()
-				if cond != 0 {
+				taken := i.stack[i.sp-1].I32() != 0
+				i.sp -= 1
+				if taken {
 					i.fr.ip += offset
 				}
 				i.fr.ip += 3
@@ -5347,7 +5347,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					value := i.stack[i.sp-1]
-					if value.Ref() == 0 {
+					taken := value.Ref() == 0
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 5
@@ -5417,7 +5418,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 12
@@ -5448,7 +5450,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 12
@@ -5479,7 +5482,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 12
@@ -5510,7 +5514,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 12
@@ -5541,7 +5546,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 12
@@ -5572,7 +5578,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 12
@@ -5603,7 +5610,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 16
@@ -5634,7 +5642,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 16
@@ -5665,7 +5674,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 16
@@ -5696,7 +5706,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 16
@@ -5727,7 +5738,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 16
@@ -5758,7 +5770,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 16
@@ -5797,7 +5810,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -5836,7 +5850,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -5875,7 +5890,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -5914,7 +5930,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -5953,7 +5970,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -5992,7 +6010,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6031,7 +6050,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6070,7 +6090,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6109,7 +6130,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6148,7 +6170,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6187,7 +6210,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6226,7 +6250,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6265,7 +6290,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6304,7 +6330,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6343,7 +6370,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6382,7 +6410,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6421,7 +6450,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6460,7 +6490,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6499,7 +6530,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6538,7 +6570,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6577,7 +6610,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6616,7 +6650,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6655,7 +6690,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6694,7 +6730,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6733,7 +6770,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6772,7 +6810,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6811,7 +6850,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6850,7 +6890,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6889,7 +6930,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6928,7 +6970,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -6967,7 +7010,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -7006,7 +7050,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 10
@@ -7046,7 +7091,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7086,7 +7132,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7126,7 +7173,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7166,7 +7214,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7206,7 +7255,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7246,7 +7296,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7286,7 +7337,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7326,7 +7378,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7366,7 +7419,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7406,7 +7460,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7446,7 +7501,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7486,7 +7542,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7526,7 +7583,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7566,7 +7624,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7606,7 +7665,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7646,7 +7706,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7686,7 +7747,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7726,7 +7788,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7766,7 +7829,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7806,7 +7870,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7846,7 +7911,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7886,7 +7952,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7926,7 +7993,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -7966,7 +8034,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8006,7 +8075,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8046,7 +8116,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8086,7 +8157,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8126,7 +8198,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8166,7 +8239,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8206,7 +8280,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8246,7 +8321,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8286,7 +8362,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8325,7 +8402,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8364,7 +8442,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8403,7 +8482,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8442,7 +8522,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8481,7 +8562,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8520,7 +8602,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8559,7 +8642,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8598,7 +8682,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8637,7 +8722,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8676,7 +8762,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8715,7 +8802,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8754,7 +8842,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8793,7 +8882,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8832,7 +8922,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8871,7 +8962,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8910,7 +9002,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8949,7 +9042,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -8988,7 +9082,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -9027,7 +9122,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -9066,7 +9162,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -9105,7 +9202,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -9144,7 +9242,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -9183,7 +9282,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -9222,7 +9322,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -9261,7 +9362,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -9300,7 +9402,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -9339,7 +9442,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -9378,7 +9482,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -9417,7 +9522,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -9456,7 +9562,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -9495,7 +9602,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -9534,7 +9642,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -9565,7 +9674,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 12
@@ -9596,7 +9706,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 12
@@ -9627,7 +9738,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 12
@@ -9658,7 +9770,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 12
@@ -9689,7 +9802,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 12
@@ -9720,7 +9834,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 12
@@ -9751,7 +9866,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 12
@@ -9782,7 +9898,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 12
@@ -9813,7 +9930,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 12
@@ -9844,7 +9962,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 12
@@ -9875,7 +9994,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 16
@@ -9906,7 +10026,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 16
@@ -9937,7 +10058,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 16
@@ -9968,7 +10090,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 16
@@ -9999,7 +10122,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 16
@@ -10030,7 +10154,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 16
@@ -10061,7 +10186,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 16
@@ -10092,7 +10218,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 16
@@ -10123,7 +10250,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 16
@@ -10154,7 +10282,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 16
@@ -10184,8 +10313,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10215,8 +10345,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) > uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10246,8 +10377,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10277,8 +10409,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) <= uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10308,8 +10441,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10339,8 +10473,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) >= uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10853,8 +10988,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10884,8 +11020,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10915,8 +11052,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10946,8 +11084,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -10977,8 +11116,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -11008,8 +11148,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -11522,8 +11663,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -11553,8 +11695,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -14746,8 +14889,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -14777,8 +14921,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -14808,8 +14953,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -14839,8 +14985,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -21269,7 +21416,8 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if r0.Ref() == 0 {
+					taken := r0.Ref() == 0
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22077,8 +22225,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22108,8 +22257,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22139,8 +22289,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22170,8 +22321,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22201,8 +22353,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22232,8 +22385,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22263,8 +22417,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22294,8 +22449,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22325,8 +22481,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -22356,8 +22513,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -23168,8 +23326,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -23199,8 +23358,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -23230,8 +23390,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -23261,8 +23422,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) < uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -25636,7 +25798,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -25668,7 +25831,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -25700,7 +25864,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -25732,7 +25897,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -25764,7 +25930,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -25796,7 +25963,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -25828,7 +25996,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -25860,7 +26029,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -25892,7 +26062,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -25924,7 +26095,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -25956,7 +26128,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -25988,7 +26161,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -26029,7 +26203,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26070,7 +26245,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26111,7 +26287,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26152,7 +26329,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26193,7 +26371,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26234,7 +26413,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26275,7 +26455,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26316,7 +26497,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26357,7 +26539,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26398,7 +26581,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26439,7 +26623,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26480,7 +26665,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26521,7 +26707,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26562,7 +26749,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26603,7 +26791,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26644,7 +26833,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26685,7 +26875,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26726,7 +26917,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26767,7 +26959,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26808,7 +27001,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26849,7 +27043,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26890,7 +27085,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26931,7 +27127,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -26972,7 +27169,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -27013,7 +27211,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -27054,7 +27253,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -27095,7 +27295,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -27136,7 +27337,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -27177,7 +27379,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -27218,7 +27421,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -27259,7 +27463,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -27300,7 +27505,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -27332,7 +27538,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -27364,7 +27571,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -27396,7 +27604,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -27428,7 +27637,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -27460,7 +27670,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -27492,7 +27703,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -27524,7 +27736,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -27556,7 +27769,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -27588,7 +27802,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -27620,7 +27835,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -27652,7 +27868,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -27684,7 +27901,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -27716,7 +27934,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -27748,7 +27967,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -27780,7 +28000,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -27812,7 +28033,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -27844,7 +28066,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -27876,7 +28099,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -27908,7 +28132,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -27940,7 +28165,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -27971,8 +28197,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28003,8 +28230,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) > uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28035,8 +28263,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28067,8 +28296,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) <= uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28099,8 +28329,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28131,8 +28362,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) >= uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28661,8 +28893,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28693,8 +28926,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28725,8 +28959,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28757,8 +28992,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28789,8 +29025,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -28821,8 +29058,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -29351,8 +29589,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -29383,8 +29622,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -29415,8 +29655,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -29447,8 +29688,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -29479,8 +29721,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -29511,8 +29754,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -32860,7 +33104,8 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.stack[i2]
-					if r0.Ref() == 0 {
+					taken := r0.Ref() == 0
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33694,8 +33939,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33726,8 +33972,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33758,8 +34005,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33790,8 +34038,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33822,8 +34071,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33854,8 +34104,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33886,8 +34137,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33918,8 +34170,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33950,8 +34203,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -33982,8 +34236,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -34820,8 +35075,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -34852,8 +35108,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -34884,8 +35141,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -34916,8 +35174,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) < uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -37371,8 +37630,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37402,8 +37662,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37433,8 +37694,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37464,8 +37726,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37495,8 +37758,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37526,8 +37790,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37557,8 +37822,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37588,8 +37854,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37619,8 +37886,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37650,8 +37918,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37681,8 +37950,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37712,8 +37982,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37743,8 +38014,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37774,8 +38046,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37805,8 +38078,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37836,8 +38110,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37867,8 +38142,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37898,8 +38174,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37929,8 +38206,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37960,8 +38238,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -37991,8 +38270,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38022,8 +38302,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38064,8 +38345,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38106,8 +38388,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) > uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38148,8 +38431,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38190,8 +38474,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) <= uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38232,8 +38517,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38274,8 +38560,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) >= uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38316,8 +38603,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38358,8 +38646,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38400,8 +38689,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38442,8 +38732,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) < uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -38475,7 +38766,8 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if r0.Ref() == 0 {
+					taken := r0.Ref() == 0
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 7
@@ -41675,7 +41967,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -41706,7 +41999,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -41737,7 +42031,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -41768,7 +42063,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -41799,7 +42095,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -41830,7 +42127,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -41861,7 +42159,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -41892,7 +42191,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -41923,7 +42223,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -41954,7 +42255,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -41985,7 +42287,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -42016,7 +42319,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -42055,7 +42359,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42094,7 +42399,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42133,7 +42439,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42172,7 +42479,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42211,7 +42519,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42250,7 +42559,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42289,7 +42599,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42328,7 +42639,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42367,7 +42679,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42406,7 +42719,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42445,7 +42759,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42484,7 +42799,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42523,7 +42839,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42562,7 +42879,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42601,7 +42919,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42640,7 +42959,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42679,7 +42999,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42718,7 +43039,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42757,7 +43079,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42796,7 +43119,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42835,7 +43159,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42874,7 +43199,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42913,7 +43239,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42952,7 +43279,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -42991,7 +43319,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -43030,7 +43359,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -43069,7 +43399,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -43108,7 +43439,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -43147,7 +43479,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -43186,7 +43519,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -43225,7 +43559,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -43264,7 +43599,8 @@ var (
 					r1 := i.globals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -43304,7 +43640,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43344,7 +43681,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43384,7 +43722,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43424,7 +43763,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43464,7 +43804,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43504,7 +43845,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43544,7 +43886,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43584,7 +43927,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43624,7 +43968,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43664,7 +44009,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43704,7 +44050,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43744,7 +44091,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43784,7 +44132,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43824,7 +44173,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43864,7 +44214,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43904,7 +44255,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43944,7 +44296,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -43984,7 +44337,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44024,7 +44378,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44064,7 +44419,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44104,7 +44460,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44144,7 +44501,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44184,7 +44542,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44224,7 +44583,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44264,7 +44624,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44304,7 +44665,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44344,7 +44706,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44384,7 +44747,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44424,7 +44788,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44464,7 +44829,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44504,7 +44870,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44544,7 +44911,8 @@ var (
 					r1 := i.stack[i3]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44583,7 +44951,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44622,7 +44991,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44661,7 +45031,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44700,7 +45071,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44739,7 +45111,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44778,7 +45151,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44817,7 +45191,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44856,7 +45231,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44895,7 +45271,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44934,7 +45311,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -44973,7 +45351,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45012,7 +45391,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F32()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45051,7 +45431,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45090,7 +45471,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45129,7 +45511,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45168,7 +45551,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45207,7 +45591,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45246,7 +45631,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.F64()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45285,7 +45671,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45324,7 +45711,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45363,7 +45751,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45402,7 +45791,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45441,7 +45831,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45480,7 +45871,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45519,7 +45911,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45558,7 +45951,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45597,7 +45991,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45636,7 +46031,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := r1.I32()
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45675,7 +46071,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45714,7 +46111,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45753,7 +46151,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45792,7 +46191,8 @@ var (
 					r1 := i.fr.upvals[i1]
 					v1 := i.borrowI64(r1)
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -45823,7 +46223,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -45854,7 +46255,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -45885,7 +46287,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -45916,7 +46319,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) < uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -45947,7 +46351,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -45978,7 +46383,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) > uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -46009,7 +46415,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -46040,7 +46447,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) <= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -46071,7 +46479,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -46102,7 +46511,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint32(v0) >= uint32(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 11
@@ -46133,7 +46543,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 > v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -46164,7 +46575,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) > uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -46195,7 +46607,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 <= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -46226,7 +46639,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) <= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -46257,7 +46671,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 >= v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -46288,7 +46703,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) >= uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -46319,7 +46735,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 == v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -46350,7 +46767,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 != v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -46381,7 +46799,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(v0 < v1)
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -46412,7 +46831,8 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v2 := types.BoxI1(uint64(v0) < uint64(v1))
-					if v2.Bool() {
+					taken := v2.Bool()
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 15
@@ -46442,8 +46862,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -46473,8 +46894,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) > uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -46504,8 +46926,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -46535,8 +46958,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) <= uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -46566,8 +46990,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -46597,8 +47022,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) >= uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -47111,8 +47537,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -47142,8 +47569,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -47173,8 +47601,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -47204,8 +47633,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -47235,8 +47665,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -47266,8 +47697,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -47780,8 +48212,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -47811,8 +48244,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -51004,8 +51438,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -51035,8 +51470,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -51066,8 +51502,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -51097,8 +51534,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -57527,7 +57965,8 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if r0.Ref() == 0 {
+					taken := r0.Ref() == 0
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58335,8 +58774,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58366,8 +58806,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58397,8 +58838,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58428,8 +58870,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58459,8 +58902,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58490,8 +58934,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58521,8 +58966,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58552,8 +58998,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58583,8 +59030,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -58614,8 +59062,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -59426,8 +59875,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -59457,8 +59907,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -59488,8 +59939,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -59519,8 +59971,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) < uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 6
@@ -61879,7 +62332,8 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if types.BoxedNull.Ref() == 0 {
+					taken := types.BoxedNull.Ref() == 0
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 5
@@ -61933,8 +62387,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -61956,8 +62411,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -61979,8 +62435,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62002,8 +62459,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62025,8 +62483,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62048,8 +62507,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62071,8 +62531,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62094,8 +62555,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62117,8 +62579,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62140,8 +62603,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -62692,7 +63156,8 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if v0 != 0 {
+					taken := v0 != 0
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 8
@@ -62828,8 +63293,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-1].I32() == 0)
+					taken := v0.Bool()
 					i.sp -= 1
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -62851,8 +63317,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].I32() == i.stack[i.sp-1].I32())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -62874,8 +63341,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].I32() != i.stack[i.sp-1].I32())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -62897,8 +63365,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].I32() < i.stack[i.sp-1].I32())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -62920,8 +63389,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(uint32(i.stack[i.sp-2].I32()) < uint32(i.stack[i.sp-1].I32()))
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -62943,8 +63413,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].I32() > i.stack[i.sp-1].I32())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -62966,8 +63437,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(uint32(i.stack[i.sp-2].I32()) > uint32(i.stack[i.sp-1].I32()))
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -62989,8 +63461,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].I32() <= i.stack[i.sp-1].I32())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63012,8 +63485,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(uint32(i.stack[i.sp-2].I32()) <= uint32(i.stack[i.sp-1].I32()))
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63035,8 +63509,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].I32() >= i.stack[i.sp-1].I32())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63058,8 +63533,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(uint32(i.stack[i.sp-2].I32()) >= uint32(i.stack[i.sp-1].I32()))
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63085,8 +63561,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63108,8 +63585,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) > uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63131,8 +63609,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63154,8 +63633,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) <= uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63177,8 +63657,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63200,8 +63681,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) >= uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63223,8 +63705,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63246,8 +63729,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63269,8 +63753,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63292,8 +63777,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-1])) < uint64(v0))
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -63826,8 +64312,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-1]) == 0)
+					taken := v0.Bool()
 					i.sp -= 1
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63849,8 +64336,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) == i.unboxI64(i.stack[i.sp-1]))
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63872,8 +64360,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) != i.unboxI64(i.stack[i.sp-1]))
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63895,8 +64384,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) < i.unboxI64(i.stack[i.sp-1]))
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63918,8 +64408,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-2])) < uint64(i.unboxI64(i.stack[i.sp-1])))
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63941,8 +64432,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) > i.unboxI64(i.stack[i.sp-1]))
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63964,8 +64456,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-2])) > uint64(i.unboxI64(i.stack[i.sp-1])))
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -63987,8 +64480,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) <= i.unboxI64(i.stack[i.sp-1]))
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64010,8 +64504,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-2])) <= uint64(i.unboxI64(i.stack[i.sp-1])))
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64033,8 +64528,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.unboxI64(i.stack[i.sp-2]) >= i.unboxI64(i.stack[i.sp-1]))
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64056,8 +64552,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(uint64(i.unboxI64(i.stack[i.sp-2])) >= uint64(i.unboxI64(i.stack[i.sp-1])))
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64083,8 +64580,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -64106,8 +64604,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -64129,8 +64628,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -64152,8 +64652,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -64175,8 +64676,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -64198,8 +64700,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 9
@@ -64539,8 +65042,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F32() == i.stack[i.sp-1].F32())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64562,8 +65066,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F32() != i.stack[i.sp-1].F32())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64585,8 +65090,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F32() < i.stack[i.sp-1].F32())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64608,8 +65114,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F32() > i.stack[i.sp-1].F32())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64631,8 +65138,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F32() <= i.stack[i.sp-1].F32())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64654,8 +65162,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F32() >= i.stack[i.sp-1].F32())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -64681,8 +65190,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -64704,8 +65214,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -64727,8 +65238,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -64750,8 +65262,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -64773,8 +65286,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -64796,8 +65310,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
+					taken := v1.Bool()
 					i.sp -= 1
-					if v1.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 13
@@ -65137,8 +65652,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F64() == i.stack[i.sp-1].F64())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -65160,8 +65676,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F64() != i.stack[i.sp-1].F64())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -65183,8 +65700,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F64() < i.stack[i.sp-1].F64())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -65206,8 +65724,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F64() > i.stack[i.sp-1].F64())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -65229,8 +65748,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F64() <= i.stack[i.sp-1].F64())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4
@@ -65252,8 +65772,9 @@ var (
 						panic(ErrStackUnderflow)
 					}
 					v0 := types.BoxI1(i.stack[i.sp-2].F64() >= i.stack[i.sp-1].F64())
+					taken := v0.Bool()
 					i.sp -= 2
-					if v0.Bool() {
+					if taken {
 						i.fr.ip += offset
 					}
 					i.fr.ip += 4

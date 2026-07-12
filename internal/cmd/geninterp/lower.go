@@ -652,32 +652,52 @@ func numericLower(state *loweringState, source fact) (lowering, error) {
 }
 
 func branchLower(state *loweringState, source fact) (lowering, error) {
-	if len(state.pending) > 0 {
-		consumer := state.pending[len(state.pending)-1]
-		if _, ok := arity(consumer.source.op); ok {
-			body, err := numericCode(consumer.source, state.pending[:len(state.pending)-1], state.total, state.label, true)
-			return lowering{source: source.step, compile: body}, err
+	if state.standalone {
+		compile := []jen.Code{
+			jen.Id("offset").Op(":=").Qual("github.com/siyul-park/minivm/instr", "ParseI16").Call(jen.Id("c").Dot("code"), jen.Id("c").Dot("ip").Op("+").Lit(1)),
 		}
-		if consumer.raw != nil {
-			condition := consumer.raw
-			if consumer.source.op == instr.I32_CONST {
-				condition = jen.Add(condition).Op("!=").Lit(0)
-			}
-			compile := append([]jen.Code(nil), consumer.compile...)
-			body := append([]jen.Code(nil), consumer.check...)
-			body = append(body, consumer.body...)
-			body = append(body,
-				jen.If(condition).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
-				jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(state.total),
-			)
-			compile = append(compile,
-				jen.Id("c").Dot("ip").Op("+=").Lit(width(consumer.source.op)),
-				jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
-			)
-			return lowering{source: source.step, compile: compile}, nil
+		body := []jen.Code{
+			jen.If(jen.Id("i").Dot("sp").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 		}
+		condition := jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Dot("I32").Call().Op("!=").Lit(0)
+		body = append(body, branchBody(condition, 1, width(source.op))...)
+		return lowering{source: source.step, handler: standaloneCode(source.step, compile, body)}, nil
 	}
-	return lowering{source: source.step, handler: brIf()}, nil
+	if len(state.pending) == 0 {
+		return lowering{}, fmt.Errorf("%s needs one pending condition", instr.TypeOf(source.op).Mnemonic)
+	}
+	consumer := state.pending[len(state.pending)-1]
+	if _, ok := arity(consumer.source.op); ok {
+		body, err := numericCode(consumer.source, state.pending[:len(state.pending)-1], state.total, state.label, true)
+		return lowering{source: source.step, compile: body}, err
+	}
+	if consumer.raw == nil {
+		return lowering{}, fmt.Errorf("%s has no branch condition", instr.TypeOf(consumer.source.op).Mnemonic)
+	}
+	condition := consumer.raw
+	if consumer.source.op == instr.I32_CONST {
+		condition = jen.Add(condition).Op("!=").Lit(0)
+	}
+	compile := append([]jen.Code(nil), consumer.compile...)
+	body := append([]jen.Code(nil), consumer.check...)
+	body = append(body, consumer.body...)
+	body = append(body, branchBody(condition, 0, state.total)...)
+	compile = append(compile,
+		jen.Id("c").Dot("ip").Op("+=").Lit(width(consumer.source.op)),
+		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
+	)
+	return lowering{source: source.step, compile: compile}, nil
+}
+
+func branchBody(condition jen.Code, consume, advance int) []jen.Code {
+	body := []jen.Code{jen.Id("taken").Op(":=").Add(condition)}
+	if consume > 0 {
+		body = append(body, jen.Id("i").Dot("sp").Op("-=").Lit(consume))
+	}
+	return append(body,
+		jen.If(jen.Id("taken")).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
+		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
+	)
 }
 
 func dispatch(tail bool, label string, total int) jen.Code {
@@ -1058,7 +1078,10 @@ func numericCode(consumer step, sources []lowering, total int, label string, bra
 	if len(sources) > arity {
 		return nil, fmt.Errorf("numeric pattern has %d sources", len(sources))
 	}
-	kind, _ := number(consumer.op)
+	kind, ok := numericKind(consumer.op)
+	if !ok {
+		return nil, fmt.Errorf("unsupported numeric kind for %s", instr.TypeOf(consumer.op).Mnemonic)
+	}
 	if traps(consumer.op) {
 		return trappedNumericCode(consumer, sources, kind)
 	}
@@ -1095,16 +1118,7 @@ func numericCode(consumer step, sources []lowering, total int, label string, bra
 	result := slot(len(sources))
 	body = append(body, jen.Id(result).Op(":=").Add(apply(consumer.op, operands...)))
 	if branch {
-		delta := len(sources) - arity
-		if delta > 0 {
-			body = append(body, jen.Id("i").Dot("sp").Op("+=").Lit(delta))
-		} else if delta < 0 {
-			body = append(body, jen.Id("i").Dot("sp").Op("-=").Lit(-delta))
-		}
-		body = append(body,
-			jen.If(jen.Id(result).Dot("Bool").Call()).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
-			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(total),
-		)
+		body = append(body, branchBody(jen.Id(result).Dot("Bool").Call(), missing, total)...)
 	} else {
 		delta := len(sources) - arity + 1
 		if delta > 0 {
@@ -1129,7 +1143,7 @@ func numericCode(consumer step, sources []lowering, total int, label string, bra
 	return compile, nil
 }
 
-func trappedNumericCode(consumer step, sources []lowering, kind string) ([]jen.Code, error) {
+func trappedNumericCode(consumer step, sources []lowering, kind instr.Kind) ([]jen.Code, error) {
 	var compile, body []jen.Code
 	for _, source := range sources {
 		compile = append(compile, source.compile...)
@@ -1491,19 +1505,18 @@ func sourceAccess(source fact, number, offset int, label string, standalone bool
 			}
 		}
 	case instr.I32_CONST, instr.I64_CONST, instr.F32_CONST, instr.F64_CONST:
-		kind, ok := kindName(source.kind)
-		if !ok {
+		if _, ok := kindName(source.kind); !ok {
 			return lowering{}, fmt.Errorf("unsupported source kind %s", source.kind)
 		}
 		if source.boxed {
 			result.boxed = jen.Id(boxed)
 			result.compile = append(result.compile,
-				jen.Id(boxed).Op(":=").Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(immediate(kind, at)),
+				jen.Id(boxed).Op(":=").Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(immediate(source.kind, at)),
 			)
 			break
 		}
 		result.raw = jen.Id(name)
-		result.compile = append(result.compile, jen.Id(name).Op(":=").Add(immediate(kind, at)))
+		result.compile = append(result.compile, jen.Id(name).Op(":=").Add(immediate(source.kind, at)))
 		switch op {
 		case instr.I32_CONST:
 			result.boxed = jen.Qual("github.com/siyul-park/minivm/types", "BoxI32").Call(jen.Id(name))
@@ -1519,9 +1532,8 @@ func sourceAccess(source fact, number, offset int, label string, standalone bool
 	}
 
 	if source.kind != instr.KindAny && !source.boxed && !source.commit && result.raw == nil {
-		kind, _ := kindName(source.kind)
 		result.raw = jen.Id(name)
-		result.body = append(result.body, jen.Id(name).Op(":=").Add(borrow(kind, result.boxed)))
+		result.body = append(result.body, jen.Id(name).Op(":=").Add(borrow(source.kind, result.boxed)))
 	}
 
 	result.push = append(result.push, result.check...)
@@ -1565,51 +1577,51 @@ func reject(label string) jen.Code {
 	return jen.Return(jen.Nil())
 }
 
-func number(op instr.Opcode) (string, bool) {
-	prefix, _, _ := strings.Cut(instr.TypeOf(op).Mnemonic, ".")
-	switch prefix {
-	case "i32":
-		return "I32", true
-	case "i64":
-		return "I64", true
-	case "f32":
-		return "F32", true
-	case "f64":
-		return "F64", true
+func numericKind(op instr.Opcode) (instr.Kind, bool) {
+	pop := instr.TypeOf(op).Pop
+	if len(pop) == 0 {
+		return instr.KindAny, false
 	}
-	return "", false
+	kind := pop[0].Repr()
+	return kind, kind.IsNumeric()
 }
 
-func borrow(kind string, value jen.Code) jen.Code {
-	if kind == "I64" {
+func borrow(kind instr.Kind, value jen.Code) jen.Code {
+	if kind.Repr() == instr.KindI64 {
 		return jen.Id("i").Dot("borrowI64").Call(value)
 	}
-	return jen.Add(value).Dot(kind).Call()
+	name, ok := kindName(kind)
+	if !ok {
+		panic(fmt.Sprintf("unsupported borrowed kind %s", kind))
+	}
+	return jen.Add(value).Dot(name).Call()
 }
 
-func peek(kind string, index jen.Code) jen.Code {
-	return borrow(kind, jen.Id("i").Dot("stack").Index(index))
-}
-
-func take(kind string, index jen.Code) jen.Code {
+func take(kind instr.Kind, index jen.Code) jen.Code {
 	value := jen.Id("i").Dot("stack").Index(index)
-	if kind == "I64" {
+	if kind.Repr() == instr.KindI64 {
 		return jen.Id("i").Dot("unboxI64").Call(value)
 	}
-	return value.Dot(kind).Call()
+	name, ok := kindName(kind)
+	if !ok {
+		panic(fmt.Sprintf("unsupported consumed kind %s", kind))
+	}
+	return value.Dot(name).Call()
 }
 
-func immediate(kind string, at jen.Code) jen.Code {
+func immediate(kind instr.Kind, at jen.Code) jen.Code {
 	operand := jen.Qual("github.com/siyul-park/minivm/instr", "Instruction").Call(jen.Id("c").Dot("code").Index(jen.Add(at).Op(":"))).Dot("Operand").Call(jen.Lit(0))
-	switch kind {
-	case "I32":
+	switch kind.Repr() {
+	case instr.KindI32:
 		return jen.Int32().Call(operand)
-	case "I64":
+	case instr.KindI64:
 		return jen.Int64().Call(operand)
-	case "F32":
+	case instr.KindF32:
 		return jen.Qual("github.com/siyul-park/minivm/types", "Box").Call(jen.Uint64().Call(jen.Uint32().Call(operand)), jen.Qual("github.com/siyul-park/minivm/types", "KindF32")).Dot("F32").Call()
-	default:
+	case instr.KindF64:
 		return jen.Qual("github.com/siyul-park/minivm/types", "Boxed").Call(operand).Dot("F64").Call()
+	default:
+		panic(fmt.Sprintf("unsupported immediate kind %s", kind))
 	}
 }
 
@@ -2110,16 +2122,6 @@ func br() jen.Code {
 		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.List(jen.Id("f")).Op(":=").List(jen.Id("i").Dot("fr")),
 			jen.List(jen.Id("f").Dot("ip")).Op("+=").List(jen.Id("offset").Op("+").Add(jen.Lit(3))))))
-}
-
-func brIf() jen.Code {
-	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("offset")).Op(":=").List(jen.Id("instr").Dot("ParseI16").Call(jen.Id("c").Dot("code"), jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1)))),
-		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
-		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
-			jen.Id("i").Dot("sp").Op("--"),
-			jen.List(jen.Id("cond")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Dot("I32").Call()),
-			jen.If(jen.Id("cond").Op("!=").Add(jen.Lit(0))).Block(jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Id("offset"))),
-			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))
 }
 
 func brTable() jen.Code {
