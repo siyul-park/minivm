@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/asm/arm64"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
@@ -310,7 +311,7 @@ func TestCompiler_Compile(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 
-		plans, err := (staticPlanner{}).plan(&compileInput{address: 1, function: fn})
+		plans, err := staticPlan(&compileInput{address: 1, function: fn})
 		require.NoError(t, err)
 		require.NotEmpty(t, plans)
 	})
@@ -394,8 +395,29 @@ func TestCompiler_Compile(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 
-		plans, err := (staticPlanner{}).plan(&compileInput{address: 1, function: fn})
+		plans, err := staticPlan(&compileInput{address: 1, function: fn})
 		require.NoError(t, err)
 		require.NotEmpty(t, plans)
 	})
+}
+
+func TestArm64Lowerer_QueuesEachState(t *testing.T) {
+	target := edge{anchor: anchor{addr: 1, ip: 2}, block: 0}
+	ctx := &lowering{
+		assembler: asm.New(arm64.New()),
+		blocks:    []block{{anchor: target.anchor}},
+		labels:    map[int]asm.Label{},
+	}
+	lowerer := arm64Lowerer{}
+
+	ctx.values = []value{{kind: types.KindI32, raw: true, known: true, imm: 1}}
+	first, ok := lowerer.label(ctx, target, nil)
+	require.True(t, ok)
+
+	ctx.values = []value{{kind: types.KindI32, raw: true, known: true, imm: 2}}
+	second, ok := lowerer.label(ctx, target, nil)
+	require.True(t, ok)
+
+	require.NotEqual(t, first, second)
+	require.Len(t, ctx.work, 2)
 }

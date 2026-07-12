@@ -7,13 +7,7 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// lowerer emits a backend-neutral plan for one target architecture.
-type lowerer interface {
-	lower(ctx *lowering, plan plan) bool
-}
-
 type compiler struct {
-	lowerer     lowerer
 	arch        asm.Arch
 	buffer      *asm.Buffer
 	scratchRegs []asm.PReg
@@ -25,23 +19,21 @@ const continuationLimit = 256
 
 type module struct {
 	entries map[anchor]native
-	emits   int
 	bytes   int
 }
 
 type native struct {
 	callable asm.Callable
-	entry    entryKind
+	kind     entryKind
 }
 
 // lowering carries symbolic values, inlined activations, deferred blocks, and
 // cold exits while one plan is emitted. It contains no planner source objects.
 type lowering struct {
 	assembler *asm.Assembler
-	root      block
-	blocks    map[anchor]block
-	labels    map[anchor]asm.Label
-	funcs     map[int]*types.Function
+	blocks    []block
+	labels    map[int]asm.Label
+	module    *types.Function
 	constants []types.Boxed
 	globals   []types.Kind
 	heap      []types.Value
@@ -55,7 +47,6 @@ type lowering struct {
 	work      []work
 	scheduled int
 	exits     []sideExit
-	queued    map[anchor]asm.Label
 	saved     []value
 
 	addr    int
@@ -83,8 +74,7 @@ type value struct {
 // registers; loaded marks which have been pulled from the VM stack and dirty
 // marks which must be written back before native code gives up control.
 type activation struct {
-	fn     *types.Function
-	code   []byte
+	end    int
 	kinds  []types.Kind
 	upvals []types.Kind
 	locals []value
@@ -106,11 +96,10 @@ type activation struct {
 // after the deferred block stitches back into the caller frame.
 type work struct {
 	label  asm.Label
-	block  block
-	tail   []block
+	block  int
+	tail   []int
 	values []value
 	frames []activation
-	hits   int64
 }
 
 type sideExit struct {
@@ -185,8 +174,7 @@ func newActivation(addr int, fn *types.Function, base, opBase int) activation {
 		returns = len(fn.Typ.Returns)
 	}
 	return activation{
-		fn:      fn,
-		code:    fn.Code,
+		end:     len(fn.Code),
 		kinds:   kinds,
 		upvals:  upvals,
 		locals:  make([]value, len(kinds)),
@@ -207,10 +195,8 @@ func (c *compiler) newLowering(input *compileInput, arch asm.Arch) *lowering {
 	asmb := asm.New(arch)
 	ctx := &lowering{
 		assembler: asmb,
-		blocks:    map[anchor]block{},
-		labels:    map[anchor]asm.Label{},
-		funcs:     input.functions,
-		queued:    map[anchor]asm.Label{},
+		labels:    map[int]asm.Label{},
+		module:    input.module,
 		constants: input.constants,
 		globals:   input.globals,
 		heap:      input.heap,
@@ -243,20 +229,19 @@ func (c *compiler) publish(mod *module, a anchor, ctx *lowering, arch asm.Arch, 
 	}
 	n.callable = linked[0].Callable
 	mod.entries[a] = n
-	mod.emits++
 	mod.bytes += len(code.Bytes)
 	return true, nil
 }
 
-// Compile selects and lowers the first planner family that emits native code.
+// Compile selects and lowers the first frontend that emits native code.
 func (c *compiler) Compile(i *Interpreter, addr int) (*module, error) {
 	input, ok := newCompileInput(i, addr)
 	if !ok {
 		return nil, nil
 	}
-	planners := [...]planner{staticPlanner{}, tracePlanner{}}
-	for _, planner := range planners {
-		plans, err := planner.plan(input)
+	frontends := [...]func(*compileInput) ([]plan, error){staticPlan, tracePlan}
+	for _, frontend := range frontends {
+		plans, err := frontend(input)
 
 		if err != nil {
 			return nil, err
@@ -274,7 +259,7 @@ func (c *compiler) Compile(i *Interpreter, addr int) (*module, error) {
 				continue
 			}
 		}
-		if mod.emits > 0 {
+		if len(mod.entries) > 0 {
 			return mod, nil
 		}
 	}
@@ -286,21 +271,21 @@ func (c *compiler) compile(input *compileInput, plan plan, mod *module) (bool, e
 		return false, nil
 	}
 	arch := c.arch
-	if plan.spill == spillForbidden {
+	if plan.noSpill {
 		arch = noSpillArch{c.arch}
 	}
 	ctx := c.newLowering(input, arch)
-	if !c.lowerer.lower(ctx, plan) {
+	if !lower(ctx, plan) {
 		return false, nil
 	}
-	return c.publish(mod, plan.entry.anchor, ctx, c.arch, native{entry: plan.entry.kind})
+	return c.publish(mod, plan.anchor, ctx, c.arch, native{kind: plan.kind})
 }
 
 // noSpillArch wraps an asm.Arch to force Build to reject spilling instead of
 // inserting a spill frame. A nil Frame already disables spilling per asm's
 // own contract (see asm.Frame's doc comment), so this policy needs no
 // dedicated asm-level API — it is purely an interp-side JIT policy decision
-// (see planSpill), not a generic assembler concern.
+// (see noSpill), not a generic assembler concern.
 type noSpillArch struct{ asm.Arch }
 
 func (noSpillArch) Frame() asm.Frame { return nil }

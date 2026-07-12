@@ -6,6 +6,7 @@ import (
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -13,6 +14,7 @@ import (
 // compiler consumes. One Tracer is shared across a pool so a trace
 // recorded by one member compiles once and serves all.
 type Tracer struct {
+	prog  *program.Program
 	exact [][]func(*Interpreter)
 	loops map[int][]int
 	trees map[anchor]*tree
@@ -69,6 +71,15 @@ func NewTracer() *Tracer {
 		loops: map[int][]int{},
 		trees: map[anchor]*tree{},
 	}
+}
+
+func (r *Tracer) bind(prog *program.Program) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.prog == nil {
+		r.prog = prog
+	}
+	return r.prog == prog
 }
 
 func (r *Tracer) exit(i *Interpreter, root anchor, target anchor) (int64, error) {

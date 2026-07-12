@@ -33,15 +33,16 @@ type Interpreter struct {
 	tried    map[int]bool
 	journal  []uint64
 
-	types     []types.Type
-	constants []types.Boxed
-	globals   []types.Boxed
-	instrs    [][]byte
-	code      [][]func(*Interpreter)
-	coros     []bool
-	handlers  [][]instr.Handler
-	module    *types.Function
-	dynamic   map[int]bool
+	types       []types.Type
+	constants   []types.Boxed
+	globals     []types.Boxed
+	globalKinds []types.Kind
+	instrs      [][]byte
+	code        [][]func(*Interpreter)
+	coros       []bool
+	handlers    [][]instr.Handler
+	module      *types.Function
+	dynamic     map[int]bool
 
 	frames   []frame
 	fr       *frame
@@ -125,6 +126,8 @@ func WithCache(c *Cache) func(*option) {
 	return func(o *option) { o.cache = c }
 }
 
+// WithTracer shares tracing state with interpreters for the same program.
+// A tracer already bound to another program is isolated automatically.
 func WithTracer(t *Tracer) func(*option) {
 	return func(o *option) { o.tracer = t }
 }
@@ -199,8 +202,9 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	}
 
 	tracer := opt.tracer
-	if tracer == nil {
+	if tracer == nil || !tracer.bind(prog) {
 		tracer = NewTracer()
+		tracer.bind(prog)
 	}
 	samples := opt.samples
 	if samples == nil {
@@ -312,8 +316,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	// bind reads i.globals kinds to thread each constant's GLOBAL_* accesses, so
 	// an unseeded slot would misclassify a ref global as numeric and skip its
 	// retain/release, corrupting the refcount.
-	globals := types.Kinds(prog.Globals)
-	for j, kind := range globals {
+	i.globalKinds = types.Kinds(prog.Globals)
+	for j, kind := range i.globalKinds {
 		i.globals[j] = i.zero(kind)
 	}
 
@@ -322,7 +326,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		constants: i.constants,
 		heap:      i.heap,
 		coros:     i.coros,
-		globals:   globals,
+		globals:   i.globalKinds,
 		exact:     opt.tick == 1,
 	}
 	i.code[0] = c.Compile(prog.Code, i.module.LocalKinds(), types.Kinds(i.module.Captures))
@@ -816,10 +820,10 @@ func (i *Interpreter) shared(addr int) error {
 		i.cache.fail(addr)
 		return nil
 	}
-	i.samples.AddMetric("vm_jit_emits_total", float64(mod.emits))
+	i.samples.AddMetric("vm_jit_emits_total", float64(len(mod.entries)))
 	i.samples.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
 	var buf *asm.Buffer
-	if mod.emits > 0 {
+	if len(mod.entries) > 0 {
 		buf = compiler.buffer
 	} else {
 		_ = compiler.Close()
@@ -833,7 +837,7 @@ func (i *Interpreter) shared(addr int) error {
 // shadowed threaded handler for guard fallback.
 func (i *Interpreter) install(mod *module, account bool) {
 	if account {
-		i.samples.AddMetric("vm_jit_emits_total", float64(mod.emits))
+		i.samples.AddMetric("vm_jit_emits_total", float64(len(mod.entries)))
 		i.samples.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
 	}
 	for a, entry := range mod.entries {
@@ -852,12 +856,12 @@ func (i *Interpreter) install(mod *module, account bool) {
 				i.stubs[a.addr] = i.exits[a]
 			}
 		}
-		if entry.entry == entryFunction {
+		if entry.kind == entryFunction {
 			atomic.StorePointer(&i.natives[a.addr], entry.callable.Addr())
 		}
-		if entry.entry == entryLoop {
+		if entry.kind == entryLoop {
 			i.code[a.addr][a.ip] = i.loop(entry.callable)
-		} else if entry.entry == entryModule {
+		} else if entry.kind == entryModule {
 			i.code[a.addr][a.ip] = i.start(a, entry.callable)
 		} else {
 			i.code[a.addr][a.ip] = i.call(a, entry.callable)
@@ -1593,19 +1597,12 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if addr >= len(i.coros) {
 		i.coros = append(i.coros, make([]bool, n-len(i.coros))...)
 	}
-	// The declared Program.Globals are out of scope here; New pre-seeds every
-	// slot to the zero Boxed of its declared kind, so the runtime values carry
-	// the declared kinds at all times.
-	globals := make([]types.Kind, len(i.globals))
-	for j, g := range i.globals {
-		globals[j] = g.Kind()
-	}
 	c := &threader{
 		types:     i.types,
 		constants: i.constants,
 		heap:      i.heap,
 		coros:     i.coros,
-		globals:   globals,
+		globals:   i.globalKinds,
 		exact:     i.tick == 1,
 	}
 	if dynamic {

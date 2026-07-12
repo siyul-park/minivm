@@ -4,7 +4,7 @@ Contracts for the ARM64 JIT in `interp/` and its interaction with `asm/`.
 
 ## When to Read
 
-Use this document before changing `interp/jit.go`, `interp/jit_arm64.go`, `interp/trace.go`, `asm` callable ABI code, trace recording, lowering, deoptimization, loop safepoints, or JIT installation.
+Use this document before changing `interp/jit*.go`, `interp/trace.go`, `asm` callable ABI code, trace recording, lowering, deoptimization, loop safepoints, or JIT installation.
 
 For user-facing performance results, see `docs/benchmarks.md`. For sampling and hotness thresholds, see `docs/profile.md`.
 
@@ -15,8 +15,11 @@ For user-facing performance results, see `docs/benchmarks.md`. For sampling and 
 | opcode semantics | `docs/instruction-set.md`, `instr/type.go` |
 | threaded behavior | `interp/threaded.go` |
 | trace recording | `interp/trace.go` |
-| architecture-neutral compiler | `interp/jit.go` |
-| ARM64 lowering | `interp/jit_arm64.go` |
+| architecture-neutral compiler | `interp/jit.go`, `interp/jit_plan.go` |
+| ARM64 orchestration and control flow | `interp/jit_arm64.go` |
+| ARM64 numeric lowering | `interp/jit_num_arm64.go` |
+| ARM64 calls and frames | `interp/jit_call_arm64.go` |
+| ARM64 heap lowering | `interp/jit_heap_arm64.go` |
 | callable ABI | `asm/` |
 | value layout | `docs/value-representation.md` |
 | heap ownership | `docs/memory-model.md` |
@@ -24,7 +27,7 @@ For user-facing performance results, see `docs/benchmarks.md`. For sampling and 
 
 ## Summary
 
-minivm always compiles bytecode to threaded closures first. The JIT is a lazy ARM64 trace backend layered on top of that portable threaded runtime.
+minivm always compiles bytecode to threaded closures first. The JIT is a lazy ARM64 plan backend layered on top of that portable threaded runtime.
 
 ```text
 program.Program
@@ -87,17 +90,17 @@ The published native code is shared. The dispatch table remains interpreter-loca
 
 `compiler` is private to `interp` and lives in `jit.go`. The interpreter calls only `compiler.Compile(i, addr)` and receives an opaque `module`; it does not select or inspect a compilation strategy.
 
-The compiler builds one read-only `compileInput`, then runs an ordered planner chain:
+The compiler builds one read-only `compileInput`, then runs two ordered frontends:
 
-1. `staticPlanner` constructs a complete plan from verified bytecode and dataflow when no function entry is installed.
-2. `tracePlanner` constructs plans from immutable runtime trace snapshots.
-3. If neither planner produces a lowerable plan, threaded execution remains installed.
+1. `staticPlan` constructs a complete plan from verified bytecode and dataflow when no function entry is installed.
+2. `tracePlan` constructs plans from immutable runtime trace snapshots.
+3. If neither frontend produces a lowerable plan, threaded execution remains installed.
 
-Both planners return the same private `plan` model: ABI-classified entry, blocks, entry states, ordinary steps, terminators, and spill policy. Build, link, clean rejection, accounting, and publication are centralized in the compiler.
+Both frontends return the same private `plan` model: ABI kind, a root block ID, flat blocks, entry states, ordinary steps, explicit edges, and spill policy. Every internal edge carries a block ID; unresolved edges retain only their threaded fallback anchor. Build, link, validation, accounting, and publication are centralized in the compiler.
 
-## Static Planner
+## Static Frontend
 
-The static planner analyzes basic blocks with one forward fixpoint that tracks stack kind, constant-ref provenance, and direct-call targets. It emits ordinary plan blocks with explicit entry state, decoded operands, and terminators. Unsupported instructions become exact-IP fallback boundaries when the surrounding function remains structurally valid.
+The static frontend analyzes basic blocks with one forward fixpoint that tracks stack kind, constant-ref provenance, and direct-call targets. It emits plan blocks with explicit entry state, decoded operands, and block-ID edges. Unsupported instructions become exact-IP fallback boundaries when the surrounding function remains structurally valid.
 
 Top-level modules containing `CALL` or `RETURN_CALL` are rejected because module entry does not implement the framed native-call ABI. Primitive typed-array constants remain ownership-neutral markers until `ARRAY_GET`; native code reloads the current heap cell, guards its shape and index, and retains the marker only on a cold fallback.
 
@@ -124,9 +127,9 @@ Each recorded step stores the data needed for speculative lowering:
 
 The tracer aborts before host calls, allocation, and mutating heap operations. These remain interpreter-owned.
 
-Every recorded `trace` has one outcome: `loop`, `returned`, `completed`, `partial`, or `aborted`. The trace planner maps usable outcomes to plan terminators and excludes aborted fragments from learned continuations. When an observed block runs out of steps, lowering decides completion from that block's terminator, never from the root trace. This prevents an unsupported side fragment from being mistaken for normal completion.
+Every recorded `trace` has one outcome: `loop`, `returned`, `completed`, `partial`, or `aborted`. The trace frontend maps usable outcomes to plan terminators and excludes aborted fragments from learned continuations. When an observed block runs out of steps, lowering decides completion from that block's terminator, never from the root trace. This prevents an unsupported side fragment from being mistaken for normal completion.
 
-Both `observe` (the sampling safepoint) and `compile` (the one-shot JIT trigger) need an entry trace captured before compiling. They both route through `Tracer.ensureEntry`, the single owner of "capture the entry trace for this addr unless one is already recorded" — this avoids the entry being captured twice (once from each trigger, when both land close together), which would otherwise re-walk the function and inflate `tree.attempts`/blacklist counters with duplicate work.
+`Tracer.capture` serializes recording and returns an already-published root when one exists, so sampling and compilation cannot record the same entry concurrently. A tracer is bound to one `program.Program`; reusing it with a different program creates an isolated tracer instead of sharing bytecode, tree, or loop caches across programs.
 
 `Tracer.headers` (the static loop-header scan) uses `instr.Targets(code, ip)` rather than switching on `BR`/`BR_IF` directly, so a loop formed only through a backward `BR_TABLE` case target is recognized as a header too.
 
@@ -134,21 +137,17 @@ Both `observe` (the sampling safepoint) and `compile` (the one-shot JIT trigger)
 
 A pool shares one `Tracer`. Tree mutations are locked. `rootAt` returns a stable snapshot containing immutable trace pointers plus copied branch and hit containers.
 
-`tracePlanner` converts that snapshot into ordinary plan blocks. It excludes aborted fragments and standalone loop roots from learned continuations, sorts continuations deterministically, and derives spill policy from the final plan rather than exposing the trace tree to lowering.
+`tracePlan` converts that snapshot into flat plan blocks. It excludes aborted fragments and standalone loop roots from learned continuations, sorts continuation roots deterministically, connects internal paths by block ID, and derives spill policy from the final plan rather than exposing the trace tree to lowering.
 
-## Lowerer
+## Backend
 
-`jit.go` is architecture-neutral. The architecture hook is intentionally one method:
+`jit.go` is architecture-neutral. Build-tagged `lower(*lowering, plan)` implementations consume the normalized plan directly; unsupported architectures never construct a compiler.
 
-```go
-type lowerer interface {
-    lower(*lowering, plan) bool
-}
-```
+ARM64 lowering is split by role: `jit_arm64.go` owns orchestration, the single opcode dispatcher, state, and control flow; `jit_num_arm64.go` owns numeric operations; `jit_call_arm64.go` owns calls, frames, and deoptimization; `jit_heap_arm64.go` owns heap and reference operations.
 
-`jit_arm64.go` owns ARM64 lowering. Every plan block passes through one `emitBlock` path, every operation through one step dispatcher, and every edge through one terminator path. The backend reads decoded plan operands and targets only; it does not inspect bytecode or planner identity. A block with entry state reloads VM homes, while a profiled successor may continue with the current symbolic state.
+Every plan block passes through one `emitBlock` path and every edge carries an explicit block ID or an unresolved threaded-fallback anchor. Bytecode locations describe source positions only; block IDs preserve distinct inlined contexts even when they share the same `(function, IP)`. A state-backed block reloads VM homes, while a profiled successor may continue with the current symbolic state.
 
-Learned continuations need the symbolic state that exists only at their branch point. Their caller suffixes are normalized into nested plan blocks before lowering. The backend keeps a planner-neutral deferred worklist containing blocks, labels, symbolic snapshots, and hit ordering; it contains no trace tree, CFG node, raw branch step, or planner-specific type.
+Caller continuations are ordinary blocks in the same flat block pool. A cold edge carries the continuation block IDs that must run after an inlined callee returns. Deferred edges always receive an independent label and symbolic snapshot; the backend does not merge states by bytecode anchor.
 
 ## Trace ABI
 
@@ -195,7 +194,7 @@ Register allocation (`asm/rewriter.go`) is a single linear-scan pass: it spills 
 Linear spill state is unsafe across a loop back-edge, and terminal `ARRAY_SET` or `STRUCT_SET` blocks can combine paths before their exit. Two layers enforce safety:
 
 - `asm/rewriter.go` rejects spilling for code containing an intra-code backward branch.
-- `planSpill` scans every block in the completed plan, including learned continuations, and forbids spilling when a terminal mutation is present.
+- `noSpill` scans every block in the completed plan, including learned continuations, and forbids spilling when a terminal mutation is present.
 
 When a plan forbids spilling, the compiler wraps the target architecture in `noSpillArch`. Its `Frame()` returns `nil` according to the assembler contract, so register exhaustion rejects native compilation cleanly and threaded dispatch remains installed.
 
@@ -269,11 +268,11 @@ Recorded forward branches become guarded exits or learned branch continuations.
 
 When a side exit becomes hot, the tracer records that target. A later compile may fold it into the same native callable as a pending block. Loop roots are never folded as ordinary continuations: they deoptimize at the header and use their standalone loop entry, which preserves back-edge and safepoint semantics.
 
-Pending blocks reload from VM stack homes, compile hotter exits first, and stop at a bounded pending cap.
+Pending blocks reload from VM stack homes, run through a FIFO worklist, and stop at a bounded pending cap. The trace frontend orders learned roots once; the backend does not repeatedly sort pending work.
 
-A branch pending block may carry the caller tail that remains after an inlined callee returns. The side trace body lowers first; on callee `RETURN`, lowering stitches the result into the caller frame and jumps to a shared pending suffix for that tail. The suffix reloads from VM stack homes before continuing, so different side traces can reuse the caller remainder without sharing registers.
+A cold branch edge may carry caller-continuation block IDs. The side trace body lowers first; on callee `RETURN`, lowering stitches the result into the caller frame and follows those IDs. The continuation reloads from VM stack homes before continuing.
 
-Labels are reused for learned `(function, IP)` targets with no caller tail, and for shared caller-tail suffixes. Caller-tailed side traces keep distinct pending labels because the same bytecode target can need different caller remainders.
+Each deferred profiled edge gets its own label and symbolic snapshot. Static state-backed blocks share labels only through explicit block IDs, never through bytecode-anchor equality.
 
 Solo interpreters recompile a side exit when its hit count first reaches the hot-exit threshold. Pooled interpreters also rearm on later threshold multiples so a peer can recover a missed shared-cache publication.
 
@@ -283,7 +282,7 @@ Branch lowering may skip hot-path flushes only when the branch state is clean. I
 
 ### Branch range validation
 
-ARM64 conditional/compare/test branches (`B.cond`, `CBZ`/`CBNZ`, `TBZ`/`TBNZ`) encode a fixed-width signed PC-relative immediate — imm19 (±1MB) for `B.cond`/`CBZ`/`CBNZ`, imm14 (±32KB) for `TBZ`/`TBNZ`, imm26 (±128MB) for `B`/`BL`. `asm/arm64.Encoder.Encode` validates every such offset is 4-byte aligned and fits its field, returning `asm.ErrBranchOutOfRange` instead of silently masking an out-of-range offset into a wrong target. `interp/jit.go` `emitRoot` treats `ErrBranchOutOfRange` the same as `asm.ErrNoRegistersAvailable`: it aborts native lowering for that trace and falls back to threaded dispatch rather than emit a corrupt callable. `asm.Link` can also return `ErrBranchOutOfRange` (from `asm/link.go`'s `patchExternalRelocs`, which re-encodes relocations whose target lands outside the branch's field once resolved against another `Code`'s address) — `emitRoot` checks `errors.Is(err, asm.ErrBranchOutOfRange)` at the `Link` call site too and routes it through the same clean fallback, rather than letting it propagate as a hard error the way an unrelated `Link` failure does.
+ARM64 conditional/compare/test branches (`B.cond`, `CBZ`/`CBNZ`, `TBZ`/`TBNZ`) encode a fixed-width signed PC-relative immediate — imm19 (±1MB) for `B.cond`/`CBZ`/`CBNZ`, imm14 (±32KB) for `TBZ`/`TBNZ`, imm26 (±128MB) for `B`/`BL`. `asm/arm64.Encoder.Encode` validates every such offset is 4-byte aligned and fits its field, returning `asm.ErrBranchOutOfRange` instead of silently masking an out-of-range offset into a wrong target. `interp/jit.go` `publish` treats `ErrBranchOutOfRange` the same as `asm.ErrNoRegistersAvailable`: it aborts native lowering for that trace and falls back to threaded dispatch rather than emit a corrupt callable. `asm.Link` can also return `ErrBranchOutOfRange` (from `asm/link.go`'s `patchExternalRelocs`, which re-encodes relocations whose target lands outside the branch's field once resolved against another `Code`'s address) — `publish` checks `errors.Is(err, asm.ErrBranchOutOfRange)` at the `Link` call site too and routes it through the same clean fallback, rather than letting it propagate as a hard error the way an unrelated `Link` failure does.
 
 Before that fallback triggers, `asm.Assembler.encode` runs a branch relaxation fixpoint (`asm.Relaxer`, implemented by `asm/arm64.arch.Relax`) between the draft and final encoding passes. Each pass drafts the current instruction list once, collects every intra-Code `B.cond`/`CBZ`/`CBNZ` label branch whose imm19 displacement does not fit, and rewrites all of them together into an inverted-condition branch that skips a following unconditional `B` (imm26, ±128MB) to the original target; it then re-drafts and repeats until a pass finds nothing left to relax. Both replacement instructions are constructed to already be in range, so a given branch relaxes at most once and the loop always terminates, and batching every out-of-range branch within a pass keeps the number of drafts proportional to the number of passes rather than the number of branches; if the unconditional `B` itself would not reach the target (>±128MB), `Relax` returns `false` and `ErrBranchOutOfRange`/the JIT fallback still applies. `TBZ`/`TBNZ` never carry a `LabelOperand` in this codebase (their offset is always a caller-computed immediate — see `asm/arm64/instr.go`), so they never reach `Relax` and the imm14 (±32KB) window has no relaxation path; architectures without a `Relaxer` (amd64) are unaffected — `encode` no-ops the pass.
 
@@ -426,7 +425,7 @@ When changing JIT internals:
 - deoptimize before behavior the JIT cannot fully own
 - prefer one simple terminal fallback over duplicated semantics
 - keep architecture-neutral code in `jit.go`
-- keep ARM64 details in `jit_arm64.go`
+- keep ARM64 details in the owning `jit_*_arm64.go` role file
 - keep journal layout explicit and stable
 - preserve interpreter/JIT stack and ref ownership symmetry
 - use short, standard names such as `trace`, `root`, `entry`, `loop`, `module`, `lowering`, `guard`, `exit`, `frame`, and `value`
