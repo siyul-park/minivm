@@ -68,16 +68,16 @@ Verifier changes should reject only statically malformed bytecode. Runtime traps
 
 ## Step 4 — Implement Threaded Semantics
 
-Add the opcode Jennifer lowering in `internal/cmd/geninterp/lower.go`, then run `make generate`. Add a pattern in `internal/cmd/geninterp/pattern.go` only when the opcode participates in threaded fusion. Do not edit `interp/threaded.go` directly.
+Add one opcode emitter in `internal/cmd/geninterp/lower.go`, map it once in `lowerers`, then run `make generate`. The emitter receives a `state` and must define the opcode semantics once for standalone materialization and fused composition. Add a pattern in `internal/cmd/geninterp/pattern.go` only when the opcode participates in threaded fusion. Patterns select sequences and compile-time guards; they never define opcode behavior. Do not edit `interp/threaded.go` directly.
 
 Checklist:
 
-- map the opcode exactly once in `lowerings`
-- advance `c.ip` by the exact instruction width during compilation
+- map the opcode exactly once in `lowerers` and avoid standalone/fusion semantic copies
+- advance `c.ip` by the first absorbed instruction width during fusion compilation
 - advance `i.fr.ip` by the exact instruction width during execution
 - check stack underflow and overflow where applicable
-- retain refs when copying or exposing them
-- release refs when consuming or overwriting them
+- retain borrowed storage refs only when materializing them on the VM stack
+- release owned resident refs when consuming or overwriting them
 - panic with the existing runtime sentinel errors and let `interp.Run` recover
 
 Keep the generated handler explicit. Generator-only lowering methods may remove real generation duplication, but generated runtime helpers are not allowed; use existing `Interpreter` methods or emit the opcode logic directly.
@@ -133,6 +133,7 @@ Avoid repeating the same explanation in multiple documents. Link to the canonica
 ```bash
 make test
 make lint
+make check-generated
 ```
 
 If JIT support was added, also run the relevant ARM64 tests or benchmarks on ARM64 hardware.

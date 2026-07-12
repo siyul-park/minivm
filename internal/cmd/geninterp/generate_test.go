@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dave/jennifer/jen"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -27,6 +28,78 @@ func TestGenerate(t *testing.T) {
 			paths[index] = output.path
 		}
 		require.Equal(t, []string{"interp/threaded.go"}, paths)
+
+		file, err := parser.ParseFile(token.NewFileSet(), first[0].path, first[0].data, 0)
+		require.NoError(t, err)
+		var declarations []string
+		for _, declaration := range file.Decls {
+			switch declaration := declaration.(type) {
+			case *ast.GenDecl:
+				for _, specification := range declaration.Specs {
+					switch specification := specification.(type) {
+					case *ast.TypeSpec:
+						declarations = append(declarations, specification.Name.Name)
+					case *ast.ValueSpec:
+						for _, name := range specification.Names {
+							declarations = append(declarations, name.Name)
+						}
+					}
+				}
+			case *ast.FuncDecl:
+				declarations = append(declarations, declaration.Name.Name)
+			}
+		}
+		require.Equal(t, []string{"threader", "threaded", "fusions", "invalid", "init", "Compile"}, declarations)
+	})
+
+	t.Run("preserves standalone i64 consumption", func(t *testing.T) {
+		outputs, err := generate()
+		require.NoError(t, err)
+		file, err := parser.ParseFile(token.NewFileSet(), outputs[0].path, outputs[0].data, 0)
+		require.NoError(t, err)
+
+		var handler ast.Expr
+		ast.Inspect(file, func(node ast.Node) bool {
+			specification, ok := node.(*ast.ValueSpec)
+			if !ok || len(specification.Names) != 1 || specification.Names[0].Name != "threaded" || len(specification.Values) != 1 {
+				return true
+			}
+			literal, ok := specification.Values[0].(*ast.CompositeLit)
+			if !ok {
+				return false
+			}
+			for _, element := range literal.Elts {
+				entry, ok := element.(*ast.KeyValueExpr)
+				if !ok {
+					continue
+				}
+				opcode, ok := entry.Key.(*ast.SelectorExpr)
+				if ok && opcode.Sel.Name == "I64_ADD" {
+					handler = entry.Value
+					return false
+				}
+			}
+			return false
+		})
+		require.NotNil(t, handler)
+
+		unbox := 0
+		borrow := 0
+		ast.Inspect(handler, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch selector.Sel.Name {
+			case "unboxI64":
+				unbox++
+			case "borrowI64":
+				borrow++
+			}
+			return true
+		})
+		require.Equal(t, 2, unbox)
+		require.Zero(t, borrow)
 	})
 
 	t.Run("checks generated files", func(t *testing.T) {
@@ -73,18 +146,38 @@ func TestGenerate(t *testing.T) {
 		require.Equal(t, catalog(), catalog())
 	})
 
-	t.Run("renders fusion tables", func(t *testing.T) {
+	t.Run("renders compose tables", func(t *testing.T) {
 		patterns := []pattern{
 			seq(op(instr.REF_NULL), op(instr.DROP)),
 			seq(op(instr.DUP), op(instr.DROP)),
 		}
-		data, err := source(patterns)
+		data, err := render(patterns)
 		require.NoError(t, err)
 		require.Contains(t, string(data), "goto l0")
 		require.Contains(t, string(data), "l0:")
-		require.NotContains(t, string(data), "func (c *threader) fusion")
+		require.NotContains(t, string(data), "func (c *threader) compose")
 		require.NotContains(t, string(data), "candidate0")
 
+	})
+
+	t.Run("advances fusion by the first opcode width", func(t *testing.T) {
+		pattern := seq(op(instr.LOCAL_GET), op(instr.REF_IS_NULL), op(instr.BR_IF))
+		body, err := compose(pattern, pattern.width(), "")
+		require.NoError(t, err)
+		file := jen.NewFile("review")
+		file.Func().Id("render").Params().Block(body...)
+		require.Contains(t, file.GoString(), "c.ip += 2")
+	})
+
+	t.Run("uses ref representation for drop fusion", func(t *testing.T) {
+		pattern := seq(op(instr.LOCAL_GET), op(instr.DROP))
+		body, err := compose(pattern, pattern.width(), "")
+		require.NoError(t, err)
+		file := jen.NewFile("review")
+		file.Func().Id("render").Params().Block(body...)
+		source := file.GoString()
+		require.Contains(t, source, "types.KindRef")
+		require.NotContains(t, source, "types.KindI32")
 	})
 
 	t.Run("accepts the catalog", func(t *testing.T) {
@@ -131,14 +224,14 @@ func TestGenerate(t *testing.T) {
 		require.ErrorContains(t, validate([]pattern{seq(op(instr.Opcode(0xff)), op(instr.DROP))}), "unsupported opcode")
 	})
 
-	t.Run("rejects missing lowerings", func(t *testing.T) {
+	t.Run("rejects missing lowerers", func(t *testing.T) {
 		require.ErrorContains(t, validate([]pattern{seq(op(instr.LOCAL_GET), op(instr.CALL))}), "unsupported fusion")
 	})
 
-	t.Run("rejects unsupported trailing operations", func(t *testing.T) {
+	t.Run("rejects unresolved trailing operations", func(t *testing.T) {
 		require.ErrorContains(t, validate([]pattern{
 			seq(op(instr.REF_NULL), op(instr.DROP), op(instr.REF_IS_NULL)),
-		}), "unsupported trailing operations")
+		}), "unsupported fusion")
 	})
 
 	t.Run("rejects stack kind mismatches", func(t *testing.T) {
@@ -153,13 +246,21 @@ func TestGenerate(t *testing.T) {
 		}))
 	})
 
+	t.Run("rejects stack mismatches after dynamic effects", func(t *testing.T) {
+		require.ErrorContains(t, validate([]pattern{seq(
+			op(instr.I32_CONST),
+			op(instr.CALL),
+			op(instr.I64_ADD),
+		)}), "i64.add has stack kind i32, want i64")
+	})
+
 	t.Run("maps every opcode once", func(t *testing.T) {
-		for value, lowering := range lowerings {
-			op := instr.Opcode(value)
+		for code, emit := range lowerers {
+			op := instr.Opcode(code)
 			if instr.Valid(op) {
-				require.NotNil(t, lowering, instr.TypeOf(op).Mnemonic)
+				require.NotNil(t, emit, instr.TypeOf(op).Mnemonic)
 			} else {
-				require.Nil(t, lowering)
+				require.Nil(t, emit)
 			}
 		}
 	})

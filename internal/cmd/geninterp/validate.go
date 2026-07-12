@@ -7,62 +7,15 @@ import (
 	"github.com/siyul-park/minivm/instr"
 )
 
-func (p pattern) delta() (int, bool) {
-	last := len(p) - 1
-	branch := p[last].op == instr.BR_IF
-	consumerAt := last
-	if branch {
-		consumerAt--
-	}
-	if consumerAt < 0 {
-		return 0, false
-	}
-	consumer := p[consumerAt].op
-	if len(p) == 2 && p[0].op == instr.I32_CONST && branch {
-		return 0, true
-	}
-	switch consumer {
-	case instr.DROP:
-		if consumerAt != 1 || branch {
-			return 0, false
-		}
-		return 0, true
-	case instr.REF_IS_NULL:
-		if consumerAt != 1 {
-			return 0, false
-		}
-		if branch {
-			return 0, true
-		}
-		return 1, true
-	case instr.ARRAY_GET, instr.STRUCT_GET:
-		if consumerAt != 1 || branch {
-			return 0, false
-		}
-		return 0, true
-	}
-	if arity, ok := arity(consumer); ok {
-		if consumerAt > 2 {
-			return 0, false
-		}
-		delta := consumerAt - arity
-		if !branch {
-			delta++
-		}
-		return delta, true
-	}
-	return 0, false
-}
-
 func (p pattern) key() string {
 	var key strings.Builder
-	for index, step := range p {
+	for index, current := range p {
 		if index > 0 {
 			key.WriteByte('/')
 		}
-		fmt.Fprintf(&key, "%d", step.op)
-		if step.typ != nil {
-			fmt.Fprintf(&key, ":%t:%s", step.not, step.typ)
+		fmt.Fprintf(&key, "%d", current.op)
+		if current.typ != nil {
+			fmt.Fprintf(&key, ":%t:%s", current.exclude, current.typ)
 		}
 	}
 	return key.String()
@@ -80,20 +33,20 @@ func (p pattern) overlaps(other pattern) bool {
 	return true
 }
 
-func (s step) overlaps(other step) bool {
-	if s.typ == nil || other.typ == nil {
+func (m match) overlaps(other match) bool {
+	if m.typ == nil || other.typ == nil {
 		return true
 	}
-	if !s.not && !other.not {
-		return s.typ == other.typ
+	if !m.exclude && !other.exclude {
+		return m.typ == other.typ
 	}
-	if s.not && other.not {
+	if m.exclude && other.exclude {
 		return true
 	}
-	if s.not {
-		s, other = other, s
+	if m.exclude {
+		m, other = other, m
 	}
-	return s.typ != other.typ
+	return m.typ != other.typ
 }
 
 func validate(patterns []pattern) error {
@@ -102,39 +55,27 @@ func validate(patterns []pattern) error {
 		if len(pattern) == 0 {
 			return fmt.Errorf("empty fusion pattern")
 		}
-		for _, step := range pattern {
-			if !instr.Valid(step.op) {
-				return fmt.Errorf("unsupported opcode %d", step.op)
+		for _, current := range pattern {
+			if !instr.Valid(current.op) {
+				return fmt.Errorf("unsupported opcode %d", current.op)
 			}
-			typ := instr.TypeOf(step.op)
-			for _, width := range typ.Widths {
-				if width < 0 {
+			typ := instr.TypeOf(current.op)
+			for _, size := range typ.Widths {
+				if size < 0 {
 					return fmt.Errorf("%s has variable-width operands", typ.Mnemonic)
 				}
 			}
-			if step.typ != nil || step.not {
-				if step.typ == nil {
+			if current.typ != nil || current.exclude {
+				if current.typ == nil {
 					return fmt.Errorf("%s has invalid guard", typ.Mnemonic)
 				}
-				if step.op != instr.CONST_GET {
+				if current.op != instr.CONST_GET {
 					return fmt.Errorf("%s cannot resolve a type guard", typ.Mnemonic)
 				}
 			}
 		}
-		if len(pattern) > 2 {
-			consumer := pattern[1].op
-			if consumer == instr.DROP || (consumer == instr.REF_IS_NULL && (len(pattern) != 3 || pattern[2].op != instr.BR_IF)) {
-				return fmt.Errorf("ref pattern has unsupported trailing operations")
-			}
-		}
-		if want, ok := pattern.delta(); ok {
-			pops, pushes, fixed, err := effect(pattern)
-			if err != nil {
-				return err
-			}
-			if fixed && pushes-pops != want {
-				return fmt.Errorf("stack delta %d (pop %d, push %d), want %d", pushes-pops, pops, pushes, want)
-			}
+		if err := validateStack(pattern); err != nil {
+			return err
 		}
 		key := pattern.key()
 		if _, ok := seen[key]; ok {
@@ -145,7 +86,7 @@ func validate(patterns []pattern) error {
 				return fmt.Errorf("ambiguous fusion patterns %s and %s", otherKey, key)
 			}
 		}
-		if _, err := fusion(pattern, pattern.width(), ""); err != nil {
+		if _, err := compose(pattern, pattern.width(), ""); err != nil {
 			return fmt.Errorf("unsupported fusion %s: %w", key, err)
 		}
 		seen[key] = pattern
@@ -153,27 +94,25 @@ func validate(patterns []pattern) error {
 	return nil
 }
 
-func effect(pattern pattern) (int, int, bool, error) {
+func validateStack(pattern pattern) error {
 	var stack []instr.Kind
-	pops := 0
-	for _, step := range pattern {
-		typ := instr.TypeOf(step.op)
+	for _, current := range pattern {
+		typ := instr.TypeOf(current.op)
 		if typ.Pop == nil && typ.Push == nil {
-			return 0, 0, false, nil
+			continue
 		}
 		for _, want := range typ.Pop {
 			if len(stack) == 0 {
-				pops++
 				continue
 			}
 			last := len(stack) - 1
 			got := stack[last]
 			stack = stack[:last]
 			if got != instr.KindAny && want != instr.KindAny && got.Repr() != want.Repr() {
-				return 0, 0, false, fmt.Errorf("%s has stack kind %s, want %s", typ.Mnemonic, got, want)
+				return fmt.Errorf("%s has stack kind %s, want %s", typ.Mnemonic, got, want)
 			}
 		}
 		stack = append(stack, typ.Push...)
 	}
-	return pops, len(stack), true, nil
+	return nil
 }

@@ -20,15 +20,15 @@ Read this before changing threaded fusion patterns, generated handlers, lookahea
 
 ## Model
 
-Fusion patterns are concrete opcode sequences used only during generation. `catalog` builds and orders them before validation. Generated matchers use opcode widths from `instr.Type`, choose the longest applicable specialization, and dispatch directly to closed lowerings. No runtime pattern or action object survives generation.
+Fusion patterns are concrete opcode sequences used only during generation. `catalog` builds and orders them before validation. `resolve` infers source kinds from opcode stack metadata and produces immutable `step` values. `compose` walks those steps once with a `state` and invokes each opcode's single entry in `lowerers`. `lower` invokes the same table with standalone state. Pattern declarations select sequences and compile-time guards only; no runtime pattern or action object survives generation.
 
-Each opcode specification is the semantic source for its generated standalone handler and any fusion that starts at that opcode. Standalone opcode execution remains the runtime oracle. Fusion preserves results, stack and frame state, instruction pointers, traps and check order, control flow, and final ownership. NOP run compaction remains local to the NOP handler because it is dispatch compaction, not semantic producer-consumer fusion.
+Every valid opcode has exactly one `lowerers` entry and one semantic emitter. The state's virtual stack contains `value` entries describing compile-time checks, runtime evaluation, ownership cleanup, optional stack materialization, and the first absorbed opcode. Standalone execution materializes the same values that fusion can pass directly to a consumer. Resident stack operands are consumed, while local, global, upvalue, and constant sources are borrowed until materialized. The `head` opcode advances threaded compilation by the source instruction width even when a later consumer produces the final value. This keeps results, stack and frame state, instruction pointers, traps and check order, control flow, and ownership aligned with exact execution. NOP run compaction remains local to the NOP handler because it is dispatch compaction, not semantic producer-consumer fusion.
 
 ## Support Matrix
 
 The generator validates the concrete patterns returned by `catalog` in `internal/cmd/geninterp/pattern.go`.
 
-Patterns cover ref consumption, constant calls and closure creation, numeric operations and comparisons, conditional branches, and constant aggregate indexes. Integer division and remainder use direct fused handlers that preserve standalone trap IP and stack state.
+Patterns cover ref consumption, constant calls and closure creation, numeric operations and comparisons, conditional branches, and constant aggregate indexes. Trapping numeric operations materialize completed sources before evaluating the trap so stack ownership and instruction offsets match exact execution.
 
 ## Threaded Compilation
 
@@ -54,7 +54,7 @@ Borrowed refs never enter the VM stack, frame/global/upvalue storage, calls, yie
 
 ## Maintenance Notes
 
-Add or change an opcode lowering in `lower.go`. Add or change a threaded pattern in `pattern.go` only when every concrete sequence has one supported lowering and locally obvious ownership. Reject ambiguous, shadowed, variable-width, stack-inconsistent, or ownership-unsafe patterns during generation. Do not add callbacks, code strings, ownership annotations, synthetic opcodes, runtime pattern objects, or architecture-specific output.
+Add or change an opcode through its single `lowerers` entry in `lower.go`. The emitter must work with both standalone and composable `state` values; do not add a standalone copy or a fusion-only renderer. Add a pattern in `pattern.go` only to select a concrete sequence and compile-time guards. Source kinds and stack limits come from `instr.Type` metadata, with explicit input rules only for ownership-sensitive ref consumers and dynamically typed call or aggregate-index consumers. Preserve the first absorbed step independently from the value-producing step. Reject ambiguous, variable-width, stack-inconsistent, unresolved, or ownership-unsafe patterns during generation. Do not add callbacks, code strings, synthetic opcodes, runtime pattern objects, or architecture-specific output.
 
 Keep ARM64 trace fusion hand-written in `interp/jit_arm64.go`. Do not add architecture flags or backends to this generator.
 

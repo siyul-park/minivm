@@ -8,13 +8,13 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-type step struct {
-	op  instr.Opcode
-	typ reflect.Type
-	not bool
+type match struct {
+	op      instr.Opcode
+	typ     reflect.Type
+	exclude bool
 }
 
-type pattern []step
+type pattern []match
 
 type family struct {
 	sources []pattern
@@ -38,11 +38,11 @@ var families = []family{
 }
 
 func (p pattern) width() int {
-	total := 0
-	for _, step := range p {
-		total += width(step.op)
+	size := 0
+	for _, current := range p {
+		size += width(current.op)
 	}
-	return total
+	return size
 }
 
 func catalog() []pattern {
@@ -69,7 +69,7 @@ func catalog() []pattern {
 		seq(op(instr.CONST_GET), op(instr.RETURN_CALL)),
 		seq(op(instr.CONST_GET), op(instr.CLOSURE_NEW)),
 	)
-	patterns = append(patterns, numeric()...)
+	patterns = append(patterns, scalars()...)
 	sort.Slice(patterns, func(i, j int) bool {
 		if len(patterns[i]) != len(patterns[j]) {
 			return len(patterns[i]) > len(patterns[j])
@@ -79,7 +79,7 @@ func catalog() []pattern {
 	return patterns
 }
 
-func numeric() []pattern {
+func scalars() []pattern {
 	var patterns []pattern
 	for _, family := range families {
 		ops := append(append([]instr.Opcode(nil), family.binary...), family.compare...)
@@ -164,5 +164,5 @@ func constant[T types.Value]() pattern {
 }
 
 func except[T types.Value]() pattern {
-	return pattern{{op: instr.CONST_GET, typ: reflect.TypeFor[T](), not: true}}
+	return pattern{{op: instr.CONST_GET, typ: reflect.TypeFor[T](), exclude: true}}
 }
