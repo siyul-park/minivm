@@ -963,7 +963,7 @@ func arity(op instr.Opcode) (int, bool) {
 	return 0, false
 }
 
-// index emits direct constant-index ARRAY_GET and STRUCT_GET handlers.
+// indexCode emits ARRAY_GET and STRUCT_GET from a resolved index expression.
 func indexCode(op instr.Opcode, index jen.Code, total int) []jen.Code {
 	body := []jen.Code{
 		jen.If(jen.Id("i").Dot("sp").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
@@ -1049,8 +1049,7 @@ func indexCode(op instr.Opcode, index jen.Code, total int) []jen.Code {
 	)
 }
 
-// arithmetic emits preflight plus one concrete runtime handler for a
-// normalized pattern. Every source step is inline in that handler.
+// numericCode emits one numeric operation from pending and resident operands.
 func numericCode(consumer step, sources []lowering, total int, label string, branch bool) ([]jen.Code, error) {
 	arity, ok := arity(consumer.op)
 	if !ok {

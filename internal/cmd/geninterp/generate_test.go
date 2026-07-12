@@ -231,98 +231,48 @@ func TestGenerate(t *testing.T) {
 
 		types := make(map[string]struct{})
 		values := make(map[string]struct{})
-		functions := make(map[string]struct{})
-		mappings := make(map[string]string)
-		calls := make(map[string]int)
+		functions := make(map[string]*ast.FuncDecl)
 		ast.Inspect(file, func(node ast.Node) bool {
 			switch node := node.(type) {
 			case *ast.TypeSpec:
 				types[node.Name.Name] = struct{}{}
 			case *ast.ValueSpec:
-				for index, name := range node.Names {
+				for _, name := range node.Names {
 					values[name.Name] = struct{}{}
-					if name.Name != "lowerers" || index >= len(node.Values) {
-						continue
-					}
-					literal, ok := node.Values[index].(*ast.CompositeLit)
-					if !ok {
-						continue
-					}
-					for _, element := range literal.Elts {
-						entry, ok := element.(*ast.KeyValueExpr)
-						if !ok {
-							continue
-						}
-						op, ok := entry.Key.(*ast.SelectorExpr)
-						if !ok {
-							continue
-						}
-						switch value := entry.Value.(type) {
-						case *ast.Ident:
-							mappings[op.Sel.Name] = value.Name
-						case *ast.CallExpr:
-							fn, ok := value.Fun.(*ast.Ident)
-							if !ok || len(value.Args) != 1 {
-								continue
-							}
-							arg, ok := value.Args[0].(*ast.Ident)
-							if ok {
-								mappings[op.Sel.Name] = fn.Name + "(" + arg.Name + ")"
-							}
-						}
-					}
 				}
 			case *ast.FuncDecl:
-				functions[node.Name.Name] = struct{}{}
-			case *ast.CallExpr:
-				if fn, ok := node.Fun.(*ast.Ident); ok {
-					calls[fn.Name]++
-				}
+				functions[node.Name.Name] = node
 			}
 			return true
 		})
 
-		require.Contains(t, types, "lowering")
+		for _, name := range []string{"fact", "lowerer", "lowering", "loweringState"} {
+			require.Contains(t, types, name)
+		}
 		require.Contains(t, values, "lowerers")
-		require.Contains(t, functions, "compose")
-		require.Contains(t, functions, "prepare")
-		require.Equal(t, 1, calls["sourceAccess"])
-
-		expected := map[string]string{
-			"BR_IF":       "branchLower",
-			"CALL":        "callLower",
-			"CLOSURE_NEW": "callLower",
-			"CONST_GET":   "sourceLower",
-			"DROP":        "refLower",
-			"DUP":         "refSource",
-			"F32_CONST":   "sourceLower",
-			"F64_CONST":   "sourceLower",
-			"GLOBAL_GET":  "sourceLower",
-			"I32_CONST":   "sourceLower",
-			"I64_CONST":   "sourceLower",
-			"LOCAL_GET":   "sourceLower",
-			"REF_IS_NULL": "refLower",
-			"REF_NULL":    "refSource",
-			"RETURN_CALL": "callLower",
-			"STRUCT_GET":  "indexLower",
-			"ARRAY_GET":   "indexLower",
-			"UPVAL_GET":   "sourceLower",
-		}
-		for _, family := range families {
-			for _, op := range append(family.binary, family.compare...) {
-				expected[symbol(op)] = "numericLower"
-			}
-		}
-		expected["I32_EQZ"] = "numericLower"
-		expected["I64_EQZ"] = "numericLower"
-		for op, lower := range expected {
-			require.Equal(t, lower, mappings[op], op)
+		for _, name := range []string{"compose", "standalone"} {
+			fn := functions[name]
+			require.NotNil(t, fn)
+			uses := false
+			ast.Inspect(fn.Body, func(node ast.Node) bool {
+				index, ok := node.(*ast.IndexExpr)
+				if !ok {
+					return true
+				}
+				identifier, ok := index.X.(*ast.Ident)
+				if ok && identifier.Name == "lowerers" {
+					uses = true
+				}
+				return true
+			})
+			require.True(t, uses, name)
 		}
 
 		for _, name := range []string{
-			"fusion", "call", "reference", "index", "arithmetic", "integer", "operand",
-			"callSequence", "composeCall", "composeDirectBranch", "composeIndex",
-			"composeNumeric", "composeRef", "indexSequence", "refSequence",
+			"callHandler", "callSequence", "composeCall", "composeDirectBranch",
+			"composeIndex", "composeNumeric", "composeRef", "indexHandler",
+			"indexSequence", "refHandler", "refSequence", "sourceHandler",
+			"standaloneNumericCode",
 		} {
 			require.NotContains(t, functions, name)
 		}
