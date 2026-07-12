@@ -2453,7 +2453,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 			return 7
 		})
 		require.NoError(t, err)
-		setup.Close()
+		require.NoError(t, setup.Close())
 
 		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(fn))
 		i := New(prog)
@@ -2490,7 +2490,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 		setup := New(program.New(nil))
 		v, err := setup.Marshal(func(a, b int32) int32 { return a + b })
 		require.NoError(t, err)
-		setup.Close()
+		require.NoError(t, setup.Close())
 
 		// program.New's default constant path keeps the *HostFunction Go
 		// value itself (not a copy) in each Interpreter's heap, so two
@@ -2601,7 +2601,7 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 
 		var call func(context.Context) (int32, error)
 		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
-		ctx := context.WithValue(context.Background(), struct{}{}, "value")
+		ctx := context.WithValue(context.Background(), contextKey{}, "value")
 		value, err := call(ctx)
 		require.NoError(t, err)
 		require.Equal(t, int32(7), value)
