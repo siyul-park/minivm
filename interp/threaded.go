@@ -1285,7 +1285,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI32(i.stack[i.sp-2].I32() + i.stack[i.sp-1].I32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1297,7 +1297,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI32(i.stack[i.sp-2].I32() - i.stack[i.sp-1].I32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1309,7 +1309,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI32(i.stack[i.sp-2].I32() * i.stack[i.sp-1].I32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1389,7 +1389,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI32(i.stack[i.sp-2].I32() << (i.stack[i.sp-1].I32() & 31))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1401,7 +1401,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI32(i.stack[i.sp-2].I32() >> (i.stack[i.sp-1].I32() & 31))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1413,7 +1413,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI32(int32(uint32(i.stack[i.sp-2].I32()) >> (i.stack[i.sp-1].I32() & 31)))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1425,7 +1425,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.Boxed(uint64(i.stack[i.sp-2])&uint64(i.stack[i.sp-1]) & ^uint64(types.VMask) | (uint64(i.stack[i.sp-2]) ^ uint64(i.stack[i.sp-1])&types.VMask))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1437,7 +1437,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.Boxed(uint64(i.stack[i.sp-2]) & uint64(i.stack[i.sp-1]))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1449,7 +1449,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.Boxed(uint64(i.stack[i.sp-2]) | uint64(i.stack[i.sp-1]))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1503,7 +1503,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-2].I32()), int(i.stack[i.sp-1].I32()))))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1515,7 +1515,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-2].I32()), -int(i.stack[i.sp-1].I32()))))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1566,7 +1566,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].I32() == i.stack[i.sp-1].I32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1578,7 +1578,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].I32() != i.stack[i.sp-1].I32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1590,7 +1590,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].I32() < i.stack[i.sp-1].I32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1602,7 +1602,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(uint32(i.stack[i.sp-2].I32()) < uint32(i.stack[i.sp-1].I32()))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1614,7 +1614,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].I32() > i.stack[i.sp-1].I32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1626,7 +1626,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(uint32(i.stack[i.sp-2].I32()) > uint32(i.stack[i.sp-1].I32()))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1638,7 +1638,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].I32() <= i.stack[i.sp-1].I32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1650,7 +1650,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(uint32(i.stack[i.sp-2].I32()) <= uint32(i.stack[i.sp-1].I32()))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1662,7 +1662,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].I32() >= i.stack[i.sp-1].I32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1674,7 +1674,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(uint32(i.stack[i.sp-2].I32()) >= uint32(i.stack[i.sp-1].I32()))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1808,7 +1808,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.boxI64(i.borrowI64(i.stack[i.sp-2]) + i.borrowI64(i.stack[i.sp-1]))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1820,7 +1820,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.boxI64(i.borrowI64(i.stack[i.sp-2]) - i.borrowI64(i.stack[i.sp-1]))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1832,7 +1832,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.boxI64(i.borrowI64(i.stack[i.sp-2]) * i.borrowI64(i.stack[i.sp-1]))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1912,7 +1912,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.boxI64(i.borrowI64(i.stack[i.sp-2]) << (i.borrowI64(i.stack[i.sp-1]) & 63))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1924,7 +1924,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.boxI64(i.borrowI64(i.stack[i.sp-2]) >> (i.borrowI64(i.stack[i.sp-1]) & 63))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1936,7 +1936,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.boxI64(int64(uint64(i.borrowI64(i.stack[i.sp-2])) >> (i.borrowI64(i.stack[i.sp-1]) & 63)))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1948,7 +1948,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.boxI64(i.borrowI64(i.stack[i.sp-2]) ^ i.borrowI64(i.stack[i.sp-1]))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1960,7 +1960,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.boxI64(i.borrowI64(i.stack[i.sp-2]) & i.borrowI64(i.stack[i.sp-1]))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -1972,7 +1972,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.boxI64(i.borrowI64(i.stack[i.sp-2]) | i.borrowI64(i.stack[i.sp-1]))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2026,7 +2026,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.boxI64(int64(bits.RotateLeft64(uint64(i.borrowI64(i.stack[i.sp-2])), int(i.borrowI64(i.stack[i.sp-1])))))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2038,7 +2038,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := i.boxI64(int64(bits.RotateLeft64(uint64(i.borrowI64(i.stack[i.sp-2])), -int(i.borrowI64(i.stack[i.sp-1])))))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2103,7 +2103,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.borrowI64(i.stack[i.sp-2]) == i.borrowI64(i.stack[i.sp-1]))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2115,7 +2115,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.borrowI64(i.stack[i.sp-2]) != i.borrowI64(i.stack[i.sp-1]))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2127,7 +2127,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.borrowI64(i.stack[i.sp-2]) < i.borrowI64(i.stack[i.sp-1]))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2139,7 +2139,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-2])) < uint64(i.borrowI64(i.stack[i.sp-1])))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2151,7 +2151,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.borrowI64(i.stack[i.sp-2]) > i.borrowI64(i.stack[i.sp-1]))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2163,7 +2163,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-2])) > uint64(i.borrowI64(i.stack[i.sp-1])))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2175,7 +2175,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.borrowI64(i.stack[i.sp-2]) <= i.borrowI64(i.stack[i.sp-1]))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2187,7 +2187,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-2])) <= uint64(i.borrowI64(i.stack[i.sp-1])))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2199,7 +2199,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.borrowI64(i.stack[i.sp-2]) >= i.borrowI64(i.stack[i.sp-1]))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2211,7 +2211,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-2])) >= uint64(i.borrowI64(i.stack[i.sp-1])))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2320,7 +2320,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxF32(i.stack[i.sp-2].F32() + i.stack[i.sp-1].F32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2332,7 +2332,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxF32(i.stack[i.sp-2].F32() - i.stack[i.sp-1].F32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2344,7 +2344,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxF32(i.stack[i.sp-2].F32() * i.stack[i.sp-1].F32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2511,7 +2511,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxF32(min(i.stack[i.sp-2].F32(), i.stack[i.sp-1].F32()))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2523,7 +2523,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxF32(max(i.stack[i.sp-2].F32(), i.stack[i.sp-1].F32()))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2535,7 +2535,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxF32(float32(math.Copysign(float64(i.stack[i.sp-2].F32()), float64(i.stack[i.sp-1].F32()))))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2547,7 +2547,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].F32() == i.stack[i.sp-1].F32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2559,7 +2559,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].F32() != i.stack[i.sp-1].F32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2571,7 +2571,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].F32() < i.stack[i.sp-1].F32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2583,7 +2583,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].F32() > i.stack[i.sp-1].F32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2595,7 +2595,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].F32() <= i.stack[i.sp-1].F32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2607,7 +2607,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].F32() >= i.stack[i.sp-1].F32())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2750,7 +2750,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxF64(i.stack[i.sp-2].F64() + i.stack[i.sp-1].F64())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2762,7 +2762,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxF64(i.stack[i.sp-2].F64() - i.stack[i.sp-1].F64())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2774,7 +2774,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxF64(i.stack[i.sp-2].F64() * i.stack[i.sp-1].F64())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2941,7 +2941,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxF64(math.Min(i.stack[i.sp-2].F64(), i.stack[i.sp-1].F64()))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2953,7 +2953,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxF64(math.Max(i.stack[i.sp-2].F64(), i.stack[i.sp-1].F64()))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2965,7 +2965,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxF64(math.Copysign(i.stack[i.sp-2].F64(), i.stack[i.sp-1].F64()))
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2977,7 +2977,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].F64() == i.stack[i.sp-1].F64())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -2989,7 +2989,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].F64() != i.stack[i.sp-1].F64())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -3001,7 +3001,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].F64() < i.stack[i.sp-1].F64())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -3013,7 +3013,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].F64() > i.stack[i.sp-1].F64())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -3025,7 +3025,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].F64() <= i.stack[i.sp-1].F64())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -3037,7 +3037,7 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				v0 := types.BoxI1(i.stack[i.sp-2].F64() >= i.stack[i.sp-1].F64())
-				i.sp--
+				i.sp -= 1
 				i.stack[i.sp-1] = v0
 				i.fr.ip += 1
 			}
@@ -10273,7 +10273,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) > v0)
@@ -10304,7 +10304,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) > uint64(v0))
@@ -10335,7 +10335,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) <= v0)
@@ -10366,7 +10366,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) <= uint64(v0))
@@ -10397,7 +10397,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) >= v0)
@@ -10428,7 +10428,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) >= uint64(v0))
@@ -10942,7 +10942,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
@@ -10973,7 +10973,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
@@ -11004,7 +11004,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
@@ -11035,7 +11035,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
@@ -11066,7 +11066,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
@@ -11097,7 +11097,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
@@ -11611,7 +11611,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
@@ -11642,7 +11642,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
@@ -14815,7 +14815,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
@@ -14846,7 +14846,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
@@ -14877,7 +14877,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
@@ -14908,7 +14908,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
@@ -22106,7 +22106,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
@@ -22137,7 +22137,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
@@ -22168,7 +22168,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
@@ -22199,7 +22199,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
@@ -22230,7 +22230,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
@@ -22261,7 +22261,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
@@ -22292,7 +22292,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
@@ -22323,7 +22323,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
@@ -22354,7 +22354,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
@@ -22385,7 +22385,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
@@ -23201,7 +23201,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) == v0)
@@ -23232,7 +23232,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) != v0)
@@ -23263,7 +23263,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) < v0)
@@ -23294,7 +23294,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) < uint64(v0))
@@ -23324,7 +23324,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) > v0)
@@ -23351,7 +23351,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) > uint64(v0))
@@ -23378,7 +23378,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) <= v0)
@@ -23405,7 +23405,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) <= uint64(v0))
@@ -23432,7 +23432,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) >= v0)
@@ -23459,7 +23459,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) >= uint64(v0))
@@ -23486,7 +23486,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(i.stack[i.sp-1].F32() + v0)
@@ -23513,7 +23513,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(i.stack[i.sp-1].F32() - v0)
@@ -23540,7 +23540,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(i.stack[i.sp-1].F32() * v0)
@@ -23678,7 +23678,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(min(i.stack[i.sp-1].F32(), v0))
@@ -23705,7 +23705,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(max(i.stack[i.sp-1].F32(), v0))
@@ -23732,7 +23732,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(float32(math.Copysign(float64(i.stack[i.sp-1].F32()), float64(v0))))
@@ -23759,7 +23759,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
@@ -23786,7 +23786,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
@@ -23813,7 +23813,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
@@ -23840,7 +23840,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
@@ -23867,7 +23867,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
@@ -23894,7 +23894,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
@@ -23921,7 +23921,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(i.stack[i.sp-1].F64() + v0)
@@ -23948,7 +23948,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(i.stack[i.sp-1].F64() - v0)
@@ -23975,7 +23975,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(i.stack[i.sp-1].F64() * v0)
@@ -24113,7 +24113,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(math.Min(i.stack[i.sp-1].F64(), v0))
@@ -24140,7 +24140,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(math.Max(i.stack[i.sp-1].F64(), v0))
@@ -24167,7 +24167,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(math.Copysign(i.stack[i.sp-1].F64(), v0))
@@ -24194,7 +24194,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
@@ -24221,7 +24221,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
@@ -24248,7 +24248,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
@@ -24275,7 +24275,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
@@ -24302,7 +24302,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
@@ -24329,7 +24329,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
@@ -24399,7 +24399,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() + v0)
@@ -24426,7 +24426,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() - v0)
@@ -24453,7 +24453,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() * v0)
@@ -24620,7 +24620,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() << (v0 & 31))
@@ -24647,7 +24647,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() >> (v0 & 31))
@@ -24674,7 +24674,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(int32(uint32(i.stack[i.sp-1].I32()) >> (v0 & 31)))
@@ -24700,7 +24700,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.Boxed(uint64(i.stack[i.sp-1])&uint64(r0) & ^uint64(types.VMask) | (uint64(i.stack[i.sp-1]) ^ uint64(r0)&types.VMask))
@@ -24726,7 +24726,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.Boxed(uint64(i.stack[i.sp-1]) & uint64(r0))
@@ -24752,7 +24752,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.globals[i0]
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.Boxed(uint64(i.stack[i.sp-1]) | uint64(r0))
@@ -24779,7 +24779,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-1].I32()), int(v0))))
@@ -24806,7 +24806,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-1].I32()), -int(v0))))
@@ -24833,7 +24833,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
@@ -24860,7 +24860,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
@@ -24887,7 +24887,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
@@ -24914,7 +24914,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
@@ -24941,7 +24941,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
@@ -24968,7 +24968,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
@@ -24995,7 +24995,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
@@ -25022,7 +25022,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
@@ -25049,7 +25049,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
@@ -25076,7 +25076,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
@@ -25103,7 +25103,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) + v0)
@@ -25130,7 +25130,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) - v0)
@@ -25157,7 +25157,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) * v0)
@@ -25328,7 +25328,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) << (v0 & 63))
@@ -25355,7 +25355,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) >> (v0 & 63))
@@ -25382,7 +25382,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(int64(uint64(i.borrowI64(i.stack[i.sp-1])) >> (v0 & 63)))
@@ -25409,7 +25409,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) ^ v0)
@@ -25436,7 +25436,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) & v0)
@@ -25463,7 +25463,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) | v0)
@@ -25490,7 +25490,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(int64(bits.RotateLeft64(uint64(i.borrowI64(i.stack[i.sp-1])), int(v0))))
@@ -25517,7 +25517,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(int64(bits.RotateLeft64(uint64(i.borrowI64(i.stack[i.sp-1])), -int(v0))))
@@ -25544,7 +25544,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) == v0)
@@ -25571,7 +25571,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) != v0)
@@ -25598,7 +25598,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) < v0)
@@ -25625,7 +25625,7 @@ var (
 					}
 					r0 := i.globals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) < uint64(v0))
@@ -27991,10 +27991,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) > v0)
@@ -28023,10 +28023,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) > uint64(v0))
@@ -28055,10 +28055,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) <= v0)
@@ -28087,10 +28087,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) <= uint64(v0))
@@ -28119,10 +28119,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) >= v0)
@@ -28151,10 +28151,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) >= uint64(v0))
@@ -28681,10 +28681,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
@@ -28713,10 +28713,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
@@ -28745,10 +28745,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
@@ -28777,10 +28777,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
@@ -28809,10 +28809,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
@@ -28841,10 +28841,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
@@ -29371,10 +29371,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
@@ -29403,10 +29403,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
@@ -29435,10 +29435,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
@@ -29467,10 +29467,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
@@ -29499,10 +29499,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
@@ -29531,10 +29531,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
@@ -33694,10 +33694,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
@@ -33726,10 +33726,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
@@ -33758,10 +33758,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
@@ -33790,10 +33790,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
@@ -33822,10 +33822,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
@@ -33854,10 +33854,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
@@ -33886,10 +33886,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
@@ -33918,10 +33918,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
@@ -33950,10 +33950,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
@@ -33982,10 +33982,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
@@ -34824,10 +34824,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) == v0)
@@ -34856,10 +34856,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) != v0)
@@ -34888,10 +34888,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) < v0)
@@ -34920,10 +34920,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) < uint64(v0))
@@ -34951,10 +34951,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) > v0)
@@ -34979,10 +34979,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) > uint64(v0))
@@ -35007,10 +35007,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) <= v0)
@@ -35035,10 +35035,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) <= uint64(v0))
@@ -35063,10 +35063,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) >= v0)
@@ -35091,10 +35091,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) >= uint64(v0))
@@ -35119,10 +35119,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(i.stack[i.sp-1].F32() + v0)
@@ -35147,10 +35147,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(i.stack[i.sp-1].F32() - v0)
@@ -35175,10 +35175,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(i.stack[i.sp-1].F32() * v0)
@@ -35203,8 +35203,8 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -35239,8 +35239,8 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -35275,8 +35275,8 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -35317,10 +35317,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(min(i.stack[i.sp-1].F32(), v0))
@@ -35345,10 +35345,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(max(i.stack[i.sp-1].F32(), v0))
@@ -35373,10 +35373,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(float32(math.Copysign(float64(i.stack[i.sp-1].F32()), float64(v0))))
@@ -35401,10 +35401,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
@@ -35429,10 +35429,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
@@ -35457,10 +35457,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
@@ -35485,10 +35485,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
@@ -35513,10 +35513,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
@@ -35541,10 +35541,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
@@ -35569,10 +35569,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(i.stack[i.sp-1].F64() + v0)
@@ -35597,10 +35597,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(i.stack[i.sp-1].F64() - v0)
@@ -35625,10 +35625,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(i.stack[i.sp-1].F64() * v0)
@@ -35653,8 +35653,8 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -35689,8 +35689,8 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -35725,8 +35725,8 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -35767,10 +35767,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(math.Min(i.stack[i.sp-1].F64(), v0))
@@ -35795,10 +35795,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(math.Max(i.stack[i.sp-1].F64(), v0))
@@ -35823,10 +35823,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(math.Copysign(i.stack[i.sp-1].F64(), v0))
@@ -35851,10 +35851,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
@@ -35879,10 +35879,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
@@ -35907,10 +35907,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
@@ -35935,10 +35935,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
@@ -35963,10 +35963,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
@@ -35991,10 +35991,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
@@ -36064,10 +36064,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() + v0)
@@ -36092,10 +36092,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() - v0)
@@ -36120,10 +36120,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() * v0)
@@ -36148,8 +36148,8 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -36184,8 +36184,8 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -36220,8 +36220,8 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -36256,8 +36256,8 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					i.stack[i.sp] = r0
 					i.sp++
 					i.fr.ip += 2
@@ -36292,10 +36292,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() << (v0 & 31))
@@ -36320,10 +36320,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() >> (v0 & 31))
@@ -36348,10 +36348,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(int32(uint32(i.stack[i.sp-1].I32()) >> (v0 & 31)))
@@ -36376,9 +36376,9 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
-					if i.sp == 0 {
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.Boxed(uint64(i.stack[i.sp-1])&uint64(r0) & ^uint64(types.VMask) | (uint64(i.stack[i.sp-1]) ^ uint64(r0)&types.VMask))
@@ -36403,9 +36403,9 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
-					if i.sp == 0 {
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.Boxed(uint64(i.stack[i.sp-1]) & uint64(r0))
@@ -36430,9 +36430,9 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
-					if i.sp == 0 {
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.Boxed(uint64(i.stack[i.sp-1]) | uint64(r0))
@@ -36457,10 +36457,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-1].I32()), int(v0))))
@@ -36485,10 +36485,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-1].I32()), -int(v0))))
@@ -36513,10 +36513,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
@@ -36541,10 +36541,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
@@ -36569,10 +36569,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
@@ -36597,10 +36597,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
@@ -36625,10 +36625,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
@@ -36653,10 +36653,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
@@ -36681,10 +36681,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
@@ -36709,10 +36709,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
@@ -36737,10 +36737,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
@@ -36765,10 +36765,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
@@ -36793,10 +36793,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) + v0)
@@ -36821,10 +36821,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) - v0)
@@ -36849,10 +36849,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) * v0)
@@ -36877,8 +36877,8 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
@@ -36914,8 +36914,8 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
@@ -36951,8 +36951,8 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
@@ -36988,8 +36988,8 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					i.retainBox(r0)
 					i.stack[i.sp] = r0
 					i.sp++
@@ -37025,10 +37025,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) << (v0 & 63))
@@ -37053,10 +37053,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) >> (v0 & 63))
@@ -37081,10 +37081,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(int64(uint64(i.borrowI64(i.stack[i.sp-1])) >> (v0 & 63)))
@@ -37109,10 +37109,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) ^ v0)
@@ -37137,10 +37137,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) & v0)
@@ -37165,10 +37165,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) | v0)
@@ -37193,10 +37193,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(int64(bits.RotateLeft64(uint64(i.borrowI64(i.stack[i.sp-1])), int(v0))))
@@ -37221,10 +37221,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(int64(bits.RotateLeft64(uint64(i.borrowI64(i.stack[i.sp-1])), -int(v0))))
@@ -37249,10 +37249,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) == v0)
@@ -37277,10 +37277,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) != v0)
@@ -37305,10 +37305,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) < v0)
@@ -37333,10 +37333,10 @@ var (
 					if i.fr.bp+i0 >= i.sp {
 						panic(ErrSegmentationFault)
 					}
-					i1 := i.fr.bp + i0
-					r0 := i.stack[i1]
+					i2 := i.fr.bp + i0
+					r0 := i.stack[i2]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) < uint64(v0))
@@ -37368,7 +37368,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
@@ -37399,7 +37399,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
@@ -37430,7 +37430,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
@@ -37461,7 +37461,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
@@ -37492,7 +37492,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
@@ -37523,7 +37523,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
@@ -37554,7 +37554,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
@@ -37585,7 +37585,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
@@ -37616,7 +37616,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
@@ -37647,7 +37647,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
@@ -37678,7 +37678,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
@@ -37709,7 +37709,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
@@ -37740,7 +37740,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
@@ -37771,7 +37771,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
@@ -37802,7 +37802,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
@@ -37833,7 +37833,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
@@ -37864,7 +37864,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
@@ -37895,7 +37895,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
@@ -37926,7 +37926,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
@@ -37957,7 +37957,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
@@ -37988,7 +37988,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
@@ -38019,7 +38019,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
@@ -38063,7 +38063,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) > v0)
@@ -38107,7 +38107,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) > uint64(v0))
@@ -38151,7 +38151,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) <= v0)
@@ -38195,7 +38195,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) <= uint64(v0))
@@ -38239,7 +38239,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) >= v0)
@@ -38283,7 +38283,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) >= uint64(v0))
@@ -38327,7 +38327,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) == v0)
@@ -38371,7 +38371,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) != v0)
@@ -38415,7 +38415,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) < v0)
@@ -38459,7 +38459,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) < uint64(v0))
@@ -38911,7 +38911,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(i.stack[i.sp-1].F32() + v0)
@@ -38938,7 +38938,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(i.stack[i.sp-1].F32() - v0)
@@ -38965,7 +38965,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(i.stack[i.sp-1].F32() * v0)
@@ -39106,7 +39106,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(min(i.stack[i.sp-1].F32(), v0))
@@ -39133,7 +39133,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(max(i.stack[i.sp-1].F32(), v0))
@@ -39160,7 +39160,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(float32(math.Copysign(float64(i.stack[i.sp-1].F32()), float64(v0))))
@@ -39187,7 +39187,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
@@ -39214,7 +39214,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
@@ -39241,7 +39241,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
@@ -39268,7 +39268,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
@@ -39295,7 +39295,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
@@ -39322,7 +39322,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
@@ -39349,7 +39349,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(i.stack[i.sp-1].F64() + v0)
@@ -39376,7 +39376,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(i.stack[i.sp-1].F64() - v0)
@@ -39403,7 +39403,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(i.stack[i.sp-1].F64() * v0)
@@ -39544,7 +39544,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(math.Min(i.stack[i.sp-1].F64(), v0))
@@ -39571,7 +39571,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(math.Max(i.stack[i.sp-1].F64(), v0))
@@ -39598,7 +39598,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(math.Copysign(i.stack[i.sp-1].F64(), v0))
@@ -39625,7 +39625,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
@@ -39652,7 +39652,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
@@ -39679,7 +39679,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
@@ -39706,7 +39706,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
@@ -39733,7 +39733,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
@@ -39760,7 +39760,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
@@ -39939,7 +39939,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() + v0)
@@ -39966,7 +39966,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() - v0)
@@ -39993,7 +39993,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() * v0)
@@ -40164,7 +40164,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() << (v0 & 31))
@@ -40191,7 +40191,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() >> (v0 & 31))
@@ -40218,7 +40218,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(int32(uint32(i.stack[i.sp-1].I32()) >> (v0 & 31)))
@@ -40244,7 +40244,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.Boxed(uint64(i.stack[i.sp-1])&uint64(r0) & ^uint64(types.VMask) | (uint64(i.stack[i.sp-1]) ^ uint64(r0)&types.VMask))
@@ -40270,7 +40270,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.Boxed(uint64(i.stack[i.sp-1]) & uint64(r0))
@@ -40296,7 +40296,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.Boxed(uint64(i.stack[i.sp-1]) | uint64(r0))
@@ -40323,7 +40323,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-1].I32()), int(v0))))
@@ -40350,7 +40350,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-1].I32()), -int(v0))))
@@ -40377,7 +40377,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
@@ -40404,7 +40404,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
@@ -40431,7 +40431,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
@@ -40458,7 +40458,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
@@ -40485,7 +40485,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
@@ -40512,7 +40512,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
@@ -40539,7 +40539,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
@@ -40566,7 +40566,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
@@ -40593,7 +40593,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
@@ -40620,7 +40620,7 @@ var (
 						panic(ErrStackOverflow)
 					}
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
@@ -40660,7 +40660,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) > v0)
@@ -40700,7 +40700,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) > uint64(v0))
@@ -40740,7 +40740,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) <= v0)
@@ -40780,7 +40780,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) <= uint64(v0))
@@ -40820,7 +40820,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) >= v0)
@@ -40860,7 +40860,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) >= uint64(v0))
@@ -40900,7 +40900,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) + v0)
@@ -40940,7 +40940,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) - v0)
@@ -40980,7 +40980,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) * v0)
@@ -41212,7 +41212,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) << (v0 & 63))
@@ -41252,7 +41252,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) >> (v0 & 63))
@@ -41292,7 +41292,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(int64(uint64(i.borrowI64(i.stack[i.sp-1])) >> (v0 & 63)))
@@ -41332,7 +41332,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) ^ v0)
@@ -41372,7 +41372,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) & v0)
@@ -41412,7 +41412,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) | v0)
@@ -41452,7 +41452,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(int64(bits.RotateLeft64(uint64(i.borrowI64(i.stack[i.sp-1])), int(v0))))
@@ -41492,7 +41492,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(int64(bits.RotateLeft64(uint64(i.borrowI64(i.stack[i.sp-1])), -int(v0))))
@@ -41532,7 +41532,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) == v0)
@@ -41572,7 +41572,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) != v0)
@@ -41612,7 +41612,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) < v0)
@@ -41652,7 +41652,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) < uint64(v0))
@@ -46511,7 +46511,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) > v0)
@@ -46542,7 +46542,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) > uint64(v0))
@@ -46573,7 +46573,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) <= v0)
@@ -46604,7 +46604,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) <= uint64(v0))
@@ -46635,7 +46635,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) >= v0)
@@ -46666,7 +46666,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) >= uint64(v0))
@@ -47180,7 +47180,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
@@ -47211,7 +47211,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
@@ -47242,7 +47242,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
@@ -47273,7 +47273,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
@@ -47304,7 +47304,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
@@ -47335,7 +47335,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
@@ -47849,7 +47849,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
@@ -47880,7 +47880,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
@@ -51053,7 +51053,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
@@ -51084,7 +51084,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
@@ -51115,7 +51115,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
@@ -51146,7 +51146,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
@@ -58344,7 +58344,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
@@ -58375,7 +58375,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
@@ -58406,7 +58406,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
@@ -58437,7 +58437,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
@@ -58468,7 +58468,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
@@ -58499,7 +58499,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
@@ -58530,7 +58530,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
@@ -58561,7 +58561,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
@@ -58592,7 +58592,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
@@ -58623,7 +58623,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
@@ -59439,7 +59439,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) == v0)
@@ -59470,7 +59470,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) != v0)
@@ -59501,7 +59501,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) < v0)
@@ -59532,7 +59532,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) < uint64(v0))
@@ -59562,7 +59562,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) > v0)
@@ -59589,7 +59589,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) > uint64(v0))
@@ -59616,7 +59616,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) <= v0)
@@ -59643,7 +59643,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) <= uint64(v0))
@@ -59670,7 +59670,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) >= v0)
@@ -59697,7 +59697,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) >= uint64(v0))
@@ -59724,7 +59724,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(i.stack[i.sp-1].F32() + v0)
@@ -59751,7 +59751,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(i.stack[i.sp-1].F32() - v0)
@@ -59778,7 +59778,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(i.stack[i.sp-1].F32() * v0)
@@ -59916,7 +59916,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(min(i.stack[i.sp-1].F32(), v0))
@@ -59943,7 +59943,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(max(i.stack[i.sp-1].F32(), v0))
@@ -59970,7 +59970,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(float32(math.Copysign(float64(i.stack[i.sp-1].F32()), float64(v0))))
@@ -59997,7 +59997,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
@@ -60024,7 +60024,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
@@ -60051,7 +60051,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
@@ -60078,7 +60078,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
@@ -60105,7 +60105,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
@@ -60132,7 +60132,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
@@ -60159,7 +60159,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(i.stack[i.sp-1].F64() + v0)
@@ -60186,7 +60186,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(i.stack[i.sp-1].F64() - v0)
@@ -60213,7 +60213,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(i.stack[i.sp-1].F64() * v0)
@@ -60351,7 +60351,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(math.Min(i.stack[i.sp-1].F64(), v0))
@@ -60378,7 +60378,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(math.Max(i.stack[i.sp-1].F64(), v0))
@@ -60405,7 +60405,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(math.Copysign(i.stack[i.sp-1].F64(), v0))
@@ -60432,7 +60432,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
@@ -60459,7 +60459,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
@@ -60486,7 +60486,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
@@ -60513,7 +60513,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
@@ -60540,7 +60540,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
@@ -60567,7 +60567,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.F64()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
@@ -60637,7 +60637,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() + v0)
@@ -60664,7 +60664,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() - v0)
@@ -60691,7 +60691,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() * v0)
@@ -60858,7 +60858,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() << (v0 & 31))
@@ -60885,7 +60885,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() >> (v0 & 31))
@@ -60912,7 +60912,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(int32(uint32(i.stack[i.sp-1].I32()) >> (v0 & 31)))
@@ -60938,7 +60938,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.Boxed(uint64(i.stack[i.sp-1])&uint64(r0) & ^uint64(types.VMask) | (uint64(i.stack[i.sp-1]) ^ uint64(r0)&types.VMask))
@@ -60964,7 +60964,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.Boxed(uint64(i.stack[i.sp-1]) & uint64(r0))
@@ -60990,7 +60990,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r0 := i.fr.upvals[i0]
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.Boxed(uint64(i.stack[i.sp-1]) | uint64(r0))
@@ -61017,7 +61017,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-1].I32()), int(v0))))
@@ -61044,7 +61044,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-1].I32()), -int(v0))))
@@ -61071,7 +61071,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
@@ -61098,7 +61098,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
@@ -61125,7 +61125,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
@@ -61152,7 +61152,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
@@ -61179,7 +61179,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
@@ -61206,7 +61206,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
@@ -61233,7 +61233,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
@@ -61260,7 +61260,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
@@ -61287,7 +61287,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
@@ -61314,7 +61314,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := r0.I32()
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
@@ -61341,7 +61341,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) + v0)
@@ -61368,7 +61368,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) - v0)
@@ -61395,7 +61395,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) * v0)
@@ -61566,7 +61566,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) << (v0 & 63))
@@ -61593,7 +61593,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) >> (v0 & 63))
@@ -61620,7 +61620,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(int64(uint64(i.borrowI64(i.stack[i.sp-1])) >> (v0 & 63)))
@@ -61647,7 +61647,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) ^ v0)
@@ -61674,7 +61674,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) & v0)
@@ -61701,7 +61701,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) | v0)
@@ -61728,7 +61728,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(int64(bits.RotateLeft64(uint64(i.borrowI64(i.stack[i.sp-1])), int(v0))))
@@ -61755,7 +61755,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(int64(bits.RotateLeft64(uint64(i.borrowI64(i.stack[i.sp-1])), -int(v0))))
@@ -61782,7 +61782,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) == v0)
@@ -61809,7 +61809,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) != v0)
@@ -61836,7 +61836,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) < v0)
@@ -61863,7 +61863,7 @@ var (
 					}
 					r0 := i.fr.upvals[i0]
 					v0 := i.borrowI64(r0)
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) < uint64(v0))
@@ -61938,7 +61938,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
@@ -61961,7 +61961,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
@@ -61984,7 +61984,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
@@ -62007,7 +62007,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
@@ -62030,7 +62030,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
@@ -62053,7 +62053,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
@@ -62076,7 +62076,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
@@ -62099,7 +62099,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
@@ -62122,7 +62122,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
@@ -62145,7 +62145,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
@@ -62303,7 +62303,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() + v0)
@@ -62322,7 +62322,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() - v0)
@@ -62341,7 +62341,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() * v0)
@@ -62476,7 +62476,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() << (v0 & 31))
@@ -62495,7 +62495,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(i.stack[i.sp-1].I32() >> (v0 & 31))
@@ -62514,7 +62514,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(int32(uint32(i.stack[i.sp-1].I32()) >> (v0 & 31)))
@@ -62533,7 +62533,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.Boxed(uint64(i.stack[i.sp-1])&uint64(r0) & ^uint64(types.VMask) | (uint64(i.stack[i.sp-1]) ^ uint64(r0)&types.VMask))
@@ -62552,7 +62552,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.Boxed(uint64(i.stack[i.sp-1]) & uint64(r0))
@@ -62571,7 +62571,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.Boxed(uint64(i.stack[i.sp-1]) | uint64(r0))
@@ -62590,7 +62590,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-1].I32()), int(v0))))
@@ -62609,7 +62609,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI32(int32(bits.RotateLeft32(uint32(i.stack[i.sp-1].I32()), -int(v0))))
@@ -62628,7 +62628,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() == v0)
@@ -62647,7 +62647,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() != v0)
@@ -62666,7 +62666,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() < v0)
@@ -62685,7 +62685,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) < uint32(v0))
@@ -62722,7 +62722,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() > v0)
@@ -62741,7 +62741,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) > uint32(v0))
@@ -62760,7 +62760,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() <= v0)
@@ -62779,7 +62779,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) <= uint32(v0))
@@ -62798,7 +62798,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].I32() >= v0)
@@ -62817,7 +62817,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint32(i.stack[i.sp-1].I32()) >= uint32(v0))
@@ -63094,7 +63094,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) > v0)
@@ -63117,7 +63117,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) > uint64(v0))
@@ -63140,7 +63140,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) <= v0)
@@ -63163,7 +63163,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) <= uint64(v0))
@@ -63186,7 +63186,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) >= v0)
@@ -63209,7 +63209,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) >= uint64(v0))
@@ -63232,7 +63232,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) == v0)
@@ -63255,7 +63255,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) != v0)
@@ -63278,7 +63278,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) < v0)
@@ -63301,7 +63301,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) < uint64(v0))
@@ -63323,7 +63323,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) > v0)
@@ -63342,7 +63342,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) > uint64(v0))
@@ -63361,7 +63361,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) <= v0)
@@ -63380,7 +63380,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) <= uint64(v0))
@@ -63399,7 +63399,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) >= v0)
@@ -63418,7 +63418,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) >= uint64(v0))
@@ -63437,7 +63437,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) + v0)
@@ -63456,7 +63456,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) - v0)
@@ -63475,7 +63475,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) * v0)
@@ -63610,7 +63610,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) << (v0 & 63))
@@ -63629,7 +63629,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) >> (v0 & 63))
@@ -63648,7 +63648,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(int64(uint64(i.borrowI64(i.stack[i.sp-1])) >> (v0 & 63)))
@@ -63667,7 +63667,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) ^ v0)
@@ -63686,7 +63686,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) & v0)
@@ -63705,7 +63705,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(i.borrowI64(i.stack[i.sp-1]) | v0)
@@ -63724,7 +63724,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(int64(bits.RotateLeft64(uint64(i.borrowI64(i.stack[i.sp-1])), int(v0))))
@@ -63743,7 +63743,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := i.boxI64(int64(bits.RotateLeft64(uint64(i.borrowI64(i.stack[i.sp-1])), -int(v0))))
@@ -63762,7 +63762,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) == v0)
@@ -63781,7 +63781,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) != v0)
@@ -63800,7 +63800,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.borrowI64(i.stack[i.sp-1]) < v0)
@@ -63819,7 +63819,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(uint64(i.borrowI64(i.stack[i.sp-1])) < uint64(v0))
@@ -64096,7 +64096,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
@@ -64119,7 +64119,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
@@ -64142,7 +64142,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
@@ -64165,7 +64165,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
@@ -64188,7 +64188,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
@@ -64211,7 +64211,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
@@ -64233,7 +64233,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(i.stack[i.sp-1].F32() + v0)
@@ -64252,7 +64252,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(i.stack[i.sp-1].F32() - v0)
@@ -64271,7 +64271,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(i.stack[i.sp-1].F32() * v0)
@@ -64383,7 +64383,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(min(i.stack[i.sp-1].F32(), v0))
@@ -64402,7 +64402,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(max(i.stack[i.sp-1].F32(), v0))
@@ -64421,7 +64421,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF32(float32(math.Copysign(float64(i.stack[i.sp-1].F32()), float64(v0))))
@@ -64440,7 +64440,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() == v0)
@@ -64459,7 +64459,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() != v0)
@@ -64478,7 +64478,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() < v0)
@@ -64497,7 +64497,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() > v0)
@@ -64516,7 +64516,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() <= v0)
@@ -64535,7 +64535,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F32() >= v0)
@@ -64697,7 +64697,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
@@ -64720,7 +64720,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
@@ -64743,7 +64743,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
@@ -64766,7 +64766,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
@@ -64789,7 +64789,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
@@ -64812,7 +64812,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)
@@ -64834,7 +64834,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(i.stack[i.sp-1].F64() + v0)
@@ -64853,7 +64853,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(i.stack[i.sp-1].F64() - v0)
@@ -64872,7 +64872,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(i.stack[i.sp-1].F64() * v0)
@@ -64984,7 +64984,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(math.Min(i.stack[i.sp-1].F64(), v0))
@@ -65003,7 +65003,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(math.Max(i.stack[i.sp-1].F64(), v0))
@@ -65022,7 +65022,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxF64(math.Copysign(i.stack[i.sp-1].F64(), v0))
@@ -65041,7 +65041,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() == v0)
@@ -65060,7 +65060,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() != v0)
@@ -65079,7 +65079,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() < v0)
@@ -65098,7 +65098,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() > v0)
@@ -65117,7 +65117,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() <= v0)
@@ -65136,7 +65136,7 @@ var (
 					if i.sp == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					if i.sp == 0 {
+					if i.sp < 1 {
 						panic(ErrStackUnderflow)
 					}
 					v1 := types.BoxI1(i.stack[i.sp-1].F64() >= v0)

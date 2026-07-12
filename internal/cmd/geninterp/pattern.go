@@ -9,10 +9,12 @@ import (
 )
 
 type step struct {
-	op   instr.Opcode
-	typ  reflect.Type
-	kind instr.Kind
-	not  bool
+	op          instr.Opcode
+	typ         reflect.Type
+	kind        instr.Kind
+	boxed       bool
+	materialize bool
+	not         bool
 }
 
 type pattern []step

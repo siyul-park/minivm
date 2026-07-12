@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
@@ -200,6 +201,32 @@ func TestGenerate(t *testing.T) {
 		for _, function := range []string{"func i32Add(", "func i64Eqz(", "func f64Ge("} {
 			require.NotContains(t, source, function)
 		}
+	})
+
+	t.Run("shares source lowerings", func(t *testing.T) {
+		data, err := os.ReadFile("lower.go")
+		require.NoError(t, err)
+		source := string(data)
+		for _, opcode := range []string{
+			"CONST_GET", "F32_CONST", "F64_CONST", "GLOBAL_GET",
+			"I32_CONST", "I64_CONST", "LOCAL_GET", "UPVAL_GET",
+		} {
+			require.Contains(t, source, "instr."+opcode+":")
+		}
+		for _, function := range []string{
+			"func constGet(", "func f32Const(", "func f64Const(",
+			"func globalGet(", "func i32Const(", "func i64Const(",
+			"func localGet(", "func upvalGet(",
+		} {
+			require.NotContains(t, source, function)
+		}
+		require.GreaterOrEqual(t, strings.Count(source, "sourceLower,"), 8)
+	})
+
+	t.Run("composes numeric sources through lowerers", func(t *testing.T) {
+		data, err := os.ReadFile("lower.go")
+		require.NoError(t, err)
+		require.Equal(t, 2, strings.Count(string(data), "sourceAccess("))
 	})
 
 	t.Run("maps every opcode once", func(t *testing.T) {
