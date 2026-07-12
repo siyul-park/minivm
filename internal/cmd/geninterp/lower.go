@@ -40,8 +40,8 @@ var lowerers = [256]func(step, []lowering, int, string) ([]lowering, lowering, e
 	instr.CONST_GET:           sourceLower,
 	instr.CORO_DONE:           wrap(coroDone),
 	instr.CORO_VALUE:          wrap(coroValue),
-	instr.DROP:                wrap(drop),
-	instr.DUP:                 wrap(dup),
+	instr.DROP:                refLower,
+	instr.DUP:                 refSource,
 	instr.ERROR_CODE:          wrap(errorCode),
 	instr.ERROR_GET:           wrap(errorGet),
 	instr.ERROR_NEW:           wrap(errorNew),
@@ -201,10 +201,10 @@ var lowerers = [256]func(step, []lowering, int, string) ([]lowering, lowering, e
 	instr.REF_CAST:            wrap(refCast),
 	instr.REF_EQ:              wrap(refEq),
 	instr.REF_GET:             wrap(refGet),
-	instr.REF_IS_NULL:         wrap(refIsNull),
+	instr.REF_IS_NULL:         refLower,
 	instr.REF_NE:              wrap(refNe),
 	instr.REF_NEW:             wrap(refNew),
-	instr.REF_NULL:            wrap(refNull),
+	instr.REF_NULL:            refSource,
 	instr.REF_SET:             wrap(refSet),
 	instr.REF_TEST:            wrap(refTest),
 	instr.RESUME:              wrap(resume),
@@ -268,7 +268,7 @@ func sourceLower(source step, pending []lowering, offset int, label string) ([]l
 	if !ok {
 		return nil, lowering{}, fmt.Errorf("unsupported source kind %s", source.kind)
 	}
-	lowered, err := sourceAccess(source.op, len(pending), 2, offset, kind, source.boxed, source.materialize, label)
+	lowered, err := sourceAccess(source, len(pending), 2, offset, kind, source.boxed, source.materialize, label)
 	if err != nil {
 		return nil, lowering{}, err
 	}
@@ -406,6 +406,162 @@ func kindName(kind instr.Kind) (string, bool) {
 	}
 }
 
+func refSource(source step, pending []lowering, _ int, _ string) ([]lowering, lowering, error) {
+	if source.kind == instr.KindAny {
+		return pending, lowering{source: source, handler: refHandler(source.op)}, nil
+	}
+	lowered := lowering{source: source}
+	switch source.op {
+	case instr.REF_NULL:
+		lowered.boxed = jen.Qual("github.com/siyul-park/minivm/types", "BoxedNull")
+		lowered.check = append(lowered.check, overflow())
+		lowered.push = append(lowered.push, lowered.check...)
+		lowered.push = append(lowered.push,
+			jen.Id("i").Dot("retain").Call(jen.Lit(0)),
+			jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Add(lowered.boxed),
+			jen.Id("i").Dot("sp").Op("++"),
+			jen.Id("i").Dot("fr").Dot("ip").Op("++"),
+		)
+	case instr.DUP:
+		lowered.boxed = jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1))
+		lowered.check = append(lowered.check,
+			jen.If(jen.Id("i").Dot("sp").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
+			overflow(),
+		)
+		lowered.push = append(lowered.push, lowered.check...)
+		lowered.push = append(lowered.push,
+			jen.Id("value").Op(":=").Add(lowered.boxed),
+			jen.Id("i").Dot("retainBox").Call(jen.Id("value")),
+			jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Id("value"),
+			jen.Id("i").Dot("sp").Op("++"),
+			jen.Id("i").Dot("fr").Dot("ip").Op("++"),
+		)
+	default:
+		return nil, lowering{}, fmt.Errorf("unsupported ref source %s", instr.TypeOf(source.op).Mnemonic)
+	}
+	return append(pending, lowered), lowered, nil
+}
+
+func refLower(source step, pending []lowering, total int, _ string) ([]lowering, lowering, error) {
+	if len(pending) == 0 {
+		return pending, lowering{source: source, handler: refHandler(source.op)}, nil
+	}
+	value := pending[len(pending)-1]
+	compile := append([]jen.Code(nil), value.compile...)
+	body := append([]jen.Code(nil), value.check...)
+	switch source.op {
+	case instr.DROP:
+		body = append(body, value.discard...)
+		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(total))
+	case instr.REF_IS_NULL:
+		body = append(body, value.body...)
+		condition := jen.Add(value.boxed).Dot("Ref").Call().Op("==").Lit(0)
+		if total == 0 {
+			lowered := lowering{source: value.source, compile: compile, check: value.check, body: value.body, raw: condition}
+			return []lowering{lowered}, lowered, nil
+		}
+		body = append(body,
+			jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Qual("github.com/siyul-park/minivm/types", "BoxI1").Call(condition),
+			jen.Id("i").Dot("sp").Op("++"),
+			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(total),
+		)
+	default:
+		return nil, lowering{}, fmt.Errorf("unsupported ref consumer %s", instr.TypeOf(source.op).Mnemonic)
+	}
+	compile = append(compile,
+		jen.Id("c").Dot("ip").Op("+=").Lit(width(value.source.op)),
+		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
+	)
+	return nil, lowering{source: source, compile: compile}, nil
+}
+
+func refHandler(op instr.Opcode) jen.Code {
+	switch op {
+	case instr.DROP:
+		return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
+			jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
+				jen.List(jen.Id("val")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
+				jen.Id("i").Dot("releaseBox").Call(jen.Id("val")),
+				jen.Id("i").Dot("sp").Op("--"),
+				jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
+	case instr.DUP:
+		return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
+			jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
+				jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Id("len").Call(jen.Id("i").Dot("stack")))).Block(jen.Id("panic").Call(jen.Id("ErrStackOverflow"))),
+				jen.List(jen.Id("val")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
+				jen.Id("i").Dot("retainBox").Call(jen.Id("val")),
+				jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp"))).Op("=").List(jen.Id("val")),
+				jen.Id("i").Dot("sp").Op("++"),
+				jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
+	case instr.REF_IS_NULL:
+		return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
+			jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
+				jen.List(jen.Id("val")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
+				jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxI1").Call(jen.Id("val").Dot("Ref").Call().Op("==").Add(jen.Lit(0)))),
+				jen.Id("i").Dot("releaseBox").Call(jen.Id("val")),
+				jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
+	case instr.REF_NULL:
+		return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
+			jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Id("len").Call(jen.Id("i").Dot("stack")))).Block(jen.Id("panic").Call(jen.Id("ErrStackOverflow"))),
+				jen.Id("i").Dot("retain").Call(jen.Lit(0)),
+				jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp"))).Op("=").List(jen.Id("types").Dot("BoxedNull")),
+				jen.Id("i").Dot("sp").Op("++"),
+				jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
+	default:
+		panic(fmt.Sprintf("unsupported ref opcode %s", instr.TypeOf(op).Mnemonic))
+	}
+}
+
+func composeRef(pattern pattern, total int, label string) ([]jen.Code, bool, error) {
+	if len(pattern) < 2 || len(pattern) > 3 {
+		return nil, false, nil
+	}
+	consumer := pattern[1]
+	if consumer.op != instr.DROP && consumer.op != instr.REF_IS_NULL {
+		return nil, false, nil
+	}
+	branch := len(pattern) == 3 && pattern[2].op == instr.BR_IF
+	if len(pattern) == 3 && !branch {
+		return nil, true, fmt.Errorf("ref pattern has unsupported trailing operations")
+	}
+	source := pattern[0]
+	source.kind = instr.KindRef
+	source.boxed = true
+	var pending []lowering
+	var err error
+	pending, _, err = lowerers[source.op](source, pending, 0, label)
+	if err != nil {
+		return nil, true, err
+	}
+	var lowered lowering
+	pending, lowered, err = refLower(consumer, pending, map[bool]int{true: 0, false: total}[branch], label)
+	if err != nil {
+		return nil, true, err
+	}
+	if branch {
+		_, lowered, err = branchLower(pattern[2], pending, total, label)
+		if err != nil {
+			return nil, true, err
+		}
+	}
+	return lowered.compile, true, nil
+}
+
+func composeDirectBranch(pattern pattern, total int, label string) ([]jen.Code, bool, error) {
+	if len(pattern) != 2 || pattern[0].op != instr.I32_CONST || pattern[1].op != instr.BR_IF {
+		return nil, false, nil
+	}
+	source := pattern[0]
+	source.kind = instr.KindI32
+	_, lowered, err := lowerers[source.op](source, nil, 0, label)
+	if err != nil {
+		return nil, true, err
+	}
+	condition := lowering{source: lowered.source, compile: lowered.compile, check: lowered.check, body: lowered.body, raw: jen.Add(lowered.raw).Op("!=").Lit(0)}
+	_, result, err := branchLower(pattern[1], []lowering{condition}, total, label)
+	return result.compile, true, err
+}
+
 func numericLower(source step, pending []lowering, total int, label string) ([]lowering, lowering, error) {
 	if total == 0 {
 		lowered := lowering{source: source}
@@ -421,6 +577,20 @@ func branchLower(source step, pending []lowering, total int, label string) ([]lo
 		if _, ok := arity(consumer.source.op); ok {
 			body, err := numericCode(consumer.source, pending[:len(pending)-1], total, label, true)
 			return nil, lowering{source: source, compile: body}, err
+		}
+		if consumer.raw != nil {
+			compile := append([]jen.Code(nil), consumer.compile...)
+			body := append([]jen.Code(nil), consumer.check...)
+			body = append(body, consumer.body...)
+			body = append(body,
+				jen.If(consumer.raw).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
+				jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(total),
+			)
+			compile = append(compile,
+				jen.Id("c").Dot("ip").Op("+=").Lit(width(consumer.source.op)),
+				jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
+			)
+			return nil, lowering{source: source, compile: compile}, nil
 		}
 	}
 	return pending, lowering{source: source, handler: brIf()}, nil
@@ -499,6 +669,12 @@ func compose(pattern pattern, total int, label string) ([]jen.Code, error) {
 	if body, ok, err := composeNumeric(pattern, total, label); ok {
 		return body, err
 	}
+	if body, ok, err := composeRef(pattern, total, label); ok {
+		return body, err
+	}
+	if body, ok, err := composeDirectBranch(pattern, total, label); ok {
+		return body, err
+	}
 	last := pattern[len(pattern)-1].op
 	consumer := last
 	if last == instr.BR_IF && len(pattern) > 1 {
@@ -521,28 +697,10 @@ func compose(pattern pattern, total int, label string) ([]jen.Code, error) {
 	if consumer == instr.CALL || consumer == instr.RETURN_CALL || consumer == instr.CLOSURE_NEW {
 		return callSequence(pattern, label)
 	}
-	if consumer == instr.DROP || consumer == instr.REF_IS_NULL {
-		return refSequence(pattern, total, label)
-	}
 	if consumer == instr.ARRAY_GET || consumer == instr.STRUCT_GET {
 		return indexSequence(pattern, total, label)
 	}
-	if len(pattern) == 2 && pattern[0].op == instr.I32_CONST && last == instr.BR_IF {
-		return branch(total), nil
-	}
 	return nil, fmt.Errorf("no fusion lowering for %s", instr.TypeOf(consumer).Mnemonic)
-}
-
-func branch(total int) []jen.Code {
-	return []jen.Code{
-		jen.Id("value").Op(":=").Add(immediate("I32", jen.Id("start"))),
-		jen.Id("c").Dot("ip").Op("+=").Lit(width(instr.I32_CONST)),
-		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(
-			jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
-			jen.If(jen.Id("value").Op("!=").Lit(0)).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
-			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(total),
-		)),
-	}
 }
 
 // call emits compile-time target resolution followed by target-specific
@@ -785,101 +943,6 @@ func arity(op instr.Opcode) (int, bool) {
 	return 0, false
 }
 
-func refSequence(pattern pattern, total int, label string) ([]jen.Code, error) {
-	if len(pattern) < 2 {
-		return nil, fmt.Errorf("ref pattern has no consumer")
-	}
-	if len(pattern) > 3 || len(pattern) == 3 && pattern[2].op != instr.BR_IF {
-		return nil, fmt.Errorf("ref pattern has unsupported trailing operations")
-	}
-	source := pattern[0].op
-	consumer := pattern[1].op
-	branch := len(pattern) == 3 && pattern[2].op == instr.BR_IF
-	pre, body, value, err := resolve(source, label)
-	if err != nil {
-		return nil, err
-	}
-	switch consumer {
-	case instr.DROP:
-		body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(total))
-	case instr.REF_IS_NULL:
-		body = append(body, jen.Id("value").Op(":=").Add(value))
-		if branch {
-			body = append(body,
-				jen.If(jen.Id("value").Dot("Ref").Call().Op("==").Lit(0)).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
-				jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(total),
-			)
-		} else {
-			body = append(body,
-				jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Qual("github.com/siyul-park/minivm/types", "BoxI1").Call(jen.Id("value").Dot("Ref").Call().Op("==").Lit(0)),
-				jen.Id("i").Dot("sp").Op("++"),
-				jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(total),
-			)
-		}
-	default:
-		return nil, fmt.Errorf("unsupported ref consumer %s", instr.TypeOf(consumer).Mnemonic)
-	}
-	pre = append(pre,
-		jen.Id("c").Dot("ip").Op("+=").Lit(width(source)),
-		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
-	)
-	return pre, nil
-}
-
-func resolve(op instr.Opcode, label string) ([]jen.Code, []jen.Code, jen.Code, error) {
-	overflow := jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow")))
-	switch op {
-	case instr.LOCAL_GET:
-		return []jen.Code{
-				jen.Id("idx").Op(":=").Int().Call(jen.Id("c").Dot("code").Index(jen.Id("start").Op("+").Lit(1))),
-				metadata("locals", label),
-			}, []jen.Code{
-				overflow,
-				jen.Id("addr").Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id("idx"),
-				jen.If(jen.Id("addr").Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
-			}, jen.Id("i").Dot("stack").Index(jen.Id("addr")), nil
-	case instr.GLOBAL_GET:
-		return []jen.Code{
-				jen.Id("idx").Op(":=").Qual("github.com/siyul-park/minivm/instr", "ParseU16").Call(jen.Id("c").Dot("code"), jen.Id("start").Op("+").Lit(1)),
-				metadata("globals", label),
-			}, []jen.Code{
-				overflow,
-				jen.If(jen.Id("idx").Op(">=").Len(jen.Id("i").Dot("globals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
-			}, jen.Id("i").Dot("globals").Index(jen.Id("idx")), nil
-	case instr.UPVAL_GET:
-		return []jen.Code{
-				jen.Id("idx").Op(":=").Int().Call(jen.Id("c").Dot("code").Index(jen.Id("start").Op("+").Lit(1))),
-				metadata("captures", label),
-			}, []jen.Code{
-				overflow,
-				jen.If(jen.Id("idx").Op(">=").Len(jen.Id("i").Dot("fr").Dot("upvals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
-			}, jen.Id("i").Dot("fr").Dot("upvals").Index(jen.Id("idx")), nil
-	case instr.CONST_GET:
-		return []jen.Code{
-			jen.Id("idx").Op(":=").Qual("github.com/siyul-park/minivm/instr", "ParseU16").Call(jen.Id("c").Dot("code"), jen.Id("start").Op("+").Lit(1)),
-			jen.If(jen.Id("idx").Op(">=").Len(jen.Id("c").Dot("constants"))).Block(reject(label)),
-			jen.Id("constant").Op(":=").Id("c").Dot("constants").Index(jen.Id("idx")),
-			jen.If(jen.Id("constant").Dot("Kind").Call().Op("!=").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(reject(label)),
-			jen.Id("addr").Op(":=").Id("constant").Dot("Ref").Call(),
-			jen.If(jen.Id("addr").Op("<").Lit(0).Op("||").Id("addr").Op(">=").Len(jen.Id("c").Dot("heap"))).Block(reject(label)),
-			jen.If(jen.List(jen.Id("_"), jen.Id("ok")).Op(":=").Id("c").Dot("heap").Index(jen.Id("addr")).Assert(jen.Qual("github.com/siyul-park/minivm/types", "String")), jen.Id("ok")).Block(reject(label)),
-		}, []jen.Code{overflow}, jen.Id("constant"), nil
-	case instr.REF_NULL:
-		return nil, []jen.Code{overflow}, jen.Qual("github.com/siyul-park/minivm/types", "BoxedNull"), nil
-	case instr.DUP:
-		return nil, []jen.Code{
-			jen.If(jen.Id("i").Dot("sp").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
-			overflow,
-		}, jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)), nil
-	default:
-		return nil, nil, nil, fmt.Errorf("unsupported ref source %s", instr.TypeOf(op).Mnemonic)
-	}
-}
-
-func metadata(field, label string) jen.Code {
-	return jen.If(jen.Id("idx").Op(">=").Len(jen.Id("c").Dot(field)).Op("||").Id("c").Dot(field).Index(jen.Id("idx")).Op("!=").Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(reject(label))
-}
-
 // index emits direct constant-index ARRAY_GET and STRUCT_GET handlers.
 func indexSequence(pattern pattern, totalWidth int, label string) ([]jen.Code, error) {
 	if len(pattern) != 2 {
@@ -1019,11 +1082,8 @@ func numericCode(consumer step, sources []lowering, total int, label string, bra
 	}
 
 	var compile, body []jen.Code
-	for index, source := range sources {
+	for _, source := range sources {
 		compile = append(compile, source.compile...)
-		body = append(body, jen.If(add(jen.Id("i").Dot("sp"), index).Op("==").Len(jen.Id("i").Dot("stack"))).Block(
-			jen.Panic(jen.Id("ErrStackOverflow")),
-		))
 		body = append(body, source.check...)
 		body = append(body, source.body...)
 	}
@@ -1332,14 +1392,18 @@ func traps(op instr.Opcode) bool {
 	}
 }
 
-func sourceAccess(op instr.Opcode, number, count, offset int, kind string, raw, materialize bool, label string) (lowering, error) {
+func sourceAccess(source step, number, count, offset int, kind string, raw, materialize bool, label string) (lowering, error) {
+	op := source.op
 	width := width(op)
 	name := slot(number)
 	boxed := box(name)
 	idx := fmt.Sprintf("i%d", number)
 	addr := fmt.Sprintf("i%d", count+number)
 	at := add(jen.Id("start"), offset)
-	result := lowering{source: step{op: op, kind: instr.KindAny}, raw: jen.Id(name), boxed: jen.Id(boxed)}
+	result := lowering{source: source, raw: jen.Id(name), boxed: jen.Id(boxed)}
+	result.check = append(result.check, jen.If(add(jen.Id("i").Dot("sp"), number).Op("==").Len(jen.Id("i").Dot("stack"))).Block(
+		jen.Panic(jen.Id("ErrStackOverflow")),
+	))
 	switch op {
 	case instr.LOCAL_GET, instr.UPVAL_GET:
 		result.compile = append(result.compile, jen.Id(idx).Op(":=").Int().Call(jen.Id("c").Dot("code").Index(jen.Add(at).Op("+").Lit(1))))
@@ -1394,6 +1458,23 @@ func sourceAccess(op instr.Opcode, number, count, offset int, kind string, raw, 
 			result.compile = append(result.compile,
 				jen.If(jen.Id(boxed).Dot("Kind").Call().Op("!=").Add(expected)).Block(reject(label)),
 			)
+			if kind == "Ref" && source.typ != nil {
+				name := source.typ.Name()
+				if name == "" {
+					return lowering{}, fmt.Errorf("unsupported constant guard %s", source.typ)
+				}
+				ref := fmt.Sprintf("c%d", number)
+				result.compile = append(result.compile,
+					jen.Id(ref).Op(":=").Id(boxed).Dot("Ref").Call(),
+					jen.If(jen.Id(ref).Op("<").Lit(0).Op("||").Id(ref).Op(">=").Len(jen.Id("c").Dot("heap"))).Block(reject(label)),
+				)
+				guard := jen.List(jen.Id("_"), jen.Id("ok")).Op(":=").Id("c").Dot("heap").Index(jen.Id(ref)).Assert(jen.Qual("github.com/siyul-park/minivm/types", name))
+				if source.not {
+					result.compile = append(result.compile, jen.If(guard, jen.Id("ok")).Block(reject(label)))
+				} else {
+					result.compile = append(result.compile, guard, jen.If(jen.Op("!").Id("ok")).Block(reject(label)))
+				}
+			}
 		}
 	case instr.I32_CONST, instr.I64_CONST, instr.F32_CONST, instr.F64_CONST:
 		if raw {
@@ -1418,7 +1499,6 @@ func sourceAccess(op instr.Opcode, number, count, offset int, kind string, raw, 
 	if !raw && op != instr.I32_CONST && op != instr.I64_CONST && op != instr.F32_CONST && op != instr.F64_CONST && !(op == instr.CONST_GET && kind == "I64") {
 		result.body = append(result.body, jen.Id(name).Op(":=").Add(borrow(kind, jen.Id(box(name)))))
 	}
-	result.push = append(result.push, jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))))
 	result.push = append(result.push, result.check...)
 	switch op {
 	case instr.LOCAL_GET:
@@ -1438,7 +1518,7 @@ func sourceAccess(op instr.Opcode, number, count, offset int, kind string, raw, 
 	case instr.F64_CONST:
 		result.push = append(result.push, jen.Id(box(name)).Op(":=").Qual("github.com/siyul-park/minivm/types", "BoxF64").Call(jen.Id(name)))
 	}
-	if kind == "I64" && op != instr.I64_CONST {
+	if (kind == "I64" && op != instr.I64_CONST) || kind == "Ref" {
 		result.push = append(result.push, jen.Id("i").Dot("retainBox").Call(jen.Id(box(name))))
 	}
 	result.push = append(result.push,
@@ -2188,26 +2268,6 @@ func coroValue() jen.Code {
 				jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch")))),
 			jen.Id("i").Dot("releaseBox").Call(jen.Id("box")),
 			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("val")),
-			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
-}
-
-func drop() jen.Code {
-	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
-		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
-			jen.List(jen.Id("val")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
-			jen.Id("i").Dot("releaseBox").Call(jen.Id("val")),
-			jen.Id("i").Dot("sp").Op("--"),
-			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
-}
-
-func dup() jen.Code {
-	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
-		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
-			jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Id("len").Call(jen.Id("i").Dot("stack")))).Block(jen.Id("panic").Call(jen.Id("ErrStackOverflow"))),
-			jen.List(jen.Id("val")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
-			jen.Id("i").Dot("retainBox").Call(jen.Id("val")),
-			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp"))).Op("=").List(jen.Id("val")),
-			jen.Id("i").Dot("sp").Op("++"),
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
@@ -3211,15 +3271,6 @@ func refGet() jen.Code {
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
-func refIsNull() jen.Code {
-	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
-		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
-			jen.List(jen.Id("val")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
-			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxI1").Call(jen.Id("val").Dot("Ref").Call().Op("==").Add(jen.Lit(0)))),
-			jen.Id("i").Dot("releaseBox").Call(jen.Id("val")),
-			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
-}
-
 func refNe() jen.Code {
 	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Lit(2))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
@@ -3238,15 +3289,6 @@ func refNew() jen.Code {
 			jen.List(jen.Id("v")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
 			jen.If(jen.Id("v").Dot("Kind").Call().Op("==").Add(jen.Id("types").Dot("KindRef"))).Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))),
 			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("types").Dot("Unbox").Call(jen.Id("v"))))),
-			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
-}
-
-func refNull() jen.Code {
-	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.Id("c").Dot("ip").Op("++"),
-		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("sp").Op("==").Add(jen.Id("len").Call(jen.Id("i").Dot("stack")))).Block(jen.Id("panic").Call(jen.Id("ErrStackOverflow"))),
-			jen.Id("i").Dot("retain").Call(jen.Lit(0)),
-			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp"))).Op("=").List(jen.Id("types").Dot("BoxedNull")),
-			jen.Id("i").Dot("sp").Op("++"),
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 

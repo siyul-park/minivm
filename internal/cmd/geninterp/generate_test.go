@@ -229,6 +229,26 @@ func TestGenerate(t *testing.T) {
 		require.Equal(t, 2, strings.Count(string(data), "sourceAccess("))
 	})
 
+	t.Run("shares ref lowerings", func(t *testing.T) {
+		data, err := os.ReadFile("lower.go")
+		require.NoError(t, err)
+		source := string(data)
+		for _, mapping := range []string{
+			"instr.DROP:                refLower",
+			"instr.DUP:                 refSource",
+			"instr.REF_IS_NULL:         refLower",
+			"instr.REF_NULL:            refSource",
+		} {
+			require.Contains(t, source, mapping)
+		}
+		for _, function := range []string{
+			"func drop(", "func dup(", "func refIsNull(", "func refNull(",
+			"func refSequence(", "func resolve(", "func metadata(", "func branch(",
+		} {
+			require.NotContains(t, source, function)
+		}
+	})
+
 	t.Run("maps every opcode once", func(t *testing.T) {
 		for value, lowering := range lowerers {
 			op := instr.Opcode(value)
