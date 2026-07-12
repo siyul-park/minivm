@@ -51,6 +51,56 @@ func TestGenerate(t *testing.T) {
 		require.Equal(t, []string{"threader", "threaded", "fusions", "invalid", "init", "Compile"}, declarations)
 	})
 
+	t.Run("preserves standalone i64 consumption", func(t *testing.T) {
+		outputs, err := generate()
+		require.NoError(t, err)
+		file, err := parser.ParseFile(token.NewFileSet(), outputs[0].path, outputs[0].data, 0)
+		require.NoError(t, err)
+
+		var handler ast.Expr
+		ast.Inspect(file, func(node ast.Node) bool {
+			specification, ok := node.(*ast.ValueSpec)
+			if !ok || len(specification.Names) != 1 || specification.Names[0].Name != "threaded" || len(specification.Values) != 1 {
+				return true
+			}
+			literal, ok := specification.Values[0].(*ast.CompositeLit)
+			if !ok {
+				return false
+			}
+			for _, element := range literal.Elts {
+				entry, ok := element.(*ast.KeyValueExpr)
+				if !ok {
+					continue
+				}
+				opcode, ok := entry.Key.(*ast.SelectorExpr)
+				if ok && opcode.Sel.Name == "I64_ADD" {
+					handler = entry.Value
+					return false
+				}
+			}
+			return false
+		})
+		require.NotNil(t, handler)
+
+		unbox := 0
+		borrow := 0
+		ast.Inspect(handler, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch selector.Sel.Name {
+			case "unboxI64":
+				unbox++
+			case "borrowI64":
+				borrow++
+			}
+			return true
+		})
+		require.Equal(t, 2, unbox)
+		require.Zero(t, borrow)
+	})
+
 	t.Run("checks generated files", func(t *testing.T) {
 		t.Chdir(t.TempDir())
 

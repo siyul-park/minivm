@@ -947,8 +947,71 @@ func numericLower(source step, pending []lowering, total int, label string) ([]l
 		lowered := lowering{source: source}
 		return append(pending, lowered), lowered, nil
 	}
+	if len(pending) == 0 {
+		body, err := standaloneNumericCode(source.op)
+		return nil, lowering{source: source, compile: body}, err
+	}
 	body, err := numericCode(source, pending, total, label, false)
 	return nil, lowering{source: source, compile: body}, err
+}
+
+func standaloneNumericCode(op instr.Opcode) ([]jen.Code, error) {
+	arity, ok := arity(op)
+	if !ok {
+		return nil, fmt.Errorf("unsupported numeric opcode %s", instr.TypeOf(op).Mnemonic)
+	}
+	kind, _ := number(op)
+	body := []jen.Code{
+		jen.If(jen.Id("i").Dot("sp").Op("<").Lit(arity)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
+	}
+	if arity == 1 {
+		body = append(body,
+			jen.Id("v").Op(":=").Add(take(kind, jen.Id("i").Dot("sp").Op("-").Lit(1))),
+			jen.Block(
+				jen.Id("v").Op(":=").Id("v"),
+				jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Add(apply(op, jen.Id("v"))),
+			),
+		)
+	} else {
+		boxed := op == instr.I32_XOR || op == instr.I32_AND || op == instr.I32_OR
+		rhs := take(kind, jen.Id("i").Dot("sp").Op("-").Lit(1))
+		lhs := take(kind, jen.Id("i").Dot("sp").Op("-").Lit(2))
+		if boxed {
+			rhs = jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1))
+			lhs = jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(2))
+		}
+		body = append(body,
+			jen.Id("rhs").Op(":=").Add(rhs),
+			jen.Id("lhs").Op(":=").Add(lhs),
+		)
+		if traps(op) {
+			body = append(body,
+				jen.Var().Id("result").Qual("github.com/siyul-park/minivm/types", "Boxed"),
+				jen.Block(
+					jen.Id("lhs").Op(":=").Id("lhs"),
+					jen.Id("rhs").Op(":=").Id("rhs"),
+					jen.If(jen.Id("rhs").Op("==").Lit(0)).Block(jen.Panic(jen.Id("ErrDivideByZero"))),
+					jen.Id("result").Op("=").Add(apply(op, jen.Id("lhs"), jen.Id("rhs"))),
+				),
+				jen.Id("i").Dot("sp").Op("--"),
+				jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Id("result"),
+			)
+		} else {
+			body = append(body,
+				jen.Id("i").Dot("sp").Op("--"),
+				jen.Block(
+					jen.Id("lhs").Op(":=").Id("lhs"),
+					jen.Id("rhs").Op(":=").Id("rhs"),
+					jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Op("=").Add(apply(op, jen.Id("lhs"), jen.Id("rhs"))),
+				),
+			)
+		}
+	}
+	body = append(body, jen.Id("i").Dot("fr").Dot("ip").Op("++"))
+	return []jen.Code{
+		jen.Id("c").Dot("ip").Op("++"),
+		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
+	}, nil
 }
 
 func branchLower(source step, pending []lowering, total int, label string) ([]lowering, lowering, error) {
@@ -1626,8 +1689,11 @@ func sourceAccess(source step, number, offset int, label string) (lowering, erro
 	switch op {
 	case instr.LOCAL_GET:
 		result.compile = append(result.compile, check("locals", idx, expected, label))
-		result.check = append(result.check, jen.If(jen.Id("i").Dot("fr").Dot("bp").Op("+").Id(idx).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))))
-		result.body = append(result.body, jen.Id(addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(idx), jen.Id(boxed).Op(":=").Id("i").Dot("stack").Index(jen.Id(addr)))
+		result.check = append(result.check,
+			jen.Id(addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(idx),
+			jen.If(jen.Id(addr).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+		)
+		result.body = append(result.body, jen.Id(boxed).Op(":=").Id("i").Dot("stack").Index(jen.Id(addr)))
 	case instr.GLOBAL_GET:
 		result.compile = append(result.compile, check("globals", idx, expected, label))
 		result.check = append(result.check, jen.If(jen.Id(idx).Op(">=").Len(jen.Id("i").Dot("globals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))))
@@ -1714,7 +1780,7 @@ func sourceAccess(source step, number, offset int, label string) (lowering, erro
 	result.push = append(result.push, result.check...)
 	switch op {
 	case instr.LOCAL_GET:
-		result.push = append(result.push, jen.Id(addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(idx), jen.Id(box(name)).Op(":=").Id("i").Dot("stack").Index(jen.Id(addr)))
+		result.push = append(result.push, jen.Id(box(name)).Op(":=").Id("i").Dot("stack").Index(jen.Id(addr)))
 	case instr.GLOBAL_GET:
 		result.push = append(result.push, jen.Id(box(name)).Op(":=").Id("i").Dot("globals").Index(jen.Id(idx)))
 	case instr.UPVAL_GET:
