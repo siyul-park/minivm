@@ -8,7 +8,9 @@ Hide static and trace compilation behind one compiler entry point. The interpret
 
 - Preserve bytecode semantics, deoptimization IPs, ownership, spill safety, loop safepoints, native-call ABI, metrics meaning, and current performance.
 - Keep `Interpreter` unaware of CFG, trace trees, planner order, and strategy rejection.
-- Ex## Architecture
+- Keep public APIs unchanged and all new compiler types private.
+
+## Architecture
 
 The compiler owns an ordered planner chain. Each planner inspects the same compile input and returns zero or more complete plans. The compiler lowers plans in order and stops at the first successful module.
 
@@ -164,7 +166,7 @@ The exact loop may accumulate compatible entry and loop plans into one module, b
 
 The backend receives only `compileInput`, `plan`, and `lowering` state. It cannot inspect planner identity.
 
-Trace-specific scheduling fields are removed from `lowering`: `tree`, `branches`, `pending`, `pendingBranches`, `queued`, `tails`, and `loop`. Their information must already be represented by plan blocks, entry kind, terminators, and spill policy.
+Trace-specific source objects are removed from `lowering`: `tree`, `branches`, and `loop`. Lowering may retain a planner-neutral block worklist because learned continuations need the symbolic state produced at the branch point. The worklist stores only plan blocks, labels, snapshots, and ordering metadata; it must not contain trace trees, CFG nodes, or planner-specific types.
 
 Shared lowering responsibilities:
 
@@ -249,7 +251,7 @@ Each migration step must preserve a passing focused test set and end without com
 - `lowerer` exposes one `lower(*lowering, plan)` method.
 - Static and trace planners produce the same plan type.
 - ARM64 lowering has one block path, one opcode path, and one terminator path.
-- `lowering` contains no trace tree or pending-continuation scheduling state.
+- `lowering` contains no trace tree, CFG node, or planner-specific scheduling state; any deferred work uses generic plan blocks and symbolic snapshots.
 - Obsolete CFG-specific production files and symbols are deleted.
 - Production JIT file count, symbol count, and LOC decrease from the current branch.
 - All correctness, race, cross-architecture, and performance gates pass.
