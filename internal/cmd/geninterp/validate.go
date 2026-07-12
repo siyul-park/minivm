@@ -56,8 +56,8 @@ func (p pattern) delta() (int, bool) {
 
 func (p pattern) key() string {
 	var key strings.Builder
-	for indexSequence, step := range p {
-		if indexSequence > 0 {
+	for index, step := range p {
+		if index > 0 {
 			key.WriteByte('/')
 		}
 		fmt.Fprintf(&key, "%d", step.op)
@@ -72,8 +72,8 @@ func (p pattern) overlaps(other pattern) bool {
 	if len(p) != len(other) {
 		return false
 	}
-	for indexSequence := range p {
-		if p[indexSequence].op != other[indexSequence].op || !p[indexSequence].overlaps(other[indexSequence]) {
+	for index := range p {
+		if p[index].op != other[index].op || !p[index].overlaps(other[index]) {
 			return false
 		}
 	}
@@ -100,7 +100,7 @@ func validate(patterns []pattern) error {
 	seen := make(map[string]pattern, len(patterns))
 	for _, pattern := range patterns {
 		if len(pattern) == 0 {
-			return fmt.Errorf("empty compose pattern")
+			return fmt.Errorf("empty fusion pattern")
 		}
 		for _, step := range pattern {
 			if !instr.Valid(step.op) {
@@ -138,15 +138,15 @@ func validate(patterns []pattern) error {
 		}
 		key := pattern.key()
 		if _, ok := seen[key]; ok {
-			return fmt.Errorf("duplicate compose pattern %s", key)
+			return fmt.Errorf("duplicate fusion pattern %s", key)
 		}
 		for otherKey, other := range seen {
 			if pattern.overlaps(other) {
-				return fmt.Errorf("ambiguous compose patterns %s and %s", otherKey, key)
+				return fmt.Errorf("ambiguous fusion patterns %s and %s", otherKey, key)
 			}
 		}
 		if _, err := compose(pattern, pattern.width(), ""); err != nil {
-			return fmt.Errorf("unsupported compose %s: %w", key, err)
+			return fmt.Errorf("unsupported fusion %s: %w", key, err)
 		}
 		seen[key] = pattern
 	}

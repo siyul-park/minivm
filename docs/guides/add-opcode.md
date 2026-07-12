@@ -68,11 +68,11 @@ Verifier changes should reject only statically malformed bytecode. Runtime traps
 
 ## Step 4 — Implement Threaded Semantics
 
-Add the opcode Jennifer lowering in `internal/cmd/geninterp/lower.go`, then run `make generate`. Add a pattern in `internal/cmd/geninterp/pattern.go` only when the opcode participates in threaded fusion. Do not edit `interp/threaded.go` directly.
+Add the opcode Jennifer lowering in `internal/cmd/geninterp/lower.go`, then run `make generate`. Map it once in `lowerers`; that entry owns standalone generation and any composable specialization. Add a pattern in `internal/cmd/geninterp/pattern.go` only when the opcode participates in threaded fusion. Patterns select sequences and guards, never a second semantic renderer. Do not edit `interp/threaded.go` directly.
 
 Checklist:
 
-- map the opcode exactly once in `lowerings`
+- map the opcode exactly once in `lowerers`
 - advance `c.ip` by the exact instruction width during compilation
 - advance `i.fr.ip` by the exact instruction width during execution
 - check stack underflow and overflow where applicable
@@ -133,6 +133,7 @@ Avoid repeating the same explanation in multiple documents. Link to the canonica
 ```bash
 make test
 make lint
+make check-generated
 ```
 
 If JIT support was added, also run the relevant ARM64 tests or benchmarks on ARM64 hardware.

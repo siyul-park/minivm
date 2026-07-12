@@ -7,7 +7,6 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
@@ -24,10 +23,32 @@ func TestGenerate(t *testing.T) {
 		require.Equal(t, first, second)
 
 		paths := make([]string, len(first))
-		for indexSequence, output := range first {
-			paths[indexSequence] = output.path
+		for index, output := range first {
+			paths[index] = output.path
 		}
 		require.Equal(t, []string{"interp/threaded.go"}, paths)
+
+		file, err := parser.ParseFile(token.NewFileSet(), first[0].path, first[0].data, 0)
+		require.NoError(t, err)
+		var declarations []string
+		for _, declaration := range file.Decls {
+			switch declaration := declaration.(type) {
+			case *ast.GenDecl:
+				for _, specification := range declaration.Specs {
+					switch specification := specification.(type) {
+					case *ast.TypeSpec:
+						declarations = append(declarations, specification.Name.Name)
+					case *ast.ValueSpec:
+						for _, name := range specification.Names {
+							declarations = append(declarations, name.Name)
+						}
+					}
+				}
+			case *ast.FuncDecl:
+				declarations = append(declarations, declaration.Name.Name)
+			}
+		}
+		require.Equal(t, []string{"threader", "threaded", "fusions", "invalid", "init", "Compile"}, declarations)
 	})
 
 	t.Run("checks generated files", func(t *testing.T) {
@@ -133,7 +154,7 @@ func TestGenerate(t *testing.T) {
 	})
 
 	t.Run("rejects missing lowerers", func(t *testing.T) {
-		require.ErrorContains(t, validate([]pattern{seq(op(instr.LOCAL_GET), op(instr.CALL))}), "unsupported compose")
+		require.ErrorContains(t, validate([]pattern{seq(op(instr.LOCAL_GET), op(instr.CALL))}), "unsupported fusion")
 	})
 
 	t.Run("rejects unsupported trailing operations", func(t *testing.T) {
@@ -154,148 +175,106 @@ func TestGenerate(t *testing.T) {
 		}))
 	})
 
-	t.Run("uses one opcode lowering path", func(t *testing.T) {
+	t.Run("uses unified lowering architecture", func(t *testing.T) {
 		file, err := parser.ParseFile(token.NewFileSet(), "lower.go", nil, 0)
 		require.NoError(t, err)
 
 		types := make(map[string]struct{})
 		values := make(map[string]struct{})
 		functions := make(map[string]struct{})
-		for _, declaration := range file.Decls {
-			switch declaration := declaration.(type) {
-			case *ast.GenDecl:
-				for _, specification := range declaration.Specs {
-					switch specification := specification.(type) {
-					case *ast.TypeSpec:
-						types[specification.Name.Name] = struct{}{}
-					case *ast.ValueSpec:
-						for _, name := range specification.Names {
-							values[name.Name] = struct{}{}
+		mappings := make(map[string]string)
+		calls := make(map[string]int)
+		ast.Inspect(file, func(node ast.Node) bool {
+			switch node := node.(type) {
+			case *ast.TypeSpec:
+				types[node.Name.Name] = struct{}{}
+			case *ast.ValueSpec:
+				for index, name := range node.Names {
+					values[name.Name] = struct{}{}
+					if name.Name != "lowerers" || index >= len(node.Values) {
+						continue
+					}
+					literal, ok := node.Values[index].(*ast.CompositeLit)
+					if !ok {
+						continue
+					}
+					for _, element := range literal.Elts {
+						entry, ok := element.(*ast.KeyValueExpr)
+						if !ok {
+							continue
+						}
+						op, ok := entry.Key.(*ast.SelectorExpr)
+						if !ok {
+							continue
+						}
+						switch value := entry.Value.(type) {
+						case *ast.Ident:
+							mappings[op.Sel.Name] = value.Name
+						case *ast.CallExpr:
+							fn, ok := value.Fun.(*ast.Ident)
+							if !ok || len(value.Args) != 1 {
+								continue
+							}
+							arg, ok := value.Args[0].(*ast.Ident)
+							if ok {
+								mappings[op.Sel.Name] = fn.Name + "(" + arg.Name + ")"
+							}
 						}
 					}
 				}
 			case *ast.FuncDecl:
-				functions[declaration.Name.Name] = struct{}{}
+				functions[node.Name.Name] = struct{}{}
+			case *ast.CallExpr:
+				if fn, ok := node.Fun.(*ast.Ident); ok {
+					calls[fn.Name]++
+				}
 			}
-		}
+			return true
+		})
 
 		require.Contains(t, types, "lowering")
 		require.Contains(t, values, "lowerers")
 		require.Contains(t, functions, "compose")
-		for _, name := range []string{"fusion", "call", "reference", "index", "arithmetic", "integer", "operand"} {
+		require.Contains(t, functions, "prepare")
+		require.Equal(t, 1, calls["sourceAccess"])
+
+		expected := map[string]string{
+			"BR_IF":       "branchLower",
+			"CALL":        "callLower",
+			"CLOSURE_NEW": "callLower",
+			"CONST_GET":   "sourceLower",
+			"DROP":        "refLower",
+			"DUP":         "refSource",
+			"F32_CONST":   "sourceLower",
+			"F64_CONST":   "sourceLower",
+			"GLOBAL_GET":  "sourceLower",
+			"I32_CONST":   "sourceLower",
+			"I64_CONST":   "sourceLower",
+			"LOCAL_GET":   "sourceLower",
+			"REF_IS_NULL": "refLower",
+			"REF_NULL":    "refSource",
+			"RETURN_CALL": "callLower",
+			"STRUCT_GET":  "indexLower",
+			"ARRAY_GET":   "indexLower",
+			"UPVAL_GET":   "sourceLower",
+		}
+		for _, family := range families {
+			for _, op := range append(family.binary, family.compare...) {
+				expected[symbol(op)] = "numericLower"
+			}
+		}
+		expected["I32_EQZ"] = "numericLower"
+		expected["I64_EQZ"] = "numericLower"
+		for op, lower := range expected {
+			require.Equal(t, lower, mappings[op], op)
+		}
+
+		for _, name := range []string{
+			"fusion", "call", "reference", "index", "arithmetic", "integer", "operand",
+			"callSequence", "composeCall", "composeDirectBranch", "composeIndex",
+			"composeNumeric", "composeRef", "indexSequence", "refSequence",
+		} {
 			require.NotContains(t, functions, name)
-		}
-	})
-
-	t.Run("shares numeric lowerings", func(t *testing.T) {
-		data, err := os.ReadFile("lower.go")
-		require.NoError(t, err)
-		source := string(data)
-		for _, mapping := range []string{
-			"instr.I32_ADD:             numericLower",
-			"instr.I64_EQZ:             numericLower",
-			"instr.F64_GE:              numericLower",
-		} {
-			require.Contains(t, source, mapping)
-		}
-		for _, function := range []string{"func i32Add(", "func i64Eqz(", "func f64Ge("} {
-			require.NotContains(t, source, function)
-		}
-	})
-
-	t.Run("shares source lowerings", func(t *testing.T) {
-		data, err := os.ReadFile("lower.go")
-		require.NoError(t, err)
-		source := string(data)
-		for _, opcode := range []string{
-			"CONST_GET", "F32_CONST", "F64_CONST", "GLOBAL_GET",
-			"I32_CONST", "I64_CONST", "LOCAL_GET", "UPVAL_GET",
-		} {
-			require.Contains(t, source, "instr."+opcode+":")
-		}
-		for _, function := range []string{
-			"func constGet(", "func f32Const(", "func f64Const(",
-			"func globalGet(", "func i32Const(", "func i64Const(",
-			"func localGet(", "func upvalGet(",
-		} {
-			require.NotContains(t, source, function)
-		}
-		require.GreaterOrEqual(t, strings.Count(source, "sourceLower,"), 8)
-	})
-
-	t.Run("composes numeric sources through lowerers", func(t *testing.T) {
-		data, err := os.ReadFile("lower.go")
-		require.NoError(t, err)
-		require.Equal(t, 2, strings.Count(string(data), "sourceAccess("))
-	})
-
-	t.Run("shares ref lowerings", func(t *testing.T) {
-		data, err := os.ReadFile("lower.go")
-		require.NoError(t, err)
-		source := string(data)
-		for _, mapping := range []string{
-			"instr.DROP:                refLower",
-			"instr.DUP:                 refSource",
-			"instr.REF_IS_NULL:         refLower",
-			"instr.REF_NULL:            refSource",
-		} {
-			require.Contains(t, source, mapping)
-		}
-		for _, function := range []string{
-			"func drop(", "func dup(", "func refIsNull(", "func refNull(",
-			"func refSequence(", "func resolve(", "func metadata(", "func branch(",
-		} {
-			require.NotContains(t, source, function)
-		}
-	})
-
-	t.Run("shares index lowerings", func(t *testing.T) {
-		data, err := os.ReadFile("lower.go")
-		require.NoError(t, err)
-		source := string(data)
-		for _, mapping := range []string{
-			"instr.ARRAY_GET:           indexLower",
-			"instr.STRUCT_GET:          indexLower",
-		} {
-			require.Contains(t, source, mapping)
-		}
-		for _, function := range []string{
-			"func arrayGet(", "func structGet(", "func indexSequence(",
-		} {
-			require.NotContains(t, source, function)
-		}
-	})
-
-	t.Run("shares call lowerings", func(t *testing.T) {
-		data, err := os.ReadFile("lower.go")
-		require.NoError(t, err)
-		source := string(data)
-		for _, mapping := range []string{
-			"instr.CALL:                callLower",
-			"instr.CLOSURE_NEW:         callLower",
-			"instr.RETURN_CALL:         callLower",
-		} {
-			require.Contains(t, source, mapping)
-		}
-		for _, function := range []string{
-			"func callOp(", "func closureNew(", "func returnCall(",
-			"func callSequence(",
-		} {
-			require.NotContains(t, source, function)
-		}
-	})
-
-	t.Run("uses one composition loop", func(t *testing.T) {
-		data, err := os.ReadFile("lower.go")
-		require.NoError(t, err)
-		source := string(data)
-		require.Contains(t, source, "func prepare(")
-		for _, function := range []string{
-			"func composeNumeric(", "func composeRef(",
-			"func composeDirectBranch(", "func composeIndex(",
-			"func composeCall(",
-		} {
-			require.NotContains(t, source, function)
 		}
 	})
 

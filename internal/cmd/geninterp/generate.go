@@ -149,8 +149,8 @@ func fusions(patterns []pattern) (jen.Code, error) {
 			continue
 		}
 		body := []jen.Code{jen.Id("start").Op(":=").Id("c").Dot("ip")}
-		for indexSequence, pattern := range patterns {
-			label := fmt.Sprintf("l%d", indexSequence)
+		for index, pattern := range patterns {
+			label := fmt.Sprintf("l%d", index)
 			total := pattern.width()
 			statements, err := compose(pattern, total, label)
 			if err != nil {

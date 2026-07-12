@@ -20,15 +20,15 @@ Read this before changing threaded fusion patterns, generated handlers, lookahea
 
 ## Model
 
-Fusion patterns are concrete opcode sequences used only during generation. `catalog` builds and orders them before validation. Generated matchers use opcode widths from `instr.Type`, choose the longest applicable specialization, and dispatch directly to closed lowerings. No runtime pattern or action object survives generation.
+Fusion patterns are concrete opcode sequences used only during generation. `catalog` builds and orders them before validation. `prepare` annotates those existing steps with resolved kinds and specialization facts; `compose` then walks the sequence once and invokes each opcode's entry in `lowerers`. The same table generates standalone handlers. Pattern declarations select sequences and guards only, and no runtime pattern or action object survives generation.
 
-Each opcode specification is the semantic source for its generated standalone handler and any fusion that starts at that opcode. Standalone opcode execution remains the runtime oracle. Fusion preserves results, stack and frame state, instruction pointers, traps and check order, control flow, and final ownership. NOP run compaction remains local to the NOP handler because it is dispatch compaction, not semantic producer-consumer fusion.
+Every valid opcode has exactly one `lowerers` entry. That entry owns its standalone and composable generation paths; there is no separate fusion semantic switch or per-family renderer. Standalone opcode execution remains the runtime oracle. Fusion preserves results, stack and frame state, instruction pointers, traps and check order, control flow, and final ownership. NOP run compaction remains local to the NOP handler because it is dispatch compaction, not semantic producer-consumer fusion.
 
 ## Support Matrix
 
 The generator validates the concrete patterns returned by `catalog` in `internal/cmd/geninterp/pattern.go`.
 
-Patterns cover ref consumption, constant calls and closure creation, numeric operations and comparisons, conditional branches, and constant aggregate indexes. Integer division and remainder use direct fused handlers that preserve standalone trap IP and stack state.
+Patterns cover ref consumption, constant calls and closure creation, numeric operations and comparisons, conditional branches, and constant aggregate indexes. Integer division and remainder use the same numeric lowerer, which commits absorbed sources before the trapping operation to preserve standalone trap IP and stack state.
 
 ## Threaded Compilation
 
@@ -54,7 +54,7 @@ Borrowed refs never enter the VM stack, frame/global/upvalue storage, calls, yie
 
 ## Maintenance Notes
 
-Add or change an opcode lowering in `lower.go`. Add or change a threaded pattern in `pattern.go` only when every concrete sequence has one supported lowering and locally obvious ownership. Reject ambiguous, shadowed, variable-width, stack-inconsistent, or ownership-unsafe patterns during generation. Do not add callbacks, code strings, ownership annotations, synthetic opcodes, runtime pattern objects, or architecture-specific output.
+Add or change an opcode through its single `lowerers` entry in `lower.go`. Add or change a threaded pattern in `pattern.go` only to select a concrete sequence and its compile-time guards; do not add a second fusion renderer. Reject ambiguous, shadowed, variable-width, stack-inconsistent, or ownership-unsafe patterns during generation. Do not add callbacks, code strings, ownership annotations, synthetic opcodes, runtime pattern objects, or architecture-specific output.
 
 Keep ARM64 trace fusion hand-written in `interp/jit_arm64.go`. Do not add architecture flags or backends to this generator.
 
