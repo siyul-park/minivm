@@ -186,6 +186,22 @@ func TestGenerate(t *testing.T) {
 		}
 	})
 
+	t.Run("shares numeric lowerings", func(t *testing.T) {
+		data, err := os.ReadFile("lower.go")
+		require.NoError(t, err)
+		source := string(data)
+		for _, mapping := range []string{
+			"instr.I32_ADD:             numericLower",
+			"instr.I64_EQZ:             numericLower",
+			"instr.F64_GE:              numericLower",
+		} {
+			require.Contains(t, source, mapping)
+		}
+		for _, function := range []string{"func i32Add(", "func i64Eqz(", "func f64Ge("} {
+			require.NotContains(t, source, function)
+		}
+	})
+
 	t.Run("maps every opcode once", func(t *testing.T) {
 		for value, lowering := range lowerers {
 			op := instr.Opcode(value)
