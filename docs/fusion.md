@@ -10,10 +10,10 @@ Read this before changing threaded fusion patterns, generated handlers, lookahea
 
 | Concern | File |
 |---|---|
-| Opcode lowering | `internal/cmd/genfusion/lower.go` |
-| Fusion pattern catalog | `internal/cmd/genfusion/pattern.go` |
-| Source generation | `internal/cmd/genfusion/generate.go` |
-| Pattern validation | `internal/cmd/genfusion/validate.go` |
+| Opcode lowering | `internal/cmd/geninterp/lower.go` |
+| Fusion pattern catalog | `internal/cmd/geninterp/pattern.go` |
+| Source generation | `internal/cmd/geninterp/generate.go` |
+| Pattern validation | `internal/cmd/geninterp/validate.go` |
 | Standalone and fused threaded handlers | `interp/threaded.go` |
 | ARM64 trace lowering | `interp/jit_arm64.go` |
 | Opcode metadata | `instr/type.go` |
@@ -26,7 +26,7 @@ Each opcode specification is the semantic source for its generated standalone ha
 
 ## Support Matrix
 
-The generator validates the concrete patterns returned by `catalog` in `internal/cmd/genfusion/pattern.go`.
+The generator validates the concrete patterns returned by `catalog` in `internal/cmd/geninterp/pattern.go`.
 
 Patterns cover ref consumption, constant calls and closure creation, numeric operations and comparisons, conditional branches, and constant aggregate indexes. Integer division and remainder use direct fused handlers that preserve standalone trap IP and stack state.
 

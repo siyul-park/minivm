@@ -13,8 +13,8 @@ Use this guide when adding or changing an opcode. For canonical semantics, keep 
 | Opcode value and append order | `instr/opcode.go` |
 | Mnemonic, operand widths, fixed stack effects | `instr/type.go` |
 | Static validation | `program/verify.go` |
-| Runtime lowering | `internal/cmd/genfusion/lower.go` |
-| Fusion patterns | `internal/cmd/genfusion/pattern.go` |
+| Runtime lowering | `internal/cmd/geninterp/lower.go` |
+| Fusion patterns | `internal/cmd/geninterp/pattern.go` |
 | Generated runtime semantics | `interp/threaded.go` |
 | ARM64 native lowering | `interp/jit_arm64.go` |
 | Public reference | `docs/instruction-set.md` |
@@ -68,7 +68,7 @@ Verifier changes should reject only statically malformed bytecode. Runtime traps
 
 ## Step 4 — Implement Threaded Semantics
 
-Add the opcode Jennifer lowering in `internal/cmd/genfusion/lower.go`, then run `make generate`. Add a pattern in `internal/cmd/genfusion/pattern.go` only when the opcode participates in threaded fusion. Do not edit `interp/threaded.go` directly.
+Add the opcode Jennifer lowering in `internal/cmd/geninterp/lower.go`, then run `make generate`. Add a pattern in `internal/cmd/geninterp/pattern.go` only when the opcode participates in threaded fusion. Do not edit `interp/threaded.go` directly.
 
 Checklist:
 

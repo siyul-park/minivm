@@ -17,7 +17,7 @@ install-modules:
 	@go install -v ./...
 
 generate:
-	@go run ./internal/cmd/genfusion
+	@go run ./internal/cmd/geninterp
 
 build:
 	@go clean -cache
@@ -47,7 +47,7 @@ check: check-generated check-tidy check-fmt vet test check-arm64
 	@go build ./...
 
 check-generated:
-	@go run ./internal/cmd/genfusion -check
+	@go run ./internal/cmd/geninterp -check
 
 check-tidy:
 	@go mod tidy -diff
