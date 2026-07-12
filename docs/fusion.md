@@ -50,7 +50,7 @@ Borrowed refs never enter the VM stack, frame/global/upvalue storage, calls, yie
 
 ## Generation and Checks
 
-`make generate` refreshes `interp/threaded.go` and the generated fusion parity test. This document is maintained manually. Generated output has stable ordering and contains no timestamp or absolute path. `make check-generated` reports stale output without rewriting it. `make check` also verifies module tidiness, formatting, vet, race tests, native build, and Linux ARM64 production/test compilation.
+`make generate` refreshes `interp/threaded.go`. This document is maintained manually. Generated output has stable ordering and contains no timestamp or absolute path. `make check-generated` reports stale output without rewriting it. `make check` also verifies module tidiness, formatting, vet, race tests, native build, and Linux ARM64 production/test compilation.
 
 ## Maintenance Notes
 

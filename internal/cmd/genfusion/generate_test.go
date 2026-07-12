@@ -26,10 +26,7 @@ func TestGenerate(t *testing.T) {
 		for index, output := range first {
 			paths[index] = output.path
 		}
-		require.Equal(t, []string{
-			"interp/threaded.go",
-			"interp/threaded_test.go",
-		}, paths)
+		require.Equal(t, []string{"interp/threaded.go"}, paths)
 	})
 
 	t.Run("checks generated files", func(t *testing.T) {
@@ -88,15 +85,6 @@ func TestGenerate(t *testing.T) {
 		require.NotContains(t, string(data), "func (c *threader) fusion")
 		require.NotContains(t, string(data), "candidate0")
 
-		test, err := parity([]pattern{
-			seq(op(instr.I32_CONST), op(instr.I32_ADD)),
-			seq(op(instr.REF_NULL), op(instr.DROP)),
-		})
-		require.NoError(t, err)
-		require.Contains(t, string(test), "i32.const/i32.add")
-		require.Contains(t, string(test), "ref.null/drop")
-		require.Contains(t, string(test), ".Run(context.Background())")
-		require.Contains(t, string(test), "WithTick(1)")
 	})
 
 	t.Run("accepts the catalog", func(t *testing.T) {
@@ -185,9 +173,6 @@ func TestGenerate(t *testing.T) {
 			"structGetAt": {}, "suspend": {}, "tail": {},
 		}
 		for _, output := range outputs {
-			if output.path == "interp/threaded_test.go" {
-				continue
-			}
 			file, err := parser.ParseFile(token.NewFileSet(), output.path, output.data, 0)
 			require.NoError(t, err)
 			ast.Inspect(file, func(node ast.Node) bool {

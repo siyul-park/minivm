@@ -5849,9 +5849,6 @@ var (
 				i.fr.ip++
 			}
 		}}
-	invalid = func(_ *Interpreter) {
-		panic(ErrUnknownOpcode)
-	}
 	fusions = [256]func(c *threader) func(*Interpreter){
 		instr.DUP: func(c *threader) func(*Interpreter) {
 			start := c.ip
@@ -65714,6 +65711,9 @@ var (
 		l0:
 			return nil
 		}}
+	invalid = func(_ *Interpreter) {
+		panic(ErrUnknownOpcode)
+	}
 )
 
 func init() {
