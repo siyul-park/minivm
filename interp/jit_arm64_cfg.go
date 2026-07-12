@@ -32,6 +32,12 @@ func (l arm64Lowerer) lowerCFG(ctx *lowering, blocks []*analysis.BasicBlock, kin
 			return false
 		}
 	}
+	for _, exit := range ctx.exits {
+		ctx.values = exit.values
+		ctx.frames = exit.frames
+		ctx.assembler.Bind(exit.label)
+		l.trapFlushed(ctx, trapFallback, exit.resume)
+	}
 	return true
 }
 

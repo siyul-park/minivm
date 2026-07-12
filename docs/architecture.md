@@ -164,6 +164,7 @@ For plain functions, `addr == ref`. For closures, `addr` points to the function 
 ### JIT
 
 - Native code is speculative and guarded.
+- Whole-CFG block edges carry no register state; stack and dirty locals are canonical in VM memory.
 - Unsupported paths must fall back to threaded execution.
 - JIT handlers must not duplicate complex interpreter behavior unless they can own all semantics.
 - Guard failure materializes VM state and resumes threaded dispatch.

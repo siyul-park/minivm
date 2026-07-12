@@ -100,6 +100,10 @@ For each usable root, it:
 
 General behavior belongs to the threaded interpreter. Native guard failures materialize VM state into the journal and resume threaded execution.
 
+## Whole-CFG Baseline
+
+Hot non-module functions first attempt a conservative whole-CFG compilation. Each verified basic block reloads its entry operands from canonical VM stack slots, keeps registers block-local, and flushes values before every edge. Native branches connect blocks directly; backward edges spend the journal safepoint budget. Unsupported opcodes return through an exact-IP fallback, while structural uncertainty rejects the baseline and leaves trace compilation available. A deoptimizing installed CFG is never rebuilt as the same CFG because the existing entry stub makes subsequent exit-triggered attempts trace-only.
+
 ## Tracer
 
 Trace recording lives in `interp/trace.go`.

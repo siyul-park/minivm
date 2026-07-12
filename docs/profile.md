@@ -123,6 +123,8 @@ Runtime compiler activity is exported as named metrics.
 | Metric | Meaning |
 |---|---|
 | `vm_jit_attempts_total` | compilation attempts |
+| `vm_jit_cfg_attempts_total` | baseline whole-CFG attempts |
+| `vm_jit_cfg_rejected_total` | structurally rejected whole-CFG attempts |
 | `vm_jit_emits_total` | emitted trace objects |
 | `vm_jit_errors_total` | compile or link errors |
 | `vm_jit_bytes_total` | generated code bytes |
