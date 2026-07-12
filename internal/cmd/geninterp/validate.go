@@ -99,7 +99,7 @@ func validateStack(pattern pattern) error {
 	for _, current := range pattern {
 		typ := instr.TypeOf(current.op)
 		if typ.Pop == nil && typ.Push == nil {
-			return nil
+			continue
 		}
 		for _, want := range typ.Pop {
 			if len(stack) == 0 {

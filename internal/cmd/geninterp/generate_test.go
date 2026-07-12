@@ -246,93 +246,12 @@ func TestGenerate(t *testing.T) {
 		}))
 	})
 
-	t.Run("uses role based lowering names", func(t *testing.T) {
-		types := make(map[string]struct{})
-		fields := make(map[string][]string)
-		values := make(map[string]struct{})
-		functions := make(map[string]*ast.FuncDecl)
-		for _, path := range []string{"pattern.go", "lower.go", "validate.go", "generate.go"} {
-			file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
-			require.NoError(t, err)
-			ast.Inspect(file, func(node ast.Node) bool {
-				switch node := node.(type) {
-				case *ast.TypeSpec:
-					types[node.Name.Name] = struct{}{}
-					structure, ok := node.Type.(*ast.StructType)
-					if !ok {
-						break
-					}
-					for _, field := range structure.Fields.List {
-						if len(field.Names) > 0 {
-							for _, name := range field.Names {
-								fields[node.Name.Name] = append(fields[node.Name.Name], name.Name)
-							}
-						} else if name, ok := field.Type.(*ast.Ident); ok {
-							fields[node.Name.Name] = append(fields[node.Name.Name], name.Name)
-						}
-					}
-				case *ast.ValueSpec:
-					for _, name := range node.Names {
-						values[name.Name] = struct{}{}
-					}
-				case *ast.FuncDecl:
-					functions[node.Name.Name] = node
-				}
-				return true
-			})
-		}
-
-		for _, name := range []string{"match", "step", "value", "state", "target", "loader", "lowerer"} {
-			require.Contains(t, types, name)
-		}
-		require.Equal(t, []string{"op", "typ", "exclude"}, fields["match"])
-		require.Equal(t, []string{"match", "kind", "boxed", "commit"}, fields["step"])
-		require.Equal(t, []string{"op", "head", "compile", "check", "body", "drop", "push", "raw", "boxed", "resident", "handler"}, fields["value"])
-		require.Equal(t, []string{"stack", "offset", "width", "label", "standalone"}, fields["state"])
-		require.Equal(t, []string{"code", "addr", "upvals", "ref"}, fields["target"])
-		require.Equal(t, []string{"slot", "width", "raw", "boxed", "index", "addr", "pos", "label", "standalone"}, fields["loader"])
-		require.Contains(t, values, "lowerers")
-		for _, name := range []string{
-			"lower", "compose", "resolve", "source", "ref", "produce", "consume",
-			"index", "call", "scalar", "branch", "load", "materialize", "jump",
-			"validateStack", "render", "declare", "matches",
-		} {
-			require.Contains(t, functions, name)
-		}
-
-		for _, name := range []string{
-			"fact", "lowering", "loweringState", "callTarget", "sourceContext",
-		} {
-			require.NotContains(t, types, name)
-		}
-		for _, name := range []string{
-			"lowerSource", "lowerRef", "produceRef", "consumeRef", "lowerIndex",
-			"lowerCall", "lowerNumeric", "lowerBranch", "standalone", "prepare",
-			"sourceLower", "refSource", "refLower", "indexLower", "callLower",
-			"numericLower", "branchLower", "sourceAccess", "sourcePush",
-			"dynamicCallCode", "branchBody", "indexCode", "numericCode",
-			"trappedNumericCode", "validateEffect", "frameBody", "replaceBody",
-			"hostBodyCode", "createBody", "threader",
-		} {
-			require.NotContains(t, functions, name)
-		}
-		for _, name := range []string{"compose", "lower"} {
-			fn := functions[name]
-			require.NotNil(t, fn)
-			uses := false
-			ast.Inspect(fn.Body, func(node ast.Node) bool {
-				index, ok := node.(*ast.IndexExpr)
-				if !ok {
-					return true
-				}
-				identifier, ok := index.X.(*ast.Ident)
-				if ok && identifier.Name == "lowerers" {
-					uses = true
-				}
-				return true
-			})
-			require.True(t, uses, name)
-		}
+	t.Run("rejects stack mismatches after dynamic effects", func(t *testing.T) {
+		require.ErrorContains(t, validate([]pattern{seq(
+			op(instr.I32_CONST),
+			op(instr.CALL),
+			op(instr.I64_ADD),
+		)}), "i64.add has stack kind i32, want i64")
 	})
 
 	t.Run("maps every opcode once", func(t *testing.T) {

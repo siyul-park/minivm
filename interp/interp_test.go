@@ -1407,6 +1407,38 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Equal(t, 0, i.rc[1])
 	})
 
+	t.Run("fused trapping sources use the remaining stack slot", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(8))),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))),
+			instr.New(instr.F32_DIV),
+		}, program.WithGlobals(types.TypeF32))
+		i := New(prog, WithStack(2), WithThreshold(-1))
+		defer i.Close()
+
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.F32(4), value)
+	})
+
+	t.Run("fused trapping sources report overflow on the second push", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(8))),
+			instr.New(instr.GLOBAL_SET, 0),
+			instr.New(instr.GLOBAL_GET, 0),
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))),
+			instr.New(instr.F32_DIV),
+		}, program.WithGlobals(types.TypeF32))
+		i := New(prog, WithStack(1), WithThreshold(-1))
+		defer i.Close()
+
+		require.ErrorIs(t, i.Run(context.Background()), ErrStackOverflow)
+		require.Equal(t, 1, i.sp)
+	})
+
 	t.Run("STRUCT_NEW_DEFAULT reports stack overflow before mutating sp", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),

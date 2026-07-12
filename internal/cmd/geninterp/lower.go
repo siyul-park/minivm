@@ -1205,10 +1205,6 @@ func overflow() jen.Code {
 	return jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow")))
 }
 
-func overflowAt(offset int) jen.Code {
-	return jen.If(add(jen.Id("i").Dot("sp"), offset).Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow")))
-}
-
 func arity(op instr.Opcode) (int, bool) {
 	if op == instr.I32_EQZ || op == instr.I64_EQZ {
 		return 1, true
@@ -1629,7 +1625,7 @@ func traps(op instr.Opcode) bool {
 func load(current step, slot, offset int, label string, standalone bool) (value, error) {
 	loader := newLoader(current.op, slot, offset, label, standalone)
 	result := value{op: current.op, head: current.op, boxed: jen.Id(loader.boxed)}
-	result.check = append(result.check, overflowAt(slot))
+	result.check = append(result.check, overflow())
 
 	field, indexed := slotField(current.op)
 	loader.decode(&result, current.op)
