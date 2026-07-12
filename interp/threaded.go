@@ -3,11 +3,12 @@
 package interp
 
 import (
-	instr "github.com/siyul-park/minivm/instr"
-	types "github.com/siyul-park/minivm/types"
 	"math"
 	"math/bits"
 	"unsafe"
+
+	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/types"
 )
 
 type threader struct {

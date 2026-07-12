@@ -216,6 +216,8 @@ A Go function marshals to `*HostFunction`.
 
 A final `error` return is treated as a host error. If it returns non-nil, the VM call fails with that error.
 
+An exact first `context.Context` parameter is host-only and omitted from the VM function signature. When guest code calls the marshaled function, minivm passes the active `Interpreter.Context`; a nil active context is normalized to `context.Background()`. The same rule applies to exported host-object methods. A `context.Context` in any other position is converted as an ordinary VM argument.
+
 ```go
 add := func(a, b int32) (int32, error) {
     return a + b, nil
@@ -232,6 +234,8 @@ result, err := add(2, 3)
 ```
 
 The Go and VM signatures must map to equal VM function types. A final Go `error` return is host-only: VM traps and bridge errors are returned there. Without a final `error`, those failures panic. Calls must not overlap another `Run` or callable-wrapper call on the same interpreter. Wrappers use the interpreter heap and become invalid when their referenced function no longer survives normal `Release`, `Reset`, or `Close` ownership rules.
+
+When a VM function, closure, or live function ref is unmarshaled into a Go function wrapper, an exact first `context.Context` parameter is host-only and omitted from the VM signature. The wrapper passes it to VM execution, so cancellation and `Interpreter.Context` use the caller's context. A nil caller context and wrappers without a context parameter use `context.Background()`. A `context.Context` in any other position is converted as an ordinary VM argument.
 
 VM-native scalar types can reduce conversion overhead.
 
