@@ -1249,6 +1249,16 @@ var runTests = []struct {
 		}, program.WithTypes(types.TypeI32Array)),
 		err: ErrIndexOutOfRange,
 	},
+	{
+		program: program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_CONST, 4), instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 6), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
+			instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, uint64(^uint32(0))),
+			instr.New(instr.ARRAY_COPY),
+		}, program.WithTypes(types.TypeI32Array)),
+		err: ErrIndexOutOfRange,
+	},
 }
 
 func TestInterpreter_Run(t *testing.T) {
