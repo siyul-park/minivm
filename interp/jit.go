@@ -38,6 +38,7 @@ type module struct {
 type native struct {
 	callable asm.Callable
 	loop     bool
+	cfg      bool
 }
 
 // lowering carries the symbolic interpreter state for one trace
@@ -156,6 +157,7 @@ const (
 	journalRC             // &i.rc[0]; read/write for guarded native refcount fast paths
 	journalUpvals         // &i.fr.upvals[0] or 0; read/write for closure body fast paths
 	journalHeap           // &i.heap[0]; read-only for heap object fast paths
+	journalNatives        // &i.natives[0]; atomic per-function entry slots
 	journalHead           // first frame record cell
 )
 

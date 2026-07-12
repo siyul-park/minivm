@@ -59,6 +59,19 @@ func (l arm64Lowerer) cfgBlock(ctx *lowering, block *analysis.BasicBlock, labels
 		op := step{op: inst.Opcode(), fn: ctx.addr, ip: ip}
 		next := ip + inst.Width()
 
+		if op.op == instr.CONST_GET && next < block.End && instr.Opcode(f.code[next]) == instr.CALL {
+			callee, ok := l.cfgTarget(ctx, inst)
+			if !ok {
+				return l.exit(ctx, ip)
+			}
+			call := step{op: instr.CALL, fn: ctx.addr, ip: next, callee: callee}
+			if !l.cfgCall(ctx, call) {
+				return false
+			}
+			ip = next + 1
+			continue
+		}
+
 		switch op.op {
 		case instr.BR:
 			if !l.flush(ctx, false) {
@@ -238,6 +251,175 @@ func (l arm64Lowerer) cfgOp(ctx *lowering, op step) (bool, bool) {
 		return l.exit(ctx, op.ip), true
 	}
 	return ok, false
+}
+
+func (l arm64Lowerer) cfgTarget(ctx *lowering, inst instr.Instruction) (int, bool) {
+	idx := int(inst.Operand(0))
+	if idx >= len(ctx.constants) || ctx.constants[idx].Kind() != types.KindRef {
+		return 0, false
+	}
+	ref := ctx.constants[idx].Ref()
+	if ref <= 0 || ref >= len(ctx.heap) {
+		return 0, false
+	}
+	fn, ok := ctx.heap[ref].(*types.Function)
+	if !ok || fn.Typ == nil || len(fn.Captures) != 0 {
+		return 0, false
+	}
+	ctx.push(value{kind: types.KindRef, raw: true, fn: ref, ref: ref})
+	return ref, true
+}
+
+func (l arm64Lowerer) cfgCall(ctx *lowering, op step) bool {
+	target := ctx.funcs[op.callee]
+	if op.callee == ctx.addr || target == nil || target.Typ == nil || ctx.count() < 1 {
+		return false
+	}
+	params := len(target.Typ.Params)
+	if ctx.count() < params+1 {
+		return false
+	}
+	for _, typ := range target.Typ.Returns {
+		switch typ.Kind() {
+		case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
+		default:
+			return false
+		}
+	}
+
+	a := ctx.assembler
+	vCtrl := ctx.pin(scratchCtrl)
+	natives := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(natives, vCtrl, int16(journalNatives*8)))
+	callee := a.Reg(asm.RegTypeInt, asm.Width64)
+	if op.callee > 4095 {
+		return false
+	}
+	a.Emit(arm64.LDR(callee, natives, int16(op.callee*8)))
+	ready := a.Label()
+	a.Emit(arm64.CBNZLabel(callee, ready))
+	if !l.exit(ctx, op.ip) {
+		return false
+	}
+	a.Bind(ready)
+
+	marker := ctx.pop()
+	if marker.fn != op.callee || ctx.count() < params || !l.args(ctx, target, params) {
+		return false
+	}
+	if !l.flush(ctx, false) {
+		return false
+	}
+
+	active := ctx.pinTo(arm64.X15)
+	limit := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(limit, vCtrl, int16(journalCap*8)))
+	a.Emit(arm64.CMP(active, limit))
+	hasFrame := a.Label()
+	a.Emit(arm64.BCondLabel(arm64.OpBCC, hasFrame))
+	l.overflow(ctx, op)
+	a.Bind(hasFrame)
+	a.Emit(arm64.ADDI(active, active, 1))
+	a.Emit(arm64.STR(active, vCtrl, int16(journalActive*8)))
+
+	vBP := ctx.pin(scratchBP)
+	nextSP := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ADDI(nextSP, vBP, uint16(ctx.sp())))
+	oldBP := ctx.scratch[scratchBP]
+	oldSP := ctx.scratch[scratchSP]
+	a.Emit(
+		arm64.SUBI(arm64.SP, arm64.SP, 32),
+		arm64.STP(oldBP, oldSP, arm64.SP, 0),
+		arm64.STR(arm64.LR, arm64.SP, 16),
+	)
+	calleeBP := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.SUBI(calleeBP, nextSP, uint16(params)))
+	a.Emit(arm64.MOV(ctx.pinTo(oldBP), calleeBP))
+
+	localKinds := target.LocalKinds()
+	if len(localKinds) > params {
+		stack := ctx.pin(scratchStack)
+		base := l.base(ctx, stack)
+		for idx := params; idx < len(localKinds); idx++ {
+			zero, ok := cfgZero(localKinds[idx])
+			if !ok {
+				return false
+			}
+			reg := a.Reg(asm.RegTypeInt, asm.Width64)
+			a.Emit(arm64.LDI(reg, uint64(zero))...)
+			a.Emit(arm64.STR(reg, base, int16((ctx.sp()-params+idx)*8)))
+		}
+	}
+	calleeSP := calleeBP
+	if len(localKinds) > 0 {
+		calleeSP = a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ADDI(calleeSP, calleeBP, uint16(len(localKinds))))
+	}
+	a.Emit(arm64.MOV(ctx.pinTo(oldSP), calleeSP))
+	a.Emit(arm64.MOV(arm64.X0, vCtrl))
+	a.Emit(arm64.BLR(callee))
+
+	vCtrl = ctx.pin(scratchCtrl)
+	trap := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDR(trap, vCtrl, int16(journalTrap*8)))
+	normal := a.Label()
+	a.Emit(arm64.CBZLabel(trap, normal), arm64.LDR(oldBP, arm64.SP, 0))
+	l.unwind(ctx, vCtrl, op.ip+1)
+	a.Emit(
+		arm64.LDR(arm64.LR, arm64.SP, 16),
+		arm64.ADDI(arm64.SP, arm64.SP, 32),
+		arm64.RET(),
+	)
+	a.Bind(normal)
+
+	active = ctx.pinTo(arm64.X15)
+	a.Emit(arm64.SUBI(active, active, 1))
+	a.Emit(arm64.STR(active, vCtrl, int16(journalActive*8)))
+	a.Emit(
+		arm64.LDP(oldBP, oldSP, arm64.SP, 0),
+		arm64.LDR(arm64.LR, arm64.SP, 16),
+		arm64.ADDI(arm64.SP, arm64.SP, 32),
+	)
+
+	rets := target.Typ.Returns
+	regs := make([]asm.VReg, len(rets))
+	for idx := range rets {
+		if idx >= len(arm64.IntRets) {
+			return false
+		}
+		regs[idx] = ctx.pinTo(arm64.IntRets[idx])
+	}
+	ctx.values = ctx.values[:len(ctx.values)-params]
+	for fi := range ctx.frames {
+		clear(ctx.frames[fi].loaded)
+		clear(ctx.frames[fi].dirty)
+	}
+	l.reload(ctx)
+	for idx, typ := range rets {
+		ctx.push(value{reg: regs[idx], kind: typ.Kind(), raw: true})
+	}
+	return true
+}
+
+func cfgZero(kind types.Kind) (types.Boxed, bool) {
+	switch kind {
+	case types.KindI1:
+		return types.BoxI1(false), true
+	case types.KindI8:
+		return types.BoxI8(0), true
+	case types.KindI32:
+		return types.BoxI32(0), true
+	case types.KindI64:
+		return types.BoxI64(0), true
+	case types.KindF32:
+		return types.BoxF32(0), true
+	case types.KindF64:
+		return types.BoxF64(0), true
+	case types.KindRef:
+		return types.BoxedNull, true
+	default:
+		return 0, false
+	}
 }
 
 func (l arm64Lowerer) cfgIf(ctx *lowering, op step, from, nextIP int, labels []asm.Label, index map[int]int) bool {

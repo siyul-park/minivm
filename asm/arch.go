@@ -83,6 +83,8 @@ type Callable interface {
 	// Call invokes the native entry with ctx as its architecture-specific
 	// context. ctx must remain valid until Call returns.
 	Call(ctx unsafe.Pointer) error
+	// Addr returns the immutable executable entry address.
+	Addr() unsafe.Pointer
 }
 
 var (

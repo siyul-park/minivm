@@ -231,6 +231,7 @@ Header cells come before fixed-stride frame records.
 | `journalRC` | refcount base pointer |
 | `journalUpvals` | closure upvalue base pointer |
 | `journalHeap` | heap base pointer |
+| `journalNatives` | fixed per-function native-entry slot base |
 | `journalHead...` | frame records `{addr, bp, ip, returns}` |
 
 On guard failure, native code writes live stack state, appends frame records, sets trap state, sets the resume IP, and returns to Go.
@@ -258,6 +259,8 @@ Native lowering supports selected calls:
 A call may lower to native `BL` when the observed target is a JIT-eligible `*types.Function` with matching arity.
 
 Unsupported targets fall back, including host calls, allocation, heap mutation, maps, unsupported functions, and unsupported closures.
+
+Whole-CFG call sites recognize direct `CONST_GET function; CALL` pairs. Each interpreter owns a fixed-size `natives` slot array; installing or synchronizing a CFG entry publishes its executable address atomically. The caller loads the slot at runtime and uses `BLR`, so compile order does not matter: a null slot falls back at the CALL, while a later callee installation is visible without recompiling the caller. Self-recursion remains on the established trace self-call path, and `RETURN_CALL` remains threaded.
 
 Native calls are frame-aware. The lowering checks frame budget, increments native depth, saves caller state, enters the callee trace, and restores caller state on return.
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/asm"
@@ -28,6 +29,7 @@ type Interpreter struct {
 	samples  *prof.Collector
 	exits    map[anchor]func(*Interpreter)
 	stubs    []func(*Interpreter)
+	natives  []unsafe.Pointer
 	tried    map[int]bool
 	journal  []uint64
 
@@ -244,6 +246,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		handlers:  make([][]instr.Handler, len(prog.Constants)+1),
 		exits:     map[anchor]func(*Interpreter){},
 		stubs:     make([]func(*Interpreter), len(prog.Constants)+1),
+		natives:   make([]unsafe.Pointer, len(prog.Constants)+1),
 		tried:     map[int]bool{},
 		dynamic:   map[int]bool{},
 		journal:   make([]uint64, journalHead+journalStride*opt.frame),
@@ -871,6 +874,9 @@ func (i *Interpreter) install(mod *module, account bool) {
 				i.stubs[a.addr] = i.exits[a]
 			}
 		}
+		if entry.cfg && a.ip == 0 {
+			atomic.StorePointer(&i.natives[a.addr], entry.callable.Addr())
+		}
 		if entry.loop {
 			i.code[a.addr][a.ip] = i.loop(entry.callable)
 		} else if a.addr == 0 {
@@ -1272,6 +1278,10 @@ func (i *Interpreter) context() unsafe.Pointer {
 	i.journal[journalHeap] = 0
 	if len(i.heap) > 0 {
 		i.journal[journalHeap] = uint64(uintptr(unsafe.Pointer(&i.heap[0])))
+	}
+	i.journal[journalNatives] = 0
+	if len(i.natives) > 0 {
+		i.journal[journalNatives] = uint64(uintptr(unsafe.Pointer(&i.natives[0])))
 	}
 
 	i.journal[journalDepth] = 0

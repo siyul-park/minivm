@@ -42,8 +42,16 @@ func (c *compiler) compileCFG(i *Interpreter, addr int, fn *types.Function) (*mo
 		globals[j] = g.Kind()
 	}
 
+	funcs := make(map[int]*types.Function)
+	for fnAddr := range i.instrs {
+		if target, ok := i.function(fnAddr); ok {
+			funcs[fnAddr] = target
+		}
+	}
+
 	ctx := &lowering{
 		assembler: asmb,
+		funcs:     funcs,
 		queued:    map[branch]asm.Label{},
 		tails:     map[*step]asm.Label{},
 		constants: i.constants,
@@ -87,7 +95,7 @@ func (c *compiler) compileCFG(i *Interpreter, addr int, fn *types.Function) (*mo
 		return mod, false, err
 	}
 	a := anchor{addr: addr, ip: 0}
-	mod.entries[a] = native{callable: linked[0].Callable, loop: false}
+	mod.entries[a] = native{callable: linked[0].Callable, cfg: true}
 	mod.emits++
 	mod.bytes += len(code.Bytes)
 	return mod, true, nil
