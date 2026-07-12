@@ -45,7 +45,9 @@ type compileInput struct {
     functions   map[int]*types.Function
     installed   bool
 }
-```The input owns only normalized data reused by planners and lowering. Constants, heap values, and tracer snapshots remain reachable through `interpreter` unless immutability requires copying. Avoid duplicating fields without a clear consumer.
+```
+
+The input owns only normalized data reused by planners and lowering. Constants, heap values, and tracer snapshots remain reachable through `interpreter` unless immutability requires copying. Avoid duplicating fields without a clear consumer.
 
 ## Plan Model
 
@@ -93,7 +95,9 @@ type slot struct {
     callee      int
     calleeKnown bool
 }
-````slot` records only facts consumed by lowering. Function signatures are resolved from `compileInput.functions` using `callee`; no duplicate signature pointer is stored.
+```
+
+`slot` records only facts consumed by lowering. Function signatures are resolved from `compileInput.functions` using `callee`; no duplicate signature pointer is stored.
 
 ```go
 type terminator struct {
@@ -129,7 +133,9 @@ Planner order is compiler policy:
 2. trace planner;
 3. threaded execution when no plan lowers successfully.
 
-No score or generic cost model is introduced until measured use cases require one.## Compiler Flow
+No score or generic cost model is introduced until measured use cases require one.
+
+## Compiler Flow
 
 `compiler.Compile` is the only strategy-selection entry point:
 
@@ -175,7 +181,9 @@ Shared lowering responsibilities:
 - emit ordinary steps through one opcode dispatcher;
 - emit terminators through one control-flow dispatcher;
 - queue and materialize side exits;
-- preserve frame journal and native-call ABI.## Interpreter Boundary
+- preserve frame journal and native-call ABI.
+
+## Interpreter Boundary
 
 `Interpreter.build` is removed. The hot path calls `compiler.Compile(i, addr)` and handles only the opaque result. Strategy-specific metrics and rejection accounting move into the compiler.
 
@@ -210,7 +218,9 @@ Target production files:
 - `interp/trace.go`: runtime observation and immutable snapshots only.
 - `interp/jit_stub.go`: unsupported architecture stub.
 
-Remove `cfg.go`, `cfgflow.go`, `jit_arm64_cfg.go`, `jit_arm64_step.go`, and `jit_structure_test.go`. Tests consolidate into `jit_test.go`, `jit_plan_test.go`, `jit_arm64_test.go`, and `trace_test.go`.## Metrics
+Remove `cfg.go`, `cfgflow.go`, `jit_arm64_cfg.go`, `jit_arm64_step.go`, and `jit_structure_test.go`. Tests consolidate into `jit_plan_test.go`, `jit_arm64_test.go`, and `trace_test.go`.
+
+## Metrics
 
 Interpreter-level metrics remain strategy-neutral:
 

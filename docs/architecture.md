@@ -163,6 +163,9 @@ For plain functions, `addr == ref`. For closures, `addr` points to the function 
 
 ### JIT
 
+
+The interpreter requests native compilation through `compiler.Compile(i, addr)` only. The compiler selects a static or trace planner internally, both produce the same backend-neutral plan, and installation depends on entry ABI kind rather than planner identity.
+
 - Native code is speculative and guarded.
 - Whole-CFG block edges carry no register state; stack and dirty locals are canonical in VM memory.
 - CFG native-call slots are fixed for an interpreter lifetime and published atomically on CFG installation.

@@ -1,6 +1,6 @@
 # Plan-Based JIT Compiler Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Replace separate CFG and trace compilation paths with one plan-based compiler selected entirely inside `compiler.Compile`.
 
@@ -31,11 +31,11 @@
 - Produces: `plan`, `entry`, `entryKind`, `block`, `state`, `slot`, `terminator`, `terminatorKind`, `spillPolicy`, `planner`, and `compileInput`.
 - Produces: `func newCompileInput(*Interpreter, int) (*compileInput, bool)` and `func (p plan) valid() bool`.
 
-- [ ] Write table tests for plan validation: unique block offsets, valid entry target, valid terminator targets, and ABI-compatible entry kinds.
-- [ ] Run `go test ./interp -run TestPlan -count=1`; expect failure because the model does not exist.
-- [ ] Implement the minimal private model and validation in declaration order.
-- [ ] Run `go test ./interp -run TestPlan -count=1`; expect pass.
-- [ ] Commit with `refactor(interp): add jit plan model`.
+- [x] Write table tests for plan validation: unique block offsets, valid entry target, valid terminator targets, and ABI-compatible entry kinds.
+- [x] Run `go test ./interp -run TestPlan -count=1`; expect failure because the model does not exist.
+- [x] Implement the minimal private model and validation in declaration order.
+- [x] Run `go test ./interp -run TestPlan -count=1`; expect pass.
+- [x] Commit with `refactor(interp): add jit plan model`.
 
 ### Task 2: Convert Static Compilation into `staticPlanner`
 
@@ -49,12 +49,12 @@
 - Consumes: `compileInput`, `plan`, `block`, `state`, `slot`, and `terminator`.
 - Produces: `type staticPlanner struct{}` and `func (staticPlanner) plan(*compileInput) ([]plan, error)`.
 
-- [ ] Add behavior tests for direct branches, conditional branches, branch tables, exact-IP fallbacks, ref provenance merge, direct-call facts, and module-call rejection.
-- [ ] Run `go test ./interp -run 'TestStaticPlan|TestPlan' -count=1`; expect failures.
-- [ ] Move basic-block and dataflow logic from `cfg.go`/`cfgflow.go` into `staticPlanner`, producing backend-neutral blocks and terminators with no assembler labels.
-- [ ] Delete `compileCFG`, `blockFacts`, and all `cfg*` analysis symbols that have no remaining caller.
-- [ ] Run `go test ./interp -run 'TestStaticPlan|TestPlan|TestInterpreter_JIT' -count=1`; expect pass.
-- [ ] Commit with `refactor(interp): plan static jit compilation`.
+- [x] Add behavior tests for direct branches, conditional branches, branch tables, exact-IP fallbacks, ref provenance merge, direct-call facts, and module-call rejection.
+- [x] Run `go test ./interp -run 'TestStaticPlan|TestPlan' -count=1`; expect failures.
+- [x] Move basic-block and dataflow logic from `cfg.go`/`cfgflow.go` into `staticPlanner`, producing backend-neutral blocks and terminators with no assembler labels.
+- [x] Delete `compileCFG`, `blockFacts`, and all `cfg*` analysis symbols that have no remaining caller.
+- [x] Run `go test ./interp -run 'TestStaticPlan|TestPlan|TestInterpreter_JIT' -count=1`; expect pass.
+- [x] Commit with `refactor(interp): plan static jit compilation`.
 
 ### Task 3: Convert Trace Trees into `tracePlanner`
 
@@ -69,12 +69,12 @@
 - Produces: `type tracePlanner struct{}` and `func (tracePlanner) plan(*compileInput) ([]plan, error)`.
 - Produces generic deferred `work` blocks carrying only plan blocks, symbolic snapshots, labels, and hit ordering.
 
-- [ ] Add tests for entry traces, loop roots, partial cuts, aborted branches, learned continuations, caller-tail suffixes, and mutation-derived spill policy.
-- [ ] Run `go test ./interp -run 'TestTracePlan|TestTracer' -count=1`; expect failures.
-- [ ] Convert trace roots and eligible continuations into plan blocks; retain runtime-produced snapshots through planner-neutral deferred work rather than tree-specific lowering fields.
-- [ ] Ensure loop roots and entry-at-zero loop exclusions match existing behavior.
-- [ ] Run focused trace and JIT tests; expect pass.
-- [ ] Commit with `refactor(interp): plan trace jit compilation`.
+- [x] Add tests for entry traces, loop roots, partial cuts, aborted branches, learned continuations, caller-tail suffixes, and mutation-derived spill policy.
+- [x] Run `go test ./interp -run 'TestTracePlan|TestTracer' -count=1`; expect failures.
+- [x] Convert trace roots and eligible continuations into plan blocks; retain runtime-produced snapshots through planner-neutral deferred work rather than tree-specific lowering fields.
+- [x] Ensure loop roots and entry-at-zero loop exclusions match existing behavior.
+- [x] Run focused trace and JIT tests; expect pass.
+- [x] Commit with `refactor(interp): plan trace jit compilation`.
 
 ### Task 4: Lower One Plan Through One ARM64 Path
 
@@ -92,14 +92,14 @@
 - Produces: one block emitter, one opcode dispatcher, and one terminator dispatcher.
 - Removes: `lowerCFG`, `cfgEntry`, `cfgBlock`, `cfgEdge`, `cfgIf`, `cfgTable`, `cfgCall`, `emitStep(..., static bool)`, and planner-specific lowering fields.
 
-- [ ] Add focused tests covering static and observed plans through the same lowerer contract, including exact fallback IP, native calls, loop budgets, and cold retain exits.
-- [ ] Run ARM64 JIT tests; expect failure until the contract changes.
-- [ ] Implement plan block scheduling, entry-state restoration, ordinary opcode emission, and terminator emission in `jit_arm64.go`.
-- [ ] Replace the `static bool` opcode branch with slot facts already encoded in the plan.
-- [ ] Remove trace tree/CFG nodes from `lowering`; keep only generic deferred work where branch-time symbolic snapshots are required.
-- [ ] Delete obsolete ARM64 files and merge their tests into `jit_arm64_test.go`.
-- [ ] Run `go test ./asm/... ./interp -count=1`; expect pass.
-- [ ] Commit with `refactor(interp): lower unified jit plans`.
+- [x] Add focused tests covering static and observed plans through the same lowerer contract, including exact fallback IP, native calls, loop budgets, and cold retain exits.
+- [x] Run ARM64 JIT tests; expect failure until the contract changes.
+- [x] Implement plan block scheduling, entry-state restoration, ordinary opcode emission, and terminator emission in `jit_arm64.go`.
+- [x] Replace the `static bool` opcode branch with slot facts already encoded in the plan.
+- [x] Remove trace tree/CFG nodes from `lowering`; keep only generic deferred work where branch-time symbolic snapshots are required.
+- [x] Delete obsolete ARM64 files and merge their tests into `jit_arm64_test.go`.
+- [x] Run `go test ./asm/... ./interp -count=1`; expect pass.
+- [x] Commit with `refactor(interp): lower unified jit plans`.
 
 ### Task 5: Move Strategy Selection into `compiler.Compile`
 
@@ -115,13 +115,13 @@
 - Removes: `Interpreter.build`, `compileCFG`, strategy branching in the interpreter, and CFG-specific metrics.
 - Changes: `native` to `{callable asm.Callable; entry entryKind}` and removes `loop`/`cfg` strategy flags.
 
-- [ ] Add tests proving `Interpreter` calls one compiler path and installs function, loop, and module entries solely by `entryKind`.
-- [ ] Run focused compiler/install tests; expect failures.
-- [ ] Implement the ordered planner chain inside `compiler.Compile`, trying static plans only before a function entry has been installed, then trace plans.
-- [ ] Move clean rejection and strategy diagnostics into compiler-local accounting; retain only strategy-neutral interpreter metrics.
-- [ ] Remove `Interpreter.build`, `native.cfg`, and CFG-specific metric assertions.
-- [ ] Run `go test -race ./interp -count=1`; expect pass.
-- [ ] Commit with `refactor(interp): hide jit strategy selection`.
+- [x] Add tests proving `Interpreter` calls one compiler path and installs function, loop, and module entries solely by `entryKind`.
+- [x] Run focused compiler/install tests; expect failures.
+- [x] Implement the ordered planner chain inside `compiler.Compile`, trying static plans only before a function entry has been installed, then trace plans.
+- [x] Move clean rejection and strategy diagnostics into compiler-local accounting; retain only strategy-neutral interpreter metrics.
+- [x] Remove `Interpreter.build`, `native.cfg`, and CFG-specific metric assertions.
+- [x] Run `go test -race ./interp -count=1`; expect pass.
+- [x] Commit with `refactor(interp): hide jit strategy selection`.
 
 ### Task 6: Consolidate Files, Docs, and Verify
 
@@ -135,11 +135,11 @@
 **Interfaces:**
 - Produces no new runtime interface; this task removes obsolete names, files, comments, and tests.
 
-- [ ] Search for `compileCFG`, `lowerCFG`, `native.cfg`, `cfgEntry`, `cfgBlock`, `cfgEdge`, `jit_arm64_cfg`, and `jit_arm64_step`; expect no production matches.
-- [ ] Re-read every touched symbol against `docs/coding-patterns.md` sections 0, 1, 2, 5, 6, 7, and 8; inline or remove single-use wrappers and inconsistent names.
-- [ ] Update JIT and profile documentation to describe the plan compiler and strategy-neutral metrics.
-- [ ] Run `gofmt`, `goimports`, `go vet ./...`, `go test -race ./...`, and `GOARCH=amd64 go test ./...`.
-- [ ] Run tl2g correctness and benchmarks for single-row and 200-row regression cases; require less than 5% median regression.
-- [ ] Compare production JIT file count, symbol count, and LOC against commit `e55d7ee`; require all three to decrease.
-- [ ] Mark this plan complete and commit with `docs(jit): document plan compiler`.
-- [ ] Push `feat/cfg-jit` and update PR #139.
+- [x] Search for `compileCFG`, `lowerCFG`, `native.cfg`, `cfgEntry`, `cfgBlock`, `cfgEdge`, `jit_arm64_cfg`, and `jit_arm64_step`; expect no production matches.
+- [x] Re-read every touched symbol against `docs/coding-patterns.md` sections 0, 1, 2, 5, 6, 7, and 8; inline or remove single-use wrappers and inconsistent names.
+- [x] Update JIT and profile documentation to describe the plan compiler and strategy-neutral metrics.
+- [x] Run `gofmt`, `goimports`, `go vet ./...`, `go test -race ./...`, and `GOARCH=amd64 go test ./...`.
+- [x] Run tl2g correctness and benchmarks for single-row and 200-row regression cases; require less than 5% median regression.
+- [x] Compare production JIT file count, symbol count, and LOC against commit `e55d7ee`; require all three to decrease.
+- [x] Mark this plan complete and commit with `docs(jit): document plan compiler`.
+- [x] Push `feat/cfg-jit` and update PR #139.

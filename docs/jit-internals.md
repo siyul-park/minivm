@@ -85,25 +85,21 @@ The published native code is shared. The dispatch table remains interpreter-loca
 
 ## Compiler
 
-`compiler` is private to `interp` and lives in `jit.go`.
+`compiler` is private to `interp` and lives in `jit.go`. The interpreter calls only `compiler.Compile(i, addr)` and receives an opaque `module`; it does not select or inspect a compilation strategy.
 
-Trace and whole-CFG frontends keep distinct control-flow drivers, but share compiler setup, native context construction, build/link rejection, accounting, and publication.
+The compiler builds one read-only `compileInput`, then runs an ordered planner chain:
 
-For each usable root or CFG entry, the compiler:
+1. `staticPlanner` constructs a complete plan from verified bytecode and dataflow when no function entry is installed.
+2. `tracePlanner` constructs plans from immutable runtime trace snapshots.
+3. If neither planner produces a lowerable plan, threaded execution remains installed.
 
-1. builds one shared `lowering` context
-2. lets the selected frontend driver emit control flow
-3. routes ordinary opcodes through the single ARM64 `emitStep` dispatcher
-4. materializes queued side exits through one cold-path implementation
-5. builds, links, and publishes the callable through one compiler shell
+Both planners return the same private `plan` model: ABI-classified entry, blocks, entry states, ordinary steps, terminators, and spill policy. Build, link, clean rejection, accounting, and publication are centralized in the compiler.
 
-General behavior belongs to the threaded interpreter. Native guard failures materialize VM state into the journal and resume threaded execution.
+## Static Planner
 
-## Whole-CFG Baseline
+The static planner analyzes basic blocks with one forward fixpoint that tracks stack kind, constant-ref provenance, and direct-call targets. It emits canonical blocks whose entry state is reloaded from VM stack homes. Unsupported instructions become exact-IP fallback boundaries when the surrounding function remains structurally valid.
 
-Hot functions and call-free top-level modules first attempt a conservative whole-CFG compilation. Each verified basic block reloads its entry operands from canonical VM stack slots, keeps registers block-local, and flushes values before every edge. Native branches connect blocks directly; backward edges spend the journal safepoint budget. Top-level modules containing `CALL` or `RETURN_CALL` remain trace-compiled because their module-entry ABI does not yet own cross-function frame teardown safely. Unsupported opcodes return through an exact-IP fallback, while structural uncertainty rejects the baseline and leaves trace compilation available. A deoptimizing installed CFG is never rebuilt as the same CFG because the existing entry stub makes subsequent exit-triggered attempts trace-only.
-
-CFG dataflow preserves full block-entry facts: runtime kind, direct-call signature, and explicitly-known constant-ref provenance. Conflicting provenance is weakened to unknown at joins instead of overloading ref zero as an unknown sentinel. A primitive typed-array constant can therefore stay as an unmaterialized marker until `ARRAY_GET`: lowering checks the current heap cell's interface type and index bounds, then reads the current slice data directly. The hot path avoids redundant retain/release traffic. Before a possible fallback, the marker is written to its canonical stack slot without ownership; the cold exit retains it only when control actually transfers to threaded execution. Replacing the heap cell after compilation remains visible because native code reloads the current cell on every access.
+Top-level modules containing `CALL` or `RETURN_CALL` are rejected because module entry does not implement the framed native-call ABI. Primitive typed-array constants remain ownership-neutral markers until `ARRAY_GET`; native code reloads the current heap cell, guards its shape and index, and retains the marker only on a cold fallback.
 
 ## Tracer
 
@@ -128,7 +124,7 @@ Each recorded step stores the data needed for speculative lowering:
 
 The tracer aborts before host calls, allocation, and mutating heap operations. These remain interpreter-owned.
 
-Every recorded `trace` carries a `kind outcome`: `loop`, `returned`, `completed`, `partial`, or `aborted`. `completed` and `returned` both mark a trace that ended cleanly (reached the top-level function's end, or returned from its recorded frame) and may lower as a normal native completion. `partial` always ends in its own recorded cut step, which the lowerer's `walk` handles explicitly before it can fall off the end of the fragment's ops. `aborted` means recording stopped on an unsupported op with no terminal step recorded at all; `tree.branchIPs()` excludes `aborted` branches from the set eligible for inlining as a continuation, and `arm64Lowerer.continuation` repeats that check as a direct safeguard. When `arm64Lowerer.walk` lowers a fragment (the root, or a pending branch continuation) and its ops run out without hitting an explicit terminal case, it checks that *fragment's own* `kind` — never the root's — before falling through as a normal completion; checking the root's kind instead would let a branch continuation that itself aborted after recording a few ops be lowered as if it had completed normally.
+Every recorded `trace` has one outcome: `loop`, `returned`, `completed`, `partial`, or `aborted`. The trace planner maps usable outcomes to plan terminators and excludes aborted fragments from learned continuations. When an observed block runs out of steps, lowering decides completion from that block's terminator, never from the root trace. This prevents an unsupported side fragment from being mistaken for normal completion.
 
 Both `observe` (the sampling safepoint) and `compile` (the one-shot JIT trigger) need an entry trace captured before compiling. They both route through `Tracer.ensureEntry`, the single owner of "capture the entry trace for this addr unless one is already recorded" — this avoids the entry being captured twice (once from each trigger, when both land close together), which would otherwise re-walk the function and inflate `tree.attempts`/blacklist counters with duplicate work.
 
@@ -136,29 +132,23 @@ Both `observe` (the sampling safepoint) and `compile` (the one-shot JIT trigger)
 
 ## Trace Snapshots
 
-A pool shares one `Tracer`. Tree mutations are locked.
+A pool shares one `Tracer`. Tree mutations are locked. `rootAt` returns a stable snapshot containing immutable trace pointers plus copied branch and hit containers.
 
-The compiler must not lower from a live mutable tree. `rootAt` returns `tree.snapshot()`, a shallow immutable view containing root pointer, copied branches, and copied hit counters.
-
-Published traces are fully built before they are installed. Sharing trace pointers across the snapshot boundary is safe.
+`tracePlanner` converts that snapshot into ordinary plan blocks. It excludes aborted fragments and standalone loop roots from learned continuations, sorts continuations deterministically, and derives spill policy from the final plan rather than exposing the trace tree to lowering.
 
 ## Lowerer
 
-`jit.go` is architecture-neutral.
-
-The architecture hook is intentionally small:
+`jit.go` is architecture-neutral. The architecture hook is intentionally one method:
 
 ```go
 type lowerer interface {
-    lower(ctx *lowering) bool
+    lower(*lowering, plan) bool
 }
 ```
 
-`jit_arm64.go` owns trace control-flow scheduling and shared ARM64 helpers. `jit_arm64_cfg.go` owns only canonical CFG block/edge traversal. `jit_arm64_step.go` contains the single non-control opcode dispatcher used by both paths. Short trace fusions remain beside trace scheduling; `internal/cmd/geninterp` generates threaded-interpreter fusion only.
+`jit_arm64.go` owns ARM64 lowering. Every plan block passes through one `emitBlock` path and every ordinary opcode through one `emitStep` dispatcher. Canonical blocks reload their declared entry state; observed blocks use the same helpers while preserving guarded branch and inlined-frame behavior.
 
-Other architectures use stubs, so JIT is unavailable.
-
-Keep the lowerer interface small. Add architecture hooks only when the architecture-neutral lowering context cannot express the behavior cleanly.
+Learned continuations need the symbolic state that exists only at their branch point. Lowering therefore keeps a planner-neutral deferred worklist containing plan blocks, labels, symbolic snapshots, and hit ordering. It contains no trace tree, CFG node, or planner-specific type.
 
 ## Trace ABI
 
@@ -202,12 +192,12 @@ corrupting the native stack at runtime.
 
 Register allocation (`asm/rewriter.go`) is a single linear-scan pass: it spills the vreg with the farthest-away next use to a stack slot at the stream position where pressure was observed. Rewritten labels target the start of any inserted reload/store prefix, and labels on a return target its inserted frame epilogue. Only a call whose target label is bound inside the same `Code` (an intra-Code self-call, which runs through the shared epilogue on return) reserves the caller's spill area again before continuing; a call to a label resolved externally by `Link` never runs this `Code`'s epilogue, so the rewriter must not re-reserve after it. `Assembler.Entry` documents the matching limitation for non-primary entries: only the primary entry (offset 0) runs the frame prologue, so `Build` returns `asm.ErrEntryRequiresFrame` when spilling occurs and a non-primary entry exists.
 
-Linear spill state is still unsafe across a loop back-edge, and terminal `ARRAY_SET`/`STRUCT_SET` traces can combine multiple branch paths before their exit. Two independent layers disable spilling for these cases, and both are needed:
+Linear spill state is unsafe across a loop back-edge, and terminal `ARRAY_SET` or `STRUCT_SET` blocks can combine paths before their exit. Two layers enforce safety:
 
-- `asm/rewriter.go` disables spilling generically for any `Code` containing an intra-Code backward label branch (a loop back-edge), as a safety net that has no notion of VM opcodes. It cannot see terminal `ARRAY_SET`/`STRUCT_SET` mutations, which are a VM-opcode concept.
-- `interp/jit.go`'s `spillSafe(tree *tree) bool` disables spilling for VM-opcode reasons the assembler cannot know about: it scans the *whole* trace tree — the root trace and every branch the tree may inline as a learned continuation, not just the root's own last op — for a terminal `ARRAY_SET`/`STRUCT_SET`. A learned continuation that itself ends in a mutation would otherwise escape a root-only check. `spillSafe` does not need to check for loop back-edges itself; the assembler's generic scan already covers that.
+- `asm/rewriter.go` rejects spilling for code containing an intra-code backward branch.
+- `planSpill` scans every block in the completed plan, including learned continuations, and forbids spilling when a terminal mutation is present.
 
-When `spillSafe` returns false, `emitRoot` wraps `c.arch` in a private `noSpillArch` (`interp/jit.go`) whose `Frame()` returns `nil` — the assembler's own documented contract for "no spilling" (`asm.Frame`'s doc comment) — rather than calling a dedicated `Assembler.DisableSpilling` API; no such API exists in `asm` because disabling spilling for this reason is purely an interp-side JIT policy decision. A root that exhausts physical registers then returns `asm.ErrNoRegistersAvailable` and keeps threaded dispatch installed; acyclic entry traces can still spill and emit native code.
+When a plan forbids spilling, the compiler wraps the target architecture in `noSpillArch`. Its `Frame()` returns `nil` according to the assembler contract, so register exhaustion rejects native compilation cleanly and threaded dispatch remains installed.
 
 Native code does not marshal parameters or returns. It writes results and trap state into the journal, and the Go wrapper restores interpreter state from there.
 
