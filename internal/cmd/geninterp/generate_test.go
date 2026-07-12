@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dave/jennifer/jen"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -157,6 +158,15 @@ func TestGenerate(t *testing.T) {
 		require.NotContains(t, string(data), "func (c *threader) compose")
 		require.NotContains(t, string(data), "candidate0")
 
+	})
+
+	t.Run("advances fusion by the first opcode width", func(t *testing.T) {
+		pattern := seq(op(instr.LOCAL_GET), op(instr.REF_IS_NULL), op(instr.BR_IF))
+		body, err := compose(pattern, pattern.width(), "")
+		require.NoError(t, err)
+		file := jen.NewFile("review")
+		file.Func().Id("render").Params().Block(body...)
+		require.Contains(t, file.GoString(), "c.ip += 2")
 	})
 
 	t.Run("accepts the catalog", func(t *testing.T) {

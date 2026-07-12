@@ -11,6 +11,7 @@ import (
 
 type lowering struct {
 	source   step
+	first    step
 	compile  []jen.Code
 	check    []jen.Code
 	body     []jen.Code
@@ -260,7 +261,7 @@ var lowerers = [256]lowerer{
 
 func wrap(handler func() jen.Code) lowerer {
 	return func(_ *loweringState, source fact) (lowering, error) {
-		return lowering{source: source.step, handler: handler()}, nil
+		return lowering{source: source.step, first: source.step, handler: handler()}, nil
 	}
 }
 
@@ -422,7 +423,7 @@ func kindName(kind instr.Kind) (string, bool) {
 }
 
 func refSource(state *loweringState, source fact) (lowering, error) {
-	lowered := lowering{source: source.step}
+	lowered := lowering{source: source.step, first: source.step}
 	switch source.op {
 	case instr.REF_NULL:
 		lowered.boxed = jen.Qual("github.com/siyul-park/minivm/types", "BoxedNull")
@@ -466,6 +467,7 @@ func refLower(state *loweringState, source fact) (lowering, error) {
 	if state.standalone {
 		state.pending = []lowering{{
 			source:   source.step,
+			first:    source.step,
 			boxed:    jen.Id("value"),
 			resident: true,
 			check: []jen.Code{
@@ -498,7 +500,7 @@ func refLower(state *loweringState, source fact) (lowering, error) {
 		body = append(body, value.body...)
 		condition := jen.Add(value.boxed).Dot("Ref").Call().Op("==").Lit(0)
 		if !state.standalone && state.offset+width(source.op) < state.total {
-			lowered := lowering{source: source.step, compile: compile, check: value.check, body: value.body, raw: condition}
+			lowered := lowering{source: source.step, first: value.first, compile: compile, check: value.check, body: value.body, raw: condition}
 			state.pending = []lowering{lowered}
 			return lowered, nil
 		}
@@ -519,13 +521,13 @@ func refLower(state *loweringState, source fact) (lowering, error) {
 	}
 
 	if state.standalone {
-		return lowering{source: source.step, handler: standaloneCode(source.step, compile, body)}, nil
+		return lowering{source: source.step, first: source.step, handler: standaloneCode(source.step, compile, body)}, nil
 	}
 	compile = append(compile,
-		jen.Id("c").Dot("ip").Op("+=").Lit(width(value.source.op)),
+		jen.Id("c").Dot("ip").Op("+=").Lit(width(value.first.op)),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
 	)
-	return lowering{source: source.step, compile: compile}, nil
+	return lowering{source: source.step, first: value.first, compile: compile}, nil
 }
 
 func indexLower(state *loweringState, source fact) (lowering, error) {
@@ -536,7 +538,7 @@ func indexLower(state *loweringState, source fact) (lowering, error) {
 			jen.Id("i").Dot("sp").Op("--"),
 		}
 		body = append(body, indexCode(source.op, jen.Id("index"), width(source.op))...)
-		return lowering{source: source.step, handler: standaloneCode(source.step, nil, body)}, nil
+		return lowering{source: source.step, first: source.step, handler: standaloneCode(source.step, nil, body)}, nil
 	}
 	if len(state.pending) != 1 {
 		return lowering{}, fmt.Errorf("%s needs one constant index", instr.TypeOf(source.op).Mnemonic)
@@ -547,10 +549,10 @@ func indexLower(state *loweringState, source fact) (lowering, error) {
 	body = append(body, index.body...)
 	body = append(body, indexCode(source.op, jen.Int().Call(index.raw), state.total)...)
 	compile = append(compile,
-		jen.Id("c").Dot("ip").Op("+=").Lit(width(index.source.op)),
+		jen.Id("c").Dot("ip").Op("+=").Lit(width(index.first.op)),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
 	)
-	return lowering{source: source.step, compile: compile}, nil
+	return lowering{source: source.step, first: index.first, compile: compile}, nil
 }
 
 func callLower(state *loweringState, source fact) (lowering, error) {
@@ -559,7 +561,7 @@ func callLower(state *loweringState, source fact) (lowering, error) {
 		if err != nil {
 			return lowering{}, err
 		}
-		return lowering{source: source.step, handler: standaloneCode(source.step, nil, body)}, nil
+		return lowering{source: source.step, first: source.step, handler: standaloneCode(source.step, nil, body)}, nil
 	}
 	if len(state.pending) != 1 || state.pending[0].source.op != instr.CONST_GET {
 		return lowering{}, fmt.Errorf("%s needs one constant target", instr.TypeOf(source.op).Mnemonic)
@@ -580,7 +582,7 @@ func callLower(state *loweringState, source fact) (lowering, error) {
 	default:
 		return lowering{}, fmt.Errorf("unsupported call opcode %s", instr.TypeOf(source.op).Mnemonic)
 	}
-	return lowering{source: source.step, compile: compile}, nil
+	return lowering{source: source.step, first: target.first, compile: compile}, nil
 }
 
 func dynamicCallCode(op instr.Opcode) ([]jen.Code, error) {
@@ -642,13 +644,17 @@ func dynamicCallCode(op instr.Opcode) ([]jen.Code, error) {
 }
 
 func numericLower(state *loweringState, source fact) (lowering, error) {
+	first := source.step
+	if len(state.pending) > 0 {
+		first = state.pending[0].first
+	}
 	if !state.standalone && state.offset+width(source.op) < state.total {
-		lowered := lowering{source: source.step}
+		lowered := lowering{source: source.step, first: first}
 		state.pending = append(state.pending, lowered)
 		return lowered, nil
 	}
 	body, err := numericCode(source.step, state.pending, state.total, state.label, false)
-	return lowering{source: source.step, compile: body}, err
+	return lowering{source: source.step, first: first, compile: body}, err
 }
 
 func branchLower(state *loweringState, source fact) (lowering, error) {
@@ -661,7 +667,7 @@ func branchLower(state *loweringState, source fact) (lowering, error) {
 		}
 		condition := jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(1)).Dot("I32").Call().Op("!=").Lit(0)
 		body = append(body, branchBody(condition, 1, width(source.op))...)
-		return lowering{source: source.step, handler: standaloneCode(source.step, compile, body)}, nil
+		return lowering{source: source.step, first: source.step, handler: standaloneCode(source.step, compile, body)}, nil
 	}
 	if len(state.pending) == 0 {
 		return lowering{}, fmt.Errorf("%s needs one pending condition", instr.TypeOf(source.op).Mnemonic)
@@ -669,7 +675,7 @@ func branchLower(state *loweringState, source fact) (lowering, error) {
 	consumer := state.pending[len(state.pending)-1]
 	if _, ok := arity(consumer.source.op); ok {
 		body, err := numericCode(consumer.source, state.pending[:len(state.pending)-1], state.total, state.label, true)
-		return lowering{source: source.step, compile: body}, err
+		return lowering{source: source.step, first: consumer.first, compile: body}, err
 	}
 	if consumer.raw == nil {
 		return lowering{}, fmt.Errorf("%s has no branch condition", instr.TypeOf(consumer.source.op).Mnemonic)
@@ -683,21 +689,25 @@ func branchLower(state *loweringState, source fact) (lowering, error) {
 	body = append(body, consumer.body...)
 	body = append(body, branchBody(condition, 0, state.total)...)
 	compile = append(compile,
-		jen.Id("c").Dot("ip").Op("+=").Lit(width(consumer.source.op)),
+		jen.Id("c").Dot("ip").Op("+=").Lit(width(consumer.first.op)),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
 	)
-	return lowering{source: source.step, compile: compile}, nil
+	return lowering{source: source.step, first: consumer.first, compile: compile}, nil
 }
 
 func branchBody(condition jen.Code, consume, advance int) []jen.Code {
-	body := []jen.Code{jen.Id("taken").Op(":=").Add(condition)}
-	if consume > 0 {
-		body = append(body, jen.Id("i").Dot("sp").Op("-=").Lit(consume))
+	if consume == 0 {
+		return []jen.Code{
+			jen.If(condition).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
+			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
+		}
 	}
-	return append(body,
+	return []jen.Code{
+		jen.Id("taken").Op(":=").Add(condition),
+		jen.Id("i").Dot("sp").Op("-=").Lit(consume),
 		jen.If(jen.Id("taken")).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
 		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
-	)
+	}
 }
 
 func dispatch(tail bool, label string, total int) jen.Code {
@@ -748,7 +758,7 @@ func frameBody(target callTarget, targetSlots int, releaseTarget bool, advance i
 	}
 	body = append(body,
 		jen.If(jen.Id("i").Dot("fp").Op("==").Len(jen.Id("i").Dot("frames"))).Block(jen.Panic(jen.Id("ErrFrameOverflow"))),
-		jen.If(jen.Id("i").Dot("sp").Op("<").Lit(targetSlots).Op("+").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
+		jen.If(jen.Id("i").Dot("sp").Op("<").Add(adjust(jen.Id("params"), targetSlots))).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 		jen.If(adjust(jen.Id("i").Dot("sp").Op("+").Id("locals"), -targetSlots).Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
 	)
 	start := func() jen.Code { return adjust(jen.Id("i").Dot("sp"), -targetSlots) }
@@ -760,7 +770,7 @@ func frameBody(target callTarget, targetSlots int, releaseTarget bool, advance i
 		jen.Id("f").Dot("addr").Op("=").Add(target.addr),
 		jen.Id("f").Dot("ref").Op("=").Add(target.ref),
 		jen.Id("f").Dot("ip").Op("=").Lit(0),
-		jen.Id("f").Dot("bp").Op("=").Id("i").Dot("sp").Op("-").Id("params").Op("-").Lit(targetSlots),
+		jen.Id("f").Dot("bp").Op("=").Add(adjust(jen.Id("i").Dot("sp").Op("-").Id("params"), -targetSlots)),
 		jen.Id("f").Dot("returns").Op("=").Id("returns"),
 		jen.Id("f").Dot("release").Op("=").Add(boolean(releaseTarget)),
 		jen.Id("f").Dot("coro").Op("=").Lit(0),
@@ -795,7 +805,7 @@ func replaceBody(target callTarget, targetSlots int, releaseTarget bool, advance
 		body = append(body, overflow())
 	}
 	body = append(body,
-		jen.If(jen.Id("i").Dot("sp").Op("<").Lit(targetSlots).Op("+").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
+		jen.If(jen.Id("i").Dot("sp").Op("<").Add(adjust(jen.Id("params"), targetSlots))).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 		jen.If(jen.Id("i").Dot("fp").Op("==").Lit(1)).Block(
 			jen.If(jen.Id("i").Dot("fp").Op("==").Len(jen.Id("i").Dot("frames"))).Block(jen.Panic(jen.Id("ErrFrameOverflow"))),
 			jen.If(adjust(jen.Id("i").Dot("sp").Op("+").Id("locals"), -targetSlots).Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
@@ -806,7 +816,7 @@ func replaceBody(target callTarget, targetSlots int, releaseTarget bool, advance
 			jen.Id("f").Dot("addr").Op("=").Add(target.addr),
 			jen.Id("f").Dot("ref").Op("=").Add(target.ref),
 			jen.Id("f").Dot("ip").Op("=").Lit(0),
-			jen.Id("f").Dot("bp").Op("=").Id("i").Dot("sp").Op("-").Id("params").Op("-").Lit(targetSlots),
+			jen.Id("f").Dot("bp").Op("=").Add(adjust(jen.Id("i").Dot("sp").Op("-").Id("params"), -targetSlots)),
 			jen.Id("f").Dot("returns").Op("=").Id("returns"),
 			jen.Id("f").Dot("release").Op("=").Add(boolean(releaseTarget)),
 			jen.Id("f").Dot("coro").Op("=").Lit(0),
@@ -852,7 +862,9 @@ func hostBody(targetSlots, advance int, tail bool) []jen.Code {
 	body = append(body,
 		jen.If(jen.Id("i").Dot("sp").Op("<").Lit(targetSlots).Op("+").Id("params")).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
 		jen.If(adjust(jen.Id("i").Dot("sp").Op("+").Id("returns").Op("-").Id("params"), -targetSlots).Op(">").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow"))),
-		jen.Id("args").Op(":=").Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("params").Op("-").Lit(targetSlots).Op(":").Id("i").Dot("sp").Op("-").Lit(targetSlots)),
+		jen.Id("args").Op(":=").Id("i").Dot("stack").Index(
+			adjust(jen.Id("i").Dot("sp").Op("-").Id("params"), -targetSlots).Op(":").Add(adjust(jen.Id("i").Dot("sp"), -targetSlots)),
+		),
 		jen.Id("out").Op(",").Id("err").Op(":=").Id("fn").Dot("Fn").Call(jen.Id("i"), jen.Id("args")),
 		jen.If(jen.Id("err").Op("!=").Nil()).Block(jen.Panic(jen.Id("err"))),
 		release(jen.Id("args"), jen.Id("out")),
@@ -861,7 +873,7 @@ func hostBody(targetSlots, advance int, tail bool) []jen.Code {
 		body = append(body, release(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Lit(targetSlots).Op(":").Id("i").Dot("sp")), jen.Id("out")))
 	}
 	body = append(body,
-		jen.Id("i").Dot("sp").Op("+=").Id("returns").Op("-").Id("params").Op("-").Lit(targetSlots),
+		jen.Id("i").Dot("sp").Op("+=").Add(adjust(jen.Id("returns").Op("-").Id("params"), -targetSlots)),
 		jen.Copy(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Id("returns").Op(":").Id("i").Dot("sp")), jen.Id("out")),
 	)
 	if tail {
@@ -889,8 +901,8 @@ func createBody(targetSlots int, borrowed bool, advance int) []jen.Code {
 		body = append(body, overflow())
 	}
 	body = append(body,
-		jen.If(jen.Id("i").Dot("sp").Op("<").Id("captures").Op("+").Lit(targetSlots)).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
-		jen.Id("base").Op(":=").Id("i").Dot("sp").Op("-").Id("captures").Op("-").Lit(targetSlots),
+		jen.If(jen.Id("i").Dot("sp").Op("<").Add(adjust(jen.Id("captures"), targetSlots))).Block(jen.Panic(jen.Id("ErrStackUnderflow"))),
+		jen.Id("base").Op(":=").Add(adjust(jen.Id("i").Dot("sp").Op("-").Id("captures"), -targetSlots)),
 		jen.Id("upvals").Op(":=").Append(jen.Index().Qual("github.com/siyul-park/minivm/types", "Boxed").Values(), jen.Id("i").Dot("stack").Index(jen.Id("base").Op(":").Id("base").Op("+").Id("captures")).Op("...")),
 	)
 	if borrowed {
@@ -1399,7 +1411,7 @@ func sourceAccess(source fact, number, offset int, label string, standalone bool
 	if standalone {
 		at = jen.Id("c").Dot("ip")
 	}
-	result := lowering{source: source.step, boxed: jen.Id(boxed)}
+	result := lowering{source: source.step, first: source.step, boxed: jen.Id(boxed)}
 	result.check = append(result.check, overflow())
 
 	rejectBounds := func(field string) jen.Code {
