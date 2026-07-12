@@ -242,42 +242,34 @@ var (
 						if err != nil {
 							panic(err)
 						}
-						{
-							args := args
-							rets := out
-							for _, val := range args {
-								if val.Kind() != types.KindRef {
-									continue
-								}
-								kept := false
-								for _, r := range rets {
-									if r == val {
-										kept = true
-										break
-									}
-								}
-								if !kept {
-									i.release(val.Ref())
+						for _, value := range args {
+							if value.Kind() != types.KindRef {
+								continue
+							}
+							kept := false
+							for _, result := range out {
+								if result == value {
+									kept = true
+									break
 								}
 							}
+							if !kept {
+								i.release(value.Ref())
+							}
 						}
-						{
-							args := i.stack[i.sp-1 : i.sp]
-							rets := out
-							for _, val := range args {
-								if val.Kind() != types.KindRef {
-									continue
+						for _, value := range i.stack[i.sp-1 : i.sp] {
+							if value.Kind() != types.KindRef {
+								continue
+							}
+							kept := false
+							for _, result := range out {
+								if result == value {
+									kept = true
+									break
 								}
-								kept := false
-								for _, r := range rets {
-									if r == val {
-										kept = true
-										break
-									}
-								}
-								if !kept {
-									i.release(val.Ref())
-								}
+							}
+							if !kept {
+								i.release(value.Ref())
 							}
 						}
 						i.sp += returns - params - 1
@@ -504,42 +496,34 @@ var (
 						if err != nil {
 							panic(err)
 						}
-						{
-							args := args
-							rets := out
-							for _, val := range args {
-								if val.Kind() != types.KindRef {
-									continue
-								}
-								kept := false
-								for _, r := range rets {
-									if r == val {
-										kept = true
-										break
-									}
-								}
-								if !kept {
-									i.release(val.Ref())
+						for _, value := range args {
+							if value.Kind() != types.KindRef {
+								continue
+							}
+							kept := false
+							for _, result := range out {
+								if result == value {
+									kept = true
+									break
 								}
 							}
+							if !kept {
+								i.release(value.Ref())
+							}
 						}
-						{
-							args := i.stack[i.sp-1 : i.sp]
-							rets := out
-							for _, val := range args {
-								if val.Kind() != types.KindRef {
-									continue
+						for _, value := range i.stack[i.sp-1 : i.sp] {
+							if value.Kind() != types.KindRef {
+								continue
+							}
+							kept := false
+							for _, result := range out {
+								if result == value {
+									kept = true
+									break
 								}
-								kept := false
-								for _, r := range rets {
-									if r == val {
-										kept = true
-										break
-									}
-								}
-								if !kept {
-									i.release(val.Ref())
-								}
+							}
+							if !kept {
+								i.release(value.Ref())
 							}
 						}
 						i.sp += returns - params - 1
@@ -4286,6 +4270,9 @@ var (
 					panic(ErrStackUnderflow)
 				}
 				size := int(i.stack[i.sp-1].I32())
+				if size < 0 {
+					panic(ErrIndexOutOfRange)
+				}
 				srcOffset := int(i.stack[i.sp-2].I32())
 				srcRef := i.stack[i.sp-3]
 				dstOffset := int(i.stack[i.sp-4].I32())
@@ -14013,7 +14000,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) | uint64(r1)&types.VMask))
+					v2 := types.Boxed(uint64(r0) | uint64(r1))
 					i.stack[i.sp] = v2
 					i.sp++
 					i.fr.ip += 7
@@ -17328,7 +17315,7 @@ var (
 					}
 					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) | uint64(r1)&types.VMask))
+					v2 := types.Boxed(uint64(r0) | uint64(r1))
 					i.stack[i.sp] = v2
 					i.sp++
 					i.fr.ip += 6
@@ -20501,7 +20488,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) | uint64(r1)&types.VMask))
+					v2 := types.Boxed(uint64(r0) | uint64(r1))
 					i.stack[i.sp] = v2
 					i.sp++
 					i.fr.ip += 6
@@ -22159,7 +22146,7 @@ var (
 					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) | uint64(r1)&types.VMask))
+					v2 := types.Boxed(uint64(r0) | uint64(r1))
 					i.stack[i.sp] = v2
 					i.sp++
 					i.fr.ip += 9
@@ -25182,7 +25169,7 @@ var (
 					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
-					v1 := types.Boxed(uint64(i.stack[i.sp-1])&uint64(r0) & ^uint64(types.VMask) | (uint64(i.stack[i.sp-1]) | uint64(r0)&types.VMask))
+					v1 := types.Boxed(uint64(i.stack[i.sp-1]) | uint64(r0))
 					i.stack[i.sp-1] = v1
 					i.fr.ip += 4
 				}
@@ -32003,7 +31990,7 @@ var (
 					}
 					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) | uint64(r1)&types.VMask))
+					v2 := types.Boxed(uint64(r0) | uint64(r1))
 					i.stack[i.sp] = v2
 					i.sp++
 					i.fr.ip += 5
@@ -33737,7 +33724,7 @@ var (
 					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) | uint64(r1)&types.VMask))
+					v2 := types.Boxed(uint64(r0) | uint64(r1))
 					i.stack[i.sp] = v2
 					i.sp++
 					i.fr.ip += 8
@@ -36862,7 +36849,7 @@ var (
 					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
-					v1 := types.Boxed(uint64(i.stack[i.sp-1])&uint64(r0) & ^uint64(types.VMask) | (uint64(i.stack[i.sp-1]) | uint64(r0)&types.VMask))
+					v1 := types.Boxed(uint64(i.stack[i.sp-1]) | uint64(r0))
 					i.stack[i.sp-1] = v1
 					i.fr.ip += 3
 				}
@@ -40726,7 +40713,7 @@ var (
 					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
-					v1 := types.Boxed(uint64(i.stack[i.sp-1])&uint64(r0) & ^uint64(types.VMask) | (uint64(i.stack[i.sp-1]) | uint64(r0)&types.VMask))
+					v1 := types.Boxed(uint64(i.stack[i.sp-1]) | uint64(r0))
 					i.stack[i.sp-1] = v1
 					i.fr.ip += 4
 				}
@@ -50251,7 +50238,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.globals[i1]
-					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) | uint64(r1)&types.VMask))
+					v2 := types.Boxed(uint64(r0) | uint64(r1))
 					i.stack[i.sp] = v2
 					i.sp++
 					i.fr.ip += 6
@@ -53566,7 +53553,7 @@ var (
 					}
 					i3 := i.fr.bp + i1
 					r1 := i.stack[i3]
-					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) | uint64(r1)&types.VMask))
+					v2 := types.Boxed(uint64(r0) | uint64(r1))
 					i.stack[i.sp] = v2
 					i.sp++
 					i.fr.ip += 5
@@ -56739,7 +56726,7 @@ var (
 						panic(ErrSegmentationFault)
 					}
 					r1 := i.fr.upvals[i1]
-					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) | uint64(r1)&types.VMask))
+					v2 := types.Boxed(uint64(r0) | uint64(r1))
 					i.stack[i.sp] = v2
 					i.sp++
 					i.fr.ip += 5
@@ -58397,7 +58384,7 @@ var (
 					if i.sp+1 == len(i.stack) {
 						panic(ErrStackOverflow)
 					}
-					v2 := types.Boxed(uint64(r0)&uint64(r1) & ^uint64(types.VMask) | (uint64(r0) | uint64(r1)&types.VMask))
+					v2 := types.Boxed(uint64(r0) | uint64(r1))
 					i.stack[i.sp] = v2
 					i.sp++
 					i.fr.ip += 8
@@ -61420,7 +61407,7 @@ var (
 					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
-					v1 := types.Boxed(uint64(i.stack[i.sp-1])&uint64(r0) & ^uint64(types.VMask) | (uint64(i.stack[i.sp-1]) | uint64(r0)&types.VMask))
+					v1 := types.Boxed(uint64(i.stack[i.sp-1]) | uint64(r0))
 					i.stack[i.sp-1] = v1
 					i.fr.ip += 3
 				}
@@ -63001,7 +62988,7 @@ var (
 					if i.sp == 0 {
 						panic(ErrStackUnderflow)
 					}
-					v1 := types.Boxed(uint64(i.stack[i.sp-1])&uint64(r0) & ^uint64(types.VMask) | (uint64(i.stack[i.sp-1]) | uint64(r0)&types.VMask))
+					v1 := types.Boxed(uint64(i.stack[i.sp-1]) | uint64(r0))
 					i.stack[i.sp-1] = v1
 					i.fr.ip += 6
 				}
