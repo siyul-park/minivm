@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -91,8 +92,9 @@ var DefaultMarshaler Marshaler = &codec{}
 var (
 	_ Marshaler = (*codec)(nil)
 
-	typeError = reflect.TypeOf((*error)(nil)).Elem()
-	typeValue = reflect.TypeOf((*types.Value)(nil)).Elem()
+	typeError   = reflect.TypeOf((*error)(nil)).Elem()
+	typeContext = reflect.TypeOf((*context.Context)(nil)).Elem()
+	typeValue   = reflect.TypeOf((*types.Value)(nil)).Elem()
 
 	runtimeTypes = map[reflect.Type]types.Type{
 		reflect.TypeOf(types.I32(0)):     types.TypeI32,
@@ -552,6 +554,9 @@ func (m *codec) compileHostObject(t reflect.Type, seen map[reflect.Type]bool) (*
 }
 
 func (m *codec) compileFunctionType(t reflect.Type, skip int, seen map[reflect.Type]bool) (*types.FunctionType, error) {
+	if skip < t.NumIn() && t.In(skip) == typeContext {
+		skip++
+	}
 	params := make([]types.Type, t.NumIn()-skip)
 	for idx := range params {
 		p, err := m.compile(t.In(idx+skip), seen)
@@ -589,6 +594,7 @@ func (s *marshalState) value(v reflect.Value) (types.Value, error) {
 func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *HostFunction {
 	m := s.m
 	fnType := fn.Type()
+	hasContext := fnType.NumIn() > 0 && fnType.In(0) == typeContext
 	// in and seen are allocated fresh inside the returned closure on every
 	// call: the returned HostFunction is a types.Value that can be placed in
 	// program.WithConstants, so pooled Interpreters built from the same
@@ -597,14 +603,23 @@ func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *Host
 	// it concurrently from separate goroutines. Call-scoped scratch would
 	// race across such concurrent calls.
 	return NewHostFunction(typ, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
-		if len(params) != fnType.NumIn() {
-			return nil, fmt.Errorf("%w: got %d params, want %d", ErrTypeMismatch, len(params), fnType.NumIn())
+		if len(params) != len(typ.Params) {
+			return nil, fmt.Errorf("%w: got %d params, want %d", ErrTypeMismatch, len(params), len(typ.Params))
 		}
 		in := make([]reflect.Value, fnType.NumIn())
+		offset := 0
+		if hasContext {
+			ctx := i.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			in[0] = reflect.ValueOf(ctx)
+			offset = 1
+		}
 		unmarshal := &unmarshalState{m: m, i: i}
-		for idx := range in {
-			in[idx] = reflect.New(fnType.In(idx)).Elem()
-			if err := unmarshal.value(params[idx], in[idx]); err != nil {
+		for idx := range params {
+			in[idx+offset] = reflect.New(fnType.In(idx + offset)).Elem()
+			if err := unmarshal.value(params[idx], in[idx+offset]); err != nil {
 				return nil, fmt.Errorf("function param %d: %w", idx, err)
 			}
 		}
@@ -1173,6 +1188,7 @@ func (m *codec) unmarshalFunc(fnType *types.FunctionType) unmarshaler {
 		}
 
 		typ := dst.Type()
+		hasContext := typ.NumIn() > 0 && typ.In(0) == typeContext
 		hasError := typ.NumOut() > 0 && typ.Out(typ.NumOut()-1).Implements(typeError)
 		dst.Set(reflect.MakeFunc(typ, func(in []reflect.Value) []reflect.Value {
 			out := make([]reflect.Value, typ.NumOut())
@@ -1187,18 +1203,27 @@ func (m *codec) unmarshalFunc(fnType *types.FunctionType) unmarshaler {
 				return out
 			}
 
-			boxed := make([]types.Boxed, len(in))
+			ctx := context.Background()
+			offset := 0
+			if hasContext {
+				ctx, _ = in[0].Interface().(context.Context)
+				if ctx == nil {
+					ctx = context.Background()
+				}
+				offset = 1
+			}
+			boxed := make([]types.Boxed, len(in)-offset)
 			marshal := &marshalState{m: m, i: s.i, seen: make(map[uintptr]bool)}
 			defer marshal.close()
-			for idx := range in {
-				v, err := marshal.boxAs(in[idx], fnType.Params[idx])
+			for idx := range boxed {
+				v, err := marshal.boxAs(in[idx+offset], fnType.Params[idx])
 				if err != nil {
 					return fail(fmt.Errorf("function param %d: %w", idx, err))
 				}
 				boxed[idx] = v
 			}
 
-			returns, err := s.i.invoke(val, boxed)
+			returns, err := s.i.invoke(ctx, val, boxed)
 			if err != nil {
 				return fail(err)
 			}

@@ -21,6 +21,17 @@ import (
 
 type upperMarshaler struct{}
 
+type contextKey struct{}
+
+type contextHost struct{}
+
+func (*contextHost) Value(ctx context.Context) int32 {
+	if ctx.Value(contextKey{}) == "value" {
+		return 7
+	}
+	return 0
+}
+
 func (upperMarshaler) Marshal(_ *Interpreter, v any) (types.Value, error) {
 	s, ok := v.(string)
 	if !ok {
@@ -2434,6 +2445,47 @@ func TestInterpreter_Marshal(t *testing.T) {
 		require.Equal(t, types.I32(7), v)
 	})
 
+	t.Run("function receives active context", func(t *testing.T) {
+		var got context.Context
+		setup := New(program.New(nil))
+		fn, err := setup.Marshal(func(ctx context.Context) int32 {
+			got = ctx
+			return 7
+		})
+		require.NoError(t, err)
+		setup.Close()
+
+		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(fn))
+		i := New(prog)
+		defer i.Close()
+		ctx := context.WithValue(context.Background(), contextKey{}, "value")
+		require.NoError(t, i.Run(ctx))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(7), value)
+		require.Equal(t, ctx, got)
+	})
+
+	t.Run("host method receives active context", func(t *testing.T) {
+		setup := New(program.New(nil))
+		defer setup.Close()
+		value, err := setup.Marshal(contextHost{})
+		require.NoError(t, err)
+		host := value.(*HostObject)
+		method := host.Field(host.Typ.FieldIndex("Value"))
+		fn, err := setup.Load(method.Ref())
+		require.NoError(t, err)
+
+		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(fn))
+		i := New(prog)
+		defer i.Close()
+		ctx := context.WithValue(context.Background(), contextKey{}, "value")
+		require.NoError(t, i.Run(ctx))
+		got, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(7), got)
+	})
+
 	t.Run("marshaled function is shared and race-safe across interpreters", func(t *testing.T) {
 		setup := New(program.New(nil))
 		v, err := setup.Marshal(func(a, b int32) int32 { return a + b })
@@ -2517,6 +2569,135 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 		got, err := add(2, 3)
 		require.NoError(t, err)
 		require.Equal(t, int32(5), got)
+	})
+
+	t.Run("VM function with context", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32},
+		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
+
+		var add func(context.Context, int32, int32) (int32, error)
+		require.NoError(t, i.Unmarshal(fn, &add))
+		got, err := add(context.Background(), 2, 3)
+		require.NoError(t, err)
+		require.Equal(t, int32(5), got)
+	})
+
+	t.Run("VM function context identity", func(t *testing.T) {
+		var got context.Context
+		i := New(program.New(nil), WithTick(2), WithHook(func(i *Interpreter) error {
+			got = i.Context()
+			return nil
+		}))
+		defer i.Close()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
+		).MustBuild()
+		addr, err := i.Alloc(fn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, i.Release(addr)) }()
+
+		var call func(context.Context) (int32, error)
+		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
+		ctx := context.WithValue(context.Background(), struct{}{}, "value")
+		value, err := call(ctx)
+		require.NoError(t, err)
+		require.Equal(t, int32(7), value)
+		require.Equal(t, ctx, got)
+	})
+
+	t.Run("VM function canceled context", func(t *testing.T) {
+		i := New(program.New(nil), WithTick(1))
+		defer i.Close()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
+		).MustBuild()
+
+		var call func(context.Context) (int32, error)
+		require.NoError(t, i.Unmarshal(fn, &call))
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := call(ctx)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("VM function nil context uses background", func(t *testing.T) {
+		var got context.Context
+		i := New(program.New(nil), WithTick(2), WithHook(func(i *Interpreter) error {
+			got = i.Context()
+			return nil
+		}))
+		defer i.Close()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
+		).MustBuild()
+		addr, err := i.Alloc(fn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, i.Release(addr)) }()
+
+		var call func(context.Context) (int32, error)
+		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
+		value, err := call(nil)
+		require.NoError(t, err)
+		require.Equal(t, int32(7), value)
+		require.Equal(t, context.Background(), got)
+	})
+
+	t.Run("VM function non-first context", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+		fn := types.NewFunctionBuilder(&types.FunctionType{
+			Params: []types.Type{types.TypeI32, types.TypeRef}, Returns: []types.Type{types.TypeI32},
+		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).MustBuild()
+
+		var call func(int32, context.Context) (int32, error)
+		require.NoError(t, i.Unmarshal(fn, &call))
+		got, err := call(7, nil)
+		require.NoError(t, err)
+		require.Equal(t, int32(7), got)
+	})
+
+	t.Run("VM closure with context", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
+		).MustBuild()
+		fnAddr, err := i.Alloc(fn)
+		require.NoError(t, err)
+		closureAddr, err := i.Alloc(types.NewClosure(fn.Typ, types.Ref(fnAddr), nil))
+		require.NoError(t, err)
+		defer func() { require.NoError(t, i.Release(closureAddr)) }()
+
+		var call func(context.Context) (int32, error)
+		require.NoError(t, i.Unmarshal(types.BoxRef(closureAddr), &call))
+		got, err := call(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, int32(7), got)
+	})
+
+	t.Run("VM function without context uses background", func(t *testing.T) {
+		var got context.Context
+		i := New(program.New(nil), WithTick(2), WithHook(func(i *Interpreter) error {
+			got = i.Context()
+			return nil
+		}))
+		defer i.Close()
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
+		).MustBuild()
+		addr, err := i.Alloc(fn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, i.Release(addr)) }()
+
+		var call func() (int32, error)
+		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
+		value, err := call()
+		require.NoError(t, err)
+		require.Equal(t, int32(7), value)
+		require.Equal(t, context.Background(), got)
 	})
 
 	t.Run("function ref", func(t *testing.T) {

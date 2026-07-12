@@ -418,7 +418,7 @@ func (i *Interpreter) Unmarshal(v types.Value, dst any) error {
 	return i.marshaler.Unmarshal(i, v, dst)
 }
 
-func (i *Interpreter) invoke(val types.Value, params []types.Boxed) (returns []types.Boxed, err error) {
+func (i *Interpreter) invoke(ctx context.Context, val types.Value, params []types.Boxed) (returns []types.Boxed, err error) {
 	if i.ctx != nil || i.fp != 1 {
 		return nil, ErrInterpreterBusy
 	}
@@ -469,7 +469,7 @@ func (i *Interpreter) invoke(val types.Value, params []types.Boxed) (returns []t
 
 	i.fr.code = []func(*Interpreter){threaded[instr.CALL](&threader{})}
 	i.fr.ip = 0
-	if err = i.Run(context.Background()); err != nil {
+	if err = i.Run(ctx); err != nil {
 		return nil, err
 	}
 	returns = append([]types.Boxed(nil), i.stack[base:i.sp]...)
