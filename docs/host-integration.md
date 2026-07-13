@@ -111,13 +111,16 @@ err = vm.Release(addr)
 Ownership rules:
 
 - `Alloc` creates an owned heap reference
+- `Alloc` of an existing `types.Ref` or `KindRef` creates another ownership of the same address
 - `Load` reads without changing ownership
-- `Store` replaces the value at an address
+- `Store` replaces the value at an address, releases refs owned by the old value, and finalizes its external resources
+- `Store(addr, types.BoxRef(addr))` leaves the current value unchanged
 - `Retain` creates another host-owned reference
 - `Release` drops a host-owned reference
-- every successful `Retain` must be matched by `Release`
+- every owned reference from `Alloc` or `Retain` must eventually be transferred or released
 
-Leaked host references keep heap objects alive.
+Leaked host references keep heap objects alive. Releasing an address does not
+invalidate another ownership created by `Alloc` or `Retain`.
 
 ### Globals and Locals
 
@@ -128,11 +131,11 @@ If `val` is `KindRef`, ownership transfers into the slot. The caller must not re
 To keep another reference, retain first.
 
 ```go
-ref, err := vm.Retain(addr)
+_, err := vm.Retain(addr)
 if err != nil {
     return err
 }
-err = vm.SetGlobal(0, types.BoxRef(ref))
+err = vm.SetGlobal(0, types.BoxRef(addr))
 ```
 
 This mirrors `GLOBAL_SET` and `LOCAL_SET`, which consume stack references into slots.
@@ -305,9 +308,9 @@ Unsigned integers use the same VM types as signed integers. Values above the sig
 
 Marshaled references live on the VM heap. This includes strings, arrays, maps, structs, host objects, and host functions.
 
-They remain alive while reachable from the stack, constants, globals, closures, heap objects, or retained host references. They do not survive `vm.Close()` or `vm.Reset()`.
+They remain alive while reachable from the stack, constants, globals, closures, heap objects, or retained host references. Dynamic values do not survive `vm.Close()` or `vm.Reset()`; reset finalizes their external resources and invalidates every dynamic heap address.
 
-Use marshaled refs before the next reset, or register them as constants or globals.
+Use marshaled refs before the next reset, or register immutable inputs as program constants.
 
 ```go
 v, err := vm.Marshal(myStruct)

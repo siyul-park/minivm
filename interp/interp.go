@@ -558,10 +558,13 @@ func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
 		return ErrSegmentationFault
 	}
 	old := i.globals[idx]
+	if old == val {
+		return nil
+	}
+	i.globals[idx] = val
 	if old.Kind() == types.KindRef {
 		i.release(old.Ref())
 	}
-	i.globals[idx] = val
 	return nil
 }
 
@@ -585,10 +588,13 @@ func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
 		return ErrSegmentationFault
 	}
 	old := i.stack[addr]
+	if old == val {
+		return nil
+	}
+	i.stack[addr] = val
 	if old.Kind() == types.KindRef {
 		i.release(old.Ref())
 	}
-	i.stack[addr] = val
 	return nil
 }
 
@@ -604,21 +610,33 @@ func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 	if addr < 0 || addr >= len(i.heap) || i.rc[addr] <= 0 {
 		return ErrSegmentationFault
 	}
-	if v, ok := val.(types.Boxed); ok {
+	switch v := val.(type) {
+	case types.Boxed:
 		if v.Kind() == types.KindRef {
 			ref := v.Ref()
 			if ref < 0 || ref >= len(i.heap) || i.rc[ref] <= 0 {
 				return ErrSegmentationFault
 			}
+			if ref == addr {
+				return nil
+			}
 			val = i.heap[ref]
 		} else {
 			val = types.Unbox(v)
 		}
+	case types.Ref:
+		ref := int(v)
+		if ref < 0 || ref >= len(i.heap) || i.rc[ref] <= 0 {
+			return ErrSegmentationFault
+		}
+		if ref == addr {
+			return nil
+		}
+		val = i.heap[ref]
 	}
-	if _, ok := i.heap[addr].(*types.Function); ok {
-		i.remove(addr)
-	}
+	old := i.heap[addr]
 	i.heap[addr] = val
+	i.dispose(addr, old)
 	if fn, ok := val.(*types.Function); ok {
 		i.bind(addr, fn, true)
 	}
@@ -627,11 +645,24 @@ func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 
 func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 	defer i.guard(&err)
-	if v, ok := val.(types.Boxed); ok {
+	switch v := val.(type) {
+	case types.Boxed:
 		if v.Kind() == types.KindRef {
-			return v.Ref(), nil
+			addr = v.Ref()
+			if addr < 0 || addr >= len(i.heap) || i.rc[addr] <= 0 {
+				return 0, ErrSegmentationFault
+			}
+			i.retain(addr)
+			return addr, nil
 		}
 		val = types.Unbox(v)
+	case types.Ref:
+		addr = int(v)
+		if addr < 0 || addr >= len(i.heap) || i.rc[addr] <= 0 {
+			return 0, ErrSegmentationFault
+		}
+		i.retain(addr)
+		return addr, nil
 	}
 	if s, ok := val.(types.String); ok {
 		return int(i.intern(string(s))), nil
@@ -721,8 +752,10 @@ func (i *Interpreter) Close() error {
 }
 
 func (i *Interpreter) Reset() {
-	for addr := range i.dynamic {
-		i.remove(addr)
+	for addr := i.base; addr < len(i.heap); addr++ {
+		if i.rc[addr] > 0 {
+			i.finalize(addr, i.heap[addr])
+		}
 	}
 	for i.fp > 1 {
 		i.fp--
@@ -746,22 +779,22 @@ func (i *Interpreter) Reset() {
 
 	i.gas = i.fuel
 	i.roots = i.roots[:0]
-	clear(i.interned)
 
-	i.heap = i.heap[:i.base]
-	i.rc = i.rc[:i.base]
+	heap := i.heap[:cap(i.heap)]
+	clear(heap[i.base:])
+	i.heap = heap[:i.base]
+	hits := i.rc[:cap(i.rc)]
+	clear(hits[i.base:])
+	i.rc = hits[:i.base]
 	for j := 0; j < i.base; j++ {
 		i.rc[j] = 1
 	}
 	i.free = i.free[:0]
 
-	// Restore the declared-kind zero seed (see New). Each slot's runtime kind
-	// still matches its declaration, so the kind is read back from the slot
-	// itself; the heap and refcounts were re-baselined above, so any old ref
-	// value needs no release, and this runs after the rc reset so the seed's
-	// null-ref retain is preserved.
-	for idx := range i.globals {
-		i.globals[idx] = i.zero(i.globals[idx].Kind())
+	// Restore each global from its declaration rather than its previous runtime
+	// kind: a dynamic ref global may have held an inline scalar before reset.
+	for idx, kind := range i.globalKinds {
+		i.globals[idx] = i.zero(kind)
 	}
 }
 
@@ -1795,21 +1828,39 @@ func (i *Interpreter) refs(v types.Value) []types.Ref {
 	return i.refbuf
 }
 
-// reclaim finalizes slot addr holding v: it drops interned-string and
-// OS-resource bookkeeping, clears the slot, and returns it to the free list. The
-// caller has already decided addr is dead and settled its referents' counts.
+// dispose releases the refs owned by v and finalizes its non-heap resources.
+// The containing slot stays allocated, so Store can replace a value without
+// changing the address or its external refcount.
+func (i *Interpreter) dispose(addr int, v types.Value) {
+	var local [8]int
+	children := local[:0]
+	for _, ref := range i.refs(v) {
+		children = append(children, int(ref))
+	}
+	for _, child := range children {
+		i.release(child)
+	}
+	i.finalize(addr, v)
+}
+
+// reclaim finalizes slot addr holding v, clears it, and returns the stable
+// address to the free list. The caller has already settled its referents.
 func (i *Interpreter) reclaim(addr int, v types.Value) {
+	i.finalize(addr, v)
+	i.heap[addr] = nil
+	i.free = append(i.free, addr)
+}
+
+func (i *Interpreter) finalize(addr int, v types.Value) {
 	if _, ok := v.(*types.Function); ok {
 		i.remove(addr)
 	}
-	if s, ok := v.(types.String); ok {
+	if s, ok := v.(types.String); ok && i.interned[string(s)] == types.Ref(addr) {
 		delete(i.interned, string(s))
 	}
 	if c, ok := v.(io.Closer); ok {
 		_ = c.Close()
 	}
-	i.heap[addr] = nil
-	i.free = append(i.free, addr)
 }
 
 func (i *Interpreter) yields(code []byte) bool {
