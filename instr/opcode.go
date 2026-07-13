@@ -281,4 +281,6 @@ const (
 	ERROR_CODE
 
 	STRING_ITER
+
+	opcodeCount
 )

@@ -10,6 +10,39 @@ import (
 )
 
 func TestVerify(t *testing.T) {
+	t.Run("defines a policy for every opcode", func(t *testing.T) {
+		policies := map[instr.Opcode]string{
+			instr.NOP:          "fixed zero effect",
+			instr.UNREACHABLE:  "terminator",
+			instr.DUP:          "duplicates the current top kind",
+			instr.SWAP:         "swaps the current top kinds",
+			instr.BR:           "fixed zero effect",
+			instr.SELECT:       "unifies the selected operand kinds",
+			instr.CALL:         "uses the statically known callee signature",
+			instr.RETURN:       "checks the declared return arity",
+			instr.RETURN_CALL:  "uses the statically known callee signature",
+			instr.GLOBAL_TEE:   "preserves the stored value on the stack",
+			instr.LOCAL_GET:    "uses the declared local kind",
+			instr.LOCAL_TEE:    "preserves the stored value on the stack",
+			instr.CONST_GET:    "uses the constant value kind",
+			instr.UPVAL_GET:    "uses the declared capture kind",
+			instr.STRUCT_NEW:   "uses the declared struct field count",
+			instr.ARRAY_APPEND: "stops dataflow at its stack-counted arity",
+			instr.MAP_NEW:      "stops dataflow at its stack-counted arity",
+			instr.CLOSURE_NEW:  "stops dataflow at its capture-counted arity",
+		}
+		for code := 0; code < 256; code++ {
+			op := instr.Opcode(code)
+			if !instr.Valid(op) {
+				continue
+			}
+			typ := instr.TypeOf(op)
+			if typ.Pop != nil || typ.Push != nil {
+				continue
+			}
+			require.NotEmpty(t, policies[op], "%s has neither a fixed stack effect nor an explicit verifier policy", typ.Mnemonic)
+		}
+	})
 	t.Run("valid arithmetic", func(t *testing.T) {
 		prog := New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),

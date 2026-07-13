@@ -1280,6 +1280,40 @@ var runTests = []struct {
 }
 
 func TestInterpreter_Run(t *testing.T) {
+	t.Run("covers every runtime opcode", func(t *testing.T) {
+		covered := make(map[instr.Opcode]struct{})
+		for _, tt := range runTests {
+			codes := [][]byte{tt.program.Code}
+			for _, constant := range tt.program.Constants {
+				if fn, ok := constant.(*types.Function); ok {
+					codes = append(codes, fn.Code)
+				}
+			}
+			for _, code := range codes {
+				for ip := 0; ip < len(code); {
+					inst := instr.Instruction(code[ip:])
+					covered[inst.Opcode()] = struct{}{}
+					width := inst.Width()
+					require.Positive(t, width)
+					require.LessOrEqual(t, ip+width, len(code))
+					ip += width
+				}
+			}
+		}
+
+		var missing []string
+		for code := 0; code < 256; code++ {
+			op := instr.Opcode(code)
+			if !instr.Valid(op) {
+				continue
+			}
+			if _, ok := covered[op]; !ok {
+				missing = append(missing, instr.TypeOf(op).Mnemonic)
+			}
+		}
+		require.Empty(t, missing)
+	})
+
 	for _, tt := range runTests {
 		t.Run(fmt.Sprint(tt.program), func(t *testing.T) {
 			i := New(tt.program)

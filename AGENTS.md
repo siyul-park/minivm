@@ -109,6 +109,7 @@ Read only docs relevant to the task.
 | `docs/guides/repl.md` | REPL commands, bytecode debugging, branch syntax |
 | `docs/compatibility.md` | Go version, platform matrix, CGO, build tags, `unsafe` usage |
 | `docs/host-integration.md` | `HostFunction`, `Marshal`/`Unmarshal`, host objects |
+| `docs/testing.md` | executable specification layers, API ownership, opcode coverage |
 | `docs/benchmarks.md` | measured performance, cross-runtime comparison, methodology |
 | `docs/debugging.md` | debugger API, breakpoints, stepping, inspection |
 
@@ -173,7 +174,7 @@ Violations cause silent corruption or invalid execution.
 
 ## Tests
 
-Before writing or modifying tests, read relevant docs from the Task Router and apply `docs/coding-patterns.md` §6.
+Use `docs/testing.md` for ownership and opcode coverage status. Before writing or modifying tests, read relevant docs from the Task Router and apply `docs/coding-patterns.md` §6.
 
 - One top-level test per public symbol: `Test<Func>` or `Test<Type>_<Method>`.
 - Put sub-cases under `t.Run`; do not split them into parallel top-level tests.

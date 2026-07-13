@@ -274,3 +274,23 @@ func TestTypeOf(t *testing.T) {
 		})
 	}
 }
+
+func TestValid(t *testing.T) {
+	mnemonics := make(map[string]Opcode)
+	for op := Opcode(0); op < opcodeCount; op++ {
+		typ := TypeOf(op)
+		require.True(t, Valid(op), "opcode %d has no metadata", op)
+		require.NotEmpty(t, typ.Mnemonic, "opcode %d has no mnemonic", op)
+		previous, exists := mnemonics[typ.Mnemonic]
+		require.False(t, exists, "opcodes %d and %d share mnemonic %q", previous, op, typ.Mnemonic)
+		mnemonics[typ.Mnemonic] = op
+		for _, width := range typ.Widths {
+			require.Contains(t, []int{-8, -4, -2, -1, 1, 2, 4, 8}, width, "%s has invalid operand width", typ.Mnemonic)
+		}
+	}
+
+	require.LessOrEqual(t, int(opcodeCount), 256)
+	for code := int(opcodeCount); code < 256; code++ {
+		require.False(t, Valid(Opcode(code)), "opcode %d is registered past opcodeCount", code)
+	}
+}

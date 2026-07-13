@@ -25,7 +25,7 @@ No later phase starts before the previous phase passes its review gate.
 | Phase | Scope | Status | Commit | Review |
 |---|---|---|---|---|
 | 0 | Baseline, inventory, and plan | Complete | `test: record test and benchmark baseline` | Passed |
-| 1 | Test ownership matrices and completeness gates | Pending | - | - |
+| 1 | Test ownership matrices and completeness gates | Complete | `test: add test ownership gates` | Passed |
 | 2 | `instr` executable specifications and fuzzing | Pending | - | - |
 | 3 | `types` executable specifications and fuzzing | Pending | - | - |
 | 4 | `program` construction, parser, verifier, and fuzzing | Pending | - | - |
@@ -83,8 +83,8 @@ go tool cover -func=coverage.out
 |---|---:|---:|---:|
 | `analysis` | 78.0% | 5 | 3 |
 | `asm` | 82.8% | 44 | 15 |
-| `asm/amd64` | 100.0% | included above | - |
-| `asm/arm64` | 50.4% | included above | - |
+| `asm/amd64` | 100.0% | 1 | 1 |
+| `asm/arm64` | 50.4% | 155 | 152 |
 | `cli` | 92.5% | 6 | 2 |
 | `debug` | 93.6% | 12 | 11 |
 | `instr` | 78.1% | 44 | 12 |
@@ -95,7 +95,7 @@ go tool cover -func=coverage.out
 | `program` | 76.9% | 25 | 12 |
 | `transform` | 87.4% | 10 | 5 |
 | `types` | 85.8% | 172 | 71 |
-| **total** | **72.8%** | **419** | **162** |
+| **total** | **72.8%** | **575** | **315** |
 
 Exact owner-test counts are structural migration indicators, not claims that the listed behavior is currently untested. Existing umbrella tests often cover several owners and will be split in later phases.
 
@@ -121,13 +121,13 @@ Current benchmark classification:
 
 ### Tasks
 
-- [ ] Build a reviewed public symbol-to-owner-test matrix grouped by package and production file.
-- [ ] Build an opcode matrix covering metadata, parser/formatter, verifier, runtime corpus, and applicable JIT parity.
-- [ ] Document intentional exclusions: constants, aliases, marker methods, architecture stubs, and private invariants.
-- [ ] Add an opcode registry completeness specification in `instr`.
-- [ ] Add verifier-policy completeness specification in `program`.
-- [ ] Add runtime-corpus completeness specification in `interp`.
-- [ ] Run focused tests, review diff, update progress, and commit.
+- [x] Build a reviewed public symbol-to-owner-test matrix grouped by package and production file.
+- [x] Build an opcode matrix covering metadata, parser/formatter, verifier, runtime corpus, and applicable JIT parity.
+- [x] Document intentional exclusions: constants, aliases, marker methods, architecture stubs, and private invariants.
+- [x] Add an opcode registry completeness specification in `instr`.
+- [x] Add verifier-policy completeness specification in `program`.
+- [x] Add runtime-corpus completeness specification in `interp`.
+- [x] Run focused tests, review diff, update progress, and commit.
 
 ### Verification
 
@@ -157,7 +157,7 @@ make check-generated
 - [ ] Specify marshal/unmarshal and symbolic branch/handler resolution.
 - [ ] Add bounded parser and instruction round-trip fuzz tests.
 - [ ] Remove duplicate or issue-history test names.
-- [ ] Run focused tests, review diff, update progress, and commit.
+- [x] Run focused tests, review diff, update progress, and commit.
 
 ### Verification
 
@@ -181,7 +181,7 @@ All production-matched `types/*_test.go` files plus `types/fuzz_test.go`.
 - [ ] Specify append-to-destination reference tracing, invalid indexes, ownership, map overwrite/delete, NaN, and signed zero behavior.
 - [ ] Add bounded type and function parse/format round-trip fuzz tests.
 - [ ] Keep only meaningful traversal microbenchmarks and validate their fixtures.
-- [ ] Run focused tests, review diff, update progress, and commit.
+- [x] Run focused tests, review diff, update progress, and commit.
 
 ### Verification
 
@@ -205,7 +205,7 @@ go test -run='^$' -fuzz=FuzzParseFunction -fuzztime=10s ./types
 - [ ] Specify `VerifyError.Error` and `VerifyError.Unwrap`.
 - [ ] Add parser/string round-trip fuzzing.
 - [ ] Add arbitrary-bytecode `FuzzVerify` and prove no panic at admission boundary.
-- [ ] Run focused tests, review diff, update progress, and commit.
+- [x] Run focused tests, review diff, update progress, and commit.
 
 ### Verification
 
@@ -277,7 +277,7 @@ Tests in `analysis`, `asm`, `cli`, `debug`, `internal/cmd/geninterp`, `optimize`
 - [ ] Test debugger stepping with real interpreter programs.
 - [ ] Test CLI/REPL through injected filesystems and buffers.
 - [ ] Specify generator definition completeness, duplicate rejection, deterministic rendering, and `-check` behavior.
-- [ ] Run focused tests, review diff, update progress, and commit.
+- [x] Run focused tests, review diff, update progress, and commit.
 
 ### Verification
 
@@ -366,10 +366,20 @@ GOOS=linux GOARCH=arm64 go test -exec=true ./...
 
 - Focused verification: inventory scripts reviewed against exported receiver visibility.
 - Broad verification: `make check`; `GOENV_VERSION=1.26.2 make coverage`.
-- Review findings fixed: excluded exported methods on private receiver types; separated package-owned microbenchmarks from interpreter-owned cases.
+- Review findings fixed: excluded exported methods on private receiver types, included architecture subpackages, and separated package-owned microbenchmarks from interpreter-owned cases.
 - Intentionally retained structure: no code or test files changed before migration phases.
 - Coverage/benchmark effect: baseline only; total 72.8%.
 - Commit: `test: record test and benchmark baseline`.
+
+### Phase 1
+
+- Focused verification: `GOENV_VERSION=1.26.2 go test -race ./instr ./program ./interp`.
+- Broad verification: `GOENV_VERSION=1.26.2 make check-generated`; `git diff --check`.
+- Review findings fixed: included architecture subpackages in the API inventory, renamed the verifier matrix by role, and replaced direct `t.Fatalf` use with `require`.
+- Gate validation: missing `opcodeCount` failed `TestValid`; omitted `array.append` failed verifier policy coverage; deliberately omitted `nop` failed runtime corpus coverage.
+- Intentionally retained structure: the verifier policy map remains an independent test oracle; the exact symbol and opcode matrices remain verbose because each public owner and opcode needs visible ownership.
+- Coverage/benchmark effect: `instr` 78.1% -> 78.7%; `program` 76.9%; `interp` 20.6%; no benchmark change.
+- Commit: `test: add test ownership gates`.
 
 Add one entry after each later phase:
 
