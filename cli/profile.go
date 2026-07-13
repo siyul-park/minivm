@@ -105,30 +105,24 @@ type jitMiss struct {
 
 const profileLimit = 10
 
-func (p jitProfile) empty() bool {
-	return p.summary == (jitSummary{}) && len(p.entries) == 0 && len(p.exits) == 0 && len(p.misses) == 0
-}
-
-// printProfile renders a normalized, ranked view of profiler metrics.
-func printProfile(out io.Writer, metrics []prof.Metric) {
-	report := newProfileReport(metrics)
-
-	fmt.Fprintf(out, "profile samples: %d\n", report.total)
-	if len(report.functions) > 0 {
+// print renders the normalized, ranked profile.
+func (p profileReport) print(out io.Writer) {
+	fmt.Fprintf(out, "profile samples: %d\n", p.total)
+	if len(p.functions) > 0 {
 		fmt.Fprintln(out, "hot functions:")
 		fmt.Fprintln(out, "func\tsamples\t%")
-		for _, function := range report.functions {
-			fmt.Fprintf(out, "%d\t%d\t%s\n", function.fn, function.samples, formatPercent(function.samples, report.total))
+		for _, function := range p.functions {
+			fmt.Fprintf(out, "%d\t%d\t%s\n", function.fn, function.samples, formatPercent(function.samples, p.total))
 		}
 	}
 
 	hasIPs := false
-	for _, function := range report.functions {
+	for _, function := range p.functions {
 		hasIPs = hasIPs || len(function.ips) > 0
 	}
 	if hasIPs {
 		fmt.Fprintln(out, "hot ips:")
-		for _, function := range report.functions {
+		for _, function := range p.functions {
 			if len(function.ips) == 0 {
 				continue
 			}
@@ -140,31 +134,31 @@ func printProfile(out io.Writer, metrics []prof.Metric) {
 		}
 	}
 
-	if len(report.opcodes) > 0 {
+	if len(p.opcodes) > 0 {
 		fmt.Fprintln(out, "hot opcodes:")
 		fmt.Fprintln(out, "opcode\tsamples\t%")
-		for _, opcode := range report.opcodes {
-			fmt.Fprintf(out, "%s\t%d\t%s\n", opcode.name, opcode.samples, formatPercent(opcode.samples, report.total))
+		for _, opcode := range p.opcodes {
+			fmt.Fprintf(out, "%s\t%d\t%s\n", opcode.name, opcode.samples, formatPercent(opcode.samples, p.total))
 		}
 	}
 
-	if report.jit.empty() {
+	if p.jit.empty() {
 		return
 	}
 	fmt.Fprintln(out, "jit summary:")
 	fmt.Fprintln(out, "captures\tcompiles\temits\tbytes\tentries\texits")
 	fmt.Fprintf(out, "%d\t%d\t%d\t%d\t%d\t%d\n",
-		report.jit.summary.captures,
-		report.jit.summary.compiles,
-		report.jit.summary.emits,
-		report.jit.summary.bytes,
-		report.jit.summary.entries,
-		report.jit.summary.exits,
+		p.jit.summary.captures,
+		p.jit.summary.compiles,
+		p.jit.summary.emits,
+		p.jit.summary.bytes,
+		p.jit.summary.entries,
+		p.jit.summary.exits,
 	)
 
 	fmt.Fprintln(out, "jit entries:")
 	fmt.Fprintln(out, "func\tip\tkind\tfrontend\tstatus\tsamples\temits\tbytes\tentries")
-	for _, entry := range report.jit.entries {
+	for _, entry := range p.jit.entries {
 		fmt.Fprintf(out, "%d\t%04d\t%s\t%s\t%s\t%d\t%d\t%d\t%d\n",
 			entry.fn, entry.ip, entry.kind, entry.frontend, entry.status,
 			entry.samples, entry.emits, entry.bytes, entry.entries,
@@ -173,7 +167,7 @@ func printProfile(out io.Writer, metrics []prof.Metric) {
 
 	fmt.Fprintln(out, "jit exit reasons:")
 	fmt.Fprintln(out, "func\tip\tkind\tfrontend\treason\topcode\texits\t%")
-	for _, exit := range report.jit.exits {
+	for _, exit := range p.jit.exits {
 		fmt.Fprintf(out, "%d\t%04d\t%s\t%s\t%s\t%s\t%d\t%s\n",
 			exit.fn, exit.ip, exit.kind, exit.frontend, exit.reason, exit.opcode,
 			exit.count, formatPercent(exit.count, exit.entries),
@@ -182,12 +176,16 @@ func printProfile(out io.Writer, metrics []prof.Metric) {
 
 	fmt.Fprintln(out, "jit misses:")
 	fmt.Fprintln(out, "stage\tfunc\tip\ttrigger\tfrontend\toutcome\treason\tcount")
-	for _, miss := range report.jit.misses {
+	for _, miss := range p.jit.misses {
 		fmt.Fprintf(out, "%s\t%d\t%04d\t%s\t%s\t%s\t%s\t%d\n",
 			miss.stage, miss.fn, miss.ip, miss.trigger, miss.frontend,
 			miss.outcome, miss.reason, miss.count,
 		)
 	}
+}
+
+func (p jitProfile) empty() bool {
+	return p.summary == (jitSummary{}) && len(p.entries) == 0 && len(p.exits) == 0 && len(p.misses) == 0
 }
 
 func newProfileReport(metrics []prof.Metric) profileReport {
@@ -334,21 +332,12 @@ func normalizeJIT(
 	}
 	for key, count := range compileRows {
 		report.summary.compiles += count
-		matched := false
-		for entry := range entryRows {
-			if entry.fn == key.fn && entry.ip == key.ip && entry.frontend == key.frontend {
-				matched = true
-				break
-			}
-		}
-		if !matched {
+		if key.outcome != "emitted" || key.reason != "none" {
 			report.entries = append(report.entries, jitEntry{
 				entryKey: entryKey{fn: key.fn, ip: key.ip, kind: "none", frontend: key.frontend},
 				status:   "compile-" + key.outcome,
 				samples:  ips[[2]int{key.fn, key.ip}],
 			})
-		}
-		if key.outcome != "emitted" || key.reason != "none" {
 			report.misses = append(report.misses, jitMiss{
 				stage: "compile", fn: key.fn, ip: key.ip, trigger: key.trigger,
 				frontend: key.frontend, outcome: key.outcome, reason: key.reason, count: count,

@@ -142,10 +142,12 @@ converts them to ordered string labels:
 | `vm_jit_native_exits_total` | `func,ip,kind,frontend,reason,opcode` | descriptor-attributed fallback exits |
 | `vm_jit_native_yields_total` | `func,ip,kind,frontend` | native safepoint yields, separate from exits |
 
-`none` denotes a reason or opcode that cannot be attributed. Registered native
-entry, exit, and yield counters keep stable storage across collector resets, so
-the runtime increment is constant-time and allocation-free. Merging collectors
-adds each exact labeled row once and retains destination counter objects.
+`none` denotes a reason or opcode that cannot be attributed. Attributable
+fallbacks report their concrete source opcode; synthetic boundaries such as a
+`trace-cut` report opcode `none`. Registered native entry, exit, and yield
+counters keep stable storage across collector resets, so the runtime increment
+is constant-time and allocation-free. Merging collectors adds each exact labeled
+row once and retains destination counter objects.
 
 ## Hotness Thresholds
 

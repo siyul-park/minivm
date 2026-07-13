@@ -243,11 +243,13 @@ exit descriptors. Installation resolves stable local counters for entry, yield,
 and every descriptor. Native wrappers increment those handles directly; they do
 not construct labels.
 
-Every fallback creation site assigns a descriptor with a stable reason and
-source opcode. Generated code writes `descriptor ID + 1` to `journalExitID`
-before returning with `trapFallback`. The Go wrapper resolves that ID and counts
-the exact exit row. Zero means no descriptor. `trapYield` counts only a yield,
-and native frame overflow counts neither an exit nor a yield.
+Every fallback creation site assigns a descriptor with a stable reason. It uses
+the concrete source opcode when the fallback is attributable to one; synthetic
+boundaries such as an `opLimit` trace cut use `none`. Generated code writes
+`descriptor ID + 1` to `journalExitID` before returning with `trapFallback`. The
+Go wrapper resolves that ID and counts the exact exit row. Zero means no
+descriptor. `trapYield` counts only a yield, and native frame overflow counts
+neither an exit nor a yield.
 
 Compile and emission ownership follows compilation ownership: a solo compiler
 records its result, while a shared cache records it only on the winning member.

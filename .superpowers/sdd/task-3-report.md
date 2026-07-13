@@ -120,3 +120,43 @@ The differences are within normal benchmark noise and the reporting change is ou
 ## Concerns
 
 None.
+
+## Review follow-up
+
+The final review fixes preserve distinct compile lifecycle rows even when an
+entry with the same function, IP, and frontend was emitted earlier. A
+non-successful compile now always contributes its `compile-empty` or
+`compile-rejected` placeholder and miss row; a successful `emitted/none`
+compile does not add a redundant `compile-emitted` placeholder.
+
+The focused regression was verified against both defects:
+
+- restoring the old anchor/frontend suppression removed the `compile-empty`
+  row while leaving the emitted entry, and the regression failed
+- adding placeholders for every compile outcome exposed a spurious
+  `compile-emitted` row, and the regression failed
+- the final non-success-only condition passes the same regression
+
+Profile rendering is owned by `profileReport.print`, and its output coverage
+lives under `TestREPL_Run` with output assertions rather than report-field
+assertions. The `.profile` side-effect case now runs a program with non-empty
+history, constants, and types, executes more bytecode after profiling, and uses
+`.show` plus stack output to verify all three remain usable.
+
+The lifecycle documentation now states that attributable fallbacks use their
+concrete opcode while synthetic boundaries such as an `opLimit` trace cut use
+`none`.
+
+Review verification:
+
+```text
+go test ./cli -run '^TestREPL_Run$' -count=20
+go test ./cli/... ./cmd/minivm -count=1
+go test ./asm/... ./prof ./interp ./cli/... ./cmd/minivm -count=1
+go test -race ./prof ./interp ./cli/... ./cmd/minivm -count=1
+go vet ./...
+git diff --check
+```
+
+All commands passed. A completion-gate reread found no remaining removable
+symbols or safe control-flow simplification in the touched code.
