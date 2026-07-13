@@ -3398,7 +3398,7 @@ func TestWithProfiler(t *testing.T) {
 		i := New(program.New(nil), WithProfiler(nil))
 		defer i.Close()
 
-		require.False(t, i.profile)
+		require.Nil(t, i.profiler)
 	})
 
 	t.Run("samples execution", func(t *testing.T) {
@@ -3587,7 +3587,7 @@ func TestWithFrame(t *testing.T) {
 		local := prof.NewCollector()
 		i = New(prog, WithFrame(nativeFrameLimit+2), WithTick(1), WithThreshold(0))
 		i.samples = local
-		i.profile = true
+		i.profiler = prof.New()
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), ErrFrameOverflow)

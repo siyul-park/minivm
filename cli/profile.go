@@ -236,39 +236,40 @@ func (p profile) summary() jitSummary {
 }
 
 func (p profile) entries() []entryRow {
-	rows := map[entry]*entryRow{}
+	rows := map[entry]entryRow{}
 	covered := map[anchor]bool{}
 	for key, counts := range p.entryCounts {
-		rows[key] = &entryRow{
+		rows[key] = entryRow{
 			fn: key.fn, ip: key.ip, kind: key.kind, frontend: key.frontend,
 			emits: counts.emits, bytes: counts.bytes, entries: counts.entries,
 		}
 		covered[key.anchor] = true
 	}
 	for key, count := range p.exitCounts {
-		if row := rows[key.entry]; row != nil {
+		if row, ok := rows[key.entry]; ok {
 			row.exits += count
+			rows[key.entry] = row
 		}
 	}
 	for key := range p.compileCounts {
 		covered[key.anchor] = true
 		if key.outcome != "emitted" || key.reason != "none" {
 			entry := entry{anchor: key.anchor, kind: "none", frontend: key.frontend}
-			if rows[entry] == nil {
-				rows[entry] = &entryRow{fn: entry.fn, ip: entry.ip, kind: entry.kind, frontend: entry.frontend}
+			if _, ok := rows[entry]; !ok {
+				rows[entry] = entryRow{fn: entry.fn, ip: entry.ip, kind: entry.kind, frontend: entry.frontend}
 			}
 		}
 	}
 	for key := range p.pointSamples {
 		if !covered[key] {
 			entry := entry{anchor: key, kind: "none", frontend: "interpreted"}
-			rows[entry] = &entryRow{fn: entry.fn, ip: entry.ip, kind: entry.kind, frontend: entry.frontend}
+			rows[entry] = entryRow{fn: entry.fn, ip: entry.ip, kind: entry.kind, frontend: entry.frontend}
 		}
 	}
 
 	result := make([]entryRow, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, *row)
+		result = append(result, row)
 	}
 	sort.Slice(result, func(i, j int) bool {
 		a, b := result[i], result[j]

@@ -8,7 +8,7 @@ import (
 type jitMetrics struct {
 	captures map[captureKey]*Counter
 	compiles map[compileKey]*Counter
-	emits    map[entryKey]*emitCounters
+	emits    map[entryKey]*emitCounts
 	entries  map[entryKey]*Counter
 	yields   map[entryKey]*Counter
 	exits    map[exitKey]*Counter
@@ -43,9 +43,9 @@ type exitKey struct {
 	opcode int
 }
 
-type emitCounters struct {
-	emits Counter
-	bytes Counter
+type emitCounts struct {
+	emits uint64
+	bytes uint64
 }
 
 func (m *jitMetrics) appendMetrics(out []Metric, collector *Collector) []Metric {
@@ -86,11 +86,11 @@ func (m *jitMetrics) appendMetrics(out []Metric, collector *Collector) []Metric 
 	for _, key := range emits {
 		labels := key.labels()
 		counters := m.emits[key]
-		if counters.emits.value > 0 {
-			out = append(out, Metric{Name: "vm_jit_entry_emits_total", Labels: labels, Value: float64(counters.emits.value)})
+		if counters.emits > 0 {
+			out = append(out, Metric{Name: "vm_jit_entry_emits_total", Labels: labels, Value: float64(counters.emits)})
 		}
-		if counters.bytes.value > 0 {
-			out = append(out, Metric{Name: "vm_jit_entry_bytes_total", Labels: key.labels(), Value: float64(counters.bytes.value)})
+		if counters.bytes > 0 {
+			out = append(out, Metric{Name: "vm_jit_entry_bytes_total", Labels: labels, Value: float64(counters.bytes)})
 		}
 	}
 
@@ -124,19 +124,19 @@ func (m *jitMetrics) merge(other *jitMetrics) {
 	mergeCounters(&m.captures, other.captures)
 	mergeCounters(&m.compiles, other.compiles)
 	if len(other.emits) > 0 && m.emits == nil {
-		m.emits = make(map[entryKey]*emitCounters)
+		m.emits = make(map[entryKey]*emitCounts)
 	}
 	for key, source := range other.emits {
-		if source.emits.value == 0 && source.bytes.value == 0 {
+		if source.emits == 0 && source.bytes == 0 {
 			continue
 		}
 		destination := m.emits[key]
 		if destination == nil {
-			destination = &emitCounters{}
+			destination = &emitCounts{}
 			m.emits[key] = destination
 		}
-		destination.emits.value += source.emits.value
-		destination.bytes.value += source.bytes.value
+		destination.emits += source.emits
+		destination.bytes += source.bytes
 	}
 	mergeCounters(&m.entries, other.entries)
 	mergeCounters(&m.yields, other.yields)
@@ -147,8 +147,8 @@ func (m *jitMetrics) reset() {
 	resetCounters(m.captures)
 	resetCounters(m.compiles)
 	for _, counters := range m.emits {
-		counters.emits.value = 0
-		counters.bytes.value = 0
+		counters.emits = 0
+		counters.bytes = 0
 	}
 	resetCounters(m.entries)
 	resetCounters(m.yields)
@@ -356,10 +356,10 @@ func activeKeys[K comparable](rows map[K]*Counter) []K {
 	return keys
 }
 
-func activeEmits(rows map[entryKey]*emitCounters) []entryKey {
+func activeEmits(rows map[entryKey]*emitCounts) []entryKey {
 	keys := make([]entryKey, 0, len(rows))
 	for key, counters := range rows {
-		if counters.emits.value > 0 || counters.bytes.value > 0 {
+		if counters.emits > 0 || counters.bytes > 0 {
 			keys = append(keys, key)
 		}
 	}

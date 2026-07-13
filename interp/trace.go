@@ -123,7 +123,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 	r.recordMu.Lock()
 	defer r.recordMu.Unlock()
 	defer func() {
-		if i.profile && result.outcome != prof.CaptureOutcomeNone {
+		if i.profiler != nil && result.outcome != prof.CaptureOutcomeNone {
 			i.samples.RecordCapture(a.addr, a.ip, result.outcome, result.reason)
 		}
 	}()

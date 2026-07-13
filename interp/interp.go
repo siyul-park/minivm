@@ -27,7 +27,6 @@ type Interpreter struct {
 	cache    *Cache
 	profiler *prof.Profiler
 	samples  *prof.Collector
-	profile  bool
 	exits    map[anchor]func(*Interpreter)
 	stubs    []func(*Interpreter)
 	natives  []unsafe.Pointer
@@ -90,7 +89,6 @@ type option struct {
 	cache      *Cache
 	tracer     *Tracer
 	profiler   *prof.Profiler
-	profile    bool
 	threshold  int
 	cutoff     int
 
@@ -140,7 +138,6 @@ func WithTracer(t *Tracer) func(*option) {
 func WithProfiler(p *prof.Profiler) func(*option) {
 	return func(o *option) {
 		o.profiler = p
-		o.profile = p != nil
 	}
 }
 
@@ -235,7 +232,6 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		cache:     opt.cache,
 		profiler:  opt.profiler,
 		samples:   samples,
-		profile:   opt.profile,
 		threshold: threshold,
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
@@ -870,7 +866,7 @@ func (i *Interpreter) install(mod *module, account bool) {
 }
 
 func (i *Interpreter) entryMetrics(a anchor, entry native) entryMetrics {
-	if !i.profile {
+	if i.profiler == nil {
 		return entryMetrics{}
 	}
 	kind := entry.kind.profile()
@@ -888,7 +884,7 @@ func (i *Interpreter) entryMetrics(a anchor, entry native) entryMetrics {
 func (i *Interpreter) account(mod *module) {
 	i.samples.AddMetric("vm_jit_emits_total", float64(len(mod.entries)))
 	i.samples.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
-	if !i.profile {
+	if i.profiler == nil {
 		return
 	}
 	for a, entry := range mod.entries {
@@ -897,7 +893,7 @@ func (i *Interpreter) account(mod *module) {
 }
 
 func (i *Interpreter) recordCompile(trigger prof.Trigger, result compileResult) {
-	if i.profile {
+	if i.profiler != nil {
 		i.samples.RecordCompile(result.anchor.addr, result.anchor.ip, trigger, result.frontend, result.outcome, result.reason)
 	}
 }

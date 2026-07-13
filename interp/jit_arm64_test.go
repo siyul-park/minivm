@@ -381,7 +381,7 @@ func TestCompiler_Compile(t *testing.T) {
 			local := prof.NewCollector()
 			i := New(prog, WithThreshold(-1))
 			i.samples = local
-			i.profile = true
+			i.profiler = prof.New()
 			defer i.Close()
 			addr := i.constants[0].Ref()
 			i.fr.addr = addr
@@ -436,7 +436,7 @@ func TestCompiler_Compile(t *testing.T) {
 			i := New(program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn)),
 				WithThreshold(-1))
 			i.samples = local
-			i.profile = true
+			i.profiler = prof.New()
 			defer i.Close()
 			addr := i.constants[0].Ref()
 			i.fr.addr = addr

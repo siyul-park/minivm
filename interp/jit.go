@@ -129,8 +129,6 @@ type sideExit struct {
 	frames []activation
 	resume int
 	retain int
-	reason prof.ExitReason
-	opcode int
 	id     int
 }
 
@@ -402,7 +400,7 @@ func (ctx *lowering) queueExit(values []value, resume, retain int, reason prof.E
 	ctx.descriptors = append(ctx.descriptors, exitDescriptor{reason: reason, opcode: opcode})
 	ctx.exits = append(ctx.exits, sideExit{
 		label: label, values: stack, frames: frames, resume: resume, retain: retain,
-		reason: reason, opcode: opcode, id: id,
+		id: id,
 	})
 	return label
 }

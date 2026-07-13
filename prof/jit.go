@@ -128,16 +128,16 @@ func (c *Collector) RecordCompile(
 func (c *Collector) RecordEmit(fn, ip int, kind EntryKind, frontend Frontend, size int) {
 	key := entryKey{fn: fn, ip: ip, kind: kind, frontend: frontend}
 	if c.jit.emits == nil {
-		c.jit.emits = make(map[entryKey]*emitCounters)
+		c.jit.emits = make(map[entryKey]*emitCounts)
 	}
 	counters := c.jit.emits[key]
 	if counters == nil {
-		counters = &emitCounters{}
+		counters = &emitCounts{}
 		c.jit.emits[key] = counters
 	}
-	counters.emits.value++
+	counters.emits++
 	if size > 0 {
-		counters.bytes.value += uint64(size)
+		counters.bytes += uint64(size)
 	}
 }
 

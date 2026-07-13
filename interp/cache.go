@@ -123,7 +123,7 @@ func (c *Cache) request(next cacheRequest) {
 func (c *Cache) fail(addr int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.finish(addr)
+	c.finishLocked(addr)
 }
 
 func (c *Cache) publish(addr int, mod *module, buf *asm.Buffer) {
@@ -145,7 +145,7 @@ func (c *Cache) publish(addr int, mod *module, buf *asm.Buffer) {
 			}
 		}
 	}
-	c.finish(addr)
+	c.finishLocked(addr)
 }
 
 func (c *Cache) release() error {
@@ -162,7 +162,7 @@ func (c *Cache) release() error {
 	return err
 }
 
-func (c *Cache) finish(addr int) {
+func (c *Cache) finishLocked(addr int) {
 	if addr >= 0 && addr < len(c.state) {
 		if c.pending[addr].trigger == prof.TriggerNone {
 			c.state[addr].Store(cacheReady)
