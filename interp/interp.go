@@ -90,7 +90,6 @@ type option struct {
 	cache      *Cache
 	tracer     *Tracer
 	profiler   *prof.Profiler
-	samples    *prof.Collector
 	profile    bool
 	threshold  int
 	cutoff     int
@@ -139,13 +138,10 @@ func WithTracer(t *Tracer) func(*option) {
 // hotness but no profile is collected. Pass the same Profiler to NewPool so every
 // pooled interpreter shares it.
 func WithProfiler(p *prof.Profiler) func(*option) {
-	return func(o *option) { o.profiler, o.profile = p, true }
-}
-
-// WithLocal injects a pre-seeded sample collector. Tests use it to drive hot-IP
-// selection and to read JIT counters back after a run.
-func WithLocal(p *prof.Collector) func(*option) {
-	return func(o *option) { o.samples, o.profile = p, true }
+	return func(o *option) {
+		o.profiler = p
+		o.profile = p != nil
+	}
 }
 
 func WithFrame(val int) func(*option) {
@@ -208,10 +204,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		tracer = NewTracer()
 		tracer.bind(prog)
 	}
-	samples := opt.samples
-	if samples == nil {
-		samples = prof.NewCollector()
-	}
+	samples := prof.NewCollector()
 	m := opt.marshaler
 	if m == nil {
 		m = DefaultMarshaler
@@ -772,6 +765,7 @@ func (i *Interpreter) Reset() {
 // native entries. Recording belongs to observe and side-exit handling because
 // only those paths hold the exact runtime state for their anchor.
 func (i *Interpreter) compile(root anchor) error {
+	i.samples.AddMetric("vm_jit_attempts_total", 1)
 	if i.compiler == nil {
 		compiler, err := newCompiler()
 		if err != nil {
@@ -785,7 +779,6 @@ func (i *Interpreter) compile(root anchor) error {
 		i.recordCompile(prof.TriggerHot, compileResult{anchor: root, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonBackendUnavailable})
 		return nil
 	}
-	i.samples.AddMetric("vm_jit_attempts_total", 1)
 	result := i.compiler.Compile(i, root)
 	i.recordCompile(prof.TriggerHot, result)
 	if result.err != nil {
@@ -801,6 +794,7 @@ func (i *Interpreter) compile(root anchor) error {
 
 func (i *Interpreter) shared(root anchor, trigger prof.Trigger) error {
 	addr := root.addr
+	i.samples.AddMetric("vm_jit_attempts_total", 1)
 	compiler, err := newCompiler()
 	if err != nil {
 		i.samples.AddMetric("vm_jit_errors_total", 1)
@@ -813,7 +807,6 @@ func (i *Interpreter) shared(root anchor, trigger prof.Trigger) error {
 		i.cache.fail(addr)
 		return nil
 	}
-	i.samples.AddMetric("vm_jit_attempts_total", 1)
 	result := compiler.Compile(i, root)
 	i.recordCompile(trigger, result)
 	if result.err != nil {

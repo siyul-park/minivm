@@ -235,8 +235,7 @@ If the fallback IP is `0`, the wrapper runs the shadowed threaded entry handler 
 
 ### Lifecycle Profiling
 
-Observable profiling is enabled only by an explicit profiler or local
-collector option. Internal hotness sampling alone does not emit detailed rows.
+Observable profiling is enabled only by an explicit profiler. Internal hotness sampling alone does not emit detailed rows.
 
 Each published native entry carries its frontend, own byte size, and immutable
 exit descriptors. Installation resolves stable local counters for entry, yield,

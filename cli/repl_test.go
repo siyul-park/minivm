@@ -467,6 +467,11 @@ func TestREPL_Run(t *testing.T) {
 				{Key: "outcome", Value: "empty"}, {Key: "reason", Value: "no-plan"},
 			}, Value: 3},
 			{Name: "vm_jit_compiles_total", Labels: []prof.Label{
+				{Key: "func", Value: "4"}, {Key: "ip", Value: "4"},
+				{Key: "trigger", Value: "side-exit"}, {Key: "frontend", Value: "static"},
+				{Key: "outcome", Value: "empty"}, {Key: "reason", Value: "no-plan"},
+			}, Value: 2},
+			{Name: "vm_jit_compiles_total", Labels: []prof.Label{
 				{Key: "func", Value: "40"}, {Key: "ip", Value: "40"},
 				{Key: "trigger", Value: "hot"}, {Key: "frontend", Value: "static"},
 				{Key: "outcome", Value: "empty"}, {Key: "reason", Value: "no-plan"},
@@ -541,11 +546,12 @@ func TestREPL_Run(t *testing.T) {
 		require.Contains(t, exits, "57\t0000\ttrace-cut\tnone\t1\t-")
 		require.NotContains(t, exits, "59\t0000")
 
-		require.Contains(t, misses, "4\t0004\tcompile\tno-plan\t3")
+		require.Contains(t, misses, "4\t0004\tcompile-hot\tno-plan\t3")
+		require.Contains(t, misses, "4\t0004\tcompile-side-exit\tno-plan\t2")
 		require.Contains(t, misses, "10\t0000\tcapture\tunsupported-op\t1")
-		require.Contains(t, misses, "18\t0000\tcapture\tunsupported-op\t1")
-		require.Less(t, strings.Index(misses, "10\t0000"), strings.Index(misses, "18\t0000"))
-		require.NotContains(t, misses, "19\t0000")
+		require.Contains(t, misses, "17\t0000\tcapture\tunsupported-op\t1")
+		require.Less(t, strings.Index(misses, "10\t0000"), strings.Index(misses, "17\t0000"))
+		require.NotContains(t, misses, "18\t0000")
 	})
 
 	t.Run("profile does not mutate history", func(t *testing.T) {

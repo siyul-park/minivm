@@ -363,7 +363,9 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NoError(t, err)
 			prog := program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn))
 			local := prof.NewCollector()
-			i := New(prog, WithLocal(local), WithThreshold(-1))
+			i := New(prog, WithThreshold(-1))
+			i.samples = local
+			i.profile = true
 			defer i.Close()
 			addr := i.constants[0].Ref()
 			i.fr.addr = addr
@@ -416,7 +418,9 @@ func TestCompiler_Compile(t *testing.T) {
 				MustBuild()
 			local := prof.NewCollector()
 			i := New(program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn)),
-				WithLocal(local), WithThreshold(-1))
+				WithThreshold(-1))
+			i.samples = local
+			i.profile = true
 			defer i.Close()
 			addr := i.constants[0].Ref()
 			i.fr.addr = addr

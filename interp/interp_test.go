@@ -3394,6 +3394,13 @@ func TestWithTracer(t *testing.T) {
 }
 
 func TestWithProfiler(t *testing.T) {
+	t.Run("nil disables profiling", func(t *testing.T) {
+		i := New(program.New(nil), WithProfiler(nil))
+		defer i.Close()
+
+		require.False(t, i.profile)
+	})
+
 	t.Run("samples execution", func(t *testing.T) {
 		p := prof.New()
 		prog := program.New([]instr.Instruction{
@@ -3578,7 +3585,9 @@ func TestWithFrame(t *testing.T) {
 			instr.New(instr.CALL),
 		}, program.WithConstants(recurse))
 		local := prof.NewCollector()
-		i = New(prog, WithFrame(nativeFrameLimit+2), WithTick(1), WithThreshold(0), WithLocal(local))
+		i = New(prog, WithFrame(nativeFrameLimit+2), WithTick(1), WithThreshold(0))
+		i.samples = local
+		i.profile = true
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), ErrFrameOverflow)
