@@ -219,3 +219,23 @@ git diff --check
 ```
 
 All commands passed.
+
+## Partial-capture and lifecycle-coverage follow-up
+
+TDD began with the focused `TestREPL_Run/profile_excludes_published_partial_captures_from_misses` regression. Before the fix it failed because the misses table rendered `0\t0000\tcapture\top-limit\t2` for a published partial capture. The minimal fix admits only rejected capture outcomes to the misses table; the regression now retains the rejected `unsupported-op` row and excludes the successful partial `op-limit` row.
+
+The issue-mandated lifecycle coverage now includes repeated same-name labeled rows, compile-empty and emitted-unused entries, separately reported yields excluded from exit denominators, deterministic ties, and independent top-10 limits for entries, exits, and misses. Ordinary behavior remains covered through real REPL programs and public `Collector`, `Profiler`, `Interpreter`, and `Pool` flows. Exact top-level public-symbol tests now cover `Collector.RecordCapture`, `Collector.RecordCompile`, `Collector.RecordEmit`, and `Collector.RegisterYield`; `entryKey.less` and `jitMiss.less` keep deterministic key comparison on their owning types.
+
+Retained one direct private `REPL.printProfile` output-contract test because a single real `.profile` run cannot deterministically co-produce compile-empty, emitted-unused, native yields, and >10 entry/exit/miss rows. It calls the owning REPL renderer, asserts only user-visible text, adds no public/test-only API, and protects issue #130’s mandated human-readable contract.
+
+Completion-gate verification:
+
+```text
+go test ./...
+go test -race ./prof ./interp ./cli/... ./cmd/minivm
+go vet ./...
+make build
+git diff --check
+```
+
+All commands passed. Every touched file was re-read against the applicable coding-pattern sections, every touched symbol retains a current role, and a final simplification pass found no safe removable structure or simpler control flow. No simplification was intentionally skipped.

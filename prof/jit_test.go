@@ -3,121 +3,70 @@ package prof_test
 import (
 	"testing"
 
-	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCollector_Metrics(t *testing.T) {
-	s := prof.NewCollector()
-	s.AddMetric("vm_jit_emits_total", 3)
-	s.RecordCapture(2, 11, prof.CaptureOutcomePartial, prof.CaptureReasonOpLimit)
-	s.RecordCompile(2, 11, prof.TriggerHot, prof.FrontendTrace, prof.CompileOutcomeEmitted, prof.CompileReasonNone)
-	s.RecordEmit(2, 11, prof.EntryStart, prof.FrontendTrace, 64)
-	entry := s.RegisterEntry(2, 11, prof.EntryStart, prof.FrontendTrace)
-	entry.Inc()
-	entry.Inc()
-	yield := s.RegisterYield(2, 11, prof.EntryStart, prof.FrontendTrace)
-	yield.Inc()
-	yield.Inc()
-	yield.Inc()
-	exit := s.RegisterExit(2, 11, prof.EntryStart, prof.FrontendTrace, prof.ExitGuardKind, int(instr.I32_ADD))
-	exit.Inc()
-	exit.Inc()
-	s.RegisterExit(2, 11, prof.EntryStart, prof.FrontendTrace, prof.ExitTerminalOp, prof.OpcodeNone).Inc()
+	c := prof.NewCollector()
+	c.RecordCapture(1, 2, prof.CaptureOutcomePartial, prof.CaptureReasonOpLimit)
+	c.RecordCompile(1, 2, prof.TriggerHot, prof.FrontendTrace, prof.CompileOutcomeEmitted, prof.CompileReasonNone)
+	c.RegisterYield(1, 2, prof.EntryStart, prof.FrontendTrace).Inc()
 
-	want := []prof.Metric{
-		{Name: "vm_samples_total", Value: 0},
-		{Name: "vm_jit_emits_total", Value: 3},
-		{
-			Name: "vm_jit_trace_captures_total",
-			Labels: []prof.Label{
-				{Key: "func", Value: "2"},
-				{Key: "ip", Value: "11"},
-				{Key: "outcome", Value: "partial"},
-				{Key: "reason", Value: "op-limit"},
-			},
-			Value: 1,
-		},
-		{
-			Name: "vm_jit_compiles_total",
-			Labels: []prof.Label{
-				{Key: "func", Value: "2"},
-				{Key: "ip", Value: "11"},
-				{Key: "trigger", Value: "hot"},
-				{Key: "frontend", Value: "trace"},
-				{Key: "outcome", Value: "emitted"},
-				{Key: "reason", Value: "none"},
-			},
-			Value: 1,
-		},
-		{
-			Name: "vm_jit_entry_emits_total",
-			Labels: []prof.Label{
-				{Key: "func", Value: "2"},
-				{Key: "ip", Value: "11"},
-				{Key: "kind", Value: "start"},
-				{Key: "frontend", Value: "trace"},
-			},
-			Value: 1,
-		},
-		{
-			Name: "vm_jit_entry_bytes_total",
-			Labels: []prof.Label{
-				{Key: "func", Value: "2"},
-				{Key: "ip", Value: "11"},
-				{Key: "kind", Value: "start"},
-				{Key: "frontend", Value: "trace"},
-			},
-			Value: 64,
-		},
-		{
-			Name: "vm_jit_native_entries_total",
-			Labels: []prof.Label{
-				{Key: "func", Value: "2"},
-				{Key: "ip", Value: "11"},
-				{Key: "kind", Value: "start"},
-				{Key: "frontend", Value: "trace"},
-			},
-			Value: 2,
-		},
-		{
-			Name: "vm_jit_native_yields_total",
-			Labels: []prof.Label{
-				{Key: "func", Value: "2"},
-				{Key: "ip", Value: "11"},
-				{Key: "kind", Value: "start"},
-				{Key: "frontend", Value: "trace"},
-			},
-			Value: 3,
-		},
-		{
-			Name: "vm_jit_native_exits_total",
-			Labels: []prof.Label{
-				{Key: "func", Value: "2"},
-				{Key: "ip", Value: "11"},
-				{Key: "kind", Value: "start"},
-				{Key: "frontend", Value: "trace"},
-				{Key: "reason", Value: "guard-kind"},
-				{Key: "opcode", Value: "i32.add"},
-			},
-			Value: 2,
-		},
-		{
-			Name: "vm_jit_native_exits_total",
-			Labels: []prof.Label{
-				{Key: "func", Value: "2"},
-				{Key: "ip", Value: "11"},
-				{Key: "kind", Value: "start"},
-				{Key: "frontend", Value: "trace"},
-				{Key: "reason", Value: "terminal-op"},
-				{Key: "opcode", Value: "none"},
-			},
-			Value: 1,
-		},
+	first := c.Metrics()
+	require.Equal(t, first, c.Metrics())
+	names := make([]string, len(first))
+	for index, metric := range first {
+		names[index] = metric.Name
 	}
-	require.Equal(t, want, s.Metrics())
-	require.Equal(t, want, s.Metrics())
+	require.Equal(t, []string{
+		"vm_samples_total",
+		"vm_jit_trace_captures_total",
+		"vm_jit_compiles_total",
+		"vm_jit_native_yields_total",
+	}, names)
+}
+
+func TestCollector_RecordCapture(t *testing.T) {
+	c := prof.NewCollector()
+	c.RecordCapture(2, 11, prof.CaptureOutcomePartial, prof.CaptureReasonOpLimit)
+	c.RecordCapture(2, 11, prof.CaptureOutcomePartial, prof.CaptureReasonOpLimit)
+
+	value, ok := c.Metric("vm_jit_trace_captures_total",
+		prof.Label{Key: "func", Value: "2"}, prof.Label{Key: "ip", Value: "11"},
+		prof.Label{Key: "outcome", Value: "partial"}, prof.Label{Key: "reason", Value: "op-limit"})
+	require.True(t, ok)
+	require.Equal(t, float64(2), value)
+}
+
+func TestCollector_RecordCompile(t *testing.T) {
+	c := prof.NewCollector()
+	c.RecordCompile(2, 11, prof.TriggerSideExit, prof.FrontendTrace, prof.CompileOutcomeEmpty, prof.CompileReasonNoPlan)
+	c.RecordCompile(2, 11, prof.TriggerSideExit, prof.FrontendTrace, prof.CompileOutcomeEmpty, prof.CompileReasonNoPlan)
+
+	value, ok := c.Metric("vm_jit_compiles_total",
+		prof.Label{Key: "func", Value: "2"}, prof.Label{Key: "ip", Value: "11"},
+		prof.Label{Key: "trigger", Value: "side-exit"}, prof.Label{Key: "frontend", Value: "trace"},
+		prof.Label{Key: "outcome", Value: "empty"}, prof.Label{Key: "reason", Value: "no-plan"})
+	require.True(t, ok)
+	require.Equal(t, float64(2), value)
+}
+
+func TestCollector_RecordEmit(t *testing.T) {
+	c := prof.NewCollector()
+	c.RecordEmit(2, 11, prof.EntryStart, prof.FrontendTrace, 64)
+	c.RecordEmit(2, 11, prof.EntryStart, prof.FrontendTrace, 64)
+	labels := []prof.Label{
+		{Key: "func", Value: "2"}, {Key: "ip", Value: "11"},
+		{Key: "kind", Value: "start"}, {Key: "frontend", Value: "trace"},
+	}
+
+	emits, ok := c.Metric("vm_jit_entry_emits_total", labels...)
+	require.True(t, ok)
+	require.Equal(t, float64(2), emits)
+	bytes, ok := c.Metric("vm_jit_entry_bytes_total", labels...)
+	require.True(t, ok)
+	require.Equal(t, float64(128), bytes)
 }
 
 func TestCounter_Inc(t *testing.T) {
@@ -176,6 +125,24 @@ func TestCollector_RegisterExit(t *testing.T) {
 		prof.Label{Key: "reason", Value: "terminal-op"},
 		prof.Label{Key: "opcode", Value: "none"},
 	)
+	require.True(t, ok)
+	require.Equal(t, float64(2), value)
+}
+
+func TestCollector_RegisterYield(t *testing.T) {
+	local := prof.NewCollector()
+	yield := local.RegisterYield(3, 17, prof.EntryLoop, prof.FrontendTrace)
+	p := prof.New()
+
+	yield.Inc()
+	p.Flush(local)
+	yield.Inc()
+	p.Flush(local)
+	p.Flush(local)
+
+	value, ok := p.Metric("vm_jit_native_yields_total",
+		prof.Label{Key: "func", Value: "3"}, prof.Label{Key: "ip", Value: "17"},
+		prof.Label{Key: "kind", Value: "loop"}, prof.Label{Key: "frontend", Value: "trace"})
 	require.True(t, ok)
 	require.Equal(t, float64(2), value)
 }

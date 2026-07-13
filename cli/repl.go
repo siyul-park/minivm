@@ -367,7 +367,7 @@ func (r *REPL) profile(ctx context.Context) error {
 		return err
 	}
 
-	newProfileReport(p.Metrics()).print(r.out)
+	r.printProfile(p.Metrics())
 	return nil
 }
 

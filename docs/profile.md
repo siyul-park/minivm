@@ -198,7 +198,8 @@ compile results, emission rows, and runtime rows. A sampled anchor without a
 compile row is rendered as `kind=none,frontend=interpreted`; a compile miss is
 rendered as a zero-count entry beside its miss row; and an emitted entry remains
 visible even when it was never entered. Sample-only anchors never synthesize a
-miss reason.
+miss reason. Only rejected captures are misses; a published partial capture at
+the operation limit remains a successful capture outcome and is not listed.
 
 Function and opcode percentages use total samples. IP percentages use the
 matching function's samples. Function exit percentages use all native entries

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"io"
 	"sort"
 	"strconv"
 
@@ -207,8 +206,10 @@ func newProfileReport(metrics []prof.Metric) profileReport {
 	return report
 }
 
-// print renders the normalized, ranked profile.
-func (p profileReport) print(out io.Writer) {
+// printProfile renders normalized, ranked profiler metrics.
+func (r *REPL) printProfile(metrics []prof.Metric) {
+	p := newProfileReport(metrics)
+	out := r.out
 	fmt.Fprintf(out, "profile samples: %d\n", p.total)
 	if len(p.functions) > 0 {
 		fmt.Fprintln(out, "hot functions (top 10):")
@@ -285,6 +286,16 @@ func (p profileReport) print(out io.Writer) {
 
 func (p jitProfile) empty() bool {
 	return p.summary == (jitSummary{}) && len(p.entries) == 0 && len(p.exits) == 0 && len(p.misses) == 0
+}
+
+func (a entryKey) less(b entryKey) bool {
+	return a.fn < b.fn || a.fn == b.fn && (a.ip < b.ip ||
+		a.ip == b.ip && (a.kind < b.kind || a.kind == b.kind && a.frontend < b.frontend))
+}
+
+func (a jitMiss) less(b jitMiss) bool {
+	return a.fn < b.fn || a.fn == b.fn && (a.ip < b.ip || a.ip == b.ip &&
+		(a.phase < b.phase || a.phase == b.phase && a.reason < b.reason))
 }
 
 func rankedFunctions(functions map[int]uint64, ips map[[2]int]uint64, native map[[2]int]nativeAnchor) []functionProfile {
@@ -384,7 +395,7 @@ func normalizeJIT(
 		}
 	}
 	for key, count := range captureRows {
-		if key.outcome != "published" || key.reason != "none" {
+		if key.outcome == "rejected" {
 			misses[missKey{fn: key.fn, ip: key.ip, phase: "capture", reason: key.reason}] += count
 		}
 	}
@@ -412,7 +423,7 @@ func normalizeJIT(
 	sort.Slice(report.entries, func(i, j int) bool {
 		a, b := report.entries[i], report.entries[j]
 		return a.entries > b.entries || a.entries == b.entries &&
-			(a.emits > b.emits || a.emits == b.emits && entryLess(a.entryKey, b.entryKey))
+			(a.emits > b.emits || a.emits == b.emits && a.entryKey.less(b.entryKey))
 	})
 	sort.Slice(report.exits, func(i, j int) bool {
 		a, b := report.exits[i], report.exits[j]
@@ -422,22 +433,12 @@ func normalizeJIT(
 	})
 	sort.Slice(report.misses, func(i, j int) bool {
 		a, b := report.misses[i], report.misses[j]
-		return a.count > b.count || a.count == b.count && missLess(a, b)
+		return a.count > b.count || a.count == b.count && a.less(b)
 	})
 	report.entries = limit(report.entries)
 	report.exits = limit(report.exits)
 	report.misses = limit(report.misses)
 	return report
-}
-
-func entryLess(a, b entryKey) bool {
-	return a.fn < b.fn || a.fn == b.fn && (a.ip < b.ip ||
-		a.ip == b.ip && (a.kind < b.kind || a.kind == b.kind && a.frontend < b.frontend))
-}
-
-func missLess(a, b jitMiss) bool {
-	return a.fn < b.fn || a.fn == b.fn && (a.ip < b.ip || a.ip == b.ip &&
-		(a.phase < b.phase || a.phase == b.phase && a.reason < b.reason))
 }
 
 func aggregateNative(entries map[entryKey]*jitEntry, exits map[exitKey]uint64) map[[2]int]nativeAnchor {

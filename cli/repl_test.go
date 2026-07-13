@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/stretchr/testify/require"
 )
 
@@ -409,6 +410,142 @@ func TestREPL_Run(t *testing.T) {
 		require.Contains(t, section, "0009\t1")
 		require.Less(t, strings.Index(section, "0000\t1"), strings.Index(section, "0009\t1"))
 		require.NotContains(t, section, "0010\t1")
+	})
+
+	t.Run("profile excludes published partial captures from misses", func(t *testing.T) {
+		metrics := []prof.Metric{
+			{Name: "vm_jit_trace_captures_total", Labels: []prof.Label{
+				{Key: "func", Value: "0"}, {Key: "ip", Value: "0"},
+				{Key: "outcome", Value: "partial"}, {Key: "reason", Value: "op-limit"},
+			}, Value: 2},
+			{Name: "vm_jit_trace_captures_total", Labels: []prof.Label{
+				{Key: "func", Value: "0"}, {Key: "ip", Value: "0"},
+				{Key: "outcome", Value: "rejected"}, {Key: "reason", Value: "unsupported-op"},
+			}, Value: 3},
+		}
+		var out bytes.Buffer
+		r := NewREPL(strings.NewReader(""), &out, nil)
+		r.printProfile(metrics)
+
+		require.Contains(t, out.String(), "0\t0000\tcapture\tunsupported-op\t3")
+		require.NotContains(t, out.String(), "capture\top-limit")
+	})
+
+	t.Run("profile renders the lifecycle output contract", func(t *testing.T) {
+		// One real .profile run cannot deterministically produce compile misses,
+		// unused emissions, yields, and more than ten rows together. Exercise the
+		// protected human-readable contract at its owning REPL renderer boundary.
+		metrics := []prof.Metric{
+			{Name: "vm_jit_attempts_total", Value: 4},
+			{Name: "vm_jit_emits_total", Value: 9},
+			{Name: "vm_jit_bytes_total", Value: 204},
+			{Name: "vm_jit_native_entries_total", Labels: []prof.Label{
+				{Key: "func", Value: "1"}, {Key: "ip", Value: "1"},
+				{Key: "kind", Value: "start"}, {Key: "frontend", Value: "static"},
+			}, Value: 4},
+			{Name: "vm_jit_native_entries_total", Labels: []prof.Label{
+				{Key: "func", Value: "3"}, {Key: "ip", Value: "3"},
+				{Key: "kind", Value: "call"}, {Key: "frontend", Value: "trace"},
+			}, Value: 4},
+			{Name: "vm_jit_native_yields_total", Labels: []prof.Label{
+				{Key: "func", Value: "1"}, {Key: "ip", Value: "1"},
+				{Key: "kind", Value: "start"}, {Key: "frontend", Value: "static"},
+			}, Value: 99},
+			{Name: "vm_jit_native_exits_total", Labels: []prof.Label{
+				{Key: "func", Value: "1"}, {Key: "ip", Value: "1"},
+				{Key: "kind", Value: "start"}, {Key: "frontend", Value: "static"},
+				{Key: "reason", Value: "guard-value"}, {Key: "opcode", Value: "i32.div_s"},
+			}, Value: 2},
+			{Name: "vm_jit_native_exits_total", Labels: []prof.Label{
+				{Key: "func", Value: "3"}, {Key: "ip", Value: "3"},
+				{Key: "kind", Value: "call"}, {Key: "frontend", Value: "trace"},
+				{Key: "reason", Value: "cold-branch"}, {Key: "opcode", Value: "br_if"},
+			}, Value: 2},
+			{Name: "vm_jit_compiles_total", Labels: []prof.Label{
+				{Key: "func", Value: "4"}, {Key: "ip", Value: "4"},
+				{Key: "trigger", Value: "hot"}, {Key: "frontend", Value: "static"},
+				{Key: "outcome", Value: "empty"}, {Key: "reason", Value: "no-plan"},
+			}, Value: 3},
+			{Name: "vm_jit_compiles_total", Labels: []prof.Label{
+				{Key: "func", Value: "40"}, {Key: "ip", Value: "40"},
+				{Key: "trigger", Value: "hot"}, {Key: "frontend", Value: "static"},
+				{Key: "outcome", Value: "empty"}, {Key: "reason", Value: "no-plan"},
+			}, Value: 1},
+		}
+		for _, row := range []struct {
+			fn       string
+			ip       string
+			kind     string
+			frontend string
+			bytes    float64
+		}{
+			{fn: "1", ip: "1", kind: "start", frontend: "static", bytes: 64},
+			{fn: "2", ip: "2", kind: "loop", frontend: "trace", bytes: 32},
+			{fn: "3", ip: "3", kind: "call", frontend: "trace", bytes: 48},
+			{fn: "30", ip: "30", kind: "loop", frontend: "trace", bytes: 10},
+			{fn: "31", ip: "31", kind: "loop", frontend: "trace", bytes: 10},
+			{fn: "32", ip: "32", kind: "loop", frontend: "trace", bytes: 10},
+			{fn: "33", ip: "33", kind: "loop", frontend: "trace", bytes: 10},
+			{fn: "34", ip: "34", kind: "loop", frontend: "trace", bytes: 10},
+			{fn: "35", ip: "35", kind: "loop", frontend: "trace", bytes: 10},
+		} {
+			labels := []prof.Label{
+				{Key: "func", Value: row.fn}, {Key: "ip", Value: row.ip},
+				{Key: "kind", Value: row.kind}, {Key: "frontend", Value: row.frontend},
+			}
+			metrics = append(metrics,
+				prof.Metric{Name: "vm_jit_entry_emits_total", Labels: labels, Value: 1},
+				prof.Metric{Name: "vm_jit_entry_bytes_total", Labels: labels, Value: row.bytes},
+			)
+		}
+		for fn := 50; fn < 60; fn++ {
+			metrics = append(metrics, prof.Metric{Name: "vm_jit_native_exits_total", Labels: []prof.Label{
+				{Key: "func", Value: fmt.Sprint(fn)}, {Key: "ip", Value: "0"},
+				{Key: "kind", Value: "loop"}, {Key: "frontend", Value: "trace"},
+				{Key: "reason", Value: "trace-cut"}, {Key: "opcode", Value: "none"},
+			}, Value: 1})
+		}
+		for fn := 10; fn < 20; fn++ {
+			metrics = append(metrics, prof.Metric{Name: "vm_jit_trace_captures_total", Labels: []prof.Label{
+				{Key: "func", Value: fmt.Sprint(fn)}, {Key: "ip", Value: "0"},
+				{Key: "outcome", Value: "rejected"}, {Key: "reason", Value: "unsupported-op"},
+			}, Value: 1})
+		}
+
+		var out bytes.Buffer
+		r := NewREPL(strings.NewReader(""), &out, nil)
+		r.printProfile(metrics)
+		output := out.String()
+		require.Contains(t, output, "4\t9\t0\t204\t8\t14\t99")
+
+		entriesStart := strings.Index(output, "jit entries:")
+		exitsStart := strings.Index(output, "jit exit reasons:")
+		missesStart := strings.Index(output, "jit misses:")
+		require.NotEqual(t, -1, entriesStart)
+		require.Greater(t, exitsStart, entriesStart)
+		require.Greater(t, missesStart, exitsStart)
+		entries := output[entriesStart:exitsStart]
+		exits := output[exitsStart:missesStart]
+		misses := output[missesStart:]
+
+		require.Contains(t, entries, "1\t0001\tstart\tstatic\t1\t64\t4\t2\t50.0%")
+		require.Contains(t, entries, "3\t0003\tcall\ttrace\t1\t48\t4\t2\t50.0%")
+		require.Less(t, strings.Index(entries, "1\t0001"), strings.Index(entries, "3\t0003"))
+		require.Contains(t, entries, "2\t0002\tloop\ttrace\t1\t32\t0\t0\t-")
+		require.Contains(t, entries, "4\t0004\tnone\tstatic\t0\t0\t0\t0\t-")
+		require.NotContains(t, entries, "40\t0040")
+
+		require.Contains(t, exits, "1\t0001\tguard-value\ti32.div_s\t2\t50.0%")
+		require.Contains(t, exits, "3\t0003\tcold-branch\tbr_if\t2\t50.0%")
+		require.Less(t, strings.Index(exits, "1\t0001"), strings.Index(exits, "3\t0003"))
+		require.Contains(t, exits, "57\t0000\ttrace-cut\tnone\t1\t-")
+		require.NotContains(t, exits, "59\t0000")
+
+		require.Contains(t, misses, "4\t0004\tcompile\tno-plan\t3")
+		require.Contains(t, misses, "10\t0000\tcapture\tunsupported-op\t1")
+		require.Contains(t, misses, "18\t0000\tcapture\tunsupported-op\t1")
+		require.Less(t, strings.Index(misses, "10\t0000"), strings.Index(misses, "18\t0000"))
+		require.NotContains(t, misses, "19\t0000")
 	})
 
 	t.Run("profile does not mutate history", func(t *testing.T) {
