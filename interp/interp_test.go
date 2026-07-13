@@ -7501,6 +7501,8 @@ func BenchmarkPool_Get(b *testing.B) {
 			b.StartTimer()
 			second, getErr = pool.Get(context.Background())
 			b.StopTimer()
+			require.NoError(b, getErr)
+			second.sync()
 			require.NotNil(b, second.stub(0))
 			pool.Put(first)
 			pool.Put(second)
@@ -7508,7 +7510,6 @@ func BenchmarkPool_Get(b *testing.B) {
 			b.StartTimer()
 		}
 		b.StopTimer()
-		require.NoError(b, getErr)
 		require.NoError(b, closeErr)
 	})
 
