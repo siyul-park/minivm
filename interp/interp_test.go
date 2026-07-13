@@ -3834,6 +3834,24 @@ func TestWithHeap(t *testing.T) {
 		require.Equal(t, 3, i.Len())
 	})
 
+	t.Run("collects cycle at backing capacity", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(2))
+		defer i.Close()
+
+		value := &trackedValue{}
+		addr, err := i.Alloc(value)
+		require.NoError(t, err)
+		value.refs = []types.Ref{types.Ref(addr)}
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		reused, err := i.Alloc(types.I32(1))
+		require.NoError(t, err)
+		require.Equal(t, addr, reused)
+		require.Equal(t, 1, value.closed)
+	})
+
 	t.Run("negative capacity normalizes", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
@@ -3846,7 +3864,7 @@ func TestWithHeap(t *testing.T) {
 	})
 
 	t.Run("collects cycles at adaptive goal", func(t *testing.T) {
-		const capacity = 128
+		const capacity = 2 * heapRunway
 
 		i := New(program.New(nil), WithHeap(capacity), WithMaxHeap(capacity))
 		defer i.Close()
@@ -3874,28 +3892,30 @@ func TestWithHeap(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, i.Release(addr))
 
-		for n := range 62 {
+		// The first collection leaves two live slots, so pace sets goal to
+		// 2+heapRunway. Reuse and the new cycle occupy two of that runway.
+		for n := range heapRunway - 2 {
 			_, err = i.Alloc(types.I32(n + 3))
 			require.NoError(t, err)
 		}
 		require.Equal(t, 0, cycle.closed)
 
-		_, err = i.Alloc(types.I32(65))
+		_, err = i.Alloc(types.I32(heapRunway + 1))
 		require.NoError(t, err)
 		require.Equal(t, 1, cycle.closed)
 	})
 
 	t.Run("paces from live set", func(t *testing.T) {
-		const capacity = 192
+		const capacity = 3 * heapRunway
 
 		i := New(program.New(nil), WithHeap(capacity), WithMaxHeap(capacity))
 		defer i.Close()
 
-		for n := range 65 {
+		for n := range heapRunway + 1 {
 			_, err := i.Alloc(types.I32(n))
 			require.NoError(t, err)
 		}
-		for range capacity - 66 {
+		for range capacity - heapRunway - 2 {
 			value := &trackedValue{}
 			addr, err := i.Alloc(value)
 			require.NoError(t, err)
@@ -3905,7 +3925,7 @@ func TestWithHeap(t *testing.T) {
 			require.NoError(t, i.Release(addr))
 		}
 
-		_, err := i.Alloc(types.I32(65))
+		_, err := i.Alloc(types.I32(heapRunway + 1))
 		require.NoError(t, err)
 
 		cycle := &trackedValue{}
@@ -3916,25 +3936,27 @@ func TestWithHeap(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, i.Release(addr))
 
-		for n := range 62 {
-			_, err = i.Alloc(types.I32(n + 66))
+		// After the first collection, heapRunway+2 slots survive and the
+		// dynamic live set adds heapRunway+1 slots of runway.
+		for n := range heapRunway - 2 {
+			_, err = i.Alloc(types.I32(n + heapRunway + 2))
 			require.NoError(t, err)
 		}
 		require.Equal(t, 0, cycle.closed)
 
-		_, err = i.Alloc(types.I32(128))
+		_, err = i.Alloc(types.I32(2 * heapRunway))
 		require.NoError(t, err)
 		require.Equal(t, 0, cycle.closed)
 
-		_, err = i.Alloc(types.I32(129))
+		_, err = i.Alloc(types.I32(2*heapRunway + 1))
 		require.NoError(t, err)
 		require.Equal(t, 1, cycle.closed)
 	})
 
 	t.Run("resets adaptive goal", func(t *testing.T) {
-		const capacity = 192
+		const capacity = 3 * heapRunway
 
-		i := New(program.New(nil), WithHeap(capacity), WithMaxHeap(256))
+		i := New(program.New(nil), WithHeap(capacity), WithMaxHeap(4*heapRunway))
 		defer i.Close()
 
 		for n := range capacity {
@@ -3951,13 +3973,15 @@ func TestWithHeap(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, i.Release(addr))
 
-		for n := range 63 {
+		// Reset leaves only null, so the next goal is 1+heapRunway. The
+		// cycle consumes the first dynamic slot.
+		for n := range heapRunway - 1 {
 			_, err = i.Alloc(types.I32(n))
 			require.NoError(t, err)
 		}
 		require.Equal(t, 0, cycle.closed)
 
-		_, err = i.Alloc(types.I32(63))
+		_, err = i.Alloc(types.I32(heapRunway - 1))
 		require.NoError(t, err)
 		require.Equal(t, 1, cycle.closed)
 	})

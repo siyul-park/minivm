@@ -1599,36 +1599,27 @@ func (i *Interpreter) unbox(val types.Boxed) types.Value {
 }
 
 func (i *Interpreter) alloc(val types.Value) int {
-	collected := false
-	if i.goal > 0 && len(i.heap)-len(i.free) >= i.goal {
+	collected := i.goal > 0 && len(i.heap)-len(i.free) >= i.goal
+	if collected {
 		i.gc()
-		collected = true
 	}
 	if addr, ok := i.reuse(val); ok {
 		return addr
 	}
 
-	if i.limit > 0 && len(i.heap) >= i.limit {
-		if !collected {
-			i.gc()
-			if addr, ok := i.reuse(val); ok {
-				return addr
-			}
+	full := len(i.heap) == cap(i.heap)
+	limited := i.limit > 0 && len(i.heap) >= i.limit
+	if !collected && (full || limited) {
+		i.gc()
+		if addr, ok := i.reuse(val); ok {
+			return addr
 		}
+	}
+	if limited {
 		panic(ErrHeapExhausted)
 	}
 
-	if len(i.heap) == cap(i.heap) {
-		if !collected {
-			i.gc()
-			if addr, ok := i.reuse(val); ok {
-				return addr
-			}
-		}
-		if i.limit > 0 && len(i.heap) >= i.limit {
-			panic(ErrHeapExhausted)
-		}
-
+	if full {
 		c := 2 * cap(i.heap)
 		if c == 0 {
 			c = 1
@@ -1818,8 +1809,7 @@ func (i *Interpreter) gc() {
 
 func (i *Interpreter) pace() {
 	live := len(i.heap) - len(i.free)
-	dynamic := max(live-i.base, 0)
-	goal := live + max(dynamic, heapRunway)
+	goal := live + max(live-i.base, heapRunway)
 	if i.limit > 0 {
 		goal = min(goal, i.limit)
 	}
