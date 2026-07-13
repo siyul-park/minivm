@@ -1,8 +1,12 @@
+coverage-min ?= 72.8
+benchmark-pr-time ?= 100ms
+benchmark-time ?= 1s
+benchmark-count ?= 5
 -include .env
 
 PROJECT = $(shell basename -s .git $(shell git config --get remote.origin.url))
 
-.PHONY: init generate build clean tidy update sync check check-generated check-tidy check-fmt check-arm64 test coverage benchmark benchmark-fusion lint fmt vet doc
+.PHONY: init install-tools install-modules generate build clean tidy update clean-sum clean-cache sync check check-generated check-tidy check-fmt check-arm64 test coverage coverage-check benchmark benchmark-pr benchmark-core benchmark-nightly benchmark-compare lint fmt vet doc fuzz
 all: lint test build
 
 init:
@@ -66,12 +70,72 @@ test:
 coverage:
 	@go test -race --coverprofile=coverage.out --covermode=atomic $(test-options) ./...
 
-benchmark:
-	@go test -run="-" -bench=".*" -benchmem $(test-options) ./...
-	@(cd benchmarks && go test -run="-" -bench=".*" -benchmem $(test-options) ./...)
+coverage-check: coverage
+	@coverage="$$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%", "", $$3); print $$3}')"; \
+	awk -v coverage="$$coverage" -v minimum="$(coverage-min)" 'BEGIN { \
+		if (coverage + 0 < minimum + 0) { \
+			printf "coverage %.1f%% is below baseline %.1f%%\n", coverage, minimum; \
+			exit 1; \
+		} \
+		printf "coverage %.1f%% meets baseline %.1f%%\n", coverage, minimum; \
+	}'
 
-benchmark-fusion:
-	@(cd benchmarks && go test -run="^$$" -bench="Fusion|RefFusion" -benchmem -count=10 ./...)
+benchmark: benchmark-core
+
+benchmark-pr:
+	@root="$$( \
+		go test -run='^$$' -bench='^BenchmarkNew$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
+		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^(Empty|Nop|Stack|Local|Global|I64Mul|F64Add)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
+		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^I32Add$$/^Straight$$/^(Threaded|JITWarm)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
+		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^Branch$$/^Taken$$/^Threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
+		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^Call$$/^Direct$$/^Threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
+		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^Array$$/^Get$$/^Threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
+		go test -run='^$$' -bench='^BenchmarkInterpreter_Reset$$/^(Scalar|Heap)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
+		go test -run='^$$' -bench='^BenchmarkPool_(Get|Put)$$/^Uncontended$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp \
+	)" || { status=$$?; printf '%s\n' "$$root"; exit $$status; }; \
+	printf '%s\n' "$$root"; \
+	for name in \
+		BenchmarkNew/Empty \
+		BenchmarkInterpreter_Run/Empty/Threaded \
+		BenchmarkInterpreter_Run/Nop/Straight/Threaded \
+		BenchmarkInterpreter_Run/Stack/DupSwapDrop/Threaded \
+		BenchmarkInterpreter_Run/Local/SetGet/Threaded \
+		BenchmarkInterpreter_Run/Global/SetGet/Threaded \
+		BenchmarkInterpreter_Run/I32Add/Straight/Threaded \
+		BenchmarkInterpreter_Run/I64Mul/Threaded \
+		BenchmarkInterpreter_Run/F64Add/Threaded \
+		BenchmarkInterpreter_Run/Branch/Taken/Threaded \
+		BenchmarkInterpreter_Run/Call/Direct/Threaded \
+		BenchmarkInterpreter_Run/Array/Get/Threaded \
+		BenchmarkInterpreter_Reset/Scalar \
+		BenchmarkInterpreter_Reset/Heap \
+		BenchmarkPool_Get/Uncontended \
+		BenchmarkPool_Put/Uncontended; do \
+		printf '%s\n' "$$root" | grep -q "^$$name-" || { printf 'missing benchmark %s\n' "$$name"; exit 1; }; \
+	done; \
+	if [ "$$(go env GOARCH)" = arm64 ]; then \
+		printf '%s\n' "$$root" | grep -q '^BenchmarkInterpreter_Run/I32Add/Straight/JITWarm-' || { printf '%s\n' 'missing ARM64 JIT warm benchmark'; exit 1; }; \
+	fi
+	@kernels="$$(cd benchmarks && go test -run='^$$' -bench='^(BenchmarkControl_IterativeFib|BenchmarkCall_RecursiveFib|BenchmarkMemory_TypedArraySum|BenchmarkNumeric_BranchTree)$$/^threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./...)" || { status=$$?; printf '%s\n' "$$kernels"; exit $$status; }; \
+	printf '%s\n' "$$kernels"; \
+	for name in \
+		BenchmarkControl_IterativeFib/threaded \
+		BenchmarkCall_RecursiveFib/threaded \
+		BenchmarkMemory_TypedArraySum/threaded \
+		BenchmarkNumeric_BranchTree/threaded; do \
+		printf '%s\n' "$$kernels" | grep -q "^$$name-" || { printf 'missing benchmark %s\n' "$$name"; exit 1; }; \
+	done
+
+benchmark-core:
+	@go test -run='^$$' -bench='^Benchmark' -benchmem -benchtime=$(benchmark-time) $(test-options) ./...
+	@(cd benchmarks && go test -run='^$$' -bench='^(BenchmarkControl|BenchmarkCall|BenchmarkMemory|BenchmarkNumeric)' -benchmem -benchtime=$(benchmark-time) $(test-options) ./...)
+
+benchmark-nightly:
+	@go test -run='^$$' -bench='^Benchmark' -benchmem -benchtime=$(benchmark-time) -count=$(benchmark-count) $(test-options) ./...
+	@(cd benchmarks && go test -run='^$$' -bench='^(BenchmarkControl|BenchmarkCall|BenchmarkMemory|BenchmarkNumeric)' -benchmem -benchtime=$(benchmark-time) -count=$(benchmark-count) $(test-options) ./...)
+
+benchmark-compare:
+	@(cd benchmarks && go test -tags=compare -run='^$$' -bench='^BenchmarkCompare' -benchmem -benchtime=$(benchmark-time) $(test-options) ./...)
 
 lint: fmt vet
 
@@ -83,3 +147,13 @@ vet:
 
 doc: init
 	@godoc -http=:6060
+
+fuzz:
+	@go test -run='^$$' -fuzz='^FuzzInstructionRoundTrip$$' -fuzztime=10s $(test-options) ./instr
+	@go test -run='^$$' -fuzz='^FuzzParse$$' -fuzztime=10s $(test-options) ./instr
+	@go test -run='^$$' -fuzz='^FuzzInterpreterParity$$' -fuzztime=10s $(test-options) ./interp
+	@go test -run='^$$' -fuzz='^FuzzOptimizerParity$$' -fuzztime=10s $(test-options) ./optimize
+	@go test -run='^$$' -fuzz='^FuzzParseProgram$$' -fuzztime=10s $(test-options) ./program
+	@go test -run='^$$' -fuzz='^FuzzVerify$$' -fuzztime=10s $(test-options) ./program
+	@go test -run='^$$' -fuzz='^FuzzParseFunction$$' -fuzztime=10s $(test-options) ./types
+	@go test -run='^$$' -fuzz='^FuzzParseType$$' -fuzztime=10s $(test-options) ./types

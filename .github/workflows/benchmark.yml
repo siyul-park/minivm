@@ -1,0 +1,48 @@
+name: Benchmark
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  canonical:
+    name: Repeated Canonical Suite
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            benchmarks/go.sum
+
+      - name: Run Repeated Canonical Suite
+        run: make benchmark-nightly
+
+  comparison:
+    name: External Runtime Comparison
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            benchmarks/go.sum
+
+      - name: Run External Runtime Comparisons
+        run: make benchmark-compare

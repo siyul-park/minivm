@@ -21,9 +21,13 @@ If instructions conflict, choose the more specific instruction and mention the c
 ```bash
 make init          # install goimports/godoc and go install ./...
 make test          # go test -race ./...
-make benchmark     # package benches + ./benchmarks module benches
+make benchmark-pr  # quick pull-request benchmark report
+make benchmark-core # full canonical package + VM kernel suite
+make benchmark-compare # optional external runtime comparisons
+make fuzz          # bounded trust-boundary fuzz smoke
 make lint          # goimports -w . && go vet ./...
 make coverage      # CI-style full test run with coverage.out
+make coverage-check # enforce recorded total-coverage baseline
 make build         # build ./dist/minivm
 
 go test -race ./...

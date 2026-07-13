@@ -29,3 +29,7 @@ Before reporting done, re-read every touched code/test file and verify:
 - Documentation, workflow, or convention changes updated the owning docs listed in §8.
 
 If any checklist item is intentionally not applied, record the reason in the final summary.
+
+## Verification Commands
+
+Use `make benchmark-pr` for the quick benchmark report, `make benchmark-core` for the canonical suite, `make benchmark-compare` only for tagged external comparisons, `make fuzz` for bounded fuzz smoke, and `make coverage-check` for the recorded coverage floor.
