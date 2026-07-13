@@ -26,7 +26,7 @@ No later phase starts before the previous phase passes its review gate.
 |---|---|---|---|---|
 | 0 | Baseline, inventory, and plan | Complete | `test: record test and benchmark baseline` | Passed |
 | 1 | Test ownership matrices and completeness gates | Complete | `test: add test ownership gates` | Passed |
-| 2 | `instr` executable specifications and fuzzing | Pending | - | - |
+| 2 | `instr` executable specifications and fuzzing | Complete | `test(instr): reorganize executable specifications` | Passed |
 | 3 | `types` executable specifications and fuzzing | Pending | - | - |
 | 4 | `program` construction, parser, verifier, and fuzzing | Pending | - | - |
 | 5 | Interpreter public API, marshal, host, pool, and lifecycle | Pending | - | - |
@@ -150,13 +150,13 @@ make check-generated
 
 ### Tasks
 
-- [ ] Align test files with production ownership and remove umbrella ownership.
-- [ ] Specify `Kind` string, numeric, representation, and size behavior.
-- [ ] Specify opcode classification, metadata uniqueness, `TypeOf`, and `Valid`.
-- [ ] Specify instruction construction, operand access, width, mutation, target calculation, and formatting.
-- [ ] Specify marshal/unmarshal and symbolic branch/handler resolution.
-- [ ] Add bounded parser and instruction round-trip fuzz tests.
-- [ ] Remove duplicate or issue-history test names.
+- [x] Align test files with production ownership and remove umbrella ownership.
+- [x] Specify `Kind` string, numeric, representation, and size behavior.
+- [x] Specify opcode classification, metadata uniqueness, `TypeOf`, and `Valid`.
+- [x] Specify instruction construction, operand access, width, mutation, target calculation, and formatting.
+- [x] Specify marshal/unmarshal and symbolic branch/handler resolution.
+- [x] Add bounded parser and instruction round-trip fuzz tests.
+- [x] Remove duplicate or issue-history test names.
 - [x] Run focused tests, review diff, update progress, and commit.
 
 ### Verification
@@ -181,7 +181,7 @@ All production-matched `types/*_test.go` files plus `types/fuzz_test.go`.
 - [ ] Specify append-to-destination reference tracing, invalid indexes, ownership, map overwrite/delete, NaN, and signed zero behavior.
 - [ ] Add bounded type and function parse/format round-trip fuzz tests.
 - [ ] Keep only meaningful traversal microbenchmarks and validate their fixtures.
-- [x] Run focused tests, review diff, update progress, and commit.
+- [ ] Run focused tests, review diff, update progress, and commit.
 
 ### Verification
 
@@ -205,7 +205,7 @@ go test -run='^$' -fuzz=FuzzParseFunction -fuzztime=10s ./types
 - [ ] Specify `VerifyError.Error` and `VerifyError.Unwrap`.
 - [ ] Add parser/string round-trip fuzzing.
 - [ ] Add arbitrary-bytecode `FuzzVerify` and prove no panic at admission boundary.
-- [x] Run focused tests, review diff, update progress, and commit.
+- [ ] Run focused tests, review diff, update progress, and commit.
 
 ### Verification
 
@@ -277,7 +277,7 @@ Tests in `analysis`, `asm`, `cli`, `debug`, `internal/cmd/geninterp`, `optimize`
 - [ ] Test debugger stepping with real interpreter programs.
 - [ ] Test CLI/REPL through injected filesystems and buffers.
 - [ ] Specify generator definition completeness, duplicate rejection, deterministic rendering, and `-check` behavior.
-- [x] Run focused tests, review diff, update progress, and commit.
+- [ ] Run focused tests, review diff, update progress, and commit.
 
 ### Verification
 
@@ -380,6 +380,16 @@ GOOS=linux GOARCH=arm64 go test -exec=true ./...
 - Intentionally retained structure: the verifier policy map remains an independent test oracle; the exact symbol and opcode matrices remain verbose because each public owner and opcode needs visible ownership.
 - Coverage/benchmark effect: `instr` 78.1% -> 78.7%; `program` 76.9%; `interp` 20.6%; no benchmark change.
 - Commit: `test: add test ownership gates`.
+
+### Phase 2
+
+- Focused verification: `GOENV_VERSION=1.26.2 go test -race ./instr`; both fuzz targets ran for 10 seconds.
+- Broad verification: explicit `gofmt`, `/Users/siyulpark/go/bin/goimports`, `go vet ./instr`, generator `-check`, and `git diff --check`.
+- Review findings fixed: restored production declaration order, kept `TestValid` as exhaustive registry coverage instead of a duplicated opcode list, and moved numeric readers/parsers to `parse_test.go`.
+- Production bug fixed: `KindAny.Repr()` no longer aliases to `KindI32`; committed separately as `aae004a`.
+- Intentionally retained structure: no `handler_test.go` because `Handler` is a behavior-free data record; handler resolution is specified through `Builder.Try` and `Builder.Handlers`.
+- Coverage/benchmark effect: `instr` 78.7% -> 93.9%; no benchmark change.
+- Commit: `test(instr): reorganize executable specifications`.
 
 Add one entry after each later phase:
 

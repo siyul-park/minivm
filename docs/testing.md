@@ -45,7 +45,7 @@ The inventory includes exported functions and exported methods on exported recei
 | `asm/arm64` | 155 | 3 | 152 |
 | `cli` | 6 | 4 | 2 |
 | `debug` | 12 | 1 | 11 |
-| `instr` | 44 | 33 | 11 |
+| `instr` | 44 | 44 | 0 |
 | `interp` | 66 | 51 | 15 |
 | `optimize` | 4 | 3 | 1 |
 | `pass` | 9 | 4 | 5 |
@@ -283,18 +283,18 @@ The inventory includes exported functions and exported methods on exported recei
 | `debug/debugger.go` | `TestNewDebugger` | ⬜ |
 | `instr/builder.go` | `TestBuilder_Append` | ✅ |
 | `instr/builder.go` | `TestBuilder_Assemble` | ✅ |
-| `instr/builder.go` | `TestBuilder_Bind` | ⬜ |
+| `instr/builder.go` | `TestBuilder_Bind` | ✅ |
 | `instr/builder.go` | `TestBuilder_Br` | ✅ |
 | `instr/builder.go` | `TestBuilder_BrIf` | ✅ |
 | `instr/builder.go` | `TestBuilder_BrTable` | ✅ |
 | `instr/builder.go` | `TestBuilder_Emit` | ✅ |
-| `instr/builder.go` | `TestBuilder_Handlers` | ⬜ |
-| `instr/builder.go` | `TestBuilder_Label` | ⬜ |
-| `instr/builder.go` | `TestBuilder_Try` | ⬜ |
-| `instr/builder.go` | `TestNewBuilder` | ⬜ |
+| `instr/builder.go` | `TestBuilder_Handlers` | ✅ |
+| `instr/builder.go` | `TestBuilder_Label` | ✅ |
+| `instr/builder.go` | `TestBuilder_Try` | ✅ |
+| `instr/builder.go` | `TestNewBuilder` | ✅ |
 | `instr/code.go` | `TestFormat` | ✅ |
 | `instr/code.go` | `TestMarshal` | ✅ |
-| `instr/code.go` | `TestTargets` | ⬜ |
+| `instr/code.go` | `TestTargets` | ✅ |
 | `instr/code.go` | `TestUnmarshal` | ✅ |
 | `instr/instr.go` | `TestInstruction_Opcode` | ✅ |
 | `instr/instr.go` | `TestInstruction_Operand` | ✅ |
@@ -304,13 +304,13 @@ The inventory includes exported functions and exported methods on exported recei
 | `instr/instr.go` | `TestInstruction_Type` | ✅ |
 | `instr/instr.go` | `TestInstruction_Width` | ✅ |
 | `instr/instr.go` | `TestNew` | ✅ |
-| `instr/kind.go` | `TestKind_IsNumeric` | ⬜ |
-| `instr/kind.go` | `TestKind_Repr` | ⬜ |
-| `instr/kind.go` | `TestKind_Size` | ⬜ |
-| `instr/kind.go` | `TestKind_String` | ⬜ |
+| `instr/kind.go` | `TestKind_IsNumeric` | ✅ |
+| `instr/kind.go` | `TestKind_Repr` | ✅ |
+| `instr/kind.go` | `TestKind_Size` | ✅ |
+| `instr/kind.go` | `TestKind_String` | ✅ |
 | `instr/opcode.go` | `TestOpcode_IsBranch` | ✅ |
 | `instr/parse.go` | `TestParse` | ✅ |
-| `instr/parse.go` | `TestParseAll` | ⬜ |
+| `instr/parse.go` | `TestParseAll` | ✅ |
 | `instr/parse.go` | `TestParseI16` | ✅ |
 | `instr/parse.go` | `TestParseI32` | ✅ |
 | `instr/parse.go` | `TestParseI8` | ✅ |
