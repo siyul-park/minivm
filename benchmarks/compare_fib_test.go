@@ -1,4 +1,6 @@
-package bench
+//go:build compare
+
+package benchmarks
 
 import (
 	"context"
@@ -13,6 +15,7 @@ import (
 	"github.com/tetratelabs/wazero/api"
 
 	"github.com/siyul-park/minivm/interp"
+	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -68,46 +71,47 @@ func fibGo(n int32) int32 {
 	return fibGo(n-1) + fibGo(n-2)
 }
 
-// BenchmarkFib35 compares recursive fib(35) across six runtimes.
+// BenchmarkCompare_RecursiveFib compares recursive fib(35) across runtimes.
 // Each sub-benchmark creates its runtime and compiles its program once
 // outside the timed loop, then calls fib(35) b.N times.
-func BenchmarkFib35(b *testing.B) {
+func BenchmarkCompare_RecursiveFib(b *testing.B) {
 	b.Run("native", func(b *testing.B) {
+		var value int32
 		b.ReportAllocs()
 		b.ResetTimer()
 		for n := 0; n < b.N; n++ {
-			fibGo(fibN)
-		}
-	})
-
-	// minivm is measured twice: interpreter-only (JIT disabled via
-	// WithThreshold(-1)) and with the JIT enabled (default New, which
-	// promotes hot segments on ARM64). On architectures without a JIT
-	// backend the two rows coincide.
-	runMiniVM := func(b *testing.B, i *interp.Interpreter) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		defer i.Close()
-
-		b.ReportAllocs()
-		b.ResetTimer()
-		var err error
-		for n := 0; n < b.N; n++ {
-			err = i.Run(ctx)
-			i.Reset()
+			value = fibGo(fibN)
 		}
 		b.StopTimer()
-		require.NoError(b, err)
-	}
-
-	b.Run("minivm_interp", func(b *testing.B) {
-		vm := interp.New(Fib(fibN), interp.WithThreshold(-1))
-		runMiniVM(b, vm)
+		require.Equal(b, recursiveFibReference(fibN), value)
 	})
 
-	b.Run("minivm_jit", func(b *testing.B) {
-		vm := interp.New(Fib(fibN))
-		runMiniVM(b, vm)
+	prog := recursiveFib(fibN)
+
+	b.Run("minivm_threaded", func(b *testing.B) {
+		ctx := context.Background()
+		vm := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
+		defer vm.Close()
+		require.NoError(b, vm.Run(ctx))
+		value, err := vm.Pop()
+		require.NoError(b, err)
+		require.Equal(b, types.I32(recursiveFibReference(fibN)), value)
+		vm.Reset()
+
+		var runErr, popErr error
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			runErr = vm.Run(ctx)
+			b.StopTimer()
+			value, popErr = vm.Pop()
+			vm.Reset()
+			b.StartTimer()
+		}
+		b.StopTimer()
+		require.NoError(b, runErr)
+		require.NoError(b, popErr)
+		require.Equal(b, types.I32(recursiveFibReference(fibN)), value)
 	})
 
 	b.Run("wazero", func(b *testing.B) {
