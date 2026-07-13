@@ -1169,6 +1169,14 @@ var runTests = []struct {
 		values:  []types.Value{types.TypedArray[int32]{0, 0, 0}},
 	},
 	{
+		name: "i32.const array.new_default returns null refs",
+		program: program.New(
+			[]instr.Instruction{instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0)},
+			program.WithTypes(types.NewArrayType(types.TypeRef)),
+		),
+		values: []types.Value{types.NewArray(types.NewArrayType(types.TypeRef), types.BoxedNull, types.BoxedNull)},
+	},
+	{
 		name: "i32.const i32.const i32.const array.new array.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),

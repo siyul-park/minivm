@@ -2326,6 +2326,8 @@ func arrayNewDefault() jen.Code {
 				jen.List(jen.Id("size")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))).Dot("I32").Call()),
 				jen.If(jen.Id("size").Op("<").Add(jen.Lit(0))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))),
 				jen.List(jen.Id("val")).Op(":=").List(jen.Op("&").Add(jen.Id("types").Dot("Array").Values(jen.Dict{jen.Id("Typ"): jen.Id("typ"), jen.Id("Elems"): jen.Id("make").Call(jen.Index().Add(jen.Id("types").Dot("Boxed")), jen.Id("size"))}))),
+				jen.For(jen.List(jen.Id("j")).Op(":=").Range().Add(jen.Id("val").Dot("Elems"))).Block(jen.List(jen.Id("val").Dot("Elems").Index(jen.Id("j"))).Op("=").List(jen.Id("types").Dot("BoxedNull"))),
+				jen.Id("i").Dot("retains").Call(jen.Lit(0), jen.Id("int").Call(jen.Id("size"))),
 				jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("val")))),
 				jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))))
 }
