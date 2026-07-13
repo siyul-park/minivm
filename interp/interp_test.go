@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -6782,4 +6783,763 @@ func i32operand(v int32) uint64 {
 
 func i64operand(v int64) uint64 {
 	return uint64(v)
+}
+
+func BenchmarkNew(b *testing.B) {
+	b.Run("Empty", func(b *testing.B) {
+		prog := program.New(nil)
+		var vm *Interpreter
+		b.ReportAllocs()
+		b.ResetTimer()
+		var closeErr error
+		for b.Loop() {
+			vm = New(prog)
+			b.StopTimer()
+			closeErr = vm.Close()
+			b.StartTimer()
+		}
+		b.StopTimer()
+		require.NoError(b, closeErr)
+	})
+
+	b.Run("Program", func(b *testing.B) {
+		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)})
+		var vm *Interpreter
+		b.ReportAllocs()
+		b.ResetTimer()
+		var closeErr error
+		for b.Loop() {
+			vm = New(prog, WithThreshold(-1))
+			b.StopTimer()
+			closeErr = vm.Close()
+			b.StartTimer()
+		}
+		b.StopTimer()
+		require.NoError(b, closeErr)
+	})
+
+	b.Run("JITEnabled", func(b *testing.B) {
+		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)})
+		var vm *Interpreter
+		b.ReportAllocs()
+		b.ResetTimer()
+		var closeErr error
+		for b.Loop() {
+			vm = New(prog, WithThreshold(0))
+			b.StopTimer()
+			closeErr = vm.Close()
+			b.StartTimer()
+		}
+		b.StopTimer()
+		require.NoError(b, closeErr)
+	})
+}
+
+func BenchmarkInterpreter_Run(b *testing.B) {
+	var straight []instr.Instruction
+	for range 64 {
+		straight = append(straight, instr.New(instr.NOP))
+	}
+	straight = append(straight, instr.New(instr.I32_CONST, 1))
+
+	var numeric []instr.Instruction
+	for range 64 {
+		numeric = append(numeric,
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.DROP),
+		)
+	}
+	numeric = append(numeric, instr.New(instr.I32_CONST, 42))
+
+	branch := program.NewBuilder()
+	taken := branch.Label()
+	branch.Emit(instr.I32_CONST, 1).
+		BrIf(taken).
+		Emit(instr.I32_CONST, 0).
+		Bind(taken).
+		Emit(instr.I32_CONST, 7)
+	branchProgram, err := branch.Build()
+	require.NoError(b, err)
+
+	callee := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+		Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).MustBuild()
+	host := NewHostFunction(
+		&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+		func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+			return []types.Boxed{types.BoxI32(42)}, nil
+		},
+	)
+	coroutine := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+		Emit(
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.YIELD),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+		).MustBuild()
+
+	tests := []struct {
+		name     string
+		prog     *program.Program
+		want     types.Value
+		wantKind types.Kind
+		fused    bool
+		jit      bool
+		opcodes  int
+	}{
+		{name: "Empty", prog: program.New(nil)},
+		{name: "Nop/Straight", prog: program.New([]instr.Instruction{instr.New(instr.NOP)}), fused: true},
+		{name: "Dispatch/Straight", prog: program.New(straight), want: types.I32(1), fused: true, opcodes: len(straight)},
+		{
+			name: "Stack/DupSwapDrop",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 1), instr.New(instr.DUP), instr.New(instr.SWAP), instr.New(instr.DROP),
+			}),
+			want: types.I32(1), fused: true,
+		},
+		{
+			name: "Constant/Get",
+			prog: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0)}, program.WithConstants(types.I32(42))),
+			want: types.I32(42), fused: true,
+		},
+		{
+			name: "Local/SetGet",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 42), instr.New(instr.LOCAL_SET, 0), instr.New(instr.LOCAL_GET, 0),
+			}, program.WithLocals(types.TypeI32)),
+			want: types.I32(42), fused: true,
+		},
+		{
+			name: "Global/SetGet",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 42), instr.New(instr.GLOBAL_SET, 0), instr.New(instr.GLOBAL_GET, 0),
+			}, program.WithGlobals(types.TypeI32)),
+			want: types.I32(42), fused: true,
+		},
+		{name: "I32Add/Straight", prog: program.New(numeric), want: types.I32(42), fused: true, jit: true, opcodes: len(numeric)},
+		{
+			name: "I64Mul",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I64_CONST, 6), instr.New(instr.I64_CONST, 7), instr.New(instr.I64_MUL),
+			}),
+			want: types.I64(42), fused: true,
+		},
+		{
+			name: "F64Add",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(20.5)),
+				instr.New(instr.F64_CONST, math.Float64bits(21.5)),
+				instr.New(instr.F64_ADD),
+			}),
+			want: types.F64(42), fused: true,
+		},
+		{name: "Branch/Taken", prog: branchProgram, want: types.I32(7), fused: true},
+		{
+			name: "Call/Direct",
+			prog: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(callee)),
+			want: types.I32(42), fused: true,
+		},
+		{
+			name: "Call/Host",
+			prog: program.New(
+				[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
+				program.WithConstants(host),
+			),
+			want: types.I32(42), fused: true,
+		},
+		{
+			name: "Array/Get",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET),
+			}, program.WithConstants(types.TypedArray[int32]{10, 20, 30})),
+			want: types.I32(20), fused: true,
+		},
+		{
+			name: "Array/New",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			}, program.WithTypes(types.TypeI32Array)),
+			wantKind: types.KindRef, fused: true,
+		},
+		{
+			name: "Struct/Get",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.F64_CONST, math.Float64bits(2.5)),
+				instr.New(instr.STRUCT_NEW, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.STRUCT_GET),
+			}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)))),
+			want: types.F64(2.5), fused: true,
+		},
+		{
+			name: "Map/Get",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 42), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
+				instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_GET),
+			}, program.WithTypes(types.NewMapType(types.TypeI32, types.TypeI32))),
+			want: types.I32(42), fused: true,
+		},
+		{
+			name: "String/Len",
+			prog: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_LEN)}, program.WithConstants(types.String("minivm"))),
+			want: types.I32(6), fused: true,
+		},
+		{
+			name: "Coroutine/Resume",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0), instr.New(instr.CALL), instr.New(instr.I32_CONST, 41),
+				instr.New(instr.RESUME), instr.New(instr.CORO_VALUE),
+			}, program.WithConstants(coroutine)),
+			want: types.I32(42), fused: true,
+		},
+	}
+
+	metric := func(vm *Interpreter, name string) float64 {
+		var total float64
+		for _, sample := range vm.samples.Metrics() {
+			if sample.Name == name {
+				total += sample.Value
+			}
+		}
+		return total
+	}
+
+	for _, tt := range tests {
+		modes := []struct {
+			name string
+			opts []func(*option)
+		}{
+			{name: "Threaded", opts: []func(*option){WithTick(1), WithThreshold(-1)}},
+		}
+		if tt.fused {
+			modes = append(modes, struct {
+				name string
+				opts []func(*option)
+			}{name: "Fused", opts: []func(*option){WithThreshold(-1)}})
+		}
+		if tt.jit && runtime.GOARCH == "arm64" {
+			modes = append(modes, struct {
+				name string
+				opts []func(*option)
+			}{name: "JITWarm", opts: []func(*option){WithThreshold(0)}})
+		}
+
+		for _, mode := range modes {
+			b.Run(tt.name+"/"+mode.name, func(b *testing.B) {
+				ctx := context.Background()
+				vm := New(tt.prog, mode.opts...)
+				defer vm.Close()
+
+				require.NoError(b, vm.Run(ctx))
+				if tt.want != nil {
+					value, err := vm.Pop()
+					require.NoError(b, err)
+					require.Equal(b, tt.want, value)
+				} else if tt.wantKind != 0 {
+					value, err := vm.Pop()
+					require.NoError(b, err)
+					require.Equal(b, tt.wantKind, value.Kind())
+				}
+				vm.Reset()
+				if mode.name == "JITWarm" {
+					for range 16 {
+						if metric(vm, "vm_jit_emits_total") > 0 {
+							break
+						}
+						require.NoError(b, vm.Run(ctx))
+						vm.Reset()
+					}
+					require.Greater(b, metric(vm, "vm_jit_emits_total"), float64(0))
+				}
+				if tt.opcodes > 0 {
+					b.ReportMetric(float64(tt.opcodes), "opcodes/op")
+				}
+
+				var runErr error
+				b.ReportAllocs()
+				b.ResetTimer()
+				for b.Loop() {
+					runErr = vm.Run(ctx)
+					b.StopTimer()
+					vm.Reset()
+					b.StartTimer()
+				}
+				b.StopTimer()
+				require.NoError(b, runErr)
+			})
+		}
+	}
+
+	if runtime.GOARCH == "arm64" {
+		b.Run("I32Add/Straight/JITCold", func(b *testing.B) {
+			ctx := context.Background()
+			var runErr, popErr, closeErr error
+			var value types.Value
+			var emits float64
+			b.ReportAllocs()
+			b.ReportMetric(float64(len(numeric)), "opcodes/op")
+			b.ResetTimer()
+			for b.Loop() {
+				b.StopTimer()
+				vm := New(program.New(numeric), WithTick(1), WithThreshold(0))
+				b.StartTimer()
+				runErr = vm.Run(ctx)
+				b.StopTimer()
+				value, popErr = vm.Pop()
+				emits = metric(vm, "vm_jit_emits_total")
+				closeErr = vm.Close()
+				b.StartTimer()
+			}
+			b.StopTimer()
+			require.NoError(b, runErr)
+			require.NoError(b, popErr)
+			require.NoError(b, closeErr)
+			require.Equal(b, types.I32(42), value)
+			require.Greater(b, emits, float64(0))
+		})
+
+		branchBuilder := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			WithParams(types.TypeI32)
+		negative := branchBuilder.Label()
+		branchFunction := branchBuilder.
+			Emit(
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_LT_S),
+			).
+			BrIf(negative).
+			Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN)).
+			Bind(negative).
+			Emit(instr.New(instr.I32_CONST, 2), instr.New(instr.RETURN)).
+			MustBuild()
+		branchExit := program.New(
+			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
+			program.WithConstants(branchFunction),
+		)
+		b.Run("Branch/JITExit", func(b *testing.B) {
+			ctx := context.Background()
+			var runErr, popErr, closeErr error
+			var value types.Value
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				b.StopTimer()
+				vm := New(branchExit, WithTick(1), WithThreshold(0))
+				for range 8 {
+					vm.Reset()
+					require.NoError(b, vm.Push(types.I32(1)))
+					require.NoError(b, vm.Run(ctx))
+					_, err := vm.Pop()
+					require.NoError(b, err)
+				}
+				require.Greater(b, metric(vm, "vm_jit_emits_total"), float64(0))
+				require.NotNil(b, vm.stub(1))
+				vm.Reset()
+				require.NoError(b, vm.Push(types.I32(-1)))
+				b.StartTimer()
+				runErr = vm.Run(ctx)
+				b.StopTimer()
+				value, popErr = vm.Pop()
+				closeErr = vm.Close()
+				b.StartTimer()
+			}
+			b.StopTimer()
+			require.NoError(b, runErr)
+			require.NoError(b, popErr)
+			require.NoError(b, closeErr)
+			require.Equal(b, types.I32(2), value)
+		})
+
+		divideFunction := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			WithParams(types.TypeI32, types.TypeI32).
+			Emit(
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.I32_DIV_S),
+				instr.New(instr.RETURN),
+			).
+			MustBuild()
+		divide := program.New(
+			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
+			program.WithConstants(divideFunction),
+		)
+		b.Run("I32Div/JITDeopt", func(b *testing.B) {
+			ctx := context.Background()
+			var runErr, closeErr error
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				b.StopTimer()
+				vm := New(divide, WithTick(1), WithThreshold(0))
+				for range 8 {
+					vm.Reset()
+					require.NoError(b, vm.Push(types.I32(90)))
+					require.NoError(b, vm.Push(types.I32(3)))
+					require.NoError(b, vm.Run(ctx))
+					value, err := vm.Pop()
+					require.NoError(b, err)
+					require.Equal(b, types.I32(30), value)
+				}
+				require.Greater(b, metric(vm, "vm_jit_emits_total"), float64(0))
+				require.NotNil(b, vm.stub(1))
+				vm.Reset()
+				require.NoError(b, vm.Push(types.I32(90)))
+				require.NoError(b, vm.Push(types.I32(0)))
+				b.StartTimer()
+				runErr = vm.Run(ctx)
+				b.StopTimer()
+				closeErr = vm.Close()
+				b.StartTimer()
+			}
+			b.StopTimer()
+			require.ErrorIs(b, runErr, ErrDivideByZero)
+			require.NoError(b, closeErr)
+		})
+	}
+}
+
+func BenchmarkInterpreter_Reset(b *testing.B) {
+	var jitCode []instr.Instruction
+	for range 64 {
+		jitCode = append(jitCode,
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.DROP),
+		)
+	}
+	jitCode = append(jitCode, instr.New(instr.I32_CONST, 42))
+
+	tests := []struct {
+		name string
+		prog *program.Program
+		opts []func(*option)
+	}{
+		{
+			name: "Scalar",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 42), instr.New(instr.GLOBAL_SET, 0),
+			}, program.WithGlobals(types.TypeI32)),
+			opts: []func(*option){WithThreshold(-1)},
+		},
+		{
+			name: "Heap",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 8), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			}, program.WithTypes(types.NewArrayType(types.TypeRef))),
+			opts: []func(*option){WithThreshold(-1)},
+		},
+		{
+			name: "JITState",
+			prog: program.New(jitCode),
+			opts: []func(*option){WithThreshold(0)},
+		},
+	}
+
+	for _, tt := range tests {
+		if tt.name == "JITState" && runtime.GOARCH != "arm64" {
+			continue
+		}
+		b.Run(tt.name, func(b *testing.B) {
+			ctx := context.Background()
+			vm := New(tt.prog, tt.opts...)
+			defer vm.Close()
+			require.NoError(b, vm.Run(ctx))
+			if tt.name == "JITState" {
+				for range 16 {
+					if vm.stub(0) != nil {
+						break
+					}
+					vm.Reset()
+					require.NoError(b, vm.Run(ctx))
+				}
+				require.NotNil(b, vm.stub(0))
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				vm.Reset()
+				b.StopTimer()
+				require.NoError(b, vm.Run(ctx))
+				b.StartTimer()
+			}
+			b.StopTimer()
+		})
+	}
+}
+
+func BenchmarkInterpreter_Push(b *testing.B) {
+	b.Run("Scalar", func(b *testing.B) {
+		vm := New(program.New(nil))
+		defer vm.Close()
+		b.ReportAllocs()
+		var pushErr error
+		b.ResetTimer()
+		for b.Loop() {
+			pushErr = vm.Push(types.I32(42))
+			b.StopTimer()
+			vm.Reset()
+			b.StartTimer()
+		}
+		b.StopTimer()
+		require.NoError(b, pushErr)
+	})
+
+	b.Run("Reference", func(b *testing.B) {
+		vm := New(program.New(nil))
+		defer vm.Close()
+		b.ReportAllocs()
+		var pushErr error
+		b.ResetTimer()
+		for b.Loop() {
+			pushErr = vm.Push(types.String("value"))
+			b.StopTimer()
+			vm.Reset()
+			b.StartTimer()
+		}
+		b.StopTimer()
+		require.NoError(b, pushErr)
+	})
+}
+
+func BenchmarkInterpreter_Pop(b *testing.B) {
+	vm := New(program.New(nil))
+	defer vm.Close()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		b.StopTimer()
+		require.NoError(b, vm.Push(types.I32(42)))
+		b.StartTimer()
+		value, err := vm.Pop()
+		b.StopTimer()
+		require.NoError(b, err)
+		require.Equal(b, types.I32(42), value)
+		b.StartTimer()
+	}
+	b.StopTimer()
+}
+
+func BenchmarkInterpreter_PopBoxed(b *testing.B) {
+	vm := New(program.New(nil))
+	defer vm.Close()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		b.StopTimer()
+		require.NoError(b, vm.Push(types.I32(42)))
+		b.StartTimer()
+		value, err := vm.PopBoxed()
+		b.StopTimer()
+		require.NoError(b, err)
+		require.Equal(b, types.BoxI32(42), value)
+		b.StartTimer()
+	}
+	b.StopTimer()
+}
+
+func BenchmarkInterpreter_Peek(b *testing.B) {
+	vm := New(program.New(nil))
+	defer vm.Close()
+	require.NoError(b, vm.Push(types.I32(42)))
+	var value types.Boxed
+	var err error
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		value, err = vm.Peek(0)
+	}
+	b.StopTimer()
+	require.NoError(b, err)
+	require.Equal(b, types.BoxI32(42), value)
+}
+
+func BenchmarkInterpreter_Alloc(b *testing.B) {
+	vm := New(program.New(nil))
+	defer vm.Close()
+	var addr int
+	var err error
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		addr, err = vm.Alloc(types.String("value"))
+		b.StopTimer()
+		require.NoError(b, err)
+		require.NoError(b, vm.Release(addr))
+		b.StartTimer()
+	}
+	b.StopTimer()
+}
+
+func BenchmarkInterpreter_Retain(b *testing.B) {
+	vm := New(program.New(nil))
+	defer vm.Close()
+	addr, err := vm.Alloc(types.String("value"))
+	require.NoError(b, err)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_, err = vm.Retain(addr)
+		b.StopTimer()
+		require.NoError(b, err)
+		require.NoError(b, vm.Release(addr))
+		b.StartTimer()
+	}
+	b.StopTimer()
+	require.NoError(b, vm.Release(addr))
+}
+
+func BenchmarkInterpreter_Release(b *testing.B) {
+	vm := New(program.New(nil))
+	defer vm.Close()
+	addr, err := vm.Alloc(types.String("value"))
+	require.NoError(b, err)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		b.StopTimer()
+		_, err = vm.Retain(addr)
+		require.NoError(b, err)
+		b.StartTimer()
+		releaseErr := vm.Release(addr)
+		b.StopTimer()
+		require.NoError(b, releaseErr)
+		b.StartTimer()
+	}
+	b.StopTimer()
+	require.NoError(b, vm.Release(addr))
+}
+
+func BenchmarkPool_Get(b *testing.B) {
+	b.Run("Uncontended", func(b *testing.B) {
+		pool := NewPool(program.New(nil), 1)
+		defer pool.Close()
+		vm, err := pool.Get(context.Background())
+		require.NoError(b, err)
+		pool.Put(vm)
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			vm, err = pool.Get(context.Background())
+			b.StopTimer()
+			require.NoError(b, err)
+			pool.Put(vm)
+			b.StartTimer()
+		}
+		b.StopTimer()
+	})
+
+	b.Run("Miss", func(b *testing.B) {
+		var vm *Interpreter
+		var err, closeErr error
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			b.StopTimer()
+			pool := NewPool(program.New(nil), 1)
+			b.StartTimer()
+			vm, err = pool.Get(context.Background())
+			b.StopTimer()
+			if vm != nil {
+				pool.Put(vm)
+			}
+			closeErr = pool.Close()
+			b.StartTimer()
+		}
+		b.StopTimer()
+		require.NoError(b, err)
+		require.NoError(b, closeErr)
+	})
+
+	b.Run("SharedJITMiss", func(b *testing.B) {
+		if runtime.GOARCH != "arm64" {
+			b.Skip("native JIT requires arm64")
+		}
+		var code []instr.Instruction
+		for range 64 {
+			code = append(code,
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.DROP),
+			)
+		}
+		code = append(code, instr.New(instr.I32_CONST, 42))
+		prog := program.New(code)
+		var second *Interpreter
+		var getErr, closeErr error
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			b.StopTimer()
+			pool := NewPool(prog, 2, WithThreshold(0))
+			first, err := pool.Get(context.Background())
+			require.NoError(b, err)
+			for range 16 {
+				first.Reset()
+				require.NoError(b, first.Run(context.Background()))
+				_, err := first.Pop()
+				require.NoError(b, err)
+				if first.stub(0) != nil {
+					break
+				}
+			}
+			require.NotNil(b, first.stub(0))
+			b.StartTimer()
+			second, getErr = pool.Get(context.Background())
+			b.StopTimer()
+			require.NotNil(b, second.stub(0))
+			pool.Put(first)
+			pool.Put(second)
+			closeErr = pool.Close()
+			b.StartTimer()
+		}
+		b.StopTimer()
+		require.NoError(b, getErr)
+		require.NoError(b, closeErr)
+	})
+
+	b.Run("ParallelRoundTrip", func(b *testing.B) {
+		pool := NewPool(program.New(nil), runtime.GOMAXPROCS(0))
+		defer pool.Close()
+		var failed atomic.Bool
+		b.ReportAllocs()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				vm, err := pool.Get(context.Background())
+				if err != nil {
+					failed.Store(true)
+					continue
+				}
+				pool.Put(vm)
+			}
+		})
+		require.False(b, failed.Load())
+	})
+}
+
+func BenchmarkPool_Put(b *testing.B) {
+	b.Run("Uncontended", func(b *testing.B) {
+		pool := NewPool(program.New(nil), 1)
+		defer pool.Close()
+		vm, err := pool.Get(context.Background())
+		require.NoError(b, err)
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			pool.Put(vm)
+			b.StopTimer()
+			vm, err = pool.Get(context.Background())
+			require.NoError(b, err)
+			b.StartTimer()
+		}
+		b.StopTimer()
+		pool.Put(vm)
+	})
 }

@@ -224,6 +224,55 @@ Cross-runtime library versions:
 - tengo v2.17.0
 - goja v0.0.0-20260311135729
 
+## Benchmark Ownership
+
+Use two benchmark layers:
+
+| Owner | Measures |
+|---|---|
+| `interp/interp_test.go` | public interpreter and pool API costs, dispatch, opcode families, lifecycle, heap operations, and JIT lifecycle states |
+| `benchmarks/` | runtime-neutral VM kernels and optional cross-runtime comparisons |
+
+Package-owned microbenchmarks may remain beside their production owner only when they measure a distinct package contract, such as `types.Traceable.Refs` or analysis construction. Service-domain workloads do not define canonical VM performance.
+
+Every benchmark behavior has an independently owned correctness test. Interpreter execution cases map to `TestInterpreter_Run`; construction, reset, stack, heap, and pool cases map to their same-named public API tests.
+
+## Interpreter Benchmark Methodology
+
+Interpreter benchmark names match public API owners:
+
+```text
+BenchmarkNew
+BenchmarkInterpreter_Run
+BenchmarkInterpreter_Reset
+BenchmarkInterpreter_Push
+BenchmarkInterpreter_Pop
+BenchmarkInterpreter_PopBoxed
+BenchmarkInterpreter_Peek
+BenchmarkInterpreter_Alloc
+BenchmarkInterpreter_Retain
+BenchmarkInterpreter_Release
+BenchmarkPool_Get
+BenchmarkPool_Put
+```
+
+Each fixture is validated once before timing. `BenchmarkInterpreter_Run` times only `Run`; `Reset`, result validation, fixture construction, and JIT warmup remain outside the timer. `BenchmarkInterpreter_Reset` times only `Reset`; re-execution remains outside the timer. Pool miss benchmarks time `Get` while pool construction and cleanup remain outside the timer.
+
+Execution modes are explicit sub-benchmarks:
+
+| Mode | Boundary |
+|---|---|
+| `Threaded` | exact threaded dispatch with fusion and JIT disabled |
+| `Fused` | generated fused threaded execution with JIT disabled |
+| `JITWarm` | native stub already emitted; execution only |
+| `JITCold` | trace capture and compilation included; interpreter construction excluded |
+| `JITExit` | first alternate branch from a warmed native trace |
+| `JITDeopt` | first trapping guard failure from a warmed native trace |
+
+Warm, exit, and deoptimization fixtures assert that a native stub exists before timing. Cold fixtures assert native emission after timing. Straight dispatch and numeric cases report fixed `opcodes/op` alongside `ns/op`.
+
+Pool benchmarks separate uncontended reuse, capacity miss, shared-JIT miss, parallel round trips, and put cost. Parallel workers use independent interpreter instances obtained from the pool.
+
 ## Maintenance Notes
 
 When changing benchmark documentation:

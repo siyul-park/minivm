@@ -32,7 +32,7 @@ No later phase starts before the previous phase passes its review gate.
 | 5 | Interpreter public API, marshal, host, pool, and lifecycle | Complete | `test(interp): align public API specifications` | Passed |
 | 6 | Opcode corpus and threaded/optimized/JIT semantic parity | Complete | `test(interp): name opcode specs and add parity checks` | Passed |
 | 7 | Optimizer, backend, generator, and support packages | Complete | `test: align support package specifications` | Passed |
-| 8 | Interpreter benchmark consolidation | Pending | - | - |
+| 8 | Interpreter benchmark consolidation | Complete | `perf(interp): consolidate interpreter benchmarks` | Passed |
 | 9 | Runtime-neutral kernel and comparison benchmark rebuild | Pending | - | - |
 | 10 | Coverage gates, CI, documentation, and final review | Pending | - | - |
 
@@ -294,13 +294,13 @@ make check-generated
 
 ### Tasks
 
-- [ ] Move interpreter-owned microbenchmarks under matching public API benchmark owners in `interp/interp_test.go`.
-- [ ] Align benchmark and correctness-test names and subcase hierarchy.
-- [ ] Add construction, reset, empty run, NOP, dispatch, stack, local, global, numeric, branch, call, heap, collection, coroutine, pool, and supported JIT lifecycle cases.
-- [ ] Keep setup, verification, reset, and warmup outside execution-only timers.
-- [ ] Validate fixtures once before timing and final state/checksum after timing where needed.
-- [ ] Use deterministic state, `b.Loop()`, `b.ReportAllocs()`, and explicit custom units only where stable.
-- [ ] Run compile/smoke benchmarks, review diff, update progress, and commit.
+- [x] Move interpreter-owned microbenchmarks under matching public API benchmark owners in `interp/interp_test.go`.
+- [x] Align benchmark and correctness-test names and subcase hierarchy.
+- [x] Add construction, reset, empty run, NOP, dispatch, stack, local, global, numeric, branch, call, heap, collection, coroutine, pool, and supported JIT lifecycle cases.
+- [x] Keep setup, verification, reset, and warmup outside execution-only timers.
+- [x] Validate fixtures once before timing and final state/checksum after timing where needed.
+- [x] Use deterministic state, `b.Loop()`, `b.ReportAllocs()`, and explicit custom units only where stable.
+- [x] Run compile/smoke benchmarks, review diff, update progress, and commit.
 
 ### Verification
 
@@ -440,6 +440,17 @@ GOOS=linux GOARCH=arm64 go test -exec=true ./...
 - Intentionally retained structure: ARM64 instruction factories use shared family ownership through encoder golden tests, wrapper smoke tests, and an AST completeness gate. Creating 152 one-line top-level tests would duplicate the same mechanical contract. Generator private behaviors remain shallow subtests under `TestGenerate`; they already own deterministic output, renderer selection, duplicate rejection, definition completeness, and `-check`.
 - Coverage/benchmark effect: ARM64 coverage 50.4% -> 57.8%; debug 93.6% -> 100.0%; profiler 76.8% -> 78.2%; generator 94.3%; no timed benchmark changed.
 - Commit: `test: align support package specifications`.
+
+### Phase 8
+
+- Focused verification: every `BenchmarkNew`, `BenchmarkInterpreter_*`, and `BenchmarkPool_*` case ran with `-benchmem -benchtime=1x`; 80 benchmark result rows completed without failure.
+- Broad verification: `GOENV_VERSION=1.26.2 go test -race ./interp`, benchmark-module compile-only test, explicit `gofmt`, `goimports`, `go vet ./interp`, and `git diff --check` passed.
+- Review findings fixed: closed constructed interpreters outside `BenchmarkNew` timing, removed assertions and lifecycle work from timed regions, restricted `JITWarm` to a trace that proves native emission, populated real JIT state before reset timing, and separated cold compilation, first branch exit, and trapping deoptimization.
+- Pool boundaries: split uncontended reuse, construction miss, shared-JIT miss, parallel round trips, and put cost. The shared-JIT case proves the second interpreter receives an existing native stub.
+- Ownership cleanup: removed `benchmarks/alloc_test.go` and `benchmarks/fusion_test.go`; direct interpreter costs now live only in `interp/interp_test.go`. Runtime-neutral kernels remain in `benchmarks/` for Phase 9.
+- Intentionally retained structure: cold, exit, deoptimization, and shared-JIT miss cases use expensive untimed setup to guarantee the measured lifecycle state. Phase 10 excludes them from the quick pull-request subset and keeps them in the full/nightly suite.
+- Benchmark impact: this phase changes measurement ownership and boundaries only; it makes no runtime performance claim. Warm JIT smoke reported zero allocations and fixed straight-line cases report `opcodes/op`.
+- Commit: `perf(interp): consolidate interpreter benchmarks`.
 
 Add one entry after each later phase:
 
