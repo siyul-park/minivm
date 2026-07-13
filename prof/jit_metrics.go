@@ -81,7 +81,12 @@ func (m *jitMetrics) appendMetrics(out []Metric, collector *Collector) []Metric 
 		})
 	}
 
-	emits := activeEmits(m.emits)
+	emits := make([]entryKey, 0, len(m.emits))
+	for key, counts := range m.emits {
+		if counts.emits > 0 || counts.bytes > 0 {
+			emits = append(emits, key)
+		}
+	}
 	sort.Slice(emits, func(i, j int) bool { return emits[i].less(emits[j]) })
 	for _, key := range emits {
 		labels := key.labels()
@@ -94,8 +99,8 @@ func (m *jitMetrics) appendMetrics(out []Metric, collector *Collector) []Metric 
 		}
 	}
 
-	out = appendEntryMetrics(out, "vm_jit_native_entries_total", m.entries)
-	out = appendEntryMetrics(out, "vm_jit_native_yields_total", m.yields)
+	out = appendEntryCounters(out, "vm_jit_native_entries_total", m.entries)
+	out = appendEntryCounters(out, "vm_jit_native_yields_total", m.yields)
 
 	exits := activeKeys(m.exits)
 	sort.Slice(exits, func(i, j int) bool { return exits[i].less(exits[j]) })
@@ -325,7 +330,7 @@ func (v ExitReason) label() string {
 	}
 }
 
-func appendEntryMetrics(out []Metric, name string, rows map[entryKey]*Counter) []Metric {
+func appendEntryCounters(out []Metric, name string, rows map[entryKey]*Counter) []Metric {
 	keys := activeKeys(rows)
 	sort.Slice(keys, func(i, j int) bool { return keys[i].less(keys[j]) })
 	for _, key := range keys {
@@ -350,16 +355,6 @@ func activeKeys[K comparable](rows map[K]*Counter) []K {
 	keys := make([]K, 0, len(rows))
 	for key, counter := range rows {
 		if counter.value > 0 {
-			keys = append(keys, key)
-		}
-	}
-	return keys
-}
-
-func activeEmits(rows map[entryKey]*emitCounts) []entryKey {
-	keys := make([]entryKey, 0, len(rows))
-	for key, counters := range rows {
-		if counters.emits > 0 || counters.bytes > 0 {
 			keys = append(keys, key)
 		}
 	}

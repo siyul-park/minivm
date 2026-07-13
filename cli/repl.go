@@ -396,7 +396,7 @@ func (r *REPL) printProfile(metrics []prof.Metric) {
 		for _, ip := range function.ips {
 			fmt.Fprintf(out, "%04d\t%d\t%s\t%s\t%d\t%d\t%d\n",
 				ip.offset, ip.samples, formatPercent(ip.samples, function.samples),
-				ip.nativeKind, ip.emits, ip.entries, ip.exits,
+				ip.kind, ip.emits, ip.entries, ip.exits,
 			)
 		}
 	}

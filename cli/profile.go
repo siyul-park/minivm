@@ -10,9 +10,9 @@ import (
 type profile struct {
 	total           uint64
 	functionSamples map[int]uint64
-	pointSamples    map[anchor]uint64
+	ipSamples       map[anchor]uint64
 	opcodeSamples   map[string]uint64
-	jitCounts       jitCounts
+	totals          jitSummary
 	entryCounts     map[entry]entryCounts
 	exitCounts      map[exit]uint64
 	compileCounts   map[compile]uint64
@@ -49,14 +49,6 @@ type capture struct {
 	reason  string
 }
 
-type jitCounts struct {
-	attempts uint64
-	emits    uint64
-	errors   uint64
-	bytes    uint64
-	yields   uint64
-}
-
 type report struct {
 	total     uint64
 	functions []functionRow
@@ -69,16 +61,16 @@ type functionRow struct {
 	samples       uint64
 	nativeEntries uint64
 	nativeExits   uint64
-	ips           []pointRow
+	ips           []ipRow
 }
 
-type pointRow struct {
-	offset     int
-	samples    uint64
-	nativeKind string
-	emits      uint64
-	entries    uint64
-	exits      uint64
+type ipRow struct {
+	offset  int
+	samples uint64
+	kind    string
+	emits   uint64
+	entries uint64
+	exits   uint64
 }
 
 type opcodeRow struct {
@@ -159,15 +151,15 @@ func (p profile) functions(stats map[anchor]anchorStats) []functionRow {
 		byFunction[key.fn] = function
 	}
 
-	points := map[int][]pointRow{}
-	for key, samples := range p.pointSamples {
+	points := map[int][]ipRow{}
+	for key, samples := range p.ipSamples {
 		value := stats[key]
 		kind := value.kind
 		if kind == "" {
 			kind = "none"
 		}
-		points[key.fn] = append(points[key.fn], pointRow{
-			offset: key.ip, samples: samples, nativeKind: kind,
+		points[key.fn] = append(points[key.fn], ipRow{
+			offset: key.ip, samples: samples, kind: kind,
 			emits: value.emits, entries: value.entries, exits: value.exits,
 		})
 	}
@@ -215,13 +207,7 @@ func (p profile) jit(stats map[anchor]anchorStats) jitReport {
 }
 
 func (p profile) summary() jitSummary {
-	summary := jitSummary{
-		attempts: p.jitCounts.attempts,
-		emits:    p.jitCounts.emits,
-		errors:   p.jitCounts.errors,
-		bytes:    p.jitCounts.bytes,
-		yields:   p.jitCounts.yields,
-	}
+	summary := p.totals
 	for _, counts := range p.entryCounts {
 		summary.entries += counts.entries
 	}
@@ -256,7 +242,7 @@ func (p profile) entries() []entryRow {
 			}
 		}
 	}
-	for key := range p.pointSamples {
+	for key := range p.ipSamples {
 		if !covered[key] {
 			entry := entry{anchor: key, kind: "none", frontend: "interpreted"}
 			rows[entry] = entryRow{fn: entry.fn, ip: entry.ip, kind: entry.kind, frontend: entry.frontend}
@@ -373,7 +359,7 @@ func (p jitReport) empty() bool {
 func collect(metrics []prof.Metric) profile {
 	p := profile{
 		functionSamples: map[int]uint64{},
-		pointSamples:    map[anchor]uint64{},
+		ipSamples:       map[anchor]uint64{},
 		opcodeSamples:   map[string]uint64{},
 		entryCounts:     map[entry]entryCounts{},
 		exitCounts:      map[exit]uint64{},
@@ -389,17 +375,17 @@ func collect(metrics []prof.Metric) profile {
 		case "vm_func_samples_total":
 			p.functionSamples[metricInt(metric, "func")] += value
 		case "vm_func_ip_samples_total":
-			p.pointSamples[metricAnchor(metric)] += value
+			p.ipSamples[metricAnchor(metric)] += value
 		case "vm_opcode_samples_total":
 			p.opcodeSamples[metricLabel(metric, "opcode")] += value
 		case "vm_jit_attempts_total":
-			p.jitCounts.attempts += value
+			p.totals.attempts += value
 		case "vm_jit_emits_total":
-			p.jitCounts.emits += value
+			p.totals.emits += value
 		case "vm_jit_errors_total":
-			p.jitCounts.errors += value
+			p.totals.errors += value
 		case "vm_jit_bytes_total":
-			p.jitCounts.bytes += value
+			p.totals.bytes += value
 		case "vm_jit_trace_captures_total":
 			key := capture{
 				anchor:  metricAnchor(metric),
@@ -436,7 +422,7 @@ func collect(metrics []prof.Metric) profile {
 			}
 			p.exitCounts[key] += value
 		case "vm_jit_native_yields_total":
-			p.jitCounts.yields += value
+			p.totals.yields += value
 		}
 	}
 	return p

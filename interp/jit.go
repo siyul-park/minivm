@@ -32,10 +32,10 @@ type exitDescriptor struct {
 	opcode int
 }
 
-type nativeMetrics struct {
-	entry *prof.Counter
-	yield *prof.Counter
-	exits []*prof.Counter
+type counters struct {
+	entry  *prof.Counter
+	yields *prof.Counter
+	exits  []*prof.Counter
 }
 
 type compileResult struct {
@@ -241,11 +241,11 @@ func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
 		if err != nil {
 			return compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
 		}
-		result = result.preferDeeper(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan})
+		result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan})
 		mod := &module{entries: map[anchor]native{}}
 		for _, plan := range plans {
 			if !plan.valid() {
-				result = result.preferDeeper(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonInvalidPlan})
+				result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonInvalidPlan})
 				continue
 			}
 			reason, err := c.compile(input, plan, mod, frontend.kind)
@@ -253,7 +253,7 @@ func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
 				return compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
 			}
 			if reason != prof.CompileReasonNone {
-				result = result.preferDeeper(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: reason})
+				result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: reason})
 				continue
 			}
 		}
@@ -264,9 +264,9 @@ func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
 	return result
 }
 
-func (current compileResult) preferDeeper(candidate compileResult) compileResult {
-	if compileDepth(candidate.reason) > compileDepth(current.reason) ||
-		compileDepth(candidate.reason) == compileDepth(current.reason) && candidate.frontend > current.frontend {
+func (current compileResult) prefer(candidate compileResult) compileResult {
+	if reasonPriority(candidate.reason) > reasonPriority(current.reason) ||
+		reasonPriority(candidate.reason) == reasonPriority(current.reason) && candidate.frontend > current.frontend {
 		return candidate
 	}
 	return current
@@ -334,7 +334,7 @@ func (c *compiler) publish(mod *module, a anchor, ctx *lowering, arch asm.Arch, 
 	return prof.CompileReasonNone, nil
 }
 
-func (m nativeMetrics) exit(encoded uint64) {
+func (m counters) exit(encoded uint64) {
 	if encoded == 0 {
 		return
 	}
@@ -344,15 +344,15 @@ func (m nativeMetrics) exit(encoded uint64) {
 	}
 }
 
-func (m nativeMetrics) enter() {
+func (m counters) enter() {
 	if m.entry != nil {
 		m.entry.Inc()
 	}
 }
 
-func (m nativeMetrics) suspend() {
-	if m.yield != nil {
-		m.yield.Inc()
+func (m counters) yield() {
+	if m.yields != nil {
+		m.yields.Inc()
 	}
 }
 
@@ -464,7 +464,7 @@ func (ctx *lowering) pinTo(pr asm.PReg) asm.VReg {
 	return v
 }
 
-func compileDepth(reason prof.CompileReason) int {
+func reasonPriority(reason prof.CompileReason) int {
 	switch reason {
 	case prof.CompileReasonInvalidPlan:
 		return 1

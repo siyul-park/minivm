@@ -854,31 +854,31 @@ func (i *Interpreter) install(mod *module, account bool) {
 		if entry.kind == entryFunction {
 			atomic.StorePointer(&i.natives[a.addr], entry.callable.Addr())
 		}
-		metrics := i.registerMetrics(a, entry)
+		stats := i.counters(a, entry)
 		if entry.kind == entryLoop {
-			i.code[a.addr][a.ip] = i.loop(entry.callable, metrics)
+			i.code[a.addr][a.ip] = i.loop(entry.callable, stats)
 		} else if entry.kind == entryModule {
-			i.code[a.addr][a.ip] = i.start(a, entry.callable, metrics)
+			i.code[a.addr][a.ip] = i.start(a, entry.callable, stats)
 		} else {
-			i.code[a.addr][a.ip] = i.call(a, entry.callable, metrics)
+			i.code[a.addr][a.ip] = i.call(a, entry.callable, stats)
 		}
 	}
 }
 
-func (i *Interpreter) registerMetrics(a anchor, entry native) nativeMetrics {
+func (i *Interpreter) counters(a anchor, entry native) counters {
 	if i.profiler == nil {
-		return nativeMetrics{}
+		return counters{}
 	}
 	kind := entry.kind.profile()
-	metrics := nativeMetrics{
-		entry: i.samples.RegisterEntry(a.addr, a.ip, kind, entry.frontend),
-		yield: i.samples.RegisterYield(a.addr, a.ip, kind, entry.frontend),
-		exits: make([]*prof.Counter, len(entry.exits)),
+	stats := counters{
+		entry:  i.samples.RegisterEntry(a.addr, a.ip, kind, entry.frontend),
+		yields: i.samples.RegisterYield(a.addr, a.ip, kind, entry.frontend),
+		exits:  make([]*prof.Counter, len(entry.exits)),
 	}
 	for id, exit := range entry.exits {
-		metrics.exits[id] = i.samples.RegisterExit(a.addr, a.ip, kind, entry.frontend, exit.reason, exit.opcode)
+		stats.exits[id] = i.samples.RegisterExit(a.addr, a.ip, kind, entry.frontend, exit.reason, exit.opcode)
 	}
-	return metrics
+	return stats
 }
 
 func (i *Interpreter) account(mod *module) {
@@ -1049,9 +1049,9 @@ func (i *Interpreter) sample(f *frame) {
 // this closure performs the frame teardown that RETURN would do in the threaded
 // interpreter, and on a trap it rebuilds the native call chain into real VM
 // frames before resuming threaded execution at the fallback IP.
-func (i *Interpreter) call(root anchor, callable asm.Callable, metrics nativeMetrics) func(*Interpreter) {
+func (i *Interpreter) call(root anchor, callable asm.Callable, stats counters) func(*Interpreter) {
 	return func(i *Interpreter) {
-		metrics.enter()
+		stats.enter()
 		ctx := i.context()
 		i.fr.code = nil
 		i.fr.upvals = nil
@@ -1085,14 +1085,14 @@ func (i *Interpreter) call(root anchor, callable asm.Callable, metrics nativeMet
 		case trapOverflow:
 			panic(ErrFrameOverflow)
 		case trapYield:
-			metrics.suspend()
+			stats.yield()
 			// A loop back-edge spent its budget. deopt left i.fr at the loop header;
 			// run coordination, then let the threaded Run loop continue from there.
 			if err := i.safepoint(); err != nil {
 				panic(err)
 			}
 		default:
-			metrics.exit(i.journal[journalExitID])
+			stats.exit(i.journal[journalExitID])
 			i.bailout(root)
 		}
 	}
@@ -1101,9 +1101,9 @@ func (i *Interpreter) call(root anchor, callable asm.Callable, metrics nativeMet
 // start wraps a native trace for top-level code. Unlike function entries,
 // top-level completion does not tear down its frame; it preserves the operand
 // stack and marks the module frame as exhausted so dispatch returns normally.
-func (i *Interpreter) start(root anchor, callable asm.Callable, metrics nativeMetrics) func(*Interpreter) {
+func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters) func(*Interpreter) {
 	return func(i *Interpreter) {
-		metrics.enter()
+		stats.enter()
 		ctx := i.context()
 		i.fr.code = nil
 		i.fr.upvals = nil
@@ -1124,12 +1124,12 @@ func (i *Interpreter) start(root anchor, callable asm.Callable, metrics nativeMe
 		case trapOverflow:
 			panic(ErrFrameOverflow)
 		case trapYield:
-			metrics.suspend()
+			stats.yield()
 			if err := i.safepoint(); err != nil {
 				panic(err)
 			}
 		default:
-			metrics.exit(i.journal[journalExitID])
+			stats.exit(i.journal[journalExitID])
 			i.bailout(root)
 		}
 	}
@@ -1141,9 +1141,9 @@ func (i *Interpreter) start(root anchor, callable asm.Callable, metrics nativeMe
 // through a trap. A spent budget yields to the safepoint and the Run loop
 // re-enters native at the header; a guarded side exit or the loop-exit edge
 // leaves deopt with i.fr at the resume IP for threaded dispatch to continue.
-func (i *Interpreter) loop(callable asm.Callable, metrics nativeMetrics) func(*Interpreter) {
+func (i *Interpreter) loop(callable asm.Callable, stats counters) func(*Interpreter) {
 	return func(i *Interpreter) {
-		metrics.enter()
+		stats.enter()
 		ctx := i.context()
 		// Decouple the loop's safepoint cadence from tick: a native iteration does
 		// the work of a whole loop body, so yielding every tick (1 under exact
@@ -1159,12 +1159,12 @@ func (i *Interpreter) loop(callable asm.Callable, metrics nativeMetrics) func(*I
 		case trapOverflow:
 			panic(ErrFrameOverflow)
 		case trapYield:
-			metrics.suspend()
+			stats.yield()
 			if err := i.safepoint(); err != nil {
 				panic(err)
 			}
 		case trapFallback:
-			metrics.exit(i.journal[journalExitID])
+			stats.exit(i.journal[journalExitID])
 		}
 	}
 }
