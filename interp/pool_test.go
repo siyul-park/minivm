@@ -368,15 +368,15 @@ func TestPool_Get(t *testing.T) {
 				guardExits += metric.Value
 			}
 		}
-		require.GreaterOrEqual(t, hotCompiles, float64(1))
-		require.GreaterOrEqual(t, sideExitCompiles, float64(1))
-		require.GreaterOrEqual(t, guardExits, float64(exitThreshold))
+		require.Equal(t, float64(2), hotCompiles)
+		require.Equal(t, float64(2), sideExitCompiles)
+		require.Equal(t, float64(exitThreshold*2), guardExits)
 		attempts, ok := metrics.Metric("vm_jit_attempts_total")
 		require.True(t, ok)
-		require.GreaterOrEqual(t, attempts, float64(2))
+		require.Equal(t, float64(4), attempts)
 		emits, ok := metrics.Metric("vm_jit_emits_total")
 		require.True(t, ok)
-		require.GreaterOrEqual(t, emits, float64(2))
+		require.Equal(t, float64(3), emits)
 	})
 }
 

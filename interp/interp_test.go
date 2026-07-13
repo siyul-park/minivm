@@ -3584,16 +3584,16 @@ func TestWithFrame(t *testing.T) {
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
 		}, program.WithConstants(recurse))
-		local := prof.NewCollector()
-		i = New(prog, WithFrame(nativeFrameLimit+2), WithTick(1), WithThreshold(0))
-		i.samples = local
-		i.profiler = prof.New()
-		defer i.Close()
+		metrics := prof.New()
+		i = New(prog, WithFrame(nativeFrameLimit+2), WithTick(1), WithThreshold(0), WithProfiler(metrics))
 
 		require.ErrorIs(t, i.Run(context.Background()), ErrFrameOverflow)
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		require.NoError(t, i.Close())
+		emits, ok := metrics.Metric("vm_jit_emits_total")
+		require.True(t, ok)
+		require.GreaterOrEqual(t, emits, float64(1))
 		hasEntry := false
-		for _, metric := range local.Metrics() {
+		for _, metric := range metrics.Metrics() {
 			switch metric.Name {
 			case "vm_jit_native_entries_total":
 				hasEntry = true

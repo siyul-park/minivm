@@ -295,6 +295,27 @@ func TestCompiler_Compile(t *testing.T) {
 			assertNativeExit(t, i, entry, prof.ExitGuardBounds, int(instr.ARRAY_GET))
 		})
 
+		t.Run("array get value guard", func(t *testing.T) {
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.ARRAY_GET),
+			}, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeRef, types.TypeI32))
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+			value := i.constants[0]
+			i.retain(value.Ref())
+			require.NoError(t, i.SetGlobal(0, value))
+			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
+			entry, closeCompiler := compileNative(t, i, anchor{}, true)
+			defer closeCompiler()
+
+			for _, exit := range entry.exits {
+				if exit.reason == prof.ExitGuardValue && exit.opcode == int(instr.ARRAY_GET) {
+					return
+				}
+			}
+			t.Fatal("missing array.get guard-value exit")
+		})
+
 		t.Run("guard kind", func(t *testing.T) {
 			typ := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64))
 			value := types.NewStruct(typ, types.BoxI32(1), types.BoxF64(2))

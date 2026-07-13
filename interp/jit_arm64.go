@@ -3224,6 +3224,10 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 	if !ok {
 		return false
 	}
+	valueFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardValue, int(op.op))
+	if !ok {
+		return false
+	}
 	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-2])
 	if !ok {
 		return false
@@ -3264,10 +3268,10 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 		}
 	}
 	if kind == types.KindI64 {
-		l.guardBoxable(ctx, result, fail)
+		l.guardBoxable(ctx, result, valueFail)
 	}
 	rcBase := l.rcBase(ctx)
-	rc := l.guardRC(ctx, addr, rcBase, fail)
+	rc := l.guardRC(ctx, addr, rcBase, valueFail)
 	a.Emit(arm64.SUBI(rc, rc, 1))
 	a.Emit(arm64.STRR(rc, rcBase, addr))
 	if kind == types.KindRef {
@@ -3327,6 +3331,10 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 	if !ok {
 		return false
 	}
+	valueFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardValue, int(op.op))
+	if !ok {
+		return false
+	}
 	addr, itab, data := l.guardHeap(ctx, ref, fail)
 	l.guardItab(ctx, itab, want, fail)
 
@@ -3334,7 +3342,7 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 	l.guardIndex(ctx, idx, n, bounds)
 
 	rcBase := l.rcBase(ctx)
-	rc := l.guardRC(ctx, addr, rcBase, fail)
+	rc := l.guardRC(ctx, addr, rcBase, valueFail)
 
 	if kind == types.KindRef {
 		// The container's refcount deopt point (guardRC above) runs before the
@@ -3399,6 +3407,10 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 	if !ok {
 		return false
 	}
+	valueFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardValue, int(op.op))
+	if !ok {
+		return false
+	}
 	kindFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardKind, int(op.op))
 	if !ok {
 		return false
@@ -3431,10 +3443,10 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 	result := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDRR(result, dataPtr, idx))
 	if out == types.KindI64 {
-		l.guardBoxable(ctx, result, fail)
+		l.guardBoxable(ctx, result, valueFail)
 	}
 	rcBase := l.rcBase(ctx)
-	rc := l.guardRC(ctx, addr, rcBase, fail)
+	rc := l.guardRC(ctx, addr, rcBase, valueFail)
 	if out == types.KindRef {
 		l.retainBox(ctx, result)
 	}
@@ -3473,6 +3485,10 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 	if !ok {
 		return false
 	}
+	valueFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardValue, int(op.op))
+	if !ok {
+		return false
+	}
 	kindFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardKind, int(op.op))
 	if !ok {
 		return false
@@ -3502,7 +3518,7 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 	a.Emit(arm64.BCondLabel(arm64.OpBNE, kindFail))
 
 	rcBase := l.rcBase(ctx)
-	rc := l.guardRC(ctx, addr, rcBase, fail)
+	rc := l.guardRC(ctx, addr, rcBase, valueFail)
 
 	dataPtr, _ := l.sliceHeader(ctx, data, int16(structData))
 	if kind == types.KindRef {
