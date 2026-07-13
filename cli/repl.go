@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -368,8 +367,86 @@ func (r *REPL) profile(ctx context.Context) error {
 		return err
 	}
 
-	printProfile(r.out, p.Metrics())
+	r.printProfile(p.Metrics())
 	return nil
+}
+
+// printProfile renders normalized, ranked profiler metrics.
+func (r *REPL) printProfile(metrics []prof.Metric) {
+	p := collect(metrics).report()
+	out := r.out
+	fmt.Fprintf(out, "profile samples: %d\n", p.total)
+	if len(p.functions) > 0 {
+		fmt.Fprintln(out, "hot functions (top 10):")
+		fmt.Fprintln(out, "func\tsamples\ttotal%\tnative-entries\tnative-exits\texit%")
+		for _, function := range p.functions {
+			fmt.Fprintf(out, "%d\t%d\t%s\t%d\t%d\t%s\n",
+				function.fn, function.samples, formatPercent(function.samples, p.total),
+				function.nativeEntries, function.nativeExits, formatPercent(function.nativeExits, function.nativeEntries),
+			)
+		}
+	}
+
+	for _, function := range p.functions {
+		if len(function.ips) == 0 {
+			continue
+		}
+		fmt.Fprintf(out, "hot ips for func %d (top 10):\n", function.fn)
+		fmt.Fprintln(out, "ip\tsamples\tfunc%\tnative-kind\temits\tentries\texits")
+		for _, ip := range function.ips {
+			fmt.Fprintf(out, "%04d\t%d\t%s\t%s\t%d\t%d\t%d\n",
+				ip.offset, ip.samples, formatPercent(ip.samples, function.samples),
+				ip.kind, ip.emits, ip.entries, ip.exits,
+			)
+		}
+	}
+
+	if len(p.opcodes) > 0 {
+		fmt.Fprintln(out, "hot opcodes (top 10):")
+		fmt.Fprintln(out, "opcode\tsamples\ttotal%")
+		for _, opcode := range p.opcodes {
+			fmt.Fprintf(out, "%s\t%d\t%s\n", opcode.name, opcode.samples, formatPercent(opcode.samples, p.total))
+		}
+	}
+
+	if p.jit.empty() {
+		return
+	}
+	fmt.Fprintln(out, "jit summary:")
+	fmt.Fprintln(out, "attempts\temits\terrors\tbytes\tnative-entries\tnative-exits\tnative-yields")
+	fmt.Fprintf(out, "%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+		p.jit.summary.attempts,
+		p.jit.summary.emits,
+		p.jit.summary.errors,
+		p.jit.summary.bytes,
+		p.jit.summary.entries,
+		p.jit.summary.exits,
+		p.jit.summary.yields,
+	)
+
+	fmt.Fprintln(out, "jit entries:")
+	fmt.Fprintln(out, "func\tip\tkind\tfrontend\temits\tbytes\tentries\texits\texit%")
+	for _, entry := range p.jit.entries {
+		fmt.Fprintf(out, "%d\t%04d\t%s\t%s\t%d\t%d\t%d\t%d\t%s\n",
+			entry.fn, entry.ip, entry.kind, entry.frontend,
+			entry.emits, entry.bytes, entry.entries, entry.exits, formatPercent(entry.exits, entry.entries),
+		)
+	}
+
+	fmt.Fprintln(out, "jit exit reasons:")
+	fmt.Fprintln(out, "func\tip\treason\topcode\tcount\tentry%")
+	for _, exit := range p.jit.exits {
+		fmt.Fprintf(out, "%d\t%04d\t%s\t%s\t%d\t%s\n",
+			exit.fn, exit.ip, exit.reason, exit.opcode,
+			exit.count, formatPercent(exit.count, exit.entries),
+		)
+	}
+
+	fmt.Fprintln(out, "jit misses:")
+	fmt.Fprintln(out, "func\tip\tphase\treason\tcount")
+	for _, miss := range p.jit.misses {
+		fmt.Fprintf(out, "%d\t%04d\t%s\t%s\t%d\n", miss.fn, miss.ip, miss.phase, miss.reason, miss.count)
+	}
 }
 
 func (r *REPL) doBreak(spec string) error {
@@ -607,6 +684,13 @@ func (r *REPL) printErr(err error) {
 	fmt.Fprintf(r.out, "error: %v\n", err)
 }
 
+func formatPercent(value, total uint64) string {
+	if total == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.1f%%", float64(value)/float64(total)*100)
+}
+
 func printIndexed(out io.Writer, vm *interp.Interpreter, label string, get func(int) (types.Boxed, error)) {
 	var parts []string
 	for i := 0; ; i++ {
@@ -640,115 +724,6 @@ func printFrames(out io.Writer, vm *interp.Interpreter) {
 		}
 		fmt.Fprintf(out, "%s frame[%d] func=%d ip=%04d\n", marker, n, fn, ip)
 	}
-}
-
-// printProfile renders the metrics emitted by a prof.Profiler as the human-
-// readable profile table. It groups the flat metric stream back into functions,
-// per-instruction samples, opcodes, and JIT counters, computing percentages
-// from the totals.
-func printProfile(out io.Writer, metrics []prof.Metric) {
-	var total uint64
-	funcs := map[int]uint64{}
-	ips := map[int][]ipSample{}
-	var opcodes []opcodeSample
-	jit := map[string]uint64{}
-
-	for _, m := range metrics {
-		switch m.Name {
-		case "vm_samples_total":
-			total = uint64(m.Value)
-		case "vm_func_samples_total":
-			funcs[metricLabelInt(m, "func")] = uint64(m.Value)
-		case "vm_func_ip_samples_total":
-			fn := metricLabelInt(m, "func")
-			ips[fn] = append(ips[fn], ipSample{metricLabelInt(m, "ip"), uint64(m.Value)})
-		case "vm_opcode_samples_total":
-			opcodes = append(opcodes, opcodeSample{metricLabel(m, "opcode"), uint64(m.Value)})
-		default:
-			if name, ok := strings.CutPrefix(m.Name, "vm_jit_"); ok {
-				jit[strings.TrimSuffix(name, "_total")] = uint64(m.Value)
-			}
-		}
-	}
-
-	fmt.Fprintf(out, "profile samples: %d\n", total)
-	order := sortedKeys(funcs)
-	if len(order) > 0 {
-		fmt.Fprintln(out, "functions:")
-		fmt.Fprintln(out, "func\tsamples\t%")
-		for _, fn := range order {
-			fmt.Fprintf(out, "%d\t%d\t%s\n", fn, funcs[fn], formatPercent(percentage(funcs[fn], total)))
-		}
-	}
-	for _, fn := range order {
-		samples := ips[fn]
-		if len(samples) == 0 {
-			continue
-		}
-		sort.Slice(samples, func(a, b int) bool { return samples[a].offset < samples[b].offset })
-		fmt.Fprintf(out, "func %d ips:\n", fn)
-		fmt.Fprintln(out, "ip\tsamples\t%")
-		for _, ip := range samples {
-			fmt.Fprintf(out, "%04d\t%d\t%s\n", ip.offset, ip.samples, formatPercent(percentage(ip.samples, funcs[fn])))
-		}
-	}
-	if len(opcodes) > 0 {
-		fmt.Fprintln(out, "opcodes:")
-		fmt.Fprintln(out, "opcode\tsamples\t%")
-		for _, op := range opcodes {
-			fmt.Fprintf(out, "%s\t%d\t%s\n", op.name, op.samples, formatPercent(percentage(op.samples, total)))
-		}
-	}
-	if jit["attempts"]+jit["emits"]+jit["links"]+jit["skips"]+jit["errors"]+jit["bytes"] > 0 {
-		fmt.Fprintln(out, "jit:")
-		fmt.Fprintln(out, "attempts\temits\tlinks\tskips\terrors\tbytes")
-		fmt.Fprintf(out, "%d\t%d\t%d\t%d\t%d\t%d\n",
-			jit["attempts"], jit["emits"], jit["links"], jit["skips"], jit["errors"], jit["bytes"])
-	}
-}
-
-type ipSample struct {
-	offset  int
-	samples uint64
-}
-
-type opcodeSample struct {
-	name    string
-	samples uint64
-}
-
-func formatPercent(v float64) string {
-	return fmt.Sprintf("%.1f%%", v)
-}
-
-func percentage(samples, total uint64) float64 {
-	if total == 0 {
-		return 0
-	}
-	return float64(samples) / float64(total) * 100
-}
-
-func metricLabel(m prof.Metric, key string) string {
-	for _, l := range m.Labels {
-		if l.Key == key {
-			return l.Value
-		}
-	}
-	return ""
-}
-
-func metricLabelInt(m prof.Metric, key string) int {
-	v, _ := strconv.Atoi(metricLabel(m, key))
-	return v
-}
-
-func sortedKeys(m map[int]uint64) []int {
-	keys := make([]int, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Ints(keys)
-	return keys
 }
 
 // normalize converts "@N" absolute byte targets in branch instructions to relative

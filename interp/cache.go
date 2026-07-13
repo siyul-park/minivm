@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 )
 
@@ -17,10 +18,16 @@ type Cache struct {
 	buffers []*asm.Buffer
 	hits    []atomic.Int64
 	state   []atomic.Int32
+	pending []cacheRequest
 	refs    atomic.Int64
 
 	mu     sync.Mutex
 	closed bool
+}
+
+type cacheRequest struct {
+	root    anchor
+	trigger prof.Trigger
 }
 
 const (
@@ -33,8 +40,9 @@ func NewCache(prog *program.Program) *Cache {
 	size := len(prog.Constants) + 1
 	mods := []*module{}
 	c := &Cache{
-		hits:  make([]atomic.Int64, size),
-		state: make([]atomic.Int32, size),
+		hits:    make([]atomic.Int64, size),
+		state:   make([]atomic.Int32, size),
+		pending: make([]cacheRequest, size),
 	}
 	c.refs.Store(1)
 	c.modules.Store(&mods)
@@ -67,29 +75,55 @@ func (c *Cache) detach() error {
 	return c.release()
 }
 
-func (c *Cache) due(addr int, threshold int64) bool {
+func (c *Cache) claim(addr int, threshold int64) (cacheRequest, bool) {
 	if threshold < 0 || addr < 0 || addr >= len(c.hits) {
-		return false
+		return cacheRequest{}, false
 	}
 	if c.state[addr].Load() != cacheCold {
-		return false
+		return cacheRequest{}, false
 	}
-	return c.hits[addr].Add(1) >= threshold && c.state[addr].CompareAndSwap(cacheCold, cacheBuild)
+	if c.hits[addr].Add(1) < threshold {
+		return cacheRequest{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.state[addr].Load() != cacheCold {
+		return cacheRequest{}, false
+	}
+	request := c.pending[addr]
+	if request.trigger == prof.TriggerNone {
+		request = cacheRequest{root: anchor{addr: addr}, trigger: prof.TriggerHot}
+	}
+	c.pending[addr] = cacheRequest{}
+	c.state[addr].Store(cacheBuild)
+	return request, true
 }
 
-// rearm returns a ready function to cold so due owns the next build transition
-// after a hot side exit grows the trace tree.
-func (c *Cache) rearm(addr int) {
+// rearm queues a side-exit build request without disturbing an active owner.
+func (c *Cache) rearm(root anchor) {
+	c.request(cacheRequest{root: root, trigger: prof.TriggerSideExit})
+}
+
+func (c *Cache) request(next cacheRequest) {
+	addr := next.root.addr
 	if addr < 0 || addr >= len(c.state) {
 		return
 	}
-	c.state[addr].CompareAndSwap(cacheReady, cacheCold)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	trigger := c.pending[addr].trigger
+	if trigger == prof.TriggerNone || trigger == prof.TriggerHot && next.trigger == prof.TriggerSideExit {
+		c.pending[addr] = next
+	}
+	if c.state[addr].Load() == cacheReady {
+		c.state[addr].Store(cacheCold)
+	}
 }
 
 func (c *Cache) fail(addr int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.ready(addr)
+	c.finishLocked(addr)
 }
 
 func (c *Cache) publish(addr int, mod *module, buf *asm.Buffer) {
@@ -105,10 +139,13 @@ func (c *Cache) publish(addr int, mod *module, buf *asm.Buffer) {
 		next = append(next, mod)
 		c.modules.Store(&next)
 		for target := range mod.entries {
-			c.ready(target.addr)
+			if target.addr >= 0 && target.addr < len(c.state) && target.addr != addr &&
+				c.state[target.addr].Load() == cacheCold && c.pending[target.addr].trigger == prof.TriggerNone {
+				c.state[target.addr].Store(cacheReady)
+			}
 		}
 	}
-	c.ready(addr)
+	c.finishLocked(addr)
 }
 
 func (c *Cache) release() error {
@@ -125,8 +162,12 @@ func (c *Cache) release() error {
 	return err
 }
 
-func (c *Cache) ready(addr int) {
+func (c *Cache) finishLocked(addr int) {
 	if addr >= 0 && addr < len(c.state) {
-		c.state[addr].Store(cacheReady)
+		if c.pending[addr].trigger == prof.TriggerNone {
+			c.state[addr].Store(cacheReady)
+		} else {
+			c.state[addr].Store(cacheCold)
+		}
 	}
 }

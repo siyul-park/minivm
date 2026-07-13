@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -13,10 +14,6 @@ type compiler struct {
 	scratchRegs []asm.PReg
 }
 
-// continuationLimit caps deferred learned continuations in one native
-// callable; beyond this the guard keeps the old deopt fallback.
-const continuationLimit = 256
-
 type module struct {
 	entries map[anchor]native
 	bytes   int
@@ -25,6 +22,29 @@ type module struct {
 type native struct {
 	callable asm.Callable
 	kind     entryKind
+	frontend prof.Frontend
+	bytes    int
+	exits    []exitDescriptor
+}
+
+type exitDescriptor struct {
+	reason prof.ExitReason
+	opcode int
+}
+
+type counters struct {
+	entry  *prof.Counter
+	yields *prof.Counter
+	exits  []*prof.Counter
+}
+
+type compileResult struct {
+	module   *module
+	anchor   anchor
+	frontend prof.Frontend
+	outcome  prof.CompileOutcome
+	reason   prof.CompileReason
+	err      error
 }
 
 // lowering carries symbolic values, inlined activations, deferred blocks, and
@@ -42,12 +62,13 @@ type lowering struct {
 	head      asm.Label
 	back      asm.Label
 
-	values    []value
-	frames    []activation
-	work      []work
-	scheduled int
-	exits     []sideExit
-	saved     []value
+	values      []value
+	frames      []activation
+	work        []work
+	scheduled   int
+	exits       []sideExit
+	descriptors []exitDescriptor
+	saved       []value
 
 	addr    int
 	returns int
@@ -108,7 +129,19 @@ type sideExit struct {
 	frames []activation
 	resume int
 	retain int
+	id     int
 }
+
+// noSpillArch wraps an asm.Arch to force Build to reject spilling instead of
+// inserting a spill frame. A nil Frame already disables spilling per asm's
+// own contract (see asm.Frame's doc comment), so this policy needs no
+// dedicated asm-level API — it is purely an interp-side JIT policy decision
+// (see noSpill), not a generic assembler concern.
+type noSpillArch struct{ asm.Arch }
+
+// continuationLimit caps deferred learned continuations in one native
+// callable; beyond this the guard keeps the old deopt fallback.
+const continuationLimit = 256
 
 const (
 	scratchStack = iota
@@ -138,6 +171,7 @@ const (
 	journalUpvals         // &i.fr.upvals[0] or 0; read/write for closure body fast paths
 	journalHeap           // &i.heap[0]; read-only for heap object fast paths
 	journalNatives        // &i.natives[0]; atomic per-function entry slots
+	journalExitID         // fallback descriptor ID + 1; zero means none
 	journalHead           // first frame record cell
 )
 
@@ -191,6 +225,69 @@ func (c *compiler) Close() error {
 	return c.buffer.Free()
 }
 
+// Compile selects and lowers the first frontend that emits native code.
+func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
+	input, ok := newCompileInput(i, root.addr)
+	if !ok {
+		return compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoInput}
+	}
+	frontends := [...]struct {
+		kind prof.Frontend
+		plan func(*compileInput) ([]plan, error)
+	}{{prof.FrontendStatic, staticPlan}, {prof.FrontendTrace, tracePlan}}
+	result := compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan}
+	for _, frontend := range frontends {
+		plans, err := frontend.plan(input)
+		if err != nil {
+			return compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
+		}
+		result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan})
+		mod := &module{entries: map[anchor]native{}}
+		for _, plan := range plans {
+			if !plan.valid() {
+				result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonInvalidPlan})
+				continue
+			}
+			reason, err := c.compile(input, plan, mod, frontend.kind)
+			if err != nil {
+				return compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
+			}
+			if reason != prof.CompileReasonNone {
+				result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: reason})
+				continue
+			}
+		}
+		if len(mod.entries) > 0 {
+			return compileResult{module: mod, anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeEmitted}
+		}
+	}
+	return result
+}
+
+func (current compileResult) prefer(candidate compileResult) compileResult {
+	if reasonPriority(candidate.reason) > reasonPriority(current.reason) ||
+		reasonPriority(candidate.reason) == reasonPriority(current.reason) && candidate.frontend > current.frontend {
+		return candidate
+	}
+	return current
+}
+
+func (c *compiler) compile(input *compileInput, plan plan, mod *module, frontend prof.Frontend) (prof.CompileReason, error) {
+	if len(c.scratchRegs) < scratchCount {
+		return prof.CompileReasonLoweringRejected, nil
+	}
+	arch := c.arch
+	if plan.noSpill {
+		arch = noSpillArch{c.arch}
+	}
+	ctx := c.newLowering(input, arch)
+	if !lower(ctx, plan) {
+		return prof.CompileReasonLoweringRejected, nil
+	}
+	exits := append([]exitDescriptor(nil), ctx.descriptors...)
+	return c.publish(mod, plan.anchor, ctx, c.arch, native{kind: plan.kind, frontend: frontend, exits: exits})
+}
+
 func (c *compiler) newLowering(input *compileInput, arch asm.Arch) *lowering {
 	asmb := asm.New(arch)
 	ctx := &lowering{
@@ -212,81 +309,52 @@ func (c *compiler) newLowering(input *compileInput, arch asm.Arch) *lowering {
 	return ctx
 }
 
-func (c *compiler) publish(mod *module, a anchor, ctx *lowering, arch asm.Arch, n native) (bool, error) {
+func (c *compiler) publish(mod *module, a anchor, ctx *lowering, arch asm.Arch, n native) (prof.CompileReason, error) {
 	code, err := ctx.assembler.Build()
 	if err != nil {
-		if errors.Is(err, asm.ErrNoRegistersAvailable) || errors.Is(err, asm.ErrBranchOutOfRange) {
-			return false, nil
+		if errors.Is(err, asm.ErrNoRegistersAvailable) {
+			return prof.CompileReasonRegisterPressure, nil
 		}
-		return false, err
+		if errors.Is(err, asm.ErrBranchOutOfRange) {
+			return prof.CompileReasonBranchRange, nil
+		}
+		return prof.CompileReasonError, err
 	}
 	linked, err := asm.Link(c.buffer, arch, []*asm.Code{code}, nil)
 	if err != nil {
 		if errors.Is(err, asm.ErrBranchOutOfRange) {
-			return false, nil
+			return prof.CompileReasonBranchRange, nil
 		}
-		return false, err
+		return prof.CompileReasonError, err
 	}
 	n.callable = linked[0].Callable
+	n.bytes = len(code.Bytes)
 	mod.entries[a] = n
 	mod.bytes += len(code.Bytes)
-	return true, nil
+	return prof.CompileReasonNone, nil
 }
 
-// Compile selects and lowers the first frontend that emits native code.
-func (c *compiler) Compile(i *Interpreter, addr int) (*module, error) {
-	input, ok := newCompileInput(i, addr)
-	if !ok {
-		return nil, nil
+func (m counters) exit(encoded uint64) {
+	if encoded == 0 {
+		return
 	}
-	frontends := [...]func(*compileInput) ([]plan, error){staticPlan, tracePlan}
-	for _, frontend := range frontends {
-		plans, err := frontend(input)
-
-		if err != nil {
-			return nil, err
-		}
-		mod := &module{entries: map[anchor]native{}}
-		for _, plan := range plans {
-			if !plan.valid() {
-				continue
-			}
-			ok, err := c.compile(input, plan, mod)
-			if err != nil {
-				return nil, err
-			}
-			if !ok {
-				continue
-			}
-		}
-		if len(mod.entries) > 0 {
-			return mod, nil
-		}
+	id := int(encoded - 1)
+	if id >= 0 && id < len(m.exits) {
+		m.exits[id].Inc()
 	}
-	return &module{entries: map[anchor]native{}}, nil
 }
 
-func (c *compiler) compile(input *compileInput, plan plan, mod *module) (bool, error) {
-	if len(c.scratchRegs) < scratchCount {
-		return false, nil
+func (m counters) enter() {
+	if m.entry != nil {
+		m.entry.Inc()
 	}
-	arch := c.arch
-	if plan.noSpill {
-		arch = noSpillArch{c.arch}
-	}
-	ctx := c.newLowering(input, arch)
-	if !lower(ctx, plan) {
-		return false, nil
-	}
-	return c.publish(mod, plan.anchor, ctx, c.arch, native{kind: plan.kind})
 }
 
-// noSpillArch wraps an asm.Arch to force Build to reject spilling instead of
-// inserting a spill frame. A nil Frame already disables spilling per asm's
-// own contract (see asm.Frame's doc comment), so this policy needs no
-// dedicated asm-level API — it is purely an interp-side JIT policy decision
-// (see noSpill), not a generic assembler concern.
-type noSpillArch struct{ asm.Arch }
+func (m counters) yield() {
+	if m.yields != nil {
+		m.yields.Inc()
+	}
+}
 
 func (noSpillArch) Frame() asm.Frame { return nil }
 
@@ -330,19 +398,32 @@ func (ctx *lowering) sp() int {
 	return f.base + len(f.kinds) + (len(ctx.values) - f.opBase)
 }
 
+func (ctx *lowering) opcode(ip int) int {
+	fn := resolve(ctx.module, ctx.heap, ctx.frame().addr)
+	if fn == nil || ip < 0 || ip >= len(fn.Code) {
+		return prof.OpcodeNone
+	}
+	return int(fn.Code[ip])
+}
+
 // snapshot deep-copies operand and frame state for a deferred branch. Callers
 // must flush VM stack homes before snapshot; re-entry reloads locals on demand,
 // so stale register/local loaded state must stay dropped.
 // queueExit records a cold fallback after the caller has materialized VM stack state.
 // values may be nil to snapshot the current symbolic stack; retain is applied only
 // on the cold path before returning to threaded execution.
-func (ctx *lowering) queueExit(values []value, resume, retain int) asm.Label {
+func (ctx *lowering) queueExit(values []value, resume, retain int, reason prof.ExitReason, opcode int) asm.Label {
 	if values != nil {
 		ctx.values = append(ctx.values[:0], values...)
 	}
 	label := ctx.assembler.Label()
 	stack, frames := ctx.snapshot()
-	ctx.exits = append(ctx.exits, sideExit{label: label, values: stack, frames: frames, resume: resume, retain: retain})
+	id := len(ctx.descriptors)
+	ctx.descriptors = append(ctx.descriptors, exitDescriptor{reason: reason, opcode: opcode})
+	ctx.exits = append(ctx.exits, sideExit{
+		label: label, values: stack, frames: frames, resume: resume, retain: retain,
+		id: id,
+	})
 	return label
 }
 
@@ -381,4 +462,21 @@ func (ctx *lowering) pinTo(pr asm.PReg) asm.VReg {
 	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	_ = ctx.assembler.Pin(v, pr)
 	return v
+}
+
+func reasonPriority(reason prof.CompileReason) int {
+	switch reason {
+	case prof.CompileReasonInvalidPlan:
+		return 1
+	case prof.CompileReasonLoweringRejected, prof.CompileReasonBackendUnavailable:
+		return 2
+	case prof.CompileReasonRegisterPressure:
+		return 3
+	case prof.CompileReasonBranchRange:
+		return 4
+	case prof.CompileReasonError:
+		return 5
+	default:
+		return 0
+	}
 }

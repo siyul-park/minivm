@@ -13,6 +13,7 @@ import (
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/asm/arm64"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -238,6 +239,277 @@ func TestNativeStackReserve(t *testing.T) {
 // TestCompiler_Compile covers compiler-selected static plans and verifies that
 // their native entries match threaded execution.
 func TestCompiler_Compile(t *testing.T) {
+	if runtime.GOARCH == "arm64" {
+		t.Run("guard value", func(t *testing.T) {
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.I32_DIV_S),
+			}, program.WithGlobals(types.TypeI32, types.TypeI32))
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+			require.NoError(t, i.SetGlobal(0, types.BoxI32(8)))
+			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
+
+			entry, closeCompiler := compileNative(t, i, anchor{}, false)
+			defer closeCompiler()
+			assertNativeExit(t, i, entry, prof.ExitGuardValue, int(instr.I32_DIV_S))
+		})
+
+		t.Run("guard shape", func(t *testing.T) {
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.ARRAY_LEN),
+			}, program.WithConstants(types.TypedArray[int32]{1}, types.TypedArray[float64]{2}),
+				program.WithGlobals(types.TypeRef))
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+			{
+				value := i.constants[0]
+				i.retain(value.Ref())
+				require.NoError(t, i.SetGlobal(0, value))
+			}
+			entry, closeCompiler := compileNative(t, i, anchor{}, true)
+			defer closeCompiler()
+			{
+				value := i.constants[1]
+				i.retain(value.Ref())
+				require.NoError(t, i.SetGlobal(0, value))
+			}
+
+			assertNativeExit(t, i, entry, prof.ExitGuardShape, int(instr.ARRAY_LEN))
+		})
+
+		t.Run("guard bounds", func(t *testing.T) {
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.ARRAY_GET),
+			}, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeRef, types.TypeI32))
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+			{
+				value := i.constants[0]
+				i.retain(value.Ref())
+				require.NoError(t, i.SetGlobal(0, value))
+			}
+			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
+			entry, closeCompiler := compileNative(t, i, anchor{}, true)
+			defer closeCompiler()
+			require.NoError(t, i.SetGlobal(1, types.BoxI32(2)))
+			assertNativeExit(t, i, entry, prof.ExitGuardBounds, int(instr.ARRAY_GET))
+		})
+
+		t.Run("array get value guard", func(t *testing.T) {
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.ARRAY_GET),
+			}, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeRef, types.TypeI32))
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+			value := i.constants[0]
+			i.retain(value.Ref())
+			require.NoError(t, i.SetGlobal(0, value))
+			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
+			entry, closeCompiler := compileNative(t, i, anchor{}, true)
+			defer closeCompiler()
+
+			for _, exit := range entry.exits {
+				if exit.reason == prof.ExitGuardValue && exit.opcode == int(instr.ARRAY_GET) {
+					return
+				}
+			}
+			t.Fatal("missing array.get guard-value exit")
+		})
+
+		t.Run("guard kind", func(t *testing.T) {
+			typ := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64))
+			value := types.NewStruct(typ, types.BoxI32(1), types.BoxF64(2))
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.STRUCT_GET),
+			}, program.WithConstants(value), program.WithGlobals(types.TypeRef, types.TypeI32))
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+			{
+				value := i.constants[0]
+				i.retain(value.Ref())
+				require.NoError(t, i.SetGlobal(0, value))
+			}
+			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
+			entry, closeCompiler := compileNative(t, i, anchor{}, true)
+			defer closeCompiler()
+			require.NoError(t, i.SetGlobal(1, types.BoxI32(1)))
+
+			assertNativeExit(t, i, entry, prof.ExitGuardKind, int(instr.STRUCT_GET))
+		})
+
+		t.Run("cold branch", func(t *testing.T) {
+			b := program.NewBuilder()
+			cold := b.Label()
+			done := b.Label()
+			b.Globals(types.TypeI32).
+				Emit(instr.GLOBAL_GET, 0).
+				BrIf(cold).
+				Emit(instr.I32_CONST, 1).
+				Br(done).
+				Bind(cold).
+				Emit(instr.I32_CONST, 2).
+				Bind(done)
+			prog, err := b.Build()
+			require.NoError(t, err)
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+			require.NoError(t, i.SetGlobal(0, types.BoxI32(0)))
+			entry, closeCompiler := compileNative(t, i, anchor{}, true)
+			defer closeCompiler()
+			require.NoError(t, i.SetGlobal(0, types.BoxI32(1)))
+
+			assertNativeExit(t, i, entry, prof.ExitColdBranch, int(instr.BR_IF))
+		})
+
+		t.Run("trace cut", func(t *testing.T) {
+			instructions := make([]instr.Instruction, opLimit+1)
+			for idx := range instructions {
+				instructions[idx] = instr.New(instr.NOP)
+			}
+			i := New(program.New(instructions), WithThreshold(-1))
+			defer i.Close()
+			entry, closeCompiler := compileNative(t, i, anchor{}, true)
+			defer closeCompiler()
+
+			assertNativeExit(t, i, entry, prof.ExitTraceCut, prof.OpcodeNone)
+		})
+
+		t.Run("terminal", func(t *testing.T) {
+			i := New(program.New([]instr.Instruction{
+				instr.New(instr.F64_CONST, math.Float64bits(5.5)),
+				instr.New(instr.F64_CONST, math.Float64bits(2)),
+				instr.New(instr.F64_REM),
+			}), WithThreshold(-1))
+			defer i.Close()
+			entry, closeCompiler := compileNative(t, i, anchor{}, false)
+			defer closeCompiler()
+
+			assertNativeExit(t, i, entry, prof.ExitTerminalOp, int(instr.F64_REM))
+		})
+
+		t.Run("loop exit", func(t *testing.T) {
+			b := types.NewFunctionBuilder(nil).WithLocals(types.TypeI32)
+			loop := b.Label()
+			b.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 0)).
+				Bind(loop).
+				Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD),
+					instr.New(instr.LOCAL_TEE, 0), instr.New(instr.I32_CONST, loopBudget+2), instr.New(instr.I32_LT_S)).
+				BrIf(loop).
+				Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
+			fn, err := b.Build()
+			require.NoError(t, err)
+			prog := program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn))
+			local := prof.NewCollector()
+			i := New(prog, WithThreshold(-1))
+			i.samples = local
+			i.profiler = prof.New()
+			defer i.Close()
+			addr := i.constants[0].Ref()
+			i.fr.addr = addr
+			i.fr.ref = addr
+			i.fr.code = i.code[addr]
+			i.fr.ip = 0
+			i.fr.bp = 0
+			i.sp = 1
+			i.stack[0] = types.BoxI32(0)
+			header := -1
+			for ip := 0; ip < len(fn.Code); {
+				inst := instr.Instruction(fn.Code[ip:])
+				if inst.Opcode() == instr.BR_IF {
+					header = instr.Targets(fn.Code, ip)[0]
+					break
+				}
+				ip += inst.Width()
+			}
+			require.Greater(t, header, 0)
+			for i.fr.ip < header {
+				i.fr.code[i.fr.ip](i)
+			}
+			root := anchor{addr: addr, ip: header}
+			addrLabel := strconv.Itoa(addr)
+			headerLabel := strconv.Itoa(header)
+			entry, closeCompiler := compileNative(t, i, root, true)
+			defer closeCompiler()
+			require.Equal(t, entryLoop, entry.kind)
+			metrics := i.counters(root, entry)
+
+			i.stack[i.fr.bp] = types.BoxI32(loopBudget + 2)
+			i.fr.ip = header
+			i.loop(entry.callable, metrics)(i)
+			encoded := i.journal[journalExitID]
+			require.NotZero(t, encoded)
+			id := int(encoded - 1)
+			require.Less(t, id, len(entry.exits))
+			require.Equal(t, exitDescriptor{reason: prof.ExitLoop, opcode: int(instr.BR_IF)}, entry.exits[id])
+			exits, ok := local.Metric("vm_jit_native_exits_total",
+				prof.Label{Key: "func", Value: addrLabel}, prof.Label{Key: "ip", Value: headerLabel},
+				prof.Label{Key: "kind", Value: "loop"}, prof.Label{Key: "frontend", Value: "trace"},
+				prof.Label{Key: "reason", Value: "loop-exit"}, prof.Label{Key: "opcode", Value: "br_if"})
+			require.True(t, ok)
+			require.Equal(t, float64(1), exits)
+		})
+
+		t.Run("yield", func(t *testing.T) {
+			fn := types.NewFunctionBuilder(nil).
+				Emit(instr.New(instr.CONST_GET, 0), instr.New(instr.RETURN_CALL)).
+				MustBuild()
+			local := prof.NewCollector()
+			i := New(program.New([]instr.Instruction{instr.New(instr.NOP)}, program.WithConstants(fn)),
+				WithThreshold(-1))
+			i.samples = local
+			i.profiler = prof.New()
+			defer i.Close()
+			addr := i.constants[0].Ref()
+			i.fr.addr = addr
+			i.fr.ref = addr
+			i.fr.code = i.code[addr]
+			i.fr.ip = 0
+			i.fr.bp = 0
+			i.sp = 0
+			root := anchor{addr: addr}
+			entry, closeCompiler := compileNative(t, i, root, true)
+			defer closeCompiler()
+			require.Equal(t, entryFunction, entry.kind)
+
+			i.call(root, entry.callable, i.counters(root, entry))(i)
+			require.Equal(t, uint64(trapYield), i.journal[journalTrap])
+			require.Zero(t, i.journal[journalExitID])
+			yields, ok := local.Metric("vm_jit_native_yields_total",
+				prof.Label{Key: "func", Value: strconv.Itoa(addr)}, prof.Label{Key: "ip", Value: "0"},
+				prof.Label{Key: "kind", Value: "call"}, prof.Label{Key: "frontend", Value: "trace"})
+			require.True(t, ok)
+			require.Equal(t, float64(1), yields)
+			for _, metric := range local.Metrics() {
+				require.NotEqual(t, "vm_jit_native_exits_total", metric.Name)
+			}
+		})
+	}
+
+	t.Run("attributes concrete guard exits to their opcode", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 8), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_DIV_S),
+		}, program.WithLocals(types.TypeI32))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+		c, err := newCompiler()
+		require.NoError(t, err)
+		defer c.Close()
+
+		result := c.Compile(i, anchor{})
+		require.NoError(t, result.err)
+		require.NotNil(t, result.module)
+		for _, exit := range result.module.entries[anchor{}].exits {
+			if exit.reason == prof.ExitGuardValue {
+				require.Equal(t, int(instr.I32_DIV_S), exit.opcode)
+				return
+			}
+		}
+		t.Fatal("missing guard-value exit")
+	})
+
 	if runtime.GOARCH != "arm64" {
 		t.Skip("native JIT is only available on arm64")
 	}
@@ -278,8 +550,9 @@ func TestCompiler_Compile(t *testing.T) {
 		defer c.Close()
 
 		addr := int(i.constants[idx].Ref())
-		mod, err := c.Compile(i, addr)
-		require.NoError(t, err)
+		result := c.Compile(i, anchor{addr: addr})
+		require.NoError(t, result.err)
+		mod := result.module
 		require.NotEmpty(t, mod.entries)
 		i.install(mod, false)
 
@@ -365,8 +638,9 @@ func TestCompiler_Compile(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 		addr := int(jit.constants[idx].Ref())
-		mod, err := c.Compile(jit, addr)
-		require.NoError(t, err)
+		result := c.Compile(jit, anchor{addr: addr})
+		require.NoError(t, result.err)
+		mod := result.module
 		require.NotEmpty(t, mod.entries)
 		jit.install(mod, false)
 		require.NoError(t, jit.Run(context.Background()))
@@ -401,6 +675,36 @@ func TestCompiler_Compile(t *testing.T) {
 	})
 }
 
+func compileNative(t *testing.T, i *Interpreter, root anchor, trace bool) (native, func()) {
+	t.Helper()
+	if trace {
+		result, err := i.tracer.capture(i, root)
+		require.NoError(t, err)
+		require.NotNil(t, result.trace)
+		i.stubs[root.addr] = i.code[root.addr][0]
+	}
+	c, err := newCompiler()
+	require.NoError(t, err)
+	result := c.Compile(i, root)
+	require.NoError(t, result.err)
+	require.NotNil(t, result.module, "%+v", result)
+	entry, ok := result.module.entries[root]
+	require.True(t, ok)
+	return entry, func() { require.NoError(t, c.Close()) }
+}
+
+func assertNativeExit(t *testing.T, i *Interpreter, entry native, reason prof.ExitReason, opcode int) {
+	t.Helper()
+	require.NoError(t, entry.callable.Call(i.context()))
+	require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
+	encoded := i.journal[journalExitID]
+	require.NotZero(t, encoded)
+	id := int(encoded - 1)
+	require.Less(t, id, len(entry.exits))
+	require.Equal(t, exitDescriptor{reason: reason, opcode: opcode}, entry.exits[id])
+	require.Equal(t, uint64(id+1), encoded)
+}
+
 func TestArm64Lowerer_QueuesEachState(t *testing.T) {
 	target := edge{anchor: anchor{addr: 1, ip: 2}, block: 0}
 	ctx := &lowering{
@@ -411,11 +715,11 @@ func TestArm64Lowerer_QueuesEachState(t *testing.T) {
 	lowerer := arm64Lowerer{}
 
 	ctx.values = []value{{kind: types.KindI32, raw: true, known: true, imm: 1}}
-	first, ok := lowerer.label(ctx, target, nil)
+	first, ok := lowerer.label(ctx, target, nil, prof.OpcodeNone)
 	require.True(t, ok)
 
 	ctx.values = []value{{kind: types.KindI32, raw: true, known: true, imm: 2}}
-	second, ok := lowerer.label(ctx, target, nil)
+	second, ok := lowerer.label(ctx, target, nil, prof.OpcodeNone)
 	require.True(t, ok)
 
 	require.NotEqual(t, first, second)

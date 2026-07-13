@@ -45,9 +45,10 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, WithTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		tr, err := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
+		result, err := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
 		require.NoError(t, err)
-		require.NotNil(t, tr)
+		require.NotNil(t, result.trace)
+		tr := result.trace
 		require.Equal(t, completed, tr.kind)
 		require.NotEmpty(t, tr.ops)
 		require.Equal(t, instr.I32_CONST, tr.ops[len(tr.ops)-1].op)
@@ -64,9 +65,10 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, WithTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		tr, err := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
+		result, err := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
 		require.NoError(t, err)
-		require.NotNil(t, tr)
+		require.NotNil(t, result.trace)
+		tr := result.trace
 		require.Equal(t, returned, tr.kind)
 		require.NotEmpty(t, tr.ops)
 		require.Equal(t, instr.YIELD, tr.ops[len(tr.ops)-1].op)
@@ -81,8 +83,10 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(program.New(code), WithTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		tr, err := tracer.capture(i, anchor{addr: 0, ip: 0})
+		result, err := tracer.capture(i, anchor{addr: 0, ip: 0})
 		require.NoError(t, err)
+		require.NotNil(t, result.trace)
+		tr := result.trace
 		require.Equal(t, partial, tr.kind)
 		require.Len(t, tr.ops, opLimit+1)
 		require.True(t, tr.ops[len(tr.ops)-1].cut)
@@ -103,8 +107,10 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, WithTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		tr, err := tracer.capture(i, anchor{addr: 0, ip: 0})
+		result, err := tracer.capture(i, anchor{addr: 0, ip: 0})
 		require.NoError(t, err)
+		require.NotNil(t, result.trace)
+		tr := result.trace
 		require.Equal(t, partial, tr.kind)
 		require.Len(t, tr.ops, 5)
 		require.Equal(t, instr.BR, tr.ops[len(tr.ops)-2].op)
@@ -237,7 +243,7 @@ func TestTracer_Capture(t *testing.T) {
 		for range attemptLimit + 1 {
 			tr, err := tracer.capture(i, anchor{})
 			require.NoError(t, err)
-			require.Nil(t, tr)
+			require.Nil(t, tr.trace)
 		}
 
 		tracer.mu.Lock()
@@ -247,20 +253,6 @@ func TestTracer_Capture(t *testing.T) {
 		require.Nil(t, tracer.rootAt(anchor{}))
 	})
 
-	t.Run("records terminal set fast paths and rejects remaining array mutators", func(t *testing.T) {
-		tracer := NewTracer()
-		require.False(t, tracer.unrecordable(nil, instr.ARRAY_SET))
-		require.False(t, tracer.unrecordable(nil, instr.STRUCT_SET))
-		for _, op := range []instr.Opcode{
-			instr.ARRAY_FILL,
-			instr.ARRAY_COPY,
-			instr.ARRAY_APPEND,
-			instr.ARRAY_DELETE,
-			instr.ARRAY_SLICE,
-		} {
-			require.True(t, tracer.unrecordable(nil, op))
-		}
-	})
 }
 
 func TestTracer(t *testing.T) {

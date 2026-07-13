@@ -3698,17 +3698,118 @@ func TestWithTracer(t *testing.T) {
 }
 
 func TestWithProfiler(t *testing.T) {
-	p := prof.New()
-	prog := program.New([]instr.Instruction{
-		instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD),
-	})
-	i := New(prog, WithProfiler(p), WithTick(1))
-	require.NoError(t, i.Run(context.Background()))
-	require.NoError(t, i.Close())
+	t.Run("nil disables profiling", func(t *testing.T) {
+		i := New(program.New(nil), WithProfiler(nil))
+		defer i.Close()
 
-	total, ok := p.Metric("vm_samples_total")
-	require.True(t, ok)
-	require.Equal(t, float64(3), total)
+		require.Nil(t, i.profiler)
+	})
+
+	t.Run("samples execution", func(t *testing.T) {
+		p := prof.New()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD),
+		})
+		i := New(prog, WithProfiler(p), WithTick(1))
+		require.NoError(t, i.Run(context.Background()))
+		require.NoError(t, i.Close())
+
+		total, ok := p.Metric("vm_samples_total")
+		require.True(t, ok)
+		require.Equal(t, float64(3), total)
+	})
+
+	t.Run("records compilation and native entry", func(t *testing.T) {
+		p := prof.New()
+		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+		i := New(prog, WithProfiler(p), WithTick(1), WithThreshold(0))
+		require.NoError(t, i.Run(context.Background()))
+		if runtime.GOARCH == "arm64" {
+			i.Reset()
+			require.NoError(t, i.Run(context.Background()))
+		}
+		require.NoError(t, i.Close())
+
+		if runtime.GOARCH == "arm64" {
+			value, ok := p.Metric("vm_jit_compiles_total",
+				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+				prof.Label{Key: "trigger", Value: "hot"}, prof.Label{Key: "frontend", Value: "static"},
+				prof.Label{Key: "outcome", Value: "emitted"}, prof.Label{Key: "reason", Value: "none"})
+			require.True(t, ok)
+			require.Equal(t, float64(1), value)
+			value, ok = p.Metric("vm_jit_native_entries_total",
+				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+				prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "static"})
+			require.True(t, ok)
+			require.Equal(t, float64(2), value)
+		} else {
+			value, ok := p.Metric("vm_jit_compiles_total",
+				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+				prof.Label{Key: "trigger", Value: "hot"}, prof.Label{Key: "frontend", Value: "none"},
+				prof.Label{Key: "outcome", Value: "rejected"}, prof.Label{Key: "reason", Value: "backend-unavailable"})
+			require.True(t, ok)
+			require.Equal(t, float64(1), value)
+		}
+	})
+
+	t.Run("records a partial trace cut", func(t *testing.T) {
+		code := make([]instr.Instruction, opLimit+1)
+		for index := range code {
+			code[index] = instr.New(instr.NOP)
+		}
+		p := prof.New()
+		i := New(program.New(code), WithProfiler(p), WithTick(1), WithThreshold(0))
+		require.NoError(t, i.Run(context.Background()))
+		require.NoError(t, i.Close())
+
+		value, ok := p.Metric("vm_jit_trace_captures_total",
+			prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+			prof.Label{Key: "outcome", Value: "partial"}, prof.Label{Key: "reason", Value: "op-limit"})
+		require.True(t, ok)
+		require.Equal(t, float64(1), value)
+	})
+
+	t.Run("records a nested terminal rejection", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{}).Emit(
+			instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_SET), instr.New(instr.RETURN),
+		).MustBuild()
+		p := prof.New()
+		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 1), instr.New(instr.CALL)},
+			program.WithConstants(types.TypedArray[int32]{0}, fn))
+		i := New(prog, WithProfiler(p), WithTick(1), WithThreshold(0))
+		require.NoError(t, i.Run(context.Background()))
+		require.NoError(t, i.Close())
+
+		value, ok := p.Metric("vm_jit_trace_captures_total",
+			prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+			prof.Label{Key: "outcome", Value: "rejected"}, prof.Label{Key: "reason", Value: "nested-terminal"})
+		require.True(t, ok)
+		require.Equal(t, float64(1), value)
+	})
+
+	t.Run("records terminal native fallback", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		p := prof.New()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.F64_CONST, math.Float64bits(5.5)),
+			instr.New(instr.F64_CONST, math.Float64bits(2)),
+			instr.New(instr.F64_REM),
+		})
+		i := New(prog, WithProfiler(p), WithTick(1), WithThreshold(0))
+		require.NoError(t, i.Run(context.Background()))
+		require.NoError(t, i.Close())
+
+		value, ok := p.Metric("vm_jit_native_exits_total",
+			prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+			prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "static"},
+			prof.Label{Key: "reason", Value: "terminal-op"}, prof.Label{Key: "opcode", Value: "f64.rem"})
+		require.True(t, ok)
+		require.Equal(t, float64(1), value)
+	})
+
 }
 
 func TestWithFrame(t *testing.T) {
@@ -3787,11 +3888,24 @@ func TestWithFrame(t *testing.T) {
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
 		}, program.WithConstants(recurse))
-		i = New(prog, WithFrame(nativeFrameLimit+2), WithTick(1), WithThreshold(0))
-		defer i.Close()
+		metrics := prof.New()
+		i = New(prog, WithFrame(nativeFrameLimit+2), WithTick(1), WithThreshold(0), WithProfiler(metrics))
 
 		require.ErrorIs(t, i.Run(context.Background()), ErrFrameOverflow)
-		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		require.NoError(t, i.Close())
+		emits, ok := metrics.Metric("vm_jit_emits_total")
+		require.True(t, ok)
+		require.GreaterOrEqual(t, emits, float64(1))
+		hasEntry := false
+		for _, metric := range metrics.Metrics() {
+			switch metric.Name {
+			case "vm_jit_native_entries_total":
+				hasEntry = true
+			case "vm_jit_native_exits_total", "vm_jit_native_yields_total":
+				t.Fatalf("native overflow must not increment %s", metric.Name)
+			}
+		}
+		require.True(t, hasEntry)
 	})
 }
 
@@ -4224,7 +4338,7 @@ func TestWithThreshold(t *testing.T) {
 		defer i.Close()
 
 		i.fr.ip = 1
-		require.NoError(t, i.compile(0))
+		require.NoError(t, i.compile(anchor{}))
 		i.tracer.mu.Lock()
 		_, recorded := i.tracer.trees[anchor{addr: 0, ip: 0}]
 		i.tracer.mu.Unlock()

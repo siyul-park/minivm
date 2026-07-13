@@ -5,6 +5,7 @@ import (
 
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -59,6 +60,19 @@ const (
 	entryLoop
 	entryModule
 )
+
+func (kind entryKind) profile() prof.EntryKind {
+	switch kind {
+	case entryModule:
+		return prof.EntryStart
+	case entryFunction:
+		return prof.EntryCall
+	case entryLoop:
+		return prof.EntryLoop
+	default:
+		return prof.EntryNone
+	}
+}
 
 type block struct {
 	anchor anchor

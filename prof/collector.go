@@ -12,6 +12,7 @@ type Collector struct {
 	funcs   []function
 	ops     [256]uint64
 	metrics []Metric
+	jit     jitMetrics
 }
 
 type function struct {
@@ -58,6 +59,7 @@ func (c *Collector) Metrics() []Metric {
 		})
 	}
 	out = append(out, c.metrics...)
+	out = c.jit.appendMetrics(out, c)
 	return out
 }
 
@@ -158,6 +160,7 @@ func (c *Collector) merge(o *Collector) {
 	for _, m := range o.metrics {
 		c.AddMetric(m.Name, m.Value, m.Labels...)
 	}
+	c.jit.merge(&o.jit)
 }
 
 // grow ensures index fn and index ip within c.funcs[fn].ips are addressable,
@@ -197,6 +200,7 @@ func (c *Collector) reset() {
 	}
 	clear(c.ops[:])
 	c.metrics = c.metrics[:0]
+	c.jit.reset()
 }
 
 func (c *Collector) opcodeLabel(code byte) string {

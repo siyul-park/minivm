@@ -137,7 +137,7 @@ func TestPool_Get(t *testing.T) {
 			wg.Add(1)
 			go func(worker int) {
 				defer wg.Done()
-				for n := range exitThreshold * 32 {
+				for n := range 256 {
 					i, err := p.Get(context.Background())
 					if err != nil {
 						errs <- err
@@ -229,28 +229,6 @@ func TestPool_Get(t *testing.T) {
 		require.Greater(t, emits, float64(0))
 	})
 
-	t.Run("rearms shared cache after missed side-exit threshold", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
-		p := NewPool(prog, 1, WithThreshold(-1))
-		defer p.Close()
-		i, err := p.Get(context.Background())
-		require.NoError(t, err)
-		defer p.Put(i)
-		root := anchor{addr: 0, ip: 0}
-		target := anchor{addr: 0, ip: 0}
-
-		for range exitThreshold*2 - 1 {
-			_, err := i.tracer.exit(i, root, target)
-			require.NoError(t, err)
-		}
-		p.cache.ready(0)
-		i.fr.ip = 0
-		i.exit(root)
-
-		require.Equal(t, cacheCold, p.cache.state[0].Load())
-		require.True(t, p.cache.due(0, 1))
-	})
-
 	t.Run("does not recompile a known loop exit", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
@@ -287,6 +265,120 @@ func TestPool_Get(t *testing.T) {
 		attempts, ok := metrics.Metric("vm_jit_attempts_total")
 		require.True(t, ok)
 		require.Equal(t, float64(1), attempts)
+	})
+
+	t.Run("accounts only shared cache winners across flush and recompile", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		b := types.NewFunctionBuilder(nil).WithParams(types.TypeI32, types.TypeI32).WithReturns(types.TypeI32)
+		b.Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.LOCAL_GET, 1)).
+			Emit(instr.New(instr.I32_DIV_S)).
+			Emit(instr.New(instr.RETURN))
+		divide, err := b.Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		}, program.WithConstants(divide))
+		metrics := prof.New()
+		p := NewPool(prog, 2, WithProfiler(metrics), WithTick(1), WithThreshold(0))
+		first, err := p.Get(context.Background())
+		require.NoError(t, err)
+		second, err := p.Get(context.Background())
+		require.NoError(t, err)
+
+		run := func(i *Interpreter, divisor int32) (types.Value, error) {
+			i.Reset()
+			if err := i.Push(types.I32(8)); err != nil {
+				return nil, err
+			}
+			if err := i.Push(types.I32(divisor)); err != nil {
+				return nil, err
+			}
+			if err := i.Run(context.Background()); err != nil {
+				return nil, err
+			}
+			return i.Pop()
+		}
+
+		ready := make(chan struct{}, 2)
+		start := make(chan struct{})
+		results := make(chan error, 2)
+		for _, i := range []*Interpreter{first, second} {
+			go func(i *Interpreter) {
+				ready <- struct{}{}
+				<-start
+				value, err := run(i, 2)
+				if err == nil && value != types.I32(4) {
+					err = fmt.Errorf("got %v, want %v", value, types.I32(4))
+				}
+				results <- err
+			}(i)
+		}
+		<-ready
+		<-ready
+		close(start)
+		require.NoError(t, <-results)
+		require.NoError(t, <-results)
+		for range exitThreshold {
+			ready := make(chan struct{}, 2)
+			start := make(chan struct{})
+			results := make(chan error, 2)
+			for _, i := range []*Interpreter{first, second} {
+				go func(i *Interpreter) {
+					ready <- struct{}{}
+					<-start
+					_, err := run(i, 0)
+					results <- err
+				}(i)
+			}
+			<-ready
+			<-ready
+			close(start)
+			require.ErrorIs(t, <-results, ErrDivideByZero)
+			require.ErrorIs(t, <-results, ErrDivideByZero)
+		}
+		resultValue, err := run(second, 2)
+		require.NoError(t, err)
+		require.Equal(t, types.I32(4), resultValue)
+
+		p.Put(first)
+		p.Put(second)
+		require.NoError(t, p.Close())
+
+		var hotCompiles, sideExitCompiles, guardExits float64
+		for _, metric := range metrics.Metrics() {
+			trigger := ""
+			reason := ""
+			for _, label := range metric.Labels {
+				switch label.Key {
+				case "trigger":
+					trigger = label.Value
+				case "reason":
+					reason = label.Value
+				}
+			}
+			switch {
+			case metric.Name == "vm_jit_compiles_total" && trigger == "hot":
+				hotCompiles += metric.Value
+			case metric.Name == "vm_jit_compiles_total" && trigger == "side-exit":
+				sideExitCompiles += metric.Value
+			case metric.Name == "vm_jit_native_exits_total" && reason == "guard-value":
+				guardExits += metric.Value
+			}
+		}
+		require.Equal(t, 2.0, hotCompiles)
+		require.Equal(t, 2.0, sideExitCompiles)
+		require.Equal(t, float64(exitThreshold*2), guardExits)
+		attempts, ok := metrics.Metric("vm_jit_attempts_total")
+		require.True(t, ok)
+		require.Equal(t, hotCompiles+sideExitCompiles, attempts)
+		emits, ok := metrics.Metric("vm_jit_emits_total")
+		require.True(t, ok)
+		// The module and function roots emit three entries. Recompiling a hot
+		// side exit replaces an existing entry instead of adding another one.
+		require.Equal(t, 3.0, emits)
 	})
 }
 

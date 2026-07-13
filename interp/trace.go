@@ -6,6 +6,7 @@ import (
 	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 )
@@ -41,6 +42,12 @@ type trace struct {
 	anchor anchor
 	ops    []record
 	kind   outcome
+}
+
+type captureResult struct {
+	trace   *trace
+	outcome prof.CaptureOutcome
+	reason  prof.CaptureReason
 }
 
 type tree struct {
@@ -100,45 +107,50 @@ func (r *Tracer) exit(i *Interpreter, root anchor, target anchor) (int64, error)
 	}
 	r.mu.Unlock()
 
-	t, err := r.capture(i, anchor{addr: target.addr, ip: target.ip})
+	result, err := r.capture(i, anchor{addr: target.addr, ip: target.ip})
 	if err != nil {
 		return hits, err
 	}
 	r.mu.Lock()
 	if r.trees[root] == tree {
-		tree.branches[id] = t
+		tree.branches[id] = result.trace
 	}
 	r.mu.Unlock()
 	return hits, nil
 }
 
-func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
+func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err error) {
 	r.recordMu.Lock()
 	defer r.recordMu.Unlock()
+	defer func() {
+		if i.profiler != nil && result.outcome != prof.CaptureOutcomeNone {
+			i.samples.RecordCapture(a.addr, a.ip, result.outcome, result.reason)
+		}
+	}()
 
 	r.mu.Lock()
 	tree := r.trees[a]
 	if tree != nil && tree.root != nil {
 		t := tree.root
 		r.mu.Unlock()
-		return t, nil
+		return captureResult{trace: t}, nil
 	}
 	if a.ip == 0 && (i.fr == nil || i.fr.addr != a.addr || i.fr.ip != 0) {
 		r.mu.Unlock()
-		return nil, nil
+		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonInvalidAnchor}, nil
 	}
 	if tree == nil {
 		tree = r.tree(a)
 	}
 	if tree.attempts >= attemptLimit {
 		r.mu.Unlock()
-		return nil, nil
+		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonAttemptLimit}, nil
 	}
 	tree.attempts++
 	r.mu.Unlock()
 
 	if a.addr < 0 || a.addr >= len(i.instrs) || a.ip < 0 || a.ip >= len(i.instrs[a.addr]) {
-		return nil, nil
+		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonInvalidAnchor}, nil
 	}
 
 	clone := r.clone(i)
@@ -156,8 +168,9 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 
 		code := clone.instrs[f.addr]
 		op := instr.Opcode(code[f.ip])
-		if r.unrecordable(&clone, op) {
+		if reason := r.unrecordableReason(&clone, op); reason != prof.CaptureReasonNone {
 			t.kind = aborted
+			result.reason = reason
 			break
 		}
 
@@ -177,7 +190,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 			t.ops = append(t.ops, st)
 			t.kind = returned
 			r.publish(a, tree, t)
-			return t, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
 		}
 		// YIELD/RESUME and exception-producing ops have side effects a trace
 		// cannot represent. In the anchor frame, record the op as the
@@ -188,15 +201,17 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		if op == instr.YIELD || op == instr.RESUME || op == instr.ERROR_NEW || op == instr.ERROR_CODE || op == instr.THROW {
 			if clone.fp != startFP {
 				t.kind = aborted
+				result.reason = prof.CaptureReasonNestedTerminal
 				break
 			}
 			t.ops = append(t.ops, st)
 			t.kind = returned
 			r.publish(a, tree, t)
-			return t, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
 		}
 		if !r.step(&clone, f.addr, f.ip) {
 			t.kind = aborted
+			result.reason = prof.CaptureReasonStepTrap
 			break
 		}
 
@@ -216,7 +231,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 			})
 			t.kind = partial
 			r.publish(a, tree, t)
-			return t, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePartial}, nil
 		}
 		// Heap mutations still lower as terminal native fast paths: the hot
 		// path performs the store and resumes at the next threaded instruction;
@@ -225,31 +240,32 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		if op == instr.ARRAY_SET || op == instr.STRUCT_SET {
 			if clone.fp != startFP {
 				t.kind = aborted
+				result.reason = prof.CaptureReasonNestedTerminal
 				break
 			}
 			t.kind = returned
 			r.publish(a, tree, t)
-			return t, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
 		}
 		switch {
 		case op == instr.RETURN && st.depth == 0:
 			t.kind = returned
 			r.publish(a, tree, t)
-			return t, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
 		case clone.fr.addr >= 0 && clone.fr.addr < len(clone.instrs) && clone.fr.ip >= len(clone.instrs[clone.fr.addr]):
 			if clone.fr.addr == 0 {
 				t.kind = completed
 			}
 			r.publish(a, tree, t)
-			return t, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
 		case clone.fr.addr == a.addr && clone.fr.ip == a.ip:
 			t.kind = loop
 			r.publish(a, tree, t)
-			return t, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
 		case clone.fp < startFP:
 			t.kind = returned
 			r.publish(a, tree, t)
-			return t, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
 		}
 	}
 	if len(t.ops) >= opLimit {
@@ -258,12 +274,17 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (*trace, error) {
 		f := clone.fr
 		t.ops = append(t.ops, record{step: step{fn: f.addr, depth: clone.fp - startFP}, target: f.ip, cut: true})
 		t.kind = partial
+		result.reason = prof.CaptureReasonOpLimit
 	}
 	if t.kind == aborted {
-		return nil, nil
+		if result.reason == prof.CaptureReasonNone {
+			result.reason = prof.CaptureReasonUnsupportedOp
+		}
+		result.outcome = prof.CaptureOutcomeRejected
+		return result, nil
 	}
 	r.publish(a, tree, t)
-	return t, nil
+	return captureResult{trace: t, outcome: prof.CaptureOutcomePartial, reason: result.reason}, nil
 }
 
 func (r *Tracer) clone(i *Interpreter) Interpreter {
@@ -605,26 +626,29 @@ func (r *Tracer) exitIndex(tree *tree, target anchor) int {
 	return idx
 }
 
-func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
+func (r *Tracer) unrecordableReason(i *Interpreter, op instr.Opcode) prof.CaptureReason {
 	if (op == instr.CALL || op == instr.RETURN_CALL) && i.sp > 0 {
 		if i.stack[i.sp-1].Kind() != types.KindRef {
-			return false
+			return prof.CaptureReasonNone
 		}
 		addr := i.stack[i.sp-1].Ref()
 		if addr < 0 || addr >= len(i.heap) {
-			return false
+			return prof.CaptureReasonNone
 		}
 		if _, ok := i.heap[addr].(*HostFunction); ok {
-			return true
+			return prof.CaptureReasonHostCall
 		}
 		// A tail call only lowers to a plain function target: the loop back-edge
 		// and the in-place activation morph have no slot for closure upvals, so
 		// closures deopt to the threaded tail() handler.
 		if op == instr.RETURN_CALL {
 			_, ok := i.heap[addr].(*types.Function)
-			return !ok
+			if !ok {
+				return prof.CaptureReasonTailClosure
+			}
+			return prof.CaptureReasonNone
 		}
-		return false
+		return prof.CaptureReasonNone
 	}
 	switch op {
 	// YIELD and RESUME suspend or rebuild a frame, so a trace cannot
@@ -651,9 +675,9 @@ func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
 		instr.REF_NEW,
 		instr.REF_SET,
 		instr.CLOSURE_NEW:
-		return true
+		return prof.CaptureReasonUnsupportedOp
 	}
-	return false
+	return prof.CaptureReasonNone
 }
 
 // snapshot returns a compile-time-stable copy of the fields readers consume off

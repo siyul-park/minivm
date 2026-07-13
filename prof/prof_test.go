@@ -54,6 +54,7 @@ func TestCollector(t *testing.T) {
 		require.Equal(t, float64(1), s.Value("vm_func_ip_samples_total", prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "5"}))
 		require.Equal(t, float64(1), s.Value("vm_opcode_samples_total", prof.Label{Key: "opcode", Value: "i32.const"}))
 	})
+
 }
 
 func TestNew(t *testing.T) {
