@@ -67,18 +67,24 @@ func TestREPL_Run(t *testing.T) {
 		{
 			input:    ".profile\n.quit\n",
 			contains: []string{"(empty)"},
+			excludes: []string{"profile samples:"},
 		},
 		{
 			input: "i32.const 7\ndrop\n.profile\n.quit\n",
 			contains: []string{
 				"profile samples: 2",
-				"functions:",
+				"hot functions:",
+				"hot ips:",
 				"func 0 ips:",
 				"0000\t1\t50.0%",
 				"0005\t1\t50.0%",
-				"opcodes:",
+				"hot opcodes:",
 				"i32.const\t1\t50.0%",
 				"drop\t1\t50.0%",
+				"jit summary:",
+				"jit entries:",
+				"0\t0000\tnone\tinterpreted\tnot-attempted",
+				"0\t0005\tnone\tinterpreted\tnot-attempted",
 			},
 		},
 		{
@@ -383,6 +389,8 @@ func TestREPL_Run(t *testing.T) {
 		require.NoError(t, r.Run(context.Background()))
 		require.Len(t, r.instrs, 1)
 		require.Equal(t, 5, r.codeLen)
+		require.Empty(t, r.constants)
+		require.Empty(t, r.types)
 	})
 
 	t.Run("profile command renders runtime errors", func(t *testing.T) {

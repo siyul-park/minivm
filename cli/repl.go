@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -640,115 +639,6 @@ func printFrames(out io.Writer, vm *interp.Interpreter) {
 		}
 		fmt.Fprintf(out, "%s frame[%d] func=%d ip=%04d\n", marker, n, fn, ip)
 	}
-}
-
-// printProfile renders the metrics emitted by a prof.Profiler as the human-
-// readable profile table. It groups the flat metric stream back into functions,
-// per-instruction samples, opcodes, and JIT counters, computing percentages
-// from the totals.
-func printProfile(out io.Writer, metrics []prof.Metric) {
-	var total uint64
-	funcs := map[int]uint64{}
-	ips := map[int][]ipSample{}
-	var opcodes []opcodeSample
-	jit := map[string]uint64{}
-
-	for _, m := range metrics {
-		switch m.Name {
-		case "vm_samples_total":
-			total = uint64(m.Value)
-		case "vm_func_samples_total":
-			funcs[metricLabelInt(m, "func")] = uint64(m.Value)
-		case "vm_func_ip_samples_total":
-			fn := metricLabelInt(m, "func")
-			ips[fn] = append(ips[fn], ipSample{metricLabelInt(m, "ip"), uint64(m.Value)})
-		case "vm_opcode_samples_total":
-			opcodes = append(opcodes, opcodeSample{metricLabel(m, "opcode"), uint64(m.Value)})
-		default:
-			if name, ok := strings.CutPrefix(m.Name, "vm_jit_"); ok {
-				jit[strings.TrimSuffix(name, "_total")] = uint64(m.Value)
-			}
-		}
-	}
-
-	fmt.Fprintf(out, "profile samples: %d\n", total)
-	order := sortedKeys(funcs)
-	if len(order) > 0 {
-		fmt.Fprintln(out, "functions:")
-		fmt.Fprintln(out, "func\tsamples\t%")
-		for _, fn := range order {
-			fmt.Fprintf(out, "%d\t%d\t%s\n", fn, funcs[fn], formatPercent(percentage(funcs[fn], total)))
-		}
-	}
-	for _, fn := range order {
-		samples := ips[fn]
-		if len(samples) == 0 {
-			continue
-		}
-		sort.Slice(samples, func(a, b int) bool { return samples[a].offset < samples[b].offset })
-		fmt.Fprintf(out, "func %d ips:\n", fn)
-		fmt.Fprintln(out, "ip\tsamples\t%")
-		for _, ip := range samples {
-			fmt.Fprintf(out, "%04d\t%d\t%s\n", ip.offset, ip.samples, formatPercent(percentage(ip.samples, funcs[fn])))
-		}
-	}
-	if len(opcodes) > 0 {
-		fmt.Fprintln(out, "opcodes:")
-		fmt.Fprintln(out, "opcode\tsamples\t%")
-		for _, op := range opcodes {
-			fmt.Fprintf(out, "%s\t%d\t%s\n", op.name, op.samples, formatPercent(percentage(op.samples, total)))
-		}
-	}
-	if jit["attempts"]+jit["emits"]+jit["links"]+jit["skips"]+jit["errors"]+jit["bytes"] > 0 {
-		fmt.Fprintln(out, "jit:")
-		fmt.Fprintln(out, "attempts\temits\tlinks\tskips\terrors\tbytes")
-		fmt.Fprintf(out, "%d\t%d\t%d\t%d\t%d\t%d\n",
-			jit["attempts"], jit["emits"], jit["links"], jit["skips"], jit["errors"], jit["bytes"])
-	}
-}
-
-type ipSample struct {
-	offset  int
-	samples uint64
-}
-
-type opcodeSample struct {
-	name    string
-	samples uint64
-}
-
-func formatPercent(v float64) string {
-	return fmt.Sprintf("%.1f%%", v)
-}
-
-func percentage(samples, total uint64) float64 {
-	if total == 0 {
-		return 0
-	}
-	return float64(samples) / float64(total) * 100
-}
-
-func metricLabel(m prof.Metric, key string) string {
-	for _, l := range m.Labels {
-		if l.Key == key {
-			return l.Value
-		}
-	}
-	return ""
-}
-
-func metricLabelInt(m prof.Metric, key string) int {
-	v, _ := strconv.Atoi(metricLabel(m, key))
-	return v
-}
-
-func sortedKeys(m map[int]uint64) []int {
-	keys := make([]int, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Ints(keys)
-	return keys
 }
 
 // normalize converts "@N" absolute byte targets in branch instructions to relative

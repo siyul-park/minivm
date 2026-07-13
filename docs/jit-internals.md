@@ -224,6 +224,7 @@ Header cells come before fixed-stride frame records.
 | `journalUpvals` | closure upvalue base pointer |
 | `journalHeap` | heap base pointer |
 | `journalNatives` | fixed per-function native-entry slot base |
+| `journalExitID` | fallback descriptor ID plus one; zero means no descriptor |
 | `journalHead...` | frame records `{addr, bp, ip, returns}` |
 
 On guard failure, native code writes live stack state, appends frame records, sets trap state, sets the resume IP, and returns to Go.
@@ -231,6 +232,28 @@ On guard failure, native code writes live stack state, appends frame records, se
 The Go wrapper rebuilds the VM state and resumes threaded execution.
 
 If the fallback IP is `0`, the wrapper runs the shadowed threaded entry handler once to avoid immediate native re-entry.
+
+### Lifecycle Profiling
+
+Observable profiling is enabled only by an explicit profiler or local
+collector option. Internal hotness sampling alone does not emit detailed rows.
+
+Each published native entry carries its frontend, own byte size, and immutable
+exit descriptors. Installation resolves stable local counters for entry, yield,
+and every descriptor. Native wrappers increment those handles directly; they do
+not construct labels.
+
+Every fallback creation site assigns a descriptor with a stable reason and
+source opcode. Generated code writes `descriptor ID + 1` to `journalExitID`
+before returning with `trapFallback`. The Go wrapper resolves that ID and counts
+the exact exit row. Zero means no descriptor. `trapYield` counts only a yield,
+and native frame overflow counts neither an exit nor a yield.
+
+Compile and emission ownership follows compilation ownership: a solo compiler
+records its result, while a shared cache records it only on the winning member.
+Peers install their own runtime counters without duplicating compile or emission
+rows. Collector flush preserves registered handles while moving accumulated
+values to the shared profiler.
 
 ## Speculation
 

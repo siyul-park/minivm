@@ -1,0 +1,122 @@
+# Task 3 report: Ranked profile report and documentation
+
+Status: DONE
+
+## Files
+
+- `cli/profile.go`: normalizes flat profiler metrics into a ranked report model and renders deterministic sample, JIT entry, exit, and miss sections.
+- `cli/profile_test.go`: covers repeated labeled rows, deterministic ties, percentages, top-10 limits, interpreted/not-attempted, compile-empty, emitted-unused, and yield exclusion.
+- `cli/repl.go`: removes the old direct flat metric renderer; `.profile` execution and side-effect behavior are unchanged.
+- `cli/repl_test.go`: updates empty/simple report expectations and retains the history/constants/types side-effect assertions.
+- `docs/profile.md`: documents aggregate and detailed metric schemas, ranked report sections, percentages, and lifecycle statuses.
+- `docs/jit-internals.md`: documents `journalExitID`, immutable exit descriptors, stable runtime counters, and cache-winner accounting.
+
+## TDD evidence
+
+### RED 1: normalized ranked report
+
+Command:
+
+```text
+go test ./cli -run '^TestPrintProfile$/normalizes_and_ranks_lifecycle_rows$' -count=1
+```
+
+Expected failure observed: the old renderer printed `functions`, per-function IPs, and `opcodes` directly, retained opcode input order, and omitted every detailed JIT section. The literal expected report differed at `hot functions`, `hot ips`, opcode tie order, `jit summary`, `jit entries`, `jit exit reasons`, and `jit misses`.
+
+GREEN:
+
+```text
+ok github.com/siyul-park/minivm/cli 0.456s
+```
+
+### RED 2: compile-empty union
+
+Command:
+
+```text
+go test ./cli -run '^TestPrintProfile$/keeps_compile_empty_and_zero_denominator_exits_visible$' -count=1
+```
+
+Expected failure observed: the compile miss existed, but the normalized entry model omitted the required `compile-empty` row:
+
+```text
+does not contain "4\t0007\tnone\tstatic\tcompile-empty\t1\t0\t0\t0"
+```
+
+GREEN:
+
+```text
+ok github.com/siyul-park/minivm/cli 0.446s
+```
+
+The same slice also verifies that an exit with no matching native entries prints `-` and that a yield count of `99` is absent from the report.
+
+## Verification
+
+Focused deterministic report run:
+
+```text
+go test ./cli -run '^TestPrintProfile$' -count=20
+ok github.com/siyul-park/minivm/cli 0.231s
+```
+
+Required CLI and command packages:
+
+```text
+go test ./cli/... ./cmd/minivm -count=1
+ok github.com/siyul-park/minivm/cli 0.419s
+?  github.com/siyul-park/minivm/cmd/minivm [no test files]
+```
+
+Final package set:
+
+```text
+go test ./asm/... ./prof ./interp ./cli/... ./cmd/minivm -count=1
+```
+
+All packages passed.
+
+Race verification:
+
+```text
+go test -race ./prof ./interp ./cli/... ./cmd/minivm -count=1
+```
+
+All packages passed.
+
+Additional checks:
+
+```text
+go vet ./cli/... ./cmd/minivm
+git diff --check
+```
+
+Both passed.
+
+## Benchmark comparison
+
+`make benchmark` was rerun through the comparable baseline cases. The remaining long benchmark run was stopped after the task coordinator confirmed it did not need to complete.
+
+| Benchmark | Baseline | Current | Difference |
+|---|---:|---:|---:|
+| `Fib20AllocJITWarmup` | 237472 ns/op, 390931 B/op, 3769 allocs/op | 239933 ns/op, 392165 B/op, 3787 allocs/op | +1.0% time, +0.3% bytes, +0.5% allocs |
+| `Fib35AllocJITSteady` | 47659488 ns/op, 0 B/op, 0 allocs/op | 47020945 ns/op, 0 B/op, 0 allocs/op | -1.3% time, allocation-neutral |
+| `JITIssue101/interp` | 1477 ns/op, 0 B/op, 0 allocs/op | 1463 ns/op, 0 B/op, 0 allocs/op | -0.9% time, allocation-neutral |
+
+The differences are within normal benchmark noise and the reporting change is outside runtime execution loops.
+
+## Completion-gate self-review
+
+- Re-read every touched code, test, and documentation file against `docs/coding-patterns.md` sections 0, 1, 2, 6, 7, and 8.
+- The report model retains exact metric keys, aggregates repeated exact rows, and sorts every ranked collection by count plus its full deterministic key.
+- Functions, each displayed function's IPs, opcodes, entries, exits, and misses are independently capped at 10.
+- Function/opcode, IP, and matching-entry exit denominators are explicit; zero denominators render `-`.
+- Samples without lifecycle rows become `interpreted/not-attempted`; only recorded capture or compile failures become misses.
+- The old renderer and now-unused helpers were removed rather than retained beside the new model.
+- Declaration order is private types, private constants, private methods, then caller-before-callee private functions.
+- A second simplification pass found no removable symbol or simpler control flow. Splitting normalization further would add coordination without removing complexity, so the cohesive report model remains in one file.
+- Broad local review found no Critical or Important spec or standards issues.
+
+## Concerns
+
+None.
