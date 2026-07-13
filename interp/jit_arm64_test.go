@@ -239,15 +239,57 @@ func TestNativeStackReserve(t *testing.T) {
 // TestCompiler_Compile covers compiler-selected static plans and verifies that
 // their native entries match threaded execution.
 func TestCompiler_Compile(t *testing.T) {
+	t.Run("attributes concrete guard exits to their opcode", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 8), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_DIV_S),
+		}, program.WithLocals(types.TypeI32))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+		c, err := newCompiler()
+		require.NoError(t, err)
+		defer c.Close()
+
+		result := c.Compile(i, anchor{})
+		require.NoError(t, result.err)
+		require.NotNil(t, result.module)
+		for _, exit := range result.module.entries[anchor{}].exits {
+			if exit.reason == prof.ExitGuardValue {
+				require.Equal(t, int(instr.I32_DIV_S), exit.opcode)
+				return
+			}
+		}
+		t.Fatal("missing guard-value exit")
+	})
+
 	t.Run("reports missing input", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
-		result := (&compiler{}).Compile(i, -1)
+		root := anchor{addr: -1, ip: 7}
+		result := (&compiler{}).Compile(i, root)
+		require.Equal(t, root, result.anchor)
 		require.Nil(t, result.module)
 		require.Equal(t, prof.FrontendNone, result.frontend)
 		require.Equal(t, prof.CompileOutcomeEmpty, result.outcome)
 		require.Equal(t, prof.CompileReasonNoInput, result.reason)
 		require.NoError(t, result.err)
+	})
+
+	t.Run("keeps the deepest deterministic failure", func(t *testing.T) {
+		deep := compileResult{frontend: prof.FrontendStatic, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonRegisterPressure}
+		shallow := []compileResult{
+			{frontend: prof.FrontendTrace, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan},
+			{frontend: prof.FrontendTrace, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonInvalidPlan},
+		}
+		for _, candidate := range shallow {
+			require.Equal(t, deep, deeperCompileResult(deep, candidate))
+		}
+		require.Equal(t,
+			compileResult{frontend: prof.FrontendTrace, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonBranchRange},
+			deeperCompileResult(deep, compileResult{frontend: prof.FrontendTrace, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonBranchRange}),
+		)
 	})
 
 	if runtime.GOARCH != "arm64" {
@@ -290,7 +332,7 @@ func TestCompiler_Compile(t *testing.T) {
 		defer c.Close()
 
 		addr := int(i.constants[idx].Ref())
-		result := c.Compile(i, addr)
+		result := c.Compile(i, anchor{addr: addr})
 		require.NoError(t, result.err)
 		mod := result.module
 		require.NotEmpty(t, mod.entries)
@@ -378,7 +420,7 @@ func TestCompiler_Compile(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 		addr := int(jit.constants[idx].Ref())
-		result := c.Compile(jit, addr)
+		result := c.Compile(jit, anchor{addr: addr})
 		require.NoError(t, result.err)
 		mod := result.module
 		require.NotEmpty(t, mod.entries)

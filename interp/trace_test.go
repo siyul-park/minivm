@@ -42,13 +42,25 @@ func TestTracer_Capture(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
 
 		local := prof.NewCollector()
-		plain := New(prog, WithLocal(local), WithThreshold(-1))
-		defer plain.Close()
-		result, err := plain.tracer.capture(plain, anchor{})
+		localVM := New(prog, WithLocal(local), WithThreshold(-1))
+		defer localVM.Close()
+		result, err := localVM.tracer.capture(localVM, anchor{})
 		require.NoError(t, err)
 		require.NotNil(t, result.trace)
 		require.Equal(t, prof.CaptureOutcomePublished, result.outcome)
 		_, ok := local.Metric("vm_jit_trace_captures_total",
+			prof.Label{Key: "func", Value: "0"},
+			prof.Label{Key: "ip", Value: "0"},
+			prof.Label{Key: "outcome", Value: "published"},
+			prof.Label{Key: "reason", Value: "none"},
+		)
+		require.True(t, ok)
+
+		plain := New(prog, WithThreshold(-1))
+		defer plain.Close()
+		_, err = plain.tracer.capture(plain, anchor{})
+		require.NoError(t, err)
+		_, ok = plain.samples.Metric("vm_jit_trace_captures_total",
 			prof.Label{Key: "func", Value: "0"},
 			prof.Label{Key: "ip", Value: "0"},
 			prof.Label{Key: "outcome", Value: "published"},
@@ -300,19 +312,21 @@ func TestTracer_Capture(t *testing.T) {
 		require.Nil(t, tracer.rootAt(anchor{}))
 	})
 
-	t.Run("records terminal set fast paths and rejects remaining array mutators", func(t *testing.T) {
-		tracer := NewTracer()
-		require.False(t, tracer.unrecordable(nil, instr.ARRAY_SET))
-		require.False(t, tracer.unrecordable(nil, instr.STRUCT_SET))
-		for _, op := range []instr.Opcode{
-			instr.ARRAY_FILL,
-			instr.ARRAY_COPY,
-			instr.ARRAY_APPEND,
-			instr.ARRAY_DELETE,
-			instr.ARRAY_SLICE,
-		} {
-			require.True(t, tracer.unrecordable(nil, op))
-		}
+	t.Run("rejects a nested terminal set with its stable reason", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{}).Emit(
+			instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_SET), instr.New(instr.RETURN),
+		).MustBuild()
+		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 1), instr.New(instr.CALL)},
+			program.WithConstants(types.TypedArray[int32]{0}, fn))
+		i := New(prog, WithThreshold(-1))
+		defer i.Close()
+
+		result, err := i.tracer.capture(i, anchor{})
+		require.NoError(t, err)
+		require.Nil(t, result.trace)
+		require.Equal(t, prof.CaptureOutcomeRejected, result.outcome)
+		require.Equal(t, prof.CaptureReasonNestedTerminal, result.reason)
 	})
 }
 

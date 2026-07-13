@@ -288,6 +288,54 @@ func TestPool_Get(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, float64(1), attempts)
 	})
+
+	t.Run("accounts only shared cache winners across flush and recompile", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		metrics := prof.New()
+		p := NewPool(program.New([]instr.Instruction{instr.New(instr.NOP)}), 3,
+			WithProfiler(metrics), WithThreshold(-1))
+		first, err := p.Get(context.Background())
+		require.NoError(t, err)
+		second, err := p.Get(context.Background())
+		require.NoError(t, err)
+		third, err := p.Get(context.Background())
+		require.NoError(t, err)
+
+		p.cache.ready(0)
+		firstRoot := anchor{ip: 7}
+		p.cache.rearm(firstRoot)
+		require.True(t, p.cache.due(0, 1))
+		require.Equal(t, firstRoot, p.cache.root(0))
+		require.NoError(t, first.compile(firstRoot))
+		second.sync()
+
+		secondRoot := anchor{ip: 9}
+		p.cache.rearm(secondRoot)
+		require.True(t, p.cache.due(0, 1))
+		require.Equal(t, secondRoot, p.cache.root(0))
+		require.NoError(t, third.compile(secondRoot))
+		p.Put(first)
+		p.Put(second)
+		p.Put(third)
+		require.NoError(t, p.Close())
+
+		for _, ip := range []string{"7", "9"} {
+			value, ok := metrics.Metric("vm_jit_compiles_total",
+				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: ip},
+				prof.Label{Key: "trigger", Value: "side-exit"}, prof.Label{Key: "frontend", Value: "static"},
+				prof.Label{Key: "outcome", Value: "emitted"}, prof.Label{Key: "reason", Value: "none"})
+			require.True(t, ok)
+			require.Equal(t, float64(1), value)
+		}
+		attempts, ok := metrics.Metric("vm_jit_attempts_total")
+		require.True(t, ok)
+		require.Equal(t, float64(2), attempts)
+		emits, ok := metrics.Metric("vm_jit_emits_total")
+		require.True(t, ok)
+		require.Equal(t, float64(2), emits)
+	})
 }
 
 func TestPool_Put(t *testing.T) {

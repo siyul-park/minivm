@@ -19,6 +19,7 @@ type Cache struct {
 	hits    []atomic.Int64
 	state   []atomic.Int32
 	side    []atomic.Bool
+	roots   []atomic.Int64
 	refs    atomic.Int64
 
 	mu     sync.Mutex
@@ -38,6 +39,7 @@ func NewCache(prog *program.Program) *Cache {
 		hits:  make([]atomic.Int64, size),
 		state: make([]atomic.Int32, size),
 		side:  make([]atomic.Bool, size),
+		roots: make([]atomic.Int64, size),
 	}
 	c.refs.Store(1)
 	c.modules.Store(&mods)
@@ -82,14 +84,24 @@ func (c *Cache) due(addr int, threshold int64) bool {
 
 // rearm returns a ready function to cold so due owns the next build transition
 // after a hot side exit grows the trace tree.
-func (c *Cache) rearm(addr int) {
+func (c *Cache) rearm(root anchor) {
+	addr := root.addr
 	if addr < 0 || addr >= len(c.state) {
 		return
 	}
 	c.side[addr].Store(true)
+	c.roots[addr].Store(int64(root.ip))
 	if !c.state[addr].CompareAndSwap(cacheReady, cacheCold) && c.state[addr].Load() == cacheReady {
 		c.side[addr].Store(false)
 	}
+}
+
+func (c *Cache) root(addr int) anchor {
+	root := anchor{addr: addr}
+	if addr >= 0 && addr < len(c.roots) {
+		root.ip = int(c.roots[addr].Load())
+	}
+	return root
 }
 
 func (c *Cache) fail(addr int) {

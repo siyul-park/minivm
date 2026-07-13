@@ -1203,7 +1203,7 @@ func (l arm64Lowerer) arrayGetKnown(ctx *lowering, op step) bool {
 	}
 	clear(ctx.frame().loaded)
 	clear(ctx.frame().dirty)
-	fail := ctx.queueExit(nil, op.ip, constant, prof.ExitGuardValue, prof.OpcodeNone)
+	fail := ctx.queueExit(nil, op.ip, constant, prof.ExitGuardValue, int(op.op))
 
 	a := ctx.assembler
 	heap := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -2273,7 +2273,7 @@ func (l arm64Lowerer) copysign(ctx *lowering, kind types.Kind) bool {
 
 // guardI64 deopts when v is a heap-promoted i64.
 func (l arm64Lowerer) guardI64(ctx *lowering, v asm.VReg, ip int) bool {
-	fail, ok := l.sideExit(ctx, ctx.values, ip, prof.ExitGuardKind, prof.OpcodeNone)
+	fail, ok := l.sideExit(ctx, ctx.values, ip, prof.ExitGuardKind, ctx.opcode(ip))
 	if !ok {
 		return false
 	}
@@ -2300,7 +2300,7 @@ func (l arm64Lowerer) guardDivisor(ctx *lowering, divisor value, reg asm.VReg, o
 	if divisor.known && divisor.imm != 0 || guarded {
 		return true
 	}
-	fail, ok := l.sideExit(ctx, ctx.values, ip, prof.ExitGuardValue, prof.OpcodeNone)
+	fail, ok := l.sideExit(ctx, ctx.values, ip, prof.ExitGuardValue, ctx.opcode(ip))
 	if !ok {
 		return false
 	}
@@ -2311,7 +2311,7 @@ func (l arm64Lowerer) guardDivisor(ctx *lowering, divisor value, reg asm.VReg, o
 
 // boxableI64 keeps raw i64 values within the boxed 49-bit lane.
 func (l arm64Lowerer) boxableI64(ctx *lowering, raw asm.VReg, ip int) bool {
-	fail, ok := l.sideExit(ctx, ctx.values, ip, prof.ExitGuardValue, prof.OpcodeNone)
+	fail, ok := l.sideExit(ctx, ctx.values, ip, prof.ExitGuardValue, ctx.opcode(ip))
 	if !ok {
 		return false
 	}
@@ -2329,7 +2329,7 @@ func (l arm64Lowerer) guardBoxable(ctx *lowering, v asm.VReg, fail asm.Label) {
 // guardRaw keeps observed narrow inputs speculative: a different runtime value
 // exits before the opcode, so the threaded handler owns the general case.
 func (l arm64Lowerer) guardRaw(ctx *lowering, got asm.VReg, val uint64, ip int) bool {
-	fail, ok := l.sideExit(ctx, ctx.values, ip, prof.ExitGuardValue, prof.OpcodeNone)
+	fail, ok := l.sideExit(ctx, ctx.values, ip, prof.ExitGuardValue, ctx.opcode(ip))
 	if !ok {
 		return false
 	}
@@ -3926,7 +3926,7 @@ func (arm64Lowerer) guardRC(ctx *lowering, addr, rcBase asm.VReg, fail asm.Label
 
 // releaseRef decrements addr after guardRC proves it will stay live.
 func (l arm64Lowerer) releaseRef(ctx *lowering, addr asm.VReg, pre []value, ip int) {
-	fail, ok := l.sideExit(ctx, pre, ip, prof.ExitGuardValue, prof.OpcodeNone)
+	fail, ok := l.sideExit(ctx, pre, ip, prof.ExitGuardValue, ctx.opcode(ip))
 	if !ok {
 		return
 	}

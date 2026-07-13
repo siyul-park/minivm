@@ -102,3 +102,48 @@ All commands passed. The final post-edit `go test ./interp -count=1` and focused
 
 - The identity machinery and representative native entry/terminal fallback paths are directly tested, and the full existing ARM64/race suites pass. New dedicated assertions were not added for every requested guard category, loop exit, yield, and overflow metric row; those paths share the tested descriptor/handle plumbing but retain some coverage reliance on the existing native behavior suite.
 - CodeGraph was not initialized in this worktree. Its MCP response explicitly warned that the available index belonged to the main worktree, so structural exploration used focused local reads after recording that limitation.
+
+## Reviewer fix pass
+
+Status: DONE
+
+### Focused RED/GREEN evidence
+
+- Explicit `WithLocal` observability:
+  - RED: `go test ./interp -run '^TestTracer_Capture$/reports_one_published_attempt_only_when_profiling_is_explicit$' -count=1`
+  - Observed failure: `trace_test.go:57: Should be true`; the injected collector did not receive the capture row.
+  - GREEN: same command passed after constructor options preserved explicit local-collector intent while default internal sampling remained off.
+- Deterministic compiler failure depth:
+  - RED: `go test ./interp -run '^TestCompiler_Compile$/keeps_the_deepest_deterministic_failure$' -count=1`
+  - Observed build failure: `undefined: deeperCompileResult`.
+  - GREEN: same command passed with explicit precedence: no-input/no-plan < invalid-plan < lowering/backend < register-pressure < branch-range < hard error; frontend order breaks equal-depth ties.
+- Compiler anchor API:
+  - RED: `go test ./interp -run '^TestCompiler_Compile$/reports_missing_input$' -count=1`
+  - Observed build failure: `cannot use root ... as int` and `result.anchor undefined`.
+  - GREEN: same command passed after `Compile` accepted/carried `anchor`; hot-loop and shared side-exit callers now preserve root IP, including cache rearm ownership.
+- Concrete guard opcode:
+  - RED: `go test ./interp -run '^TestCompiler_Compile$/attributes_concrete_guard_exits_to_their_opcode$' -count=1`
+  - Observed failure: expected `I32_DIV_S` (`38`), got `OpcodeNone` (`-1`).
+  - GREEN: same command passed after guard helpers resolved source opcode from the current lowering frame; all concrete side-exit creation sites now avoid `OpcodeNone`.
+- Nested terminal set:
+  - RED: `go test ./interp -run '^TestTracer_Capture$/rejects_a_nested_terminal_set_with_its_stable_reason$' -count=1`
+  - Observed failure: expected `nested-terminal`, got `unsupported-op`.
+  - GREEN: same command passed after nested `ARRAY_SET`/`STRUCT_SET` rejection assigned `CaptureReasonNestedTerminal`.
+
+### Added direct accounting assertions
+
+- `TestWithProfiler` now directly checks every native exit reason row, loop-entry identity, yield-only accounting, and overflow counting neither exit nor yield.
+- `TestPool_Get` now checks two exact side-exit compile rows at distinct root IPs, winner-only aggregate attempts/emits, peer installation, flush, and recompile accounting.
+- The private-shape `unrecordable` wrapper and its direct predicate test were removed; unsupported and nested-terminal behavior is asserted through `Tracer.capture`.
+
+### Final verification after reviewer fixes
+
+```text
+go test ./prof ./interp -count=1
+go test -race ./interp -count=1
+GOARCH=amd64 go test ./interp -run '^(TestWithProfiler|TestTracer_Capture|TestCompiler_Compile)$' -count=1
+go vet ./interp
+git diff --check
+```
+
+All passed. No remaining concerns from the reviewer list.

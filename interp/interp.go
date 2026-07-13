@@ -91,6 +91,7 @@ type option struct {
 	tracer     *Tracer
 	profiler   *prof.Profiler
 	samples    *prof.Collector
+	profile    bool
 	threshold  int
 	cutoff     int
 
@@ -138,13 +139,13 @@ func WithTracer(t *Tracer) func(*option) {
 // hotness but no profile is collected. Pass the same Profiler to NewPool so every
 // pooled interpreter shares it.
 func WithProfiler(p *prof.Profiler) func(*option) {
-	return func(o *option) { o.profiler = p }
+	return func(o *option) { o.profiler, o.profile = p, true }
 }
 
 // WithLocal injects a pre-seeded sample collector. Tests use it to drive hot-IP
 // selection and to read JIT counters back after a run.
 func WithLocal(p *prof.Collector) func(*option) {
-	return func(o *option) { o.samples = p }
+	return func(o *option) { o.samples, o.profile = p, true }
 }
 
 func WithFrame(val int) func(*option) {
@@ -241,7 +242,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		cache:     opt.cache,
 		profiler:  opt.profiler,
 		samples:   samples,
-		profile:   opt.profiler != nil,
+		profile:   opt.profile,
 		threshold: threshold,
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
@@ -770,26 +771,27 @@ func (i *Interpreter) Reset() {
 // compile lowers traces already recorded for addr and installs the resulting
 // native entries. Recording belongs to observe and side-exit handling because
 // only those paths hold the exact runtime state for their anchor.
-func (i *Interpreter) compile(addr int) error {
+func (i *Interpreter) compile(root anchor) error {
+	addr := root.addr
 	if i.cache != nil && !i.dynamic[addr] {
-		return i.shared(addr, i.cache.trigger(addr))
+		return i.shared(root, i.cache.trigger(addr))
 	}
 	if i.compiler == nil {
 		compiler, err := newCompiler()
 		if err != nil {
 			i.samples.AddMetric("vm_jit_errors_total", 1)
-			i.recordCompile(addr, 0, prof.TriggerHot, compileResult{outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err})
+			i.recordCompile(prof.TriggerHot, compileResult{anchor: root, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err})
 			return err
 		}
 		i.compiler = compiler
 	}
 	if i.compiler == nil {
-		i.recordCompile(addr, 0, prof.TriggerHot, compileResult{outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonBackendUnavailable})
+		i.recordCompile(prof.TriggerHot, compileResult{anchor: root, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonBackendUnavailable})
 		return nil
 	}
 	i.samples.AddMetric("vm_jit_attempts_total", 1)
-	result := i.compiler.Compile(i, addr)
-	i.recordCompile(addr, 0, prof.TriggerHot, result)
+	result := i.compiler.Compile(i, root)
+	i.recordCompile(prof.TriggerHot, result)
 	if result.err != nil {
 		i.samples.AddMetric("vm_jit_errors_total", 1)
 		return result.err
@@ -801,22 +803,23 @@ func (i *Interpreter) compile(addr int) error {
 	return nil
 }
 
-func (i *Interpreter) shared(addr int, trigger prof.Trigger) error {
+func (i *Interpreter) shared(root anchor, trigger prof.Trigger) error {
+	addr := root.addr
 	compiler, err := newCompiler()
 	if err != nil {
 		i.samples.AddMetric("vm_jit_errors_total", 1)
-		i.recordCompile(addr, 0, trigger, compileResult{outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err})
+		i.recordCompile(trigger, compileResult{anchor: root, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err})
 		i.cache.ready(addr)
 		return err
 	}
 	if compiler == nil {
-		i.recordCompile(addr, 0, trigger, compileResult{outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonBackendUnavailable})
+		i.recordCompile(trigger, compileResult{anchor: root, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonBackendUnavailable})
 		i.cache.ready(addr)
 		return nil
 	}
 	i.samples.AddMetric("vm_jit_attempts_total", 1)
-	result := compiler.Compile(i, addr)
-	i.recordCompile(addr, 0, trigger, result)
+	result := compiler.Compile(i, root)
+	i.recordCompile(trigger, result)
 	if result.err != nil {
 		i.samples.AddMetric("vm_jit_errors_total", 1)
 		_ = compiler.Close()
@@ -904,9 +907,9 @@ func (i *Interpreter) account(mod *module) {
 	}
 }
 
-func (i *Interpreter) recordCompile(addr, ip int, trigger prof.Trigger, result compileResult) {
+func (i *Interpreter) recordCompile(trigger prof.Trigger, result compileResult) {
 	if i.profile {
-		i.samples.RecordCompile(addr, ip, trigger, result.frontend, result.outcome, result.reason)
+		i.samples.RecordCompile(result.anchor.addr, result.anchor.ip, trigger, result.frontend, result.outcome, result.reason)
 	}
 }
 
@@ -1002,7 +1005,7 @@ func (i *Interpreter) safepoint() error {
 	// peer published and rearm after a hot side exit. Both are ~1 atomic when idle.
 	if i.cache != nil {
 		if i.cache.due(f.addr, i.threshold) {
-			if err := i.compile(f.addr); err != nil {
+			if err := i.compile(i.cache.root(f.addr)); err != nil {
 				return err
 			}
 		}
@@ -1044,7 +1047,7 @@ func (i *Interpreter) observe(f *frame) error {
 				return err
 			}
 			if result.trace != nil {
-				if err := i.compile(f.addr); err != nil {
+				if err := i.compile(anchor{addr: f.addr, ip: f.ip}); err != nil {
 					return err
 				}
 			}
@@ -1053,7 +1056,7 @@ func (i *Interpreter) observe(f *frame) error {
 	}
 	if i.cache == nil && i.threshold >= 0 && samples >= uint64(i.threshold) && !i.tried[f.addr] {
 		i.tried[f.addr] = true
-		if err := i.compile(f.addr); err != nil {
+		if err := i.compile(anchor{addr: f.addr}); err != nil {
 			return err
 		}
 	}
@@ -1222,7 +1225,7 @@ func (i *Interpreter) exit(root anchor) {
 		if hits < exitThreshold || hits%exitThreshold != 0 {
 			return
 		}
-		i.cache.rearm(root.addr)
+		i.cache.rearm(root)
 		return
 	}
 	if hits != exitThreshold {
@@ -1232,8 +1235,8 @@ func (i *Interpreter) exit(root anchor) {
 		return
 	}
 	i.samples.AddMetric("vm_jit_attempts_total", 1)
-	result := i.compiler.Compile(i, root.addr)
-	i.recordCompile(root.addr, root.ip, prof.TriggerSideExit, result)
+	result := i.compiler.Compile(i, root)
+	i.recordCompile(prof.TriggerSideExit, result)
 	if result.err != nil {
 		i.samples.AddMetric("vm_jit_errors_total", 1)
 		panic(result.err)

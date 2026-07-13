@@ -44,6 +44,7 @@ type entryMetrics struct {
 
 type compileResult struct {
 	module   *module
+	anchor   anchor
 	frontend prof.Frontend
 	outcome  prof.CompileOutcome
 	reason   prof.CompileReason
@@ -266,42 +267,67 @@ func (c *compiler) publish(mod *module, a anchor, ctx *lowering, arch asm.Arch, 
 }
 
 // Compile selects and lowers the first frontend that emits native code.
-func (c *compiler) Compile(i *Interpreter, addr int) compileResult {
-	input, ok := newCompileInput(i, addr)
+func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
+	input, ok := newCompileInput(i, root.addr)
 	if !ok {
-		return compileResult{outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoInput}
+		return compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoInput}
 	}
 	frontends := [...]struct {
 		kind prof.Frontend
 		plan func(*compileInput) ([]plan, error)
 	}{{prof.FrontendStatic, staticPlan}, {prof.FrontendTrace, tracePlan}}
-	result := compileResult{outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan}
+	result := compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan}
 	for _, frontend := range frontends {
 		plans, err := frontend.plan(input)
 		if err != nil {
-			return compileResult{frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
+			return compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
 		}
-		result = compileResult{frontend: frontend.kind, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan}
+		result = deeperCompileResult(result, compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan})
 		mod := &module{entries: map[anchor]native{}}
 		for _, plan := range plans {
 			if !plan.valid() {
-				result = compileResult{frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonInvalidPlan}
+				result = deeperCompileResult(result, compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonInvalidPlan})
 				continue
 			}
 			reason, err := c.compile(input, plan, mod, frontend.kind)
 			if err != nil {
-				return compileResult{frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
+				return compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
 			}
 			if reason != prof.CompileReasonNone {
-				result = compileResult{frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: reason}
+				result = deeperCompileResult(result, compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: reason})
 				continue
 			}
 		}
 		if len(mod.entries) > 0 {
-			return compileResult{module: mod, frontend: frontend.kind, outcome: prof.CompileOutcomeEmitted}
+			return compileResult{module: mod, anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeEmitted}
 		}
 	}
 	return result
+}
+
+func deeperCompileResult(current, candidate compileResult) compileResult {
+	if compileDepth(candidate.reason) > compileDepth(current.reason) ||
+		compileDepth(candidate.reason) == compileDepth(current.reason) && candidate.frontend > current.frontend {
+		return candidate
+	}
+	return current
+}
+
+func compileDepth(reason prof.CompileReason) int {
+	switch reason {
+	case prof.CompileReasonInvalidPlan:
+		return 1
+	case prof.CompileReasonLoweringRejected, prof.CompileReasonBackendUnavailable:
+		return 2
+	case prof.CompileReasonRegisterPressure:
+		return 3
+	case prof.CompileReasonBranchRange:
+		return 4
+	case prof.CompileReasonError:
+		return 5
+	default:
+		return 0
+	}
 }
 
 func (c *compiler) compile(input *compileInput, plan plan, mod *module, frontend prof.Frontend) (prof.CompileReason, error) {
@@ -367,6 +393,14 @@ func (ctx *lowering) slot(idx int) int {
 func (ctx *lowering) sp() int {
 	f := ctx.frame()
 	return f.base + len(f.kinds) + (len(ctx.values) - f.opBase)
+}
+
+func (ctx *lowering) opcode(ip int) int {
+	fn := resolve(ctx.module, ctx.heap, ctx.frame().addr)
+	if fn == nil || ip < 0 || ip >= len(fn.Code) {
+		return prof.OpcodeNone
+	}
+	return int(fn.Code[ip])
 }
 
 // snapshot deep-copies operand and frame state for a deferred branch. Callers

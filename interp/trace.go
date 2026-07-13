@@ -240,6 +240,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 		if op == instr.ARRAY_SET || op == instr.STRUCT_SET {
 			if clone.fp != startFP {
 				t.kind = aborted
+				result.reason = prof.CaptureReasonNestedTerminal
 				break
 			}
 			t.kind = returned
@@ -621,10 +622,6 @@ func (r *Tracer) exitIndex(tree *tree, target anchor) int {
 	tree.exits[target] = idx
 	tree.hits = append(tree.hits, 0)
 	return idx
-}
-
-func (r *Tracer) unrecordable(i *Interpreter, op instr.Opcode) bool {
-	return r.unrecordableReason(i, op) != prof.CaptureReasonNone
 }
 
 func (r *Tracer) unrecordableReason(i *Interpreter, op instr.Opcode) prof.CaptureReason {

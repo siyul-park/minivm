@@ -41,12 +41,12 @@ func TestCache_Rearm(t *testing.T) {
 
 	require.True(t, cache.due(0, 1))
 	cache.ready(0)
-	cache.rearm(0)
+	cache.rearm(anchor{})
 	require.True(t, cache.due(0, 1))
 	cache.ready(0)
-	cache.rearm(0)
+	cache.rearm(anchor{})
 	require.Equal(t, cacheCold, cache.state[0].Load())
-	cache.rearm(2)
+	cache.rearm(anchor{addr: 2})
 }
 
 func TestCache_Close(t *testing.T) {
