@@ -636,220 +636,220 @@ The inventory includes exported functions and exported methods on exported recei
 
 ## Opcode Ownership Matrix
 
-`Metadata / parse` and `Runtime corpus` are enforced now. `Runtime error` records whether the current shared corpus contains an error-bearing row that includes the opcode; Phase 6 reviews whether an opcode-specific error case is applicable. `ARM64 parity` tracks test work, not backend capability; capability remains owned by `docs/instruction-set.md`.
+`Metadata / parse` and `Runtime success` are enforced for every registered opcode. `Runtime error` is checked only where the shared corpus owns an error-bearing row; `—` means the opcode is currently specified through successful execution. `ARM64 parity` records exact differential scope, not backend capability; capability remains owned by `docs/instruction-set.md`.
 
 | Opcode | Mnemonic | Metadata / parse | Verifier policy | Runtime success | Runtime error | ARM64 capability | ARM64 parity |
 |---|---|---:|---|---:|---|---:|---|
-| `NOP` | `nop` | ✅ | fixed zero | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `UNREACHABLE` | `unreachable` | ✅ | terminator | Review in Phase 6 | ✅ | ◐ | Phase 6 |
-| `DROP` | `drop` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `DUP` | `dup` | ✅ | explicit | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `SWAP` | `swap` | ✅ | explicit | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `BR` | `br` | ✅ | fixed zero | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `BR_IF` | `br_if` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `BR_TABLE` | `br_table` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `SELECT` | `select` | ✅ | explicit | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `CALL` | `call` | ✅ | callee signature | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `RETURN` | `return` | ✅ | return arity | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `RETURN_CALL` | `return_call` | ✅ | callee signature | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `YIELD` | `yield` | ✅ | fixed metadata | ✅ | ✅ | ◐ | Phase 6 |
-| `RESUME` | `resume` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `CORO_DONE` | `coro.done` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `CORO_VALUE` | `coro.value` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `GLOBAL_GET` | `global.get` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `GLOBAL_SET` | `global.set` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `GLOBAL_TEE` | `global.tee` | ✅ | explicit | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `LOCAL_GET` | `local.get` | ✅ | declared local | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `LOCAL_SET` | `local.set` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `LOCAL_TEE` | `local.tee` | ✅ | explicit | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `CONST_GET` | `const.get` | ✅ | constant kind | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `UPVAL_GET` | `upval.get` | ✅ | declared capture | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `UPVAL_SET` | `upval.set` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `REF_NULL` | `ref.null` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `REF_NEW` | `ref.new` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `REF_GET` | `ref.get` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `REF_SET` | `ref.set` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `REF_TEST` | `ref.test` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `REF_CAST` | `ref.cast` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `REF_IS_NULL` | `ref.is_null` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `REF_EQ` | `ref.eq` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `REF_NE` | `ref.ne` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `I32_CONST` | `i32.const` | ✅ | fixed metadata | ✅ | ✅ | ✅ | Phase 6 |
-| `I32_ADD` | `i32.add` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_SUB` | `i32.sub` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_MUL` | `i32.mul` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_DIV_S` | `i32.div_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_DIV_U` | `i32.div_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_REM_S` | `i32.rem_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_REM_U` | `i32.rem_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_SHL` | `i32.shl` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_SHR_S` | `i32.shr_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_SHR_U` | `i32.shr_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_XOR` | `i32.xor` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_AND` | `i32.and` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_OR` | `i32.or` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_CLZ` | `i32.clz` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_CTZ` | `i32.ctz` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_POPCNT` | `i32.popcnt` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_ROTL` | `i32.rotl` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_ROTR` | `i32.rotr` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_EXTEND8_S` | `i32.extend8_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_EXTEND16_S` | `i32.extend16_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_EQZ` | `i32.eqz` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_EQ` | `i32.eq` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_NE` | `i32.ne` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_LT_S` | `i32.lt_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_LT_U` | `i32.lt_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_GT_S` | `i32.gt_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_GT_U` | `i32.gt_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_LE_S` | `i32.le_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_LE_U` | `i32.le_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_GE_S` | `i32.ge_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_GE_U` | `i32.ge_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_TO_I64_S` | `i32.to_i64_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_TO_I64_U` | `i32.to_i64_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_TO_F32_U` | `i32.to_f32_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_TO_F32_S` | `i32.to_f32_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_TO_F64_U` | `i32.to_f64_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_TO_F64_S` | `i32.to_f64_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I32_REINTERPRET_F32` | `i32.reinterpret_f32` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_CONST` | `i64.const` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `I64_ADD` | `i64.add` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_SUB` | `i64.sub` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_MUL` | `i64.mul` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_DIV_S` | `i64.div_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_DIV_U` | `i64.div_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_REM_S` | `i64.rem_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_REM_U` | `i64.rem_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_SHL` | `i64.shl` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_SHR_S` | `i64.shr_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_SHR_U` | `i64.shr_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_XOR` | `i64.xor` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_AND` | `i64.and` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_OR` | `i64.or` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_CLZ` | `i64.clz` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_CTZ` | `i64.ctz` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_POPCNT` | `i64.popcnt` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_ROTL` | `i64.rotl` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_ROTR` | `i64.rotr` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_EXTEND8_S` | `i64.extend8_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_EXTEND16_S` | `i64.extend16_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_EXTEND32_S` | `i64.extend32_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_EQZ` | `i64.eqz` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_EQ` | `i64.eq` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_NE` | `i64.ne` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_LT_S` | `i64.lt_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_LT_U` | `i64.lt_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_GT_S` | `i64.gt_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_GT_U` | `i64.gt_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_LE_S` | `i64.le_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_LE_U` | `i64.le_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_GE_S` | `i64.ge_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_GE_U` | `i64.ge_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_TO_I32` | `i64.to_i32` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_TO_F32_S` | `i64.to_f32_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_TO_F32_U` | `i64.to_f32_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_TO_F64_S` | `i64.to_f64_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_TO_F64_U` | `i64.to_f64_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `I64_REINTERPRET_F64` | `i64.reinterpret_f64` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_CONST` | `f32.const` | ✅ | fixed metadata | ✅ | ✅ | ✅ | Phase 6 |
-| `F32_ADD` | `f32.add` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_SUB` | `f32.sub` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_MUL` | `f32.mul` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_DIV` | `f32.div` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_REM` | `f32.rem` | ✅ | fixed metadata | ✅ | ✅ | ◐ | Phase 6 |
-| `F32_MOD` | `f32.mod` | ✅ | fixed metadata | ✅ | ✅ | ◐ | Phase 6 |
-| `F32_ABS` | `f32.abs` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_NEG` | `f32.neg` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_SQRT` | `f32.sqrt` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_CEIL` | `f32.ceil` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_FLOOR` | `f32.floor` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_TRUNC` | `f32.trunc` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_NEAREST` | `f32.nearest` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_MIN` | `f32.min` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_MAX` | `f32.max` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_COPYSIGN` | `f32.copysign` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_EQ` | `f32.eq` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_NE` | `f32.ne` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_LT` | `f32.lt` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_GT` | `f32.gt` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_LE` | `f32.le` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_GE` | `f32.ge` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_TO_I32_S` | `f32.to_i32_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_TO_I32_U` | `f32.to_i32_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_TO_I64_S` | `f32.to_i64_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_TO_I64_U` | `f32.to_i64_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_TO_F64` | `f32.to_f64` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F32_REINTERPRET_I32` | `f32.reinterpret_i32` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_CONST` | `f64.const` | ✅ | fixed metadata | ✅ | ✅ | ✅ | Phase 6 |
-| `F64_ADD` | `f64.add` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_SUB` | `f64.sub` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_MUL` | `f64.mul` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_DIV` | `f64.div` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_REM` | `f64.rem` | ✅ | fixed metadata | ✅ | ✅ | ◐ | Phase 6 |
-| `F64_MOD` | `f64.mod` | ✅ | fixed metadata | ✅ | ✅ | ◐ | Phase 6 |
-| `F64_ABS` | `f64.abs` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_NEG` | `f64.neg` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_SQRT` | `f64.sqrt` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_CEIL` | `f64.ceil` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_FLOOR` | `f64.floor` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_TRUNC` | `f64.trunc` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_NEAREST` | `f64.nearest` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_MIN` | `f64.min` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_MAX` | `f64.max` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_COPYSIGN` | `f64.copysign` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_EQ` | `f64.eq` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_NE` | `f64.ne` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_LT` | `f64.lt` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_GT` | `f64.gt` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_LE` | `f64.le` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_GE` | `f64.ge` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_TO_I32_S` | `f64.to_i32_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_TO_I32_U` | `f64.to_i32_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_TO_I64_S` | `f64.to_i64_s` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_TO_I64_U` | `f64.to_i64_u` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_TO_F32` | `f64.to_f32` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `F64_REINTERPRET_I64` | `f64.reinterpret_i64` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `STRING_NEW_UTF32` | `string.new_utf32` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `STRING_LEN` | `string.len` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `STRING_CONCAT` | `string.concat` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `STRING_EQ` | `string.eq` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `STRING_NE` | `string.ne` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `STRING_LT` | `string.lt` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `STRING_GT` | `string.gt` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `STRING_LE` | `string.le` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `STRING_GE` | `string.ge` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `STRING_ENCODE_UTF32` | `string.encode_utf32` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `ARRAY_NEW` | `array.new` | ✅ | fixed metadata | ✅ | ✅ | ⬜ | Fallback review in Phase 6 |
-| `ARRAY_NEW_DEFAULT` | `array.new_default` | ✅ | fixed metadata | ✅ | ✅ | ⬜ | Fallback review in Phase 6 |
-| `ARRAY_LEN` | `array.len` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `ARRAY_GET` | `array.get` | ✅ | fixed metadata | ✅ | ✅ | ✅ | Phase 6 |
-| `ARRAY_SET` | `array.set` | ✅ | fixed metadata | ✅ | ✅ | ◐ | Phase 6 |
-| `ARRAY_FILL` | `array.fill` | ✅ | fixed metadata | ✅ | ✅ | ⬜ | Fallback review in Phase 6 |
-| `ARRAY_COPY` | `array.copy` | ✅ | fixed metadata | ✅ | ✅ | ⬜ | Fallback review in Phase 6 |
-| `ARRAY_APPEND` | `array.append` | ✅ | indeterminate arity | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `ARRAY_DELETE` | `array.delete` | ✅ | fixed metadata | ✅ | ✅ | ⬜ | Fallback review in Phase 6 |
-| `ARRAY_SLICE` | `array.slice` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `STRUCT_NEW` | `struct.new` | ✅ | declared fields | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `STRUCT_NEW_DEFAULT` | `struct.new_default` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `STRUCT_GET` | `struct.get` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `STRUCT_SET` | `struct.set` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `MAP_NEW` | `map.new` | ✅ | indeterminate arity | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `MAP_NEW_DEFAULT` | `map.new_default` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `MAP_LEN` | `map.len` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `MAP_GET` | `map.get` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `MAP_LOOKUP` | `map.lookup` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `MAP_SET` | `map.set` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `MAP_DELETE` | `map.delete` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `MAP_CLEAR` | `map.clear` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `MAP_KEYS` | `map.keys` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `CLOSURE_NEW` | `closure.new` | ✅ | indeterminate arity | ✅ | Review in Phase 6 | ⬜ | Fallback review in Phase 6 |
-| `MAP_ITER` | `map.iter` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `THROW` | `throw` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `ERROR_NEW` | `error.new` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `ERROR_GET` | `error.get` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ✅ | Phase 6 |
-| `ERROR_CODE` | `error.code` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ◐ | Phase 6 |
-| `STRING_ITER` | `string.iter` | ✅ | fixed metadata | ✅ | Review in Phase 6 | ◐ | Phase 6 |
+| `NOP` | `nop` | ✅ | fixed zero | ✅ | — | ✅ | Runtime corpus only |
+| `UNREACHABLE` | `unreachable` | ✅ | terminator | Review in Phase 6 | ✅ | ◐ | Runtime corpus only |
+| `DROP` | `drop` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `DUP` | `dup` | ✅ | explicit | ✅ | — | ✅ | Runtime corpus only |
+| `SWAP` | `swap` | ✅ | explicit | ✅ | — | ✅ | Runtime corpus only |
+| `BR` | `br` | ✅ | fixed zero | ✅ | — | ✅ | Runtime corpus only |
+| `BR_IF` | `br_if` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
+| `BR_TABLE` | `br_table` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
+| `SELECT` | `select` | ✅ | explicit | ✅ | — | ✅ | Runtime corpus only |
+| `CALL` | `call` | ✅ | callee signature | ✅ | — | ◐ | Representative differential |
+| `RETURN` | `return` | ✅ | return arity | ✅ | — | ✅ | Representative differential |
+| `RETURN_CALL` | `return_call` | ✅ | callee signature | ✅ | — | ◐ | Runtime corpus only |
+| `YIELD` | `yield` | ✅ | fixed metadata | ✅ | ✅ | ◐ | Representative differential |
+| `RESUME` | `resume` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
+| `CORO_DONE` | `coro.done` | ✅ | fixed metadata | ✅ | — | ✅ | Representative differential |
+| `CORO_VALUE` | `coro.value` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `GLOBAL_GET` | `global.get` | ✅ | fixed metadata | ✅ | — | ✅ | Representative differential |
+| `GLOBAL_SET` | `global.set` | ✅ | fixed metadata | ✅ | — | ✅ | Representative differential |
+| `GLOBAL_TEE` | `global.tee` | ✅ | explicit | ✅ | — | ✅ | Runtime corpus only |
+| `LOCAL_GET` | `local.get` | ✅ | declared local | ✅ | — | ✅ | Runtime corpus only |
+| `LOCAL_SET` | `local.set` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `LOCAL_TEE` | `local.tee` | ✅ | explicit | ✅ | — | ✅ | Runtime corpus only |
+| `CONST_GET` | `const.get` | ✅ | constant kind | ✅ | — | ◐ | Representative differential |
+| `UPVAL_GET` | `upval.get` | ✅ | declared capture | ✅ | — | ✅ | Runtime corpus only |
+| `UPVAL_SET` | `upval.set` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `REF_NULL` | `ref.null` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `REF_NEW` | `ref.new` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `REF_GET` | `ref.get` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `REF_SET` | `ref.set` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `REF_TEST` | `ref.test` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `REF_CAST` | `ref.cast` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `REF_IS_NULL` | `ref.is_null` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `REF_EQ` | `ref.eq` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `REF_NE` | `ref.ne` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `I32_CONST` | `i32.const` | ✅ | fixed metadata | ✅ | ✅ | ✅ | Representative differential |
+| `I32_ADD` | `i32.add` | ✅ | fixed metadata | ✅ | — | ✅ | Bounded differential fuzz |
+| `I32_SUB` | `i32.sub` | ✅ | fixed metadata | ✅ | — | ✅ | Bounded differential fuzz |
+| `I32_MUL` | `i32.mul` | ✅ | fixed metadata | ✅ | — | ✅ | Bounded differential fuzz |
+| `I32_DIV_S` | `i32.div_s` | ✅ | fixed metadata | ✅ | — | ✅ | Representative differential |
+| `I32_DIV_U` | `i32.div_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_REM_S` | `i32.rem_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_REM_U` | `i32.rem_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_SHL` | `i32.shl` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_SHR_S` | `i32.shr_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_SHR_U` | `i32.shr_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_XOR` | `i32.xor` | ✅ | fixed metadata | ✅ | — | ✅ | Bounded differential fuzz |
+| `I32_AND` | `i32.and` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_OR` | `i32.or` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_CLZ` | `i32.clz` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_CTZ` | `i32.ctz` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_POPCNT` | `i32.popcnt` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_ROTL` | `i32.rotl` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_ROTR` | `i32.rotr` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_EXTEND8_S` | `i32.extend8_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_EXTEND16_S` | `i32.extend16_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_EQZ` | `i32.eqz` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_EQ` | `i32.eq` | ✅ | fixed metadata | ✅ | — | ✅ | Bounded differential fuzz |
+| `I32_NE` | `i32.ne` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_LT_S` | `i32.lt_s` | ✅ | fixed metadata | ✅ | — | ✅ | Bounded differential fuzz |
+| `I32_LT_U` | `i32.lt_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_GT_S` | `i32.gt_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_GT_U` | `i32.gt_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_LE_S` | `i32.le_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_LE_U` | `i32.le_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_GE_S` | `i32.ge_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_GE_U` | `i32.ge_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_TO_I64_S` | `i32.to_i64_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_TO_I64_U` | `i32.to_i64_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_TO_F32_U` | `i32.to_f32_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_TO_F32_S` | `i32.to_f32_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_TO_F64_U` | `i32.to_f64_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_TO_F64_S` | `i32.to_f64_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I32_REINTERPRET_F32` | `i32.reinterpret_f32` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_CONST` | `i64.const` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
+| `I64_ADD` | `i64.add` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_SUB` | `i64.sub` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_MUL` | `i64.mul` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_DIV_S` | `i64.div_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_DIV_U` | `i64.div_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_REM_S` | `i64.rem_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_REM_U` | `i64.rem_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_SHL` | `i64.shl` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_SHR_S` | `i64.shr_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_SHR_U` | `i64.shr_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_XOR` | `i64.xor` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_AND` | `i64.and` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_OR` | `i64.or` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_CLZ` | `i64.clz` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_CTZ` | `i64.ctz` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_POPCNT` | `i64.popcnt` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_ROTL` | `i64.rotl` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_ROTR` | `i64.rotr` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_EXTEND8_S` | `i64.extend8_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_EXTEND16_S` | `i64.extend16_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_EXTEND32_S` | `i64.extend32_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_EQZ` | `i64.eqz` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_EQ` | `i64.eq` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_NE` | `i64.ne` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_LT_S` | `i64.lt_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_LT_U` | `i64.lt_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_GT_S` | `i64.gt_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_GT_U` | `i64.gt_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_LE_S` | `i64.le_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_LE_U` | `i64.le_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_GE_S` | `i64.ge_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_GE_U` | `i64.ge_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_TO_I32` | `i64.to_i32` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_TO_F32_S` | `i64.to_f32_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_TO_F32_U` | `i64.to_f32_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_TO_F64_S` | `i64.to_f64_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_TO_F64_U` | `i64.to_f64_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `I64_REINTERPRET_F64` | `i64.reinterpret_f64` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_CONST` | `f32.const` | ✅ | fixed metadata | ✅ | ✅ | ✅ | Runtime corpus only |
+| `F32_ADD` | `f32.add` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_SUB` | `f32.sub` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_MUL` | `f32.mul` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_DIV` | `f32.div` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_REM` | `f32.rem` | ✅ | fixed metadata | ✅ | ✅ | ◐ | Runtime corpus only |
+| `F32_MOD` | `f32.mod` | ✅ | fixed metadata | ✅ | ✅ | ◐ | Runtime corpus only |
+| `F32_ABS` | `f32.abs` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_NEG` | `f32.neg` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_SQRT` | `f32.sqrt` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_CEIL` | `f32.ceil` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_FLOOR` | `f32.floor` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_TRUNC` | `f32.trunc` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_NEAREST` | `f32.nearest` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_MIN` | `f32.min` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_MAX` | `f32.max` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_COPYSIGN` | `f32.copysign` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_EQ` | `f32.eq` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_NE` | `f32.ne` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_LT` | `f32.lt` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_GT` | `f32.gt` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_LE` | `f32.le` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_GE` | `f32.ge` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_TO_I32_S` | `f32.to_i32_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_TO_I32_U` | `f32.to_i32_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_TO_I64_S` | `f32.to_i64_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_TO_I64_U` | `f32.to_i64_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_TO_F64` | `f32.to_f64` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F32_REINTERPRET_I32` | `f32.reinterpret_i32` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_CONST` | `f64.const` | ✅ | fixed metadata | ✅ | ✅ | ✅ | Runtime corpus only |
+| `F64_ADD` | `f64.add` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_SUB` | `f64.sub` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_MUL` | `f64.mul` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_DIV` | `f64.div` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_REM` | `f64.rem` | ✅ | fixed metadata | ✅ | ✅ | ◐ | Runtime corpus only |
+| `F64_MOD` | `f64.mod` | ✅ | fixed metadata | ✅ | ✅ | ◐ | Runtime corpus only |
+| `F64_ABS` | `f64.abs` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_NEG` | `f64.neg` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_SQRT` | `f64.sqrt` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_CEIL` | `f64.ceil` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_FLOOR` | `f64.floor` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_TRUNC` | `f64.trunc` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_NEAREST` | `f64.nearest` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_MIN` | `f64.min` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_MAX` | `f64.max` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_COPYSIGN` | `f64.copysign` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_EQ` | `f64.eq` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_NE` | `f64.ne` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_LT` | `f64.lt` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_GT` | `f64.gt` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_LE` | `f64.le` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_GE` | `f64.ge` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_TO_I32_S` | `f64.to_i32_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_TO_I32_U` | `f64.to_i32_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_TO_I64_S` | `f64.to_i64_s` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_TO_I64_U` | `f64.to_i64_u` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_TO_F32` | `f64.to_f32` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `F64_REINTERPRET_I64` | `f64.reinterpret_i64` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `STRING_NEW_UTF32` | `string.new_utf32` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `STRING_LEN` | `string.len` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `STRING_CONCAT` | `string.concat` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `STRING_EQ` | `string.eq` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `STRING_NE` | `string.ne` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `STRING_LT` | `string.lt` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `STRING_GT` | `string.gt` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `STRING_LE` | `string.le` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `STRING_GE` | `string.ge` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `STRING_ENCODE_UTF32` | `string.encode_utf32` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
+| `ARRAY_NEW` | `array.new` | ✅ | fixed metadata | ✅ | ✅ | ⬜ | Runtime corpus only |
+| `ARRAY_NEW_DEFAULT` | `array.new_default` | ✅ | fixed metadata | ✅ | ✅ | ⬜ | Runtime corpus only |
+| `ARRAY_LEN` | `array.len` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `ARRAY_GET` | `array.get` | ✅ | fixed metadata | ✅ | ✅ | ✅ | Representative differential |
+| `ARRAY_SET` | `array.set` | ✅ | fixed metadata | ✅ | ✅ | ◐ | Runtime corpus only |
+| `ARRAY_FILL` | `array.fill` | ✅ | fixed metadata | ✅ | ✅ | ⬜ | Runtime corpus only |
+| `ARRAY_COPY` | `array.copy` | ✅ | fixed metadata | ✅ | ✅ | ⬜ | Runtime corpus only |
+| `ARRAY_APPEND` | `array.append` | ✅ | indeterminate arity | ✅ | — | ⬜ | Runtime corpus only |
+| `ARRAY_DELETE` | `array.delete` | ✅ | fixed metadata | ✅ | ✅ | ⬜ | Runtime corpus only |
+| `ARRAY_SLICE` | `array.slice` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `STRUCT_NEW` | `struct.new` | ✅ | declared fields | ✅ | — | ⬜ | Runtime corpus only |
+| `STRUCT_NEW_DEFAULT` | `struct.new_default` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `STRUCT_GET` | `struct.get` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `STRUCT_SET` | `struct.set` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
+| `MAP_NEW` | `map.new` | ✅ | indeterminate arity | ✅ | — | ⬜ | Runtime corpus only |
+| `MAP_NEW_DEFAULT` | `map.new_default` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `MAP_LEN` | `map.len` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
+| `MAP_GET` | `map.get` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
+| `MAP_LOOKUP` | `map.lookup` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
+| `MAP_SET` | `map.set` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `MAP_DELETE` | `map.delete` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `MAP_CLEAR` | `map.clear` | ✅ | fixed metadata | ✅ | — | ⬜ | Runtime corpus only |
+| `MAP_KEYS` | `map.keys` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
+| `CLOSURE_NEW` | `closure.new` | ✅ | indeterminate arity | ✅ | — | ⬜ | Runtime corpus only |
+| `MAP_ITER` | `map.iter` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
+| `THROW` | `throw` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
+| `ERROR_NEW` | `error.new` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
+| `ERROR_GET` | `error.get` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
+| `ERROR_CODE` | `error.code` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
+| `STRING_ITER` | `string.iter` | ✅ | fixed metadata | ✅ | — | ◐ | Runtime corpus only |
 
 ## Intentional White-Box Coverage
 

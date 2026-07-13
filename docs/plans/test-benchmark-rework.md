@@ -30,7 +30,7 @@ No later phase starts before the previous phase passes its review gate.
 | 3 | `types` executable specifications and fuzzing | Complete | `test(types): reorganize executable specifications` | Passed |
 | 4 | `program` construction, parser, verifier, and fuzzing | Complete | `test(program): reorganize executable specifications` | Passed |
 | 5 | Interpreter public API, marshal, host, pool, and lifecycle | Complete | `test(interp): align public API specifications` | Passed |
-| 6 | Opcode corpus and threaded/optimized/JIT semantic parity | Pending | - | - |
+| 6 | Opcode corpus and threaded/optimized/JIT semantic parity | Complete | `test(interp): name opcode specs and add parity checks` | Passed |
 | 7 | Optimizer, backend, generator, and support packages | Pending | - | - |
 | 8 | Interpreter benchmark consolidation | Pending | - | - |
 | 9 | Runtime-neutral kernel and comparison benchmark rebuild | Pending | - | - |
@@ -245,14 +245,14 @@ go test -race -run='TestPool_|TestInterpreter_(Marshal|Unmarshal|Run|Reset|Close
 
 ### Tasks
 
-- [ ] Convert `runTests` into behavior-named rows in instruction-family declaration order.
-- [ ] Ensure each runtime opcode has an explicit success, error, or documented exclusion case.
-- [ ] Keep complex call, coroutine, error, reset, and ownership lifecycles as explicit subtests.
-- [ ] Remove issue-number and implementation-path test names.
-- [ ] Add bounded valid-program optimizer parity.
-- [ ] Add bounded verified-program threaded/JIT parity on supported architectures.
-- [ ] Compare stack, errors, globals, host effects, coroutine state, and reset behavior rather than trace shape.
-- [ ] Run focused and architecture tests, review diff, update progress, and commit.
+- [x] Convert `runTests` into behavior-named rows in instruction-family declaration order.
+- [x] Ensure each runtime opcode has an explicit success, error, or documented exclusion case.
+- [x] Keep complex call, coroutine, error, reset, and ownership lifecycles as explicit subtests.
+- [x] Remove issue-number and implementation-path test names.
+- [x] Add bounded valid-program optimizer parity.
+- [x] Add bounded verified-program threaded/JIT parity on supported architectures.
+- [x] Compare stack, errors, globals, host effects, coroutine state, and reset behavior rather than trace shape.
+- [x] Run focused and architecture tests, review diff, update progress, and commit.
 
 ### Verification
 
@@ -420,6 +420,16 @@ GOOS=linux GOARCH=arm64 go test -exec=true ./...
 - Intentionally retained structure: cache/tracer wiring and pool live-count checks remain white-box safety invariants because no exported observation path exists. Pool close error aggregation has no deterministic public failure source; no test-only production seam was added.
 - Coverage/benchmark effect: `interp` 20.6% -> 21.1%; no benchmark change.
 - Commit: `test(interp): align public API specifications`.
+
+### Phase 6
+
+- Focused verification: 221 runtime rows passed with non-empty unique behavior names; representative threaded/fused/warm-JIT parity passed for stack values, traps, globals, arrays, coroutine state, host callback effects, and reset behavior.
+- Differential fuzzing: `FuzzInterpreterParity` ran for 10 seconds with 662,883 executions; `FuzzOptimizerParity` ran for 10 seconds with 648,541 executions. Both generate bounded verified numeric programs only.
+- Broad verification: `GOENV_VERSION=1.26.2 go test -race ./interp ./optimize`; Linux/ARM64 `go test -exec=true`; explicit `gofmt`, `goimports`, `go vet`, benchmark-module compile-only check, and `git diff --check` passed.
+- Review findings fixed: removed two value-only duplicate opcode rows, replaced program-string subtest names with literal behavior names, measured warm JIT on the same reset interpreter, and removed issue-numbered correctness-test names.
+- Intentionally retained structure: exhaustive JIT parity is not claimed for every opcode; the matrix distinguishes bounded fuzz, representative differential coverage, and runtime-corpus-only ownership. Full `BranchTree` JIT fixture validation remains Phase 9 because its 30-tree warmup is a long-running kernel workload.
+- Coverage/benchmark effect: `interp` remains 21.1%; `optimize` remains 100.0%; no timed benchmark changed.
+- Commit: `test(interp): name opcode specs and add parity checks`.
 
 Add one entry after each later phase:
 

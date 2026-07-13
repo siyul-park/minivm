@@ -3,7 +3,6 @@ package interp
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"math"
 	"reflect"
 	"runtime"
@@ -71,37 +70,45 @@ func (upperMarshaler) Unmarshal(_ *Interpreter, v types.Value, dst any) error {
 }
 
 var runTests = []struct {
+	name    string
 	program *program.Program
 	values  []types.Value
 	err     error
 }{
 	{
+		name:    "i32.const nop returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.NOP)}),
 		values:  []types.Value{types.I32(1)},
 	},
 	{
+		name:    "unreachable reports unreachable executed",
 		program: program.New([]instr.Instruction{instr.New(instr.UNREACHABLE)}),
 		err:     ErrUnreachableExecuted,
 	},
 	{
+		name:    "i32.const i32.const drop returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.DROP)}),
 		values:  []types.Value{types.I32(1)},
 	},
 	{
+		name:    "i32.const dup returns i32 i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7), instr.New(instr.DUP)}),
 		values:  []types.Value{types.I32(7), types.I32(7)},
 	},
 	{
+		name:    "i32.const i32.const swap returns i32 i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.SWAP)}),
 		values:  []types.Value{types.I32(1), types.I32(2)},
 	},
 	{
+		name: "i32.const i32.const i32.const select returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 1), instr.New(instr.SELECT),
 		}),
 		values: []types.Value{types.I32(10)},
 	},
 	{
+		name: "br i32.const i32.const returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.BR, 5),
 			instr.New(instr.I32_CONST, 999),
@@ -110,6 +117,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
+		name: "i32.const br_if i32.const i32.const returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.BR_IF, 5),
@@ -119,6 +127,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
+		name: "i32.const br_table i32.const i32.const returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 0),
 			instr.New(instr.BR_TABLE, 1, 5, 0),
@@ -128,6 +137,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
+		name: "const.get call i32.const return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -136,6 +146,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(42)},
 	},
 	{
+		name: "const.get call i32.const i32.const return returns i32 i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -144,6 +155,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(20), types.I32(10)},
 	},
 	{
+		name: "i32.const const.get return_call local.get i32.const i32.add return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5),
 			instr.New(instr.CONST_GET, 0),
@@ -153,10 +165,12 @@ var runTests = []struct {
 		values: []types.Value{types.I32(6)},
 	},
 	{
+		name:    "i32.const yield reports yield",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.YIELD)}),
 		err:     ErrYield,
 	},
 	{
+		name: "const.get call through yield i32.const i32.add return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -168,6 +182,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(42)},
 	},
 	{
+		name: "const.get call coro.done i32.const yield return returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -177,6 +192,7 @@ var runTests = []struct {
 		values: []types.Value{types.I1(false)},
 	},
 	{
+		name: "const.get call coro.value i32.const yield return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -186,42 +202,36 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
+		name: "i32.const global.set global.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.GLOBAL_SET, 0), instr.New(instr.GLOBAL_GET, 0),
 		}, program.WithGlobals(types.TypeI32)),
 		values: []types.Value{types.I32(3)},
 	},
 	{
-		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 4), instr.New(instr.GLOBAL_SET, 0), instr.New(instr.GLOBAL_GET, 0),
-		}, program.WithGlobals(types.TypeI32)),
-		values: []types.Value{types.I32(4)},
-	},
-	{
+		name:    "i32.const global.tee returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 6), instr.New(instr.GLOBAL_TEE, 0)}, program.WithGlobals(types.TypeI32)),
 		values:  []types.Value{types.I32(6)},
 	},
 	{
+		name: "i32.const local.set local.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.LOCAL_SET, 0), instr.New(instr.LOCAL_GET, 0),
 		}, program.WithLocals(types.TypeI32)),
 		values: []types.Value{types.I32(5)},
 	},
 	{
-		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.LOCAL_SET, 0), instr.New(instr.LOCAL_GET, 0),
-		}, program.WithLocals(types.TypeI32)),
-		values: []types.Value{types.I32(7)},
-	},
-	{
+		name:    "i32.const local.tee returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 9), instr.New(instr.LOCAL_TEE, 0)}, program.WithLocals(types.TypeI32)),
 		values:  []types.Value{types.I32(9)},
 	},
 	{
+		name:    "const.get returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0)}, program.WithConstants(types.I32(11))),
 		values:  []types.Value{types.I32(11)},
 	},
 	{
+		name: "i32.const const.get closure.new call upval.get return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.CONST_GET, 0),
@@ -232,6 +242,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(7)},
 	},
 	{
+		name: "i32.const const.get through i32.const upval.set upval.get return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 0),
 			instr.New(instr.CONST_GET, 0),
@@ -244,18 +255,22 @@ var runTests = []struct {
 		values: []types.Value{types.I32(99)},
 	},
 	{
+		name:    "ref.null returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.REF_NULL)}),
 		values:  []types.Value{types.Null},
 	},
 	{
+		name:    "i32.const ref.new returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.REF_NEW)}),
 		values:  []types.Value{types.I32(5)},
 	},
 	{
+		name:    "i32.const ref.new ref.get returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 9), instr.New(instr.REF_NEW), instr.New(instr.REF_GET)}),
 		values:  []types.Value{types.I32(9)},
 	},
 	{
+		name: "i32.const ref.new dup i32.const ref.set ref.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), instr.New(instr.DUP),
 			instr.New(instr.I32_CONST, 77), instr.New(instr.REF_SET),
@@ -264,678 +279,824 @@ var runTests = []struct {
 		values: []types.Value{types.I32(77)},
 	},
 	{
+		name:    "i32.const ref.test returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.REF_TEST, 0)}, program.WithTypes(types.TypeI32)),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const ref.cast returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.REF_CAST, 0)}, program.WithTypes(types.TypeI32)),
 		values:  []types.Value{types.I32(5)},
 	},
 	{
+		name:    "ref.null ref.is_null returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.REF_NULL), instr.New(instr.REF_IS_NULL)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "ref.null ref.null ref.eq returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.REF_NULL), instr.New(instr.REF_NULL), instr.New(instr.REF_EQ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "ref.null i32.const ref.new ref.ne returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.REF_NULL), instr.New(instr.I32_CONST, 5), instr.New(instr.REF_NEW), instr.New(instr.REF_NE)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)}),
 		values:  []types.Value{types.I32(42)},
 	},
 	{
+		name:    "i32.const i32.const i32.add returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_ADD)}),
 		values:  []types.Value{types.I32(5)},
 	},
 	{
+		name:    "i32.const i32.const i32.sub returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_SUB)}),
 		values:  []types.Value{types.I32(2)},
 	},
 	{
+		name:    "i32.const i32.const i32.mul returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_MUL)}),
 		values:  []types.Value{types.I32(12)},
 	},
 	{
+		name: "i32.const i32.const i32.div_s returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-7)), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_DIV_S),
 		}),
 		values: []types.Value{types.I32(-3)},
 	},
 	{
+		name: "i32.const i32.const i32.div_u returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_DIV_U),
 		}),
 		values: []types.Value{types.I32(int32(uint32(math.MaxUint32) / 2))},
 	},
 	{
+		name: "i32.const i32.const i32.rem_s returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-7)), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_REM_S),
 		}),
 		values: []types.Value{types.I32(-1)},
 	},
 	{
+		name: "i32.const i32.const i32.rem_u returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_REM_U),
 		}),
 		values: []types.Value{types.I32(int32(uint32(math.MaxUint32) % 3))},
 	},
 	{
+		name:    "i32.const i32.const i32.shl returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_SHL)}),
 		values:  []types.Value{types.I32(8)},
 	},
 	{
+		name: "i32.const i32.const i32.shr_s returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-8)), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SHR_S),
 		}),
 		values: []types.Value{types.I32(-4)},
 	},
 	{
+		name: "i32.const i32.const i32.shr_u returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SHR_U),
 		}),
 		values: []types.Value{types.I32(int32(uint32(math.MaxUint32) >> 1))},
 	},
 	{
+		name:    "i32.const i32.const i32.and returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 12), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_AND)}),
 		values:  []types.Value{types.I32(8)},
 	},
 	{
+		name:    "i32.const i32.const i32.or returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 12), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_OR)}),
 		values:  []types.Value{types.I32(14)},
 	},
 	{
+		name:    "i32.const i32.const i32.xor returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 12), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_XOR)}),
 		values:  []types.Value{types.I32(6)},
 	},
 	{
+		name:    "i32.const i32.clz returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CLZ)}),
 		values:  []types.Value{types.I32(31)},
 	},
 	{
+		name:    "i32.const i32.ctz returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 8), instr.New(instr.I32_CTZ)}),
 		values:  []types.Value{types.I32(3)},
 	},
 	{
+		name:    "i32.const i32.popcnt returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7), instr.New(instr.I32_POPCNT)}),
 		values:  []types.Value{types.I32(3)},
 	},
 	{
+		name:    "i32.const i32.const i32.rotl returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_ROTL)}),
 		values:  []types.Value{types.I32(16)},
 	},
 	{
+		name:    "i32.const i32.const i32.rotr returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 16), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_ROTR)}),
 		values:  []types.Value{types.I32(1)},
 	},
 	{
+		name:    "i32.const i32.extend8_s returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 255), instr.New(instr.I32_EXTEND8_S)}),
 		values:  []types.Value{types.I32(-1)},
 	},
 	{
+		name:    "i32.const i32.extend16_s returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 65535), instr.New(instr.I32_EXTEND16_S)}),
 		values:  []types.Value{types.I32(-1)},
 	},
 	{
+		name:    "i32.const i32.eqz returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_EQZ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const i32.const i32.eq returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 5), instr.New(instr.I32_EQ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const i32.const i32.ne returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 6), instr.New(instr.I32_NE)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const i32.const i32.lt_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LT_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const i32.const i32.lt_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LT_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
+		name:    "i32.const i32.const i32.gt_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_GT_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const i32.const i32.gt_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_GT_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
+		name:    "i32.const i32.const i32.le_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_LE_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const i32.const i32.le_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
+		name:    "i32.const i32.const i32.ge_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_GE_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const i32.const i32.ge_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_GE_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
+		name:    "i32.const i32.to_i64_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_I64_S)}),
 		values:  []types.Value{types.I64(-1)},
 	},
 	{
+		name:    "i32.const i32.to_i64_u returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_I64_U)}),
 		values:  []types.Value{types.I64(int64(uint32(math.MaxUint32)))},
 	},
 	{
+		name:    "i32.const i32.to_f32_s returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_F32_S)}),
 		values:  []types.Value{types.F32(float32(int32(-1)))},
 	},
 	{
+		name:    "i32.const i32.to_f32_u returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_F32_U)}),
 		values:  []types.Value{types.F32(float32(uint32(math.MaxUint32)))},
 	},
 	{
+		name:    "i32.const i32.to_f64_s returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_F64_S)}),
 		values:  []types.Value{types.F64(float64(int32(-1)))},
 	},
 	{
+		name:    "i32.const i32.to_f64_u returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_F64_U)}),
 		values:  []types.Value{types.F64(float64(uint32(math.MaxUint32)))},
 	},
 	{
+		name:    "f32.const i32.reinterpret_f32 returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1))), instr.New(instr.I32_REINTERPRET_F32)}),
 		values:  []types.Value{types.I32(int32(math.Float32bits(1)))},
 	},
 	{
+		name:    "i64.const returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 42)}),
 		values:  []types.Value{types.I64(42)},
 	},
 	{
+		name:    "i64.const i64.const i64.add returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 2), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_ADD)}),
 		values:  []types.Value{types.I64(5)},
 	},
 	{
+		name:    "i64.const i64.const i64.sub returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 5), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_SUB)}),
 		values:  []types.Value{types.I64(2)},
 	},
 	{
+		name:    "i64.const i64.const i64.mul returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 3), instr.New(instr.I64_CONST, 4), instr.New(instr.I64_MUL)}),
 		values:  []types.Value{types.I64(12)},
 	},
 	{
+		name: "i64.const i64.const i64.div_s returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-7)), instr.New(instr.I64_CONST, 2), instr.New(instr.I64_DIV_S),
 		}),
 		values: []types.Value{types.I64(-3)},
 	},
 	{
+		name: "i64.const i64.const i64.div_u returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 2), instr.New(instr.I64_DIV_U),
 		}),
 		values: []types.Value{types.I64(int64(uint64(math.MaxUint64) / 2))},
 	},
 	{
+		name: "i64.const i64.const i64.rem_s returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-7)), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_REM_S),
 		}),
 		values: []types.Value{types.I64(-1)},
 	},
 	{
+		name: "i64.const i64.const i64.rem_u returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_REM_U),
 		}),
 		values: []types.Value{types.I64(int64(uint64(math.MaxUint64) % 3))},
 	},
 	{
+		name:    "i64.const i64.const i64.shl returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 1), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_SHL)}),
 		values:  []types.Value{types.I64(8)},
 	},
 	{
+		name: "i64.const i64.const i64.shr_s returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-8)), instr.New(instr.I64_CONST, 1), instr.New(instr.I64_SHR_S),
 		}),
 		values: []types.Value{types.I64(-4)},
 	},
 	{
+		name: "i64.const i64.const i64.shr_u returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 1), instr.New(instr.I64_SHR_U),
 		}),
 		values: []types.Value{types.I64(int64(uint64(math.MaxUint64) >> 1))},
 	},
 	{
+		name:    "i64.const i64.const i64.xor returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 12), instr.New(instr.I64_CONST, 10), instr.New(instr.I64_XOR)}),
 		values:  []types.Value{types.I64(6)},
 	},
 	{
+		name:    "i64.const i64.const i64.and returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 12), instr.New(instr.I64_CONST, 10), instr.New(instr.I64_AND)}),
 		values:  []types.Value{types.I64(8)},
 	},
 	{
+		name:    "i64.const i64.const i64.or returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 12), instr.New(instr.I64_CONST, 10), instr.New(instr.I64_OR)}),
 		values:  []types.Value{types.I64(14)},
 	},
 	{
+		name:    "i64.const i64.clz returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 1), instr.New(instr.I64_CLZ)}),
 		values:  []types.Value{types.I64(63)},
 	},
 	{
+		name:    "i64.const i64.ctz returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 8), instr.New(instr.I64_CTZ)}),
 		values:  []types.Value{types.I64(3)},
 	},
 	{
+		name:    "i64.const i64.popcnt returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 7), instr.New(instr.I64_POPCNT)}),
 		values:  []types.Value{types.I64(3)},
 	},
 	{
+		name:    "i64.const i64.const i64.rotl returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 1), instr.New(instr.I64_CONST, 4), instr.New(instr.I64_ROTL)}),
 		values:  []types.Value{types.I64(16)},
 	},
 	{
+		name:    "i64.const i64.const i64.rotr returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 16), instr.New(instr.I64_CONST, 4), instr.New(instr.I64_ROTR)}),
 		values:  []types.Value{types.I64(1)},
 	},
 	{
+		name:    "i64.const i64.extend8_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 255), instr.New(instr.I64_EXTEND8_S)}),
 		values:  []types.Value{types.I64(-1)},
 	},
 	{
+		name:    "i64.const i64.extend16_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 65535), instr.New(instr.I64_EXTEND16_S)}),
 		values:  []types.Value{types.I64(-1)},
 	},
 	{
+		name:    "i64.const i64.extend32_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, uint64(uint32(math.MaxUint32))), instr.New(instr.I64_EXTEND32_S)}),
 		values:  []types.Value{types.I64(-1)},
 	},
 	{
+		name:    "i64.const i64.eqz returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_EQZ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i64.const i64.const i64.eq returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 5), instr.New(instr.I64_CONST, 5), instr.New(instr.I64_EQ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i64.const i64.const i64.ne returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 5), instr.New(instr.I64_CONST, 6), instr.New(instr.I64_NE)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i64.const i64.const i64.lt_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 0), instr.New(instr.I64_LT_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i64.const i64.const i64.lt_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 0), instr.New(instr.I64_LT_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
+		name:    "i64.const i64.const i64.gt_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_GT_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i64.const i64.const i64.gt_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_GT_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
+		name:    "i64.const i64.const i64.le_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_LE_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i64.const i64.const i64.le_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 0), instr.New(instr.I64_LE_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
+		name:    "i64.const i64.const i64.ge_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_CONST, 0), instr.New(instr.I64_GE_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i64.const i64.const i64.ge_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_GE_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
+		name:    "i64.const i64.to_i32 returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, uint64(int64(1)<<32+1)), instr.New(instr.I64_TO_I32)}),
 		values:  []types.Value{types.I32(1)},
 	},
 	{
+		name:    "i64.const i64.to_f32_s returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_TO_F32_S)}),
 		values:  []types.Value{types.F32(float32(int64(-1)))},
 	},
 	{
+		name:    "i64.const i64.to_f32_u returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_TO_F32_U)}),
 		values:  []types.Value{types.F32(float32(uint64(math.MaxUint64)))},
 	},
 	{
+		name:    "i64.const i64.to_f64_s returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_TO_F64_S)}),
 		values:  []types.Value{types.F64(float64(int64(-1)))},
 	},
 	{
+		name:    "i64.const i64.to_f64_u returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_TO_F64_U)}),
 		values:  []types.Value{types.F64(float64(uint64(math.MaxUint64)))},
 	},
 	{
+		name:    "f64.const i64.reinterpret_f64 returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(1)), instr.New(instr.I64_REINTERPRET_F64)}),
 		values:  []types.Value{types.I64(int64(math.Float64bits(1)))},
 	},
 	{
+		name:    "f32.const returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5)))}),
 		values:  []types.Value{types.F32(1.5)},
 	},
 	{
+		name: "f32.const f32.const f32.add returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2.25))), instr.New(instr.F32_ADD),
 		}),
 		values: []types.Value{types.F32(3.75)},
 	},
 	{
+		name: "f32.const f32.const f32.sub returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(5.5))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2.25))), instr.New(instr.F32_SUB),
 		}),
 		values: []types.Value{types.F32(3.25)},
 	},
 	{
+		name: "f32.const f32.const f32.mul returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2.5))), instr.New(instr.F32_CONST, uint64(math.Float32bits(4))), instr.New(instr.F32_MUL),
 		}),
 		values: []types.Value{types.F32(10)},
 	},
 	{
+		name: "f32.const f32.const f32.div returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(10))), instr.New(instr.F32_CONST, uint64(math.Float32bits(4))), instr.New(instr.F32_DIV),
 		}),
 		values: []types.Value{types.F32(2.5)},
 	},
 	{
+		name: "f32.const f32.const f32.rem returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(-7))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_REM),
 		}),
 		values: []types.Value{types.F32(-1)},
 	},
 	{
+		name: "f32.const f32.const f32.mod returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(-7))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_MOD),
 		}),
 		values: []types.Value{types.F32(2)},
 	},
 	{
+		name: "f32.const f32.const f32.rem reports divide by zero",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))), instr.New(instr.F32_CONST, 0), instr.New(instr.F32_REM),
 		}),
 		err: ErrDivideByZero,
 	},
 	{
+		name: "f32.const f32.const f32.mod reports divide by zero",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))), instr.New(instr.F32_CONST, 0), instr.New(instr.F32_MOD),
 		}),
 		err: ErrDivideByZero,
 	},
 	{
+		name:    "f32.const f32.abs returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.5))), instr.New(instr.F32_ABS)}),
 		values:  []types.Value{types.F32(3.5)},
 	},
 	{
+		name:    "f32.const f32.neg returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(3.5))), instr.New(instr.F32_NEG)}),
 		values:  []types.Value{types.F32(-3.5)},
 	},
 	{
+		name:    "f32.const f32.sqrt returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(9))), instr.New(instr.F32_SQRT)}),
 		values:  []types.Value{types.F32(3)},
 	},
 	{
+		name:    "f32.const f32.ceil returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1.2))), instr.New(instr.F32_CEIL)}),
 		values:  []types.Value{types.F32(2)},
 	},
 	{
+		name:    "f32.const f32.floor returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1.8))), instr.New(instr.F32_FLOOR)}),
 		values:  []types.Value{types.F32(1)},
 	},
 	{
+		name:    "f32.const f32.trunc returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-1.8))), instr.New(instr.F32_TRUNC)}),
 		values:  []types.Value{types.F32(-1)},
 	},
 	{
+		name:    "f32.const f32.nearest returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(2.5))), instr.New(instr.F32_NEAREST)}),
 		values:  []types.Value{types.F32(2)},
 	},
 	{
+		name: "f32.const f32.const f32.min returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.F32_MIN),
 		}),
 		values: []types.Value{types.F32(3)},
 	},
 	{
+		name: "f32.const f32.const f32.max returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.F32_MAX),
 		}),
 		values: []types.Value{types.F32(5)},
 	},
 	{
+		name: "f32.const f32.const f32.copysign returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_CONST, uint64(math.Float32bits(-1))), instr.New(instr.F32_COPYSIGN),
 		}),
 		values: []types.Value{types.F32(-3)},
 	},
 	{
+		name: "f32.const f32.const f32.eq returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_EQ),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f32.const f32.const f32.ne returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_NE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f32.const f32.const f32.lt returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_LT),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f32.const f32.const f32.gt returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_GT),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f32.const f32.const f32.le returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_LE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f32.const f32.const f32.ge returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_GE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name:    "f32.const f32.to_i32_s returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.7))), instr.New(instr.F32_TO_I32_S)}),
 		values:  []types.Value{types.I32(-3)},
 	},
 	{
+		name:    "f32.const f32.to_i32_u returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(3.7))), instr.New(instr.F32_TO_I32_U)}),
 		values:  []types.Value{types.I32(3)},
 	},
 	{
+		name:    "f32.const f32.to_i64_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.7))), instr.New(instr.F32_TO_I64_S)}),
 		values:  []types.Value{types.I64(-3)},
 	},
 	{
+		name:    "f32.const f32.to_i64_u returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(3.7))), instr.New(instr.F32_TO_I64_U)}),
 		values:  []types.Value{types.I64(3)},
 	},
 	{
+		name:    "f32.const f32.to_f64 returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))), instr.New(instr.F32_TO_F64)}),
 		values:  []types.Value{types.F64(float64(float32(1.5)))},
 	},
 	{
+		name:    "i32.const f32.reinterpret_i32 returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, uint64(math.Float32bits(1))), instr.New(instr.F32_REINTERPRET_I32)}),
 		values:  []types.Value{types.F32(1)},
 	},
 	{
+		name:    "f64.const returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(2.5))}),
 		values:  []types.Value{types.F64(2.5)},
 	},
 	{
+		name: "f64.const f64.const f64.add returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(1.5)), instr.New(instr.F64_CONST, math.Float64bits(2.25)), instr.New(instr.F64_ADD),
 		}),
 		values: []types.Value{types.F64(3.75)},
 	},
 	{
+		name: "f64.const f64.const f64.sub returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(5.5)), instr.New(instr.F64_CONST, math.Float64bits(2.25)), instr.New(instr.F64_SUB),
 		}),
 		values: []types.Value{types.F64(3.25)},
 	},
 	{
+		name: "f64.const f64.const f64.mul returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.F64_CONST, math.Float64bits(4)), instr.New(instr.F64_MUL),
 		}),
 		values: []types.Value{types.F64(10)},
 	},
 	{
+		name: "f64.const f64.const f64.div returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(10)), instr.New(instr.F64_CONST, math.Float64bits(4)), instr.New(instr.F64_DIV),
 		}),
 		values: []types.Value{types.F64(2.5)},
 	},
 	{
+		name: "f64.const f64.const f64.rem returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(-7)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_REM),
 		}),
 		values: []types.Value{types.F64(-1)},
 	},
 	{
+		name: "f64.const f64.const f64.mod returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(-7)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_MOD),
 		}),
 		values: []types.Value{types.F64(2)},
 	},
 	{
+		name: "f64.const f64.const f64.rem reports divide by zero",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(1)), instr.New(instr.F64_CONST, 0), instr.New(instr.F64_REM),
 		}),
 		err: ErrDivideByZero,
 	},
 	{
+		name: "f64.const f64.const f64.mod reports divide by zero",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(1)), instr.New(instr.F64_CONST, 0), instr.New(instr.F64_MOD),
 		}),
 		err: ErrDivideByZero,
 	},
 	{
+		name:    "f64.const f64.abs returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-3.5)), instr.New(instr.F64_ABS)}),
 		values:  []types.Value{types.F64(3.5)},
 	},
 	{
+		name:    "f64.const f64.neg returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(3.5)), instr.New(instr.F64_NEG)}),
 		values:  []types.Value{types.F64(-3.5)},
 	},
 	{
+		name:    "f64.const f64.sqrt returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(9)), instr.New(instr.F64_SQRT)}),
 		values:  []types.Value{types.F64(3)},
 	},
 	{
+		name:    "f64.const f64.ceil returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(1.2)), instr.New(instr.F64_CEIL)}),
 		values:  []types.Value{types.F64(2)},
 	},
 	{
+		name:    "f64.const f64.floor returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(1.8)), instr.New(instr.F64_FLOOR)}),
 		values:  []types.Value{types.F64(1)},
 	},
 	{
+		name:    "f64.const f64.trunc returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-1.8)), instr.New(instr.F64_TRUNC)}),
 		values:  []types.Value{types.F64(-1)},
 	},
 	{
+		name:    "f64.const f64.nearest returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.F64_NEAREST)}),
 		values:  []types.Value{types.F64(2)},
 	},
 	{
+		name: "f64.const f64.const f64.min returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.F64_MIN),
 		}),
 		values: []types.Value{types.F64(3)},
 	},
 	{
+		name: "f64.const f64.const f64.max returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.F64_MAX),
 		}),
 		values: []types.Value{types.F64(5)},
 	},
 	{
+		name: "f64.const f64.const f64.copysign returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_CONST, math.Float64bits(-1)), instr.New(instr.F64_COPYSIGN),
 		}),
 		values: []types.Value{types.F64(-3)},
 	},
 	{
+		name: "f64.const f64.const f64.eq returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_EQ),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f64.const f64.const f64.ne returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_NE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f64.const f64.const f64.lt returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_LT),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f64.const f64.const f64.gt returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_GT),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f64.const f64.const f64.le returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_LE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f64.const f64.const f64.ge returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_GE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name:    "f64.const f64.to_i32_s returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-3.7)), instr.New(instr.F64_TO_I32_S)}),
 		values:  []types.Value{types.I32(-3)},
 	},
 	{
+		name:    "f64.const f64.to_i32_u returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(3.7)), instr.New(instr.F64_TO_I32_U)}),
 		values:  []types.Value{types.I32(3)},
 	},
 	{
+		name:    "f64.const f64.to_i64_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-3.7)), instr.New(instr.F64_TO_I64_S)}),
 		values:  []types.Value{types.I64(-3)},
 	},
 	{
+		name:    "f64.const f64.to_i64_u returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(3.7)), instr.New(instr.F64_TO_I64_U)}),
 		values:  []types.Value{types.I64(3)},
 	},
 	{
+		name:    "f64.const f64.to_f32 returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(1.5)), instr.New(instr.F64_TO_F32)}),
 		values:  []types.Value{types.F32(1.5)},
 	},
 	{
+		name:    "i64.const f64.reinterpret_i64 returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, math.Float64bits(1)), instr.New(instr.F64_REINTERPRET_I64)}),
 		values:  []types.Value{types.F64(1)},
 	},
 	{
+		name: "i32.const i32.const i32.const array.new string.new_utf32 returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 72), instr.New(instr.I32_CONST, 105), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.STRING_NEW_UTF32),
@@ -943,59 +1104,71 @@ var runTests = []struct {
 		values: []types.Value{types.String("Hi")},
 	},
 	{
+		name:    "const.get string.len returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_LEN)}, program.WithConstants(types.String("Hi"))),
 		values:  []types.Value{types.I32(2)},
 	},
 	{
+		name: "const.get const.get string.concat returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT)},
 			program.WithConstants(types.String("Hi"), types.String("There"))),
 		values: []types.Value{types.String("HiThere")},
 	},
 	{
+		name: "const.get const.get string.eq returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_EQ)},
 			program.WithConstants(types.String("Go"), types.String("Go"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "const.get const.get string.ne returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_NE)},
 			program.WithConstants(types.String("Go"), types.String("No"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "const.get const.get string.lt returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_LT)},
 			program.WithConstants(types.String("Go"), types.String("No"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "const.get const.get string.gt returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_GT)},
 			program.WithConstants(types.String("No"), types.String("Go"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "const.get const.get string.le returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_LE)},
 			program.WithConstants(types.String("Go"), types.String("Go"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "const.get const.get string.ge returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_GE)},
 			program.WithConstants(types.String("Go"), types.String("Go"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name:    "const.get string.encode_utf32 returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_ENCODE_UTF32)}, program.WithConstants(types.String("Hi"))),
 		values:  []types.Value{types.TypedArray[int32]{72, 105}},
 	},
 	{
+		name: "i32.const i32.const i32.const i32.const array.new returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 30), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
 		}, program.WithTypes(types.TypeI32Array)),
 		values: []types.Value{types.TypedArray[int32]{10, 20, 30}},
 	},
 	{
+		name:    "i32.const array.new_default returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0)}, program.WithTypes(types.TypeI32Array)),
 		values:  []types.Value{types.TypedArray[int32]{0, 0, 0}},
 	},
 	{
+		name: "i32.const i32.const i32.const array.new array.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.ARRAY_LEN),
@@ -1003,6 +1176,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
+		name: "i32.const i32.const i32.const i32.const array.new i32.const array.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 100), instr.New(instr.I32_CONST, 200), instr.New(instr.I32_CONST, 300), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET),
@@ -1010,6 +1184,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(200)},
 	},
 	{
+		name: "i32.const i32.const through i32.const array.set i32.const array.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.DUP),
@@ -1019,6 +1194,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(99)},
 	},
 	{
+		name: "i32.const array.new_default through i32.const array.fill i32.const array.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.DUP),
@@ -1028,6 +1204,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(7)},
 	},
 	{
+		name: "i32.const array.new_default through i32.const array.copy i32.const array.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.DUP),
@@ -1039,6 +1216,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(9)},
 	},
 	{
+		name: "i32.const i32.const through i32.const i32.const i32.const array.append returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_APPEND),
@@ -1046,6 +1224,7 @@ var runTests = []struct {
 		values: []types.Value{types.TypedArray[int32]{1, 2, 3, 4}},
 	},
 	{
+		name: "i32.const i32.const i32.const i32.const array.new i32.const array.delete returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_DELETE),
@@ -1053,6 +1232,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
+		name: "i32.const i32.const through array.new i32.const i32.const array.slice returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 30), instr.New(instr.I32_CONST, 40), instr.New(instr.I32_CONST, 4), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_SLICE),
@@ -1060,6 +1240,7 @@ var runTests = []struct {
 		values: []types.Value{types.TypedArray[int32]{20, 30}},
 	},
 	{
+		name: "i32.const f64.const struct.new returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
 		}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)))),
@@ -1069,11 +1250,13 @@ var runTests = []struct {
 		)},
 	},
 	{
+		name: "struct.new_default returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.STRUCT_NEW_DEFAULT, 0)},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)))),
 		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)))},
 	},
 	{
+		name: "i32.const f64.const struct.new i32.const struct.get returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
@@ -1081,6 +1264,7 @@ var runTests = []struct {
 		values: []types.Value{types.F64(2.5)},
 	},
 	{
+		name: "i32.const f64.const through i32.const struct.set i32.const struct.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
 			instr.New(instr.DUP),
@@ -1090,6 +1274,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(99)},
 	},
 	{
+		name: "i32.const i32.const through i32.const map.new i32.const map.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_GET),
@@ -1097,6 +1282,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(10)},
 	},
 	{
+		name: "i32.const map.new_default map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 4), instr.New(instr.MAP_NEW_DEFAULT, 0),
 			instr.New(instr.MAP_LEN),
@@ -1104,6 +1290,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(0)},
 	},
 	{
+		name: "i32.const i32.const i32.const i32.const i32.const map.new map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.MAP_LEN),
@@ -1111,6 +1298,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
+		name: "i32.const i32.const i32.const map.new i32.const map.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_GET),
@@ -1118,6 +1306,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(0)},
 	},
 	{
+		name: "i32.const i32.const i32.const map.new i32.const map.lookup returns i1 i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_LOOKUP),
@@ -1125,6 +1314,7 @@ var runTests = []struct {
 		values: []types.Value{types.I1(true), types.I32(10)},
 	},
 	{
+		name: "i32.const i32.const through i32.const i32.const map.set map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.DUP),
@@ -1134,6 +1324,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
+		name: "i32.const i32.const through dup i32.const map.delete map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.DUP),
@@ -1143,6 +1334,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
+		name: "i32.const i32.const i32.const map.new dup map.clear map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.DUP),
@@ -1152,6 +1344,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(0)},
 	},
 	{
+		name: "i32.const i32.const through i32.const map.new map.keys array.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.MAP_KEYS), instr.New(instr.ARRAY_LEN),
@@ -1159,6 +1352,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
+		name: "i32.const i32.const i32.const map.new map.iter coro.value returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.MAP_ITER), instr.New(instr.CORO_VALUE),
@@ -1166,6 +1360,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
+		name: "i32.const throw i32.const returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 99),
 			instr.New(instr.THROW),
@@ -1174,26 +1369,31 @@ var runTests = []struct {
 		values: []types.Value{types.I32(99)},
 	},
 	{
+		name:    "i32.const i32.const error.new returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 7), instr.New(instr.ERROR_NEW)}),
 		values:  []types.Value{types.NewError(types.ErrorCode(7), "5", types.BoxI32(5))},
 	},
 	{
+		name: "i32.const i32.const error.new error.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 7), instr.New(instr.ERROR_NEW), instr.New(instr.ERROR_GET),
 		}),
 		values: []types.Value{types.I32(5)},
 	},
 	{
+		name: "i32.const i32.const error.new error.code returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 7), instr.New(instr.ERROR_NEW), instr.New(instr.ERROR_CODE),
 		}),
 		values: []types.Value{types.I32(7)},
 	},
 	{
+		name:    "const.get string.iter coro.value returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_ITER), instr.New(instr.CORO_VALUE)}, program.WithConstants(types.String("Hi"))),
 		values:  []types.Value{types.I32(72)},
 	},
 	{
+		name: "const.get i32.const array.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.I32_CONST, 1),
@@ -1202,6 +1402,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(5)},
 	},
 	{
+		name: "const.get i32.const struct.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.I32_CONST, 0),
@@ -1210,6 +1411,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(7)},
 	},
 	{
+		name: "const.get ref.get returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.REF_GET),
@@ -1217,6 +1419,7 @@ var runTests = []struct {
 		values: []types.Value{types.I64(math.MaxInt64)},
 	},
 	{
+		name: "i32.const i32.const const.get call returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4),
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
@@ -1229,6 +1432,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(7)},
 	},
 	{
+		name: "i32.const array.new_default i32.const array.get reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_GET),
@@ -1236,6 +1440,7 @@ var runTests = []struct {
 		err: ErrIndexOutOfRange,
 	},
 	{
+		name: "i32.const array.new_default i32.const i32.const array.set reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 9), instr.New(instr.ARRAY_SET),
@@ -1243,6 +1448,7 @@ var runTests = []struct {
 		err: ErrIndexOutOfRange,
 	},
 	{
+		name: "i32.const array.new_default i32.const i32.const i32.const array.fill reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 7), instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_FILL),
@@ -1250,6 +1456,7 @@ var runTests = []struct {
 		err: ErrIndexOutOfRange,
 	},
 	{
+		name: "i32.const array.new_default i32.const array.delete reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_DELETE),
@@ -1257,6 +1464,7 @@ var runTests = []struct {
 		err: ErrIndexOutOfRange,
 	},
 	{
+		name: "i32.const array.new_default through array.new_default i32.const i32.const array.copy reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 0),
@@ -1267,6 +1475,7 @@ var runTests = []struct {
 		err: ErrIndexOutOfRange,
 	},
 	{
+		name: "i32.const i32.const through array.new i32.const i32.const array.copy reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.I32_CONST, 2),
@@ -1281,7 +1490,12 @@ var runTests = []struct {
 func TestInterpreter_Run(t *testing.T) {
 	t.Run("covers every runtime opcode", func(t *testing.T) {
 		covered := make(map[instr.Opcode]struct{})
+		names := make(map[string]struct{})
 		for _, tt := range runTests {
+			require.NotEmpty(t, tt.name)
+			_, duplicate := names[tt.name]
+			require.False(t, duplicate, "duplicate runtime case %q", tt.name)
+			names[tt.name] = struct{}{}
 			codes := [][]byte{tt.program.Code}
 			for _, constant := range tt.program.Constants {
 				if fn, ok := constant.(*types.Function); ok {
@@ -1314,7 +1528,7 @@ func TestInterpreter_Run(t *testing.T) {
 	})
 
 	for _, tt := range runTests {
-		t.Run(fmt.Sprint(tt.program), func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			i := New(tt.program)
 			defer i.Close()
 
@@ -1331,6 +1545,146 @@ func TestInterpreter_Run(t *testing.T) {
 			}
 		})
 	}
+
+	parityPrograms := []struct {
+		name string
+		prog *program.Program
+	}{
+		{
+			name: "integer arithmetic",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 20),
+				instr.New(instr.I32_CONST, 22),
+				instr.New(instr.I32_ADD),
+			}),
+		},
+		{
+			name: "global mutation",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.GLOBAL_GET, 0),
+			}, program.WithGlobals(types.TypeI32)),
+		},
+		{
+			name: "array access",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_GET),
+			}, program.WithConstants(types.TypedArray[int32]{10, 20, 30})),
+		},
+		{
+			name: "divide by zero trap",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_DIV_S),
+			}),
+		},
+		{
+			name: "coroutine state",
+			prog: program.New(
+				[]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+					instr.New(instr.CORO_DONE),
+				},
+				program.WithConstants(
+					types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.YIELD),
+						instr.New(instr.RETURN),
+					).MustBuild(),
+				),
+			),
+		},
+	}
+	type outcome struct {
+		values  []types.Value
+		globals []types.Boxed
+		code    types.ErrorCode
+	}
+	run := func(t *testing.T, prog *program.Program, opts ...func(*option)) outcome {
+		t.Helper()
+		i := New(prog, opts...)
+		defer i.Close()
+		err := i.Run(context.Background())
+		result := outcome{code: ErrorCode(err)}
+		for i.Len() > 0 {
+			value, popErr := i.Pop()
+			require.NoError(t, popErr)
+			result.values = append(result.values, value)
+		}
+		for index := range prog.Globals {
+			value, globalErr := i.Global(index)
+			require.NoError(t, globalErr)
+			result.globals = append(result.globals, value)
+		}
+		return result
+	}
+	for _, tt := range parityPrograms {
+		oracle := run(t, tt.prog, WithTick(1), WithThreshold(-1))
+		t.Run("parity/"+tt.name+"/fused", func(t *testing.T) {
+			require.Equal(t, oracle, run(t, tt.prog, WithThreshold(-1)))
+		})
+		if runtime.GOARCH == "arm64" {
+			t.Run("parity/"+tt.name+"/jit warm", func(t *testing.T) {
+				i := New(tt.prog, WithThreshold(0))
+				defer i.Close()
+				require.Equal(t, oracle.code, ErrorCode(i.Run(context.Background())))
+				i.Reset()
+
+				err := i.Run(context.Background())
+				result := outcome{code: ErrorCode(err)}
+				for i.Len() > 0 {
+					value, popErr := i.Pop()
+					require.NoError(t, popErr)
+					result.values = append(result.values, value)
+				}
+				for index := range tt.prog.Globals {
+					value, globalErr := i.Global(index)
+					require.NoError(t, globalErr)
+					result.globals = append(result.globals, value)
+				}
+				require.Equal(t, oracle, result)
+			})
+		}
+	}
+
+	t.Run("parity/host callback effect", func(t *testing.T) {
+		runHost := func(opts ...func(*option)) (types.Value, int) {
+			calls := 0
+			host := NewHostFunction(
+				&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+				func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+					calls++
+					return []types.Boxed{types.BoxI32(42)}, nil
+				},
+			)
+			prog := program.New(
+				[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
+				program.WithConstants(host),
+			)
+			i := New(prog, opts...)
+			defer i.Close()
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.Pop()
+			require.NoError(t, err)
+			return value, calls
+		}
+
+		want, calls := runHost(WithTick(1), WithThreshold(-1))
+		require.Equal(t, 1, calls)
+		got, calls := runHost(WithThreshold(-1))
+		require.Equal(t, want, got)
+		require.Equal(t, 1, calls)
+		if runtime.GOARCH == "arm64" {
+			got, calls = runHost(WithThreshold(0))
+			require.Equal(t, want, got)
+			require.Equal(t, 1, calls)
+		}
+	})
 
 	t.Run("entry frame yield resumes on the next Run call", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{

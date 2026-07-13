@@ -350,4 +350,61 @@ func TestOptimizer_Optimize(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, beforeValue, optimizedValue)
 	})
+
+	parity := []struct {
+		name string
+		prog *program.Program
+	}{
+		{
+			name: "constant arithmetic",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 20),
+				instr.New(instr.I32_CONST, 22),
+				instr.New(instr.I32_ADD),
+			}),
+		},
+		{
+			name: "conditional branch",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.BR_IF, 5),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 7),
+			}),
+		},
+		{
+			name: "array access",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_GET),
+			}, program.WithConstants(types.TypedArray[int32]{10, 20, 30})),
+		},
+	}
+	for _, tt := range parity {
+		t.Run("semantic parity "+tt.name, func(t *testing.T) {
+			original := interp.New(tt.prog, interp.WithThreshold(-1))
+			defer original.Close()
+			require.NoError(t, original.Run(context.Background()))
+			var want []types.Value
+			for original.Len() > 0 {
+				value, err := original.Pop()
+				require.NoError(t, err)
+				want = append(want, value)
+			}
+
+			optimized, err := NewOptimizer(O3).Optimize(tt.prog)
+			require.NoError(t, err)
+			got := interp.New(optimized, interp.WithThreshold(-1))
+			defer got.Close()
+			require.NoError(t, got.Run(context.Background()))
+			var values []types.Value
+			for got.Len() > 0 {
+				value, err := got.Pop()
+				require.NoError(t, err)
+				values = append(values, value)
+			}
+			require.Equal(t, want, values)
+		})
+	}
 }

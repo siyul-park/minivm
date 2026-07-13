@@ -19,12 +19,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestInterpreter_JITArraySetAfterBranchyCallsInLoop is a regression test for
+// ArraySetAfterNestedCalls protects compiled stack materialization across
 // a SIGSEGV in generated ARM64 code: an outer row loop whose body inlines
 // branchy F64 tree calls and ends each iteration with ARRAY_SET. Register
 // pressure used to spill inside the terminal mutation trace, letting a branch
 // skip spill-frame work and corrupt the Go stack.
-func TestInterpreter_JITArraySetAfterBranchyCallsInLoop(t *testing.T) {
+func TestARM64_ArraySetAfterNestedCalls(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
 		t.Skip("native JIT is only available on arm64")
 	}
@@ -117,7 +117,7 @@ func TestInterpreter_JITArraySetAfterBranchyCallsInLoop(t *testing.T) {
 	require.Equal(t, jitOut, out)
 }
 
-// TestInterpreter_JITSideExitAbortNotCompletion is a regression test for a
+// AbortedSideExitDoesNotComplete protects partial unsupported traces from
 // miscompile where a captured side-exit fragment that recorded a few
 // supported opcodes and then aborted on an unsupported one (MAP_NEW_DEFAULT
 // is not recordable) could be mistaken for a normal top-level completion:
@@ -129,7 +129,7 @@ func TestInterpreter_JITArraySetAfterBranchyCallsInLoop(t *testing.T) {
 // exitThreshold and force the tracer to capture — and abort on — the
 // MAP_NEW_DEFAULT side exit. The JIT-enabled run must match a pure
 // interpreter run (WithThreshold(-1)) on every input.
-func TestInterpreter_JITSideExitAbortNotCompletion(t *testing.T) {
+func TestARM64_AbortedSideExitDoesNotComplete(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
 		t.Skip("native JIT is only available on arm64")
 	}
