@@ -3123,6 +3123,19 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.String("value"), v)
 	})
+
+	t.Run("rejects invalid reference", func(t *testing.T) {
+		prog := program.New(nil, program.WithGlobals(types.TypeRef))
+		i := New(prog)
+		defer i.Close()
+
+		before, err := i.Global(0)
+		require.NoError(t, err)
+		require.ErrorIs(t, i.SetGlobal(0, types.BoxRef(9999)), ErrSegmentationFault)
+		after, err := i.Global(0)
+		require.NoError(t, err)
+		require.Equal(t, before, after)
+	})
 }
 
 func TestInterpreter_Local(t *testing.T) {
@@ -3164,6 +3177,19 @@ func TestInterpreter_SetLocal(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.String("value"), v)
 	})
+
+	t.Run("rejects invalid reference", func(t *testing.T) {
+		prog := program.New(nil, program.WithLocals(types.TypeRef))
+		i := New(prog)
+		defer i.Close()
+
+		before, err := i.Local(0)
+		require.NoError(t, err)
+		require.ErrorIs(t, i.SetLocal(0, types.BoxRef(9999)), ErrSegmentationFault)
+		after, err := i.Local(0)
+		require.NoError(t, err)
+		require.Equal(t, before, after)
+	})
 }
 
 func TestInterpreter_Load(t *testing.T) {
@@ -3184,7 +3210,7 @@ func TestInterpreter_Store(t *testing.T) {
 
 		addr, err := i.Alloc(types.I32(5))
 		require.NoError(t, err)
-		require.NoError(t, i.Store(addr, types.I32(9)))
+		require.NoError(t, i.Store(addr, types.BoxI32(9)))
 		v, err := i.Load(addr)
 		require.NoError(t, err)
 		require.Equal(t, types.I32(9), v)
@@ -3234,6 +3260,106 @@ func TestInterpreter_Store(t *testing.T) {
 		require.NoError(t, err)
 		require.Same(t, value, v)
 	})
+
+	t.Run("ignores identical value", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		value := &trackedValue{}
+		addr, err := i.Alloc(value)
+		require.NoError(t, err)
+		loaded, err := i.Load(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Store(addr, loaded))
+		require.Equal(t, 0, value.closed)
+	})
+
+	t.Run("rejects different-address reference", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		source := &trackedValue{}
+		sourceAddr, err := i.Alloc(source)
+		require.NoError(t, err)
+		targetAddr, err := i.Alloc(types.I32(5))
+		require.NoError(t, err)
+
+		require.ErrorIs(t, i.Store(targetAddr, types.BoxRef(sourceAddr)), ErrTypeMismatch)
+		require.Equal(t, 0, source.closed)
+		v, err := i.Load(targetAddr)
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), v)
+	})
+
+	t.Run("rejects owned pointer", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		source := &trackedValue{}
+		_, err := i.Alloc(source)
+		require.NoError(t, err)
+		targetAddr, err := i.Alloc(types.I32(5))
+		require.NoError(t, err)
+
+		require.ErrorIs(t, i.Store(targetAddr, source), ErrTypeMismatch)
+		require.Equal(t, 0, source.closed)
+		v, err := i.Load(targetAddr)
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), v)
+	})
+
+	t.Run("ignores same-address ref", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		value := &trackedValue{}
+		addr, err := i.Alloc(value)
+		require.NoError(t, err)
+		require.NoError(t, i.Store(addr, types.Ref(addr)))
+		require.Equal(t, 0, value.closed)
+		v, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Same(t, value, v)
+	})
+
+	t.Run("rejects different-address ref", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		sourceAddr, err := i.Alloc(types.I32(7))
+		require.NoError(t, err)
+		targetAddr, err := i.Alloc(types.I32(5))
+		require.NoError(t, err)
+
+		require.ErrorIs(t, i.Store(targetAddr, types.Ref(sourceAddr)), ErrTypeMismatch)
+		v, err := i.Load(targetAddr)
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), v)
+	})
+
+	t.Run("rejects invalid ref", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.I32(5))
+		require.NoError(t, err)
+		require.ErrorIs(t, i.Store(addr, types.Ref(9999)), ErrSegmentationFault)
+		v, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), v)
+	})
+
+	t.Run("rejects invalid boxed ref", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.I32(5))
+		require.NoError(t, err)
+		require.ErrorIs(t, i.Store(addr, types.BoxRef(9999)), ErrSegmentationFault)
+		v, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), v)
+	})
 }
 
 func TestInterpreter_Alloc(t *testing.T) {
@@ -3279,6 +3405,21 @@ func TestInterpreter_Alloc(t *testing.T) {
 		require.Equal(t, types.String("hi"), v)
 		require.NoError(t, i.Release(copyAddr))
 	})
+
+	t.Run("rejects owned pointer", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		value := &trackedValue{}
+		addr, err := i.Alloc(value)
+		require.NoError(t, err)
+		_, err = i.Alloc(value)
+		require.ErrorIs(t, err, ErrTypeMismatch)
+		loaded, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Same(t, value, loaded)
+		require.Equal(t, 0, value.closed)
+	})
 }
 
 func TestInterpreter_Retain(t *testing.T) {
@@ -3306,11 +3447,25 @@ func TestInterpreter_Release(t *testing.T) {
 }
 
 func TestInterpreter_Push(t *testing.T) {
-	i := New(program.New(nil))
-	defer i.Close()
+	t.Run("pushes scalar", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
 
-	require.NoError(t, i.Push(types.I32(4)))
-	require.Equal(t, 1, i.Len())
+		require.NoError(t, i.Push(types.I32(4)))
+		require.Equal(t, 1, i.Len())
+	})
+
+	t.Run("rejects owned pointer", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		value := &trackedValue{}
+		_, err := i.Alloc(value)
+		require.NoError(t, err)
+		require.ErrorIs(t, i.Push(value), ErrTypeMismatch)
+		require.Equal(t, 0, i.Len())
+		require.Equal(t, 0, value.closed)
+	})
 }
 
 func TestInterpreter_Pop(t *testing.T) {

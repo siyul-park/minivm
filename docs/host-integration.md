@@ -114,7 +114,13 @@ Ownership rules:
 - `Alloc` of an existing `types.Ref` or `KindRef` creates another ownership of the same address
 - `Load` reads without changing ownership
 - `Store` replaces the value at an address, releases refs owned by the old value, and finalizes its external resources
-- `Store(addr, types.BoxRef(addr))` leaves the current value unchanged
+- storing the same concrete pointer or the destination's own `types.Ref` /
+  `KindRef` is a no-op
+- storing a different heap address returns `ErrTypeMismatch`; use
+  `Alloc(existingRef)` to create another ownership of one object
+- concrete pointer values passed to `Alloc`, `Store`, or `Push` transfer unique
+  ownership and must not already be owned by the interpreter; use an existing
+  ref when sharing one object
 - `Retain` creates another host-owned reference
 - `Release` drops a host-owned reference
 - every owned reference from `Alloc` or `Retain` must eventually be transferred or released
@@ -126,7 +132,11 @@ invalidate another ownership created by `Alloc` or `Retain`.
 
 `SetGlobal(idx, val)` and `SetLocal(idx, val)` overwrite VM slots.
 
-If `val` is a different `KindRef`, ownership transfers into the slot. The caller must not release that same ownership afterward. Assigning the slot's current boxed value is a no-op; in that case no ownership transfers, and the caller remains responsible for any ownership it already holds.
+If `val` is a different valid `KindRef`, ownership transfers into the slot. The
+caller must not release that same ownership afterward. Invalid heap addresses
+return `ErrSegmentationFault` without changing the slot. Assigning the slot's
+current boxed value is a no-op; in that case no ownership transfers, and the
+caller remains responsible for any ownership it already holds.
 
 To keep another reference after a different-value assignment, retain first.
 

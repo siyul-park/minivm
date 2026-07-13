@@ -584,6 +584,9 @@ func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
 	if idx < 0 || idx >= len(i.globals) {
 		return ErrSegmentationFault
 	}
+	if val.Kind() == types.KindRef && !i.alive(val.Ref()) {
+		return ErrSegmentationFault
+	}
 	old := i.globals[idx]
 	if old == val {
 		return nil
@@ -615,6 +618,9 @@ func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
 	if addr < 0 || addr >= i.sp {
 		return ErrSegmentationFault
 	}
+	if val.Kind() == types.KindRef && !i.alive(val.Ref()) {
+		return ErrSegmentationFault
+	}
 	old := i.stack[addr]
 	if old == val {
 		return nil
@@ -627,31 +633,44 @@ func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
 }
 
 func (i *Interpreter) Load(addr int) (types.Value, error) {
-	if addr < 0 || addr >= len(i.heap) || i.rc[addr] <= 0 {
+	if !i.alive(addr) {
 		return nil, ErrSegmentationFault
 	}
 	return i.heap[addr], nil
 }
 
+// Store replaces the value at addr. Concrete values transfer unique slot
+// ownership; an existing heap ref is accepted only when it already names addr.
 func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 	defer i.guard(&err)
-	if addr < 0 || addr >= len(i.heap) || i.rc[addr] <= 0 {
+	if !i.alive(addr) {
 		return ErrSegmentationFault
 	}
+	ref, alias := 0, false
 	switch v := val.(type) {
 	case types.Boxed:
 		if v.Kind() == types.KindRef {
-			ref := v.Ref()
-			if ref < 0 || ref >= len(i.heap) || i.rc[ref] <= 0 {
-				return ErrSegmentationFault
-			}
-			if ref == addr {
-				return nil
-			}
-			val = i.heap[ref]
+			ref, alias = v.Ref(), true
 		} else {
 			val = types.Unbox(v)
 		}
+	case types.Ref:
+		ref, alias = int(v), true
+	}
+	if alias {
+		if !i.alive(ref) {
+			return ErrSegmentationFault
+		}
+		if ref == addr {
+			return nil
+		}
+		return ErrTypeMismatch
+	}
+	if owner := i.owner(val); owner >= 0 {
+		if owner == addr {
+			return nil
+		}
+		return ErrTypeMismatch
 	}
 	old := i.heap[addr]
 	i.heap[addr] = val
@@ -668,7 +687,7 @@ func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 	case types.Boxed:
 		if v.Kind() == types.KindRef {
 			addr = v.Ref()
-			if addr < 0 || addr >= len(i.heap) || i.rc[addr] <= 0 {
+			if !i.alive(addr) {
 				return 0, ErrSegmentationFault
 			}
 			i.retain(addr)
@@ -677,11 +696,14 @@ func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 		val = types.Unbox(v)
 	case types.Ref:
 		addr = int(v)
-		if addr < 0 || addr >= len(i.heap) || i.rc[addr] <= 0 {
+		if !i.alive(addr) {
 			return 0, ErrSegmentationFault
 		}
 		i.retain(addr)
 		return addr, nil
+	}
+	if i.owner(val) >= 0 {
+		return 0, ErrTypeMismatch
 	}
 	if s, ok := val.(types.String); ok {
 		return int(i.intern(string(s))), nil
@@ -694,7 +716,7 @@ func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 }
 
 func (i *Interpreter) Retain(addr int) (types.Value, error) {
-	if addr < 0 || addr >= len(i.heap) || i.rc[addr] <= 0 {
+	if !i.alive(addr) {
 		return nil, ErrSegmentationFault
 	}
 	i.retain(addr)
@@ -702,7 +724,7 @@ func (i *Interpreter) Retain(addr int) (types.Value, error) {
 }
 
 func (i *Interpreter) Release(addr int) error {
-	if addr < 0 || addr >= len(i.heap) || i.rc[addr] <= 0 {
+	if !i.alive(addr) {
 		return ErrSegmentationFault
 	}
 	i.release(addr)
@@ -713,6 +735,9 @@ func (i *Interpreter) Push(val types.Value) (err error) {
 	defer i.guard(&err)
 	if i.sp == len(i.stack) {
 		return ErrStackOverflow
+	}
+	if i.owner(val) >= 0 {
+		return ErrTypeMismatch
 	}
 	i.stack[i.sp] = i.box(val)
 	i.sp++
@@ -1729,6 +1754,27 @@ func (i *Interpreter) releaseBox(v types.Boxed) {
 	if v.Kind() == types.KindRef {
 		i.release(v.Ref())
 	}
+}
+
+func (i *Interpreter) alive(addr int) bool {
+	return addr >= 0 && addr < len(i.heap) && i.rc[addr] > 0
+}
+
+func (i *Interpreter) owner(val types.Value) int {
+	pointer := reflect.ValueOf(val)
+	if !pointer.IsValid() || pointer.Kind() != reflect.Pointer {
+		return -1
+	}
+	for addr, current := range i.heap {
+		if !i.alive(addr) {
+			continue
+		}
+		owner := reflect.ValueOf(current)
+		if owner.IsValid() && owner.Type() == pointer.Type() && owner.Pointer() == pointer.Pointer() {
+			return addr
+		}
+	}
+	return -1
 }
 
 func (i *Interpreter) retain(addr int) {
