@@ -6,6 +6,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestFieldWithName(t *testing.T) {
+	field := NewStructField(TypeI32, FieldWithName("value"))
+	require.Equal(t, "value", field.Name)
+}
+
+func TestNewStruct(t *testing.T) {
+	t.Run("initial fields", func(t *testing.T) {
+		typ := NewStructType(NewStructField(TypeI32), NewStructField(TypeRef))
+		s := NewStruct(typ, BoxI32(1), BoxRef(2))
+		require.Same(t, typ, s.Typ)
+		require.Equal(t, BoxI32(1), s.Field(0))
+		require.Equal(t, BoxRef(2), s.Field(1))
+	})
+
+	t.Run("small storage", func(t *testing.T) {
+		typ := NewStructType(NewStructField(TypeI32), NewStructField(TypeI32))
+		s := NewStruct(typ)
+		require.Len(t, s.Data, 2)
+	})
+
+	t.Run("large storage", func(t *testing.T) {
+		typ := NewStructType(
+			NewStructField(TypeI32),
+			NewStructField(TypeI32),
+			NewStructField(TypeI32),
+			NewStructField(TypeI32),
+			NewStructField(TypeI32),
+		)
+		s := NewStruct(typ)
+		require.Len(t, s.Data, 5)
+	})
+}
+
 func TestStruct_FieldByName(t *testing.T) {
 	s := NewStruct(NewStructType(NewStructField(TypeI32, FieldWithName("foo"))))
 
@@ -43,31 +76,20 @@ func TestStruct_SetField(t *testing.T) {
 	require.Equal(t, 5, s.Field(4).Ref())
 }
 
-func TestStruct_Data(t *testing.T) {
-	t.Run("small struct uses data slice", func(t *testing.T) {
-		s := NewStruct(NewStructType(
-			NewStructField(TypeI32),
-			NewStructField(TypeI32),
-			NewStructField(TypeI32),
-			NewStructField(TypeI32),
-		))
-		s.SetField(3, BoxI32(4))
-		require.Len(t, s.Data, 4)
-		require.Equal(t, int32(4), s.Field(3).I32())
-	})
+func TestStruct_Raw(t *testing.T) {
+	s := NewStruct(NewStructType(NewStructField(TypeI64)))
+	s.SetRaw(0, 42)
 
-	t.Run("large struct uses data slice", func(t *testing.T) {
-		s := NewStruct(NewStructType(
-			NewStructField(TypeI32),
-			NewStructField(TypeI32),
-			NewStructField(TypeI32),
-			NewStructField(TypeI32),
-			NewStructField(TypeI32),
-		))
-		s.SetField(4, BoxI32(5))
-		require.Len(t, s.Data, 5)
-		require.Equal(t, int32(5), s.Field(4).I32())
-	})
+	require.Equal(t, uint64(42), s.Raw(0))
+	require.Zero(t, s.Raw(1))
+}
+
+func TestStruct_SetRaw(t *testing.T) {
+	s := NewStruct(NewStructType(NewStructField(TypeI64)))
+	s.SetRaw(0, 42)
+	s.SetRaw(1, 99)
+
+	require.Equal(t, uint64(42), s.Raw(0))
 }
 
 func TestStruct_Kind(t *testing.T) {
@@ -96,7 +118,7 @@ func TestStruct_Refs(t *testing.T) {
 	t.Run("primitive fields", func(t *testing.T) {
 		s := NewStruct(NewStructType(NewStructField(TypeI32)), BoxI32(1))
 
-		require.Empty(t, s.Refs(nil))
+		require.Equal(t, []Ref{9}, s.Refs([]Ref{9}))
 		var refs []Ref
 		allocs := testing.AllocsPerRun(100, func() {
 			refs = s.Refs(nil)
@@ -111,24 +133,14 @@ func TestStruct_Refs(t *testing.T) {
 			BoxRef(1), BoxI32(2), BoxRef(3),
 		)
 
-		require.Equal(t, []Ref{1, 3}, s.Refs(nil))
+		require.Equal(t, []Ref{9, 1, 3}, s.Refs([]Ref{9}))
 	})
 }
 
-func TestStruct_Raw(t *testing.T) {
-	s := NewStruct(NewStructType(NewStructField(TypeI64)))
-	s.SetRaw(0, 42)
-
-	require.Equal(t, uint64(42), s.Raw(0))
-	require.Zero(t, s.Raw(1))
-}
-
-func TestStruct_SetRaw(t *testing.T) {
-	s := NewStruct(NewStructType(NewStructField(TypeI64)))
-	s.SetRaw(0, 42)
-	s.SetRaw(1, 99)
-
-	require.Equal(t, uint64(42), s.Raw(0))
+func TestNewStructType(t *testing.T) {
+	fields := []StructField{NewStructField(TypeI32), NewStructField(TypeRef)}
+	typ := NewStructType(fields...)
+	require.Equal(t, fields, typ.Fields)
 }
 
 func TestStructType_FieldByName(t *testing.T) {
@@ -147,6 +159,14 @@ func TestStructType_FieldIndex(t *testing.T) {
 
 	require.Equal(t, 0, typ.FieldIndex("foo"))
 	require.Equal(t, -1, typ.FieldIndex("missing"))
+}
+
+func TestStructType_Kind(t *testing.T) {
+	require.Equal(t, KindRef, NewStructType().Kind())
+}
+
+func TestStructType_String(t *testing.T) {
+	require.Equal(t, "struct {i32; ref}", NewStructType(NewStructField(TypeI32), NewStructField(TypeRef)).String())
 }
 
 func TestStructType_Cast(t *testing.T) {
@@ -168,14 +188,20 @@ func TestStructType_Equals(t *testing.T) {
 	require.False(t, typ.Equals(TypeI32))
 }
 
+func TestNewStructField(t *testing.T) {
+	field := NewStructField(TypeI8, FieldWithName("small"))
+	require.Equal(t, StructField{Name: "small", Type: TypeI8, Kind: KindI8}, field)
+}
+
 func BenchmarkStruct_Refs(b *testing.B) {
 	b.Run("no refs", func(b *testing.B) {
 		s := NewStruct(NewStructType(NewStructField(TypeI32)), BoxI32(1))
+		require.Empty(b, s.Refs(nil))
 
 		var refs []Ref
 		b.ReportAllocs()
 		b.ResetTimer()
-		for n := 0; n < b.N; n++ {
+		for b.Loop() {
 			refs = s.Refs(nil)
 		}
 		b.StopTimer()
@@ -184,14 +210,15 @@ func BenchmarkStruct_Refs(b *testing.B) {
 
 	b.Run("child refs", func(b *testing.B) {
 		s := NewStruct(NewStructType(NewStructField(TypeRef)), BoxRef(1))
+		require.Equal(b, []Ref{1}, s.Refs(nil))
 
-		var refs []Ref
+		refs := make([]Ref, 0, 1)
 		b.ReportAllocs()
 		b.ResetTimer()
-		for n := 0; n < b.N; n++ {
+		for b.Loop() {
 			refs = s.Refs(refs[:0])
 		}
 		b.StopTimer()
-		require.Len(b, refs, 1)
+		require.Equal(b, []Ref{1}, refs)
 	})
 }

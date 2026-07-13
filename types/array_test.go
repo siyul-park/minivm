@@ -7,18 +7,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestArray_Kind(t *testing.T) {
-	require.Equal(t, KindRef, NewArray(NewArrayType(TypeRef)).Kind())
-}
-
-func TestArray_Type(t *testing.T) {
+func TestNewArray(t *testing.T) {
 	typ := NewArrayType(TypeRef)
-	require.Equal(t, typ, NewArray(typ).Type())
+	elems := []Boxed{BoxRef(1), BoxRef(2)}
+	array := NewArray(typ, elems...)
+
+	require.Same(t, typ, array.Typ)
+	require.Equal(t, elems, array.Elems)
 }
 
-func TestArray_String(t *testing.T) {
-	a := NewArray(NewArrayType(TypeRef), BoxI32(1), BoxI32(2), BoxI32(3))
-	require.Equal(t, "[]ref{1, 2, 3}", a.String())
+func TestNewArrayType(t *testing.T) {
+	typ := NewArrayType(TypeI32)
+	require.Equal(t, TypeI32, typ.Elem)
 }
 
 func TestTypedArray_Kind(t *testing.T) {
@@ -72,11 +72,25 @@ func TestTypedArray_String(t *testing.T) {
 	}
 }
 
+func TestArray_Kind(t *testing.T) {
+	require.Equal(t, KindRef, NewArray(NewArrayType(TypeRef)).Kind())
+}
+
+func TestArray_Type(t *testing.T) {
+	typ := NewArrayType(TypeRef)
+	require.Equal(t, typ, NewArray(typ).Type())
+}
+
+func TestArray_String(t *testing.T) {
+	a := NewArray(NewArrayType(TypeRef), BoxI32(1), BoxI32(2), BoxI32(3))
+	require.Equal(t, "[]ref{1, 2, 3}", a.String())
+}
+
 func TestArray_Refs(t *testing.T) {
 	t.Run("primitive elements", func(t *testing.T) {
 		a := NewArray(NewArrayType(TypeI32), BoxI32(1), BoxI32(2))
 
-		require.Empty(t, a.Refs(nil))
+		require.Equal(t, []Ref{9}, a.Refs([]Ref{9}))
 		var refs []Ref
 		allocs := testing.AllocsPerRun(100, func() {
 			refs = a.Refs(nil)
@@ -88,7 +102,7 @@ func TestArray_Refs(t *testing.T) {
 	t.Run("reference elements", func(t *testing.T) {
 		a := NewArray(NewArrayType(TypeRef), BoxRef(1), BoxI32(2), BoxRef(3))
 
-		require.Equal(t, []Ref{1, 3}, a.Refs(nil))
+		require.Equal(t, []Ref{9, 1, 3}, a.Refs([]Ref{9}))
 	})
 }
 
@@ -117,14 +131,15 @@ func TestArrayType_Equals(t *testing.T) {
 	require.False(t, typ.Equals(TypeI32))
 }
 
-func BenchmarkTypedArray_Refs(b *testing.B) {
+func BenchmarkArray_Refs(b *testing.B) {
 	b.Run("no refs", func(b *testing.B) {
 		a := NewArray(NewArrayType(TypeI32), BoxI32(1), BoxI32(2))
+		require.Empty(b, a.Refs(nil))
 
 		var refs []Ref
 		b.ReportAllocs()
 		b.ResetTimer()
-		for n := 0; n < b.N; n++ {
+		for b.Loop() {
 			refs = a.Refs(nil)
 		}
 		b.StopTimer()
@@ -133,14 +148,15 @@ func BenchmarkTypedArray_Refs(b *testing.B) {
 
 	b.Run("child refs", func(b *testing.B) {
 		a := NewArray(NewArrayType(TypeRef), BoxRef(1), BoxRef(2))
+		require.Equal(b, []Ref{1, 2}, a.Refs(nil))
 
-		var refs []Ref
+		refs := make([]Ref, 0, 2)
 		b.ReportAllocs()
 		b.ResetTimer()
-		for n := 0; n < b.N; n++ {
+		for b.Loop() {
 			refs = a.Refs(refs[:0])
 		}
 		b.StopTimer()
-		require.Len(b, refs, 2)
+		require.Equal(b, []Ref{1, 2}, refs)
 	})
 }

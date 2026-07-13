@@ -7,108 +7,94 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPrimitive_Kind(t *testing.T) {
-	tests := []struct {
-		val  Value
-		kind Kind
-	}{
-		{
-			val:  I32(0),
-			kind: KindI32,
-		},
-		{
-			val:  I64(0),
-			kind: KindI64,
-		},
-		{
-			val:  F32(0),
-			kind: KindF32,
-		},
-		{
-			val:  F64(0),
-			kind: KindF64,
-		},
-		{
-			val:  Ref(0),
-			kind: KindRef,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
-			require.Equal(t, tt.kind, tt.val.Kind())
-		})
-	}
-}
-
-func TestPrimitive_Type(t *testing.T) {
-	tests := []struct {
-		val Value
-		typ Type
-	}{
-		{
-			val: I32(0),
-			typ: TypeI32,
-		},
-		{
-			val: I64(0),
-			typ: TypeI64,
-		},
-		{
-			val: F32(0),
-			typ: TypeF32,
-		},
-		{
-			val: F64(0),
-			typ: TypeF64,
-		},
-		{
-			val: Ref(0),
-			typ: TypeRef,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
-			require.Equal(t, tt.typ, tt.val.Type())
-		})
-	}
-}
-
-func TestPrimitive_String(t *testing.T) {
-	tests := []struct {
-		val Value
-		str string
-	}{
-		{
-			val: I32(0),
-			str: "0",
-		},
-		{
-			val: I64(0),
-			str: "0",
-		},
-		{
-			val: F32(0),
-			str: "0",
-		},
-		{
-			val: F64(0),
-			str: "0",
-		},
-		{
-			val: Ref(0),
-			str: "0",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
-			require.Equal(t, tt.str, tt.val.String())
-		})
-	}
-}
-
 func TestBool(t *testing.T) {
 	require.Equal(t, True, Bool(true))
 	require.Equal(t, False, Bool(false))
+}
+
+func TestI1_Kind(t *testing.T) {
+	require.Equal(t, KindI1, I1(false).Kind())
+}
+
+func TestI1_Type(t *testing.T) {
+	require.Equal(t, TypeI1, I1(false).Type())
+}
+
+func TestI1_String(t *testing.T) {
+	require.Equal(t, "false", I1(false).String())
+	require.Equal(t, "true", I1(true).String())
+}
+
+func TestI8_Kind(t *testing.T) {
+	require.Equal(t, KindI8, I8(0).Kind())
+}
+
+func TestI8_Type(t *testing.T) {
+	require.Equal(t, TypeI8, I8(0).Type())
+}
+
+func TestI8_String(t *testing.T) {
+	require.Equal(t, "-8", I8(-8).String())
+}
+
+func TestI32_Kind(t *testing.T) {
+	require.Equal(t, KindI32, I32(0).Kind())
+}
+
+func TestI32_Type(t *testing.T) {
+	require.Equal(t, TypeI32, I32(0).Type())
+}
+
+func TestI32_String(t *testing.T) {
+	require.Equal(t, "-32", I32(-32).String())
+}
+
+func TestI64_Kind(t *testing.T) {
+	require.Equal(t, KindI64, I64(0).Kind())
+}
+
+func TestI64_Type(t *testing.T) {
+	require.Equal(t, TypeI64, I64(0).Type())
+}
+
+func TestI64_String(t *testing.T) {
+	require.Equal(t, "-64", I64(-64).String())
+}
+
+func TestF32_Kind(t *testing.T) {
+	require.Equal(t, KindF32, F32(0).Kind())
+}
+
+func TestF32_Type(t *testing.T) {
+	require.Equal(t, TypeF32, F32(0).Type())
+}
+
+func TestF32_String(t *testing.T) {
+	require.Equal(t, "3.5", F32(3.5).String())
+}
+
+func TestF64_Kind(t *testing.T) {
+	require.Equal(t, KindF64, F64(0).Kind())
+}
+
+func TestF64_Type(t *testing.T) {
+	require.Equal(t, TypeF64, F64(0).Type())
+}
+
+func TestF64_String(t *testing.T) {
+	require.Equal(t, "6.25", F64(6.25).String())
+}
+
+func TestRef_Kind(t *testing.T) {
+	require.Equal(t, KindRef, Ref(0).Kind())
+}
+
+func TestRef_Type(t *testing.T) {
+	require.Equal(t, TypeRef, Ref(0).Type())
+}
+
+func TestRef_String(t *testing.T) {
+	require.Equal(t, "7", Ref(7).String())
 }
 
 func TestPrimitiveType_Kind(t *testing.T) {

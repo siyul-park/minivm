@@ -27,7 +27,7 @@ No later phase starts before the previous phase passes its review gate.
 | 0 | Baseline, inventory, and plan | Complete | `test: record test and benchmark baseline` | Passed |
 | 1 | Test ownership matrices and completeness gates | Complete | `test: add test ownership gates` | Passed |
 | 2 | `instr` executable specifications and fuzzing | Complete | `test(instr): reorganize executable specifications` | Passed |
-| 3 | `types` executable specifications and fuzzing | Pending | - | - |
+| 3 | `types` executable specifications and fuzzing | Complete | `test(types): reorganize executable specifications` | Passed |
 | 4 | `program` construction, parser, verifier, and fuzzing | Pending | - | - |
 | 5 | Interpreter public API, marshal, host, pool, and lifecycle | Pending | - | - |
 | 6 | Opcode corpus and threaded/optimized/JIT semantic parity | Pending | - | - |
@@ -174,14 +174,14 @@ All production-matched `types/*_test.go` files plus `types/fuzz_test.go`.
 
 ### Tasks
 
-- [ ] Specify value zero/null/kind and every boxing/unboxing boundary.
-- [ ] Consolidate primitive scalar and scalar-type behavior by public owner.
-- [ ] Specify array, struct, map, iterator, string, function, closure, and error contracts.
-- [ ] Split iterator and aggregate umbrella tests into method-owned tests.
-- [ ] Specify append-to-destination reference tracing, invalid indexes, ownership, map overwrite/delete, NaN, and signed zero behavior.
-- [ ] Add bounded type and function parse/format round-trip fuzz tests.
-- [ ] Keep only meaningful traversal microbenchmarks and validate their fixtures.
-- [ ] Run focused tests, review diff, update progress, and commit.
+- [x] Specify value zero/null/kind and every boxing/unboxing boundary.
+- [x] Consolidate primitive scalar and scalar-type behavior by public owner.
+- [x] Specify array, struct, map, iterator, string, function, closure, and error contracts.
+- [x] Split iterator and aggregate umbrella tests into method-owned tests.
+- [x] Specify append-to-destination reference tracing, invalid indexes, ownership, map overwrite/delete, NaN, and signed zero behavior.
+- [x] Add bounded type and function parse/format round-trip fuzz tests.
+- [x] Keep only meaningful traversal microbenchmarks and validate their fixtures.
+- [x] Run focused tests, review diff, update progress, and commit.
 
 ### Verification
 
@@ -390,6 +390,16 @@ GOOS=linux GOARCH=arm64 go test -exec=true ./...
 - Intentionally retained structure: no `handler_test.go` because `Handler` is a behavior-free data record; handler resolution is specified through `Builder.Try` and `Builder.Handlers`.
 - Coverage/benchmark effect: `instr` 78.7% -> 93.9%; no benchmark change.
 - Commit: `test(instr): reorganize executable specifications`.
+
+### Phase 3
+
+- Focused verification: `GOENV_VERSION=1.26.2 go test -race ./types`; both parse fuzz targets ran for 10 seconds.
+- Broad verification: method-owned traversal benchmarks compiled and ran with `-benchtime=1x`; explicit `gofmt`, `goimports`, `go vet ./types`, owner inventory, and `git diff --check` passed.
+- Review findings fixed: split primitive and iterator umbrella tests, restored production declaration order, folded cached-field checks into constructors, removed duplicate `Kind` alias tests, and preserved destination prefixes for every `Traceable` contract.
+- Benchmark review: renamed benchmarks to their public method owners, separated `Map.Refs` from `TypedMap.Refs`, moved map-get timing to the later VM-kernel phase, validated fixtures before timing, and used preallocated scratch with `b.Loop()`.
+- Intentionally retained structure: `PrimitiveType_*` groups behavior of exported primitive type singleton instances whose concrete receiver types are private.
+- Coverage/benchmark effect: `types` 85.8% -> 90.2%; retained traversal benchmarks report 0 allocs/op with reused destination buffers.
+- Commit: `test(types): reorganize executable specifications`.
 
 Add one entry after each later phase:
 
