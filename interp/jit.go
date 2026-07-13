@@ -32,7 +32,7 @@ type exitDescriptor struct {
 	opcode int
 }
 
-type entryMetrics struct {
+type nativeMetrics struct {
 	entry *prof.Counter
 	yield *prof.Counter
 	exits []*prof.Counter
@@ -332,6 +332,28 @@ func (c *compiler) publish(mod *module, a anchor, ctx *lowering, arch asm.Arch, 
 	mod.entries[a] = n
 	mod.bytes += len(code.Bytes)
 	return prof.CompileReasonNone, nil
+}
+
+func (m nativeMetrics) exit(encoded uint64) {
+	if encoded == 0 {
+		return
+	}
+	id := int(encoded - 1)
+	if id >= 0 && id < len(m.exits) {
+		m.exits[id].Inc()
+	}
+}
+
+func (m nativeMetrics) enter() {
+	if m.entry != nil {
+		m.entry.Inc()
+	}
+}
+
+func (m nativeMetrics) suspend() {
+	if m.yield != nil {
+		m.yield.Inc()
+	}
 }
 
 func (noSpillArch) Frame() asm.Frame { return nil }

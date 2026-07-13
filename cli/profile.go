@@ -150,10 +150,6 @@ func (p profile) report() report {
 	}
 }
 
-func (p jitReport) empty() bool {
-	return p.summary == (jitSummary{}) && len(p.entries) == 0 && len(p.exits) == 0 && len(p.misses) == 0
-}
-
 func (p profile) functions(stats map[anchor]anchorStats) []functionRow {
 	byFunction := map[int]anchorStats{}
 	for key, value := range stats {
@@ -368,6 +364,10 @@ func (p profile) stats() map[anchor]anchorStats {
 		result[key.anchor] = stats
 	}
 	return result
+}
+
+func (p jitReport) empty() bool {
+	return p.summary == (jitSummary{}) && len(p.entries) == 0 && len(p.exits) == 0 && len(p.misses) == 0
 }
 
 func collect(metrics []prof.Metric) profile {

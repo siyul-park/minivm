@@ -449,13 +449,6 @@ func (r *REPL) printProfile(metrics []prof.Metric) {
 	}
 }
 
-func formatPercent(value, total uint64) string {
-	if total == 0 {
-		return "-"
-	}
-	return fmt.Sprintf("%.1f%%", float64(value)/float64(total)*100)
-}
-
 func (r *REPL) doBreak(spec string) error {
 	if spec == "" {
 		return fmt.Errorf("usage: .break <ip> or .break <fn>:<ip>")
@@ -689,6 +682,13 @@ func (r *REPL) parse(line string) (instr.Instruction, error) {
 
 func (r *REPL) printErr(err error) {
 	fmt.Fprintf(r.out, "error: %v\n", err)
+}
+
+func formatPercent(value, total uint64) string {
+	if total == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.1f%%", float64(value)/float64(total)*100)
 }
 
 func printIndexed(out io.Writer, vm *interp.Interpreter, label string, get func(int) (types.Boxed, error)) {

@@ -368,15 +368,17 @@ func TestPool_Get(t *testing.T) {
 				guardExits += metric.Value
 			}
 		}
-		require.Equal(t, float64(2), hotCompiles)
-		require.Equal(t, float64(2), sideExitCompiles)
+		require.Equal(t, 2.0, hotCompiles)
+		require.Equal(t, 2.0, sideExitCompiles)
 		require.Equal(t, float64(exitThreshold*2), guardExits)
 		attempts, ok := metrics.Metric("vm_jit_attempts_total")
 		require.True(t, ok)
-		require.Equal(t, float64(4), attempts)
+		require.Equal(t, hotCompiles+sideExitCompiles, attempts)
 		emits, ok := metrics.Metric("vm_jit_emits_total")
 		require.True(t, ok)
-		require.Equal(t, float64(3), emits)
+		// The module and function roots emit three entries. Recompiling a hot
+		// side exit replaces an existing entry instead of adding another one.
+		require.Equal(t, 3.0, emits)
 	})
 }
 

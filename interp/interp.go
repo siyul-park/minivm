@@ -854,7 +854,7 @@ func (i *Interpreter) install(mod *module, account bool) {
 		if entry.kind == entryFunction {
 			atomic.StorePointer(&i.natives[a.addr], entry.callable.Addr())
 		}
-		metrics := i.entryMetrics(a, entry)
+		metrics := i.registerMetrics(a, entry)
 		if entry.kind == entryLoop {
 			i.code[a.addr][a.ip] = i.loop(entry.callable, metrics)
 		} else if entry.kind == entryModule {
@@ -865,12 +865,12 @@ func (i *Interpreter) install(mod *module, account bool) {
 	}
 }
 
-func (i *Interpreter) entryMetrics(a anchor, entry native) entryMetrics {
+func (i *Interpreter) registerMetrics(a anchor, entry native) nativeMetrics {
 	if i.profiler == nil {
-		return entryMetrics{}
+		return nativeMetrics{}
 	}
 	kind := entry.kind.profile()
-	metrics := entryMetrics{
+	metrics := nativeMetrics{
 		entry: i.samples.RegisterEntry(a.addr, a.ip, kind, entry.frontend),
 		yield: i.samples.RegisterYield(a.addr, a.ip, kind, entry.frontend),
 		exits: make([]*prof.Counter, len(entry.exits)),
@@ -895,19 +895,6 @@ func (i *Interpreter) account(mod *module) {
 func (i *Interpreter) recordCompile(trigger prof.Trigger, result compileResult) {
 	if i.profiler != nil {
 		i.samples.RecordCompile(result.anchor.addr, result.anchor.ip, trigger, result.frontend, result.outcome, result.reason)
-	}
-}
-
-func (kind entryKind) profile() prof.EntryKind {
-	switch kind {
-	case entryModule:
-		return prof.EntryStart
-	case entryFunction:
-		return prof.EntryCall
-	case entryLoop:
-		return prof.EntryLoop
-	default:
-		return prof.EntryNone
 	}
 }
 
@@ -1062,7 +1049,7 @@ func (i *Interpreter) sample(f *frame) {
 // this closure performs the frame teardown that RETURN would do in the threaded
 // interpreter, and on a trap it rebuilds the native call chain into real VM
 // frames before resuming threaded execution at the fallback IP.
-func (i *Interpreter) call(root anchor, callable asm.Callable, metrics entryMetrics) func(*Interpreter) {
+func (i *Interpreter) call(root anchor, callable asm.Callable, metrics nativeMetrics) func(*Interpreter) {
 	return func(i *Interpreter) {
 		metrics.enter()
 		ctx := i.context()
@@ -1114,7 +1101,7 @@ func (i *Interpreter) call(root anchor, callable asm.Callable, metrics entryMetr
 // start wraps a native trace for top-level code. Unlike function entries,
 // top-level completion does not tear down its frame; it preserves the operand
 // stack and marks the module frame as exhausted so dispatch returns normally.
-func (i *Interpreter) start(root anchor, callable asm.Callable, metrics entryMetrics) func(*Interpreter) {
+func (i *Interpreter) start(root anchor, callable asm.Callable, metrics nativeMetrics) func(*Interpreter) {
 	return func(i *Interpreter) {
 		metrics.enter()
 		ctx := i.context()
@@ -1154,7 +1141,7 @@ func (i *Interpreter) start(root anchor, callable asm.Callable, metrics entryMet
 // through a trap. A spent budget yields to the safepoint and the Run loop
 // re-enters native at the header; a guarded side exit or the loop-exit edge
 // leaves deopt with i.fr at the resume IP for threaded dispatch to continue.
-func (i *Interpreter) loop(callable asm.Callable, metrics entryMetrics) func(*Interpreter) {
+func (i *Interpreter) loop(callable asm.Callable, metrics nativeMetrics) func(*Interpreter) {
 	return func(i *Interpreter) {
 		metrics.enter()
 		ctx := i.context()
@@ -1179,28 +1166,6 @@ func (i *Interpreter) loop(callable asm.Callable, metrics entryMetrics) func(*In
 		case trapFallback:
 			metrics.exit(i.journal[journalExitID])
 		}
-	}
-}
-
-func (m entryMetrics) exit(encoded uint64) {
-	if encoded == 0 {
-		return
-	}
-	id := int(encoded - 1)
-	if id >= 0 && id < len(m.exits) {
-		m.exits[id].Inc()
-	}
-}
-
-func (m entryMetrics) enter() {
-	if m.entry != nil {
-		m.entry.Inc()
-	}
-}
-
-func (m entryMetrics) suspend() {
-	if m.yield != nil {
-		m.yield.Inc()
 	}
 }
 

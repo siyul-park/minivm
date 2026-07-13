@@ -431,7 +431,7 @@ func TestCompiler_Compile(t *testing.T) {
 			entry, closeCompiler := compileNative(t, i, root, true)
 			defer closeCompiler()
 			require.Equal(t, entryLoop, entry.kind)
-			metrics := i.entryMetrics(root, entry)
+			metrics := i.registerMetrics(root, entry)
 
 			i.stack[i.fr.bp] = types.BoxI32(loopBudget + 2)
 			i.fr.ip = header
@@ -471,7 +471,7 @@ func TestCompiler_Compile(t *testing.T) {
 			defer closeCompiler()
 			require.Equal(t, entryFunction, entry.kind)
 
-			i.call(root, entry.callable, i.entryMetrics(root, entry))(i)
+			i.call(root, entry.callable, i.registerMetrics(root, entry))(i)
 			require.Equal(t, uint64(trapYield), i.journal[journalTrap])
 			require.Zero(t, i.journal[journalExitID])
 			yields, ok := local.Metric("vm_jit_native_yields_total",
