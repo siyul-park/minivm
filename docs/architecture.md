@@ -124,7 +124,7 @@ A typical execution follows this path:
 | `tracer` | profile samples and trace recording |
 | `frames` | call stack |
 | `stack` | operand stack |
-| `heap`, `rc`, `free` | heap storage, reference counts, and reusable slots |
+| `heap`, `rc`, `free`, `trial`, `work` | heap storage, exact counts, reusable slots, and cycle-collection scratch |
 | `globals` | global slots |
 | `compiler` | private JIT compiler for standalone interpreters |
 | `cache` | shared native-code cache used by pools |

@@ -71,7 +71,6 @@ type fieldPlan struct {
 type marshalState struct {
 	m    *codec
 	i    *Interpreter
-	root int
 	seen map[uintptr]bool
 }
 
@@ -196,7 +195,6 @@ func structOf(i *Interpreter, val types.Value) (*types.Struct, bool) {
 
 func (m *codec) Marshal(i *Interpreter, v any) (types.Value, error) {
 	state := &marshalState{m: m, i: i, seen: make(map[uintptr]bool)}
-	defer state.close()
 	return state.value(reflect.ValueOf(v))
 }
 
@@ -640,7 +638,6 @@ func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *Host
 
 		returns := make([]types.Boxed, len(out))
 		marshal := &marshalState{m: m, i: i, seen: make(map[uintptr]bool)}
-		defer marshal.close()
 		for idx := range out {
 			boxed, err := marshal.boxAs(out[idx], typ.Returns[idx])
 			if err != nil {
@@ -801,9 +798,7 @@ func (s *marshalState) boxRef(val types.Value) types.Boxed {
 	case types.Ref:
 		return types.BoxRef(int(v))
 	case types.String:
-		ref := s.i.intern(string(v))
-		s.root += s.i.root(types.BoxRef(int(ref)))
-		return types.BoxRef(int(ref))
+		return types.BoxRef(int(s.i.intern(string(v))))
 	default:
 		return types.BoxRef(s.alloc(val))
 	}
@@ -814,13 +809,7 @@ func (s *marshalState) alloc(val types.Value) int {
 	if err != nil {
 		panic(err)
 	}
-	s.root += s.i.root(types.BoxRef(addr))
 	return addr
-}
-
-func (s *marshalState) close() {
-	s.i.unroot(s.root)
-	s.root = 0
 }
 
 func (s *unmarshalState) value(val types.Value, dst reflect.Value) error {
@@ -1214,7 +1203,6 @@ func (m *codec) unmarshalFunc(fnType *types.FunctionType) unmarshaler {
 			}
 			boxed := make([]types.Boxed, len(in)-offset)
 			marshal := &marshalState{m: m, i: s.i, seen: make(map[uintptr]bool)}
-			defer marshal.close()
 			for idx := range boxed {
 				v, err := marshal.boxAs(in[idx+offset], fnType.Params[idx])
 				if err != nil {

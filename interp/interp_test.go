@@ -25,6 +25,24 @@ type contextKey struct{}
 
 type contextHost struct{}
 
+type trackedValue struct {
+	refs   []types.Ref
+	closed int
+}
+
+func (v *trackedValue) Kind() types.Kind { return types.KindRef }
+func (v *trackedValue) Type() types.Type { return types.TypeRef }
+func (v *trackedValue) String() string   { return "tracked" }
+
+func (v *trackedValue) Refs(dst []types.Ref) []types.Ref {
+	return append(dst, v.refs...)
+}
+
+func (v *trackedValue) Close() error {
+	v.closed++
+	return nil
+}
+
 func (*contextHost) Value(ctx context.Context) int32 {
 	if ctx.Value(contextKey{}) == "value" {
 		return 7
@@ -3080,15 +3098,44 @@ func TestInterpreter_Global(t *testing.T) {
 }
 
 func TestInterpreter_SetGlobal(t *testing.T) {
-	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.GLOBAL_SET, 0)}, program.WithGlobals(types.TypeI32))
-	i := New(prog)
-	defer i.Close()
+	t.Run("sets scalar", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.GLOBAL_SET, 0)}, program.WithGlobals(types.TypeI32))
+		i := New(prog)
+		defer i.Close()
 
-	require.NoError(t, i.Run(context.Background()))
-	require.NoError(t, i.SetGlobal(0, types.BoxI32(8)))
-	v, err := i.Global(0)
-	require.NoError(t, err)
-	require.Equal(t, types.BoxI32(8), v)
+		require.NoError(t, i.Run(context.Background()))
+		require.NoError(t, i.SetGlobal(0, types.BoxI32(8)))
+		v, err := i.Global(0)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(8), v)
+	})
+
+	t.Run("preserves same reference", func(t *testing.T) {
+		prog := program.New(nil, program.WithGlobals(types.TypeRef))
+		i := New(prog)
+		defer i.Close()
+
+		addr, err := i.Alloc(types.String("value"))
+		require.NoError(t, err)
+		require.NoError(t, i.SetGlobal(0, types.BoxRef(addr)))
+		require.NoError(t, i.SetGlobal(0, types.BoxRef(addr)))
+		v, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Equal(t, types.String("value"), v)
+	})
+
+	t.Run("rejects invalid reference", func(t *testing.T) {
+		prog := program.New(nil, program.WithGlobals(types.TypeRef))
+		i := New(prog)
+		defer i.Close()
+
+		before, err := i.Global(0)
+		require.NoError(t, err)
+		require.ErrorIs(t, i.SetGlobal(0, types.BoxRef(9999)), ErrSegmentationFault)
+		after, err := i.Global(0)
+		require.NoError(t, err)
+		require.Equal(t, before, after)
+	})
 }
 
 func TestInterpreter_Local(t *testing.T) {
@@ -3105,15 +3152,44 @@ func TestInterpreter_Local(t *testing.T) {
 }
 
 func TestInterpreter_SetLocal(t *testing.T) {
-	prog := program.New([]instr.Instruction{instr.New(instr.YIELD)}, program.WithLocals(types.TypeI32))
-	i := New(prog)
-	defer i.Close()
+	t.Run("sets scalar", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.YIELD)}, program.WithLocals(types.TypeI32))
+		i := New(prog)
+		defer i.Close()
 
-	require.ErrorIs(t, i.Run(context.Background()), ErrYield)
-	require.NoError(t, i.SetLocal(0, types.BoxI32(3)))
-	v, err := i.Local(0)
-	require.NoError(t, err)
-	require.Equal(t, types.BoxI32(3), v)
+		require.ErrorIs(t, i.Run(context.Background()), ErrYield)
+		require.NoError(t, i.SetLocal(0, types.BoxI32(3)))
+		v, err := i.Local(0)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(3), v)
+	})
+
+	t.Run("preserves same reference", func(t *testing.T) {
+		prog := program.New(nil, program.WithLocals(types.TypeRef))
+		i := New(prog)
+		defer i.Close()
+
+		addr, err := i.Alloc(types.String("value"))
+		require.NoError(t, err)
+		require.NoError(t, i.SetLocal(0, types.BoxRef(addr)))
+		require.NoError(t, i.SetLocal(0, types.BoxRef(addr)))
+		v, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Equal(t, types.String("value"), v)
+	})
+
+	t.Run("rejects invalid reference", func(t *testing.T) {
+		prog := program.New(nil, program.WithLocals(types.TypeRef))
+		i := New(prog)
+		defer i.Close()
+
+		before, err := i.Local(0)
+		require.NoError(t, err)
+		require.ErrorIs(t, i.SetLocal(0, types.BoxRef(9999)), ErrSegmentationFault)
+		after, err := i.Local(0)
+		require.NoError(t, err)
+		require.Equal(t, before, after)
+	})
 }
 
 func TestInterpreter_Load(t *testing.T) {
@@ -3128,26 +3204,222 @@ func TestInterpreter_Load(t *testing.T) {
 }
 
 func TestInterpreter_Store(t *testing.T) {
-	i := New(program.New(nil))
-	defer i.Close()
+	t.Run("replaces scalar", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
 
-	addr, err := i.Alloc(types.I32(5))
-	require.NoError(t, err)
-	require.NoError(t, i.Store(addr, types.I32(9)))
-	v, err := i.Load(addr)
-	require.NoError(t, err)
-	require.Equal(t, types.I32(9), v)
+		addr, err := i.Alloc(types.I32(5))
+		require.NoError(t, err)
+		require.NoError(t, i.Store(addr, types.BoxI32(9)))
+		v, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Equal(t, types.I32(9), v)
+	})
+
+	t.Run("finalizes replaced value", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		old := &trackedValue{}
+		addr, err := i.Alloc(old)
+		require.NoError(t, err)
+		require.NoError(t, i.Store(addr, types.I32(9)))
+		require.Equal(t, 1, old.closed)
+		v, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Equal(t, types.I32(9), v)
+	})
+
+	t.Run("releases replaced child", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		child, err := i.Alloc(types.String("child"))
+		require.NoError(t, err)
+		_, err = i.Retain(child)
+		require.NoError(t, err)
+		parent := &trackedValue{refs: []types.Ref{types.Ref(child)}}
+		addr, err := i.Alloc(parent)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(child))
+		require.NoError(t, i.Store(addr, types.I32(9)))
+		_, err = i.Load(child)
+		require.ErrorIs(t, err, ErrSegmentationFault)
+	})
+
+	t.Run("ignores same-address reference", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		value := &trackedValue{}
+		addr, err := i.Alloc(value)
+		require.NoError(t, err)
+		require.NoError(t, i.Store(addr, types.BoxRef(addr)))
+		require.Equal(t, 0, value.closed)
+		v, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Same(t, value, v)
+	})
+
+	t.Run("ignores identical value", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		value := &trackedValue{}
+		addr, err := i.Alloc(value)
+		require.NoError(t, err)
+		loaded, err := i.Load(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Store(addr, loaded))
+		require.Equal(t, 0, value.closed)
+	})
+
+	t.Run("rejects different-address reference", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		source := &trackedValue{}
+		sourceAddr, err := i.Alloc(source)
+		require.NoError(t, err)
+		targetAddr, err := i.Alloc(types.I32(5))
+		require.NoError(t, err)
+
+		require.ErrorIs(t, i.Store(targetAddr, types.BoxRef(sourceAddr)), ErrTypeMismatch)
+		require.Equal(t, 0, source.closed)
+		v, err := i.Load(targetAddr)
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), v)
+	})
+
+	t.Run("rejects owned pointer", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		source := &trackedValue{}
+		_, err := i.Alloc(source)
+		require.NoError(t, err)
+		targetAddr, err := i.Alloc(types.I32(5))
+		require.NoError(t, err)
+
+		require.ErrorIs(t, i.Store(targetAddr, source), ErrTypeMismatch)
+		require.Equal(t, 0, source.closed)
+		v, err := i.Load(targetAddr)
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), v)
+	})
+
+	t.Run("ignores same-address ref", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		value := &trackedValue{}
+		addr, err := i.Alloc(value)
+		require.NoError(t, err)
+		require.NoError(t, i.Store(addr, types.Ref(addr)))
+		require.Equal(t, 0, value.closed)
+		v, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Same(t, value, v)
+	})
+
+	t.Run("rejects different-address ref", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		sourceAddr, err := i.Alloc(types.I32(7))
+		require.NoError(t, err)
+		targetAddr, err := i.Alloc(types.I32(5))
+		require.NoError(t, err)
+
+		require.ErrorIs(t, i.Store(targetAddr, types.Ref(sourceAddr)), ErrTypeMismatch)
+		v, err := i.Load(targetAddr)
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), v)
+	})
+
+	t.Run("rejects invalid ref", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.I32(5))
+		require.NoError(t, err)
+		require.ErrorIs(t, i.Store(addr, types.Ref(9999)), ErrSegmentationFault)
+		v, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), v)
+	})
+
+	t.Run("rejects invalid boxed ref", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.I32(5))
+		require.NoError(t, err)
+		require.ErrorIs(t, i.Store(addr, types.BoxRef(9999)), ErrSegmentationFault)
+		v, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), v)
+	})
 }
 
 func TestInterpreter_Alloc(t *testing.T) {
-	i := New(program.New(nil))
-	defer i.Close()
+	t.Run("allocates value", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
 
-	addr, err := i.Alloc(types.String("hi"))
-	require.NoError(t, err)
-	v, err := i.Load(addr)
-	require.NoError(t, err)
-	require.Equal(t, types.String("hi"), v)
+		addr, err := i.Alloc(types.String("hi"))
+		require.NoError(t, err)
+		v, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Equal(t, types.String("hi"), v)
+	})
+
+	t.Run("copies boxed reference ownership", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.String("hi"))
+		require.NoError(t, err)
+		copyAddr, err := i.Alloc(types.BoxRef(addr))
+		require.NoError(t, err)
+		require.Equal(t, addr, copyAddr)
+		require.NoError(t, i.Release(addr))
+		v, err := i.Load(copyAddr)
+		require.NoError(t, err)
+		require.Equal(t, types.String("hi"), v)
+		require.NoError(t, i.Release(copyAddr))
+	})
+
+	t.Run("copies reference ownership", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		addr, err := i.Alloc(types.String("hi"))
+		require.NoError(t, err)
+		copyAddr, err := i.Alloc(types.Ref(addr))
+		require.NoError(t, err)
+		require.Equal(t, addr, copyAddr)
+		require.NoError(t, i.Release(addr))
+		v, err := i.Load(copyAddr)
+		require.NoError(t, err)
+		require.Equal(t, types.String("hi"), v)
+		require.NoError(t, i.Release(copyAddr))
+	})
+
+	t.Run("rejects owned pointer", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		value := &trackedValue{}
+		addr, err := i.Alloc(value)
+		require.NoError(t, err)
+		_, err = i.Alloc(value)
+		require.ErrorIs(t, err, ErrTypeMismatch)
+		loaded, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Same(t, value, loaded)
+		require.Equal(t, 0, value.closed)
+	})
 }
 
 func TestInterpreter_Retain(t *testing.T) {
@@ -3175,11 +3447,25 @@ func TestInterpreter_Release(t *testing.T) {
 }
 
 func TestInterpreter_Push(t *testing.T) {
-	i := New(program.New(nil))
-	defer i.Close()
+	t.Run("pushes scalar", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
 
-	require.NoError(t, i.Push(types.I32(4)))
-	require.Equal(t, 1, i.Len())
+		require.NoError(t, i.Push(types.I32(4)))
+		require.Equal(t, 1, i.Len())
+	})
+
+	t.Run("rejects owned pointer", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		value := &trackedValue{}
+		_, err := i.Alloc(value)
+		require.NoError(t, err)
+		require.ErrorIs(t, i.Push(value), ErrTypeMismatch)
+		require.Equal(t, 0, i.Len())
+		require.Equal(t, 0, value.closed)
+	})
 }
 
 func TestInterpreter_Pop(t *testing.T) {
@@ -3312,6 +3598,24 @@ func TestInterpreter_Reset(t *testing.T) {
 		i.Reset()
 		require.Equal(t, i.base, len(i.heap))
 		require.Equal(t, 0, i.sp)
+	})
+
+	t.Run("finalizes and clears dynamic values", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(4))
+
+		value := &trackedValue{}
+		addr, err := i.Alloc(value)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, addr, i.base)
+
+		i.Reset()
+		require.Equal(t, 1, value.closed)
+		full := i.heap[:cap(i.heap)]
+		for _, slot := range full[i.base:] {
+			require.Nil(t, slot)
+		}
+		require.NoError(t, i.Close())
+		require.Equal(t, 1, value.closed)
 	})
 }
 
@@ -3530,6 +3834,24 @@ func TestWithHeap(t *testing.T) {
 		require.Equal(t, 3, i.Len())
 	})
 
+	t.Run("collects cycle at backing capacity", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(2))
+		defer i.Close()
+
+		value := &trackedValue{}
+		addr, err := i.Alloc(value)
+		require.NoError(t, err)
+		value.refs = []types.Ref{types.Ref(addr)}
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		reused, err := i.Alloc(types.I32(1))
+		require.NoError(t, err)
+		require.Equal(t, addr, reused)
+		require.Equal(t, 1, value.closed)
+	})
+
 	t.Run("negative capacity normalizes", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
@@ -3540,14 +3862,330 @@ func TestWithHeap(t *testing.T) {
 		require.NoError(t, i.Run(context.Background()))
 		require.Equal(t, 1, i.Len())
 	})
+
+	t.Run("collects cycles at adaptive goal", func(t *testing.T) {
+		const capacity = 2 * heapRunway
+
+		i := New(program.New(nil), WithHeap(capacity), WithMaxHeap(capacity))
+		defer i.Close()
+
+		_, err := i.Alloc(types.I32(1))
+		require.NoError(t, err)
+		for range capacity - 2 {
+			value := &trackedValue{}
+			addr, err := i.Alloc(value)
+			require.NoError(t, err)
+			value.refs = []types.Ref{types.Ref(addr)}
+			_, err = i.Retain(addr)
+			require.NoError(t, err)
+			require.NoError(t, i.Release(addr))
+		}
+
+		_, err = i.Alloc(types.I32(2))
+		require.NoError(t, err)
+
+		cycle := &trackedValue{}
+		addr, err := i.Alloc(cycle)
+		require.NoError(t, err)
+		cycle.refs = []types.Ref{types.Ref(addr)}
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		// The first collection leaves two live slots, so pace sets goal to
+		// 2+heapRunway. Reuse and the new cycle occupy two of that runway.
+		for n := range heapRunway - 2 {
+			_, err = i.Alloc(types.I32(n + 3))
+			require.NoError(t, err)
+		}
+		require.Equal(t, 0, cycle.closed)
+
+		_, err = i.Alloc(types.I32(heapRunway + 1))
+		require.NoError(t, err)
+		require.Equal(t, 1, cycle.closed)
+	})
+
+	t.Run("paces from live set", func(t *testing.T) {
+		const capacity = 3 * heapRunway
+
+		i := New(program.New(nil), WithHeap(capacity), WithMaxHeap(capacity))
+		defer i.Close()
+
+		for n := range heapRunway + 1 {
+			_, err := i.Alloc(types.I32(n))
+			require.NoError(t, err)
+		}
+		for range capacity - heapRunway - 2 {
+			value := &trackedValue{}
+			addr, err := i.Alloc(value)
+			require.NoError(t, err)
+			value.refs = []types.Ref{types.Ref(addr)}
+			_, err = i.Retain(addr)
+			require.NoError(t, err)
+			require.NoError(t, i.Release(addr))
+		}
+
+		_, err := i.Alloc(types.I32(heapRunway + 1))
+		require.NoError(t, err)
+
+		cycle := &trackedValue{}
+		addr, err := i.Alloc(cycle)
+		require.NoError(t, err)
+		cycle.refs = []types.Ref{types.Ref(addr)}
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		// After the first collection, heapRunway+2 slots survive and the
+		// dynamic live set adds heapRunway+1 slots of runway.
+		for n := range heapRunway - 2 {
+			_, err = i.Alloc(types.I32(n + heapRunway + 2))
+			require.NoError(t, err)
+		}
+		require.Equal(t, 0, cycle.closed)
+
+		_, err = i.Alloc(types.I32(2 * heapRunway))
+		require.NoError(t, err)
+		require.Equal(t, 0, cycle.closed)
+
+		_, err = i.Alloc(types.I32(2*heapRunway + 1))
+		require.NoError(t, err)
+		require.Equal(t, 1, cycle.closed)
+	})
+
+	t.Run("resets adaptive goal", func(t *testing.T) {
+		const capacity = 3 * heapRunway
+
+		i := New(program.New(nil), WithHeap(capacity), WithMaxHeap(4*heapRunway))
+		defer i.Close()
+
+		for n := range capacity {
+			_, err := i.Alloc(types.I32(n))
+			require.NoError(t, err)
+		}
+		i.Reset()
+
+		cycle := &trackedValue{}
+		addr, err := i.Alloc(cycle)
+		require.NoError(t, err)
+		cycle.refs = []types.Ref{types.Ref(addr)}
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		// Reset leaves only null, so the next goal is 1+heapRunway. The
+		// cycle consumes the first dynamic slot.
+		for n := range heapRunway - 1 {
+			_, err = i.Alloc(types.I32(n))
+			require.NoError(t, err)
+		}
+		require.Equal(t, 0, cycle.closed)
+
+		_, err = i.Alloc(types.I32(heapRunway - 1))
+		require.NoError(t, err)
+		require.Equal(t, 1, cycle.closed)
+	})
 }
 
 func TestWithMaxHeap(t *testing.T) {
-	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW)})
-	i := New(prog, WithMaxHeap(1))
-	defer i.Close()
+	t.Run("rejects live heap at limit", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW)})
+		i := New(prog, WithMaxHeap(1))
+		defer i.Close()
 
-	require.ErrorIs(t, i.Run(context.Background()), ErrHeapExhausted)
+		require.ErrorIs(t, i.Run(context.Background()), ErrHeapExhausted)
+	})
+
+	t.Run("preserves host-owned reference", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(2), WithMaxHeap(2))
+		defer i.Close()
+
+		value := &trackedValue{}
+		addr, err := i.Alloc(value)
+		require.NoError(t, err)
+		_, err = i.Alloc(types.String("blocked"))
+		require.ErrorIs(t, err, ErrHeapExhausted)
+		got, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Same(t, value, got)
+		require.Equal(t, 0, value.closed)
+		require.NoError(t, i.Release(addr))
+		require.Equal(t, 1, value.closed)
+	})
+
+	t.Run("preserves duplicate nested constant edges", func(t *testing.T) {
+		const leafAddr = 1
+		const midAddr = 2
+
+		leaf := &trackedValue{}
+		mid := types.NewArray(types.NewArrayType(types.TypeRef), types.BoxRef(leafAddr))
+		root := types.NewArray(types.NewArrayType(types.TypeRef), types.BoxRef(midAddr), types.BoxRef(midAddr))
+		prog := program.New(nil, program.WithConstants(leaf, mid, root))
+		i := New(prog, WithHeap(4), WithMaxHeap(4))
+		defer i.Close()
+
+		_, err := i.Alloc(types.String("blocked"))
+		require.ErrorIs(t, err, ErrHeapExhausted)
+		got, err := i.Load(leafAddr)
+		require.NoError(t, err)
+		require.Same(t, leaf, got)
+		require.Equal(t, 0, leaf.closed)
+
+		i.Reset()
+		_, err = i.Alloc(types.String("blocked again"))
+		require.ErrorIs(t, err, ErrHeapExhausted)
+		got, err = i.Load(leafAddr)
+		require.NoError(t, err)
+		require.Same(t, leaf, got)
+		require.Equal(t, 0, leaf.closed)
+	})
+
+	t.Run("collects unreachable cycle", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(3), WithMaxHeap(3))
+		defer i.Close()
+
+		left := &trackedValue{}
+		leftAddr, err := i.Alloc(left)
+		require.NoError(t, err)
+		right := &trackedValue{}
+		rightAddr, err := i.Alloc(right)
+		require.NoError(t, err)
+		left.refs = []types.Ref{types.Ref(rightAddr)}
+		right.refs = []types.Ref{types.Ref(leftAddr)}
+		_, err = i.Retain(rightAddr)
+		require.NoError(t, err)
+		_, err = i.Retain(leftAddr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(leftAddr))
+		require.NoError(t, i.Release(rightAddr))
+
+		addr, err := i.Alloc(types.String("reused"))
+		require.NoError(t, err)
+		require.Equal(t, 1, left.closed)
+		require.Equal(t, 1, right.closed)
+		require.NoError(t, i.Release(addr))
+	})
+
+	t.Run("preserves host-rooted cycle", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(3), WithMaxHeap(3))
+		defer i.Close()
+
+		left := &trackedValue{}
+		leftAddr, err := i.Alloc(left)
+		require.NoError(t, err)
+		right := &trackedValue{}
+		rightAddr, err := i.Alloc(right)
+		require.NoError(t, err)
+		left.refs = []types.Ref{types.Ref(rightAddr)}
+		right.refs = []types.Ref{types.Ref(leftAddr)}
+		_, err = i.Retain(rightAddr)
+		require.NoError(t, err)
+		_, err = i.Retain(leftAddr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(rightAddr))
+
+		_, err = i.Alloc(types.String("blocked"))
+		require.ErrorIs(t, err, ErrHeapExhausted)
+		got, err := i.Load(leftAddr)
+		require.NoError(t, err)
+		require.Same(t, left, got)
+		got, err = i.Load(rightAddr)
+		require.NoError(t, err)
+		require.Same(t, right, got)
+		require.Equal(t, 0, left.closed)
+		require.Equal(t, 0, right.closed)
+
+		require.NoError(t, i.Release(leftAddr))
+		addr, err := i.Alloc(types.String("reused"))
+		require.NoError(t, err)
+		require.Equal(t, 1, left.closed)
+		require.Equal(t, 1, right.closed)
+		require.NoError(t, i.Release(addr))
+	})
+
+	t.Run("collects self cycle", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(2), WithMaxHeap(2))
+		defer i.Close()
+
+		value := &trackedValue{}
+		addr, err := i.Alloc(value)
+		require.NoError(t, err)
+		value.refs = []types.Ref{types.Ref(addr)}
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		reused, err := i.Alloc(types.String("reused"))
+		require.NoError(t, err)
+		require.Equal(t, 1, value.closed)
+		require.NoError(t, i.Release(reused))
+	})
+
+	t.Run("collects duplicate cycle edges", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(3), WithMaxHeap(3))
+		defer i.Close()
+
+		left := &trackedValue{}
+		leftAddr, err := i.Alloc(left)
+		require.NoError(t, err)
+		right := &trackedValue{}
+		rightAddr, err := i.Alloc(right)
+		require.NoError(t, err)
+		left.refs = []types.Ref{types.Ref(rightAddr), types.Ref(rightAddr)}
+		right.refs = []types.Ref{types.Ref(leftAddr)}
+		_, err = i.Retain(rightAddr)
+		require.NoError(t, err)
+		_, err = i.Retain(rightAddr)
+		require.NoError(t, err)
+		_, err = i.Retain(leftAddr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(leftAddr))
+		require.NoError(t, i.Release(rightAddr))
+
+		reused, err := i.Alloc(types.String("reused"))
+		require.NoError(t, err)
+		require.Equal(t, 1, left.closed)
+		require.Equal(t, 1, right.closed)
+		require.NoError(t, i.Release(reused))
+	})
+
+	t.Run("settles dead edges to live object", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(4), WithMaxHeap(4))
+		defer i.Close()
+
+		left := &trackedValue{}
+		leftAddr, err := i.Alloc(left)
+		require.NoError(t, err)
+		right := &trackedValue{}
+		rightAddr, err := i.Alloc(right)
+		require.NoError(t, err)
+		live := &trackedValue{}
+		liveAddr, err := i.Alloc(live)
+		require.NoError(t, err)
+		left.refs = []types.Ref{types.Ref(rightAddr), types.Ref(liveAddr)}
+		right.refs = []types.Ref{types.Ref(leftAddr)}
+		_, err = i.Retain(rightAddr)
+		require.NoError(t, err)
+		_, err = i.Retain(liveAddr)
+		require.NoError(t, err)
+		_, err = i.Retain(leftAddr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(leftAddr))
+		require.NoError(t, i.Release(rightAddr))
+
+		reused, err := i.Alloc(types.String("reused"))
+		require.NoError(t, err)
+		require.Equal(t, 1, left.closed)
+		require.Equal(t, 1, right.closed)
+		got, err := i.Load(liveAddr)
+		require.NoError(t, err)
+		require.IsType(t, live, got)
+		require.Same(t, live, got)
+		require.Equal(t, 0, live.closed)
+		require.NoError(t, i.Release(liveAddr))
+		require.Equal(t, 1, live.closed)
+		require.NoError(t, i.Release(reused))
+	})
 }
 
 func TestWithTick(t *testing.T) {

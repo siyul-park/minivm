@@ -111,28 +111,41 @@ err = vm.Release(addr)
 Ownership rules:
 
 - `Alloc` creates an owned heap reference
+- `Alloc` of an existing `types.Ref` or `KindRef` creates another ownership of the same address
 - `Load` reads without changing ownership
-- `Store` replaces the value at an address
+- `Store` replaces the value at an address, releases refs owned by the old value, and finalizes its external resources
+- storing the same concrete pointer or the destination's own `types.Ref` /
+  `KindRef` is a no-op
+- storing a different heap address returns `ErrTypeMismatch`; use
+  `Alloc(existingRef)` to create another ownership of one object
+- concrete pointer values passed to `Alloc`, `Store`, or `Push` transfer unique
+  ownership and must not already be owned by the interpreter; use an existing
+  ref when sharing one object
 - `Retain` creates another host-owned reference
 - `Release` drops a host-owned reference
-- every successful `Retain` must be matched by `Release`
+- every owned reference from `Alloc` or `Retain` must eventually be transferred or released
 
-Leaked host references keep heap objects alive.
+Leaked host references keep heap objects alive. Releasing an address does not
+invalidate another ownership created by `Alloc` or `Retain`.
 
 ### Globals and Locals
 
 `SetGlobal(idx, val)` and `SetLocal(idx, val)` overwrite VM slots.
 
-If `val` is `KindRef`, ownership transfers into the slot. The caller must not release that same reference afterward.
+If `val` is a different valid `KindRef`, ownership transfers into the slot. The
+caller must not release that same ownership afterward. Invalid heap addresses
+return `ErrSegmentationFault` without changing the slot. Assigning the slot's
+current boxed value is a no-op; in that case no ownership transfers, and the
+caller remains responsible for any ownership it already holds.
 
-To keep another reference, retain first.
+To keep another reference after a different-value assignment, retain first.
 
 ```go
-ref, err := vm.Retain(addr)
+_, err := vm.Retain(addr)
 if err != nil {
     return err
 }
-err = vm.SetGlobal(0, types.BoxRef(ref))
+err = vm.SetGlobal(0, types.BoxRef(addr))
 ```
 
 This mirrors `GLOBAL_SET` and `LOCAL_SET`, which consume stack references into slots.
@@ -305,9 +318,9 @@ Unsigned integers use the same VM types as signed integers. Values above the sig
 
 Marshaled references live on the VM heap. This includes strings, arrays, maps, structs, host objects, and host functions.
 
-They remain alive while reachable from the stack, constants, globals, closures, heap objects, or retained host references. They do not survive `vm.Close()` or `vm.Reset()`.
+They remain alive while reachable from the stack, constants, globals, closures, heap objects, or retained host references. Dynamic values do not survive `vm.Close()` or `vm.Reset()`; reset finalizes their external resources and invalidates every dynamic heap address.
 
-Use marshaled refs before the next reset, or register them as constants or globals.
+Use marshaled refs before the next reset, or register immutable inputs as program constants.
 
 ```go
 v, err := vm.Marshal(myStruct)
