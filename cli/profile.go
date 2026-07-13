@@ -8,7 +8,7 @@ import (
 
 // printProfile renders normalized, ranked profiler metrics.
 func (r *REPL) printProfile(metrics []prof.Metric) {
-	p := newProfileReport(metrics)
+	p := collect(metrics).report()
 	out := r.out
 	fmt.Fprintf(out, "profile samples: %d\n", p.total)
 	if len(p.functions) > 0 {
