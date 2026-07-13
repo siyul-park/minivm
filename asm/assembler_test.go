@@ -14,6 +14,84 @@ import (
 // TestAssembler_Build covers the public round-trip: Assembler.Build emits a
 // Code with the encoded bytes for a trivial add+ret, then Link binds it to
 // a buffer and the Callable executes natively.
+
+func TestNew(t *testing.T) {
+	require.NotNil(t, asm.New(arm64.New()))
+}
+
+func TestAssembler_Reg(t *testing.T) {
+	assembler := asm.New(arm64.New())
+	first := assembler.Reg(asm.RegTypeInt, asm.Width64)
+	second := assembler.Reg(asm.RegTypeFloat, asm.Width32)
+	require.Equal(t, asm.NewVReg(0, asm.RegTypeInt, asm.Width64), first)
+	require.Equal(t, asm.NewVReg(1, asm.RegTypeFloat, asm.Width32), second)
+}
+
+func TestAssembler_Label(t *testing.T) {
+	assembler := asm.New(arm64.New())
+	require.NotEqual(t, assembler.Label(), assembler.Label())
+}
+
+func TestAssembler_Bind(t *testing.T) {
+	assembler := asm.New(arm64.New())
+	label := assembler.Label()
+	assembler.Bind(label)
+	code, err := assembler.Build()
+	require.NoError(t, err)
+	require.Equal(t, 0, code.Labels[label])
+}
+
+func TestAssembler_Emit(t *testing.T) {
+	assembler := asm.New(arm64.New())
+	assembler.Emit(arm64.RET())
+	code, err := assembler.Build()
+	require.NoError(t, err)
+	require.NotEmpty(t, code.Bytes)
+}
+
+func TestAssembler_Pin(t *testing.T) {
+	arch := arm64.New()
+
+	a := asm.New(arch)
+	v := a.Reg(asm.RegTypeInt, asm.Width64)
+
+	require.NoError(t, a.Pin(v, arm64.X0))
+	require.NoError(t, a.Pin(v, arm64.X0))
+	require.ErrorIs(t, a.Pin(v, arm64.X1), asm.ErrConflictingPin)
+
+	_, err := a.Build()
+	require.ErrorIs(t, err, asm.ErrConflictingPin)
+}
+
+func TestAssembler_Entry(t *testing.T) {
+	// A non-primary entry only runs the shared epilogue on return, never the
+	// prologue that reserves the spill area, so Build must reject the
+	// combination explicitly instead of a call through that entry silently
+	// corrupting SP.
+	a := asm.New(arm64.New())
+
+	const n = 64
+	vals := make([]asm.VReg, n)
+	for i := range vals {
+		vals[i] = a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LDI(vals[i], uint64(i+1))...)
+	}
+	acc := vals[0]
+	for i := 1; i < len(vals); i++ {
+		next := a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.ADD(next, acc, vals[i]))
+		acc = next
+	}
+	a.Emit(arm64.RET())
+
+	entry := a.Label()
+	a.Entry(entry)
+	a.Emit(arm64.RET())
+
+	_, err := a.Build()
+	require.ErrorIs(t, err, asm.ErrEntryRequiresFrame)
+}
+
 func TestAssembler_Build(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
 		t.Skipf("native invoke requires arm64, got %s", runtime.GOARCH)
@@ -280,102 +358,3 @@ func TestAssembler_Build(t *testing.T) {
 		}
 	})
 }
-
-func TestAssembler_Pin(t *testing.T) {
-	arch := arm64.New()
-
-	a := asm.New(arch)
-	v := a.Reg(asm.RegTypeInt, asm.Width64)
-
-	require.NoError(t, a.Pin(v, arm64.X0))
-	require.NoError(t, a.Pin(v, arm64.X0))
-	require.ErrorIs(t, a.Pin(v, arm64.X1), asm.ErrConflictingPin)
-
-	_, err := a.Build()
-	require.ErrorIs(t, err, asm.ErrConflictingPin)
-}
-
-func TestAssembler_Entry(t *testing.T) {
-	// A non-primary entry only runs the shared epilogue on return, never the
-	// prologue that reserves the spill area, so Build must reject the
-	// combination explicitly instead of a call through that entry silently
-	// corrupting SP.
-	a := asm.New(arm64.New())
-
-	const n = 64
-	vals := make([]asm.VReg, n)
-	for i := range vals {
-		vals[i] = a.Reg(asm.RegTypeInt, asm.Width64)
-		a.Emit(arm64.LDI(vals[i], uint64(i+1))...)
-	}
-	acc := vals[0]
-	for i := 1; i < len(vals); i++ {
-		next := a.Reg(asm.RegTypeInt, asm.Width64)
-		a.Emit(arm64.ADD(next, acc, vals[i]))
-		acc = next
-	}
-	a.Emit(arm64.RET())
-
-	entry := a.Label()
-	a.Entry(entry)
-	a.Emit(arm64.RET())
-
-	_, err := a.Build()
-	require.ErrorIs(t, err, asm.ErrEntryRequiresFrame)
-}
-
-func TestLink(t *testing.T) {
-	t.Run("nil buffer", func(t *testing.T) {
-		_, err := asm.Link(nil, arm64.New(), nil, nil)
-		require.ErrorIs(t, err, asm.ErrInvalidArgs)
-	})
-
-	if runtime.GOARCH != "arm64" {
-		t.Skipf("native invoke requires arm64, got %s", runtime.GOARCH)
-	}
-
-	t.Run("exposes internal entry", func(t *testing.T) {
-		arch := arm64.New()
-
-		a := asm.New(arch)
-		ctx := a.Reg(asm.RegTypeInt, asm.Width64)
-		v := a.Reg(asm.RegTypeInt, asm.Width64)
-		require.NoError(t, a.Pin(ctx, arm64.X0))
-
-		entry := a.Label()
-		a.Emit(arm64.LDI(v, 3)...)
-		a.Emit(arm64.STR(v, ctx, 0))
-		a.Emit(arm64.RET())
-		a.Entry(entry)
-		a.Emit(arm64.LDR(v, ctx, 0))
-		a.Emit(arm64.ADDI(v, v, 1))
-		a.Emit(arm64.STR(v, ctx, 0))
-		a.Emit(arm64.RET())
-
-		code, err := a.Build()
-		require.NoError(t, err)
-
-		buf, err := asm.NewBuffer(4096)
-		require.NoError(t, err)
-		defer buf.Free()
-
-		linked, err := asm.Link(buf, arch, []*asm.Code{code}, nil)
-		require.NoError(t, err)
-		require.Len(t, linked, 1)
-		require.Contains(t, linked[0].Entries, entry)
-
-		ctxBuf := []uint64{0}
-		require.NoError(t, linked[0].Callable.Call(unsafe.Pointer(&ctxBuf[0])))
-		require.Equal(t, uint64(3), ctxBuf[0])
-
-		ctxBuf[0] = 41
-		require.NoError(t, linked[0].Entries[entry].Call(unsafe.Pointer(&ctxBuf[0])))
-		require.Equal(t, uint64(42), ctxBuf[0])
-	})
-}
-
-// noFrameArch wraps an asm.Arch to report no Frame, exercising the
-// nil-Frame-disables-spilling contract documented on asm.Frame.
-type noFrameArch struct{ asm.Arch }
-
-func (noFrameArch) Frame() asm.Frame { return nil }

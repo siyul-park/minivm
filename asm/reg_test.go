@@ -14,12 +14,16 @@ func TestNewPReg(t *testing.T) {
 	require.Equal(t, Width64, reg.Width())
 }
 
-func TestNewVReg(t *testing.T) {
-	reg := NewVReg(1, RegTypeFloat, Width64)
+func TestPReg_ID(t *testing.T) {
+	require.Equal(t, uint8(3), NewPReg(3, RegTypeInt, Width64).ID())
+}
 
-	require.Equal(t, int32(1), reg.ID())
-	require.Equal(t, RegTypeFloat, reg.Type())
-	require.Equal(t, Width64, reg.Width())
+func TestPReg_Type(t *testing.T) {
+	require.Equal(t, RegTypeFloat, NewPReg(3, RegTypeFloat, Width64).Type())
+}
+
+func TestPReg_Width(t *testing.T) {
+	require.Equal(t, Width32, NewPReg(3, RegTypeInt, Width32).Width())
 }
 
 func TestPReg_String(t *testing.T) {
@@ -37,6 +41,26 @@ func TestPReg_String(t *testing.T) {
 			require.Equal(t, tt.str, tt.reg.String())
 		})
 	}
+}
+
+func TestNewVReg(t *testing.T) {
+	reg := NewVReg(1, RegTypeFloat, Width64)
+
+	require.Equal(t, int32(1), reg.ID())
+	require.Equal(t, RegTypeFloat, reg.Type())
+	require.Equal(t, Width64, reg.Width())
+}
+
+func TestVReg_ID(t *testing.T) {
+	require.Equal(t, int32(3), NewVReg(3, RegTypeInt, Width64).ID())
+}
+
+func TestVReg_Type(t *testing.T) {
+	require.Equal(t, RegTypeFloat, NewVReg(3, RegTypeFloat, Width64).Type())
+}
+
+func TestVReg_Width(t *testing.T) {
+	require.Equal(t, Width32, NewVReg(3, RegTypeInt, Width32).Width())
 }
 
 func TestVReg_String(t *testing.T) {
@@ -96,4 +120,19 @@ func TestRegMask_PopFirst(t *testing.T) {
 
 func TestRegMask_Count(t *testing.T) {
 	require.Equal(t, 2, NewRegMask([]uint8{1, 3}).Count())
+}
+
+func TestNewRegInfo(t *testing.T) {
+	info := NewRegInfo(8, 4, []uint8{0, 1}, []uint8{2}, []uint8{7})
+	require.Equal(t, uint8(8), info.NumInt)
+	require.Equal(t, uint8(4), info.NumFloat)
+	require.True(t, info.IntReserved.Contains(0))
+	require.True(t, info.FltReserved.Contains(2))
+	require.True(t, info.Scratch.Contains(7))
+}
+
+func TestRegInfo_Allocatable(t *testing.T) {
+	info := NewRegInfo(4, 3, []uint8{1}, []uint8{2}, nil)
+	require.Equal(t, NewRegMask([]uint8{0, 2, 3}), info.Allocatable(RegTypeInt))
+	require.Equal(t, NewRegMask([]uint8{0, 1}), info.Allocatable(RegTypeFloat))
 }

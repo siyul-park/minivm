@@ -27,6 +27,10 @@ func (a failAnalysis) Run(m *Manager, prog *program.Program) (int, error) {
 	return 0, a.err
 }
 
+func TestNewManager(t *testing.T) {
+	require.NotNil(t, NewManager())
+}
+
 func TestRegister(t *testing.T) {
 	m := NewManager()
 	Register[*program.Program, int](m, lenAnalysis{})
@@ -98,4 +102,30 @@ func TestManager_Invalidate(t *testing.T) {
 
 		require.Equal(t, 1, calls)
 	})
+}
+
+func TestPreserveAll(t *testing.T) {
+	calls := 0
+	m := NewManager()
+	Register[*program.Program, int](m, lenAnalysis{calls: &calls})
+	prog := program.New(nil)
+	_, err := GetResult[int](m, prog)
+	require.NoError(t, err)
+	m.Invalidate(PreserveAll())
+	_, err = GetResult[int](m, prog)
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+}
+
+func TestPreserveNone(t *testing.T) {
+	calls := 0
+	m := NewManager()
+	Register[*program.Program, int](m, lenAnalysis{calls: &calls})
+	prog := program.New(nil)
+	_, err := GetResult[int](m, prog)
+	require.NoError(t, err)
+	m.Invalidate(PreserveNone())
+	_, err = GetResult[int](m, prog)
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
 }

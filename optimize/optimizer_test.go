@@ -12,6 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNewOptimizer(t *testing.T) {
+	optimizer := NewOptimizer(O2)
+	require.Equal(t, O2, optimizer.Level())
+}
+
 func TestOptimizer_Level(t *testing.T) {
 	o := NewOptimizer(O0)
 	require.Equal(t, O0, o.Level())

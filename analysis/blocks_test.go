@@ -9,6 +9,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNewBasicBlocksAnalysis(t *testing.T) {
+	require.NotNil(t, NewBasicBlocksAnalysis())
+}
+
+func TestBlocks(t *testing.T) {
+	fn := types.NewFunctionBuilder(nil).Emit(instr.New(instr.NOP)).MustBuild()
+	got, err := Blocks(fn)
+	require.NoError(t, err)
+	require.Equal(t, []*BasicBlock{{Start: 0, End: 1}}, got)
+}
+
 func TestBasicBlocksAnalysis_Run(t *testing.T) {
 	tests := []struct {
 		name   string

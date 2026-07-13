@@ -21,6 +21,19 @@ func (p recordPass) Run(m *Manager, prog *program.Program) (Preserved, error) {
 	return p.preserved, p.err
 }
 
+func TestNewPipeline(t *testing.T) {
+	require.NotNil(t, NewPipeline[*program.Program]())
+}
+
+func TestPipeline_AddPass(t *testing.T) {
+	var log []string
+	pipeline := NewPipeline[*program.Program]()
+	pipeline.AddPass(recordPass{name: "added", log: &log, preserved: PreserveAll()})
+	_, err := pipeline.Run(NewManager(), program.New(nil))
+	require.NoError(t, err)
+	require.Equal(t, []string{"added"}, log)
+}
+
 func TestPipeline_Run(t *testing.T) {
 	t.Run("runs passes in order", func(t *testing.T) {
 		var log []string

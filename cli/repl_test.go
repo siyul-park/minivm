@@ -17,6 +17,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNewREPL(t *testing.T) {
+	out := bytes.NewBuffer(nil)
+	repl := NewREPL(strings.NewReader(""), out, newMemFS())
+	require.NotNil(t, repl)
+	require.NoError(t, repl.Run(context.Background()))
+	require.Contains(t, out.String(), "MiniVM Assembly REPL")
+}
+
 func TestREPL_Run(t *testing.T) {
 	tests := []struct {
 		input    string

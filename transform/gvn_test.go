@@ -1,16 +1,22 @@
 package transform
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNewGlobalValueNumberingPass(t *testing.T) {
+	require.NotNil(t, NewGlobalValueNumberingPass())
+}
 
 func TestGlobalValueNumberingPass_Run(t *testing.T) {
 	i32t := &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}}
@@ -82,6 +88,40 @@ func TestGlobalValueNumberingPass_Run(t *testing.T) {
 
 		runGVNPass(t, prog)
 		require.Equal(t, before, instr.Format(prog.Code), "no locals to allocate at the top level")
+	})
+
+	t.Run("preserves execution", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+		).MustBuild()
+		prog := program.New(
+			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
+			program.WithConstants(fn),
+		)
+		before := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
+		defer before.Close()
+		require.NoError(t, before.Run(context.Background()))
+		want, err := before.Pop()
+		require.NoError(t, err)
+
+		manager := pass.NewManager()
+		pass.Register(manager, analysis.NewBasicBlocksAnalysis())
+		pass.Register(manager, analysis.NewGlobalValueNumberingAnalysis())
+		_, err = NewGlobalValueNumberingPass().Run(manager, prog)
+		require.NoError(t, err)
+		after := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
+		defer after.Close()
+		require.NoError(t, after.Run(context.Background()))
+		got, err := after.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
 	})
 }
 

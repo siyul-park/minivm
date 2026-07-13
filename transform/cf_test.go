@@ -1,9 +1,11 @@
 package transform
 
 import (
+	"context"
 	"math"
 	"testing"
 
+	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/types"
 
 	"github.com/siyul-park/minivm/analysis"
@@ -12,6 +14,10 @@ import (
 	"github.com/siyul-park/minivm/program"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNewConstantFoldingPass(t *testing.T) {
+	require.NotNil(t, NewConstantFoldingPass())
+}
 
 func TestConstantFoldingPass_Run(t *testing.T) {
 	tests := []struct {
@@ -2067,4 +2073,28 @@ func TestConstantFoldingPass_Run(t *testing.T) {
 			require.Equal(t, tt.expected, actual)
 		})
 	}
+
+	t.Run("preserves execution", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+		})
+		before := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
+		defer before.Close()
+		require.NoError(t, before.Run(context.Background()))
+		want, err := before.Pop()
+		require.NoError(t, err)
+
+		manager := pass.NewManager()
+		pass.Register(manager, analysis.NewBasicBlocksAnalysis())
+		_, err = NewConstantFoldingPass().Run(manager, prog)
+		require.NoError(t, err)
+		after := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
+		defer after.Close()
+		require.NoError(t, after.Run(context.Background()))
+		got, err := after.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	})
 }

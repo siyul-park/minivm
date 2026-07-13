@@ -31,7 +31,7 @@ No later phase starts before the previous phase passes its review gate.
 | 4 | `program` construction, parser, verifier, and fuzzing | Complete | `test(program): reorganize executable specifications` | Passed |
 | 5 | Interpreter public API, marshal, host, pool, and lifecycle | Complete | `test(interp): align public API specifications` | Passed |
 | 6 | Opcode corpus and threaded/optimized/JIT semantic parity | Complete | `test(interp): name opcode specs and add parity checks` | Passed |
-| 7 | Optimizer, backend, generator, and support packages | Pending | - | - |
+| 7 | Optimizer, backend, generator, and support packages | Complete | `test: align support package specifications` | Passed |
 | 8 | Interpreter benchmark consolidation | Pending | - | - |
 | 9 | Runtime-neutral kernel and comparison benchmark rebuild | Pending | - | - |
 | 10 | Coverage gates, CI, documentation, and final review | Pending | - | - |
@@ -269,15 +269,15 @@ Tests in `analysis`, `asm`, `cli`, `debug`, `internal/cmd/geninterp`, `optimize`
 
 ### Tasks
 
-- [ ] Align tests to exported constructor and method owners.
-- [ ] Require structural rewrite proof plus execution parity for transforms.
-- [ ] Specify optimizer levels through output rather than private pipeline contents.
-- [ ] Keep exact machine encoding, relocation, register allocation, W^X, and pointer stability tests where public/backend contracts require them.
-- [ ] Split profiler/collector tests by production ownership and add concurrency/state boundaries.
-- [ ] Test debugger stepping with real interpreter programs.
-- [ ] Test CLI/REPL through injected filesystems and buffers.
-- [ ] Specify generator definition completeness, duplicate rejection, deterministic rendering, and `-check` behavior.
-- [ ] Run focused tests, review diff, update progress, and commit.
+- [x] Align tests to exported constructor and method owners.
+- [x] Require structural rewrite proof plus execution parity for transforms.
+- [x] Specify optimizer levels through output rather than private pipeline contents.
+- [x] Keep exact machine encoding, relocation, register allocation, W^X, and pointer stability tests where public/backend contracts require them.
+- [x] Split profiler/collector tests by production ownership and add concurrency/state boundaries.
+- [x] Test debugger stepping with real interpreter programs.
+- [x] Test CLI/REPL through injected filesystems and buffers.
+- [x] Specify generator definition completeness, duplicate rejection, deterministic rendering, and `-check` behavior.
+- [x] Run focused tests, review diff, update progress, and commit.
 
 ### Verification
 
@@ -430,6 +430,16 @@ GOOS=linux GOARCH=arm64 go test -exec=true ./...
 - Intentionally retained structure: exhaustive JIT parity is not claimed for every opcode; the matrix distinguishes bounded fuzz, representative differential coverage, and runtime-corpus-only ownership. Full `BranchTree` JIT fixture validation remains Phase 9 because its 30-tree warmup is a long-running kernel workload.
 - Coverage/benchmark effect: `interp` remains 21.1%; `optimize` remains 100.0%; no timed benchmark changed.
 - Commit: `test(interp): name opcode specs and add parity checks`.
+
+### Phase 7
+
+- Focused verification: race-enabled tests passed for `analysis`, `asm/...`, `cli`, `debug`, generator, `optimize`, `pass`, `prof`, and `transform`.
+- Broad verification: generator `-check`, Linux/ARM64 compile tests, explicit `gofmt`, `goimports`, `go vet`, owner inventory, and `git diff --check` passed.
+- Review findings fixed: reordered tests by production ownership, moved `TestLink` to `link_test.go`, split profiler and collector owners, removed a test helper, restored debugger lifecycle branches to 100% coverage, and required execution parity alongside every transform rewrite assertion.
+- Completeness gate: removing the `NEG` wrapper smoke row made `TestInstructionFactories` fail with the missing factory; restored table passes all 152 ARM64 factories.
+- Intentionally retained structure: ARM64 instruction factories use shared family ownership through encoder golden tests, wrapper smoke tests, and an AST completeness gate. Creating 152 one-line top-level tests would duplicate the same mechanical contract. Generator private behaviors remain shallow subtests under `TestGenerate`; they already own deterministic output, renderer selection, duplicate rejection, definition completeness, and `-check`.
+- Coverage/benchmark effect: ARM64 coverage 50.4% -> 57.8%; debug 93.6% -> 100.0%; profiler 76.8% -> 78.2%; generator 94.3%; no timed benchmark changed.
+- Commit: `test: align support package specifications`.
 
 Add one entry after each later phase:
 

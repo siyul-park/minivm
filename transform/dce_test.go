@@ -1,15 +1,21 @@
 package transform
 
 import (
+	"context"
 	"testing"
 
 	"github.com/siyul-park/minivm/analysis"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNewDeadCodeEliminationPass(t *testing.T) {
+	require.NotNil(t, NewDeadCodeEliminationPass())
+}
 
 func TestDeadCodeEliminationPass_Run(t *testing.T) {
 	tests := []struct {
@@ -184,5 +190,29 @@ func TestDeadCodeEliminationPass_Run(t *testing.T) {
 
 		_, err := NewDeadCodeEliminationPass().Run(m, prog)
 		require.ErrorIs(t, err, analysis.ErrInvalidJump)
+	})
+
+	t.Run("preserves execution", func(t *testing.T) {
+		builder := program.NewBuilder()
+		live := builder.Label()
+		builder.Br(live).Emit(instr.I32_CONST, 99).Bind(live).Emit(instr.I32_CONST, 42)
+		prog, err := builder.Build()
+		require.NoError(t, err)
+		before := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
+		defer before.Close()
+		require.NoError(t, before.Run(context.Background()))
+		want, err := before.Pop()
+		require.NoError(t, err)
+
+		manager := pass.NewManager()
+		pass.Register(manager, analysis.NewBasicBlocksAnalysis())
+		_, err = NewDeadCodeEliminationPass().Run(manager, prog)
+		require.NoError(t, err)
+		after := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
+		defer after.Close()
+		require.NoError(t, after.Run(context.Background()))
+		got, err := after.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
 	})
 }
