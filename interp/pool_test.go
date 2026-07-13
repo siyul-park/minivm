@@ -243,12 +243,14 @@ func TestPool_Get(t *testing.T) {
 			_, err := i.tracer.exit(i, root, target)
 			require.NoError(t, err)
 		}
-		p.cache.ready(0)
+		p.cache.publish(0, nil, nil)
 		i.fr.ip = 0
 		i.exit(root)
 
 		require.Equal(t, cacheCold, p.cache.state[0].Load())
-		require.True(t, p.cache.due(0, 1))
+		request, ok := p.cache.claim(0, 1)
+		require.True(t, ok)
+		require.Equal(t, cacheRequest{root: root, trigger: prof.TriggerSideExit}, request)
 	})
 
 	t.Run("does not recompile a known loop exit", func(t *testing.T) {
@@ -293,48 +295,98 @@ func TestPool_Get(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
+		b := types.NewFunctionBuilder(nil).WithParams(types.TypeI32, types.TypeI32).WithReturns(types.TypeI32)
+		b.Emit(instr.New(instr.LOCAL_GET, 0)).
+			Emit(instr.New(instr.LOCAL_GET, 1)).
+			Emit(instr.New(instr.I32_DIV_S)).
+			Emit(instr.New(instr.RETURN))
+		divide, err := b.Build()
+		require.NoError(t, err)
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
+		}, program.WithConstants(divide))
 		metrics := prof.New()
-		p := NewPool(program.New([]instr.Instruction{instr.New(instr.NOP)}), 3,
-			WithProfiler(metrics), WithThreshold(-1))
+		p := NewPool(prog, 2, WithProfiler(metrics), WithTick(1), WithThreshold(0))
 		first, err := p.Get(context.Background())
 		require.NoError(t, err)
 		second, err := p.Get(context.Background())
 		require.NoError(t, err)
-		third, err := p.Get(context.Background())
+
+		run := func(i *Interpreter, divisor int32) (types.Value, error) {
+			i.Reset()
+			if err := i.Push(types.I32(8)); err != nil {
+				return nil, err
+			}
+			if err := i.Push(types.I32(divisor)); err != nil {
+				return nil, err
+			}
+			if err := i.Run(context.Background()); err != nil {
+				return nil, err
+			}
+			return i.Pop()
+		}
+
+		ready := make(chan struct{}, 2)
+		start := make(chan struct{})
+		results := make(chan error, 2)
+		for _, i := range []*Interpreter{first, second} {
+			go func(i *Interpreter) {
+				ready <- struct{}{}
+				<-start
+				value, err := run(i, 2)
+				if err == nil && value != types.I32(4) {
+					err = fmt.Errorf("got %v, want %v", value, types.I32(4))
+				}
+				results <- err
+			}(i)
+		}
+		<-ready
+		<-ready
+		close(start)
+		require.NoError(t, <-results)
+		require.NoError(t, <-results)
+		require.Len(t, *p.cache.modules.Load(), 1)
+		addr := first.constants[0].Ref()
+		addrLabel := fmt.Sprint(addr)
+
+		for range exitThreshold {
+			_, err := run(first, 0)
+			require.ErrorIs(t, err, ErrDivideByZero)
+		}
+		require.Len(t, *p.cache.modules.Load(), 2)
+		resultValue, err := run(second, 2)
 		require.NoError(t, err)
+		require.Equal(t, types.I32(4), resultValue)
+		require.Equal(t, 2, second.gen)
 
-		p.cache.ready(0)
-		firstRoot := anchor{ip: 7}
-		p.cache.rearm(firstRoot)
-		require.True(t, p.cache.due(0, 1))
-		require.Equal(t, firstRoot, p.cache.root(0))
-		require.NoError(t, first.compile(firstRoot))
-		second.sync()
-
-		secondRoot := anchor{ip: 9}
-		p.cache.rearm(secondRoot)
-		require.True(t, p.cache.due(0, 1))
-		require.Equal(t, secondRoot, p.cache.root(0))
-		require.NoError(t, third.compile(secondRoot))
 		p.Put(first)
 		p.Put(second)
-		p.Put(third)
 		require.NoError(t, p.Close())
 
-		for _, ip := range []string{"7", "9"} {
-			value, ok := metrics.Metric("vm_jit_compiles_total",
-				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: ip},
-				prof.Label{Key: "trigger", Value: "side-exit"}, prof.Label{Key: "frontend", Value: "static"},
-				prof.Label{Key: "outcome", Value: "emitted"}, prof.Label{Key: "reason", Value: "none"})
-			require.True(t, ok)
-			require.Equal(t, float64(1), value)
-		}
+		value, ok := metrics.Metric("vm_jit_compiles_total",
+			prof.Label{Key: "func", Value: addrLabel}, prof.Label{Key: "ip", Value: "0"},
+			prof.Label{Key: "trigger", Value: "hot"}, prof.Label{Key: "frontend", Value: "static"},
+			prof.Label{Key: "outcome", Value: "emitted"}, prof.Label{Key: "reason", Value: "none"})
+		require.True(t, ok)
+		require.Equal(t, float64(1), value)
+		value, ok = metrics.Metric("vm_jit_compiles_total",
+			prof.Label{Key: "func", Value: addrLabel}, prof.Label{Key: "ip", Value: "0"},
+			prof.Label{Key: "trigger", Value: "side-exit"}, prof.Label{Key: "frontend", Value: "trace"},
+			prof.Label{Key: "outcome", Value: "emitted"}, prof.Label{Key: "reason", Value: "none"})
+		require.True(t, ok)
+		require.Equal(t, float64(1), value)
 		attempts, ok := metrics.Metric("vm_jit_attempts_total")
 		require.True(t, ok)
-		require.Equal(t, float64(2), attempts)
+		require.Equal(t, float64(3), attempts)
 		emits, ok := metrics.Metric("vm_jit_emits_total")
 		require.True(t, ok)
 		require.Equal(t, float64(2), emits)
+		exits, ok := metrics.Metric("vm_jit_native_exits_total",
+			prof.Label{Key: "func", Value: addrLabel}, prof.Label{Key: "ip", Value: "0"},
+			prof.Label{Key: "kind", Value: "call"}, prof.Label{Key: "frontend", Value: "static"},
+			prof.Label{Key: "reason", Value: "guard-value"}, prof.Label{Key: "opcode", Value: "i32.div_s"})
+		require.True(t, ok)
+		require.Equal(t, float64(exitThreshold), exits)
 	})
 }
 

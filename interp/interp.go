@@ -772,10 +772,6 @@ func (i *Interpreter) Reset() {
 // native entries. Recording belongs to observe and side-exit handling because
 // only those paths hold the exact runtime state for their anchor.
 func (i *Interpreter) compile(root anchor) error {
-	addr := root.addr
-	if i.cache != nil && !i.dynamic[addr] {
-		return i.shared(root, i.cache.trigger(addr))
-	}
 	if i.compiler == nil {
 		compiler, err := newCompiler()
 		if err != nil {
@@ -809,12 +805,12 @@ func (i *Interpreter) shared(root anchor, trigger prof.Trigger) error {
 	if err != nil {
 		i.samples.AddMetric("vm_jit_errors_total", 1)
 		i.recordCompile(trigger, compileResult{anchor: root, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err})
-		i.cache.ready(addr)
+		i.cache.fail(addr)
 		return err
 	}
 	if compiler == nil {
 		i.recordCompile(trigger, compileResult{anchor: root, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonBackendUnavailable})
-		i.cache.ready(addr)
+		i.cache.fail(addr)
 		return nil
 	}
 	i.samples.AddMetric("vm_jit_attempts_total", 1)
@@ -823,7 +819,7 @@ func (i *Interpreter) shared(root anchor, trigger prof.Trigger) error {
 	if result.err != nil {
 		i.samples.AddMetric("vm_jit_errors_total", 1)
 		_ = compiler.Close()
-		i.cache.ready(addr)
+		i.cache.fail(addr)
 		return result.err
 	}
 	if result.module == nil {
@@ -1001,11 +997,11 @@ func (i *Interpreter) safepoint() error {
 	}
 
 	// Pooled recompilation is driven by exit thresholds, not sampling, so
-	// cache.due/sync run every tick regardless of warmth: they adopt modules a
+	// cache.claim/sync run every tick regardless of warmth: they adopt modules a
 	// peer published and rearm after a hot side exit. Both are ~1 atomic when idle.
 	if i.cache != nil {
-		if i.cache.due(f.addr, i.threshold) {
-			if err := i.compile(i.cache.root(f.addr)); err != nil {
+		if request, ok := i.cache.claim(f.addr, i.threshold); ok {
+			if err := i.shared(request.root, request.trigger); err != nil {
 				return err
 			}
 		}
@@ -1047,7 +1043,10 @@ func (i *Interpreter) observe(f *frame) error {
 				return err
 			}
 			if result.trace != nil {
-				if err := i.compile(anchor{addr: f.addr, ip: f.ip}); err != nil {
+				root := anchor{addr: f.addr, ip: f.ip}
+				if i.cache != nil {
+					i.cache.request(cacheRequest{root: root, trigger: prof.TriggerHot})
+				} else if err := i.compile(root); err != nil {
 					return err
 				}
 			}

@@ -81,6 +81,11 @@ Pool interpreters use a shared `Cache`:
 - compiled modules publish immutable `asm.Callable`s
 - each interpreter installs those callables into its own dispatch table at a safepoint
 
+The cache claims a build's root and trigger together. A side-exit or loop-root
+request arriving while that build is active remains pending; publication
+finishes only the claimed build and leaves the pending request cold for the
+next winner. This prevents a completed build from clearing newer trace work.
+
 The published native code is shared. The dispatch table remains interpreter-local.
 
 ## Compiler

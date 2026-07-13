@@ -7,12 +7,10 @@ import (
 	"math"
 	"reflect"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/prof"
@@ -26,15 +24,6 @@ type upperMarshaler struct{}
 type contextKey struct{}
 
 type contextHost struct{}
-
-type journalCallable func([]uint64)
-
-func (c journalCallable) Call(ctx unsafe.Pointer) error {
-	c(unsafe.Slice((*uint64)(ctx), journalHead))
-	return nil
-}
-
-func (journalCallable) Addr() unsafe.Pointer { return nil }
 
 func (*contextHost) Value(ctx context.Context) int32 {
 	if ctx.Value(contextKey{}) == "value" {
@@ -3474,73 +3463,6 @@ func TestWithProfiler(t *testing.T) {
 		require.Equal(t, float64(1), value)
 	})
 
-	t.Run("classifies runtime exits and keeps yield and overflow separate", func(t *testing.T) {
-		reasons := []struct {
-			reason prof.ExitReason
-			label  string
-		}{
-			{prof.ExitGuardKind, "guard-kind"}, {prof.ExitGuardShape, "guard-shape"},
-			{prof.ExitGuardBounds, "guard-bounds"}, {prof.ExitGuardValue, "guard-value"},
-			{prof.ExitColdBranch, "cold-branch"}, {prof.ExitTraceCut, "trace-cut"},
-			{prof.ExitTerminalOp, "terminal-op"}, {prof.ExitLoop, "loop-exit"},
-		}
-		for _, tc := range reasons {
-			local := prof.NewCollector()
-			i := New(program.New([]instr.Instruction{instr.New(instr.NOP), instr.New(instr.NOP)}),
-				WithLocal(local), WithThreshold(-1))
-			root := anchor{}
-			kind := entryModule
-			if tc.reason == prof.ExitLoop {
-				root, kind = anchor{ip: 1}, entryLoop
-			}
-			entry := native{kind: kind, frontend: prof.FrontendTrace,
-				exits: []exitDescriptor{{reason: tc.reason, opcode: int(instr.NOP)}}}
-			metrics := i.entryMetrics(root, entry)
-			callable := journalCallable(func(journal []uint64) {
-				journal[journalTrap] = trapFallback
-				journal[journalExitID] = 1
-			})
-			if kind == entryLoop {
-				i.loop(callable, metrics)(i)
-			} else {
-				i.start(root, callable, metrics)(i)
-			}
-			kindLabel := "start"
-			if kind == entryLoop {
-				kindLabel = "loop"
-			}
-			value, ok := local.Metric("vm_jit_native_exits_total",
-				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: strconv.Itoa(root.ip)},
-				prof.Label{Key: "kind", Value: kindLabel},
-				prof.Label{Key: "frontend", Value: "trace"}, prof.Label{Key: "reason", Value: tc.label},
-				prof.Label{Key: "opcode", Value: "nop"})
-			require.True(t, ok)
-			require.Equal(t, float64(1), value)
-			require.NoError(t, i.Close())
-		}
-
-		local := prof.NewCollector()
-		i := New(program.New([]instr.Instruction{instr.New(instr.NOP)}), WithLocal(local), WithThreshold(-1))
-		entry := native{kind: entryModule, frontend: prof.FrontendTrace}
-		metrics := i.entryMetrics(anchor{}, entry)
-		i.start(anchor{}, journalCallable(func(journal []uint64) { journal[journalTrap] = trapYield }), metrics)(i)
-		_, hasExit := local.Metric("vm_jit_native_exits_total")
-		require.False(t, hasExit)
-		yields, ok := local.Metric("vm_jit_native_yields_total",
-			prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
-			prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "trace"})
-		require.True(t, ok)
-		require.Equal(t, float64(1), yields)
-
-		require.PanicsWithValue(t, ErrFrameOverflow, func() {
-			i.start(anchor{}, journalCallable(func(journal []uint64) { journal[journalTrap] = trapOverflow }), metrics)(i)
-		})
-		yields, _ = local.Metric("vm_jit_native_yields_total",
-			prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
-			prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "trace"})
-		require.Equal(t, float64(1), yields)
-		require.NoError(t, i.Close())
-	})
 }
 
 func TestWithFrame(t *testing.T) {
@@ -3619,11 +3541,22 @@ func TestWithFrame(t *testing.T) {
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
 		}, program.WithConstants(recurse))
-		i = New(prog, WithFrame(nativeFrameLimit+2), WithTick(1), WithThreshold(0))
+		local := prof.NewCollector()
+		i = New(prog, WithFrame(nativeFrameLimit+2), WithTick(1), WithThreshold(0), WithLocal(local))
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), ErrFrameOverflow)
 		require.GreaterOrEqual(t, i.samples.Value("vm_jit_emits_total"), float64(1))
+		hasEntry := false
+		for _, metric := range local.Metrics() {
+			switch metric.Name {
+			case "vm_jit_native_entries_total":
+				hasEntry = true
+			case "vm_jit_native_exits_total", "vm_jit_native_yields_total":
+				t.Fatalf("native overflow must not increment %s", metric.Name)
+			}
+		}
+		require.True(t, hasEntry)
 	})
 }
 

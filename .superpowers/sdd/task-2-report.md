@@ -147,3 +147,76 @@ git diff --check
 ```
 
 All passed. No remaining concerns from the reviewer list.
+
+## Second reviewer fix pass
+
+Status: DONE
+
+### Cache coordination RED/GREEN
+
+- RED: `go test ./interp -run '^TestCache_Rearm$/preserves_a_side_exit_requested_while_a_build_publishes$' -count=1`
+- Observed failure: the winner's publication changed the state to `cacheReady`
+  after a side exit had rearmed the active build; the expected state was
+  `cacheCold`, so the newer root/trigger request was lost.
+- GREEN: the cache now claims root, trigger, and build ownership under one
+  mutex. The atomic state read remains the fast rejection path. Completion
+  finishes only the claimed build and leaves a request that arrived during the
+  build pending and cold for the next winner. Pooled loop captures use this
+  same request path instead of bypassing cache ownership.
+
+### Real ARM64 descriptor and runtime coverage
+
+The synthetic `journalCallable` fixture was removed. Real emitted ARM64
+callables now assert the journal's descriptor ID + 1 encoding and the selected
+descriptor for:
+
+- guard value: dynamic `I32_DIV_S`
+- guard shape: `ARRAY_LEN` over a changed array shape
+- guard bounds: traced `ARRAY_GET` with an out-of-range index
+- guard kind: traced `STRUCT_GET` selecting a field of another kind
+- cold branch: the unrecorded path of a traced `BR_IF`
+- trace cut: an `opLimit` trace prefix
+- terminal operation: `F64_REM`
+- loop exit: the cold edge of a real function loop
+
+A generated self-tail-call function exhausts the native loop budget and
+asserts that yield increments only `vm_jit_native_yields_total`. The existing
+real native recursion test now also asserts that native frame overflow
+increments neither exit nor yield while still recording native entry.
+
+`trace-cut` intentionally has `opcode=none`: its resume boundary is synthesized
+after `opLimit` and has no source opcode. Every concrete guard case above
+asserts its real source opcode. A module-address loop cannot be a native loop
+entry (`plan.valid` requires loop roots to be function addresses), so loop-exit
+coverage uses a generated function loop, the actual supported architecture.
+
+### Real pool winner and recompile coverage
+
+`TestPool_Get/accounts only shared cache winners across flush and recompile`
+now runs two borrowed interpreters concurrently. One wins the real function
+compile, eight generated divisor-guard exits trigger a real side-exit trace
+recompile, and the peer synchronizes and executes the second publication.
+After both local collectors flush through `Put` and `Close`, the test asserts:
+
+- one hot static emitted compile
+- one side-exit trace emitted compile
+- three total attempts (the real top-level `CALL` root rejection plus both
+  function builds)
+- two total emitted entries
+- exactly eight static guard-value native exits
+
+The focused pool test passed 20 consecutive runs.
+
+### Final verification
+
+```text
+go test ./interp -run 'TestCache_Rearm/preserves_a_side_exit_requested_while_a_build_publishes|TestCompiler_Compile/(guard_value|guard_shape|guard_bounds|guard_kind|cold_branch|trace_cut|terminal|loop_exit|yield)|TestWithFrame/native_recursion_respects_reserved_frame_limit' -count=1
+go test ./interp -run 'TestPool_Get/accounts_only_shared_cache_winners_across_flush_and_recompile' -count=20
+git diff --check
+go test ./prof ./interp -count=1
+go test -race ./interp -count=1
+GOARCH=amd64 go test ./interp -run '^(TestWithProfiler|TestTracer_Capture|TestCompiler_Compile|TestCache|TestPool)' -count=1
+go vet ./interp
+```
+
+All passed. No remaining concerns from the second reviewer list.
