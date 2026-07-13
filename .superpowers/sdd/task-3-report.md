@@ -160,3 +160,19 @@ git diff --check
 
 All commands passed. A completion-gate reread found no remaining removable
 symbols or safe control-flow simplification in the touched code.
+
+### Final style follow-up
+
+`newProfileReport` now appears in the private-constructor section before the
+private `profileReport` and `jitProfile` methods. The remaining private
+functions follow those methods, preserving `docs/coding-patterns.md` section
+2.4 and caller-before-callee order without changing behavior.
+
+Verification:
+
+```text
+go test ./cli -run '^TestREPL_Run$' -count=1
+git diff --check
+```
+
+Both commands passed.

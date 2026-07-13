@@ -105,6 +105,77 @@ type jitMiss struct {
 
 const profileLimit = 10
 
+func newProfileReport(metrics []prof.Metric) profileReport {
+	functions := map[int]uint64{}
+	ips := map[[2]int]uint64{}
+	opcodes := map[string]uint64{}
+	entries := map[entryKey]*jitEntry{}
+	exits := map[exitKey]uint64{}
+	compiles := map[compileKey]uint64{}
+	captures := map[captureKey]uint64{}
+	var report profileReport
+
+	for _, metric := range metrics {
+		value := uint64(metric.Value)
+		switch metric.Name {
+		case "vm_samples_total":
+			report.total += value
+		case "vm_func_samples_total":
+			functions[metricLabelInt(metric, "func")] += value
+		case "vm_func_ip_samples_total":
+			key := [2]int{metricLabelInt(metric, "func"), metricLabelInt(metric, "ip")}
+			ips[key] += value
+		case "vm_opcode_samples_total":
+			opcodes[metricLabel(metric, "opcode")] += value
+		case "vm_jit_trace_captures_total":
+			key := captureKey{
+				fn: metricLabelInt(metric, "func"), ip: metricLabelInt(metric, "ip"),
+				outcome: metricLabel(metric, "outcome"), reason: metricLabel(metric, "reason"),
+			}
+			captures[key] += value
+		case "vm_jit_compiles_total":
+			key := compileKey{
+				fn: metricLabelInt(metric, "func"), ip: metricLabelInt(metric, "ip"),
+				trigger: metricLabel(metric, "trigger"), frontend: metricLabel(metric, "frontend"),
+				outcome: metricLabel(metric, "outcome"), reason: metricLabel(metric, "reason"),
+			}
+			compiles[key] += value
+		case "vm_jit_entry_emits_total", "vm_jit_entry_bytes_total", "vm_jit_native_entries_total":
+			key := entryKey{
+				fn: metricLabelInt(metric, "func"), ip: metricLabelInt(metric, "ip"),
+				kind: metricLabel(metric, "kind"), frontend: metricLabel(metric, "frontend"),
+			}
+			entry := entries[key]
+			if entry == nil {
+				entry = &jitEntry{entryKey: key}
+				entries[key] = entry
+			}
+			switch metric.Name {
+			case "vm_jit_entry_emits_total":
+				entry.emits += value
+			case "vm_jit_entry_bytes_total":
+				entry.bytes += value
+			case "vm_jit_native_entries_total":
+				entry.entries += value
+			}
+		case "vm_jit_native_exits_total":
+			key := exitKey{
+				entryKey: entryKey{
+					fn: metricLabelInt(metric, "func"), ip: metricLabelInt(metric, "ip"),
+					kind: metricLabel(metric, "kind"), frontend: metricLabel(metric, "frontend"),
+				},
+				reason: metricLabel(metric, "reason"), opcode: metricLabel(metric, "opcode"),
+			}
+			exits[key] += value
+		}
+	}
+
+	report.functions = rankedFunctions(functions, ips)
+	report.opcodes = rankedOpcodes(opcodes)
+	report.jit = normalizeJIT(entries, exits, compiles, captures, ips)
+	return report
+}
+
 // print renders the normalized, ranked profile.
 func (p profileReport) print(out io.Writer) {
 	fmt.Fprintf(out, "profile samples: %d\n", p.total)
@@ -186,77 +257,6 @@ func (p profileReport) print(out io.Writer) {
 
 func (p jitProfile) empty() bool {
 	return p.summary == (jitSummary{}) && len(p.entries) == 0 && len(p.exits) == 0 && len(p.misses) == 0
-}
-
-func newProfileReport(metrics []prof.Metric) profileReport {
-	functions := map[int]uint64{}
-	ips := map[[2]int]uint64{}
-	opcodes := map[string]uint64{}
-	entries := map[entryKey]*jitEntry{}
-	exits := map[exitKey]uint64{}
-	compiles := map[compileKey]uint64{}
-	captures := map[captureKey]uint64{}
-	var report profileReport
-
-	for _, metric := range metrics {
-		value := uint64(metric.Value)
-		switch metric.Name {
-		case "vm_samples_total":
-			report.total += value
-		case "vm_func_samples_total":
-			functions[metricLabelInt(metric, "func")] += value
-		case "vm_func_ip_samples_total":
-			key := [2]int{metricLabelInt(metric, "func"), metricLabelInt(metric, "ip")}
-			ips[key] += value
-		case "vm_opcode_samples_total":
-			opcodes[metricLabel(metric, "opcode")] += value
-		case "vm_jit_trace_captures_total":
-			key := captureKey{
-				fn: metricLabelInt(metric, "func"), ip: metricLabelInt(metric, "ip"),
-				outcome: metricLabel(metric, "outcome"), reason: metricLabel(metric, "reason"),
-			}
-			captures[key] += value
-		case "vm_jit_compiles_total":
-			key := compileKey{
-				fn: metricLabelInt(metric, "func"), ip: metricLabelInt(metric, "ip"),
-				trigger: metricLabel(metric, "trigger"), frontend: metricLabel(metric, "frontend"),
-				outcome: metricLabel(metric, "outcome"), reason: metricLabel(metric, "reason"),
-			}
-			compiles[key] += value
-		case "vm_jit_entry_emits_total", "vm_jit_entry_bytes_total", "vm_jit_native_entries_total":
-			key := entryKey{
-				fn: metricLabelInt(metric, "func"), ip: metricLabelInt(metric, "ip"),
-				kind: metricLabel(metric, "kind"), frontend: metricLabel(metric, "frontend"),
-			}
-			entry := entries[key]
-			if entry == nil {
-				entry = &jitEntry{entryKey: key}
-				entries[key] = entry
-			}
-			switch metric.Name {
-			case "vm_jit_entry_emits_total":
-				entry.emits += value
-			case "vm_jit_entry_bytes_total":
-				entry.bytes += value
-			case "vm_jit_native_entries_total":
-				entry.entries += value
-			}
-		case "vm_jit_native_exits_total":
-			key := exitKey{
-				entryKey: entryKey{
-					fn: metricLabelInt(metric, "func"), ip: metricLabelInt(metric, "ip"),
-					kind: metricLabel(metric, "kind"), frontend: metricLabel(metric, "frontend"),
-				},
-				reason: metricLabel(metric, "reason"), opcode: metricLabel(metric, "opcode"),
-			}
-			exits[key] += value
-		}
-	}
-
-	report.functions = rankedFunctions(functions, ips)
-	report.opcodes = rankedOpcodes(opcodes)
-	report.jit = normalizeJIT(entries, exits, compiles, captures, ips)
-	return report
 }
 
 func rankedFunctions(functions map[int]uint64, ips map[[2]int]uint64) []functionProfile {
