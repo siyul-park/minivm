@@ -126,9 +126,9 @@ invalidate another ownership created by `Alloc` or `Retain`.
 
 `SetGlobal(idx, val)` and `SetLocal(idx, val)` overwrite VM slots.
 
-If `val` is `KindRef`, ownership transfers into the slot. The caller must not release that same reference afterward.
+If `val` is a different `KindRef`, ownership transfers into the slot. The caller must not release that same ownership afterward. Assigning the slot's current boxed value is a no-op; in that case no ownership transfers, and the caller remains responsible for any ownership it already holds.
 
-To keep another reference, retain first.
+To keep another reference after a different-value assignment, retain first.
 
 ```go
 _, err := vm.Retain(addr)

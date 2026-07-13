@@ -195,13 +195,16 @@ err = vm.Release(addr)
 Rules:
 
 - `Alloc` creates an owned heap ref
+- `Alloc` of an existing ref creates another ownership of the same address
 - `Load` reads an object without changing ownership
-- `Store` overwrites an existing heap slot
+- `Store` overwrites an existing heap slot and finalizes the old value
 - `Retain` creates an additional host-owned ref
 - `Release` drops a host-owned ref
-- every successful `Retain` must be matched by `Release`
+- every ownership created by `Alloc` or `Retain` must be transferred or released
 
-Leaked host refs keep objects alive.
+Leaked host refs keep objects alive. `SetGlobal` and `SetLocal` transfer a
+different ref into the destination, but assigning the destination's current
+boxed value is a no-op and leaves the caller's ownership unchanged.
 
 `Marshal` may allocate nested heap refs while converting Go values. Those refs belong to the interpreter heap. Consume them through VM APIs such as `Push` or `Alloc`, or let `Close` / `Reset` discard temporary allocations.
 

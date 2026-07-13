@@ -3221,7 +3221,7 @@ func TestInterpreter_Store(t *testing.T) {
 		require.ErrorIs(t, err, ErrSegmentationFault)
 	})
 
-	t.Run("preserves self reference", func(t *testing.T) {
+	t.Run("ignores same-address reference", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
 
@@ -3715,6 +3715,33 @@ func TestWithMaxHeap(t *testing.T) {
 		require.Equal(t, 0, value.closed)
 		require.NoError(t, i.Release(addr))
 		require.Equal(t, 1, value.closed)
+	})
+
+	t.Run("preserves duplicate nested constant edges", func(t *testing.T) {
+		const leafAddr = 1
+		const midAddr = 2
+
+		leaf := &trackedValue{}
+		mid := types.NewArray(types.NewArrayType(types.TypeRef), types.BoxRef(leafAddr))
+		root := types.NewArray(types.NewArrayType(types.TypeRef), types.BoxRef(midAddr), types.BoxRef(midAddr))
+		prog := program.New(nil, program.WithConstants(leaf, mid, root))
+		i := New(prog, WithHeap(4), WithMaxHeap(4))
+		defer i.Close()
+
+		_, err := i.Alloc(types.String("blocked"))
+		require.ErrorIs(t, err, ErrHeapExhausted)
+		got, err := i.Load(leafAddr)
+		require.NoError(t, err)
+		require.Same(t, leaf, got)
+		require.Equal(t, 0, leaf.closed)
+
+		i.Reset()
+		_, err = i.Alloc(types.String("blocked again"))
+		require.ErrorIs(t, err, ErrHeapExhausted)
+		got, err = i.Load(leafAddr)
+		require.NoError(t, err)
+		require.Same(t, leaf, got)
+		require.Equal(t, 0, leaf.closed)
 	})
 
 	t.Run("collects unreachable cycle", func(t *testing.T) {

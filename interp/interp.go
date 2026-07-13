@@ -268,11 +268,20 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	}
 	i.alloc(types.Null)
 
+	// Retain each constant root and nested edge as it becomes visible because a
+	// later constant may allocate and trigger GC. recount normalizes the final
+	// baseline after the whole constant pool has been boxed.
 	for j, v := range prog.Constants {
 		var val types.Boxed
 		switch v := v.(type) {
 		case types.Boxed:
 			val = v
+			if val.Kind() == types.KindRef {
+				addr := val.Ref()
+				if addr >= 0 && addr < len(i.rc) && i.rc[addr] > 0 {
+					i.retain(addr)
+				}
+			}
 		case types.I1:
 			val = types.BoxI1(bool(v))
 		case types.I8:
@@ -287,13 +296,22 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 			val = types.BoxF64(float64(v))
 		case types.Ref:
 			val = types.BoxRef(int(v))
+			if addr := int(v); addr >= 0 && addr < len(i.rc) && i.rc[addr] > 0 {
+				i.retain(addr)
+			}
 		default:
 			val = types.BoxRef(i.keep(v))
+			for _, ref := range i.refs(v) {
+				if addr := int(ref); addr >= 0 && addr < len(i.rc) && i.rc[addr] > 0 {
+					i.retain(addr)
+				}
+			}
 		}
 		i.constants[j] = val
 	}
 
 	i.base = len(i.heap)
+	i.recount()
 
 	i.module = &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
 	i.instrs[0] = prog.Code
@@ -551,9 +569,10 @@ func (i *Interpreter) Global(idx int) (types.Boxed, error) {
 }
 
 // SetGlobal writes val into global slot idx, releasing the reference the slot
-// previously held. Ownership of a KindRef val transfers into the slot: the
-// caller must not release it afterward, and should Retain first to keep an
-// independent reference.
+// previously held. Ownership of a different KindRef val transfers into the
+// slot: the caller must not release it afterward, and should Retain first to
+// keep an independent reference. Reassigning the current value is a no-op and
+// leaves the caller's ownership unchanged.
 func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
 	if idx < 0 || idx >= len(i.globals) {
 		return ErrSegmentationFault
@@ -579,9 +598,10 @@ func (i *Interpreter) Local(idx int) (types.Boxed, error) {
 }
 
 // SetLocal writes val into local slot idx, releasing the reference the slot
-// previously held. Ownership of a KindRef val transfers into the slot: the
-// caller must not release it afterward, and should Retain first to keep an
-// independent reference.
+// previously held. Ownership of a different KindRef val transfers into the
+// slot: the caller must not release it afterward, and should Retain first to
+// keep an independent reference. Reassigning the current value is a no-op and
+// leaves the caller's ownership unchanged.
 func (i *Interpreter) SetLocal(idx int, val types.Boxed) error {
 	f := i.fr
 	addr := f.bp + idx
@@ -625,15 +645,6 @@ func (i *Interpreter) Store(addr int, val types.Value) (err error) {
 		} else {
 			val = types.Unbox(v)
 		}
-	case types.Ref:
-		ref := int(v)
-		if ref < 0 || ref >= len(i.heap) || i.rc[ref] <= 0 {
-			return ErrSegmentationFault
-		}
-		if ref == addr {
-			return nil
-		}
-		val = i.heap[ref]
 	}
 	old := i.heap[addr]
 	i.heap[addr] = val
@@ -786,9 +797,7 @@ func (i *Interpreter) Reset() {
 	hits := i.rc[:cap(i.rc)]
 	clear(hits[i.base:])
 	i.rc = hits[:i.base]
-	for j := 0; j < i.base; j++ {
-		i.rc[j] = 1
-	}
+	i.recount()
 	i.free = i.free[:0]
 
 	// Restore each global from its declaration rather than its previous runtime
@@ -1669,6 +1678,30 @@ func (i *Interpreter) remove(addr int) {
 	delete(i.dynamic, addr)
 }
 
+// recount rebuilds baseline counts from constant roots and heap edges after
+// construction or reset has removed all dynamic slots.
+func (i *Interpreter) recount() {
+	clear(i.rc)
+	i.rc[0] = 1
+	for _, val := range i.constants {
+		if val.Kind() != types.KindRef {
+			continue
+		}
+		addr := val.Ref()
+		if addr >= 0 && addr < len(i.rc) {
+			i.rc[addr]++
+		}
+	}
+	for addr := 1; addr < len(i.heap); addr++ {
+		for _, ref := range i.refs(i.heap[addr]) {
+			child := int(ref)
+			if child >= 0 && child < len(i.rc) {
+				i.rc[child]++
+			}
+		}
+	}
+}
+
 func (i *Interpreter) retainBox(v types.Boxed) {
 	if v.Kind() == types.KindRef {
 		i.retain(v.Ref())
@@ -1745,6 +1778,11 @@ func (i *Interpreter) scan() {
 				panic(ErrSegmentationFault)
 			}
 			i.trial[child]--
+		}
+	}
+	for addr := 1; addr < n; addr++ {
+		if i.rc[addr] > 0 && i.trial[addr] < 0 {
+			panic(ErrSegmentationFault)
 		}
 	}
 }
