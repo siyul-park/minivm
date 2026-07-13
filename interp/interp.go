@@ -47,12 +47,13 @@ type Interpreter struct {
 	frames   []frame
 	fr       *frame
 	stack    []types.Boxed
-	roots    []types.Boxed
 	heap     []types.Value
 	base     int
 	interned map[string]types.Ref
 	free     []int
 	rc       []int
+	trial    []int
+	work     []int
 	refbuf   []types.Ref
 
 	fp  int
@@ -778,7 +779,6 @@ func (i *Interpreter) Reset() {
 	}
 
 	i.gas = i.fuel
-	i.roots = i.roots[:0]
 
 	heap := i.heap[:cap(i.heap)]
 	clear(heap[i.base:])
@@ -1608,8 +1608,6 @@ func (i *Interpreter) reuse(val types.Value) (int, bool) {
 }
 
 func (i *Interpreter) keep(val types.Value) int {
-	roots := i.trace(val)
-	defer i.unroot(roots)
 	return i.alloc(val)
 }
 
@@ -1715,105 +1713,85 @@ func (i *Interpreter) release(addr int) {
 	}
 }
 
-func (i *Interpreter) trace(val types.Value) int {
-	n := 0
-	for _, ref := range i.refs(val) {
-		n += i.root(types.BoxRef(int(ref)))
-	}
-	return n
-}
-
-func (i *Interpreter) root(val types.Boxed) int {
-	if val.Kind() != types.KindRef {
-		return 0
-	}
-	i.roots = append(i.roots, val)
-	return 1
-}
-
-func (i *Interpreter) unroot(n int) {
-	if n == 0 {
-		return
-	}
-	i.roots = i.roots[:len(i.roots)-n]
-}
-
 func (i *Interpreter) gc() {
+	i.scan()
 	i.mark()
 	i.sweep()
 }
 
-// mark negates every live refcount, then walks the object graph from the roots,
-// flipping each reachable slot back to its original positive count. When it
-// returns, survivors hold positive counts, unreachable-but-allocated slots are
-// negative, and free slots remain zero.
+// scan derives each object's external incoming count. Exact rc includes both
+// heap edges and owners outside the heap; subtracting every heap-to-heap edge
+// leaves a positive value only for objects owned by the stack, constants,
+// globals, frames, temporary construction state, or the host.
+func (i *Interpreter) scan() {
+	n := len(i.rc)
+	if cap(i.trial) < n {
+		i.trial = make([]int, n)
+	} else {
+		i.trial = i.trial[:n]
+	}
+	copy(i.trial, i.rc)
+
+	for addr := 1; addr < n; addr++ {
+		if i.rc[addr] <= 0 {
+			continue
+		}
+		for _, ref := range i.refs(i.heap[addr]) {
+			child := int(ref)
+			if child == 0 {
+				continue
+			}
+			if child < 0 || child >= n || i.rc[child] <= 0 {
+				panic(ErrSegmentationFault)
+			}
+			i.trial[child]--
+		}
+	}
+}
+
+// mark traces from every positive external count. A negative trial value marks
+// a survivor; zero remains an unreachable cycle candidate.
 func (i *Interpreter) mark() {
-	for j := 1; j < len(i.heap); j++ {
-		if i.rc[j] < 0 {
-			i.rc[j] = 0
-		}
-		i.rc[j] *= -1
-	}
-
-	var stack []int
+	i.work = i.work[:0]
 	push := func(addr int) {
-		if i.rc[addr] < 0 {
-			i.rc[addr] *= -1
-			stack = append(stack, addr)
+		if addr <= 0 || addr >= len(i.rc) || i.rc[addr] <= 0 || i.trial[addr] < 0 {
+			return
 		}
-	}
-	pushBox := func(val types.Boxed) {
-		if val.Kind() == types.KindRef {
-			push(val.Ref())
-		}
+		i.trial[addr] = -i.trial[addr] - 1
+		i.work = append(i.work, addr)
 	}
 
-	for j := 0; j < i.sp; j++ {
-		pushBox(i.stack[j])
-	}
-	for _, val := range i.constants {
-		pushBox(val)
-	}
-	for _, val := range i.globals {
-		pushBox(val)
-	}
-	for _, val := range i.roots {
-		pushBox(val)
-	}
-	for j := 0; j < i.fp; j++ {
-		push(i.frames[j].ref)
-		if co := i.frames[j].coro; co > 0 {
-			push(co)
+	for addr := 1; addr < len(i.rc); addr++ {
+		if i.rc[addr] > 0 && i.trial[addr] > 0 {
+			push(addr)
 		}
 	}
-
-	for len(stack) > 0 {
-		addr := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
+	for len(i.work) > 0 {
+		addr := i.work[len(i.work)-1]
+		i.work = i.work[:len(i.work)-1]
 		for _, ref := range i.refs(i.heap[addr]) {
 			push(int(ref))
 		}
 	}
 }
 
-// sweep frees every slot mark left negative. For each dead object it first
-// removes that object's contribution to its live referents' counts, so the
-// surviving graph's refcounts stay exact and survivors are not pinned by edges
-// from collected garbage. Dead->dead edges are skipped: the referent is zeroed
-// by its own sweep.
+// sweep reclaims every allocated unmarked slot. Edges from dead objects to
+// survivors are removed from exact rc; dead-to-dead edges need no adjustment
+// because both slots are discarded by this pass.
 func (i *Interpreter) sweep() {
-	for j := 1; j < len(i.heap); j++ {
-		if i.rc[j] >= 0 {
+	for addr := 1; addr < len(i.heap); addr++ {
+		if i.rc[addr] <= 0 || i.trial[addr] < 0 {
 			continue
 		}
-		v := i.heap[j]
+		v := i.heap[addr]
 		for _, ref := range i.refs(v) {
-			if r := int(ref); i.rc[r] > 0 {
-				i.rc[r]--
+			child := int(ref)
+			if child > 0 && child < len(i.rc) && i.rc[child] > 0 && i.trial[child] < 0 {
+				i.rc[child]--
 			}
 		}
-		i.rc[j] = 0
-		i.reclaim(j, v)
+		i.rc[addr] = 0
+		i.reclaim(addr, v)
 	}
 }
 

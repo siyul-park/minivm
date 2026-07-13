@@ -3692,11 +3692,177 @@ func TestWithHeap(t *testing.T) {
 }
 
 func TestWithMaxHeap(t *testing.T) {
-	prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW)})
-	i := New(prog, WithMaxHeap(1))
-	defer i.Close()
+	t.Run("rejects live heap at limit", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW)})
+		i := New(prog, WithMaxHeap(1))
+		defer i.Close()
 
-	require.ErrorIs(t, i.Run(context.Background()), ErrHeapExhausted)
+		require.ErrorIs(t, i.Run(context.Background()), ErrHeapExhausted)
+	})
+
+	t.Run("preserves host-owned reference", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(2), WithMaxHeap(2))
+		defer i.Close()
+
+		value := &trackedValue{}
+		addr, err := i.Alloc(value)
+		require.NoError(t, err)
+		_, err = i.Alloc(types.String("blocked"))
+		require.ErrorIs(t, err, ErrHeapExhausted)
+		got, err := i.Load(addr)
+		require.NoError(t, err)
+		require.Same(t, value, got)
+		require.Equal(t, 0, value.closed)
+		require.NoError(t, i.Release(addr))
+		require.Equal(t, 1, value.closed)
+	})
+
+	t.Run("collects unreachable cycle", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(3), WithMaxHeap(3))
+		defer i.Close()
+
+		left := &trackedValue{}
+		leftAddr, err := i.Alloc(left)
+		require.NoError(t, err)
+		right := &trackedValue{}
+		rightAddr, err := i.Alloc(right)
+		require.NoError(t, err)
+		left.refs = []types.Ref{types.Ref(rightAddr)}
+		right.refs = []types.Ref{types.Ref(leftAddr)}
+		_, err = i.Retain(rightAddr)
+		require.NoError(t, err)
+		_, err = i.Retain(leftAddr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(leftAddr))
+		require.NoError(t, i.Release(rightAddr))
+
+		addr, err := i.Alloc(types.String("reused"))
+		require.NoError(t, err)
+		require.Equal(t, 1, left.closed)
+		require.Equal(t, 1, right.closed)
+		require.NoError(t, i.Release(addr))
+	})
+
+	t.Run("preserves host-rooted cycle", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(3), WithMaxHeap(3))
+		defer i.Close()
+
+		left := &trackedValue{}
+		leftAddr, err := i.Alloc(left)
+		require.NoError(t, err)
+		right := &trackedValue{}
+		rightAddr, err := i.Alloc(right)
+		require.NoError(t, err)
+		left.refs = []types.Ref{types.Ref(rightAddr)}
+		right.refs = []types.Ref{types.Ref(leftAddr)}
+		_, err = i.Retain(rightAddr)
+		require.NoError(t, err)
+		_, err = i.Retain(leftAddr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(rightAddr))
+
+		_, err = i.Alloc(types.String("blocked"))
+		require.ErrorIs(t, err, ErrHeapExhausted)
+		got, err := i.Load(leftAddr)
+		require.NoError(t, err)
+		require.Same(t, left, got)
+		got, err = i.Load(rightAddr)
+		require.NoError(t, err)
+		require.Same(t, right, got)
+		require.Equal(t, 0, left.closed)
+		require.Equal(t, 0, right.closed)
+
+		require.NoError(t, i.Release(leftAddr))
+		addr, err := i.Alloc(types.String("reused"))
+		require.NoError(t, err)
+		require.Equal(t, 1, left.closed)
+		require.Equal(t, 1, right.closed)
+		require.NoError(t, i.Release(addr))
+	})
+
+	t.Run("collects self cycle", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(2), WithMaxHeap(2))
+		defer i.Close()
+
+		value := &trackedValue{}
+		addr, err := i.Alloc(value)
+		require.NoError(t, err)
+		value.refs = []types.Ref{types.Ref(addr)}
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		reused, err := i.Alloc(types.String("reused"))
+		require.NoError(t, err)
+		require.Equal(t, 1, value.closed)
+		require.NoError(t, i.Release(reused))
+	})
+
+	t.Run("collects duplicate cycle edges", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(3), WithMaxHeap(3))
+		defer i.Close()
+
+		left := &trackedValue{}
+		leftAddr, err := i.Alloc(left)
+		require.NoError(t, err)
+		right := &trackedValue{}
+		rightAddr, err := i.Alloc(right)
+		require.NoError(t, err)
+		left.refs = []types.Ref{types.Ref(rightAddr), types.Ref(rightAddr)}
+		right.refs = []types.Ref{types.Ref(leftAddr)}
+		_, err = i.Retain(rightAddr)
+		require.NoError(t, err)
+		_, err = i.Retain(rightAddr)
+		require.NoError(t, err)
+		_, err = i.Retain(leftAddr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(leftAddr))
+		require.NoError(t, i.Release(rightAddr))
+
+		reused, err := i.Alloc(types.String("reused"))
+		require.NoError(t, err)
+		require.Equal(t, 1, left.closed)
+		require.Equal(t, 1, right.closed)
+		require.NoError(t, i.Release(reused))
+	})
+
+	t.Run("settles dead edges to live object", func(t *testing.T) {
+		i := New(program.New(nil), WithHeap(4), WithMaxHeap(4))
+		defer i.Close()
+
+		left := &trackedValue{}
+		leftAddr, err := i.Alloc(left)
+		require.NoError(t, err)
+		right := &trackedValue{}
+		rightAddr, err := i.Alloc(right)
+		require.NoError(t, err)
+		live := &trackedValue{}
+		liveAddr, err := i.Alloc(live)
+		require.NoError(t, err)
+		left.refs = []types.Ref{types.Ref(rightAddr), types.Ref(liveAddr)}
+		right.refs = []types.Ref{types.Ref(leftAddr)}
+		_, err = i.Retain(rightAddr)
+		require.NoError(t, err)
+		_, err = i.Retain(liveAddr)
+		require.NoError(t, err)
+		_, err = i.Retain(leftAddr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(leftAddr))
+		require.NoError(t, i.Release(rightAddr))
+
+		reused, err := i.Alloc(types.String("reused"))
+		require.NoError(t, err)
+		require.Equal(t, 1, left.closed)
+		require.Equal(t, 1, right.closed)
+		got, err := i.Load(liveAddr)
+		require.NoError(t, err)
+		require.IsType(t, live, got)
+		require.Same(t, live, got)
+		require.Equal(t, 0, live.closed)
+		require.NoError(t, i.Release(liveAddr))
+		require.Equal(t, 1, live.closed)
+		require.NoError(t, i.Release(reused))
+	})
 }
 
 func TestWithTick(t *testing.T) {

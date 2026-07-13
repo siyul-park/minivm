@@ -20,7 +20,7 @@ For boxed value layout and kind rules, see `docs/value-representation.md`.
 
 ## Summary
 
-minivm uses stable heap indices, manual reference counting, and a cycle-collecting mark-and-sweep GC.
+minivm uses stable heap indices, exact reference counting, and a trial-deletion mark-and-sweep collector for cycles.
 
 Only `KindRef` values participate in reference counting. Primitive boxed values are copied by value and ignored by RC.
 
@@ -37,9 +37,11 @@ Design rules:
 `Interpreter` stores heap state in parallel slices.
 
 ```go
-heap []types.Value
-rc   []int
-free []int
+heap  []types.Value
+rc    []int
+free  []int
+trial []int
+work  []int
 ```
 
 Allocation returns a stable integer heap index. Heap indices never move, because `KindRef` values store heap indices in stack slots, constants, globals, closures, and heap objects.
@@ -64,6 +66,10 @@ Reference counting is handled by threaded handlers and host APIs.
 `release(addr)` decrements `rc[addr]`. When the count reaches zero, it collects nested refs from `Traceable.Refs`, closes the value when needed, clears the heap slot, appends the address to `free`, and repeats for nested refs with an explicit work stack.
 
 `release` must remain iterative to avoid deep-recursion failures on large object graphs.
+
+Counts include every ownership edge, whether it comes from another heap object,
+the VM stack and frames, a global or constant, temporary construction state, or
+the host. The cycle collector relies on this exactness.
 
 ## Traceable Values
 
@@ -104,23 +110,32 @@ Public host APIs that allocate, such as `Alloc`, `Push`, and `Marshal`, return `
 
 ## GC
 
-GC is mark-and-sweep with the sign bit of `rc` used as the mark state. There is no separate mark array.
+GC uses trial deletion to derive roots from exact reference counts instead of
+maintaining a second root registry.
 
 GC runs when the heap is full and `free` is empty.
 
 High-level flow:
 
-1. mark existing live slots as unreachable
-2. trace roots from stack, constants, globals, active frames, coroutines, and closures
-3. sweep slots that remain marked unreachable
+1. copy each allocated slot's exact `rc` into the reused `trial` table
+2. subtract every heap-to-heap edge reported by `Traceable.Refs`
+3. treat positive residual counts as owners outside the heap graph
+4. mark transitively from those externally owned objects
+5. reclaim every allocated unmarked slot as cyclic garbage
+6. subtract dead-to-live edges from surviving exact counts
+
+A residual external count covers stack, constant, global, frame, coroutine,
+temporary construction, and host ownership uniformly. Host-held addresses
+therefore survive collection without a separate pin table.
 
 Properties:
 
-- handles reference cycles
-- uses O(1) extra mark storage
+- handles self-cycles, multi-object cycles, and duplicate edges
+- preserves objects with any external ownership
+- reuses O(heap slots) trial and work buffers after their first growth
 - does not compact
 - keeps heap indices stable
-- pause cost is proportional to heap size
+- pause cost is proportional to allocated slots plus traced edges
 
 ## Invariants
 
@@ -138,9 +153,11 @@ Rules:
 
 Primitive boxed values do not participate in reference counting. Only `KindRef` values are tracked.
 
-### RC must be symmetric
+### RC must be exact and symmetric
 
-Every retained ref must be released exactly once. Releasing too much can collect a value too early; releasing too little leaks it.
+Every ownership edge contributes exactly one count. Every retained ref must be
+released exactly once. Missing counts can collect a value too early; excess
+counts can turn unreachable garbage into a false external root.
 
 ### Heap indices are stable
 
@@ -219,6 +236,7 @@ When changing memory behavior:
 - update old and new refs in the same local block
 - keep `release` iterative
 - use `Refs(dst)` scratch instead of allocating traversal slices eagerly
+- keep heap-edge counts exact so trial deletion can derive external roots
 - never cache heap element indexes as slice addresses across allocation
 - keep `heap[0]` special and simple
 - prefer transfer semantics when values are already being consumed

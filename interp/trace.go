@@ -281,10 +281,12 @@ func (r *Tracer) clone(i *Interpreter) Interpreter {
 	out.journal = append([]uint64(nil), i.journal...)
 	out.frames = append([]frame(nil), i.frames...)
 	out.stack = append([]types.Boxed(nil), i.stack...)
-	out.roots = append([]types.Boxed(nil), i.roots...)
 	out.heap = r.heap(i.heap)
 	out.free = append([]int(nil), i.free...)
 	out.rc = append([]int(nil), i.rc...)
+	out.trial = nil
+	out.work = nil
+	out.refbuf = nil
 	out.interned = make(map[string]types.Ref, len(i.interned))
 	for key, val := range i.interned {
 		out.interned[key] = val
