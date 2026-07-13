@@ -233,6 +233,14 @@ func TestVerify(t *testing.T) {
 		require.ErrorIs(t, Verify(prog), ErrInvalidJump)
 	})
 
+	t.Run("branch table target inside instruction", func(t *testing.T) {
+		prog := New([]instr.Instruction{
+			instr.New(instr.BR_TABLE, 0, 7),
+			instr.New(instr.I64_CONST, uint64(7)<<48),
+		})
+		require.ErrorIs(t, Verify(prog), ErrInvalidJump)
+	})
+
 	t.Run("function branch to end", func(t *testing.T) {
 		fn := &types.Function{
 			Typ: &types.FunctionType{},

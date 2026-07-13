@@ -241,8 +241,9 @@ func (c *checker) bounds(ip int, op instr.Opcode) error {
 // flow pass seeds catch blocks directly.
 func (c *checker) blocks() ([]*block, error) {
 	offsets := []int{0}
+	starts := c.starts()
 	mark := func(ip, target int) error {
-		if target < 0 || target > len(c.code) || (target == len(c.code) && c.slot != 0) {
+		if target < 0 || target > len(c.code) || (target == len(c.code) && c.slot != 0) || !starts[target] {
 			return c.fail(ip, instr.Opcode(c.code[ip]), ErrInvalidJump)
 		}
 		if target < len(c.code) {
