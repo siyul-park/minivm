@@ -3441,6 +3441,42 @@ func TestWithProfiler(t *testing.T) {
 		}
 	})
 
+	t.Run("records a partial trace cut", func(t *testing.T) {
+		code := make([]instr.Instruction, opLimit+1)
+		for index := range code {
+			code[index] = instr.New(instr.NOP)
+		}
+		p := prof.New()
+		i := New(program.New(code), WithProfiler(p), WithTick(1), WithThreshold(0))
+		require.NoError(t, i.Run(context.Background()))
+		require.NoError(t, i.Close())
+
+		value, ok := p.Metric("vm_jit_trace_captures_total",
+			prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+			prof.Label{Key: "outcome", Value: "partial"}, prof.Label{Key: "reason", Value: "op-limit"})
+		require.True(t, ok)
+		require.Equal(t, float64(1), value)
+	})
+
+	t.Run("records a nested terminal rejection", func(t *testing.T) {
+		fn := types.NewFunctionBuilder(&types.FunctionType{}).Emit(
+			instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_SET), instr.New(instr.RETURN),
+		).MustBuild()
+		p := prof.New()
+		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 1), instr.New(instr.CALL)},
+			program.WithConstants(types.TypedArray[int32]{0}, fn))
+		i := New(prog, WithProfiler(p), WithTick(1), WithThreshold(0))
+		require.NoError(t, i.Run(context.Background()))
+		require.NoError(t, i.Close())
+
+		value, ok := p.Metric("vm_jit_trace_captures_total",
+			prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+			prof.Label{Key: "outcome", Value: "rejected"}, prof.Label{Key: "reason", Value: "nested-terminal"})
+		require.True(t, ok)
+		require.Equal(t, float64(1), value)
+	})
+
 	t.Run("records terminal native fallback", func(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")

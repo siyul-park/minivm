@@ -880,7 +880,7 @@ func (i *Interpreter) entryMetrics(a anchor, entry native) entryMetrics {
 	if !i.profile {
 		return entryMetrics{}
 	}
-	kind := profileEntryKind(entry.kind)
+	kind := entry.kind.profile()
 	metrics := entryMetrics{
 		entry: i.samples.RegisterEntry(a.addr, a.ip, kind, entry.frontend),
 		yield: i.samples.RegisterYield(a.addr, a.ip, kind, entry.frontend),
@@ -899,7 +899,7 @@ func (i *Interpreter) account(mod *module) {
 		return
 	}
 	for a, entry := range mod.entries {
-		i.samples.RecordEmit(a.addr, a.ip, profileEntryKind(entry.kind), entry.frontend, entry.bytes)
+		i.samples.RecordEmit(a.addr, a.ip, entry.kind.profile(), entry.frontend, entry.bytes)
 	}
 }
 
@@ -909,7 +909,7 @@ func (i *Interpreter) recordCompile(trigger prof.Trigger, result compileResult) 
 	}
 }
 
-func profileEntryKind(kind entryKind) prof.EntryKind {
+func (kind entryKind) profile() prof.EntryKind {
 	switch kind {
 	case entryModule:
 		return prof.EntryStart

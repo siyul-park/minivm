@@ -14,9 +14,16 @@ func TestCollector_Metrics(t *testing.T) {
 	s.RecordCapture(2, 11, prof.CaptureOutcomePartial, prof.CaptureReasonOpLimit)
 	s.RecordCompile(2, 11, prof.TriggerHot, prof.FrontendTrace, prof.CompileOutcomeEmitted, prof.CompileReasonNone)
 	s.RecordEmit(2, 11, prof.EntryStart, prof.FrontendTrace, 64)
-	s.RegisterEntry(2, 11, prof.EntryStart, prof.FrontendTrace).Inc()
-	s.RegisterYield(2, 11, prof.EntryStart, prof.FrontendTrace).Inc()
-	s.RegisterExit(2, 11, prof.EntryStart, prof.FrontendTrace, prof.ExitGuardKind, int(instr.I32_ADD)).Inc()
+	entry := s.RegisterEntry(2, 11, prof.EntryStart, prof.FrontendTrace)
+	entry.Inc()
+	entry.Inc()
+	yield := s.RegisterYield(2, 11, prof.EntryStart, prof.FrontendTrace)
+	yield.Inc()
+	yield.Inc()
+	yield.Inc()
+	exit := s.RegisterExit(2, 11, prof.EntryStart, prof.FrontendTrace, prof.ExitGuardKind, int(instr.I32_ADD))
+	exit.Inc()
+	exit.Inc()
 	s.RegisterExit(2, 11, prof.EntryStart, prof.FrontendTrace, prof.ExitTerminalOp, prof.OpcodeNone).Inc()
 
 	want := []prof.Metric{
@@ -72,7 +79,7 @@ func TestCollector_Metrics(t *testing.T) {
 				{Key: "kind", Value: "start"},
 				{Key: "frontend", Value: "trace"},
 			},
-			Value: 1,
+			Value: 2,
 		},
 		{
 			Name: "vm_jit_native_yields_total",
@@ -82,7 +89,7 @@ func TestCollector_Metrics(t *testing.T) {
 				{Key: "kind", Value: "start"},
 				{Key: "frontend", Value: "trace"},
 			},
-			Value: 1,
+			Value: 3,
 		},
 		{
 			Name: "vm_jit_native_exits_total",
@@ -94,7 +101,7 @@ func TestCollector_Metrics(t *testing.T) {
 				{Key: "reason", Value: "guard-kind"},
 				{Key: "opcode", Value: "i32.add"},
 			},
-			Value: 1,
+			Value: 2,
 		},
 		{
 			Name: "vm_jit_native_exits_total",

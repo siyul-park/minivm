@@ -183,24 +183,28 @@ minivm does not currently tier beyond the ARM64 trace backend.
 
 It normalizes the flat metric stream before rendering these ranked sections:
 
-| Section | Default rank and limit |
-|---|---|
-| `hot functions` | samples, top 10 |
-| `hot ips` | samples within each displayed function, top 10 per function |
-| `hot opcodes` | samples, top 10 |
-| `jit entries` | native entries, then emits, top 10 |
-| `jit exit reasons` | exit count, top 10 |
-| `jit misses` | capture or compile miss count, top 10 |
+| Section | Columns | Default rank and limit |
+|---|---|---|
+| `hot functions` | `func,samples,total%,native-entries,native-exits,exit%` | samples, top 10 |
+| `hot ips for func F` | `ip,samples,func%,native-kind,emits,entries,exits` | samples within each displayed function, top 10 per function |
+| `hot opcodes` | `opcode,samples,total%` | samples, top 10 |
+| `jit summary` | `attempts,emits,errors,bytes,native-entries,native-exits,native-yields` | aggregate totals |
+| `jit entries` | `func,ip,kind,frontend,emits,bytes,entries,exits,exit%` | native entries, then emits, top 10 |
+| `jit exit reasons` | `func,ip,reason,opcode,count,entry%` | exit count, top 10 |
+| `jit misses` | `func,ip,phase,reason,count` | capture or compile miss count, top 10 |
 
 Full row keys break ties deterministically. The report unions sampled anchors,
-compile results, emission rows, and runtime rows: an anchor can therefore appear
-as `interpreted/not-attempted`, `compile-empty`, `emitted-unused`, or `used`.
-Sample-only anchors never synthesize a miss reason.
+compile results, emission rows, and runtime rows. A sampled anchor without a
+compile row is rendered as `kind=none,frontend=interpreted`; a compile miss is
+rendered as a zero-count entry beside its miss row; and an emitted entry remains
+visible even when it was never entered. Sample-only anchors never synthesize a
+miss reason.
 
 Function and opcode percentages use total samples. IP percentages use the
-matching function's samples. Exit percentages use native entries for the same
-`func,ip,kind,frontend` anchor. A zero denominator prints `-`. Native yields are
-excluded from exit and miss ranking.
+matching function's samples. Function exit percentages use all native entries
+for that function; entry and exit-reason percentages use native entries for the
+same anchor. A zero denominator prints `-`. Native yields appear in the JIT
+summary and are excluded from exit percentages and miss ranking.
 
 `.profile` is side-effect free. It does not commit instructions, mutate REPL history, change constants, or change types.
 

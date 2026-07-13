@@ -176,3 +176,46 @@ git diff --check
 ```
 
 Both commands passed.
+
+## Final whole-branch fix pass
+
+The final pass aligned the REPL report with issue #130's required columns:
+
+- hot functions include native entries, exits, and exit percentage
+- hot IPs include native kind, emits, entries, and exits
+- the JIT summary uses aggregate attempts, emits, errors, bytes, native
+  entries, native exits, and native yields
+- JIT entries and exit reasons expose their documented denominators
+- misses are normalized to `func,ip,phase,reason,count`
+- yields remain visible in the summary and never contribute to exit percentage
+
+TDD started with `go test ./cli -run TestREPL_Run`, which failed on the missing
+`hot functions (top 10)` contract. The same public REPL test passed after the
+minimal report change. Ranking and top-10 behavior now run through real REPL
+programs; arbitrary lifecycle aggregation remains covered through public
+`Collector`, `Profiler`, `Interpreter`, and `Pool` behavior.
+
+The standards pass removed direct private-renderer tests, branch-added private
+cache/tracer/compiler-result assertions, and the stale `TestCache_Due` owner.
+The lost-rearm scenario now runs under public Pool contention and is asserted
+through profiler lifecycle metrics. ARM64 exit descriptor assertions remain in
+`TestCompiler_Compile` because descriptor ID, reason, and opcode are the
+protected generated-code/journal ABI contract.
+
+Declaration order now keeps private types before constants, constructors before
+methods, methods before functions, and callers before callees. Entry-kind
+conversion and compile-result preference are methods on their owning types.
+A second simplification pass removed unused helpers, redundant yield maps,
+repeated native aggregation, and unnecessary report scans.
+
+Final verification:
+
+```text
+go test ./...
+go test -race ./prof ./interp ./cli/... ./cmd/minivm
+go vet ./...
+make build
+git diff --check
+```
+
+All commands passed.

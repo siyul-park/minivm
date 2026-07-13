@@ -17,14 +17,20 @@ type profileReport struct {
 }
 
 type functionProfile struct {
-	fn      int
-	samples uint64
-	ips     []ipSample
+	fn            int
+	samples       uint64
+	nativeEntries uint64
+	nativeExits   uint64
+	ips           []ipSample
 }
 
 type ipSample struct {
-	offset  int
-	samples uint64
+	offset     int
+	samples    uint64
+	nativeKind string
+	emits      uint64
+	entries    uint64
+	exits      uint64
 }
 
 type opcodeSample struct {
@@ -40,12 +46,13 @@ type jitProfile struct {
 }
 
 type jitSummary struct {
-	captures uint64
-	compiles uint64
+	attempts uint64
 	emits    uint64
+	errors   uint64
 	bytes    uint64
 	entries  uint64
 	exits    uint64
+	yields   uint64
 }
 
 type entryKey struct {
@@ -57,11 +64,10 @@ type entryKey struct {
 
 type jitEntry struct {
 	entryKey
-	status  string
-	samples uint64
 	emits   uint64
 	bytes   uint64
 	entries uint64
+	exits   uint64
 }
 
 type exitKey struct {
@@ -70,8 +76,15 @@ type exitKey struct {
 	opcode string
 }
 
+type exitReasonKey struct {
+	fn     int
+	ip     int
+	reason string
+	opcode string
+}
+
 type jitExit struct {
-	exitKey
+	exitReasonKey
 	count   uint64
 	entries uint64
 }
@@ -79,7 +92,6 @@ type jitExit struct {
 type compileKey struct {
 	fn       int
 	ip       int
-	trigger  string
 	frontend string
 	outcome  string
 	reason   string
@@ -92,15 +104,23 @@ type captureKey struct {
 	reason  string
 }
 
+type missKey struct {
+	fn     int
+	ip     int
+	phase  string
+	reason string
+}
+
 type jitMiss struct {
-	stage    string
-	fn       int
-	ip       int
-	trigger  string
-	frontend string
-	outcome  string
-	reason   string
-	count    uint64
+	missKey
+	count uint64
+}
+
+type nativeAnchor struct {
+	kind    string
+	emits   uint64
+	entries uint64
+	exits   uint64
 }
 
 const profileLimit = 10
@@ -127,6 +147,14 @@ func newProfileReport(metrics []prof.Metric) profileReport {
 			ips[key] += value
 		case "vm_opcode_samples_total":
 			opcodes[metricLabel(metric, "opcode")] += value
+		case "vm_jit_attempts_total":
+			report.jit.summary.attempts += value
+		case "vm_jit_emits_total":
+			report.jit.summary.emits += value
+		case "vm_jit_errors_total":
+			report.jit.summary.errors += value
+		case "vm_jit_bytes_total":
+			report.jit.summary.bytes += value
 		case "vm_jit_trace_captures_total":
 			key := captureKey{
 				fn: metricLabelInt(metric, "func"), ip: metricLabelInt(metric, "ip"),
@@ -136,8 +164,8 @@ func newProfileReport(metrics []prof.Metric) profileReport {
 		case "vm_jit_compiles_total":
 			key := compileKey{
 				fn: metricLabelInt(metric, "func"), ip: metricLabelInt(metric, "ip"),
-				trigger: metricLabel(metric, "trigger"), frontend: metricLabel(metric, "frontend"),
-				outcome: metricLabel(metric, "outcome"), reason: metricLabel(metric, "reason"),
+				frontend: metricLabel(metric, "frontend"),
+				outcome:  metricLabel(metric, "outcome"), reason: metricLabel(metric, "reason"),
 			}
 			compiles[key] += value
 		case "vm_jit_entry_emits_total", "vm_jit_entry_bytes_total", "vm_jit_native_entries_total":
@@ -167,12 +195,15 @@ func newProfileReport(metrics []prof.Metric) profileReport {
 				reason: metricLabel(metric, "reason"), opcode: metricLabel(metric, "opcode"),
 			}
 			exits[key] += value
+		case "vm_jit_native_yields_total":
+			report.jit.summary.yields += value
 		}
 	}
 
-	report.functions = rankedFunctions(functions, ips)
+	native := aggregateNative(entries, exits)
+	report.functions = rankedFunctions(functions, ips, native)
 	report.opcodes = rankedOpcodes(opcodes)
-	report.jit = normalizeJIT(entries, exits, compiles, captures, ips)
+	report.jit = normalizeJIT(report.jit.summary, entries, exits, compiles, captures, ips, native)
 	return report
 }
 
@@ -180,34 +211,33 @@ func newProfileReport(metrics []prof.Metric) profileReport {
 func (p profileReport) print(out io.Writer) {
 	fmt.Fprintf(out, "profile samples: %d\n", p.total)
 	if len(p.functions) > 0 {
-		fmt.Fprintln(out, "hot functions:")
-		fmt.Fprintln(out, "func\tsamples\t%")
+		fmt.Fprintln(out, "hot functions (top 10):")
+		fmt.Fprintln(out, "func\tsamples\ttotal%\tnative-entries\tnative-exits\texit%")
 		for _, function := range p.functions {
-			fmt.Fprintf(out, "%d\t%d\t%s\n", function.fn, function.samples, formatPercent(function.samples, p.total))
+			fmt.Fprintf(out, "%d\t%d\t%s\t%d\t%d\t%s\n",
+				function.fn, function.samples, formatPercent(function.samples, p.total),
+				function.nativeEntries, function.nativeExits, formatPercent(function.nativeExits, function.nativeEntries),
+			)
 		}
 	}
 
-	hasIPs := false
 	for _, function := range p.functions {
-		hasIPs = hasIPs || len(function.ips) > 0
-	}
-	if hasIPs {
-		fmt.Fprintln(out, "hot ips:")
-		for _, function := range p.functions {
-			if len(function.ips) == 0 {
-				continue
-			}
-			fmt.Fprintf(out, "func %d ips:\n", function.fn)
-			fmt.Fprintln(out, "ip\tsamples\t%")
-			for _, ip := range function.ips {
-				fmt.Fprintf(out, "%04d\t%d\t%s\n", ip.offset, ip.samples, formatPercent(ip.samples, function.samples))
-			}
+		if len(function.ips) == 0 {
+			continue
+		}
+		fmt.Fprintf(out, "hot ips for func %d (top 10):\n", function.fn)
+		fmt.Fprintln(out, "ip\tsamples\tfunc%\tnative-kind\temits\tentries\texits")
+		for _, ip := range function.ips {
+			fmt.Fprintf(out, "%04d\t%d\t%s\t%s\t%d\t%d\t%d\n",
+				ip.offset, ip.samples, formatPercent(ip.samples, function.samples),
+				ip.nativeKind, ip.emits, ip.entries, ip.exits,
+			)
 		}
 	}
 
 	if len(p.opcodes) > 0 {
-		fmt.Fprintln(out, "hot opcodes:")
-		fmt.Fprintln(out, "opcode\tsamples\t%")
+		fmt.Fprintln(out, "hot opcodes (top 10):")
+		fmt.Fprintln(out, "opcode\tsamples\ttotal%")
 		for _, opcode := range p.opcodes {
 			fmt.Fprintf(out, "%s\t%d\t%s\n", opcode.name, opcode.samples, formatPercent(opcode.samples, p.total))
 		}
@@ -217,41 +247,39 @@ func (p profileReport) print(out io.Writer) {
 		return
 	}
 	fmt.Fprintln(out, "jit summary:")
-	fmt.Fprintln(out, "captures\tcompiles\temits\tbytes\tentries\texits")
-	fmt.Fprintf(out, "%d\t%d\t%d\t%d\t%d\t%d\n",
-		p.jit.summary.captures,
-		p.jit.summary.compiles,
+	fmt.Fprintln(out, "attempts\temits\terrors\tbytes\tnative-entries\tnative-exits\tnative-yields")
+	fmt.Fprintf(out, "%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+		p.jit.summary.attempts,
 		p.jit.summary.emits,
+		p.jit.summary.errors,
 		p.jit.summary.bytes,
 		p.jit.summary.entries,
 		p.jit.summary.exits,
+		p.jit.summary.yields,
 	)
 
 	fmt.Fprintln(out, "jit entries:")
-	fmt.Fprintln(out, "func\tip\tkind\tfrontend\tstatus\tsamples\temits\tbytes\tentries")
+	fmt.Fprintln(out, "func\tip\tkind\tfrontend\temits\tbytes\tentries\texits\texit%")
 	for _, entry := range p.jit.entries {
-		fmt.Fprintf(out, "%d\t%04d\t%s\t%s\t%s\t%d\t%d\t%d\t%d\n",
-			entry.fn, entry.ip, entry.kind, entry.frontend, entry.status,
-			entry.samples, entry.emits, entry.bytes, entry.entries,
+		fmt.Fprintf(out, "%d\t%04d\t%s\t%s\t%d\t%d\t%d\t%d\t%s\n",
+			entry.fn, entry.ip, entry.kind, entry.frontend,
+			entry.emits, entry.bytes, entry.entries, entry.exits, formatPercent(entry.exits, entry.entries),
 		)
 	}
 
 	fmt.Fprintln(out, "jit exit reasons:")
-	fmt.Fprintln(out, "func\tip\tkind\tfrontend\treason\topcode\texits\t%")
+	fmt.Fprintln(out, "func\tip\treason\topcode\tcount\tentry%")
 	for _, exit := range p.jit.exits {
-		fmt.Fprintf(out, "%d\t%04d\t%s\t%s\t%s\t%s\t%d\t%s\n",
-			exit.fn, exit.ip, exit.kind, exit.frontend, exit.reason, exit.opcode,
+		fmt.Fprintf(out, "%d\t%04d\t%s\t%s\t%d\t%s\n",
+			exit.fn, exit.ip, exit.reason, exit.opcode,
 			exit.count, formatPercent(exit.count, exit.entries),
 		)
 	}
 
 	fmt.Fprintln(out, "jit misses:")
-	fmt.Fprintln(out, "stage\tfunc\tip\ttrigger\tfrontend\toutcome\treason\tcount")
+	fmt.Fprintln(out, "func\tip\tphase\treason\tcount")
 	for _, miss := range p.jit.misses {
-		fmt.Fprintf(out, "%s\t%d\t%04d\t%s\t%s\t%s\t%s\t%d\n",
-			miss.stage, miss.fn, miss.ip, miss.trigger, miss.frontend,
-			miss.outcome, miss.reason, miss.count,
-		)
+		fmt.Fprintf(out, "%d\t%04d\t%s\t%s\t%d\n", miss.fn, miss.ip, miss.phase, miss.reason, miss.count)
 	}
 }
 
@@ -259,14 +287,32 @@ func (p jitProfile) empty() bool {
 	return p.summary == (jitSummary{}) && len(p.entries) == 0 && len(p.exits) == 0 && len(p.misses) == 0
 }
 
-func rankedFunctions(functions map[int]uint64, ips map[[2]int]uint64) []functionProfile {
+func rankedFunctions(functions map[int]uint64, ips map[[2]int]uint64, native map[[2]int]nativeAnchor) []functionProfile {
+	nativeByFunction := map[int]nativeAnchor{}
+	for key, stats := range native {
+		function := nativeByFunction[key[0]]
+		function.entries += stats.entries
+		function.exits += stats.exits
+		nativeByFunction[key[0]] = function
+	}
+	ipsByFunction := map[int][]ipSample{}
+	for key, count := range ips {
+		stats := native[key]
+		kind := stats.kind
+		if kind == "" {
+			kind = "none"
+		}
+		ipsByFunction[key[0]] = append(ipsByFunction[key[0]], ipSample{
+			offset: key[1], samples: count, nativeKind: kind,
+			emits: stats.emits, entries: stats.entries, exits: stats.exits,
+		})
+	}
 	report := make([]functionProfile, 0, len(functions))
 	for fn, samples := range functions {
-		function := functionProfile{fn: fn, samples: samples}
-		for key, count := range ips {
-			if key[0] == fn {
-				function.ips = append(function.ips, ipSample{offset: key[1], samples: count})
-			}
+		stats := nativeByFunction[fn]
+		function := functionProfile{
+			fn: fn, samples: samples, nativeEntries: stats.entries, nativeExits: stats.exits,
+			ips: ipsByFunction[fn],
 		}
 		sort.Slice(function.ips, func(i, j int) bool {
 			return function.ips[i].samples > function.ips[j].samples ||
@@ -295,82 +341,84 @@ func rankedOpcodes(opcodes map[string]uint64) []opcodeSample {
 }
 
 func normalizeJIT(
+	summary jitSummary,
 	entryRows map[entryKey]*jitEntry,
 	exitRows map[exitKey]uint64,
 	compileRows map[compileKey]uint64,
 	captureRows map[captureKey]uint64,
 	ips map[[2]int]uint64,
+	anchors map[[2]int]nativeAnchor,
 ) jitProfile {
-	var report jitProfile
+	report := jitProfile{summary: summary}
+	rows := map[entryKey]*jitEntry{}
 	covered := map[[2]int]bool{}
-	for _, entry := range entryRows {
-		entry.samples = ips[[2]int{entry.fn, entry.ip}]
-		if entry.entries > 0 {
-			entry.status = "used"
-		} else {
-			entry.status = "emitted-unused"
-		}
-		report.summary.emits += entry.emits
-		report.summary.bytes += entry.bytes
+	for key, entry := range entryRows {
+		copy := *entry
+		rows[key] = &copy
 		report.summary.entries += entry.entries
-		report.entries = append(report.entries, *entry)
 		covered[[2]int{entry.fn, entry.ip}] = true
+	}
+	for key, count := range exitRows {
+		report.summary.exits += count
+		if entry := rows[key.entryKey]; entry != nil {
+			entry.exits += count
+		}
 	}
 	for key := range compileRows {
 		covered[[2]int{key.fn, key.ip}] = true
 	}
-	for key, samples := range ips {
+	for key := range ips {
 		if !covered[key] {
-			report.entries = append(report.entries, jitEntry{
-				entryKey: entryKey{fn: key[0], ip: key[1], kind: "none", frontend: "interpreted"},
-				status:   "not-attempted", samples: samples,
-			})
+			entryKey := entryKey{fn: key[0], ip: key[1], kind: "none", frontend: "interpreted"}
+			rows[entryKey] = &jitEntry{entryKey: entryKey}
 		}
 	}
-	for _, count := range captureRows {
-		report.summary.captures += count
-	}
+	misses := map[missKey]uint64{}
 	for key, count := range compileRows {
-		report.summary.compiles += count
 		if key.outcome != "emitted" || key.reason != "none" {
-			report.entries = append(report.entries, jitEntry{
-				entryKey: entryKey{fn: key.fn, ip: key.ip, kind: "none", frontend: key.frontend},
-				status:   "compile-" + key.outcome,
-				samples:  ips[[2]int{key.fn, key.ip}],
-			})
-			report.misses = append(report.misses, jitMiss{
-				stage: "compile", fn: key.fn, ip: key.ip, trigger: key.trigger,
-				frontend: key.frontend, outcome: key.outcome, reason: key.reason, count: count,
-			})
+			entryKey := entryKey{fn: key.fn, ip: key.ip, kind: "none", frontend: key.frontend}
+			if rows[entryKey] == nil {
+				rows[entryKey] = &jitEntry{entryKey: entryKey}
+			}
+			misses[missKey{fn: key.fn, ip: key.ip, phase: "compile", reason: key.reason}] += count
 		}
 	}
 	for key, count := range captureRows {
 		if key.outcome != "published" || key.reason != "none" {
-			report.misses = append(report.misses, jitMiss{
-				stage: "capture", fn: key.fn, ip: key.ip, trigger: "none",
-				frontend: "none", outcome: key.outcome, reason: key.reason, count: count,
-			})
+			misses[missKey{fn: key.fn, ip: key.ip, phase: "capture", reason: key.reason}] += count
 		}
 	}
+	for _, entry := range rows {
+		report.entries = append(report.entries, *entry)
+	}
+	exitReasons := map[exitReasonKey]*jitExit{}
 	for key, count := range exitRows {
-		entries := uint64(0)
-		if entry := entryRows[key.entryKey]; entry != nil {
-			entries = entry.entries
+		group := exitReasonKey{fn: key.fn, ip: key.ip, reason: key.reason, opcode: key.opcode}
+		exit := exitReasons[group]
+		if exit == nil {
+			exit = &jitExit{exitReasonKey: group}
+			exitReasons[group] = exit
 		}
-		report.summary.exits += count
-		report.exits = append(report.exits, jitExit{exitKey: key, count: count, entries: entries})
+		exit.count += count
+	}
+	for _, exit := range exitReasons {
+		exit.entries = anchors[[2]int{exit.fn, exit.ip}].entries
+		report.exits = append(report.exits, *exit)
+	}
+	for key, count := range misses {
+		report.misses = append(report.misses, jitMiss{missKey: key, count: count})
 	}
 
 	sort.Slice(report.entries, func(i, j int) bool {
 		a, b := report.entries[i], report.entries[j]
-		return a.entries > b.entries ||
-			a.entries == b.entries && (a.emits > b.emits ||
-				a.emits == b.emits && (entryLess(a.entryKey, b.entryKey) ||
-					a.entryKey == b.entryKey && a.status < b.status))
+		return a.entries > b.entries || a.entries == b.entries &&
+			(a.emits > b.emits || a.emits == b.emits && entryLess(a.entryKey, b.entryKey))
 	})
 	sort.Slice(report.exits, func(i, j int) bool {
 		a, b := report.exits[i], report.exits[j]
-		return a.count > b.count || a.count == b.count && exitLess(a.exitKey, b.exitKey)
+		return a.count > b.count || a.count == b.count &&
+			(a.fn < b.fn || a.fn == b.fn && (a.ip < b.ip || a.ip == b.ip &&
+				(a.reason < b.reason || a.reason == b.reason && a.opcode < b.opcode)))
 	})
 	sort.Slice(report.misses, func(i, j int) bool {
 		a, b := report.misses[i], report.misses[j]
@@ -387,18 +435,37 @@ func entryLess(a, b entryKey) bool {
 		a.ip == b.ip && (a.kind < b.kind || a.kind == b.kind && a.frontend < b.frontend))
 }
 
-func exitLess(a, b exitKey) bool {
-	return entryLess(a.entryKey, b.entryKey) || a.entryKey == b.entryKey &&
-		(a.reason < b.reason || a.reason == b.reason && a.opcode < b.opcode)
+func missLess(a, b jitMiss) bool {
+	return a.fn < b.fn || a.fn == b.fn && (a.ip < b.ip || a.ip == b.ip &&
+		(a.phase < b.phase || a.phase == b.phase && a.reason < b.reason))
 }
 
-func missLess(a, b jitMiss) bool {
-	return a.stage < b.stage || a.stage == b.stage &&
-		(a.fn < b.fn || a.fn == b.fn &&
-			(a.ip < b.ip || a.ip == b.ip &&
-				(a.trigger < b.trigger || a.trigger == b.trigger &&
-					(a.frontend < b.frontend || a.frontend == b.frontend &&
-						(a.outcome < b.outcome || a.outcome == b.outcome && a.reason < b.reason)))))
+func aggregateNative(entries map[entryKey]*jitEntry, exits map[exitKey]uint64) map[[2]int]nativeAnchor {
+	result := map[[2]int]nativeAnchor{}
+	for key, entry := range entries {
+		anchor := [2]int{key.fn, key.ip}
+		stats := result[anchor]
+		if stats.kind == "" {
+			stats.kind = key.kind
+		} else if stats.kind != key.kind {
+			stats.kind = "mixed"
+		}
+		stats.emits += entry.emits
+		stats.entries += entry.entries
+		result[anchor] = stats
+	}
+	for key, count := range exits {
+		anchor := [2]int{key.fn, key.ip}
+		stats := result[anchor]
+		if stats.kind == "" {
+			stats.kind = key.kind
+		} else if stats.kind != key.kind {
+			stats.kind = "mixed"
+		}
+		stats.exits += count
+		result[anchor] = stats
+	}
+	return result
 }
 
 func metricLabel(metric prof.Metric, key string) string {

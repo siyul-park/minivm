@@ -469,34 +469,6 @@ func TestCompiler_Compile(t *testing.T) {
 		t.Fatal("missing guard-value exit")
 	})
 
-	t.Run("reports missing input", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-		root := anchor{addr: -1, ip: 7}
-		result := (&compiler{}).Compile(i, root)
-		require.Equal(t, root, result.anchor)
-		require.Nil(t, result.module)
-		require.Equal(t, prof.FrontendNone, result.frontend)
-		require.Equal(t, prof.CompileOutcomeEmpty, result.outcome)
-		require.Equal(t, prof.CompileReasonNoInput, result.reason)
-		require.NoError(t, result.err)
-	})
-
-	t.Run("keeps the deepest deterministic failure", func(t *testing.T) {
-		deep := compileResult{frontend: prof.FrontendStatic, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonRegisterPressure}
-		shallow := []compileResult{
-			{frontend: prof.FrontendTrace, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan},
-			{frontend: prof.FrontendTrace, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonInvalidPlan},
-		}
-		for _, candidate := range shallow {
-			require.Equal(t, deep, deeperCompileResult(deep, candidate))
-		}
-		require.Equal(t,
-			compileResult{frontend: prof.FrontendTrace, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonBranchRange},
-			deeperCompileResult(deep, compileResult{frontend: prof.FrontendTrace, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonBranchRange}),
-		)
-	})
-
 	if runtime.GOARCH != "arm64" {
 		t.Skip("native JIT is only available on arm64")
 	}

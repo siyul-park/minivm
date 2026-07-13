@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/prof"
 	"github.com/stretchr/testify/require"
 )
 
@@ -74,18 +73,28 @@ func TestREPL_Run(t *testing.T) {
 			input: "i32.const 7\ndrop\n.profile\n.quit\n",
 			contains: []string{
 				"profile samples: 2",
-				"hot functions:",
-				"hot ips:",
-				"func 0 ips:",
-				"0000\t1\t50.0%",
-				"0005\t1\t50.0%",
-				"hot opcodes:",
+				"hot functions (top 10):",
+				"func\tsamples\ttotal%\tnative-entries\tnative-exits\texit%",
+				"0\t2\t100.0%\t0\t0\t-",
+				"hot ips for func 0 (top 10):",
+				"ip\tsamples\tfunc%\tnative-kind\temits\tentries\texits",
+				"0000\t1\t50.0%\tnone\t0\t0\t0",
+				"0005\t1\t50.0%\tnone\t0\t0\t0",
+				"hot opcodes (top 10):",
+				"opcode\tsamples\ttotal%",
 				"i32.const\t1\t50.0%",
 				"drop\t1\t50.0%",
 				"jit summary:",
+				"attempts\temits\terrors\tbytes\tnative-entries\tnative-exits\tnative-yields",
+				"0\t0\t0\t0\t0\t0\t0",
 				"jit entries:",
-				"0\t0000\tnone\tinterpreted\tnot-attempted",
-				"0\t0005\tnone\tinterpreted\tnot-attempted",
+				"func\tip\tkind\tfrontend\temits\tbytes\tentries\texits\texit%",
+				"0\t0000\tnone\tinterpreted\t0\t0\t0\t0\t-",
+				"0\t0005\tnone\tinterpreted\t0\t0\t0\t0\t-",
+				"jit exit reasons:",
+				"func\tip\treason\topcode\tcount\tentry%",
+				"jit misses:",
+				"func\tip\tphase\treason\tcount",
 			},
 		},
 		{
@@ -384,121 +393,22 @@ func TestREPL_Run(t *testing.T) {
 		require.Equal(t, []string{"10", "10 20"}, valLines)
 	})
 
-	t.Run("normalizes and ranks lifecycle rows", func(t *testing.T) {
-		metrics := []prof.Metric{
-			{Name: "vm_samples_total", Value: 11},
-			{Name: "vm_func_samples_total", Labels: []prof.Label{{Key: "func", Value: "2"}}, Value: 5},
-			{Name: "vm_func_samples_total", Labels: []prof.Label{{Key: "func", Value: "1"}}, Value: 5},
-			{Name: "vm_func_samples_total", Labels: []prof.Label{{Key: "func", Value: "3"}}, Value: 1},
-			{Name: "vm_func_ip_samples_total", Labels: []prof.Label{{Key: "func", Value: "1"}, {Key: "ip", Value: "9"}}, Value: 2},
-			{Name: "vm_func_ip_samples_total", Labels: []prof.Label{{Key: "func", Value: "1"}, {Key: "ip", Value: "4"}}, Value: 2},
-			{Name: "vm_func_ip_samples_total", Labels: []prof.Label{{Key: "func", Value: "3"}, {Key: "ip", Value: "0"}}, Value: 1},
-			{Name: "vm_opcode_samples_total", Labels: []prof.Label{{Key: "opcode", Value: "z.op"}}, Value: 5},
-			{Name: "vm_opcode_samples_total", Labels: []prof.Label{{Key: "opcode", Value: "a.op"}}, Value: 5},
-			{Name: "vm_jit_trace_captures_total", Labels: []prof.Label{{Key: "func", Value: "4"}, {Key: "ip", Value: "7"}, {Key: "outcome", Value: "partial"}, {Key: "reason", Value: "op-limit"}}, Value: 2},
-			{Name: "vm_jit_trace_captures_total", Labels: []prof.Label{{Key: "func", Value: "4"}, {Key: "ip", Value: "7"}, {Key: "outcome", Value: "partial"}, {Key: "reason", Value: "op-limit"}}, Value: 1},
-			{Name: "vm_jit_trace_captures_total", Labels: []prof.Label{{Key: "func", Value: "1"}, {Key: "ip", Value: "4"}, {Key: "outcome", Value: "published"}, {Key: "reason", Value: "none"}}, Value: 1},
-			{Name: "vm_jit_compiles_total", Labels: []prof.Label{{Key: "func", Value: "4"}, {Key: "ip", Value: "7"}, {Key: "trigger", Value: "hot"}, {Key: "frontend", Value: "static"}, {Key: "outcome", Value: "empty"}, {Key: "reason", Value: "no-plan"}}, Value: 2},
-			{Name: "vm_jit_entry_emits_total", Labels: []prof.Label{{Key: "func", Value: "5"}, {Key: "ip", Value: "8"}, {Key: "kind", Value: "loop"}, {Key: "frontend", Value: "trace"}}, Value: 1},
-			{Name: "vm_jit_entry_bytes_total", Labels: []prof.Label{{Key: "func", Value: "5"}, {Key: "ip", Value: "8"}, {Key: "kind", Value: "loop"}, {Key: "frontend", Value: "trace"}}, Value: 64},
-			{Name: "vm_jit_native_entries_total", Labels: []prof.Label{{Key: "func", Value: "1"}, {Key: "ip", Value: "4"}, {Key: "kind", Value: "start"}, {Key: "frontend", Value: "static"}}, Value: 3},
-			{Name: "vm_jit_native_entries_total", Labels: []prof.Label{{Key: "func", Value: "1"}, {Key: "ip", Value: "4"}, {Key: "kind", Value: "start"}, {Key: "frontend", Value: "static"}}, Value: 1},
-			{Name: "vm_jit_native_exits_total", Labels: []prof.Label{{Key: "func", Value: "1"}, {Key: "ip", Value: "4"}, {Key: "kind", Value: "start"}, {Key: "frontend", Value: "static"}, {Key: "reason", Value: "guard-value"}, {Key: "opcode", Value: "i32.div_s"}}, Value: 2},
-			{Name: "vm_jit_native_yields_total", Labels: []prof.Label{{Key: "func", Value: "1"}, {Key: "ip", Value: "4"}, {Key: "kind", Value: "start"}, {Key: "frontend", Value: "static"}}, Value: 99},
-		}
-
+	t.Run("profile ranks tied ips and limits them to ten", func(t *testing.T) {
 		var out bytes.Buffer
-		newProfileReport(metrics).print(&out)
+		input := strings.Repeat("nop\n", 11) + ".profile\n.quit\n"
+		r := NewREPL(strings.NewReader(input), &out, nil)
+		require.NoError(t, r.Run(context.Background()))
 
-		require.Equal(t, strings.ReplaceAll(`profile samples: 11
-hot functions:
-func\tsamples\t%
-1\t5\t45.5%
-2\t5\t45.5%
-3\t1\t9.1%
-hot ips:
-func 1 ips:
-ip\tsamples\t%
-0004\t2\t40.0%
-0009\t2\t40.0%
-func 3 ips:
-ip\tsamples\t%
-0000\t1\t100.0%
-hot opcodes:
-opcode\tsamples\t%
-a.op\t5\t45.5%
-z.op\t5\t45.5%
-jit summary:
-captures\tcompiles\temits\tbytes\tentries\texits
-4\t2\t1\t64\t4\t2
-jit entries:
-func\tip\tkind\tfrontend\tstatus\tsamples\temits\tbytes\tentries
-1\t0004\tstart\tstatic\tused\t2\t0\t0\t4
-5\t0008\tloop\ttrace\temitted-unused\t0\t1\t64\t0
-1\t0009\tnone\tinterpreted\tnot-attempted\t2\t0\t0\t0
-3\t0000\tnone\tinterpreted\tnot-attempted\t1\t0\t0\t0
-4\t0007\tnone\tstatic\tcompile-empty\t0\t0\t0\t0
-jit exit reasons:
-func\tip\tkind\tfrontend\treason\topcode\texits\t%
-1\t0004\tstart\tstatic\tguard-value\ti32.div_s\t2\t50.0%
-jit misses:
-stage\tfunc\tip\ttrigger\tfrontend\toutcome\treason\tcount
-capture\t4\t0007\tnone\tnone\tpartial\top-limit\t3
-compile\t4\t0007\thot\tstatic\tempty\tno-plan\t2
-`, `\t`, "\t"), out.String())
-	})
-
-	t.Run("keeps compile empty and zero denominator exits visible", func(t *testing.T) {
-		metrics := []prof.Metric{
-			{Name: "vm_samples_total", Value: 1},
-			{Name: "vm_func_samples_total", Labels: []prof.Label{{Key: "func", Value: "4"}}, Value: 1},
-			{Name: "vm_func_ip_samples_total", Labels: []prof.Label{{Key: "func", Value: "4"}, {Key: "ip", Value: "7"}}, Value: 1},
-			{Name: "vm_jit_compiles_total", Labels: []prof.Label{{Key: "func", Value: "4"}, {Key: "ip", Value: "7"}, {Key: "trigger", Value: "hot"}, {Key: "frontend", Value: "static"}, {Key: "outcome", Value: "empty"}, {Key: "reason", Value: "no-plan"}}, Value: 1},
-			{Name: "vm_jit_native_exits_total", Labels: []prof.Label{{Key: "func", Value: "8"}, {Key: "ip", Value: "3"}, {Key: "kind", Value: "loop"}, {Key: "frontend", Value: "trace"}, {Key: "reason", Value: "trace-cut"}, {Key: "opcode", Value: "none"}}, Value: 2},
-			{Name: "vm_jit_native_yields_total", Labels: []prof.Label{{Key: "func", Value: "8"}, {Key: "ip", Value: "3"}, {Key: "kind", Value: "loop"}, {Key: "frontend", Value: "trace"}}, Value: 99},
-		}
-
-		var out bytes.Buffer
-		newProfileReport(metrics).print(&out)
 		output := out.String()
-
-		require.Contains(t, output, "4\t0007\tnone\tstatic\tcompile-empty\t1\t0\t0\t0")
-		require.Contains(t, output, "8\t0003\tloop\ttrace\ttrace-cut\tnone\t2\t-")
-		require.NotContains(t, output, "99")
-	})
-
-	t.Run("limits every ranked collection to ten", func(t *testing.T) {
-		var metrics []prof.Metric
-		for index := 0; index < 11; index++ {
-			value := float64(index + 1)
-			fn := fmt.Sprint(index)
-			ip := fmt.Sprint(index)
-			metrics = append(metrics,
-				prof.Metric{Name: "vm_func_samples_total", Labels: []prof.Label{{Key: "func", Value: fn}}, Value: value},
-				prof.Metric{Name: "vm_func_ip_samples_total", Labels: []prof.Label{{Key: "func", Value: "10"}, {Key: "ip", Value: ip}}, Value: value},
-				prof.Metric{Name: "vm_opcode_samples_total", Labels: []prof.Label{{Key: "opcode", Value: fmt.Sprintf("op%02d", index)}}, Value: value},
-				prof.Metric{Name: "vm_jit_native_entries_total", Labels: []prof.Label{{Key: "func", Value: fn}, {Key: "ip", Value: "0"}, {Key: "kind", Value: "start"}, {Key: "frontend", Value: "static"}}, Value: value},
-				prof.Metric{Name: "vm_jit_native_exits_total", Labels: []prof.Label{{Key: "func", Value: fn}, {Key: "ip", Value: "0"}, {Key: "kind", Value: "start"}, {Key: "frontend", Value: "static"}, {Key: "reason", Value: "guard-value"}, {Key: "opcode", Value: "i32.div_s"}}, Value: value},
-				prof.Metric{Name: "vm_jit_compiles_total", Labels: []prof.Label{{Key: "func", Value: fn}, {Key: "ip", Value: "0"}, {Key: "trigger", Value: "hot"}, {Key: "frontend", Value: "trace"}, {Key: "outcome", Value: "empty"}, {Key: "reason", Value: "no-plan"}}, Value: value},
-			)
-		}
-
-		var out bytes.Buffer
-		newProfileReport(metrics).print(&out)
-		output := out.String()
-
-		require.Contains(t, output, "10\t11\t-")
-		require.NotContains(t, output, "0\t1\t-")
-		require.Contains(t, output, "0010\t11\t100.0%")
-		require.NotContains(t, output, "0000\t1\t")
-		require.Contains(t, output, "op10\t11\t-")
-		require.NotContains(t, output, "op00\t1\t-")
-		require.Contains(t, output, "10\t0000\tstart\tstatic\tused")
-		require.NotContains(t, output, "\n0\t0000\tstart\tstatic\tused")
-		require.Contains(t, output, "10\t0000\tstart\tstatic\tguard-value")
-		require.NotContains(t, output, "\n0\t0000\tstart\tstatic\tguard-value")
-		require.Contains(t, output, "compile\t10\t0000\thot\ttrace\tempty\tno-plan")
-		require.NotContains(t, output, "compile\t0\t0000\thot\ttrace\tempty\tno-plan")
+		start := strings.Index(output, "hot ips for func 0 (top 10):")
+		end := strings.Index(output, "hot opcodes (top 10):")
+		require.NotEqual(t, -1, start)
+		require.Greater(t, end, start)
+		section := output[start:end]
+		require.Contains(t, section, "0000\t1")
+		require.Contains(t, section, "0009\t1")
+		require.Less(t, strings.Index(section, "0000\t1"), strings.Index(section, "0009\t1"))
+		require.NotContains(t, section, "0010\t1")
 	})
 
 	t.Run("profile does not mutate history", func(t *testing.T) {
@@ -511,28 +421,6 @@ compile\t4\t0007\thot\tstatic\tempty\tno-plan\t2
 		require.Contains(t, output, "const.get 0")
 		require.Contains(t, output, "3 3")
 		require.NotContains(t, output, "error:")
-	})
-
-	t.Run("profile keeps a later compile miss beside an emitted entry", func(t *testing.T) {
-		metrics := []prof.Metric{
-			{Name: "vm_samples_total", Value: 2},
-			{Name: "vm_func_samples_total", Labels: []prof.Label{{Key: "func", Value: "4"}}, Value: 2},
-			{Name: "vm_func_ip_samples_total", Labels: []prof.Label{{Key: "func", Value: "4"}, {Key: "ip", Value: "7"}}, Value: 2},
-			{Name: "vm_jit_entry_emits_total", Labels: []prof.Label{{Key: "func", Value: "4"}, {Key: "ip", Value: "7"}, {Key: "kind", Value: "start"}, {Key: "frontend", Value: "static"}}, Value: 1},
-			{Name: "vm_jit_entry_bytes_total", Labels: []prof.Label{{Key: "func", Value: "4"}, {Key: "ip", Value: "7"}, {Key: "kind", Value: "start"}, {Key: "frontend", Value: "static"}}, Value: 64},
-			{Name: "vm_jit_native_entries_total", Labels: []prof.Label{{Key: "func", Value: "4"}, {Key: "ip", Value: "7"}, {Key: "kind", Value: "start"}, {Key: "frontend", Value: "static"}}, Value: 3},
-			{Name: "vm_jit_compiles_total", Labels: []prof.Label{{Key: "func", Value: "4"}, {Key: "ip", Value: "7"}, {Key: "trigger", Value: "hot"}, {Key: "frontend", Value: "static"}, {Key: "outcome", Value: "emitted"}, {Key: "reason", Value: "none"}}, Value: 1},
-			{Name: "vm_jit_compiles_total", Labels: []prof.Label{{Key: "func", Value: "4"}, {Key: "ip", Value: "7"}, {Key: "trigger", Value: "side-exit"}, {Key: "frontend", Value: "static"}, {Key: "outcome", Value: "empty"}, {Key: "reason", Value: "no-plan"}}, Value: 1},
-		}
-
-		var out bytes.Buffer
-		newProfileReport(metrics).print(&out)
-		output := out.String()
-
-		require.Contains(t, output, "4\t0007\tstart\tstatic\tused\t2\t1\t64\t3")
-		require.Contains(t, output, "4\t0007\tnone\tstatic\tcompile-empty\t2\t0\t0\t0")
-		require.NotContains(t, output, "compile-emitted")
-		require.Contains(t, output, "compile\t4\t0007\tside-exit\tstatic\tempty\tno-plan\t1")
 	})
 
 	t.Run("profile command renders runtime errors", func(t *testing.T) {

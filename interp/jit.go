@@ -14,10 +14,6 @@ type compiler struct {
 	scratchRegs []asm.PReg
 }
 
-// continuationLimit caps deferred learned continuations in one native
-// callable; beyond this the guard keeps the old deopt fallback.
-const continuationLimit = 256
-
 type module struct {
 	entries map[anchor]native
 	bytes   int
@@ -138,6 +134,17 @@ type sideExit struct {
 	id     int
 }
 
+// noSpillArch wraps an asm.Arch to force Build to reject spilling instead of
+// inserting a spill frame. A nil Frame already disables spilling per asm's
+// own contract (see asm.Frame's doc comment), so this policy needs no
+// dedicated asm-level API — it is purely an interp-side JIT policy decision
+// (see noSpill), not a generic assembler concern.
+type noSpillArch struct{ asm.Arch }
+
+// continuationLimit caps deferred learned continuations in one native
+// callable; beyond this the guard keeps the old deopt fallback.
+const continuationLimit = 256
+
 const (
 	scratchStack = iota
 	scratchGlobals
@@ -220,6 +227,69 @@ func (c *compiler) Close() error {
 	return c.buffer.Free()
 }
 
+// Compile selects and lowers the first frontend that emits native code.
+func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
+	input, ok := newCompileInput(i, root.addr)
+	if !ok {
+		return compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoInput}
+	}
+	frontends := [...]struct {
+		kind prof.Frontend
+		plan func(*compileInput) ([]plan, error)
+	}{{prof.FrontendStatic, staticPlan}, {prof.FrontendTrace, tracePlan}}
+	result := compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan}
+	for _, frontend := range frontends {
+		plans, err := frontend.plan(input)
+		if err != nil {
+			return compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
+		}
+		result = result.preferDeeper(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan})
+		mod := &module{entries: map[anchor]native{}}
+		for _, plan := range plans {
+			if !plan.valid() {
+				result = result.preferDeeper(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonInvalidPlan})
+				continue
+			}
+			reason, err := c.compile(input, plan, mod, frontend.kind)
+			if err != nil {
+				return compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
+			}
+			if reason != prof.CompileReasonNone {
+				result = result.preferDeeper(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: reason})
+				continue
+			}
+		}
+		if len(mod.entries) > 0 {
+			return compileResult{module: mod, anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeEmitted}
+		}
+	}
+	return result
+}
+
+func (current compileResult) preferDeeper(candidate compileResult) compileResult {
+	if compileDepth(candidate.reason) > compileDepth(current.reason) ||
+		compileDepth(candidate.reason) == compileDepth(current.reason) && candidate.frontend > current.frontend {
+		return candidate
+	}
+	return current
+}
+
+func (c *compiler) compile(input *compileInput, plan plan, mod *module, frontend prof.Frontend) (prof.CompileReason, error) {
+	if len(c.scratchRegs) < scratchCount {
+		return prof.CompileReasonLoweringRejected, nil
+	}
+	arch := c.arch
+	if plan.noSpill {
+		arch = noSpillArch{c.arch}
+	}
+	ctx := c.newLowering(input, arch)
+	if !lower(ctx, plan) {
+		return prof.CompileReasonLoweringRejected, nil
+	}
+	exits := append([]exitDescriptor(nil), ctx.descriptors...)
+	return c.publish(mod, plan.anchor, ctx, c.arch, native{kind: plan.kind, frontend: frontend, exits: exits})
+}
+
 func (c *compiler) newLowering(input *compileInput, arch asm.Arch) *lowering {
 	asmb := asm.New(arch)
 	ctx := &lowering{
@@ -265,93 +335,6 @@ func (c *compiler) publish(mod *module, a anchor, ctx *lowering, arch asm.Arch, 
 	mod.bytes += len(code.Bytes)
 	return prof.CompileReasonNone, nil
 }
-
-// Compile selects and lowers the first frontend that emits native code.
-func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
-	input, ok := newCompileInput(i, root.addr)
-	if !ok {
-		return compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoInput}
-	}
-	frontends := [...]struct {
-		kind prof.Frontend
-		plan func(*compileInput) ([]plan, error)
-	}{{prof.FrontendStatic, staticPlan}, {prof.FrontendTrace, tracePlan}}
-	result := compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan}
-	for _, frontend := range frontends {
-		plans, err := frontend.plan(input)
-		if err != nil {
-			return compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
-		}
-		result = deeperCompileResult(result, compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan})
-		mod := &module{entries: map[anchor]native{}}
-		for _, plan := range plans {
-			if !plan.valid() {
-				result = deeperCompileResult(result, compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonInvalidPlan})
-				continue
-			}
-			reason, err := c.compile(input, plan, mod, frontend.kind)
-			if err != nil {
-				return compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
-			}
-			if reason != prof.CompileReasonNone {
-				result = deeperCompileResult(result, compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: reason})
-				continue
-			}
-		}
-		if len(mod.entries) > 0 {
-			return compileResult{module: mod, anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeEmitted}
-		}
-	}
-	return result
-}
-
-func deeperCompileResult(current, candidate compileResult) compileResult {
-	if compileDepth(candidate.reason) > compileDepth(current.reason) ||
-		compileDepth(candidate.reason) == compileDepth(current.reason) && candidate.frontend > current.frontend {
-		return candidate
-	}
-	return current
-}
-
-func compileDepth(reason prof.CompileReason) int {
-	switch reason {
-	case prof.CompileReasonInvalidPlan:
-		return 1
-	case prof.CompileReasonLoweringRejected, prof.CompileReasonBackendUnavailable:
-		return 2
-	case prof.CompileReasonRegisterPressure:
-		return 3
-	case prof.CompileReasonBranchRange:
-		return 4
-	case prof.CompileReasonError:
-		return 5
-	default:
-		return 0
-	}
-}
-
-func (c *compiler) compile(input *compileInput, plan plan, mod *module, frontend prof.Frontend) (prof.CompileReason, error) {
-	if len(c.scratchRegs) < scratchCount {
-		return prof.CompileReasonLoweringRejected, nil
-	}
-	arch := c.arch
-	if plan.noSpill {
-		arch = noSpillArch{c.arch}
-	}
-	ctx := c.newLowering(input, arch)
-	if !lower(ctx, plan) {
-		return prof.CompileReasonLoweringRejected, nil
-	}
-	exits := append([]exitDescriptor(nil), ctx.descriptors...)
-	return c.publish(mod, plan.anchor, ctx, c.arch, native{kind: plan.kind, frontend: frontend, exits: exits})
-}
-
-// noSpillArch wraps an asm.Arch to force Build to reject spilling instead of
-// inserting a spill frame. A nil Frame already disables spilling per asm's
-// own contract (see asm.Frame's doc comment), so this policy needs no
-// dedicated asm-level API — it is purely an interp-side JIT policy decision
-// (see noSpill), not a generic assembler concern.
-type noSpillArch struct{ asm.Arch }
 
 func (noSpillArch) Frame() asm.Frame { return nil }
 
@@ -459,4 +442,21 @@ func (ctx *lowering) pinTo(pr asm.PReg) asm.VReg {
 	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	_ = ctx.assembler.Pin(v, pr)
 	return v
+}
+
+func compileDepth(reason prof.CompileReason) int {
+	switch reason {
+	case prof.CompileReasonInvalidPlan:
+		return 1
+	case prof.CompileReasonLoweringRejected, prof.CompileReasonBackendUnavailable:
+		return 2
+	case prof.CompileReasonRegisterPressure:
+		return 3
+	case prof.CompileReasonBranchRange:
+		return 4
+	case prof.CompileReasonError:
+		return 5
+	default:
+		return 0
+	}
 }

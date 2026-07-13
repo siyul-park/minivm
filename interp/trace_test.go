@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
-	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -38,57 +37,6 @@ func TestNewTracer(t *testing.T) {
 }
 
 func TestTracer_Capture(t *testing.T) {
-	t.Run("reports one published attempt only when profiling is explicit", func(t *testing.T) {
-		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
-
-		local := prof.NewCollector()
-		localVM := New(prog, WithLocal(local), WithThreshold(-1))
-		defer localVM.Close()
-		result, err := localVM.tracer.capture(localVM, anchor{})
-		require.NoError(t, err)
-		require.NotNil(t, result.trace)
-		require.Equal(t, prof.CaptureOutcomePublished, result.outcome)
-		_, ok := local.Metric("vm_jit_trace_captures_total",
-			prof.Label{Key: "func", Value: "0"},
-			prof.Label{Key: "ip", Value: "0"},
-			prof.Label{Key: "outcome", Value: "published"},
-			prof.Label{Key: "reason", Value: "none"},
-		)
-		require.True(t, ok)
-
-		plain := New(prog, WithThreshold(-1))
-		defer plain.Close()
-		_, err = plain.tracer.capture(plain, anchor{})
-		require.NoError(t, err)
-		_, ok = plain.samples.Metric("vm_jit_trace_captures_total",
-			prof.Label{Key: "func", Value: "0"},
-			prof.Label{Key: "ip", Value: "0"},
-			prof.Label{Key: "outcome", Value: "published"},
-			prof.Label{Key: "reason", Value: "none"},
-		)
-		require.False(t, ok)
-
-		metrics := prof.New()
-		profiled := New(prog, WithProfiler(metrics), WithThreshold(-1))
-		result, err = profiled.tracer.capture(profiled, anchor{})
-		require.NoError(t, err)
-		require.NotNil(t, result.trace)
-		require.Equal(t, prof.CaptureOutcomePublished, result.outcome)
-		cached, err := profiled.tracer.capture(profiled, anchor{})
-		require.NoError(t, err)
-		require.NotNil(t, cached.trace)
-		require.Equal(t, prof.CaptureOutcomeNone, cached.outcome)
-		require.NoError(t, profiled.Close())
-		value, ok := metrics.Metric("vm_jit_trace_captures_total",
-			prof.Label{Key: "func", Value: "0"},
-			prof.Label{Key: "ip", Value: "0"},
-			prof.Label{Key: "outcome", Value: "published"},
-			prof.Label{Key: "reason", Value: "none"},
-		)
-		require.True(t, ok)
-		require.Equal(t, float64(1), value)
-	})
-
 	t.Run("records top-level fallthrough as completed", func(t *testing.T) {
 		tracer := NewTracer()
 		prog := program.New([]instr.Instruction{
@@ -138,8 +86,6 @@ func TestTracer_Capture(t *testing.T) {
 		result, err := tracer.capture(i, anchor{addr: 0, ip: 0})
 		require.NoError(t, err)
 		require.NotNil(t, result.trace)
-		require.Equal(t, prof.CaptureOutcomePartial, result.outcome)
-		require.Equal(t, prof.CaptureReasonOpLimit, result.reason)
 		tr := result.trace
 		require.Equal(t, partial, tr.kind)
 		require.Len(t, tr.ops, opLimit+1)
@@ -298,11 +244,6 @@ func TestTracer_Capture(t *testing.T) {
 			tr, err := tracer.capture(i, anchor{})
 			require.NoError(t, err)
 			require.Nil(t, tr.trace)
-			require.Equal(t, prof.CaptureOutcomeRejected, tr.outcome)
-			if tr.reason == prof.CaptureReasonAttemptLimit {
-				continue
-			}
-			require.Equal(t, prof.CaptureReasonUnsupportedOp, tr.reason)
 		}
 
 		tracer.mu.Lock()
@@ -312,22 +253,6 @@ func TestTracer_Capture(t *testing.T) {
 		require.Nil(t, tracer.rootAt(anchor{}))
 	})
 
-	t.Run("rejects a nested terminal set with its stable reason", func(t *testing.T) {
-		fn := types.NewFunctionBuilder(&types.FunctionType{}).Emit(
-			instr.New(instr.CONST_GET, 0), instr.New(instr.I32_CONST, 0),
-			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_SET), instr.New(instr.RETURN),
-		).MustBuild()
-		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 1), instr.New(instr.CALL)},
-			program.WithConstants(types.TypedArray[int32]{0}, fn))
-		i := New(prog, WithThreshold(-1))
-		defer i.Close()
-
-		result, err := i.tracer.capture(i, anchor{})
-		require.NoError(t, err)
-		require.Nil(t, result.trace)
-		require.Equal(t, prof.CaptureOutcomeRejected, result.outcome)
-		require.Equal(t, prof.CaptureReasonNestedTerminal, result.reason)
-	})
 }
 
 func TestTracer(t *testing.T) {
