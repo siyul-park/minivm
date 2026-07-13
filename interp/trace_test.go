@@ -255,7 +255,7 @@ func TestTracer_Capture(t *testing.T) {
 
 }
 
-func TestTracer(t *testing.T) {
+func TestTracer_OrdersAnchors(t *testing.T) {
 	t.Run("returns anchors in instruction order", func(t *testing.T) {
 		tracer := NewTracer()
 		const count = 64

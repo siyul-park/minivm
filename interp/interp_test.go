@@ -8,7 +8,6 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -2738,314 +2737,6 @@ func TestInterpreter_Run(t *testing.T) {
 	})
 }
 
-func TestInterpreter_Marshal(t *testing.T) {
-	t.Run("scalar value", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-
-		v, err := i.Marshal(int32(7))
-		require.NoError(t, err)
-		require.Equal(t, types.I32(7), v)
-	})
-
-	t.Run("function receives active context", func(t *testing.T) {
-		var got context.Context
-		setup := New(program.New(nil))
-		fn, err := setup.Marshal(func(ctx context.Context) int32 {
-			got = ctx
-			return 7
-		})
-		require.NoError(t, err)
-		require.NoError(t, setup.Close())
-
-		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(fn))
-		i := New(prog)
-		defer i.Close()
-		ctx := context.WithValue(context.Background(), contextKey{}, "value")
-		require.NoError(t, i.Run(ctx))
-		value, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(7), value)
-		require.Equal(t, ctx, got)
-	})
-
-	t.Run("host method receives active context", func(t *testing.T) {
-		setup := New(program.New(nil))
-		defer setup.Close()
-		value, err := setup.Marshal(contextHost{})
-		require.NoError(t, err)
-		host := value.(*HostObject)
-		method := host.Field(host.Typ.FieldIndex("Value"))
-		fn, err := setup.Load(method.Ref())
-		require.NoError(t, err)
-
-		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(fn))
-		i := New(prog)
-		defer i.Close()
-		ctx := context.WithValue(context.Background(), contextKey{}, "value")
-		require.NoError(t, i.Run(ctx))
-		got, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(7), got)
-	})
-
-	t.Run("marshaled function is shared and race-safe across interpreters", func(t *testing.T) {
-		setup := New(program.New(nil))
-		v, err := setup.Marshal(func(a, b int32) int32 { return a + b })
-		require.NoError(t, err)
-		require.NoError(t, setup.Close())
-
-		// program.New's default constant path keeps the *HostFunction Go
-		// value itself (not a copy) in each Interpreter's heap, so two
-		// Interpreters built from programs referencing the same fn share one
-		// *HostFunction and race on any call-scoped state it caches.
-		fn := v.(*HostFunction)
-
-		prog1 := program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.I32_CONST, 2),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
-			},
-			program.WithConstants(fn),
-		)
-		prog2 := program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 10),
-				instr.New(instr.I32_CONST, 20),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
-			},
-			program.WithConstants(fn),
-		)
-
-		i1 := New(prog1)
-		defer i1.Close()
-		i2 := New(prog2)
-		defer i2.Close()
-
-		var wg sync.WaitGroup
-		var err1, err2 error
-		var v1, v2 types.Value
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			if err1 = i1.Run(context.Background()); err1 == nil {
-				v1, err1 = i1.Pop()
-			}
-		}()
-		go func() {
-			defer wg.Done()
-			if err2 = i2.Run(context.Background()); err2 == nil {
-				v2, err2 = i2.Pop()
-			}
-		}()
-		wg.Wait()
-
-		require.NoError(t, err1)
-		require.NoError(t, err2)
-		require.Equal(t, types.I32(3), v1)
-		require.Equal(t, types.I32(30), v2)
-	})
-}
-
-func TestInterpreter_Unmarshal(t *testing.T) {
-	t.Run("scalar", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-
-		var dst int32
-		require.NoError(t, i.Unmarshal(types.I32(7), &dst))
-		require.Equal(t, int32(7), dst)
-	})
-
-	t.Run("VM function", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32},
-		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
-
-		var add func(int32, int32) (int32, error)
-		require.NoError(t, i.Unmarshal(fn, &add))
-		got, err := add(2, 3)
-		require.NoError(t, err)
-		require.Equal(t, int32(5), got)
-	})
-
-	t.Run("VM function with context", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32},
-		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
-
-		var add func(context.Context, int32, int32) (int32, error)
-		require.NoError(t, i.Unmarshal(fn, &add))
-		got, err := add(context.Background(), 2, 3)
-		require.NoError(t, err)
-		require.Equal(t, int32(5), got)
-	})
-
-	t.Run("VM function context identity", func(t *testing.T) {
-		var got context.Context
-		i := New(program.New(nil), WithTick(2), WithHook(func(i *Interpreter) error {
-			got = i.Context()
-			return nil
-		}))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-		).MustBuild()
-		addr, err := i.Alloc(fn)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, i.Release(addr)) }()
-
-		var call func(context.Context) (int32, error)
-		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
-		ctx := context.WithValue(context.Background(), contextKey{}, "value")
-		value, err := call(ctx)
-		require.NoError(t, err)
-		require.Equal(t, int32(7), value)
-		require.Equal(t, ctx, got)
-	})
-
-	t.Run("VM function canceled context", func(t *testing.T) {
-		i := New(program.New(nil), WithTick(1))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-		).MustBuild()
-
-		var call func(context.Context) (int32, error)
-		require.NoError(t, i.Unmarshal(fn, &call))
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		_, err := call(ctx)
-		require.ErrorIs(t, err, context.Canceled)
-	})
-
-	t.Run("VM function nil context uses background", func(t *testing.T) {
-		var got context.Context
-		i := New(program.New(nil), WithTick(2), WithHook(func(i *Interpreter) error {
-			got = i.Context()
-			return nil
-		}))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-		).MustBuild()
-		addr, err := i.Alloc(fn)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, i.Release(addr)) }()
-
-		var call func(context.Context) (int32, error)
-		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
-		value, err := call(nil)
-		require.NoError(t, err)
-		require.Equal(t, int32(7), value)
-		require.Equal(t, context.Background(), got)
-	})
-
-	t.Run("VM function non-first context", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params: []types.Type{types.TypeI32, types.TypeRef}, Returns: []types.Type{types.TypeI32},
-		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).MustBuild()
-
-		var call func(int32, context.Context) (int32, error)
-		require.NoError(t, i.Unmarshal(fn, &call))
-		got, err := call(7, nil)
-		require.NoError(t, err)
-		require.Equal(t, int32(7), got)
-	})
-
-	t.Run("VM closure with context", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-		).MustBuild()
-		fnAddr, err := i.Alloc(fn)
-		require.NoError(t, err)
-		closureAddr, err := i.Alloc(types.NewClosure(fn.Typ, types.Ref(fnAddr), nil))
-		require.NoError(t, err)
-		defer func() { require.NoError(t, i.Release(closureAddr)) }()
-
-		var call func(context.Context) (int32, error)
-		require.NoError(t, i.Unmarshal(types.BoxRef(closureAddr), &call))
-		got, err := call(context.Background())
-		require.NoError(t, err)
-		require.Equal(t, int32(7), got)
-	})
-
-	t.Run("VM function without context uses background", func(t *testing.T) {
-		var got context.Context
-		i := New(program.New(nil), WithTick(2), WithHook(func(i *Interpreter) error {
-			got = i.Context()
-			return nil
-		}))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-		).MustBuild()
-		addr, err := i.Alloc(fn)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, i.Release(addr)) }()
-
-		var call func() (int32, error)
-		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
-		value, err := call()
-		require.NoError(t, err)
-		require.Equal(t, int32(7), value)
-		require.Equal(t, context.Background(), got)
-	})
-
-	t.Run("function ref", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-		).MustBuild()
-		addr, err := i.Alloc(fn)
-		require.NoError(t, err)
-
-		var call func() int32
-		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
-		require.Equal(t, int32(7), call())
-		require.NoError(t, i.Release(addr))
-	})
-
-	t.Run("runtime error", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_DIV_S), instr.New(instr.RETURN),
-		).MustBuild()
-
-		var call func() (int32, error)
-		require.NoError(t, i.Unmarshal(fn, &call))
-		got, err := call()
-		require.Zero(t, got)
-		require.ErrorIs(t, err, ErrDivideByZero)
-
-		got, err = call()
-		require.Zero(t, got)
-		require.ErrorIs(t, err, ErrDivideByZero)
-	})
-
-	t.Run("signature mismatch", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).MustBuild()
-
-		var call func() int64
-		require.ErrorIs(t, i.Unmarshal(fn, &call), ErrTypeMismatch)
-	})
-}
-
 func TestInterpreter_Context(t *testing.T) {
 	var got context.Context
 	prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
@@ -3503,13 +3194,37 @@ func TestInterpreter_Push(t *testing.T) {
 }
 
 func TestInterpreter_Pop(t *testing.T) {
-	i := New(program.New(nil))
-	defer i.Close()
+	t.Run("scalar", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
 
-	require.NoError(t, i.Push(types.I32(4)))
-	v, err := i.Pop()
-	require.NoError(t, err)
-	require.Equal(t, types.I32(4), v)
+		require.NoError(t, i.Push(types.I32(4)))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(4), value)
+	})
+
+	t.Run("reference value releases its heap ownership", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		require.NoError(t, i.Push(types.String("value")))
+		boxed, err := i.Peek(0)
+		require.NoError(t, err)
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.String("value"), value)
+		_, err = i.Load(boxed.Ref())
+		require.ErrorIs(t, err, ErrSegmentationFault)
+	})
+
+	t.Run("stack underflow", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		_, err := i.Pop()
+		require.ErrorIs(t, err, ErrStackUnderflow)
+	})
 }
 
 func TestInterpreter_PopBoxed(t *testing.T) {
@@ -3551,14 +3266,37 @@ func TestInterpreter_PopBoxed(t *testing.T) {
 }
 
 func TestInterpreter_Peek(t *testing.T) {
-	i := New(program.New(nil))
-	defer i.Close()
+	t.Run("leaves value on stack", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
 
-	require.NoError(t, i.Push(types.I32(4)))
-	v, err := i.Peek(0)
-	require.NoError(t, err)
-	require.Equal(t, types.BoxI32(4), v)
-	require.Equal(t, 1, i.Len())
+		require.NoError(t, i.Push(types.I32(4)))
+		value, err := i.Peek(0)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(4), value)
+		require.Equal(t, 1, i.Len())
+	})
+
+	t.Run("keeps reference owned by stack", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		require.NoError(t, i.Push(types.String("value")))
+		value, err := i.Peek(0)
+		require.NoError(t, err)
+		loaded, err := i.Load(value.Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.String("value"), loaded)
+		require.Equal(t, 1, i.Len())
+	})
+
+	t.Run("invalid depth", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		_, err := i.Peek(0)
+		require.ErrorIs(t, err, ErrStackUnderflow)
+	})
 }
 
 func TestInterpreter_Len(t *testing.T) {
@@ -3572,7 +3310,14 @@ func TestInterpreter_Len(t *testing.T) {
 
 func TestInterpreter_Close(t *testing.T) {
 	i := New(program.New(nil))
+	value := &trackedValue{}
+	_, err := i.Alloc(value)
+	require.NoError(t, err)
+
 	require.NoError(t, i.Close())
+	require.Equal(t, 1, value.closed)
+	require.NoError(t, i.Close())
+	require.Equal(t, 1, value.closed)
 }
 
 func TestInterpreter_Reset(t *testing.T) {

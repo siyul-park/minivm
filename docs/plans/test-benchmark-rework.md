@@ -29,7 +29,7 @@ No later phase starts before the previous phase passes its review gate.
 | 2 | `instr` executable specifications and fuzzing | Complete | `test(instr): reorganize executable specifications` | Passed |
 | 3 | `types` executable specifications and fuzzing | Complete | `test(types): reorganize executable specifications` | Passed |
 | 4 | `program` construction, parser, verifier, and fuzzing | Complete | `test(program): reorganize executable specifications` | Passed |
-| 5 | Interpreter public API, marshal, host, pool, and lifecycle | Pending | - | - |
+| 5 | Interpreter public API, marshal, host, pool, and lifecycle | Complete | `test(interp): align public API specifications` | Passed |
 | 6 | Opcode corpus and threaded/optimized/JIT semantic parity | Pending | - | - |
 | 7 | Optimizer, backend, generator, and support packages | Pending | - | - |
 | 8 | Interpreter benchmark consolidation | Pending | - | - |
@@ -222,13 +222,13 @@ go test -run='^$' -fuzz=FuzzVerify -fuzztime=10s ./program
 
 ### Tasks
 
-- [ ] Keep `interp_test.go` ownership limited to `interp.go`: construction, options, accessors, stack, heap, reset, close, and run.
-- [ ] Move marshal/unmarshal contracts into `marshal_test.go` and cover primitives, named values, pointers, collections, custom marshalers/converters, cycles, overflow, and mismatches.
-- [ ] Split host function and host object tests by public method owner.
-- [ ] Specify `Push`, `Pop`, `PopBoxed`, and `Peek` ownership differences through observable lifecycle behavior.
-- [ ] Specify pool capacity, reuse, blocking, cancellation, reset, close, outstanding members, idempotence, and error aggregation without sleeps.
-- [ ] Keep only essential cache, trace, reference-count, and coroutine white-box invariants.
-- [ ] Run focused race tests, review diff, update progress, and commit.
+- [x] Keep `interp_test.go` ownership limited to `interp.go`: construction, options, accessors, stack, heap, reset, close, and run.
+- [x] Move marshal/unmarshal contracts into `marshal_test.go` and cover primitives, named values, pointers, collections, custom marshalers/converters, cycles, overflow, and mismatches.
+- [x] Split host function and host object tests by public method owner.
+- [x] Specify `Push`, `Pop`, `PopBoxed`, and `Peek` ownership differences through observable lifecycle behavior.
+- [x] Specify pool capacity, reuse, blocking, cancellation, reset, close, outstanding members, and idempotence without sleeps; review error aggregation without adding a test-only injection seam.
+- [x] Keep only essential cache, trace, reference-count, and coroutine white-box invariants.
+- [x] Run focused race tests, review diff, update progress, and commit.
 
 ### Verification
 
@@ -410,6 +410,16 @@ GOOS=linux GOARCH=arm64 go test -exec=true ./...
 - Intentionally retained structure: verifier policy coverage remains inside `TestVerify` because it is the public admission contract, not generator metadata.
 - Coverage/benchmark effect: `program` 76.9% -> 80.9%; no benchmark change.
 - Commit: `test(program): reorganize executable specifications`.
+
+### Phase 5
+
+- Focused verification: all interpreter public API, marshal, host, pool, error, coroutine, cache, and tracer tests passed; `GOENV_VERSION=1.26.2 go test -race ./interp` passed.
+- Broad verification: explicit `gofmt`, `goimports`, `go vet ./interp`, owner inventory, coverage, and `git diff --check` passed.
+- Review findings fixed: moved marshal tests to the production-matched file, split the host-object umbrella by public method, replaced timeout-based pool cancellation with channel coordination, removed duplicate opcode execution from pool tests, and named tracer white-box tests by invariant.
+- Ownership specified: `Pop` releases loaded refs, `PopBoxed` transfers boxed refs, and `Peek` preserves stack ownership.
+- Intentionally retained structure: cache/tracer wiring and pool live-count checks remain white-box safety invariants because no exported observation path exists. Pool close error aggregation has no deterministic public failure source; no test-only production seam was added.
+- Coverage/benchmark effect: `interp` 20.6% -> 21.1%; no benchmark change.
+- Commit: `test(interp): align public API specifications`.
 
 Add one entry after each later phase:
 

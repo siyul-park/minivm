@@ -46,7 +46,7 @@ The inventory includes exported functions and exported methods on exported recei
 | `cli` | 6 | 4 | 2 |
 | `debug` | 12 | 1 | 11 |
 | `instr` | 44 | 44 | 0 |
-| `interp` | 66 | 51 | 15 |
+| `interp` | 66 | 66 | 0 |
 | `optimize` | 4 | 3 | 1 |
 | `pass` | 9 | 4 | 5 |
 | `prof` | 22 | 12 | 10 |
@@ -329,22 +329,22 @@ The inventory includes exported functions and exported methods on exported recei
 | `interp/cache.go` | `TestNewCache` | ✅ |
 | `interp/coroutine.go` | `TestCoroutine_Kind` | ✅ |
 | `interp/coroutine.go` | `TestCoroutine_Refs` | ✅ |
-| `interp/coroutine.go` | `TestCoroutine_String` | ⬜ |
+| `interp/coroutine.go` | `TestCoroutine_String` | ✅ |
 | `interp/coroutine.go` | `TestCoroutine_Type` | ✅ |
-| `interp/error.go` | `TestErrorCode` | ⬜ |
-| `interp/error.go` | `TestRuntimeError_Error` | ⬜ |
-| `interp/error.go` | `TestRuntimeError_Unwrap` | ⬜ |
-| `interp/host.go` | `TestHostFunction_Kind` | ⬜ |
-| `interp/host.go` | `TestHostFunction_String` | ⬜ |
-| `interp/host.go` | `TestHostFunction_Type` | ⬜ |
-| `interp/host.go` | `TestHostObject_Field` | ⬜ |
-| `interp/host.go` | `TestHostObject_Kind` | ⬜ |
-| `interp/host.go` | `TestHostObject_Raw` | ⬜ |
-| `interp/host.go` | `TestHostObject_Refs` | ⬜ |
-| `interp/host.go` | `TestHostObject_SetField` | ⬜ |
-| `interp/host.go` | `TestHostObject_SetRaw` | ⬜ |
-| `interp/host.go` | `TestHostObject_String` | ⬜ |
-| `interp/host.go` | `TestHostObject_Type` | ⬜ |
+| `interp/error.go` | `TestErrorCode` | ✅ |
+| `interp/error.go` | `TestRuntimeError_Error` | ✅ |
+| `interp/error.go` | `TestRuntimeError_Unwrap` | ✅ |
+| `interp/host.go` | `TestHostFunction_Kind` | ✅ |
+| `interp/host.go` | `TestHostFunction_String` | ✅ |
+| `interp/host.go` | `TestHostFunction_Type` | ✅ |
+| `interp/host.go` | `TestHostObject_Field` | ✅ |
+| `interp/host.go` | `TestHostObject_Kind` | ✅ |
+| `interp/host.go` | `TestHostObject_Raw` | ✅ |
+| `interp/host.go` | `TestHostObject_Refs` | ✅ |
+| `interp/host.go` | `TestHostObject_SetField` | ✅ |
+| `interp/host.go` | `TestHostObject_SetRaw` | ✅ |
+| `interp/host.go` | `TestHostObject_String` | ✅ |
+| `interp/host.go` | `TestHostObject_Type` | ✅ |
 | `interp/host.go` | `TestNewHostFunction` | ✅ |
 | `interp/interp.go` | `TestInterpreter_Alloc` | ✅ |
 | `interp/interp.go` | `TestInterpreter_Close` | ✅ |
