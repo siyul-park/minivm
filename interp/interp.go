@@ -49,6 +49,7 @@ type Interpreter struct {
 	stack    []types.Boxed
 	heap     []types.Value
 	base     int
+	goal     int
 	interned map[string]types.Ref
 	free     []int
 	rc       []int
@@ -82,6 +83,8 @@ type frame struct {
 	ip int
 	bp int
 }
+
+const heapRunway = 64
 
 type option struct {
 	hook       func(*Interpreter) error
@@ -312,6 +315,10 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 
 	i.base = len(i.heap)
 	i.recount()
+	i.goal = max(cap(i.heap), i.base+heapRunway)
+	if i.limit > 0 {
+		i.goal = max(min(i.goal, i.limit), i.base)
+	}
 
 	i.module = &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
 	i.instrs[0] = prog.Code
@@ -805,6 +812,7 @@ func (i *Interpreter) Reset() {
 	for idx, kind := range i.globalKinds {
 		i.globals[idx] = i.zero(kind)
 	}
+	i.pace()
 }
 
 // compile lowers traces already recorded for addr and installs the resulting
@@ -1566,22 +1574,31 @@ func (i *Interpreter) unbox(val types.Boxed) types.Value {
 }
 
 func (i *Interpreter) alloc(val types.Value) int {
+	collected := false
+	if i.goal > 0 && len(i.heap)-len(i.free) >= i.goal {
+		i.gc()
+		collected = true
+	}
 	if addr, ok := i.reuse(val); ok {
 		return addr
 	}
 
 	if i.limit > 0 && len(i.heap) >= i.limit {
-		i.gc()
-		if addr, ok := i.reuse(val); ok {
-			return addr
+		if !collected {
+			i.gc()
+			if addr, ok := i.reuse(val); ok {
+				return addr
+			}
 		}
 		panic(ErrHeapExhausted)
 	}
 
 	if len(i.heap) == cap(i.heap) {
-		i.gc()
-		if addr, ok := i.reuse(val); ok {
-			return addr
+		if !collected {
+			i.gc()
+			if addr, ok := i.reuse(val); ok {
+				return addr
+			}
 		}
 		if i.limit > 0 && len(i.heap) >= i.limit {
 			panic(ErrHeapExhausted)
@@ -1750,6 +1767,17 @@ func (i *Interpreter) gc() {
 	i.scan()
 	i.mark()
 	i.sweep()
+	i.pace()
+}
+
+func (i *Interpreter) pace() {
+	live := len(i.heap) - len(i.free)
+	dynamic := max(live-i.base, 0)
+	goal := live + max(dynamic, heapRunway)
+	if i.limit > 0 {
+		goal = min(goal, i.limit)
+	}
+	i.goal = max(goal, live)
 }
 
 // scan derives each object's external incoming count. Exact rc includes both

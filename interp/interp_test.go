@@ -3689,6 +3689,123 @@ func TestWithHeap(t *testing.T) {
 		require.NoError(t, i.Run(context.Background()))
 		require.Equal(t, 1, i.Len())
 	})
+
+	t.Run("collects cycles at adaptive goal", func(t *testing.T) {
+		const capacity = 128
+
+		i := New(program.New(nil), WithHeap(capacity), WithMaxHeap(capacity))
+		defer i.Close()
+
+		_, err := i.Alloc(types.I32(1))
+		require.NoError(t, err)
+		for range capacity - 2 {
+			value := &trackedValue{}
+			addr, err := i.Alloc(value)
+			require.NoError(t, err)
+			value.refs = []types.Ref{types.Ref(addr)}
+			_, err = i.Retain(addr)
+			require.NoError(t, err)
+			require.NoError(t, i.Release(addr))
+		}
+
+		_, err = i.Alloc(types.I32(2))
+		require.NoError(t, err)
+
+		cycle := &trackedValue{}
+		addr, err := i.Alloc(cycle)
+		require.NoError(t, err)
+		cycle.refs = []types.Ref{types.Ref(addr)}
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		for n := range 62 {
+			_, err = i.Alloc(types.I32(n + 3))
+			require.NoError(t, err)
+		}
+		require.Equal(t, 0, cycle.closed)
+
+		_, err = i.Alloc(types.I32(65))
+		require.NoError(t, err)
+		require.Equal(t, 1, cycle.closed)
+	})
+
+	t.Run("paces from live set", func(t *testing.T) {
+		const capacity = 192
+
+		i := New(program.New(nil), WithHeap(capacity), WithMaxHeap(capacity))
+		defer i.Close()
+
+		for n := range 65 {
+			_, err := i.Alloc(types.I32(n))
+			require.NoError(t, err)
+		}
+		for range capacity - 66 {
+			value := &trackedValue{}
+			addr, err := i.Alloc(value)
+			require.NoError(t, err)
+			value.refs = []types.Ref{types.Ref(addr)}
+			_, err = i.Retain(addr)
+			require.NoError(t, err)
+			require.NoError(t, i.Release(addr))
+		}
+
+		_, err := i.Alloc(types.I32(65))
+		require.NoError(t, err)
+
+		cycle := &trackedValue{}
+		addr, err := i.Alloc(cycle)
+		require.NoError(t, err)
+		cycle.refs = []types.Ref{types.Ref(addr)}
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		for n := range 62 {
+			_, err = i.Alloc(types.I32(n + 66))
+			require.NoError(t, err)
+		}
+		require.Equal(t, 0, cycle.closed)
+
+		_, err = i.Alloc(types.I32(128))
+		require.NoError(t, err)
+		require.Equal(t, 0, cycle.closed)
+
+		_, err = i.Alloc(types.I32(129))
+		require.NoError(t, err)
+		require.Equal(t, 1, cycle.closed)
+	})
+
+	t.Run("resets adaptive goal", func(t *testing.T) {
+		const capacity = 192
+
+		i := New(program.New(nil), WithHeap(capacity), WithMaxHeap(256))
+		defer i.Close()
+
+		for n := range capacity {
+			_, err := i.Alloc(types.I32(n))
+			require.NoError(t, err)
+		}
+		i.Reset()
+
+		cycle := &trackedValue{}
+		addr, err := i.Alloc(cycle)
+		require.NoError(t, err)
+		cycle.refs = []types.Ref{types.Ref(addr)}
+		_, err = i.Retain(addr)
+		require.NoError(t, err)
+		require.NoError(t, i.Release(addr))
+
+		for n := range 63 {
+			_, err = i.Alloc(types.I32(n))
+			require.NoError(t, err)
+		}
+		require.Equal(t, 0, cycle.closed)
+
+		_, err = i.Alloc(types.I32(63))
+		require.NoError(t, err)
+		require.Equal(t, 1, cycle.closed)
+	})
 }
 
 func TestWithMaxHeap(t *testing.T) {
