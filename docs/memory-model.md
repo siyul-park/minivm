@@ -94,17 +94,24 @@ This contract lets `release` and GC reuse caller-owned scratch storage.
 
 Allocation order:
 
-1. reuse an index from `free`
-2. run GC when needed or when the max heap limit is reached
-3. reuse a slot freed by GC if available
-4. return `ErrHeapExhausted` if the hard limit still applies
-5. otherwise append or grow heap storage
+1. run GC when occupied slots reach the adaptive goal
+2. reuse an index from `free`
+3. run GC if backing storage or the hard limit is reached and this
+   allocation has not collected yet
+4. reuse a slot freed by GC if available
+5. return `ErrHeapExhausted` if the hard limit still applies
+6. otherwise append or grow heap storage
 
-`WithHeap(n)` sets initial heap capacity only.
+An allocation attempt runs GC at most once.
 
-`WithMaxHeap(n)` sets a hard heap entry limit. Values `n <= 0` mean unlimited.
+`WithHeap(n)` sets initial heap capacity. Subject to the hard limit, the initial
+GC goal is at least that capacity and at least 64 slots beyond the baseline heap.
 
-The max limit is checked after free-list reuse and GC, so collectable objects do not block future allocations.
+`WithMaxHeap(n)` sets a hard heap entry limit. Values `n <= 0` mean
+unlimited. It also clamps the adaptive goal.
+
+The max limit is checked after GC and free-list reuse, so collectable objects
+do not block future allocations.
 
 Public host APIs that allocate, such as `Alloc`, `Push`, and `Marshal`, return `ErrHeapExhausted` as ordinary errors.
 
@@ -113,7 +120,22 @@ Public host APIs that allocate, such as `Alloc`, `Push`, and `Marshal`, return `
 GC uses trial deletion to derive roots from exact reference counts instead of
 maintaining a second root registry.
 
-GC runs when the heap is full and `free` is empty.
+GC runs when occupied slots reach an adaptive goal. Backing-storage
+exhaustion and the hard heap limit remain forced collection points even when
+the goal is higher.
+
+After collection, the next goal is derived from the live set:
+
+```text
+live = len(heap) - len(free)
+dynamic = max(live - base, 0)
+goal = live + max(dynamic, 64)
+```
+
+The hard heap limit clamps `goal`, and `goal` never falls below `live`. The
+64-slot minimum avoids repeated collection for small heaps; larger dynamic live
+sets receive roughly their current size as allocation runway. `Reset` recomputes
+the goal from the baseline heap instead of inheriting the previous run's target.
 
 High-level flow:
 
