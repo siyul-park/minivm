@@ -50,7 +50,7 @@ The inventory includes exported functions and exported methods on exported recei
 | `optimize` | 4 | 3 | 1 |
 | `pass` | 9 | 4 | 5 |
 | `prof` | 22 | 12 | 10 |
-| `program` | 25 | 13 | 12 |
+| `program` | 25 | 25 | 0 |
 | `transform` | 10 | 5 | 5 |
 | `types` | 172 | 172 | 0 |
 
@@ -426,31 +426,31 @@ The inventory includes exported functions and exported methods on exported recei
 | `prof/profiler.go` | `TestProfiler_Flush` | ✅ |
 | `prof/profiler.go` | `TestProfiler_Metric` | ✅ |
 | `prof/profiler.go` | `TestProfiler_Metrics` | ✅ |
-| `program/builder.go` | `TestBuilder_Bind` | ⬜ |
-| `program/builder.go` | `TestBuilder_Br` | ⬜ |
-| `program/builder.go` | `TestBuilder_BrIf` | ⬜ |
-| `program/builder.go` | `TestBuilder_BrTable` | ⬜ |
+| `program/builder.go` | `TestBuilder_Bind` | ✅ |
+| `program/builder.go` | `TestBuilder_Br` | ✅ |
+| `program/builder.go` | `TestBuilder_BrIf` | ✅ |
+| `program/builder.go` | `TestBuilder_BrTable` | ✅ |
 | `program/builder.go` | `TestBuilder_Build` | ✅ |
 | `program/builder.go` | `TestBuilder_Const` | ✅ |
 | `program/builder.go` | `TestBuilder_ConstGet` | ✅ |
-| `program/builder.go` | `TestBuilder_Emit` | ⬜ |
+| `program/builder.go` | `TestBuilder_Emit` | ✅ |
 | `program/builder.go` | `TestBuilder_Globals` | ✅ |
-| `program/builder.go` | `TestBuilder_Label` | ⬜ |
+| `program/builder.go` | `TestBuilder_Label` | ✅ |
 | `program/builder.go` | `TestBuilder_Locals` | ✅ |
-| `program/builder.go` | `TestBuilder_Try` | ⬜ |
+| `program/builder.go` | `TestBuilder_Try` | ✅ |
 | `program/builder.go` | `TestBuilder_Type` | ✅ |
-| `program/builder.go` | `TestNewBuilder` | ⬜ |
+| `program/builder.go` | `TestNewBuilder` | ✅ |
 | `program/parse.go` | `TestParse` | ✅ |
-| `program/program.go` | `TestNew` | ⬜ |
+| `program/program.go` | `TestNew` | ✅ |
 | `program/program.go` | `TestProgram_String` | ✅ |
 | `program/program.go` | `TestWithConstants` | ✅ |
-| `program/program.go` | `TestWithGlobals` | ⬜ |
+| `program/program.go` | `TestWithGlobals` | ✅ |
 | `program/program.go` | `TestWithHandlers` | ✅ |
 | `program/program.go` | `TestWithLocals` | ✅ |
 | `program/program.go` | `TestWithTypes` | ✅ |
 | `program/verify.go` | `TestVerify` | ✅ |
-| `program/verify.go` | `TestVerifyError_Error` | ⬜ |
-| `program/verify.go` | `TestVerifyError_Unwrap` | ⬜ |
+| `program/verify.go` | `TestVerifyError_Error` | ✅ |
+| `program/verify.go` | `TestVerifyError_Unwrap` | ✅ |
 | `transform/as.go` | `TestAlgebraicSimplificationPass_Run` | ✅ |
 | `transform/as.go` | `TestNewAlgebraicSimplificationPass` | ⬜ |
 | `transform/cd.go` | `TestConstantDeduplicationPass_Run` | ✅ |

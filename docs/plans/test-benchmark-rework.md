@@ -28,7 +28,7 @@ No later phase starts before the previous phase passes its review gate.
 | 1 | Test ownership matrices and completeness gates | Complete | `test: add test ownership gates` | Passed |
 | 2 | `instr` executable specifications and fuzzing | Complete | `test(instr): reorganize executable specifications` | Passed |
 | 3 | `types` executable specifications and fuzzing | Complete | `test(types): reorganize executable specifications` | Passed |
-| 4 | `program` construction, parser, verifier, and fuzzing | Pending | - | - |
+| 4 | `program` construction, parser, verifier, and fuzzing | Complete | `test(program): reorganize executable specifications` | Passed |
 | 5 | Interpreter public API, marshal, host, pool, and lifecycle | Pending | - | - |
 | 6 | Opcode corpus and threaded/optimized/JIT semantic parity | Pending | - | - |
 | 7 | Optimizer, backend, generator, and support packages | Pending | - | - |
@@ -199,13 +199,13 @@ go test -run='^$' -fuzz=FuzzParseFunction -fuzztime=10s ./types
 
 ### Tasks
 
-- [ ] Specify `New`, every `With*` option, and `Program.String`.
-- [ ] Specify builder interning and final program assembly separately from instruction encoding.
-- [ ] Structure verifier cases under valid, structure, bounds, control, stack, types, calls, and handlers.
-- [ ] Specify `VerifyError.Error` and `VerifyError.Unwrap`.
-- [ ] Add parser/string round-trip fuzzing.
-- [ ] Add arbitrary-bytecode `FuzzVerify` and prove no panic at admission boundary.
-- [ ] Run focused tests, review diff, update progress, and commit.
+- [x] Specify `New`, every `With*` option, and `Program.String`.
+- [x] Specify builder interning and final program assembly separately from instruction encoding.
+- [x] Structure verifier cases under valid, structure, bounds, control, stack, types, calls, and handlers.
+- [x] Specify `VerifyError.Error` and `VerifyError.Unwrap`.
+- [x] Add parser/string round-trip fuzzing.
+- [x] Add arbitrary-bytecode `FuzzVerify` and prove no panic at admission boundary.
+- [x] Run focused tests, review diff, update progress, and commit.
 
 ### Verification
 
@@ -400,6 +400,16 @@ GOOS=linux GOARCH=arm64 go test -exec=true ./...
 - Intentionally retained structure: `PrimitiveType_*` groups behavior of exported primitive type singleton instances whose concrete receiver types are private.
 - Coverage/benchmark effect: `types` 85.8% -> 90.2%; retained traversal benchmarks report 0 allocs/op with reused destination buffers.
 - Commit: `test(types): reorganize executable specifications`.
+
+### Phase 4
+
+- Focused verification: `GOENV_VERSION=1.26.2 go test -race ./program`; parser and verifier fuzz targets each ran for 10 seconds.
+- Broad verification: explicit `gofmt`, `goimports`, `go vet ./program`, owner inventory, coverage, and `git diff --check` passed.
+- Review findings fixed: aligned builder tests with program assembly ownership instead of instruction-offset encoding, added globals to full text round trips, and grouped verifier cases by shallow behavioral category.
+- Production bug fixed: verifier now rejects branch targets inside instruction operands before CFG construction; committed separately as `6d2870d`.
+- Intentionally retained structure: verifier policy coverage remains inside `TestVerify` because it is the public admission contract, not generator metadata.
+- Coverage/benchmark effect: `program` 76.9% -> 80.9%; no benchmark change.
+- Commit: `test(program): reorganize executable specifications`.
 
 Add one entry after each later phase:
 

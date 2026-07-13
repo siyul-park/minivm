@@ -62,6 +62,7 @@ func TestParse(t *testing.T) {
 		p0 := New(
 			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
 			WithLocals(types.TypeI32),
+			WithGlobals(types.TypeRef),
 			WithConstants(
 				types.NewFunctionBuilder(&types.FunctionType{
 					Params:  []types.Type{types.TypeI32},
@@ -78,6 +79,7 @@ func TestParse(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, p0.Code, p1.Code)
 		require.Equal(t, p0.Locals, p1.Locals)
+		require.Equal(t, p0.Globals, p1.Globals)
 		require.Equal(t, p0.Constants, p1.Constants)
 		require.Equal(t, p0.Types, p1.Types)
 		require.Equal(t, p0.Handlers, p1.Handlers)
@@ -87,6 +89,7 @@ func TestParse(t *testing.T) {
 		p0 := New(
 			[]instr.Instruction{instr.New(instr.NOP)},
 			WithLocals(types.TypeI32),
+			WithGlobals(types.TypeRef),
 			WithConstants(types.I32(42)),
 			WithTypes(types.TypeI64),
 			WithHandlers(instr.Handler{Start: 0, End: 5, Catch: 10, Depth: 0}),
@@ -94,17 +97,20 @@ func TestParse(t *testing.T) {
 		output := p0.String()
 		require.Contains(t, output, ".code\n")
 		require.Contains(t, output, ".locals\n")
+		require.Contains(t, output, ".globals\n")
 		require.Contains(t, output, ".constants\n")
 		require.Contains(t, output, ".types\n")
 		require.Contains(t, output, ".handlers\n")
 
 		codeIdx := strings.Index(output, ".code")
 		localsIdx := strings.Index(output, ".locals")
+		globalsIdx := strings.Index(output, ".globals")
 		constantsIdx := strings.Index(output, ".constants")
 		typesIdx := strings.Index(output, ".types")
 		handlersIdx := strings.Index(output, ".handlers")
 		require.True(t, codeIdx < localsIdx)
-		require.True(t, localsIdx < constantsIdx)
+		require.True(t, localsIdx < globalsIdx)
+		require.True(t, globalsIdx < constantsIdx)
 		require.True(t, constantsIdx < typesIdx)
 		require.True(t, typesIdx < handlersIdx)
 	})
