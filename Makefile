@@ -89,9 +89,9 @@ benchmark-pr:
 		go test -run='^$$' -bench='^BenchmarkNew$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
 		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^(Empty|Nop|Stack|Local|Global|I64Mul|F64Add)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
 		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^I32Add$$/^Straight$$/^(Threaded|JITWarm)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
-		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^Branch$$/^Taken$$/^Threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
+		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^Branch$$/^(Taken|NotTaken)$$/^Threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
 		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^Call$$/^Direct$$/^Threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
-		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^Array$$/^Get$$/^Threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
+		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^Array$$/^(Get|Set)$$/^Threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
 		go test -run='^$$' -bench='^BenchmarkInterpreter_Reset$$/^(Scalar|Heap)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
 		go test -run='^$$' -bench='^BenchmarkPool_(Get|Put)$$/^Uncontended$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp \
 	)" || { status=$$?; printf '%s\n' "$$root"; exit $$status; }; \
@@ -107,8 +107,10 @@ benchmark-pr:
 		BenchmarkInterpreter_Run/I64Mul/Threaded \
 		BenchmarkInterpreter_Run/F64Add/Threaded \
 		BenchmarkInterpreter_Run/Branch/Taken/Threaded \
+		BenchmarkInterpreter_Run/Branch/NotTaken/Threaded \
 		BenchmarkInterpreter_Run/Call/Direct/Threaded \
 		BenchmarkInterpreter_Run/Array/Get/Threaded \
+		BenchmarkInterpreter_Run/Array/Set/Threaded \
 		BenchmarkInterpreter_Reset/Scalar \
 		BenchmarkInterpreter_Reset/Heap \
 		BenchmarkPool_Get/Uncontended \
