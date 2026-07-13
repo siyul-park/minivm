@@ -261,10 +261,18 @@ func TestCompiler_Compile(t *testing.T) {
 				program.WithGlobals(types.TypeRef))
 			i := New(prog, WithThreshold(-1))
 			defer i.Close()
-			setGlobalConstant(t, i, 0, 0)
+			{
+				value := i.constants[0]
+				i.retain(value.Ref())
+				require.NoError(t, i.SetGlobal(0, value))
+			}
 			entry, closeCompiler := compileNative(t, i, anchor{}, true)
 			defer closeCompiler()
-			setGlobalConstant(t, i, 0, 1)
+			{
+				value := i.constants[1]
+				i.retain(value.Ref())
+				require.NoError(t, i.SetGlobal(0, value))
+			}
 
 			assertNativeExit(t, i, entry, prof.ExitGuardShape, int(instr.ARRAY_LEN))
 		})
@@ -275,7 +283,11 @@ func TestCompiler_Compile(t *testing.T) {
 			}, program.WithConstants(types.TypedArray[int32]{1}), program.WithGlobals(types.TypeRef, types.TypeI32))
 			i := New(prog, WithThreshold(-1))
 			defer i.Close()
-			setGlobalConstant(t, i, 0, 0)
+			{
+				value := i.constants[0]
+				i.retain(value.Ref())
+				require.NoError(t, i.SetGlobal(0, value))
+			}
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
 			entry, closeCompiler := compileNative(t, i, anchor{}, true)
 			defer closeCompiler()
@@ -291,7 +303,11 @@ func TestCompiler_Compile(t *testing.T) {
 			}, program.WithConstants(value), program.WithGlobals(types.TypeRef, types.TypeI32))
 			i := New(prog, WithThreshold(-1))
 			defer i.Close()
-			setGlobalConstant(t, i, 0, 0)
+			{
+				value := i.constants[0]
+				i.retain(value.Ref())
+				require.NoError(t, i.SetGlobal(0, value))
+			}
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
 			entry, closeCompiler := compileNative(t, i, anchor{}, true)
 			defer closeCompiler()
@@ -666,13 +682,6 @@ func assertNativeExit(t *testing.T, i *Interpreter, entry native, reason prof.Ex
 	require.Less(t, id, len(entry.exits))
 	require.Equal(t, exitDescriptor{reason: reason, opcode: opcode}, entry.exits[id])
 	require.Equal(t, uint64(id+1), encoded)
-}
-
-func setGlobalConstant(t *testing.T, i *Interpreter, global, constant int) {
-	t.Helper()
-	value := i.constants[constant]
-	i.retain(value.Ref())
-	require.NoError(t, i.SetGlobal(global, value))
 }
 
 func TestArm64Lowerer_QueuesEachState(t *testing.T) {
