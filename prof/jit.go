@@ -203,6 +203,9 @@ func (c *Collector) RegisterExit(
 	reason ExitReason,
 	opcode int,
 ) *Counter {
+	if opcode < 0 || opcode > 255 {
+		opcode = OpcodeNone
+	}
 	key := exitKey{
 		entryKey: entryKey{fn: fn, ip: ip, kind: kind, frontend: frontend},
 		reason:   reason,
