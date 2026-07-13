@@ -2,6 +2,7 @@ coverage-min ?= 72.8
 benchmark-pr-time ?= 100ms
 benchmark-time ?= 1s
 benchmark-count ?= 5
+GOIMPORTS ?= goimports
 -include .env
 
 PROJECT = $(shell basename -s .git $(shell git config --get remote.origin.url))
@@ -57,8 +58,9 @@ check-tidy:
 	@go mod tidy -diff
 
 check-fmt:
+	@command -v $(GOIMPORTS) >/dev/null
 	@test -z "$$(gofmt -l .)"
-	@test -z "$$(goimports -l .)"
+	@test -z "$$($(GOIMPORTS) -l .)"
 
 check-arm64:
 	@GOOS=linux GOARCH=arm64 go build ./...
@@ -140,7 +142,8 @@ benchmark-compare:
 lint: fmt vet
 
 fmt:
-	@goimports -w .
+	@command -v $(GOIMPORTS) >/dev/null
+	@$(GOIMPORTS) -w .
 
 vet:
 	@go vet ./...
