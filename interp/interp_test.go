@@ -3394,17 +3394,74 @@ func TestWithTracer(t *testing.T) {
 }
 
 func TestWithProfiler(t *testing.T) {
-	p := prof.New()
-	prog := program.New([]instr.Instruction{
-		instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD),
-	})
-	i := New(prog, WithProfiler(p), WithTick(1))
-	require.NoError(t, i.Run(context.Background()))
-	require.NoError(t, i.Close())
+	t.Run("samples execution", func(t *testing.T) {
+		p := prof.New()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_ADD),
+		})
+		i := New(prog, WithProfiler(p), WithTick(1))
+		require.NoError(t, i.Run(context.Background()))
+		require.NoError(t, i.Close())
 
-	total, ok := p.Metric("vm_samples_total")
-	require.True(t, ok)
-	require.Equal(t, float64(3), total)
+		total, ok := p.Metric("vm_samples_total")
+		require.True(t, ok)
+		require.Equal(t, float64(3), total)
+	})
+
+	t.Run("records compilation and native entry", func(t *testing.T) {
+		p := prof.New()
+		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+		i := New(prog, WithProfiler(p), WithTick(1), WithThreshold(0))
+		require.NoError(t, i.Run(context.Background()))
+		if runtime.GOARCH == "arm64" {
+			i.Reset()
+			require.NoError(t, i.Run(context.Background()))
+		}
+		require.NoError(t, i.Close())
+
+		if runtime.GOARCH == "arm64" {
+			value, ok := p.Metric("vm_jit_compiles_total",
+				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+				prof.Label{Key: "trigger", Value: "hot"}, prof.Label{Key: "frontend", Value: "static"},
+				prof.Label{Key: "outcome", Value: "emitted"}, prof.Label{Key: "reason", Value: "none"})
+			require.True(t, ok)
+			require.Equal(t, float64(1), value)
+			value, ok = p.Metric("vm_jit_native_entries_total",
+				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+				prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "static"})
+			require.True(t, ok)
+			require.Equal(t, float64(2), value)
+		} else {
+			value, ok := p.Metric("vm_jit_compiles_total",
+				prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+				prof.Label{Key: "trigger", Value: "hot"}, prof.Label{Key: "frontend", Value: "none"},
+				prof.Label{Key: "outcome", Value: "rejected"}, prof.Label{Key: "reason", Value: "backend-unavailable"})
+			require.True(t, ok)
+			require.Equal(t, float64(1), value)
+		}
+	})
+
+	t.Run("records terminal native fallback", func(t *testing.T) {
+		if runtime.GOARCH != "arm64" {
+			t.Skip("native JIT is only available on arm64")
+		}
+		p := prof.New()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.F64_CONST, math.Float64bits(5.5)),
+			instr.New(instr.F64_CONST, math.Float64bits(2)),
+			instr.New(instr.F64_REM),
+		})
+		i := New(prog, WithProfiler(p), WithTick(1), WithThreshold(0))
+		require.NoError(t, i.Run(context.Background()))
+		require.NoError(t, i.Close())
+
+		value, ok := p.Metric("vm_jit_native_exits_total",
+			prof.Label{Key: "func", Value: "0"}, prof.Label{Key: "ip", Value: "0"},
+			prof.Label{Key: "kind", Value: "start"}, prof.Label{Key: "frontend", Value: "static"},
+			prof.Label{Key: "reason", Value: "terminal-op"}, prof.Label{Key: "opcode", Value: "f64.rem"})
+		require.True(t, ok)
+		require.Equal(t, float64(1), value)
+	})
 }
 
 func TestWithFrame(t *testing.T) {

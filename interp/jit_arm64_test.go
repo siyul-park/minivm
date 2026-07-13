@@ -13,6 +13,7 @@ import (
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/asm/arm64"
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -238,6 +239,17 @@ func TestNativeStackReserve(t *testing.T) {
 // TestCompiler_Compile covers compiler-selected static plans and verifies that
 // their native entries match threaded execution.
 func TestCompiler_Compile(t *testing.T) {
+	t.Run("reports missing input", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+		result := (&compiler{}).Compile(i, -1)
+		require.Nil(t, result.module)
+		require.Equal(t, prof.FrontendNone, result.frontend)
+		require.Equal(t, prof.CompileOutcomeEmpty, result.outcome)
+		require.Equal(t, prof.CompileReasonNoInput, result.reason)
+		require.NoError(t, result.err)
+	})
+
 	if runtime.GOARCH != "arm64" {
 		t.Skip("native JIT is only available on arm64")
 	}
@@ -278,8 +290,9 @@ func TestCompiler_Compile(t *testing.T) {
 		defer c.Close()
 
 		addr := int(i.constants[idx].Ref())
-		mod, err := c.Compile(i, addr)
-		require.NoError(t, err)
+		result := c.Compile(i, addr)
+		require.NoError(t, result.err)
+		mod := result.module
 		require.NotEmpty(t, mod.entries)
 		i.install(mod, false)
 
@@ -365,8 +378,9 @@ func TestCompiler_Compile(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 		addr := int(jit.constants[idx].Ref())
-		mod, err := c.Compile(jit, addr)
-		require.NoError(t, err)
+		result := c.Compile(jit, addr)
+		require.NoError(t, result.err)
+		mod := result.module
 		require.NotEmpty(t, mod.entries)
 		jit.install(mod, false)
 		require.NoError(t, jit.Run(context.Background()))
@@ -411,11 +425,11 @@ func TestArm64Lowerer_QueuesEachState(t *testing.T) {
 	lowerer := arm64Lowerer{}
 
 	ctx.values = []value{{kind: types.KindI32, raw: true, known: true, imm: 1}}
-	first, ok := lowerer.label(ctx, target, nil)
+	first, ok := lowerer.label(ctx, target, nil, prof.OpcodeNone)
 	require.True(t, ok)
 
 	ctx.values = []value{{kind: types.KindI32, raw: true, known: true, imm: 2}}
-	second, ok := lowerer.label(ctx, target, nil)
+	second, ok := lowerer.label(ctx, target, nil, prof.OpcodeNone)
 	require.True(t, ok)
 
 	require.NotEqual(t, first, second)

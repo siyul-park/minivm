@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 )
 
@@ -17,6 +18,7 @@ type Cache struct {
 	buffers []*asm.Buffer
 	hits    []atomic.Int64
 	state   []atomic.Int32
+	side    []atomic.Bool
 	refs    atomic.Int64
 
 	mu     sync.Mutex
@@ -35,6 +37,7 @@ func NewCache(prog *program.Program) *Cache {
 	c := &Cache{
 		hits:  make([]atomic.Int64, size),
 		state: make([]atomic.Int32, size),
+		side:  make([]atomic.Bool, size),
 	}
 	c.refs.Store(1)
 	c.modules.Store(&mods)
@@ -83,7 +86,10 @@ func (c *Cache) rearm(addr int) {
 	if addr < 0 || addr >= len(c.state) {
 		return
 	}
-	c.state[addr].CompareAndSwap(cacheReady, cacheCold)
+	c.side[addr].Store(true)
+	if !c.state[addr].CompareAndSwap(cacheReady, cacheCold) && c.state[addr].Load() == cacheReady {
+		c.side[addr].Store(false)
+	}
 }
 
 func (c *Cache) fail(addr int) {
@@ -128,5 +134,13 @@ func (c *Cache) release() error {
 func (c *Cache) ready(addr int) {
 	if addr >= 0 && addr < len(c.state) {
 		c.state[addr].Store(cacheReady)
+		c.side[addr].Store(false)
 	}
+}
+
+func (c *Cache) trigger(addr int) prof.Trigger {
+	if addr >= 0 && addr < len(c.side) && c.side[addr].Load() {
+		return prof.TriggerSideExit
+	}
+	return prof.TriggerHot
 }

@@ -27,6 +27,7 @@ type Interpreter struct {
 	cache    *Cache
 	profiler *prof.Profiler
 	samples  *prof.Collector
+	profile  bool
 	exits    map[anchor]func(*Interpreter)
 	stubs    []func(*Interpreter)
 	natives  []unsafe.Pointer
@@ -240,6 +241,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		cache:     opt.cache,
 		profiler:  opt.profiler,
 		samples:   samples,
+		profile:   opt.profiler != nil,
 		threshold: threshold,
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
@@ -770,58 +772,64 @@ func (i *Interpreter) Reset() {
 // only those paths hold the exact runtime state for their anchor.
 func (i *Interpreter) compile(addr int) error {
 	if i.cache != nil && !i.dynamic[addr] {
-		return i.shared(addr)
+		return i.shared(addr, i.cache.trigger(addr))
 	}
 	if i.compiler == nil {
 		compiler, err := newCompiler()
 		if err != nil {
 			i.samples.AddMetric("vm_jit_errors_total", 1)
+			i.recordCompile(addr, 0, prof.TriggerHot, compileResult{outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err})
 			return err
 		}
 		i.compiler = compiler
 	}
 	if i.compiler == nil {
+		i.recordCompile(addr, 0, prof.TriggerHot, compileResult{outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonBackendUnavailable})
 		return nil
 	}
 	i.samples.AddMetric("vm_jit_attempts_total", 1)
-	mod, err := i.compiler.Compile(i, addr)
-	if err != nil {
+	result := i.compiler.Compile(i, addr)
+	i.recordCompile(addr, 0, prof.TriggerHot, result)
+	if result.err != nil {
 		i.samples.AddMetric("vm_jit_errors_total", 1)
-		return err
+		return result.err
 	}
-	if mod == nil {
+	if result.module == nil {
 		return nil
 	}
-	i.install(mod, true)
+	i.install(result.module, true)
 	return nil
 }
 
-func (i *Interpreter) shared(addr int) error {
+func (i *Interpreter) shared(addr int, trigger prof.Trigger) error {
 	compiler, err := newCompiler()
 	if err != nil {
 		i.samples.AddMetric("vm_jit_errors_total", 1)
+		i.recordCompile(addr, 0, trigger, compileResult{outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err})
 		i.cache.ready(addr)
 		return err
 	}
 	if compiler == nil {
+		i.recordCompile(addr, 0, trigger, compileResult{outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonBackendUnavailable})
 		i.cache.ready(addr)
 		return nil
 	}
 	i.samples.AddMetric("vm_jit_attempts_total", 1)
-	mod, err := compiler.Compile(i, addr)
-	if err != nil {
+	result := compiler.Compile(i, addr)
+	i.recordCompile(addr, 0, trigger, result)
+	if result.err != nil {
 		i.samples.AddMetric("vm_jit_errors_total", 1)
 		_ = compiler.Close()
 		i.cache.ready(addr)
-		return err
+		return result.err
 	}
-	if mod == nil {
+	if result.module == nil {
 		_ = compiler.Close()
 		i.cache.fail(addr)
 		return nil
 	}
-	i.samples.AddMetric("vm_jit_emits_total", float64(len(mod.entries)))
-	i.samples.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
+	mod := result.module
+	i.account(mod)
 	var buf *asm.Buffer
 	if len(mod.entries) > 0 {
 		buf = compiler.buffer
@@ -837,8 +845,7 @@ func (i *Interpreter) shared(addr int) error {
 // shadowed threaded handler for guard fallback.
 func (i *Interpreter) install(mod *module, account bool) {
 	if account {
-		i.samples.AddMetric("vm_jit_emits_total", float64(len(mod.entries)))
-		i.samples.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
+		i.account(mod)
 	}
 	for a, entry := range mod.entries {
 		if a.addr < 0 || a.addr >= len(i.code) || a.ip < 0 || a.ip >= len(i.code[a.addr]) || entry.callable == nil {
@@ -859,13 +866,60 @@ func (i *Interpreter) install(mod *module, account bool) {
 		if entry.kind == entryFunction {
 			atomic.StorePointer(&i.natives[a.addr], entry.callable.Addr())
 		}
+		metrics := i.entryMetrics(a, entry)
 		if entry.kind == entryLoop {
-			i.code[a.addr][a.ip] = i.loop(entry.callable)
+			i.code[a.addr][a.ip] = i.loop(entry.callable, metrics)
 		} else if entry.kind == entryModule {
-			i.code[a.addr][a.ip] = i.start(a, entry.callable)
+			i.code[a.addr][a.ip] = i.start(a, entry.callable, metrics)
 		} else {
-			i.code[a.addr][a.ip] = i.call(a, entry.callable)
+			i.code[a.addr][a.ip] = i.call(a, entry.callable, metrics)
 		}
+	}
+}
+
+func (i *Interpreter) entryMetrics(a anchor, entry native) entryMetrics {
+	if !i.profile {
+		return entryMetrics{}
+	}
+	kind := profileEntryKind(entry.kind)
+	metrics := entryMetrics{
+		entry: i.samples.RegisterEntry(a.addr, a.ip, kind, entry.frontend),
+		yield: i.samples.RegisterYield(a.addr, a.ip, kind, entry.frontend),
+		exits: make([]*prof.Counter, len(entry.exits)),
+	}
+	for id, exit := range entry.exits {
+		metrics.exits[id] = i.samples.RegisterExit(a.addr, a.ip, kind, entry.frontend, exit.reason, exit.opcode)
+	}
+	return metrics
+}
+
+func (i *Interpreter) account(mod *module) {
+	i.samples.AddMetric("vm_jit_emits_total", float64(len(mod.entries)))
+	i.samples.AddMetric("vm_jit_bytes_total", float64(mod.bytes))
+	if !i.profile {
+		return
+	}
+	for a, entry := range mod.entries {
+		i.samples.RecordEmit(a.addr, a.ip, profileEntryKind(entry.kind), entry.frontend, entry.bytes)
+	}
+}
+
+func (i *Interpreter) recordCompile(addr, ip int, trigger prof.Trigger, result compileResult) {
+	if i.profile {
+		i.samples.RecordCompile(addr, ip, trigger, result.frontend, result.outcome, result.reason)
+	}
+}
+
+func profileEntryKind(kind entryKind) prof.EntryKind {
+	switch kind {
+	case entryModule:
+		return prof.EntryStart
+	case entryFunction:
+		return prof.EntryCall
+	case entryLoop:
+		return prof.EntryLoop
+	default:
+		return prof.EntryNone
 	}
 }
 
@@ -985,11 +1039,11 @@ func (i *Interpreter) observe(f *frame) error {
 			if h != f.ip {
 				continue
 			}
-			t, err := i.tracer.capture(i, anchor{addr: f.addr, ip: f.ip})
+			result, err := i.tracer.capture(i, anchor{addr: f.addr, ip: f.ip})
 			if err != nil {
 				return err
 			}
-			if t != nil {
+			if result.trace != nil {
 				if err := i.compile(f.addr); err != nil {
 					return err
 				}
@@ -1017,8 +1071,9 @@ func (i *Interpreter) sample(f *frame) {
 // this closure performs the frame teardown that RETURN would do in the threaded
 // interpreter, and on a trap it rebuilds the native call chain into real VM
 // frames before resuming threaded execution at the fallback IP.
-func (i *Interpreter) call(root anchor, callable asm.Callable) func(*Interpreter) {
+func (i *Interpreter) call(root anchor, callable asm.Callable, metrics entryMetrics) func(*Interpreter) {
 	return func(i *Interpreter) {
+		metrics.enter()
 		ctx := i.context()
 		i.fr.code = nil
 		i.fr.upvals = nil
@@ -1052,12 +1107,14 @@ func (i *Interpreter) call(root anchor, callable asm.Callable) func(*Interpreter
 		case trapOverflow:
 			panic(ErrFrameOverflow)
 		case trapYield:
+			metrics.suspend()
 			// A loop back-edge spent its budget. deopt left i.fr at the loop header;
 			// run coordination, then let the threaded Run loop continue from there.
 			if err := i.safepoint(); err != nil {
 				panic(err)
 			}
 		default:
+			metrics.exit(i.journal[journalExitID])
 			i.bailout(root)
 		}
 	}
@@ -1066,8 +1123,9 @@ func (i *Interpreter) call(root anchor, callable asm.Callable) func(*Interpreter
 // start wraps a native trace for top-level code. Unlike function entries,
 // top-level completion does not tear down its frame; it preserves the operand
 // stack and marks the module frame as exhausted so dispatch returns normally.
-func (i *Interpreter) start(root anchor, callable asm.Callable) func(*Interpreter) {
+func (i *Interpreter) start(root anchor, callable asm.Callable, metrics entryMetrics) func(*Interpreter) {
 	return func(i *Interpreter) {
+		metrics.enter()
 		ctx := i.context()
 		i.fr.code = nil
 		i.fr.upvals = nil
@@ -1088,10 +1146,12 @@ func (i *Interpreter) start(root anchor, callable asm.Callable) func(*Interprete
 		case trapOverflow:
 			panic(ErrFrameOverflow)
 		case trapYield:
+			metrics.suspend()
 			if err := i.safepoint(); err != nil {
 				panic(err)
 			}
 		default:
+			metrics.exit(i.journal[journalExitID])
 			i.bailout(root)
 		}
 	}
@@ -1103,8 +1163,9 @@ func (i *Interpreter) start(root anchor, callable asm.Callable) func(*Interprete
 // through a trap. A spent budget yields to the safepoint and the Run loop
 // re-enters native at the header; a guarded side exit or the loop-exit edge
 // leaves deopt with i.fr at the resume IP for threaded dispatch to continue.
-func (i *Interpreter) loop(callable asm.Callable) func(*Interpreter) {
+func (i *Interpreter) loop(callable asm.Callable, metrics entryMetrics) func(*Interpreter) {
 	return func(i *Interpreter) {
+		metrics.enter()
 		ctx := i.context()
 		// Decouple the loop's safepoint cadence from tick: a native iteration does
 		// the work of a whole loop body, so yielding every tick (1 under exact
@@ -1120,10 +1181,35 @@ func (i *Interpreter) loop(callable asm.Callable) func(*Interpreter) {
 		case trapOverflow:
 			panic(ErrFrameOverflow)
 		case trapYield:
+			metrics.suspend()
 			if err := i.safepoint(); err != nil {
 				panic(err)
 			}
+		case trapFallback:
+			metrics.exit(i.journal[journalExitID])
 		}
+	}
+}
+
+func (m entryMetrics) exit(encoded uint64) {
+	if encoded == 0 {
+		return
+	}
+	id := int(encoded - 1)
+	if id >= 0 && id < len(m.exits) {
+		m.exits[id].Inc()
+	}
+}
+
+func (m entryMetrics) enter() {
+	if m.entry != nil {
+		m.entry.Inc()
+	}
+}
+
+func (m entryMetrics) suspend() {
+	if m.yield != nil {
+		m.yield.Inc()
 	}
 }
 
@@ -1146,13 +1232,14 @@ func (i *Interpreter) exit(root anchor) {
 		return
 	}
 	i.samples.AddMetric("vm_jit_attempts_total", 1)
-	mod, err := i.compiler.Compile(i, root.addr)
-	if err != nil {
+	result := i.compiler.Compile(i, root.addr)
+	i.recordCompile(root.addr, root.ip, prof.TriggerSideExit, result)
+	if result.err != nil {
 		i.samples.AddMetric("vm_jit_errors_total", 1)
-		panic(err)
+		panic(result.err)
 	}
-	if mod != nil {
-		i.install(mod, true)
+	if result.module != nil {
+		i.install(result.module, true)
 	}
 }
 
@@ -1271,6 +1358,7 @@ func (i *Interpreter) context() unsafe.Pointer {
 	i.journal[journalDepth] = 0
 	i.journal[journalCap] = uint64(min(len(i.frames)-i.fp, nativeFrameLimit))
 	i.journal[journalTrap] = trapNone
+	i.journal[journalExitID] = 0
 	i.journal[journalBudget] = uint64(i.tick)
 	i.journal[journalActive] = 0
 	return unsafe.Pointer(&i.journal[0])

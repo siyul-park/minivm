@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -37,6 +38,45 @@ func TestNewTracer(t *testing.T) {
 }
 
 func TestTracer_Capture(t *testing.T) {
+	t.Run("reports one published attempt only when profiling is explicit", func(t *testing.T) {
+		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
+
+		local := prof.NewCollector()
+		plain := New(prog, WithLocal(local), WithThreshold(-1))
+		defer plain.Close()
+		result, err := plain.tracer.capture(plain, anchor{})
+		require.NoError(t, err)
+		require.NotNil(t, result.trace)
+		require.Equal(t, prof.CaptureOutcomePublished, result.outcome)
+		_, ok := local.Metric("vm_jit_trace_captures_total",
+			prof.Label{Key: "func", Value: "0"},
+			prof.Label{Key: "ip", Value: "0"},
+			prof.Label{Key: "outcome", Value: "published"},
+			prof.Label{Key: "reason", Value: "none"},
+		)
+		require.False(t, ok)
+
+		metrics := prof.New()
+		profiled := New(prog, WithProfiler(metrics), WithThreshold(-1))
+		result, err = profiled.tracer.capture(profiled, anchor{})
+		require.NoError(t, err)
+		require.NotNil(t, result.trace)
+		require.Equal(t, prof.CaptureOutcomePublished, result.outcome)
+		cached, err := profiled.tracer.capture(profiled, anchor{})
+		require.NoError(t, err)
+		require.NotNil(t, cached.trace)
+		require.Equal(t, prof.CaptureOutcomeNone, cached.outcome)
+		require.NoError(t, profiled.Close())
+		value, ok := metrics.Metric("vm_jit_trace_captures_total",
+			prof.Label{Key: "func", Value: "0"},
+			prof.Label{Key: "ip", Value: "0"},
+			prof.Label{Key: "outcome", Value: "published"},
+			prof.Label{Key: "reason", Value: "none"},
+		)
+		require.True(t, ok)
+		require.Equal(t, float64(1), value)
+	})
+
 	t.Run("records top-level fallthrough as completed", func(t *testing.T) {
 		tracer := NewTracer()
 		prog := program.New([]instr.Instruction{
@@ -45,9 +85,10 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, WithTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		tr, err := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
+		result, err := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
 		require.NoError(t, err)
-		require.NotNil(t, tr)
+		require.NotNil(t, result.trace)
+		tr := result.trace
 		require.Equal(t, completed, tr.kind)
 		require.NotEmpty(t, tr.ops)
 		require.Equal(t, instr.I32_CONST, tr.ops[len(tr.ops)-1].op)
@@ -64,9 +105,10 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, WithTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		tr, err := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
+		result, err := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
 		require.NoError(t, err)
-		require.NotNil(t, tr)
+		require.NotNil(t, result.trace)
+		tr := result.trace
 		require.Equal(t, returned, tr.kind)
 		require.NotEmpty(t, tr.ops)
 		require.Equal(t, instr.YIELD, tr.ops[len(tr.ops)-1].op)
@@ -81,8 +123,12 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(program.New(code), WithTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		tr, err := tracer.capture(i, anchor{addr: 0, ip: 0})
+		result, err := tracer.capture(i, anchor{addr: 0, ip: 0})
 		require.NoError(t, err)
+		require.NotNil(t, result.trace)
+		require.Equal(t, prof.CaptureOutcomePartial, result.outcome)
+		require.Equal(t, prof.CaptureReasonOpLimit, result.reason)
+		tr := result.trace
 		require.Equal(t, partial, tr.kind)
 		require.Len(t, tr.ops, opLimit+1)
 		require.True(t, tr.ops[len(tr.ops)-1].cut)
@@ -103,8 +149,10 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, WithTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		tr, err := tracer.capture(i, anchor{addr: 0, ip: 0})
+		result, err := tracer.capture(i, anchor{addr: 0, ip: 0})
 		require.NoError(t, err)
+		require.NotNil(t, result.trace)
+		tr := result.trace
 		require.Equal(t, partial, tr.kind)
 		require.Len(t, tr.ops, 5)
 		require.Equal(t, instr.BR, tr.ops[len(tr.ops)-2].op)
@@ -237,7 +285,12 @@ func TestTracer_Capture(t *testing.T) {
 		for range attemptLimit + 1 {
 			tr, err := tracer.capture(i, anchor{})
 			require.NoError(t, err)
-			require.Nil(t, tr)
+			require.Nil(t, tr.trace)
+			require.Equal(t, prof.CaptureOutcomeRejected, tr.outcome)
+			if tr.reason == prof.CaptureReasonAttemptLimit {
+				continue
+			}
+			require.Equal(t, prof.CaptureReasonUnsupportedOp, tr.reason)
 		}
 
 		tracer.mu.Lock()

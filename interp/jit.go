@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/siyul-park/minivm/asm"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/types"
 )
 
@@ -25,6 +26,28 @@ type module struct {
 type native struct {
 	callable asm.Callable
 	kind     entryKind
+	frontend prof.Frontend
+	bytes    int
+	exits    []exitDescriptor
+}
+
+type exitDescriptor struct {
+	reason prof.ExitReason
+	opcode int
+}
+
+type entryMetrics struct {
+	entry *prof.Counter
+	yield *prof.Counter
+	exits []*prof.Counter
+}
+
+type compileResult struct {
+	module   *module
+	frontend prof.Frontend
+	outcome  prof.CompileOutcome
+	reason   prof.CompileReason
+	err      error
 }
 
 // lowering carries symbolic values, inlined activations, deferred blocks, and
@@ -42,12 +65,13 @@ type lowering struct {
 	head      asm.Label
 	back      asm.Label
 
-	values    []value
-	frames    []activation
-	work      []work
-	scheduled int
-	exits     []sideExit
-	saved     []value
+	values      []value
+	frames      []activation
+	work        []work
+	scheduled   int
+	exits       []sideExit
+	descriptors []exitDescriptor
+	saved       []value
 
 	addr    int
 	returns int
@@ -108,6 +132,9 @@ type sideExit struct {
 	frames []activation
 	resume int
 	retain int
+	reason prof.ExitReason
+	opcode int
+	id     int
 }
 
 const (
@@ -138,6 +165,7 @@ const (
 	journalUpvals         // &i.fr.upvals[0] or 0; read/write for closure body fast paths
 	journalHeap           // &i.heap[0]; read-only for heap object fast paths
 	journalNatives        // &i.natives[0]; atomic per-function entry slots
+	journalExitID         // fallback descriptor ID + 1; zero means none
 	journalHead           // first frame record cell
 )
 
@@ -212,63 +240,73 @@ func (c *compiler) newLowering(input *compileInput, arch asm.Arch) *lowering {
 	return ctx
 }
 
-func (c *compiler) publish(mod *module, a anchor, ctx *lowering, arch asm.Arch, n native) (bool, error) {
+func (c *compiler) publish(mod *module, a anchor, ctx *lowering, arch asm.Arch, n native) (prof.CompileReason, error) {
 	code, err := ctx.assembler.Build()
 	if err != nil {
-		if errors.Is(err, asm.ErrNoRegistersAvailable) || errors.Is(err, asm.ErrBranchOutOfRange) {
-			return false, nil
+		if errors.Is(err, asm.ErrNoRegistersAvailable) {
+			return prof.CompileReasonRegisterPressure, nil
 		}
-		return false, err
+		if errors.Is(err, asm.ErrBranchOutOfRange) {
+			return prof.CompileReasonBranchRange, nil
+		}
+		return prof.CompileReasonError, err
 	}
 	linked, err := asm.Link(c.buffer, arch, []*asm.Code{code}, nil)
 	if err != nil {
 		if errors.Is(err, asm.ErrBranchOutOfRange) {
-			return false, nil
+			return prof.CompileReasonBranchRange, nil
 		}
-		return false, err
+		return prof.CompileReasonError, err
 	}
 	n.callable = linked[0].Callable
+	n.bytes = len(code.Bytes)
 	mod.entries[a] = n
 	mod.bytes += len(code.Bytes)
-	return true, nil
+	return prof.CompileReasonNone, nil
 }
 
 // Compile selects and lowers the first frontend that emits native code.
-func (c *compiler) Compile(i *Interpreter, addr int) (*module, error) {
+func (c *compiler) Compile(i *Interpreter, addr int) compileResult {
 	input, ok := newCompileInput(i, addr)
 	if !ok {
-		return nil, nil
+		return compileResult{outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoInput}
 	}
-	frontends := [...]func(*compileInput) ([]plan, error){staticPlan, tracePlan}
+	frontends := [...]struct {
+		kind prof.Frontend
+		plan func(*compileInput) ([]plan, error)
+	}{{prof.FrontendStatic, staticPlan}, {prof.FrontendTrace, tracePlan}}
+	result := compileResult{outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan}
 	for _, frontend := range frontends {
-		plans, err := frontend(input)
-
+		plans, err := frontend.plan(input)
 		if err != nil {
-			return nil, err
+			return compileResult{frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
 		}
+		result = compileResult{frontend: frontend.kind, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan}
 		mod := &module{entries: map[anchor]native{}}
 		for _, plan := range plans {
 			if !plan.valid() {
+				result = compileResult{frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonInvalidPlan}
 				continue
 			}
-			ok, err := c.compile(input, plan, mod)
+			reason, err := c.compile(input, plan, mod, frontend.kind)
 			if err != nil {
-				return nil, err
+				return compileResult{frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
 			}
-			if !ok {
+			if reason != prof.CompileReasonNone {
+				result = compileResult{frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: reason}
 				continue
 			}
 		}
 		if len(mod.entries) > 0 {
-			return mod, nil
+			return compileResult{module: mod, frontend: frontend.kind, outcome: prof.CompileOutcomeEmitted}
 		}
 	}
-	return &module{entries: map[anchor]native{}}, nil
+	return result
 }
 
-func (c *compiler) compile(input *compileInput, plan plan, mod *module) (bool, error) {
+func (c *compiler) compile(input *compileInput, plan plan, mod *module, frontend prof.Frontend) (prof.CompileReason, error) {
 	if len(c.scratchRegs) < scratchCount {
-		return false, nil
+		return prof.CompileReasonLoweringRejected, nil
 	}
 	arch := c.arch
 	if plan.noSpill {
@@ -276,9 +314,10 @@ func (c *compiler) compile(input *compileInput, plan plan, mod *module) (bool, e
 	}
 	ctx := c.newLowering(input, arch)
 	if !lower(ctx, plan) {
-		return false, nil
+		return prof.CompileReasonLoweringRejected, nil
 	}
-	return c.publish(mod, plan.anchor, ctx, c.arch, native{kind: plan.kind})
+	exits := append([]exitDescriptor(nil), ctx.descriptors...)
+	return c.publish(mod, plan.anchor, ctx, c.arch, native{kind: plan.kind, frontend: frontend, exits: exits})
 }
 
 // noSpillArch wraps an asm.Arch to force Build to reject spilling instead of
@@ -336,13 +375,18 @@ func (ctx *lowering) sp() int {
 // queueExit records a cold fallback after the caller has materialized VM stack state.
 // values may be nil to snapshot the current symbolic stack; retain is applied only
 // on the cold path before returning to threaded execution.
-func (ctx *lowering) queueExit(values []value, resume, retain int) asm.Label {
+func (ctx *lowering) queueExit(values []value, resume, retain int, reason prof.ExitReason, opcode int) asm.Label {
 	if values != nil {
 		ctx.values = append(ctx.values[:0], values...)
 	}
 	label := ctx.assembler.Label()
 	stack, frames := ctx.snapshot()
-	ctx.exits = append(ctx.exits, sideExit{label: label, values: stack, frames: frames, resume: resume, retain: retain})
+	id := len(ctx.descriptors)
+	ctx.descriptors = append(ctx.descriptors, exitDescriptor{reason: reason, opcode: opcode})
+	ctx.exits = append(ctx.exits, sideExit{
+		label: label, values: stack, frames: frames, resume: resume, retain: retain,
+		reason: reason, opcode: opcode, id: id,
+	})
 	return label
 }
 
