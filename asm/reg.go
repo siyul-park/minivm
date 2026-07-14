@@ -68,15 +68,6 @@ func NewVReg(id int32, typ RegType, w RegWidth) VReg {
 	return VReg{id: id, typ: typ, width: w}
 }
 
-// NewRegMask builds a mask from a list of physical register IDs.
-func NewRegMask(ids []uint8) RegMask {
-	var m RegMask
-	for _, id := range ids {
-		m |= 1 << id
-	}
-	return m
-}
-
 // NewRegInfo describes an architecture's register banks and reserved IDs.
 func NewRegInfo(numInt, numFloat uint8, intReserved, fltReserved, scratch []uint8) RegInfo {
 	return RegInfo{
@@ -86,6 +77,15 @@ func NewRegInfo(numInt, numFloat uint8, intReserved, fltReserved, scratch []uint
 		FltReserved: NewRegMask(fltReserved),
 		Scratch:     NewRegMask(scratch),
 	}
+}
+
+// NewRegMask builds a mask from a list of physical register IDs.
+func NewRegMask(ids []uint8) RegMask {
+	var m RegMask
+	for _, id := range ids {
+		m |= 1 << id
+	}
+	return m
 }
 
 func (r PReg) ID() uint8       { return r.id }

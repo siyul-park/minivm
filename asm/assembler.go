@@ -57,11 +57,6 @@ func (a *Assembler) Label() Label {
 	return id
 }
 
-// Bind anchors a label at the current instruction index.
-func (a *Assembler) Bind(id Label) {
-	a.labels[id] = len(a.insts)
-}
-
 // Entry marks the current position as a named callable entry. The label is bound
 // to the current instruction index. Multiple entries allow one Code to expose
 // several callables at distinct offsets.
@@ -74,6 +69,11 @@ func (a *Assembler) Bind(id Label) {
 func (a *Assembler) Entry(id Label) {
 	a.Bind(id)
 	a.entries = append(a.entries, id)
+}
+
+// Bind anchors a label at the current instruction index.
+func (a *Assembler) Bind(id Label) {
+	a.labels[id] = len(a.insts)
 }
 
 // Pin forces v to occupy preg. A vreg can be pinned to only one preg; a
