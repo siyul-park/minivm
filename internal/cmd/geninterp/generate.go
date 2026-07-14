@@ -23,6 +23,10 @@ func generate() ([]output, error) {
 	if err != nil {
 		return nil, err
 	}
+	threaded, err = imports.Process("", threaded, nil)
+	if err != nil {
+		return nil, err
+	}
 	return []output{{path: "interp/threaded.go", data: threaded}}, nil
 }
 
@@ -44,7 +48,7 @@ func render(patterns []pattern) ([]byte, error) {
 	)
 	initialize(file)
 	compile(file)
-	return imports.Process("", []byte(file.GoString()), nil)
+	return []byte(file.GoString()), nil
 }
 
 func declare(file *jen.File) {

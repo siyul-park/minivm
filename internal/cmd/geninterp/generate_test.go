@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +34,21 @@ func TestGenerate(t *testing.T) {
 
 		require.NoError(t, os.WriteFile(generated.path, []byte("stale"), 0o644))
 		require.ErrorContains(t, generated.sync(true, &stdout), "is stale")
+
+		missing := output{path: filepath.Join(t.TempDir(), "missing.go")}
+		require.ErrorContains(t, missing.sync(true, &stdout), "read")
+
+		blocked := filepath.Join(t.TempDir(), "blocked")
+		require.NoError(t, os.WriteFile(blocked, nil, 0o644))
+		require.ErrorContains(t, (output{path: filepath.Join(blocked, "threaded.go")}).sync(false, &stdout), "create")
+
+		directory := output{path: t.TempDir(), data: []byte("generated")}
+		require.ErrorContains(t, directory.sync(false, &stdout), "write")
+
+		reader, writer := io.Pipe()
+		require.NoError(t, reader.Close())
+		require.ErrorContains(t, (output{path: filepath.Join(t.TempDir(), "threaded.go")}).sync(false, writer), "report")
+		require.NoError(t, writer.Close())
 	})
 	t.Run("crosses every pattern", func(t *testing.T) {
 		got := cross(
@@ -65,16 +81,17 @@ func TestGenerate(t *testing.T) {
 		require.Equal(t, catalog(), catalog())
 	})
 
-	t.Run("renders compose tables", func(t *testing.T) {
+	t.Run("renders source", func(t *testing.T) {
 		patterns := []pattern{
 			seq(op(instr.REF_NULL), op(instr.DROP)),
 			seq(op(instr.DUP), op(instr.DROP)),
 		}
-		table, err := fusions(patterns)
+		data, err := render(patterns)
 		require.NoError(t, err)
-		file := jen.NewFile("review")
-		file.Var().Id("fusions").Op("=").Add(table)
-		source := file.GoString()
+		source := string(data)
+		require.Contains(t, source, "type threader struct")
+		require.Contains(t, source, "func init()")
+		require.Contains(t, source, "func (c *threader) Compile")
 		require.Contains(t, source, "goto l0")
 		require.Contains(t, source, "l0:")
 		require.NotContains(t, source, "func (c *threader) compose")
@@ -178,11 +195,11 @@ func TestGenerate(t *testing.T) {
 	t.Run("maps every opcode once", func(t *testing.T) {
 		for code, emit := range lowerers {
 			op := instr.Opcode(code)
-			if instr.Valid(op) {
-				require.NotNil(t, emit, instr.TypeOf(op).Mnemonic)
-			} else {
+			if !instr.Valid(op) {
 				require.Nil(t, emit)
+				continue
 			}
+			require.NotNil(t, emit, instr.TypeOf(op).Mnemonic)
 		}
 	})
 
