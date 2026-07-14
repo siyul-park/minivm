@@ -70,13 +70,15 @@ func TestGenerate(t *testing.T) {
 			seq(op(instr.REF_NULL), op(instr.DROP)),
 			seq(op(instr.DUP), op(instr.DROP)),
 		}
-		data, err := render(patterns)
+		table, err := fusions(patterns)
 		require.NoError(t, err)
-		require.Contains(t, string(data), "goto l0")
-		require.Contains(t, string(data), "l0:")
-		require.NotContains(t, string(data), "func (c *threader) compose")
-		require.NotContains(t, string(data), "candidate0")
-
+		file := jen.NewFile("review")
+		file.Var().Id("fusions").Op("=").Add(table)
+		source := file.GoString()
+		require.Contains(t, source, "goto l0")
+		require.Contains(t, source, "l0:")
+		require.NotContains(t, source, "func (c *threader) compose")
+		require.NotContains(t, source, "candidate0")
 	})
 
 	t.Run("advances fusion by the first opcode width", func(t *testing.T) {
