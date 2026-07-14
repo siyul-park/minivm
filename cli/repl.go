@@ -17,6 +17,20 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// REPL evaluates one assembly instruction per iteration, rebuilding a
+// program from accumulated history and re-running it through a fresh
+// interpreter each step.
+type REPL struct {
+	in        io.Reader
+	out       io.Writer
+	fs        WriteFS
+	instrs    []instr.Instruction
+	codeLen   int // byte length of instr.Marshal(instrs); updated incrementally
+	constants []types.Value
+	types     []types.Type
+	debugger  *debug.Debugger // nil until first .break; breakpoint storage only
+}
+
 const prompt = "> "
 const blockPrompt = "... "
 const debugPrompt = "debug> "
@@ -71,20 +85,6 @@ Debug commands:
   .help               show this help
   .quit  /  .exit     exit the REPL
 `
-
-// REPL evaluates one assembly instruction per iteration, rebuilding a
-// program from accumulated history and re-running it through a fresh
-// interpreter each step.
-type REPL struct {
-	in        io.Reader
-	out       io.Writer
-	fs        WriteFS
-	instrs    []instr.Instruction
-	codeLen   int // byte length of instr.Marshal(instrs); updated incrementally
-	constants []types.Value
-	types     []types.Type
-	debugger  *debug.Debugger // nil until first .break; breakpoint storage only
-}
 
 // NewREPL returns a new REPL that reads from in and writes to out. fs
 // backs .load and .save; pass nil to disable those commands (callers
