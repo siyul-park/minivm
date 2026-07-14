@@ -9,20 +9,9 @@ import (
 	"strings"
 )
 
-var mnemonicMap map[string]Opcode
-
 const maxParseLineBytes = 1 << 20 // 1 MiB
 
-func init() {
-	mnemonicMap = make(map[string]Opcode)
-	for i := 0; i <= 0xFF; i++ {
-		op := Opcode(i)
-		t := TypeOf(op)
-		if t.Mnemonic != "" {
-			mnemonicMap[t.Mnemonic] = op
-		}
-	}
-}
+var mnemonicMap map[string]Opcode
 
 // ReadU8 returns v truncated to 8 bits.
 func ReadU8(v uint64) int {
@@ -238,4 +227,15 @@ func parseOperand(s string, width int) (uint64, error) {
 		return 0, fmt.Errorf("invalid integer %q: %w", s, err)
 	}
 	return uint64(v), nil
+}
+
+func init() {
+	mnemonicMap = make(map[string]Opcode)
+	for i := 0; i <= 0xFF; i++ {
+		op := Opcode(i)
+		t := TypeOf(op)
+		if t.Mnemonic != "" {
+			mnemonicMap[t.Mnemonic] = op
+		}
+	}
 }
