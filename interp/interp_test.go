@@ -2974,14 +2974,12 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("fused UPVAL_GET+CONST binop computes correctly for i32/i64/f32/f64 (interp-only)", func(t *testing.T) {
 		cases := []struct {
-			name    string
 			capture types.Type
 			body    func(cst uint64) []instr.Instruction
 			cst     uint64
 			want    types.Value
 		}{
 			{
-				name:    "i32",
 				capture: types.TypeI32,
 				body: func(cst uint64) []instr.Instruction {
 					return []instr.Instruction{instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, cst), instr.New(instr.I32_ADD), instr.New(instr.RETURN)}
@@ -2990,7 +2988,6 @@ func TestInterpreter_Run(t *testing.T) {
 				want: types.I32(8),
 			},
 			{
-				name:    "i64",
 				capture: types.TypeI64,
 				body: func(cst uint64) []instr.Instruction {
 					return []instr.Instruction{instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_CONST, cst), instr.New(instr.I64_ADD), instr.New(instr.RETURN)}
@@ -2999,7 +2996,6 @@ func TestInterpreter_Run(t *testing.T) {
 				want: types.I64(8),
 			},
 			{
-				name:    "f32",
 				capture: types.TypeF32,
 				body: func(cst uint64) []instr.Instruction {
 					return []instr.Instruction{instr.New(instr.UPVAL_GET, 0), instr.New(instr.F32_CONST, cst), instr.New(instr.F32_ADD), instr.New(instr.RETURN)}
@@ -3008,7 +3004,6 @@ func TestInterpreter_Run(t *testing.T) {
 				want: types.F32(8),
 			},
 			{
-				name:    "f64",
 				capture: types.TypeF64,
 				body: func(cst uint64) []instr.Instruction {
 					return []instr.Instruction{instr.New(instr.UPVAL_GET, 0), instr.New(instr.F64_CONST, cst), instr.New(instr.F64_ADD), instr.New(instr.RETURN)}
@@ -3018,7 +3013,7 @@ func TestInterpreter_Run(t *testing.T) {
 			},
 		}
 		for _, tc := range cases {
-			t.Run(tc.name, func(t *testing.T) {
+			t.Run(tc.capture.String(), func(t *testing.T) {
 				fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{tc.capture}}).
 					WithCaptures(tc.capture).Emit(tc.body(tc.cst)...).MustBuild()
 				var seed instr.Instruction
@@ -5439,49 +5434,42 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		for _, tt := range []struct {
-			name  string
 			typ   types.Type
 			value types.Value
 			array types.Value
 		}{
 			{
-				name:  "i1",
 				typ:   types.TypeI1Array,
 				value: types.I1(true),
 				array: types.TypedArray[bool](make([]bool, 8)),
 			},
 			{
-				name:  "i8",
 				typ:   types.TypeI8Array,
 				value: types.I8(-3),
 				array: types.TypedArray[int8](make([]int8, 8)),
 			},
 			{
-				name:  "i32",
 				typ:   types.TypeI32Array,
 				value: types.I32(-33),
 				array: types.TypedArray[int32](make([]int32, 8)),
 			},
 			{
-				name:  "i64",
 				typ:   types.TypeI64Array,
 				value: types.I64(-55),
 				array: types.TypedArray[int64](make([]int64, 8)),
 			},
 			{
-				name:  "f32",
 				typ:   types.TypeF32Array,
 				value: types.F32(1.25),
 				array: types.TypedArray[float32](make([]float32, 8)),
 			},
 			{
-				name:  "f64",
 				typ:   types.TypeF64Array,
 				value: types.F64(2.5),
 				array: types.TypedArray[float64](make([]float64, 8)),
 			},
 		} {
-			t.Run(tt.name, func(t *testing.T) {
+			t.Run(tt.typ.String(), func(t *testing.T) {
 				eval := types.NewFunctionBuilder(nil).
 					WithParams(tt.typ).
 					WithReturns(types.TypeI32)
@@ -5554,20 +5542,19 @@ func TestWithThreshold(t *testing.T) {
 			types.NewStructField(types.TypeF64),
 		)
 		for _, tt := range []struct {
-			name  string
 			idx   uint32
 			typ   types.Type
 			value types.Boxed
 			want  types.Value
 		}{
-			{name: "i1", idx: 0, typ: types.TypeI1, value: types.BoxI1(true), want: types.I1(true)},
-			{name: "i8", idx: 1, typ: types.TypeI8, value: types.BoxI8(-3), want: types.I8(-3)},
-			{name: "i32", idx: 2, typ: types.TypeI32, value: types.BoxI32(-33), want: types.I32(-33)},
-			{name: "i64", idx: 3, typ: types.TypeI64, value: types.BoxI64(-55), want: types.I64(-55)},
-			{name: "f32", idx: 4, typ: types.TypeF32, value: types.BoxF32(1.25), want: types.F32(1.25)},
-			{name: "f64", idx: 5, typ: types.TypeF64, value: types.BoxF64(2.5), want: types.F64(2.5)},
+			{idx: 0, typ: types.TypeI1, value: types.BoxI1(true), want: types.I1(true)},
+			{idx: 1, typ: types.TypeI8, value: types.BoxI8(-3), want: types.I8(-3)},
+			{idx: 2, typ: types.TypeI32, value: types.BoxI32(-33), want: types.I32(-33)},
+			{idx: 3, typ: types.TypeI64, value: types.BoxI64(-55), want: types.I64(-55)},
+			{idx: 4, typ: types.TypeF32, value: types.BoxF32(1.25), want: types.F32(1.25)},
+			{idx: 5, typ: types.TypeF64, value: types.BoxF64(2.5), want: types.F64(2.5)},
 		} {
-			t.Run(tt.name, func(t *testing.T) {
+			t.Run(tt.typ.String(), func(t *testing.T) {
 				eval := types.NewFunctionBuilder(nil).
 					WithParams(typ).
 					WithReturns(tt.typ)
@@ -5612,19 +5599,18 @@ func TestWithThreshold(t *testing.T) {
 			types.NewStructField(types.TypeF64),
 		)
 		for _, tt := range []struct {
-			name  string
 			idx   uint32
 			value types.Value
 			want  types.Boxed
 		}{
-			{name: "i1", idx: 0, value: types.I1(true), want: types.BoxI1(true)},
-			{name: "i8", idx: 1, value: types.I8(-3), want: types.BoxI8(-3)},
-			{name: "i32", idx: 2, value: types.I32(-33), want: types.BoxI32(-33)},
-			{name: "i64", idx: 3, value: types.I64(-55), want: types.BoxI64(-55)},
-			{name: "f32", idx: 4, value: types.F32(1.25), want: types.BoxF32(1.25)},
-			{name: "f64", idx: 5, value: types.F64(2.5), want: types.BoxF64(2.5)},
+			{idx: 0, value: types.I1(true), want: types.BoxI1(true)},
+			{idx: 1, value: types.I8(-3), want: types.BoxI8(-3)},
+			{idx: 2, value: types.I32(-33), want: types.BoxI32(-33)},
+			{idx: 3, value: types.I64(-55), want: types.BoxI64(-55)},
+			{idx: 4, value: types.F32(1.25), want: types.BoxF32(1.25)},
+			{idx: 5, value: types.F64(2.5), want: types.BoxF64(2.5)},
 		} {
-			t.Run(tt.name, func(t *testing.T) {
+			t.Run(tt.value.Type().String(), func(t *testing.T) {
 				eval := types.NewFunctionBuilder(nil).
 					WithParams(typ).
 					WithReturns(types.TypeI32)
@@ -6025,7 +6011,6 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		for _, tt := range []struct {
-			name  string
 			typ   types.Type
 			cnst  instr.Instruction
 			div   instr.Opcode
@@ -6033,7 +6018,6 @@ func TestWithThreshold(t *testing.T) {
 			want  types.Value
 		}{
 			{
-				name:  "i32",
 				typ:   types.TypeI32,
 				cnst:  instr.New(instr.I32_CONST, 3),
 				div:   instr.I32_DIV_S,
@@ -6041,7 +6025,6 @@ func TestWithThreshold(t *testing.T) {
 				want:  types.I32(30),
 			},
 			{
-				name:  "i64",
 				typ:   types.TypeI64,
 				cnst:  instr.New(instr.I64_CONST, 3),
 				div:   instr.I64_DIV_S,
@@ -6049,7 +6032,7 @@ func TestWithThreshold(t *testing.T) {
 				want:  types.I64(30),
 			},
 		} {
-			t.Run(tt.name, func(t *testing.T) {
+			t.Run(tt.typ.String(), func(t *testing.T) {
 				eval := types.NewFunctionBuilder(nil).
 					WithParams(tt.typ).
 					WithReturns(tt.typ)
@@ -6084,7 +6067,6 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		for _, tt := range []struct {
-			name  string
 			typ   types.Type
 			div   instr.Opcode
 			left  types.Value
@@ -6095,7 +6077,6 @@ func TestWithThreshold(t *testing.T) {
 			zero  types.Value
 		}{
 			{
-				name:  "i32",
 				typ:   types.TypeI32,
 				div:   instr.I32_DIV_S,
 				left:  types.I32(90),
@@ -6106,7 +6087,6 @@ func TestWithThreshold(t *testing.T) {
 				zero:  types.I32(0),
 			},
 			{
-				name:  "i64",
 				typ:   types.TypeI64,
 				div:   instr.I64_DIV_S,
 				left:  types.I64(90),
@@ -6117,7 +6097,7 @@ func TestWithThreshold(t *testing.T) {
 				zero:  types.I64(0),
 			},
 		} {
-			t.Run(tt.name, func(t *testing.T) {
+			t.Run(tt.typ.String(), func(t *testing.T) {
 				eval := types.NewFunctionBuilder(nil).
 					WithParams(tt.typ, tt.typ).
 					WithReturns(tt.typ)
