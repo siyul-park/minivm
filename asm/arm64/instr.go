@@ -196,6 +196,24 @@ const (
 	OpDMB
 )
 
+const (
+	CondEQ uint8 = 0x0
+	CondNE uint8 = 0x1
+	CondCS uint8 = 0x2
+	CondCC uint8 = 0x3
+	CondMI uint8 = 0x4
+	CondPL uint8 = 0x5
+	CondVS uint8 = 0x6
+	CondVC uint8 = 0x7
+	CondHI uint8 = 0x8
+	CondLS uint8 = 0x9
+	CondGE uint8 = 0xA
+	CondLT uint8 = 0xB
+	CondGT uint8 = 0xC
+	CondLE uint8 = 0xD
+	CondAL uint8 = 0xE
+)
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -213,19 +231,6 @@ func newInst(op Op, dst asm.Operand, srcs ...asm.Operand) asm.Instruction {
 	}
 	return asm.Instruction{Op: uint16(op), Dst: dst, Src1: src1, Src2: src2, Src3: src3}
 }
-
-func regOperand(reg asm.Reg) asm.Operand {
-	switch r := reg.(type) {
-	case asm.PReg:
-		return asm.P(r)
-	case asm.VReg:
-		return asm.V(r)
-	default:
-		panic("unsupported register type")
-	}
-}
-
-func imm(v int64) asm.Operand { return asm.ImmOperand{Value: v} }
 
 func newReg3(op Op, dst, src1, src2 asm.Reg) asm.Instruction {
 	return newInst(op, regOperand(dst), regOperand(src1), regOperand(src2))
@@ -715,20 +720,15 @@ func ISB() asm.Instruction { return newInst(OpISB, nil) }
 func DSB() asm.Instruction { return newInst(OpDSB, nil) }
 func DMB() asm.Instruction { return newInst(OpDMB, nil) }
 
-const (
-	CondEQ uint8 = 0x0
-	CondNE uint8 = 0x1
-	CondCS uint8 = 0x2
-	CondCC uint8 = 0x3
-	CondMI uint8 = 0x4
-	CondPL uint8 = 0x5
-	CondVS uint8 = 0x6
-	CondVC uint8 = 0x7
-	CondHI uint8 = 0x8
-	CondLS uint8 = 0x9
-	CondGE uint8 = 0xA
-	CondLT uint8 = 0xB
-	CondGT uint8 = 0xC
-	CondLE uint8 = 0xD
-	CondAL uint8 = 0xE
-)
+func regOperand(reg asm.Reg) asm.Operand {
+	switch r := reg.(type) {
+	case asm.PReg:
+		return asm.P(r)
+	case asm.VReg:
+		return asm.V(r)
+	default:
+		panic("unsupported register type")
+	}
+}
+
+func imm(v int64) asm.Operand { return asm.ImmOperand{Value: v} }
