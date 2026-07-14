@@ -31,72 +31,142 @@ minivm currently provides ARM64 JIT support only. On ARM64, the default `interp.
 ## Running Benchmarks
 
 ```bash
-# Full benchmark suite
-make benchmark
+# Full canonical package and VM-kernel suite
+make benchmark-core
 
-# Fusion migration and ref-ownership cases (ten samples for benchstat)
-make benchmark-fusion
+# Pull-request-sized benchmark suite
+make benchmark-pr
 
-# Pure threaded interpreter only
-go test -run="-" -bench="BenchmarkInterpreter_Run/threaded" -benchmem ./interp/...
-
-# Cross-runtime comparison
-cd benchmarks && go test -run="-" -bench="BenchmarkFib35" -benchmem -benchtime=2s ./...
-
-# ARM64 JIT coverage workloads
-cd benchmarks && go test -run="^$" -bench="BenchmarkJITIssue60" -benchmem -benchtime=2s ./...
+# Cross-runtime comparison, matching the table below
+cd benchmarks
+go test -tags=compare -run='^$' -bench='.' -benchmem -benchtime=300ms -count=3 ./...
 ```
+
+The cross-runtime command runs each benchmark three times. The tables below report the median `ns/op`, `B/op`, and `allocs/op` for every workload/runtime combination.
 
 ## Summary
 
-Main findings:
+The canonical cross-runtime suite shows both the strengths and the current limits of minivm:
 
-- minivm's threaded interpreter is allocation-light and faster than the compared script VMs on recursive numeric workloads
-- the ARM64 JIT significantly improves hot recursive and loop-heavy code
-- on `fib(35)`, the JIT improves minivm by about **13x** over the threaded interpreter
-- the JIT brings minivm close to native-code runtimes such as wazero while preserving boxed values and deoptimization support
-- most scalar instructions in the pure threaded interpreter dispatch in roughly **11-13 ns/op** with zero allocations
+- `RecursiveFib(35)` completes in **47.05 ms** with `minivm/default`, versus **44.15 ms** for wazero and **19.13 ms** for native Go. The minivm run is zero-allocation after warmup and is about **24-114x faster** than the script VMs measured here.
+- `IterativeFib(30)` and `BranchTree(96)` put the adaptive default tier within about **1.46x** and **1.42x** of wazero, respectively, while remaining allocation-free.
+- `TypedArraySum(256)` is allocation-free in all minivm modes, but `minivm/default` remains about **4.23x** slower than wazero.
+- `Sieve(256)` favors the pure threaded interpreter: **16.33 us** versus about **40 us** for `default` and eager `jit`. The benchmark records the gap but does not isolate whether it comes from profiling, fallback, or unsupported paths.
+- `IndirectRecursiveFib(20)` is a clear weak point: `minivm/default` is about **13.5x** slower than wazero despite remaining allocation-free.
+- `AllocationGraph(128)` exposes object-management cost. minivm is faster than Tengo, Goja, and Yaegi, but slower than gpython and gopher-lua in this fixture.
 
-## Cross-Runtime Comparison: `fib(35)`
+These results are workload measurements, not general language rankings. The runtimes use different value models, safety boundaries, and compilation strategies.
 
-This benchmark computes recursive `fib(35)` without memoization.
+## Cross-Runtime Comparison
 
-- Result: `9,227,465`
-- Recursive calls: about `29.8M`
-- Source: `benchmarks/fib_test.go`
-- Timing excludes runtime setup where applicable
+### minivm Modes
 
-| Runtime | ns/op | B/op | allocs/op | vs native Go | Execution model |
-|---|---:|---:|---:|---:|---|
-| native Go | 19,324,275 | 0 | 0 | 1x | compiled |
-| wazero | 44,409,757 | 16 | 2 | 2.3x | WASM to native JIT |
-| **minivm JIT** | **51,911,961** | **4,918** | **45** | **2.7x** | threaded interpreter + tracing ARM64 JIT |
-| minivm interp | 669,343,195 | 288 | 2 | 35x | threaded interpreter |
-| tengo | 1,138,199,604 | 312,799,988 | 39,088,179 | 59x | bytecode VM |
-| gopher-lua | 1,462,044,917 | 971,008 | 3,793 | 76x | register VM |
-| goja | 2,052,722,000 | 383,488 | 46,384 | 106x | bytecode VM |
+| Mode | Construction | Meaning |
+|---|---|---|
+| `default` | `interp.New(prog)` | standard adaptive policy; may install and enter ARM64 traces after profiling |
+| `threaded` | `interp.New(prog, interp.WithThreshold(-1))` | JIT disabled; pure threaded execution |
+| `jit` | `interp.New(prog, interp.WithThreshold(0))` | eager profiling/compilation policy; not a precompiled or guaranteed-native steady state |
 
-On this workload, the ARM64 JIT reduces minivm execution time from about **669 ms** to **52 ms**. This makes the JIT path about **13x faster** than the threaded interpreter.
+The `jit` label therefore means **threshold zero**, not “fully warmed native code.” It can be slower than `default` when early compilation produces incomplete traces or when the workload is dominated by unsupported allocation and mutation paths.
 
-Compared with other script VMs, minivm JIT is about **22-40x faster** on this benchmark. The pure threaded interpreter also remains competitive while staying allocation-light.
+### Complete Results
 
-minivm JIT is still slower than wazero by about **1.2x**. This is expected: minivm keeps NaN-boxed values and deoptimization state, while wazero compiles WASM to unboxed native code without the same fallback requirements.
+Environment: Apple M4 Pro, `darwin/arm64`, Go 1.26.2. Command: `go test -tags=compare -run='^$' -bench='.' -benchmem -benchtime=300ms -count=3 ./...`. Each row is the median of three samples.
 
-### Warmup vs. Steady-State Allocations
-
-The `minivm interp` and `minivm JIT` rows above run `-benchtime=2s`, which repeats `Run`/`Reset` enough times to amortize one-time setup: the interpreter's entry-trace capture, and (for JIT) native trace compilation and installation. At a small `-benchtime`/`-benchtime=Nx` (few `b.N` iterations), that one-time cost dominates and inflates the reported `allocs/op`, making the runtime look far less allocation-light than it is in steady state.
-
-`benchmarks/alloc_test.go` isolates the two phases explicitly by running one untimed `Run`/`Reset` cycle before `b.ResetTimer()`:
-
-| Benchmark | Isolates | ns/op | B/op | allocs/op |
+| Workload | Runtime | ns/op | B/op | allocs/op |
 |---|---|---:|---:|---:|
-| `BenchmarkFib35AllocInterpSteady` | threaded interpreter, warm | 516,040,250 | 0 | 0 |
-| `BenchmarkFib20AllocJITWarmup` | one fresh compile + `fib(20)` run | 171,915 | 290,147 | 2,264 |
-| `BenchmarkFib35AllocJITSteady` | JIT, trace already installed | 48,199,078 | 0 | 0 |
+| IterativeFib(30) | minivm/default | 69.9 | 0 | 0 |
+| IterativeFib(30) | minivm/threaded | 718.5 | 0 | 0 |
+| IterativeFib(30) | minivm/jit | 73.59 | 0 | 0 |
+| IterativeFib(30) | native | 8.444 | 0 | 0 |
+| IterativeFib(30) | wazero | 47.98 | 8 | 1 |
+| IterativeFib(30) | tengo | 9,670 | 90,592 | 61 |
+| IterativeFib(30) | gopher-lua | 496.9 | 160 | 0 |
+| IterativeFib(30) | goja | 2,137 | 368 | 20 |
+| IterativeFib(30) | gpython | 2,440 | 2,448 | 88 |
+| IterativeFib(30) | yaegi | 2,695 | 2,036 | 101 |
+| Sieve(256) | minivm/default | 40,195 | 28,968 | 407 |
+| Sieve(256) | minivm/threaded | 16,328 | 1,048 | 2 |
+| Sieve(256) | minivm/jit | 39,960 | 28,968 | 407 |
+| Sieve(256) | native | 229.9 | 0 | 0 |
+| Sieve(256) | wazero | 642.4 | 8 | 1 |
+| Sieve(256) | tengo | 51,497 | 122,504 | 1,611 |
+| Sieve(256) | gopher-lua | 22,080 | 18,416 | 44 |
+| Sieve(256) | goja | 42,387 | 1,872 | 25 |
+| Sieve(256) | gpython | 34,919 | 5,704 | 30 |
+| Sieve(256) | yaegi | 18,998 | 1,800 | 37 |
+| RecursiveFib(20) | minivm/default | 37,686 | 0 | 0 |
+| RecursiveFib(20) | minivm/threaded | 353,404 | 0 | 0 |
+| RecursiveFib(20) | minivm/jit | 359,322 | 0 | 0 |
+| RecursiveFib(20) | native | 13,699 | 0 | 0 |
+| RecursiveFib(20) | wazero | 30,896 | 8 | 1 |
+| RecursiveFib(20) | tengo | 811,030 | 319,346 | 28,655 |
+| RecursiveFib(20) | gopher-lua | 1,040,265 | 704 | 2 |
+| RecursiveFib(20) | goja | 1,461,585 | 4,680 | 39 |
+| RecursiveFib(20) | gpython | 3,656,195 | 9,807,935 | 109,494 |
+| RecursiveFib(20) | yaegi | 3,752,830 | 8,302,126 | 192,840 |
+| RecursiveFib(35) | minivm/default | 47,048,123 | 0 | 0 |
+| RecursiveFib(35) | minivm/threaded | 487,293,996 | 0 | 0 |
+| RecursiveFib(35) | minivm/jit | 496,864,164 | 0 | 0 |
+| RecursiveFib(35) | native | 19,129,096 | 0 | 0 |
+| RecursiveFib(35) | wazero | 44,150,405 | 9 | 1 |
+| RecursiveFib(35) | tengo | 1,139,802,250 | 312,798,144 | 39,088,182 |
+| RecursiveFib(35) | gopher-lua | 1,448,413,000 | 971,008 | 3,793 |
+| RecursiveFib(35) | goja | 2,033,437,791 | 375,360 | 46,373 |
+| RecursiveFib(35) | gpython | 5,148,001,292 | 13,378,035,136 | 149,350,297 |
+| RecursiveFib(35) | yaegi | 5,357,106,709 | 11,324,346,072 | 263,043,770 |
+| IndirectRecursiveFib(20) | minivm/default | 569,521 | 0 | 0 |
+| IndirectRecursiveFib(20) | minivm/threaded | 555,324 | 0 | 0 |
+| IndirectRecursiveFib(20) | minivm/jit | 569,709 | 0 | 0 |
+| IndirectRecursiveFib(20) | native | 15,576 | 0 | 0 |
+| IndirectRecursiveFib(20) | wazero | 42,267 | 8 | 1 |
+| IndirectRecursiveFib(20) | tengo | 922,213 | 319,346 | 28,655 |
+| IndirectRecursiveFib(20) | gopher-lua | 932,204 | 704 | 2 |
+| IndirectRecursiveFib(20) | goja | 1,337,977 | 4,680 | 39 |
+| IndirectRecursiveFib(20) | gpython | 3,712,726 | 10,158,210 | 109,494 |
+| IndirectRecursiveFib(20) | yaegi | 10,443,107 | 13,059,874 | 394,041 |
+| ClosureCounter(128) | minivm/default | 3,032 | 64 | 2 |
+| ClosureCounter(128) | minivm/threaded | 2,841 | 64 | 2 |
+| ClosureCounter(128) | minivm/jit | 3,047 | 64 | 2 |
+| ClosureCounter(128) | native | 33.74 | 0 | 0 |
+| ClosureCounter(128) | wazero | N/A | N/A | N/A |
+| ClosureCounter(128) | tengo | 13,045 | 92,272 | 261 |
+| ClosureCounter(128) | gopher-lua | 5,748 | 151 | 3 |
+| ClosureCounter(128) | goja | 9,827 | 1,264 | 13 |
+| ClosureCounter(128) | gpython | 25,897 | 58,312 | 659 |
+| ClosureCounter(128) | yaegi | 31,750 | 34,784 | 786 |
+| TypedArraySum(256) | minivm/default | 635.6 | 0 | 0 |
+| TypedArraySum(256) | minivm/threaded | 6,309 | 0 | 0 |
+| TypedArraySum(256) | minivm/jit | 579.3 | 0 | 0 |
+| TypedArraySum(256) | native | 64.21 | 0 | 0 |
+| TypedArraySum(256) | wazero | 150.1 | 8 | 1 |
+| TypedArraySum(256) | tengo | 15,340 | 94,208 | 513 |
+| TypedArraySum(256) | gopher-lua | 3,263 | 4,000 | 15 |
+| TypedArraySum(256) | goja | 12,695 | 2,080 | 238 |
+| TypedArraySum(256) | gpython | 7,251 | 2,496 | 246 |
+| TypedArraySum(256) | yaegi | 4,274 | 296 | 8 |
+| AllocationGraph(128) | minivm/default | 7,542 | 5,120 | 256 |
+| AllocationGraph(128) | minivm/threaded | 7,390 | 5,120 | 256 |
+| AllocationGraph(128) | minivm/jit | 7,502 | 5,120 | 256 |
+| AllocationGraph(128) | native | 900.4 | 1,024 | 128 |
+| AllocationGraph(128) | wazero | N/A | N/A | N/A |
+| AllocationGraph(128) | tengo | 13,697 | 96,288 | 388 |
+| AllocationGraph(128) | gopher-lua | 5,958 | 14,376 | 256 |
+| AllocationGraph(128) | goja | 24,155 | 78,016 | 770 |
+| AllocationGraph(128) | gpython | 5,401 | 5,712 | 266 |
+| AllocationGraph(128) | yaegi | 11,502 | 1,492 | 142 |
+| BranchTree(96) | minivm/default | 222.4 | 0 | 0 |
+| BranchTree(96) | minivm/threaded | 949.4 | 0 | 0 |
+| BranchTree(96) | minivm/jit | 224.7 | 0 | 0 |
+| BranchTree(96) | native | 77.55 | 0 | 0 |
+| BranchTree(96) | wazero | 156.3 | 16 | 1 |
+| BranchTree(96) | tengo | 16,906 | 95,384 | 660 |
+| BranchTree(96) | gopher-lua | 8,225 | 2,464 | 9 |
+| BranchTree(96) | goja | 13,464 | 1,992 | 196 |
+| BranchTree(96) | gpython | 11,627 | 2,168 | 203 |
+| BranchTree(96) | yaegi | 10,412 | 1,832 | 308 |
 
-Both the threaded interpreter and the JIT are zero-allocation per `Run` once warm. The JIT's ~2,264 allocations and ~290 KB are a one-shot cost from `interp.New`, tracer capture, and native compilation/installation on the first hot entry; they do not recur on subsequent `Run` calls against the same interpreter.
-
-Large bytecode programs also used to make profiler warmup quadratic because each newly observed instruction offset reallocated the collector's sample slice to its exact length. Geometric growth reduced a 10,000-row tl2g batch benchmark (`-benchtime=20x`) from about 50.9 MB/op to 551 KB/op; the remaining figure includes the workload's output and other setup allocations.
+Wazero has no corresponding canonical implementation for `ClosureCounter(128)` or `AllocationGraph(128)`, so those rows are marked `N/A`.
 
 ## Threaded Interpreter Throughput
 
@@ -165,7 +235,7 @@ These results use the threaded interpreter with JIT disabled.
 
 | Program | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|
-| `fib(20)` — i32 recursive | 570,765 | 0 | 0 |
+| `fib(20)` — i32 recursive | 353,404 | 0 | 0 |
 | `factorial(10)` — i64 with early exit via `br_if` | 310 | 0 | 0 |
 
 For the deep-recursion `fib(35)` result with JIT enabled, see the cross-runtime comparison above.
@@ -178,51 +248,38 @@ Unsupported paths either deoptimize or continue through the threaded interpreter
 
 The default threshold is `4096` executed instructions, which is about 32 samples at the default tick interval of 128.
 
-### JIT Coverage Workloads
+### Canonical Kernel Observations
 
-`BenchmarkJITIssue60` tracks key JIT coverage workloads.
+The current canonical kernels show that native trace coverage is workload-dependent:
 
-| Workload | interp ns/op | JIT ns/op | Effect |
-|---|---:|---:|---:|
-| `indirect_call_fib_via_local` | 810,879 | 57,000 | 14x |
-| `closure_counter_loop` | 17,983 | 1,059 | 17x |
-| `typed_array_sum` | 34,059 | 2,780 | 12x |
+- adaptive `default` is effective for direct recursive calls, iterative numeric loops, typed-array reads, and branch-heavy scalar code
+- threshold-zero `jit` is not equivalent to a warmed native cache and may compile too early to outperform the adaptive default
+- allocation and mutation-heavy kernels such as `Sieve` and `AllocationGraph` can remain faster in the threaded interpreter
+- indirect recursive calls remain substantially slower than wazero and are a priority for call-target and trace-continuation optimization
 
-Loop-anchored trace compilation lets hot loop bodies run in native code between safepoints instead of deoptimizing on every iteration. Recursive function references through locals can also remain native when guards succeed.
-
-### JIT Coordination Workloads
-
-`BenchmarkJITIssue101` tracks a LightGBM-style branchy batch path with many tiny tree-score functions called over one mutable `f64` feature row. It is sensitive to per-tick coordination overhead after a trace is already installed.
-
-| Workload | Mode | ns/op | B/op | allocs/op |
-|---|---|---:|---:|---:|
-| `branchy_batch_tree_evaluation` | threaded | 1,568 | 0 | 0 |
-| `branchy_batch_tree_evaluation` | baseline CFG tier | 1,386 | 0 | 0 |
-
-The whole-CFG tier is about 12% faster on this workload while preserving zero steady-state allocations.
-
-A tl2g regression model with 30 trees exposed a separate baseline gap: its evaluator is a call-free top-level loop over primitive typed-array constants, so the earlier CFG gate never attempted it and trace execution took about 103,800 ns for one prediction. Allowing call-free module CFGs and fusing constant typed-array reads reduced `BenchmarkPredictSingle/regression` to 2,901–2,914 ns/op. With adaptive batch workers, `BenchmarkPredictBatch/regression/200` measured 131,290–138,331 ns/op (about 656–692 ns/row), 2,960 B/op, and 19 allocs/op on Apple M4 Pro. These numbers include tl2g's output allocation, pool coordination, row copying, and objective dispatch.
+Use the complete cross-runtime table above for current numbers. Do not infer JIT entry solely from the `jit` sub-benchmark name; profiler metrics are required when a benchmark specifically claims native entry.
 
 On x86-64, JIT is not implemented yet. The runtime falls back to threaded execution.
 
 ## Methodology
 
-- Threaded interpreter, lifecycle, marshal, and traversal benchmarks use `-benchtime=1s`.
-- Cross-runtime and JIT coverage benchmarks use `-benchtime=2s`.
-- Fusion comparisons use `-benchmem -count=10`; compare before and after output with `benchstat`.
-- `BenchmarkInterpreter_Run/threaded` always runs with `WithThreshold(-1)`, so it measures the pure threaded interpreter.
-- The `minivm JIT` rows use default `interp.New`, which enables ARM64 trace compilation.
-- `Interpreter.Reset()` is called between iterations.
-- `interp.New()` is called once outside the timed loop.
-- Cross-runtime benchmarks live in the separate `benchmarks/` Go module.
-- wazero uses its default compiler runtime, with module instantiation excluded from timing.
+- Cross-runtime results use `-benchtime=300ms -count=3`; every table value is the median of the three samples.
+- Each minivm fixture is verified before measurement. The benchmark performs one correctness run, four untimed warmup runs, and 32 untimed allocation samples before timing.
+- minivm reports execution-only time for `Interpreter.Run`. Result transfer through `PopBoxed` and `Reset` remains outside the measured duration.
+- `interp.New()` is called once outside the timed loop. `default` leaves all options unchanged, `threaded` changes only the threshold to `-1`, and `jit` changes only the threshold to `0`.
+- External runtime parsing, compilation, module creation, and function lookup remain outside the timer where the runtime API permits. The timed loop repeatedly invokes the prepared function or compiled program.
+- wazero uses its default compiler runtime, with module compilation and instantiation excluded from timing.
+- Cross-runtime benchmarks live in the separate `benchmarks/` Go module and are enabled only with the `compare` build tag.
+- The workload sources preserve the same input and expected result, but runtime-specific object representation and call conventions differ. Treat the results as end-to-end kernel comparisons rather than isolated opcode comparisons.
 
 Cross-runtime library versions:
 
 - wazero v1.12.0
 - gopher-lua v1.1.2
-- tengo v2.17.0
-- goja v0.0.0-20260311135729
+- Tengo v2.17.0
+- goja v0.0.0-20260311135729-065cd970411c
+- gpython v0.2.0
+- Yaegi v0.16.1
 
 ## Benchmark Ownership
 
@@ -272,6 +329,17 @@ Execution modes are explicit sub-benchmarks:
 Warm, exit, and deoptimization fixtures assert that a native stub exists before timing. Cold fixtures assert native emission after timing. Straight dispatch and numeric cases report fixed `opcodes/op` alongside `ns/op`.
 
 Pool benchmarks separate uncontended reuse, capacity miss, shared-JIT miss, parallel round trips, and put cost. Parallel workers use independent interpreter instances obtained from the pool.
+
+## Execution Tiers
+
+| Target | Use | Contents |
+|---|---|---|
+| `make benchmark-pr` | pull requests | stable construction, reset, dispatch, representative numeric/control/call/array cases, and four threaded kernels |
+| `make benchmark-core` | local canonical run | all package benchmarks and all runtime-neutral VM kernels |
+| `make benchmark-nightly` | scheduled report | canonical suite with repeated samples, including cold JIT, exits, deoptimization, large collections, and parallel pool cases |
+| `make benchmark-compare` | optional analysis | `compare`-tagged external runtimes only |
+
+Pull-request and nightly jobs report results without comparing against golden numbers. Use repeated output with `benchstat` for manual analysis. Add an automated threshold only after a benchmark has stable variance and both statistical and practical limits are documented.
 
 ## Maintenance Notes
 

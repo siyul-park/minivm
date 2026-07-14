@@ -8,9 +8,52 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/interp"
+	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
+
+type benchmarkComparison struct {
+	native  func() int32
+	wazero  string
+	args    []uint64
+	scripts benchmarkScripts
+	values  []int32
+}
+
+type benchmarkScripts struct {
+	tengo     string
+	gopherLua string
+	goja      string
+	gpython   string
+	yaegi     string
+}
+
+func benchmarkVM(b *testing.B, prog *program.Program, want types.Boxed) {
+	b.Helper()
+	run := func(name string, threshold ...int) {
+		b.Run(name, func(b *testing.B) {
+			var vm *interp.Interpreter
+			if len(threshold) == 0 {
+				vm = interp.New(prog)
+			} else {
+				vm = interp.New(prog, interp.WithThreshold(threshold[0]))
+			}
+			defer vm.Close()
+			require.NoError(b, vm.Run(context.Background()))
+			value, err := vm.PopBoxed()
+			require.NoError(b, err)
+			require.Equal(b, want, value)
+			vm.Reset()
+
+			benchmarkRun(b, vm, want)
+		})
+	}
+
+	run("default")
+	run("threaded", -1)
+	run("jit", 0)
+}
 
 func benchmarkRun(b *testing.B, vm *interp.Interpreter, want types.Boxed) {
 	b.Helper()

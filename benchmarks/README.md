@@ -19,22 +19,27 @@ Read when adding a VM workload, comparing execution tiers, or running cross-runt
 | `BenchmarkMemory_AllocationGraph` | allocation graph | reference allocation, linking, traversal, release, reuse |
 | `BenchmarkNumeric_BranchTree` | branch tree | comparisons, skewed control flow, JIT guards |
 
-Canonical fixture sizes are part of the benchmark contract: iterative Fibonacci 30, recursive Fibonacci 20, sieve 256, closure iterations 128, typed-array elements 256, allocation depth 128, and branch-tree nodes 96 with input 37.
+Canonical fixture sizes are part of the benchmark contract: iterative Fibonacci 30, recursive Fibonacci 20 and 35, sieve 256, closure iterations 128, typed-array elements 256, allocation depth 128, and branch-tree nodes 96 with input 37.
 
 Every fixture uses fixed input and has a correctness test with an exact result or graph checksum. Program construction, verification, result checks, reset, and JIT warmup stay outside execution-only timers.
 
 ## Modes
 
-Every kernel provides `threaded`. Additional modes appear only when meaningful:
+Every canonical kernel defines the same three minivm sub-benchmarks:
 
-- `jit_warm`: native emission and entry proven by profiler-backed warmup, then measured on a profiler-free interpreter sharing the compiled cache
-- `pool`: pool get, execution, result transfer, and put as one explicit embedding boundary
+| Mode | Configuration | Boundary |
+|---|---|---|
+| `default` | no explicit interpreter options | standard adaptive runtime policy |
+| `threaded` | `WithThreshold(-1)` | JIT disabled; pure threaded execution |
+| `jit` | `WithThreshold(0)` | eager profiling/compilation policy |
 
-Mode names describe measured lifecycle state. A fallback-only path must not be presented as JIT throughput.
+Only the threshold changes between modes. `jit` does not assert that native code was emitted or entered; benchmarks that claim warmed native execution must prove that state separately with profiler metrics.
+
+With the `compare` build tag, each kernel also adds the applicable external runtimes: native Go, wazero, Tengo, gopher-lua, Goja, gpython, and Yaegi. Wazero is omitted when no equivalent canonical WASM fixture exists.
 
 ## Commands
 
-Canonical kernels:
+Canonical minivm kernels:
 
 ```bash
 go test -run '^$' -bench='^(BenchmarkControl|BenchmarkCall|BenchmarkMemory|BenchmarkNumeric)' -benchmem ./...
@@ -46,13 +51,13 @@ Correctness:
 go test ./...
 ```
 
-Optional external comparisons:
+Complete external comparison with three samples:
 
 ```bash
-go test -tags=compare -run '^$' -bench='^BenchmarkCompare' -benchmem ./...
+go test -tags=compare -run '^$' -bench='.' -benchmem -benchtime=300ms -count=3 ./...
 ```
 
-External comparisons are informational. They are excluded from canonical regression gates because runtime initialization, cloning, and reset policies differ.
+External comparisons are informational. Parsing, compilation, module creation, and function lookup stay outside the timed loop where supported. They are excluded from canonical regression gates because runtime initialization, value models, and reset policies differ.
 
 ## Maintenance Notes
 

@@ -9,14 +9,23 @@ import (
 
 	tengo "github.com/d5/tengo/v2"
 	"github.com/dop251/goja"
+	"github.com/go-python/gpython/compile"
+	"github.com/go-python/gpython/py"
+	_ "github.com/go-python/gpython/stdlib"
 	"github.com/stretchr/testify/require"
+	yaegi "github.com/traefik/yaegi/interp"
 	lua "github.com/yuin/gopher-lua"
 )
 
-type compareScripts struct {
-	tengo     string
-	gopherLua string
-	goja      string
+func benchmarkCompare(b *testing.B, comparison benchmarkComparison, want int32) {
+	b.Helper()
+	b.Run("native", func(b *testing.B) {
+		benchmarkNative(b, comparison.native, want)
+	})
+	if comparison.wazero != "" {
+		benchmarkWazero(b, comparison.wazero, want, comparison.args...)
+	}
+	benchmarkScriptRuntimes(b, comparison.scripts, comparison.values, want)
 }
 
 func benchmarkNative(b *testing.B, run func() int32, want int32) {
@@ -33,7 +42,7 @@ func benchmarkNative(b *testing.B, run func() int32, want int32) {
 	require.Equal(b, want, value)
 }
 
-func benchmarkScripts(b *testing.B, scripts compareScripts, values []int32, want int32) {
+func benchmarkScriptRuntimes(b *testing.B, scripts benchmarkScripts, values []int32, want int32) {
 	b.Helper()
 	b.Run("tengo", func(b *testing.B) {
 		benchmarkTengo(b, scripts.tengo, values, want)
@@ -44,6 +53,16 @@ func benchmarkScripts(b *testing.B, scripts compareScripts, values []int32, want
 	b.Run("goja", func(b *testing.B) {
 		benchmarkGoja(b, scripts.goja, values, want)
 	})
+	if scripts.gpython != "" {
+		b.Run("gpython", func(b *testing.B) {
+			benchmarkGpython(b, scripts.gpython, want)
+		})
+	}
+	if scripts.yaegi != "" {
+		b.Run("yaegi", func(b *testing.B) {
+			benchmarkYaegi(b, scripts.yaegi, want)
+		})
+	}
 }
 
 func benchmarkTengo(b *testing.B, source string, values []int32, want int32) {
@@ -155,4 +174,54 @@ func benchmarkGoja(b *testing.B, source string, values []int32, want int32) {
 	b.StopTimer()
 	require.NoError(b, err)
 	require.Equal(b, want, value)
+}
+
+func benchmarkGpython(b *testing.B, source string, want int32) {
+	b.Helper()
+	code, err := compile.Compile(strings.TrimSpace(source), "compare.py", py.ExecMode, 0, true)
+	require.NoError(b, err)
+	ctx := py.NewContext(py.DefaultContextOpts())
+	defer ctx.Close()
+	module, err := py.RunCode(ctx, code, "compare.py", nil)
+	require.NoError(b, err)
+
+	var result py.Object
+	call := func() error {
+		result, err = module.Call("run", nil, nil)
+		return err
+	}
+	require.NoError(b, call())
+	require.Equal(b, want, int32(result.(py.Int)))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if err = call(); err != nil {
+			break
+		}
+	}
+	b.StopTimer()
+	require.NoError(b, err)
+	require.Equal(b, want, int32(result.(py.Int)))
+}
+
+func benchmarkYaegi(b *testing.B, source string, want int32) {
+	b.Helper()
+	vm := yaegi.New(yaegi.Options{})
+	_, err := vm.Eval(strings.TrimSpace(source))
+	require.NoError(b, err)
+	value, err := vm.Eval("bench.Run")
+	require.NoError(b, err)
+	run, ok := value.Interface().(func() int32)
+	require.True(b, ok)
+	require.Equal(b, want, run())
+
+	var result int32
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		result = run()
+	}
+	b.StopTimer()
+	require.Equal(b, want, result)
 }

@@ -38,31 +38,26 @@ Full docs: [`docs/README.md`](docs/README.md)
 
 ## Performance
 
-Recursive `fib(35)` — darwin/arm64, Apple M4 Pro, Go 1.26.2. minivm is measured twice: **interp** is the pure threaded interpreter, **JIT** is the default `New`, which records hot functions and loops and compiles them to native code on ARM64:
+Representative median results from the canonical cross-runtime suite — Apple M4 Pro, `darwin/arm64`, Go 1.26.2, `-benchtime=300ms -count=3`. Values are `ns/op`; lower is better.
 
-| Runtime | ns/op | B/op | allocs/op | vs native Go | execution model |
-|---|---|---|---|---|---|
-| native Go | 19,324,275 | 0 | 0 | 1× | compiled |
-| wazero | 44,409,757 | 16 | 2 | 2.3× | WASM → native JIT |
-| **minivm (JIT)** | **51,911,961** | **4,918** | **45** | **2.7×** | **threaded interpreter + ARM64 trace JIT** |
-| minivm (interp) | 669,343,195 | 288 | 2 | 35× | threaded interpreter |
-| tengo | 1,138,199,604 | 312,799,988 | 39,088,179 | 59× | bytecode VM |
-| gopher-lua | 1,462,044,917 | 971,008 | 3,793 | 76× | register VM |
-| goja | 2,052,722,000 | 383,488 | 46,384 | 106× | bytecode VM |
+| Runtime | IterativeFib(30) | Sieve(256) | RecursiveFib(35) | TypedArraySum(256) | BranchTree(96) |
+|---|---:|---:|---:|---:|---:|
+| native Go | 8.444 | 229.9 | 19,129,096 | 64.21 | 77.55 |
+| wazero | 47.98 | 642.4 | 44,150,405 | 150.1 | 156.3 |
+| **minivm/default** | **69.9** | **40,195** | **47,048,123** | **635.6** | **222.4** |
+| minivm/threaded | 718.5 | 16,328 | 487,293,996 | 6,309 | 949.4 |
+| minivm/jit (`threshold=0`) | 73.59 | 39,960 | 496,864,164 | 579.3 | 224.7 |
+| Tengo | 9,670 | 51,497 | 1,139,802,250 | 15,340 | 16,906 |
+| gopher-lua | 496.9 | 22,080 | 1,448,413,000 | 3,263 | 8,225 |
+| Goja | 2,137 | 42,387 | 2,033,437,791 | 12,695 | 13,464 |
+| gpython | 2,440 | 34,919 | 5,148,001,292 | 7,251 | 11,627 |
+| Yaegi | 2,695 | 18,998 | 5,357,106,709 | 4,274 | 10,412 |
 
-The JIT is worth **13× on this workload** (669 ms → 52 ms per call). Among pure interpreters, minivm is allocation-light and faster than the script VMs measured here.
+`minivm/default` uses the standard adaptive ARM64 trace-JIT policy. On recursive `fib(35)`, it runs within about **1.07x** of wazero and **2.46x** of native Go with zero steady-state allocations, while outperforming the measured script VMs by roughly **24-114x**. Scalar loops and branch-heavy code also approach wazero while remaining allocation-free.
 
-Single-instruction throughput (threaded interpreter, JIT disabled):
+Performance is not uniform across all kernels. `Sieve(256)` is about **2.46x faster** with the JIT disabled in this measurement; the benchmark does not isolate whether that gap comes from profiling, fallback, or unsupported paths. Indirect recursive calls and allocation-heavy object graphs remain the clearest optimization targets. The `jit` row sets `WithThreshold(0)`; it is an eager policy measurement, not a guaranteed warmed-native result.
 
-| Workload | ns/op |
-|---|---|
-| i32/i64/f32/f64 arithmetic | ~11–13 |
-| branches (`br`, `br_if`) | ~10–14 |
-| bytecode function call | ~15–16 |
-| host function call | ~18 |
-| array / struct operations | ~30–44 |
-
-Full results: [`docs/benchmarks.md`](docs/benchmarks.md)
+Full timing, memory, allocation, mode definitions, and methodology: [`docs/benchmarks.md`](docs/benchmarks.md)
 
 ## Usage
 
