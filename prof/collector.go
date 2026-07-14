@@ -24,6 +24,20 @@ func NewCollector() *Collector {
 	return &Collector{}
 }
 
+func (c *Collector) Value(name string, labels ...Label) float64 {
+	v, _ := c.Metric(name, labels...)
+	return v
+}
+
+func (c *Collector) Metric(name string, labels ...Label) (float64, bool) {
+	for _, m := range c.Metrics() {
+		if m.Name == name && sameLabels(m.Labels, labels) {
+			return m.Value, true
+		}
+	}
+	return 0, false
+}
+
 func (c *Collector) Metrics() []Metric {
 	out := []Metric{{Name: "vm_samples_total", Value: float64(c.total)}}
 	for fn := range c.funcs {
@@ -61,20 +75,6 @@ func (c *Collector) Metrics() []Metric {
 	out = append(out, c.metrics...)
 	out = c.jit.appendMetrics(out, c)
 	return out
-}
-
-func (c *Collector) Metric(name string, labels ...Label) (float64, bool) {
-	for _, m := range c.Metrics() {
-		if m.Name == name && sameLabels(m.Labels, labels) {
-			return m.Value, true
-		}
-	}
-	return 0, false
-}
-
-func (c *Collector) Value(name string, labels ...Label) float64 {
-	v, _ := c.Metric(name, labels...)
-	return v
 }
 
 // Add records one execution sample at (fn, ip) for op.
