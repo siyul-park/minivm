@@ -88,30 +88,19 @@ benchmark: benchmark-core
 benchmark-pr:
 	@root="$$( \
 		go test -run='^$$' -bench='^BenchmarkNew$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
-		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^(Empty|Nop|Stack|Local|Global|I64Mul|F64Add)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
-		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^I32Add$$/^Straight$$/^(Threaded|JITWarm)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
-		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^Branch$$/^(Taken|NotTaken)$$/^Threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
-		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^Call$$/^Direct$$/^Threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
-		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^Array$$/^(Get|Set)$$/^Threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
+		go test -run='^$$' -bench='^BenchmarkInterpreter_Run$$/^(i32\.const_nop_returns_i32|unreachable_reports_unreachable_executed|const\.get_call_i32\.const_return_returns_i32|i32\.const_array\.new_default_i32\.const_array\.get_reports_index_out_of_range)$$/^(Threaded|Fused|JITWarm)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
 		go test -run='^$$' -bench='^BenchmarkInterpreter_Reset$$/^(Scalar|Heap)$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp && \
 		go test -run='^$$' -bench='^BenchmarkPool_(Get|Put)$$/^Uncontended$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./interp \
 	)" || { status=$$?; printf '%s\n' "$$root"; exit $$status; }; \
 	printf '%s\n' "$$root"; \
 	for name in \
 		BenchmarkNew/Empty \
-		BenchmarkInterpreter_Run/Empty/Threaded \
-		BenchmarkInterpreter_Run/Nop/Straight/Threaded \
-		BenchmarkInterpreter_Run/Stack/DupSwapDrop/Threaded \
-		BenchmarkInterpreter_Run/Local/SetGet/Threaded \
-		BenchmarkInterpreter_Run/Global/SetGet/Threaded \
-		BenchmarkInterpreter_Run/I32Add/Straight/Threaded \
-		BenchmarkInterpreter_Run/I64Mul/Threaded \
-		BenchmarkInterpreter_Run/F64Add/Threaded \
-		BenchmarkInterpreter_Run/Branch/Taken/Threaded \
-		BenchmarkInterpreter_Run/Branch/NotTaken/Threaded \
-		BenchmarkInterpreter_Run/Call/Direct/Threaded \
-		BenchmarkInterpreter_Run/Array/Get/Threaded \
-		BenchmarkInterpreter_Run/Array/Set/Threaded \
+		BenchmarkInterpreter_Run/i32.const_nop_returns_i32/Threaded \
+		BenchmarkInterpreter_Run/i32.const_nop_returns_i32/Fused \
+		BenchmarkInterpreter_Run/unreachable_reports_unreachable_executed/Threaded \
+		BenchmarkInterpreter_Run/unreachable_reports_unreachable_executed/Fused \
+		BenchmarkInterpreter_Run/const.get_call_i32.const_return_returns_i32/Threaded \
+		BenchmarkInterpreter_Run/i32.const_array.new_default_i32.const_array.get_reports_index_out_of_range/Threaded \
 		BenchmarkInterpreter_Reset/Scalar \
 		BenchmarkInterpreter_Reset/Heap \
 		BenchmarkPool_Get/Uncontended \
@@ -119,7 +108,7 @@ benchmark-pr:
 		printf '%s\n' "$$root" | grep -q "^$$name-" || { printf 'missing benchmark %s\n' "$$name"; exit 1; }; \
 	done; \
 	if [ "$$(go env GOARCH)" = arm64 ]; then \
-		printf '%s\n' "$$root" | grep -q '^BenchmarkInterpreter_Run/I32Add/Straight/JITWarm-' || { printf '%s\n' 'missing ARM64 JIT warm benchmark'; exit 1; }; \
+		printf '%s\n' "$$root" | grep -q '^BenchmarkInterpreter_Run/i32.const_nop_returns_i32/JITWarm-' || { printf '%s\n' 'missing ARM64 JIT warm benchmark'; exit 1; }; \
 	fi
 	@kernels="$$(cd benchmarks && go test -run='^$$' -bench='^(BenchmarkControl_IterativeFib|BenchmarkCall_RecursiveFib|BenchmarkMemory_TypedArraySum|BenchmarkNumeric_BranchTree)$$/^threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./...)" || { status=$$?; printf '%s\n' "$$kernels"; exit $$status; }; \
 	printf '%s\n' "$$kernels"; \
