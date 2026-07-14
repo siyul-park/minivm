@@ -44,15 +44,17 @@ go test -tags=compare -run='^$' -bench='.' -benchmem -benchtime=300ms -count=3 .
 
 The cross-runtime command runs each benchmark three times. The tables below report the median `ns/op`, `B/op`, and `allocs/op` for every workload/runtime combination.
 
+The comparison is informational rather than a strict end-to-end latency ranking. minivm reports execution-only `Interpreter.Run` time and excludes result extraction and reset, while other runtimes may include host-call result materialization and conversion. This boundary difference is most significant for short workloads, so small ratios should not be treated as precise runtime speedups.
+
 ## Summary
 
 The canonical cross-runtime suite shows both the strengths and the current limits of minivm:
 
-- `RecursiveFib(35)` completes in **47.05 ms** with `minivm/default`, versus **44.15 ms** for wazero and **19.13 ms** for native Go. The minivm run is zero-allocation after warmup and is about **24-114x faster** than the script VMs measured here.
-- `IterativeFib(30)` and `BranchTree(96)` put the adaptive default tier within about **1.46x** and **1.42x** of wazero, respectively, while remaining allocation-free.
-- `TypedArraySum(256)` is allocation-free in all minivm modes, but `minivm/default` remains about **4.23x** slower than wazero.
+- `RecursiveFib(35)` places `minivm/default` near wazero and ahead of the script runtimes measured here, while remaining zero-allocation after warmup.
+- `IterativeFib(30)` and `BranchTree(96)` show the adaptive default tier in the same order of magnitude as wazero while remaining allocation-free.
+- `TypedArraySum(256)` is allocation-free in all minivm modes, but wazero remains materially faster in this fixture.
 - `Sieve(256)` favors the pure threaded interpreter: **16.33 us** versus about **40 us** for `default` and eager `jit`. The benchmark records the gap but does not isolate whether it comes from profiling, fallback, or unsupported paths.
-- `IndirectRecursiveFib(20)` is a clear weak point: `minivm/default` is about **13.5x** slower than wazero despite remaining allocation-free.
+- `IndirectRecursiveFib(20)` is a clear weak point: `minivm/default` is substantially slower than wazero despite remaining allocation-free.
 - `AllocationGraph(128)` exposes object-management cost. minivm is faster than Tengo, Goja, and Yaegi, but slower than gpython and gopher-lua in this fixture.
 
 These results are workload measurements, not general language rankings. The runtimes use different value models, safety boundaries, and compilation strategies.
@@ -68,6 +70,8 @@ These results are workload measurements, not general language rankings. The runt
 | `jit` | `interp.New(prog, interp.WithThreshold(0))` | eager profiling/compilation policy; not a precompiled or guaranteed-native steady state |
 
 The `jit` label therefore means **threshold zero**, not “fully warmed native code.” It can be slower than `default` when early compilation produces incomplete traces or when the workload is dominated by unsupported allocation and mutation paths.
+
+Each runtime measures an already prepared callable through result recovery. Compilation, module construction, fixture injection, warmup, and minivm `Reset` are excluded. Runtime-specific host-call and result-conversion costs remain part of the measured invocation, so small differences should not be interpreted as VM-core instruction throughput alone.
 
 ### Complete Results
 

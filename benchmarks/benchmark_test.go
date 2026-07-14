@@ -29,6 +29,8 @@ type benchmarkScripts struct {
 	yaegi     string
 }
 
+var benchmarkCompare = func(*testing.B, benchmarkComparison, int32) {}
+
 func benchmarkVM(b *testing.B, prog *program.Program, want types.Boxed) {
 	b.Helper()
 	run := func(name string, threshold ...int) {

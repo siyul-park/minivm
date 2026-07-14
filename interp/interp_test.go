@@ -1527,21 +1527,33 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Empty(t, missing)
 	})
 
+	modes := []struct {
+		name string
+		opts []func(*option)
+	}{
+		{name: "standalone", opts: []func(*option){WithTick(1), WithThreshold(-1)}},
+		{name: "fused", opts: []func(*option){WithThreshold(-1)}},
+	}
 	for _, tt := range runTests {
 		t.Run(tt.name, func(t *testing.T) {
-			i := New(tt.program)
-			defer i.Close()
+			for _, mode := range modes {
+				t.Run(mode.name, func(t *testing.T) {
+					i := New(tt.program, mode.opts...)
+					defer i.Close()
 
-			err := i.Run(context.Background())
-			if tt.err != nil {
-				require.ErrorIs(t, err, tt.err)
-				return
-			}
-			require.NoError(t, err)
-			for _, want := range tt.values {
-				got, err := i.Pop()
-				require.NoError(t, err)
-				require.Equal(t, want, got)
+					err := i.Run(context.Background())
+					if tt.err != nil {
+						require.ErrorIs(t, err, tt.err)
+						return
+					}
+					require.NoError(t, err)
+					for _, want := range tt.values {
+						got, err := i.Pop()
+						require.NoError(t, err)
+						require.Equal(t, want, got)
+					}
+					require.Equal(t, len(tt.program.Locals), i.Len(), "unexpected values remain on the operand stack")
+				})
 			}
 		})
 	}

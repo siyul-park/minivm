@@ -110,11 +110,14 @@ benchmark-pr:
 	if [ "$$(go env GOARCH)" = arm64 ]; then \
 		printf '%s\n' "$$root" | grep -q '^BenchmarkInterpreter_Run/i32.const_nop_returns_i32/JITWarm-' || { printf '%s\n' 'missing ARM64 JIT warm benchmark'; exit 1; }; \
 	fi
-	@kernels="$$(cd benchmarks && go test -run='^$$' -bench='^(BenchmarkControl_IterativeFib|BenchmarkCall_RecursiveFib|BenchmarkMemory_TypedArraySum|BenchmarkNumeric_BranchTree)$$/^threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./...)" || { status=$$?; printf '%s\n' "$$kernels"; exit $$status; }; \
+	@kernels="$$(cd benchmarks && \
+		go test -run='^$$' -bench='^(BenchmarkControl_IterativeFib|BenchmarkMemory_TypedArraySum|BenchmarkNumeric_BranchTree)$$/^threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./... && \
+		go test -run='^$$' -bench='^BenchmarkCall_RecursiveFib$$/^(20|35)$$/^threaded$$' -benchmem -benchtime=$(benchmark-pr-time) $(test-options) ./...)" || { status=$$?; printf '%s\n' "$$kernels"; exit $$status; }; \
 	printf '%s\n' "$$kernels"; \
 	for name in \
 		BenchmarkControl_IterativeFib/threaded \
-		BenchmarkCall_RecursiveFib/threaded \
+		BenchmarkCall_RecursiveFib/20/threaded \
+		BenchmarkCall_RecursiveFib/35/threaded \
 		BenchmarkMemory_TypedArraySum/threaded \
 		BenchmarkNumeric_BranchTree/threaded; do \
 		printf '%s\n' "$$kernels" | grep -q "^$$name-" || { printf 'missing benchmark %s\n' "$$name"; exit 1; }; \
