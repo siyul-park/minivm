@@ -249,9 +249,23 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NoError(t, i.SetGlobal(0, types.BoxI32(8)))
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
 
-			entry, closeCompiler := compileNative(t, i, anchor{}, false)
-			defer closeCompiler()
-			assertNativeExit(t, i, entry, prof.ExitGuardValue, int(instr.I32_DIV_S))
+			root := anchor{}
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+			compiled := compiler.Compile(i, root)
+			require.NoError(t, compiled.err)
+			require.NotNil(t, compiled.module, "%+v", compiled)
+			entry, ok := compiled.module.entries[root]
+			require.True(t, ok)
+			require.NoError(t, entry.callable.Call(i.context()))
+			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
+			encoded := i.journal[journalExitID]
+			require.NotZero(t, encoded)
+			id := int(encoded - 1)
+			require.Less(t, id, len(entry.exits))
+			require.Equal(t, exitDescriptor{reason: prof.ExitGuardValue, opcode: int(instr.I32_DIV_S)}, entry.exits[id])
+			require.Equal(t, uint64(id+1), encoded)
 		})
 
 		t.Run("guard shape", func(t *testing.T) {
@@ -266,15 +280,33 @@ func TestCompiler_Compile(t *testing.T) {
 				i.retain(value.Ref())
 				require.NoError(t, i.SetGlobal(0, value))
 			}
-			entry, closeCompiler := compileNative(t, i, anchor{}, true)
-			defer closeCompiler()
+			root := anchor{}
+			capture, err := i.tracer.capture(i, root)
+			require.NoError(t, err)
+			require.NotNil(t, capture.trace)
+			i.stubs[root.addr] = i.code[root.addr][0]
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+			compiled := compiler.Compile(i, root)
+			require.NoError(t, compiled.err)
+			require.NotNil(t, compiled.module, "%+v", compiled)
+			entry, ok := compiled.module.entries[root]
+			require.True(t, ok)
 			{
 				value := i.constants[1]
 				i.retain(value.Ref())
 				require.NoError(t, i.SetGlobal(0, value))
 			}
 
-			assertNativeExit(t, i, entry, prof.ExitGuardShape, int(instr.ARRAY_LEN))
+			require.NoError(t, entry.callable.Call(i.context()))
+			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
+			encoded := i.journal[journalExitID]
+			require.NotZero(t, encoded)
+			id := int(encoded - 1)
+			require.Less(t, id, len(entry.exits))
+			require.Equal(t, exitDescriptor{reason: prof.ExitGuardShape, opcode: int(instr.ARRAY_LEN)}, entry.exits[id])
+			require.Equal(t, uint64(id+1), encoded)
 		})
 
 		t.Run("guard bounds", func(t *testing.T) {
@@ -289,10 +321,28 @@ func TestCompiler_Compile(t *testing.T) {
 				require.NoError(t, i.SetGlobal(0, value))
 			}
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
-			entry, closeCompiler := compileNative(t, i, anchor{}, true)
-			defer closeCompiler()
+			root := anchor{}
+			capture, err := i.tracer.capture(i, root)
+			require.NoError(t, err)
+			require.NotNil(t, capture.trace)
+			i.stubs[root.addr] = i.code[root.addr][0]
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+			compiled := compiler.Compile(i, root)
+			require.NoError(t, compiled.err)
+			require.NotNil(t, compiled.module, "%+v", compiled)
+			entry, ok := compiled.module.entries[root]
+			require.True(t, ok)
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(2)))
-			assertNativeExit(t, i, entry, prof.ExitGuardBounds, int(instr.ARRAY_GET))
+			require.NoError(t, entry.callable.Call(i.context()))
+			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
+			encoded := i.journal[journalExitID]
+			require.NotZero(t, encoded)
+			id := int(encoded - 1)
+			require.Less(t, id, len(entry.exits))
+			require.Equal(t, exitDescriptor{reason: prof.ExitGuardBounds, opcode: int(instr.ARRAY_GET)}, entry.exits[id])
+			require.Equal(t, uint64(id+1), encoded)
 		})
 
 		t.Run("array get value guard", func(t *testing.T) {
@@ -305,8 +355,19 @@ func TestCompiler_Compile(t *testing.T) {
 			i.retain(value.Ref())
 			require.NoError(t, i.SetGlobal(0, value))
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
-			entry, closeCompiler := compileNative(t, i, anchor{}, true)
-			defer closeCompiler()
+			root := anchor{}
+			capture, err := i.tracer.capture(i, root)
+			require.NoError(t, err)
+			require.NotNil(t, capture.trace)
+			i.stubs[root.addr] = i.code[root.addr][0]
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+			compiled := compiler.Compile(i, root)
+			require.NoError(t, compiled.err)
+			require.NotNil(t, compiled.module, "%+v", compiled)
+			entry, ok := compiled.module.entries[root]
+			require.True(t, ok)
 
 			for _, exit := range entry.exits {
 				if exit.reason == prof.ExitGuardValue && exit.opcode == int(instr.ARRAY_GET) {
@@ -330,11 +391,29 @@ func TestCompiler_Compile(t *testing.T) {
 				require.NoError(t, i.SetGlobal(0, value))
 			}
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
-			entry, closeCompiler := compileNative(t, i, anchor{}, true)
-			defer closeCompiler()
+			root := anchor{}
+			capture, err := i.tracer.capture(i, root)
+			require.NoError(t, err)
+			require.NotNil(t, capture.trace)
+			i.stubs[root.addr] = i.code[root.addr][0]
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+			compiled := compiler.Compile(i, root)
+			require.NoError(t, compiled.err)
+			require.NotNil(t, compiled.module, "%+v", compiled)
+			entry, ok := compiled.module.entries[root]
+			require.True(t, ok)
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(1)))
 
-			assertNativeExit(t, i, entry, prof.ExitGuardKind, int(instr.STRUCT_GET))
+			require.NoError(t, entry.callable.Call(i.context()))
+			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
+			encoded := i.journal[journalExitID]
+			require.NotZero(t, encoded)
+			id := int(encoded - 1)
+			require.Less(t, id, len(entry.exits))
+			require.Equal(t, exitDescriptor{reason: prof.ExitGuardKind, opcode: int(instr.STRUCT_GET)}, entry.exits[id])
+			require.Equal(t, uint64(id+1), encoded)
 		})
 
 		t.Run("cold branch", func(t *testing.T) {
@@ -354,11 +433,29 @@ func TestCompiler_Compile(t *testing.T) {
 			i := New(prog, WithThreshold(-1))
 			defer i.Close()
 			require.NoError(t, i.SetGlobal(0, types.BoxI32(0)))
-			entry, closeCompiler := compileNative(t, i, anchor{}, true)
-			defer closeCompiler()
+			root := anchor{}
+			capture, err := i.tracer.capture(i, root)
+			require.NoError(t, err)
+			require.NotNil(t, capture.trace)
+			i.stubs[root.addr] = i.code[root.addr][0]
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+			compiled := compiler.Compile(i, root)
+			require.NoError(t, compiled.err)
+			require.NotNil(t, compiled.module, "%+v", compiled)
+			entry, ok := compiled.module.entries[root]
+			require.True(t, ok)
 			require.NoError(t, i.SetGlobal(0, types.BoxI32(1)))
 
-			assertNativeExit(t, i, entry, prof.ExitColdBranch, int(instr.BR_IF))
+			require.NoError(t, entry.callable.Call(i.context()))
+			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
+			encoded := i.journal[journalExitID]
+			require.NotZero(t, encoded)
+			id := int(encoded - 1)
+			require.Less(t, id, len(entry.exits))
+			require.Equal(t, exitDescriptor{reason: prof.ExitColdBranch, opcode: int(instr.BR_IF)}, entry.exits[id])
+			require.Equal(t, uint64(id+1), encoded)
 		})
 
 		t.Run("trace cut", func(t *testing.T) {
@@ -368,10 +465,28 @@ func TestCompiler_Compile(t *testing.T) {
 			}
 			i := New(program.New(instructions), WithThreshold(-1))
 			defer i.Close()
-			entry, closeCompiler := compileNative(t, i, anchor{}, true)
-			defer closeCompiler()
+			root := anchor{}
+			capture, err := i.tracer.capture(i, root)
+			require.NoError(t, err)
+			require.NotNil(t, capture.trace)
+			i.stubs[root.addr] = i.code[root.addr][0]
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+			compiled := compiler.Compile(i, root)
+			require.NoError(t, compiled.err)
+			require.NotNil(t, compiled.module, "%+v", compiled)
+			entry, ok := compiled.module.entries[root]
+			require.True(t, ok)
 
-			assertNativeExit(t, i, entry, prof.ExitTraceCut, prof.OpcodeNone)
+			require.NoError(t, entry.callable.Call(i.context()))
+			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
+			encoded := i.journal[journalExitID]
+			require.NotZero(t, encoded)
+			id := int(encoded - 1)
+			require.Less(t, id, len(entry.exits))
+			require.Equal(t, exitDescriptor{reason: prof.ExitTraceCut, opcode: prof.OpcodeNone}, entry.exits[id])
+			require.Equal(t, uint64(id+1), encoded)
 		})
 
 		t.Run("terminal", func(t *testing.T) {
@@ -381,10 +496,24 @@ func TestCompiler_Compile(t *testing.T) {
 				instr.New(instr.F64_REM),
 			}), WithThreshold(-1))
 			defer i.Close()
-			entry, closeCompiler := compileNative(t, i, anchor{}, false)
-			defer closeCompiler()
+			root := anchor{}
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+			compiled := compiler.Compile(i, root)
+			require.NoError(t, compiled.err)
+			require.NotNil(t, compiled.module, "%+v", compiled)
+			entry, ok := compiled.module.entries[root]
+			require.True(t, ok)
 
-			assertNativeExit(t, i, entry, prof.ExitTerminalOp, int(instr.F64_REM))
+			require.NoError(t, entry.callable.Call(i.context()))
+			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
+			encoded := i.journal[journalExitID]
+			require.NotZero(t, encoded)
+			id := int(encoded - 1)
+			require.Less(t, id, len(entry.exits))
+			require.Equal(t, exitDescriptor{reason: prof.ExitTerminalOp, opcode: int(instr.F64_REM)}, entry.exits[id])
+			require.Equal(t, uint64(id+1), encoded)
 		})
 
 		t.Run("loop exit", func(t *testing.T) {
@@ -428,8 +557,18 @@ func TestCompiler_Compile(t *testing.T) {
 			root := anchor{addr: addr, ip: header}
 			addrLabel := strconv.Itoa(addr)
 			headerLabel := strconv.Itoa(header)
-			entry, closeCompiler := compileNative(t, i, root, true)
-			defer closeCompiler()
+			capture, err := i.tracer.capture(i, root)
+			require.NoError(t, err)
+			require.NotNil(t, capture.trace)
+			i.stubs[root.addr] = i.code[root.addr][0]
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+			compiled := compiler.Compile(i, root)
+			require.NoError(t, compiled.err)
+			require.NotNil(t, compiled.module, "%+v", compiled)
+			entry, ok := compiled.module.entries[root]
+			require.True(t, ok)
 			require.Equal(t, entryLoop, entry.kind)
 			metrics := i.counters(root, entry)
 
@@ -467,8 +606,18 @@ func TestCompiler_Compile(t *testing.T) {
 			i.fr.bp = 0
 			i.sp = 0
 			root := anchor{addr: addr}
-			entry, closeCompiler := compileNative(t, i, root, true)
-			defer closeCompiler()
+			capture, err := i.tracer.capture(i, root)
+			require.NoError(t, err)
+			require.NotNil(t, capture.trace)
+			i.stubs[root.addr] = i.code[root.addr][0]
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+			compiled := compiler.Compile(i, root)
+			require.NoError(t, compiled.err)
+			require.NotNil(t, compiled.module, "%+v", compiled)
+			entry, ok := compiled.module.entries[root]
+			require.True(t, ok)
 			require.Equal(t, entryFunction, entry.kind)
 
 			i.call(root, entry.callable, i.counters(root, entry))(i)
@@ -673,36 +822,6 @@ func TestCompiler_Compile(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, plans)
 	})
-}
-
-func compileNative(t *testing.T, i *Interpreter, root anchor, trace bool) (native, func()) {
-	t.Helper()
-	if trace {
-		result, err := i.tracer.capture(i, root)
-		require.NoError(t, err)
-		require.NotNil(t, result.trace)
-		i.stubs[root.addr] = i.code[root.addr][0]
-	}
-	c, err := newCompiler()
-	require.NoError(t, err)
-	result := c.Compile(i, root)
-	require.NoError(t, result.err)
-	require.NotNil(t, result.module, "%+v", result)
-	entry, ok := result.module.entries[root]
-	require.True(t, ok)
-	return entry, func() { require.NoError(t, c.Close()) }
-}
-
-func assertNativeExit(t *testing.T, i *Interpreter, entry native, reason prof.ExitReason, opcode int) {
-	t.Helper()
-	require.NoError(t, entry.callable.Call(i.context()))
-	require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
-	encoded := i.journal[journalExitID]
-	require.NotZero(t, encoded)
-	id := int(encoded - 1)
-	require.Less(t, id, len(entry.exits))
-	require.Equal(t, exitDescriptor{reason: reason, opcode: opcode}, entry.exits[id])
-	require.Equal(t, uint64(id+1), encoded)
 }
 
 func TestArm64Lowerer_QueuesEachState(t *testing.T) {
