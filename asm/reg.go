@@ -30,19 +30,8 @@ type VReg struct {
 // RegType distinguishes the integer and floating-point register banks.
 type RegType uint8
 
-const (
-	RegTypeInt RegType = iota
-	RegTypeFloat
-)
-
 // RegWidth declares whether a register holds a 32- or 64-bit lane.
 type RegWidth uint8
-
-const (
-	WidthUndefined RegWidth = 0
-	Width32        RegWidth = 32
-	Width64        RegWidth = 64
-)
 
 // RegMask is a bitmask of physical register IDs (0..63).
 type RegMask uint64
@@ -57,6 +46,17 @@ type RegInfo struct {
 	FltReserved RegMask
 	Scratch     RegMask
 }
+
+const (
+	RegTypeInt RegType = iota
+	RegTypeFloat
+)
+
+const (
+	WidthUndefined RegWidth = 0
+	Width32        RegWidth = 32
+	Width64        RegWidth = 64
+)
 
 // NewPReg constructs a physical register descriptor.
 func NewPReg(id uint8, typ RegType, w RegWidth) PReg {

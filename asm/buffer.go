@@ -59,6 +59,19 @@ func (b *Buffer) Write(code []byte) (unsafe.Pointer, error) {
 	return ptr, nil
 }
 
+// Free releases the current and archived mmap mappings.
+func (b *Buffer) Free() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, m := range b.old {
+		if err := m.free(); err != nil {
+			return err
+		}
+	}
+	b.old = nil
+	return b.mem.free()
+}
+
 func (b *Buffer) writeBatch(codes [][]byte, patch func([]unsafe.Pointer) error) ([]unsafe.Pointer, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -106,19 +119,6 @@ func (b *Buffer) write(code []byte) (unsafe.Pointer, error) {
 	b.offset = end
 
 	return ptr, nil
-}
-
-// Free releases the current and archived mmap mappings.
-func (b *Buffer) Free() error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, m := range b.old {
-		if err := m.free(); err != nil {
-			return err
-		}
-	}
-	b.old = nil
-	return b.mem.free()
 }
 
 // writeAt overwrites the bytes starting at ptr with code. ptr must point

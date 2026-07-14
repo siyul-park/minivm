@@ -5,13 +5,6 @@ import (
 	"fmt"
 )
 
-// MaxSpillSlots caps how many spill slots the allocator may use for one
-// Code. It sizes the spill area the arm64 invoke trampoline reserves on its
-// native stack frame (see docs/jit-internals.md and asm/arm64/abi_arm64.s);
-// changing it without updating the trampoline's reserve and interp's
-// nativeFrameLimit breaks that arithmetic invariant silently.
-const MaxSpillSlots = 512
-
 // rewriter transforms an instruction list whose operands reference virtual
 // registers into one whose operands reference physical registers. It owns
 // the linear-scan policy: bind each vreg as it is used or defined, release
@@ -37,6 +30,13 @@ type rewriter struct {
 
 	out []Instruction
 }
+
+// MaxSpillSlots caps how many spill slots the allocator may use for one
+// Code. It sizes the spill area the arm64 invoke trampoline reserves on its
+// native stack frame (see docs/jit-internals.md and asm/arm64/abi_arm64.s);
+// changing it without updating the trampoline's reserve and interp's
+// nativeFrameLimit breaks that arithmetic invariant silently.
+const MaxSpillSlots = 512
 
 func newRewriter(arch Arch, insts []Instruction, pins map[int32]PReg) *rewriter {
 	info := arch.Registers()

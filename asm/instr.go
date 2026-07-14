@@ -2,10 +2,6 @@ package asm
 
 import "fmt"
 
-// OpPseudoLabel is a pseudo-instruction that marks a label position. It
-// emits zero bytes and is stripped before register allocation.
-const OpPseudoLabel uint16 = 0xFFFF
-
 // Instruction is the architecture-neutral IR row consumed by the
 // assembler. Op is opaque to asm/; each architecture defines its own
 // Op constants. Up to four operand slots cover every supported
@@ -17,6 +13,10 @@ type Instruction struct {
 	Src2 Operand
 	Src3 Operand
 }
+
+// OpPseudoLabel is a pseudo-instruction that marks a label position. It
+// emits zero bytes and is stripped before register allocation.
+const OpPseudoLabel uint16 = 0xFFFF
 
 // Def returns the destination vreg if Dst is a virtual-register operand.
 // Pure operand inspection — no side effects.
