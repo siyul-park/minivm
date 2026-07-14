@@ -29,10 +29,6 @@ func (v *marshalCustom) UnmarshalVM(_ *Interpreter, value types.Value) error {
 	return nil
 }
 
-type marshalNode struct {
-	Next *marshalNode
-}
-
 func TestInterpreter_Marshal(t *testing.T) {
 	t.Run("scalar value", func(t *testing.T) {
 		i := New(program.New(nil))
@@ -218,7 +214,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 	t.Run("cycle", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
-		node := &marshalNode{}
+		node := &struct{ Next any }{}
 		node.Next = node
 
 		_, err := i.Marshal(node)
