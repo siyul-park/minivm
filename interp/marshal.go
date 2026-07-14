@@ -159,40 +159,6 @@ var (
 	}
 )
 
-// unmarshalComplex decodes a {Real, Imag} struct into a *complex64 or
-// *complex128 destination. Shared by both complex builtin Converters.
-func unmarshalComplex(i *Interpreter, val types.Value, dst any) error {
-	st, ok := structOf(i, val)
-	if !ok {
-		return fmt.Errorf("%w: source=%T", ErrTypeMismatch, val)
-	}
-	re, reOK := asFloat(st.FieldByName("Real"))
-	im, imOK := asFloat(st.FieldByName("Imag"))
-	if !reOK || !imOK {
-		return fmt.Errorf("%w: source=%s", ErrTypeMismatch, st.Typ)
-	}
-	out := reflect.ValueOf(dst).Elem()
-	c := complex(re, im)
-	if out.OverflowComplex(c) {
-		return fmt.Errorf("%w: %v overflows %s", ErrValueOverflow, c, out.Type())
-	}
-	out.SetComplex(c)
-	return nil
-}
-
-// structOf resolves val to a *types.Struct, following a heap ref when needed.
-func structOf(i *Interpreter, val types.Value) (*types.Struct, bool) {
-	if b, ok := val.(types.Boxed); ok && b.Kind() == types.KindRef {
-		v, err := i.Load(b.Ref())
-		if err != nil {
-			return nil, false
-		}
-		val = v
-	}
-	st, ok := val.(*types.Struct)
-	return st, ok
-}
-
 func (m *codec) Marshal(i *Interpreter, v any) (types.Value, error) {
 	state := &marshalState{m: m, i: i, seen: make(map[uintptr]bool)}
 	return state.value(reflect.ValueOf(v))
@@ -1739,4 +1705,38 @@ func asFloat(val types.Value) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// unmarshalComplex decodes a {Real, Imag} struct into a *complex64 or
+// *complex128 destination. Shared by both complex builtin Converters.
+func unmarshalComplex(i *Interpreter, val types.Value, dst any) error {
+	st, ok := structOf(i, val)
+	if !ok {
+		return fmt.Errorf("%w: source=%T", ErrTypeMismatch, val)
+	}
+	re, reOK := asFloat(st.FieldByName("Real"))
+	im, imOK := asFloat(st.FieldByName("Imag"))
+	if !reOK || !imOK {
+		return fmt.Errorf("%w: source=%s", ErrTypeMismatch, st.Typ)
+	}
+	out := reflect.ValueOf(dst).Elem()
+	c := complex(re, im)
+	if out.OverflowComplex(c) {
+		return fmt.Errorf("%w: %v overflows %s", ErrValueOverflow, c, out.Type())
+	}
+	out.SetComplex(c)
+	return nil
+}
+
+// structOf resolves val to a *types.Struct, following a heap ref when needed.
+func structOf(i *Interpreter, val types.Value) (*types.Struct, bool) {
+	if b, ok := val.(types.Boxed); ok && b.Kind() == types.KindRef {
+		v, err := i.Load(b.Ref())
+		if err != nil {
+			return nil, false
+		}
+		val = v
+	}
+	st, ok := val.(*types.Struct)
+	return st, ok
 }

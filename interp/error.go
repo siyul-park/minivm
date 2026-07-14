@@ -27,6 +27,24 @@ type escape struct {
 	err error
 }
 
+const (
+	TrapCodeUnknownOpcode       types.ErrorCode = -1
+	TrapCodeUnreachableExecuted types.ErrorCode = -2
+	TrapCodeSegmentationFault   types.ErrorCode = -3
+	TrapCodeStackOverflow       types.ErrorCode = -4
+	TrapCodeStackUnderflow      types.ErrorCode = -5
+	TrapCodeFrameOverflow       types.ErrorCode = -6
+	TrapCodeFrameUnderflow      types.ErrorCode = -7
+	TrapCodeTypeMismatch        types.ErrorCode = -8
+	TrapCodeDivideByZero        types.ErrorCode = -9
+	TrapCodeIndexOutOfRange     types.ErrorCode = -10
+	TrapCodeFuelExhausted       types.ErrorCode = -11
+	TrapCodeHeapExhausted       types.ErrorCode = -12
+	TrapCodeCoroutineDone       types.ErrorCode = -13
+	TrapCodeUncaughtException   types.ErrorCode = -14
+	TrapCodeHostError           types.ErrorCode = -15
+)
+
 var (
 	ErrUnknownOpcode       = errors.New("unknown opcode")
 	ErrUnreachableExecuted = errors.New("unreachable executed")
@@ -44,24 +62,6 @@ var (
 	ErrCoroutineDone       = errors.New("coroutine done")
 	ErrInterpreterBusy     = errors.New("interpreter busy")
 	ErrUncaughtException   = errors.New("uncaught exception")
-)
-
-const (
-	TrapCodeUnknownOpcode       types.ErrorCode = -1
-	TrapCodeUnreachableExecuted types.ErrorCode = -2
-	TrapCodeSegmentationFault   types.ErrorCode = -3
-	TrapCodeStackOverflow       types.ErrorCode = -4
-	TrapCodeStackUnderflow      types.ErrorCode = -5
-	TrapCodeFrameOverflow       types.ErrorCode = -6
-	TrapCodeFrameUnderflow      types.ErrorCode = -7
-	TrapCodeTypeMismatch        types.ErrorCode = -8
-	TrapCodeDivideByZero        types.ErrorCode = -9
-	TrapCodeIndexOutOfRange     types.ErrorCode = -10
-	TrapCodeFuelExhausted       types.ErrorCode = -11
-	TrapCodeHeapExhausted       types.ErrorCode = -12
-	TrapCodeCoroutineDone       types.ErrorCode = -13
-	TrapCodeUncaughtException   types.ErrorCode = -14
-	TrapCodeHostError           types.ErrorCode = -15
 )
 
 var errorCodes = []struct {

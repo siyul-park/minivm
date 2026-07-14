@@ -84,8 +84,6 @@ type frame struct {
 	bp int
 }
 
-const heapRunway = 64
-
 type option struct {
 	hook       func(*Interpreter) error
 	marshaler  Marshaler
@@ -103,6 +101,8 @@ type option struct {
 	tick    int
 	fuel    uint64
 }
+
+const heapRunway = 64
 
 func WithHook(fn func(*Interpreter) error) func(*option) {
 	return func(o *option) { o.hook = fn }

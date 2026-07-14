@@ -21,18 +21,6 @@ const (
 	boxableWidth = uint8(49)
 )
 
-// Boxing tags used by scalar lowering, derived from the Kind
-// tag layout so they track any reordering of the Kind enum. i1/i8 share the i32
-// representation and box through tagI32.
-var (
-	tagI1  = types.Tag(types.KindI1)
-	tagI8  = types.Tag(types.KindI8)
-	tagI32 = types.Tag(types.KindI32)
-	tagI64 = types.Tag(types.KindI64)
-	tagF32 = types.Tag(types.KindF32)
-	tagRef = types.Tag(types.KindRef)
-)
-
 const (
 	sliceData   = 0
 	sliceLen    = 8
@@ -46,6 +34,20 @@ const (
 	errorValue  = types.ErrorValueOffset
 	coroValue   = int(unsafe.Offsetof(Coroutine{}.value))
 	coroDone    = int(unsafe.Offsetof(Coroutine{}.done))
+)
+
+const branchTableLimit = 32
+
+// Boxing tags used by scalar lowering, derived from the Kind
+// tag layout so they track any reordering of the Kind enum. i1/i8 share the i32
+// representation and box through tagI32.
+var (
+	tagI1  = types.Tag(types.KindI1)
+	tagI8  = types.Tag(types.KindI8)
+	tagI32 = types.Tag(types.KindI32)
+	tagI64 = types.Tag(types.KindI64)
+	tagF32 = types.Tag(types.KindF32)
+	tagRef = types.Tag(types.KindRef)
 )
 
 var (
@@ -75,49 +77,6 @@ func newCompiler() (*compiler, error) {
 		buffer:      buffer,
 		scratchRegs: []asm.PReg{arm64.X10, arm64.X11, arm64.X12, arm64.X13, arm64.X14},
 	}, nil
-}
-
-// lower emits one plan through the common block pipeline.
-func lower(ctx *lowering, plan plan) bool {
-	l := arm64Lowerer{}
-	l.enter(ctx)
-	ctx.blocks = plan.blocks
-	ctx.kind = plan.kind
-	for id, block := range ctx.blocks {
-		if !block.tail && block.state != nil {
-			ctx.labels[id] = ctx.assembler.Label()
-		}
-	}
-	root := plan.root
-	if _, ok := ctx.labels[root]; !ok {
-		ctx.labels[root] = ctx.assembler.Label()
-	}
-	ctx.back = ctx.labels[root]
-	ctx.assembler.Bind(ctx.back)
-	if !l.emitBlock(ctx, root, nil) {
-		return false
-	}
-	for id, block := range ctx.blocks {
-		if id == root || block.tail || block.state == nil {
-			continue
-		}
-		ctx.assembler.Bind(ctx.labels[id])
-		if !l.emitBlock(ctx, id, nil) {
-			return false
-		}
-	}
-	for n := 0; n < len(ctx.work); n++ {
-		work := ctx.work[n]
-		ctx.values = work.values
-		ctx.frames = work.frames
-		ctx.assembler.Bind(work.label)
-		l.reload(ctx)
-		if !l.emitBlock(ctx, work.block, work.tail) {
-			return false
-		}
-	}
-	l.materializeExits(ctx)
-	return true
 }
 
 // enter opens the framed callable: the external entry mirrors the
@@ -1250,8 +1209,6 @@ func (l arm64Lowerer) arrayGetKnown(ctx *lowering, op step) bool {
 	return true
 }
 
-const branchTableLimit = 32
-
 func (l arm64Lowerer) enterBlock(ctx *lowering, state []slot) {
 	ctx.values = ctx.values[:0]
 	for _, slot := range state {
@@ -1427,16 +1384,6 @@ func (l arm64Lowerer) follow(ctx *lowering, tail []int) bool {
 	ctx.work = append(ctx.work, work)
 	ctx.assembler.Emit(arm64.BLabel(label))
 	return true
-}
-
-func join(steps, tail []int) []int {
-	if len(steps) == 0 {
-		return tail
-	}
-	if len(tail) == 0 {
-		return steps
-	}
-	return append(append([]int(nil), steps...), tail...)
 }
 
 func (l arm64Lowerer) path(ctx *lowering, from anchor, target edge, tail []int, opcode int) bool {
@@ -1616,27 +1563,6 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 		ctx.push(value{reg: regs[idx], kind: typ.Kind(), raw: true})
 	}
 	return true
-}
-
-func zeroValue(kind types.Kind) (types.Boxed, bool) {
-	switch kind {
-	case types.KindI1:
-		return types.BoxI1(false), true
-	case types.KindI8:
-		return types.BoxI8(0), true
-	case types.KindI32:
-		return types.BoxI32(0), true
-	case types.KindI64:
-		return types.BoxI64(0), true
-	case types.KindF32:
-		return types.BoxF32(0), true
-	case types.KindF64:
-		return types.BoxF64(0), true
-	case types.KindRef:
-		return types.BoxedNull, true
-	default:
-		return 0, false
-	}
 }
 
 func (l arm64Lowerer) i32Binary(ctx *lowering, op func(dst, src1, src2 asm.Reg) asm.Instruction) bool {
@@ -3973,4 +3899,78 @@ func (arm64Lowerer) rcBase(ctx *lowering) asm.VReg {
 	base := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.LDR(base, ctx.pin(scratchCtrl), int16(journalRC*8)))
 	return base
+}
+
+func join(steps, tail []int) []int {
+	if len(steps) == 0 {
+		return tail
+	}
+	if len(tail) == 0 {
+		return steps
+	}
+	return append(append([]int(nil), steps...), tail...)
+}
+
+func zeroValue(kind types.Kind) (types.Boxed, bool) {
+	switch kind {
+	case types.KindI1:
+		return types.BoxI1(false), true
+	case types.KindI8:
+		return types.BoxI8(0), true
+	case types.KindI32:
+		return types.BoxI32(0), true
+	case types.KindI64:
+		return types.BoxI64(0), true
+	case types.KindF32:
+		return types.BoxF32(0), true
+	case types.KindF64:
+		return types.BoxF64(0), true
+	case types.KindRef:
+		return types.BoxedNull, true
+	default:
+		return 0, false
+	}
+}
+
+// lower emits one plan through the common block pipeline.
+func lower(ctx *lowering, plan plan) bool {
+	l := arm64Lowerer{}
+	l.enter(ctx)
+	ctx.blocks = plan.blocks
+	ctx.kind = plan.kind
+	for id, block := range ctx.blocks {
+		if !block.tail && block.state != nil {
+			ctx.labels[id] = ctx.assembler.Label()
+		}
+	}
+	root := plan.root
+	if _, ok := ctx.labels[root]; !ok {
+		ctx.labels[root] = ctx.assembler.Label()
+	}
+	ctx.back = ctx.labels[root]
+	ctx.assembler.Bind(ctx.back)
+	if !l.emitBlock(ctx, root, nil) {
+		return false
+	}
+	for id, block := range ctx.blocks {
+		if id == root || block.tail || block.state == nil {
+			continue
+		}
+		ctx.assembler.Bind(ctx.labels[id])
+		if !l.emitBlock(ctx, id, nil) {
+			return false
+		}
+	}
+	for n := 0; n < len(ctx.work); n++ {
+		work := ctx.work[n]
+		ctx.values = work.values
+		ctx.frames = work.frames
+		ctx.assembler.Bind(work.label)
+		l.reload(ctx)
+		if !l.emitBlock(ctx, work.block, work.tail) {
+			return false
+		}
+	}
+	l.materializeExits(ctx)
+	return true
 }

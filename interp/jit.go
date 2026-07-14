@@ -264,6 +264,8 @@ func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
 	return result
 }
 
+func (noSpillArch) Frame() asm.Frame { return nil }
+
 func (current compileResult) prefer(candidate compileResult) compileResult {
 	if reasonPriority(candidate.reason) > reasonPriority(current.reason) ||
 		reasonPriority(candidate.reason) == reasonPriority(current.reason) && candidate.frontend > current.frontend {
@@ -355,8 +357,6 @@ func (m counters) yield() {
 		m.yields.Inc()
 	}
 }
-
-func (noSpillArch) Frame() asm.Frame { return nil }
 
 // frame returns the innermost (currently executing) frame.
 func (ctx *lowering) frame() *activation {
