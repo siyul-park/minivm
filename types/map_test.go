@@ -34,20 +34,19 @@ func TestNewMapWithCapacity(t *testing.T) {
 func TestNewMapForType(t *testing.T) {
 	structType := NewStructType(NewStructField(TypeI32))
 	tests := []struct {
-		name string
 		typ  *MapType
 		want any
 	}{
-		{name: "i32", typ: NewMapType(TypeI32, TypeI32), want: (*TypedMap[int32])(nil)},
-		{name: "i64", typ: NewMapType(TypeI64, TypeI32), want: (*TypedMap[int64])(nil)},
-		{name: "f32", typ: NewMapType(TypeF32, TypeI32), want: (*TypedMap[float32])(nil)},
-		{name: "f64", typ: NewMapType(TypeF64, TypeI32), want: (*TypedMap[float64])(nil)},
-		{name: "ref", typ: NewMapType(TypeRef, TypeI32), want: (*Map)(nil)},
-		{name: "string", typ: NewMapType(TypeString, TypeI32), want: (*Map)(nil)},
-		{name: "struct", typ: NewMapType(structType, TypeI32), want: (*Map)(nil)},
+		{typ: NewMapType(TypeI32, TypeI32), want: (*TypedMap[int32])(nil)},
+		{typ: NewMapType(TypeI64, TypeI32), want: (*TypedMap[int64])(nil)},
+		{typ: NewMapType(TypeF32, TypeI32), want: (*TypedMap[float32])(nil)},
+		{typ: NewMapType(TypeF64, TypeI32), want: (*TypedMap[float64])(nil)},
+		{typ: NewMapType(TypeRef, TypeI32), want: (*Map)(nil)},
+		{typ: NewMapType(TypeString, TypeI32), want: (*Map)(nil)},
+		{typ: NewMapType(structType, TypeI32), want: (*Map)(nil)},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.typ.Key.String(), func(t *testing.T) {
 			require.IsType(t, tt.want, NewMapForType(tt.typ, 0))
 		})
 	}
@@ -474,7 +473,7 @@ func TestMapKey_String(t *testing.T) {
 		{MapKey{Kind: Kind(255)}, "<invalid>"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.str, func(t *testing.T) {
+		t.Run(tt.key.Kind.String(), func(t *testing.T) {
 			require.Equal(t, tt.str, tt.key.String())
 		})
 	}

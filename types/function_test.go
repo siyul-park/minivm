@@ -1,6 +1,7 @@
 package types
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
@@ -150,17 +151,16 @@ func TestFunction_String(t *testing.T) {
 
 func TestFunction_LocalKinds(t *testing.T) {
 	tests := []struct {
-		name string
 		fn   *Function
 		want []Kind
 	}{
-		{name: "none", fn: NewFunction(nil, nil, nil)},
-		{name: "locals only", fn: NewFunction(nil, []Type{TypeI32, TypeRef}, nil), want: []Kind{KindI32, KindRef}},
-		{name: "params only", fn: NewFunction(&FunctionType{Params: []Type{TypeI64}}, nil, nil), want: []Kind{KindI64}},
-		{name: "params and locals", fn: NewFunction(&FunctionType{Params: []Type{TypeI64}}, []Type{TypeF32}, nil), want: []Kind{KindI64, KindF32}},
+		{fn: NewFunction(nil, nil, nil)},
+		{fn: NewFunction(nil, []Type{TypeI32, TypeRef}, nil), want: []Kind{KindI32, KindRef}},
+		{fn: NewFunction(&FunctionType{Params: []Type{TypeI64}}, nil, nil), want: []Kind{KindI64}},
+		{fn: NewFunction(&FunctionType{Params: []Type{TypeI64}}, []Type{TypeF32}, nil), want: []Kind{KindI64, KindF32}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(fmt.Sprintf("params=%v,locals=%v", tt.fn.Typ.Params, tt.fn.Locals), func(t *testing.T) {
 			require.Equal(t, tt.want, tt.fn.LocalKinds())
 		})
 	}
@@ -172,16 +172,15 @@ func TestFunctionType_Kind(t *testing.T) {
 
 func TestFunctionType_String(t *testing.T) {
 	tests := []struct {
-		name string
 		typ  *FunctionType
 		want string
 	}{
-		{name: "empty", typ: &FunctionType{}, want: "func()"},
-		{name: "one return", typ: &FunctionType{Params: []Type{TypeI32}, Returns: []Type{TypeI64}}, want: "func(i32) i64"},
-		{name: "many returns", typ: &FunctionType{Params: []Type{TypeI32, TypeRef}, Returns: []Type{TypeI64, TypeF32}}, want: "func(i32, ref) (i64, f32)"},
+		{typ: &FunctionType{}, want: "func()"},
+		{typ: &FunctionType{Params: []Type{TypeI32}, Returns: []Type{TypeI64}}, want: "func(i32) i64"},
+		{typ: &FunctionType{Params: []Type{TypeI32, TypeRef}, Returns: []Type{TypeI64, TypeF32}}, want: "func(i32, ref) (i64, f32)"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(fmt.Sprintf("params=%v,returns=%v", tt.typ.Params, tt.typ.Returns), func(t *testing.T) {
 			require.Equal(t, tt.want, tt.typ.String())
 		})
 	}
