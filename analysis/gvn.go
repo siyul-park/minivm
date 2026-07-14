@@ -106,27 +106,6 @@ func NewGlobalValueNumberingAnalysis() *GlobalValueNumberingAnalysis {
 	return &GlobalValueNumberingAnalysis{}
 }
 
-func (a *GlobalValueNumberingAnalysis) Run(m *pass.Manager, fn *types.Function) (*GlobalValueNumbering, error) {
-	blocks, err := pass.GetResult[[]*BasicBlock](m, fn)
-	if err != nil {
-		return nil, err
-	}
-
-	g := newGNumbering(fn, blocks)
-	for block, blk := range blocks {
-		g.reset(block)
-		for ip := blk.Start; ip < blk.End; {
-			inst := instr.Instruction(fn.Code[ip:])
-			if !g.step(ip, inst) {
-				break
-			}
-			ip += inst.Width()
-		}
-	}
-	g.available()
-	return g.out, nil
-}
-
 func newGNumbering(fn *types.Function, blocks []*BasicBlock) *gnumbering {
 	var locals []types.Type
 	if fn.Typ != nil {
@@ -157,6 +136,27 @@ func newGNumbering(fn *types.Function, blocks []*BasicBlock) *gnumbering {
 		keys:   map[string]int{},
 		gen:    make([]map[int]gcompute, len(blocks)),
 	}
+}
+
+func (a *GlobalValueNumberingAnalysis) Run(m *pass.Manager, fn *types.Function) (*GlobalValueNumbering, error) {
+	blocks, err := pass.GetResult[[]*BasicBlock](m, fn)
+	if err != nil {
+		return nil, err
+	}
+
+	g := newGNumbering(fn, blocks)
+	for block, blk := range blocks {
+		g.reset(block)
+		for ip := blk.Start; ip < blk.End; {
+			inst := instr.Instruction(fn.Code[ip:])
+			if !g.step(ip, inst) {
+				break
+			}
+			ip += inst.Width()
+		}
+	}
+	g.available()
+	return g.out, nil
 }
 
 // available converts every block-first computation of an already-available value

@@ -27,10 +27,6 @@ func NewBasicBlocksAnalysis() *BasicBlocksAnalysis {
 	return &BasicBlocksAnalysis{}
 }
 
-func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*BasicBlock, error) {
-	return Blocks(fn)
-}
-
 // Blocks builds the control-flow blocks for fn.
 func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 	offsets := []int{0}
@@ -136,6 +132,10 @@ func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 		b.Preds = slices.Compact(b.Preds)
 	}
 	return blocks, nil
+}
+
+func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*BasicBlock, error) {
+	return Blocks(fn)
 }
 
 func link(blocks []*BasicBlock, indexByStart map[int]int, src, dst int) bool {
