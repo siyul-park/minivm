@@ -108,6 +108,131 @@ func (l arm64Lowerer) materializeExits(ctx *lowering) {
 	}
 }
 
+func (l arm64Lowerer) zero32(ctx *lowering, v asm.VReg) asm.VReg {
+	out := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.ANDI(out, v, maskI32))
+	return out
+}
+
+func (l arm64Lowerer) emitBlock(ctx *lowering, id int, tail []int) bool {
+	if id < 0 || id >= len(ctx.blocks) {
+		return false
+	}
+	block := ctx.blocks[id]
+	if block.state != nil {
+		l.enterBlock(ctx, block.state)
+	}
+	done, ok := l.steps(ctx, block.steps)
+	if !ok {
+		return false
+	}
+	if done {
+		return true
+	}
+	if block.term.kind == terminateFallthrough && len(tail) > 0 {
+		return l.follow(ctx, tail)
+	}
+	return l.term(ctx, block, tail)
+}
+
+func (l arm64Lowerer) term(ctx *lowering, block block, tail []int) bool {
+	switch block.term.kind {
+	case terminateFallthrough:
+		return true
+	case terminateBranch:
+		if len(block.term.edges) != 1 {
+			return false
+		}
+		target := block.term.edges[0]
+		if block.term.hot == 0 {
+			return l.next(ctx, block.anchor, target, tail, int(instr.BR))
+		}
+		if !l.flush(ctx, false) {
+			return false
+		}
+		return l.path(ctx, block.anchor, target, tail, int(instr.BR))
+	case terminateBranchIf:
+		return l.conditional(ctx, block, tail)
+	case terminateBranchTable:
+		return l.table(ctx, block, tail)
+	case terminateReturn:
+		if len(ctx.frames) > 1 {
+			if !l.stitch(ctx) {
+				return false
+			}
+			if len(tail) > 0 {
+				return l.follow(ctx, tail)
+			}
+			if ctx.kind == entryModule {
+				return l.complete(ctx)
+			}
+			return l.ret(ctx)
+		}
+		return l.ret(ctx)
+	case terminateComplete:
+		return l.complete(ctx)
+	case terminateFallback:
+		return l.exit(ctx, block.term.ip, prof.ExitTraceCut, prof.OpcodeNone)
+	default:
+		return false
+	}
+}
+
+func (l arm64Lowerer) conditional(ctx *lowering, block block, tail []int) bool {
+	if len(block.term.edges) != 2 || ctx.count() < 1 || !l.kinds(ctx, types.KindI32, 1) {
+		return false
+	}
+	cond := ctx.pop()
+	if block.term.hot >= 0 && block.term.hot < len(block.term.edges) {
+		cold := 1 - block.term.hot
+		clean := l.clean(ctx)
+		if !clean && !l.flush(ctx, false) {
+			return false
+		}
+		target := block.term.edges[cold]
+		label, ok := l.label(ctx, target, join(target.tail, tail), int(instr.BR_IF))
+		if !ok {
+			return false
+		}
+		if block.term.hot == 1 {
+			ctx.assembler.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), label))
+		} else {
+			ctx.assembler.Emit(arm64.CBZLabel(l.narrow32(cond.reg), label))
+		}
+		return l.next(ctx, block.anchor, block.term.edges[block.term.hot], tail, int(instr.BR_IF))
+	}
+
+	if !l.flush(ctx, false) {
+		return false
+	}
+	taken := ctx.assembler.Label()
+	ctx.assembler.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), taken))
+	if !l.path(ctx, block.anchor, block.term.edges[1], tail, int(instr.BR_IF)) {
+		return false
+	}
+	ctx.assembler.Bind(taken)
+	return l.path(ctx, block.anchor, block.term.edges[0], tail, int(instr.BR_IF))
+}
+
+func (l arm64Lowerer) next(ctx *lowering, from anchor, target edge, tail []int, opcode int) bool {
+	tail = join(target.tail, tail)
+	target.tail = nil
+	if target.anchor.addr == from.addr && target.anchor.ip <= from.ip {
+		if !l.flush(ctx, false) {
+			return false
+		}
+		return l.path(ctx, from, target, tail, opcode)
+	}
+	if target.block == noBlock {
+		reason := prof.ExitColdBranch
+		if ctx.kind == entryLoop {
+			reason = prof.ExitLoop
+		}
+		return l.exit(ctx, target.anchor.ip, reason, opcode)
+	}
+	return l.emitBlock(ctx, target.block, tail)
+}
+
 // steps emits the ordinary operations of one normalized block. Control flow
 // is owned by the block terminator and never appears here.
 func (l arm64Lowerer) steps(ctx *lowering, ops []step) (bool, bool) {
@@ -735,45 +860,6 @@ func (l arm64Lowerer) unreachable(ctx *lowering, op step) bool {
 	return l.exit(ctx, op.ip, prof.ExitTerminalOp, int(op.op))
 }
 
-// constGet pushes a scalar constant as an unboxed immediate. Refs retain
-// ordinary standalone ownership; call-target fusion owns direct markers.
-func (l arm64Lowerer) constGet(ctx *lowering, op step) bool {
-	idx := int(op.args[0])
-	if idx >= len(ctx.constants) {
-		return false
-	}
-	v := ctx.constants[idx]
-	switch v.Kind() {
-	case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
-		dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		val := value{reg: dst, kind: v.Kind(), raw: true}
-		if v.Kind() == types.KindI64 {
-			ctx.assembler.Emit(arm64.LDI(dst, uint64(v.I64()))...)
-			val.known = true
-			val.imm = v.I64()
-		} else {
-			ctx.assembler.Emit(arm64.LDI(dst, uint64(v))...)
-			if v.Kind().Repr() == types.KindI32 {
-				val.known = true
-				val.imm = int64(v.I32())
-			}
-		}
-		ctx.push(val)
-		return true
-	case types.KindRef:
-		ref := v.Ref()
-		if ref < 0 || ref >= len(ctx.heap) {
-			return false
-		}
-		boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		ctx.assembler.Emit(arm64.LDI(boxed, uint64(v))...)
-		l.retain(ctx, ref)
-		ctx.push(value{reg: boxed, kind: types.KindRef, raw: false, ref: ref})
-		return true
-	}
-	return false
-}
-
 func (l arm64Lowerer) localGet(ctx *lowering, op step) bool {
 	f := ctx.frame()
 	idx := int(op.args[0])
@@ -987,76 +1073,6 @@ func (l arm64Lowerer) selectOp(ctx *lowering) bool {
 	return true
 }
 
-// base returns &stack[bp] for slot-relative loads and stores.
-func (l arm64Lowerer) base(ctx *lowering, vStack asm.VReg) asm.VReg {
-	a := ctx.assembler
-	vBP := ctx.pin(scratchBP)
-	off := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LSLI(off, vBP, 3))
-	addr := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.ADD(addr, vStack, off))
-	return addr
-}
-
-// operands pops a typed binary-op pair after checking both kinds.
-func (l arm64Lowerer) operands(ctx *lowering, kind types.Kind) (value, value, bool) {
-	if ctx.count() < 2 || !l.kinds(ctx, kind, 2) {
-		return value{}, value{}, false
-	}
-	b := ctx.pop()
-	a := ctx.pop()
-	return b, a, true
-}
-
-// kinds reports whether the top n operands are all raw and computable as kind.
-// The match is by representation, so the narrow integer kinds (i1, i8) satisfy
-// an i32 operand exactly as they do in the interpreter; for every other kind
-// Repr is the identity, so the check stays exact.
-func (l arm64Lowerer) kinds(ctx *lowering, kind types.Kind, n int) bool {
-	for k := 0; k < n; k++ {
-		v := ctx.values[len(ctx.values)-1-k]
-		if v.kind.Repr() != kind.Repr() || !v.raw {
-			return false
-		}
-	}
-	return true
-}
-
-// args verifies the top params operands match the callee's declared
-// parameter kinds.
-func (l arm64Lowerer) args(ctx *lowering, target *types.Function, params int) bool {
-	kinds := target.LocalKinds()
-	if len(kinds) < params {
-		return false
-	}
-	for k := 0; k < params; k++ {
-		v := ctx.values[len(ctx.values)-params+k]
-		if v.kind != kinds[k] {
-			return false
-		}
-		if v.kind == types.KindRef {
-			if v.raw {
-				return false
-			}
-			continue
-		}
-		if !v.raw {
-			return false
-		}
-	}
-	return true
-}
-
-// marked reports whether a raw ref marker blocks deferred continuation reload.
-func (l arm64Lowerer) marked(ctx *lowering) bool {
-	for _, v := range ctx.values {
-		if v.kind == types.KindRef && v.raw {
-			return true
-		}
-	}
-	return false
-}
-
 // clean reports whether a branch can skip the hot-path flush: no live operand
 // or dirty local will be reloaded from VM stack homes later in the trace.
 func (l arm64Lowerer) clean(ctx *lowering) bool {
@@ -1072,34 +1088,6 @@ func (l arm64Lowerer) clean(ctx *lowering) bool {
 		}
 	}
 	return true
-}
-
-// setBool pushes a comparison/test result as i1: every caller is an
-// eqz/eq/lt/.../is_null/test whose result kind is i1 (matching the interpreter,
-// which boxes these through BoxI1). The 0/1 flag still satisfies any later
-// i32 operand because kinds compares by representation.
-func (l arm64Lowerer) setBool(ctx *lowering, cond uint8) {
-	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.CSET(flag, cond))
-	ctx.push(value{reg: flag, kind: types.KindI1, raw: true})
-}
-
-// sign32 sign-extends a raw i32's low lane for signed division and
-// shifts; zero32 zero-extends it for their unsigned counterparts.
-func (l arm64Lowerer) sign32(ctx *lowering, v asm.VReg) asm.VReg {
-	out := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.SXTW(out, v))
-	return out
-}
-
-func (l arm64Lowerer) zero32(ctx *lowering, v asm.VReg) asm.VReg {
-	out := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.ANDI(out, v, maskI32))
-	return out
-}
-
-func (arm64Lowerer) narrow32(v asm.VReg) asm.VReg {
-	return asm.NewVReg(v.ID(), v.Type(), asm.Width32)
 }
 
 func (l arm64Lowerer) constGetKnown(ctx *lowering, op step) bool {
@@ -1123,6 +1111,45 @@ func (l arm64Lowerer) constGetKnown(ctx *lowering, op step) bool {
 	default:
 		return l.constGet(ctx, op)
 	}
+}
+
+// constGet pushes a scalar constant as an unboxed immediate. Refs retain
+// ordinary standalone ownership; call-target fusion owns direct markers.
+func (l arm64Lowerer) constGet(ctx *lowering, op step) bool {
+	idx := int(op.args[0])
+	if idx >= len(ctx.constants) {
+		return false
+	}
+	v := ctx.constants[idx]
+	switch v.Kind() {
+	case types.KindI1, types.KindI8, types.KindI32, types.KindI64, types.KindF32, types.KindF64:
+		dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		val := value{reg: dst, kind: v.Kind(), raw: true}
+		if v.Kind() == types.KindI64 {
+			ctx.assembler.Emit(arm64.LDI(dst, uint64(v.I64()))...)
+			val.known = true
+			val.imm = v.I64()
+		} else {
+			ctx.assembler.Emit(arm64.LDI(dst, uint64(v))...)
+			if v.Kind().Repr() == types.KindI32 {
+				val.known = true
+				val.imm = int64(v.I32())
+			}
+		}
+		ctx.push(val)
+		return true
+	case types.KindRef:
+		ref := v.Ref()
+		if ref < 0 || ref >= len(ctx.heap) {
+			return false
+		}
+		boxed := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDI(boxed, uint64(v))...)
+		l.retain(ctx, ref)
+		ctx.push(value{reg: boxed, kind: types.KindRef, raw: false, ref: ref})
+		return true
+	}
+	return false
 }
 
 func (l arm64Lowerer) arrayGetKnown(ctx *lowering, op step) bool {
@@ -1220,106 +1247,6 @@ func (l arm64Lowerer) enterBlock(ctx *lowering, state []slot) {
 	l.reload(ctx)
 }
 
-func (l arm64Lowerer) emitBlock(ctx *lowering, id int, tail []int) bool {
-	if id < 0 || id >= len(ctx.blocks) {
-		return false
-	}
-	block := ctx.blocks[id]
-	if block.state != nil {
-		l.enterBlock(ctx, block.state)
-	}
-	done, ok := l.steps(ctx, block.steps)
-	if !ok {
-		return false
-	}
-	if done {
-		return true
-	}
-	if block.term.kind == terminateFallthrough && len(tail) > 0 {
-		return l.follow(ctx, tail)
-	}
-	return l.term(ctx, block, tail)
-}
-
-func (l arm64Lowerer) term(ctx *lowering, block block, tail []int) bool {
-	switch block.term.kind {
-	case terminateFallthrough:
-		return true
-	case terminateBranch:
-		if len(block.term.edges) != 1 {
-			return false
-		}
-		target := block.term.edges[0]
-		if block.term.hot == 0 {
-			return l.next(ctx, block.anchor, target, tail, int(instr.BR))
-		}
-		if !l.flush(ctx, false) {
-			return false
-		}
-		return l.path(ctx, block.anchor, target, tail, int(instr.BR))
-	case terminateBranchIf:
-		return l.conditional(ctx, block, tail)
-	case terminateBranchTable:
-		return l.table(ctx, block, tail)
-	case terminateReturn:
-		if len(ctx.frames) > 1 {
-			if !l.stitch(ctx) {
-				return false
-			}
-			if len(tail) > 0 {
-				return l.follow(ctx, tail)
-			}
-			if ctx.kind == entryModule {
-				return l.complete(ctx)
-			}
-			return l.ret(ctx)
-		}
-		return l.ret(ctx)
-	case terminateComplete:
-		return l.complete(ctx)
-	case terminateFallback:
-		return l.exit(ctx, block.term.ip, prof.ExitTraceCut, prof.OpcodeNone)
-	default:
-		return false
-	}
-}
-
-func (l arm64Lowerer) conditional(ctx *lowering, block block, tail []int) bool {
-	if len(block.term.edges) != 2 || ctx.count() < 1 || !l.kinds(ctx, types.KindI32, 1) {
-		return false
-	}
-	cond := ctx.pop()
-	if block.term.hot >= 0 && block.term.hot < len(block.term.edges) {
-		cold := 1 - block.term.hot
-		clean := l.clean(ctx)
-		if !clean && !l.flush(ctx, false) {
-			return false
-		}
-		target := block.term.edges[cold]
-		label, ok := l.label(ctx, target, join(target.tail, tail), int(instr.BR_IF))
-		if !ok {
-			return false
-		}
-		if block.term.hot == 1 {
-			ctx.assembler.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), label))
-		} else {
-			ctx.assembler.Emit(arm64.CBZLabel(l.narrow32(cond.reg), label))
-		}
-		return l.next(ctx, block.anchor, block.term.edges[block.term.hot], tail, int(instr.BR_IF))
-	}
-
-	if !l.flush(ctx, false) {
-		return false
-	}
-	taken := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.CBNZLabel(l.narrow32(cond.reg), taken))
-	if !l.path(ctx, block.anchor, block.term.edges[1], tail, int(instr.BR_IF)) {
-		return false
-	}
-	ctx.assembler.Bind(taken)
-	return l.path(ctx, block.anchor, block.term.edges[0], tail, int(instr.BR_IF))
-}
-
 func (l arm64Lowerer) table(ctx *lowering, block block, tail []int) bool {
 	if len(block.term.edges) == 0 || len(block.term.edges)-1 > branchTableLimit || ctx.count() < 1 || !l.kinds(ctx, types.KindI32, 1) {
 		return false
@@ -1346,25 +1273,6 @@ func (l arm64Lowerer) table(ctx *lowering, block block, tail []int) bool {
 		}
 	}
 	return true
-}
-
-func (l arm64Lowerer) next(ctx *lowering, from anchor, target edge, tail []int, opcode int) bool {
-	tail = join(target.tail, tail)
-	target.tail = nil
-	if target.anchor.addr == from.addr && target.anchor.ip <= from.ip {
-		if !l.flush(ctx, false) {
-			return false
-		}
-		return l.path(ctx, from, target, tail, opcode)
-	}
-	if target.block == noBlock {
-		reason := prof.ExitColdBranch
-		if ctx.kind == entryLoop {
-			reason = prof.ExitLoop
-		}
-		return l.exit(ctx, target.anchor.ip, reason, opcode)
-	}
-	return l.emitBlock(ctx, target.block, tail)
 }
 
 func (l arm64Lowerer) follow(ctx *lowering, tail []int) bool {
@@ -1432,6 +1340,16 @@ func (l arm64Lowerer) label(ctx *lowering, target edge, tail []int, opcode int) 
 	ctx.work = append(ctx.work, work)
 	ctx.scheduled++
 	return label, true
+}
+
+// marked reports whether a raw ref marker blocks deferred continuation reload.
+func (l arm64Lowerer) marked(ctx *lowering) bool {
+	for _, v := range ctx.values {
+		if v.kind == types.KindRef && v.raw {
+			return true
+		}
+	}
+	return false
 }
 
 func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
@@ -1925,6 +1843,16 @@ func (l arm64Lowerer) i64Cmp(ctx *lowering, cond uint8) bool {
 	return true
 }
 
+// operands pops a typed binary-op pair after checking both kinds.
+func (l arm64Lowerer) operands(ctx *lowering, kind types.Kind) (value, value, bool) {
+	if ctx.count() < 2 || !l.kinds(ctx, kind, 2) {
+		return value{}, value{}, false
+	}
+	b := ctx.pop()
+	a := ctx.pop()
+	return b, a, true
+}
+
 func (l arm64Lowerer) i64Eqz(ctx *lowering) bool {
 	if ctx.count() < 1 || !l.kinds(ctx, types.KindI64, 1) {
 		return false
@@ -1933,6 +1861,16 @@ func (l arm64Lowerer) i64Eqz(ctx *lowering) bool {
 	ctx.assembler.Emit(arm64.CMPI(a.reg, 0))
 	l.setBool(ctx, arm64.CondEQ)
 	return true
+}
+
+// setBool pushes a comparison/test result as i1: every caller is an
+// eqz/eq/lt/.../is_null/test whose result kind is i1 (matching the interpreter,
+// which boxes these through BoxI1). The 0/1 flag still satisfies any later
+// i32 operand because kinds compares by representation.
+func (l arm64Lowerer) setBool(ctx *lowering, cond uint8) {
+	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.CSET(flag, cond))
+	ctx.push(value{reg: flag, kind: types.KindI1, raw: true})
 }
 
 // i32ToI64 widens a raw i32 to a raw i64; the i32 range is within the
@@ -2197,18 +2135,17 @@ func (l arm64Lowerer) copysign(ctx *lowering, kind types.Kind) bool {
 	return true
 }
 
-// guardI64 deopts when v is a heap-promoted i64.
-func (l arm64Lowerer) guardI64(ctx *lowering, v asm.VReg, ip int) bool {
-	fail, ok := l.sideExit(ctx, ctx.values, ip, prof.ExitGuardKind, ctx.opcode(ip))
-	if !ok {
-		return false
+// kinds reports whether the top n operands are all raw and computable as kind.
+// The match is by representation, so the narrow integer kinds (i1, i8) satisfy
+// an i32 operand exactly as they do in the interpreter; for every other kind
+// Repr is the identity, so the check stays exact.
+func (l arm64Lowerer) kinds(ctx *lowering, kind types.Kind, n int) bool {
+	for k := 0; k < n; k++ {
+		v := ctx.values[len(ctx.values)-1-k]
+		if v.kind.Repr() != kind.Repr() || !v.raw {
+			return false
+		}
 	}
-	tag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LSRI(tag, v, uint8(types.VBits)))
-	want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDI(want, tagI64>>types.VBits)...)
-	ctx.assembler.Emit(arm64.CMP(tag, want))
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 	return true
 }
 
@@ -2245,13 +2182,6 @@ func (l arm64Lowerer) boxableI64(ctx *lowering, raw asm.VReg, ip int) bool {
 	return true
 }
 
-func (l arm64Lowerer) guardBoxable(ctx *lowering, v asm.VReg, fail asm.Label) {
-	ext := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.SBFX(ext, v, 0, boxableWidth))
-	ctx.assembler.Emit(arm64.CMP(ext, v))
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
-}
-
 // guardRaw keeps observed narrow inputs speculative: a different runtime value
 // exits before the opcode, so the threaded handler owns the general case.
 func (l arm64Lowerer) guardRaw(ctx *lowering, got asm.VReg, val uint64, ip int) bool {
@@ -2269,12 +2199,8 @@ func (l arm64Lowerer) guardRaw(ctx *lowering, got asm.VReg, val uint64, ip int) 
 	return true
 }
 
-// sign64 sign-extends the 49-bit value lane of a boxed i64 to a full raw
-// i64 value.
-func (l arm64Lowerer) sign64(ctx *lowering, v asm.VReg) asm.VReg {
-	out := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.SBFX(out, v, 0, boxableWidth))
-	return out
+func (arm64Lowerer) narrow32(v asm.VReg) asm.VReg {
+	return asm.NewVReg(v.ID(), v.Type(), asm.Width32)
 }
 
 // call lowers a recorded CALL. The callee marker must resolve to an observed
@@ -2501,84 +2427,6 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 	return true
 }
 
-// tailTarget resolves a recorded tail call's compile-time function target and
-// consumes the funcref marker, emitting the runtime funcref guard for a
-// non-constant ref (mirrors call's guard). Tail calls carry no closure upvals,
-// so a captured target is rejected; the trace stays threaded. On success the
-// top params operands are the validated arguments, still live.
-func (l arm64Lowerer) tailTarget(ctx *lowering, op step) (*types.Function, int, bool) {
-	if ctx.count() < 1 {
-		return nil, 0, false
-	}
-	v := ctx.values[len(ctx.values)-1]
-	if v.kind != types.KindRef {
-		return nil, 0, false
-	}
-	target := resolve(ctx.module, ctx.heap, op.callee)
-	if target == nil || target.Typ == nil || len(target.Captures) > 0 {
-		return nil, 0, false
-	}
-	params := len(target.Typ.Params)
-	if v.raw {
-		if v.fn != op.callee || v.ref != op.callee {
-			return nil, 0, false
-		}
-	} else {
-		if op.seen.Kind() != types.KindRef {
-			return nil, 0, false
-		}
-		wantRef := op.seen.Ref()
-		if wantRef != op.callee || wantRef < 0 || wantRef >= len(ctx.heap) {
-			return nil, 0, false
-		}
-		if _, ok := ctx.heap[wantRef].(*types.Function); !ok {
-			return nil, 0, false
-		}
-		want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		ctx.assembler.Emit(arm64.LDI(want, uint64(types.BoxRef(wantRef)))...)
-		ctx.assembler.Emit(arm64.CMP(v.reg, want))
-		ok := ctx.assembler.Label()
-		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, ok))
-		if !l.exit(ctx, op.ip, prof.ExitTerminalOp, int(op.op)) {
-			return nil, 0, false
-		}
-		ctx.assembler.Bind(ok)
-		pre := ctx.pre()
-		l.releaseBox(ctx, v.reg, pre, op.ip)
-	}
-	ctx.pop()
-	if ctx.count() < params || !l.args(ctx, target, params) {
-		return nil, 0, false
-	}
-	return target, params, true
-}
-
-// locals fills frame f with the call arguments args in its parameter slots and
-// a raw zero in every remaining local, matching threaded tail()/CALL's clear.
-// Each slot is loaded and dirty so the next flush commits it to the VM stack.
-func (l arm64Lowerer) locals(ctx *lowering, f *activation, args []value) bool {
-	for k := range args {
-		f.locals[k] = args[k]
-		f.loaded[k] = true
-		f.dirty[k] = true
-	}
-	if len(f.kinds) > len(args) {
-		zero := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-		ctx.assembler.Emit(arm64.LDI(zero, 0)...)
-		for k := len(args); k < len(f.kinds); k++ {
-			switch f.kinds[k] {
-			case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindI64:
-			default:
-				return false
-			}
-			f.locals[k] = value{reg: zero, kind: f.kinds[k], raw: true}
-			f.loaded[k] = true
-			f.dirty[k] = true
-		}
-	}
-	return true
-}
-
 // tailLoop lowers a tail call back to the trace anchor as a native loop
 // back-edge: the new arguments become the anchor entry frame's params, the
 // other locals reset, everything commits to the VM stack, and iterate branches
@@ -2635,6 +2483,109 @@ func (l arm64Lowerer) tailMorph(ctx *lowering, op step) bool {
 		return false
 	}
 	ctx.frames[len(ctx.frames)-1] = f
+	return true
+}
+
+// tailTarget resolves a recorded tail call's compile-time function target and
+// consumes the funcref marker, emitting the runtime funcref guard for a
+// non-constant ref (mirrors call's guard). Tail calls carry no closure upvals,
+// so a captured target is rejected; the trace stays threaded. On success the
+// top params operands are the validated arguments, still live.
+func (l arm64Lowerer) tailTarget(ctx *lowering, op step) (*types.Function, int, bool) {
+	if ctx.count() < 1 {
+		return nil, 0, false
+	}
+	v := ctx.values[len(ctx.values)-1]
+	if v.kind != types.KindRef {
+		return nil, 0, false
+	}
+	target := resolve(ctx.module, ctx.heap, op.callee)
+	if target == nil || target.Typ == nil || len(target.Captures) > 0 {
+		return nil, 0, false
+	}
+	params := len(target.Typ.Params)
+	if v.raw {
+		if v.fn != op.callee || v.ref != op.callee {
+			return nil, 0, false
+		}
+	} else {
+		if op.seen.Kind() != types.KindRef {
+			return nil, 0, false
+		}
+		wantRef := op.seen.Ref()
+		if wantRef != op.callee || wantRef < 0 || wantRef >= len(ctx.heap) {
+			return nil, 0, false
+		}
+		if _, ok := ctx.heap[wantRef].(*types.Function); !ok {
+			return nil, 0, false
+		}
+		want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDI(want, uint64(types.BoxRef(wantRef)))...)
+		ctx.assembler.Emit(arm64.CMP(v.reg, want))
+		ok := ctx.assembler.Label()
+		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, ok))
+		if !l.exit(ctx, op.ip, prof.ExitTerminalOp, int(op.op)) {
+			return nil, 0, false
+		}
+		ctx.assembler.Bind(ok)
+		pre := ctx.pre()
+		l.releaseBox(ctx, v.reg, pre, op.ip)
+	}
+	ctx.pop()
+	if ctx.count() < params || !l.args(ctx, target, params) {
+		return nil, 0, false
+	}
+	return target, params, true
+}
+
+// args verifies the top params operands match the callee's declared
+// parameter kinds.
+func (l arm64Lowerer) args(ctx *lowering, target *types.Function, params int) bool {
+	kinds := target.LocalKinds()
+	if len(kinds) < params {
+		return false
+	}
+	for k := 0; k < params; k++ {
+		v := ctx.values[len(ctx.values)-params+k]
+		if v.kind != kinds[k] {
+			return false
+		}
+		if v.kind == types.KindRef {
+			if v.raw {
+				return false
+			}
+			continue
+		}
+		if !v.raw {
+			return false
+		}
+	}
+	return true
+}
+
+// locals fills frame f with the call arguments args in its parameter slots and
+// a raw zero in every remaining local, matching threaded tail()/CALL's clear.
+// Each slot is loaded and dirty so the next flush commits it to the VM stack.
+func (l arm64Lowerer) locals(ctx *lowering, f *activation, args []value) bool {
+	for k := range args {
+		f.locals[k] = args[k]
+		f.loaded[k] = true
+		f.dirty[k] = true
+	}
+	if len(f.kinds) > len(args) {
+		zero := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDI(zero, 0)...)
+		for k := len(args); k < len(f.kinds); k++ {
+			switch f.kinds[k] {
+			case types.KindI1, types.KindI8, types.KindI32, types.KindF32, types.KindF64, types.KindI64:
+			default:
+				return false
+			}
+			f.locals[k] = value{reg: zero, kind: f.kinds[k], raw: true}
+			f.loaded[k] = true
+			f.dirty[k] = true
+		}
+	}
 	return true
 }
 
@@ -2698,59 +2649,6 @@ func (l arm64Lowerer) complete(ctx *lowering) bool {
 	return true
 }
 
-// exit deopts to the threaded interpreter: flush every live value boxed,
-// publish sp, record the live frame chain, and report a fallback at resume.
-func (l arm64Lowerer) exit(ctx *lowering, resume int, reason prof.ExitReason, opcode int) bool {
-	return l.trap(ctx, trapFallback, resume, reason, opcode)
-}
-
-// trap unwinds the inlined native state into the journal and returns to the Go
-// wrapper: every live value is flushed boxed, sp is published, the frame chain
-// is recorded resuming at resume, and the trap kind is reported. trapFallback
-// resumes threaded dispatch; trapYield re-enters native after a safepoint.
-func (l arm64Lowerer) trap(ctx *lowering, kind, resume int, reason prof.ExitReason, opcode int) bool {
-	if !l.flush(ctx, false) {
-		return false
-	}
-	id := -1
-	if kind == trapFallback {
-		id = len(ctx.descriptors)
-		ctx.descriptors = append(ctx.descriptors, exitDescriptor{reason: reason, opcode: opcode})
-	}
-	l.trapFlushed(ctx, kind, resume, id)
-	return true
-}
-
-func (l arm64Lowerer) trapFlushed(ctx *lowering, kind, resume, exitID int) {
-	a := ctx.assembler
-	vCtrl := ctx.pin(scratchCtrl)
-	vBP := ctx.pin(scratchBP)
-	sp := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.ADDI(sp, vBP, uint16(ctx.sp())))
-	a.Emit(arm64.STR(sp, vCtrl, int16(journalSP*8)))
-	l.unwind(ctx, vCtrl, resume)
-	vExit := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LDI(vExit, uint64(exitID+1))...)
-	a.Emit(arm64.STR(vExit, vCtrl, int16(journalExitID*8)))
-	l.report(ctx, vCtrl, kind, resume)
-	a.Emit(
-		arm64.RET(),
-	)
-}
-
-// sideExit snapshots a guard fallback from the pre-op stack shape. The snapshot
-// may include inlined frames; trapFlushed records the frame chain so the Go
-// wrapper can rebuild the same threaded resume shape.
-func (l arm64Lowerer) sideExit(ctx *lowering, pre []value, resume int, reason prof.ExitReason, opcode int) (asm.Label, bool) {
-	ctx.values = append(ctx.values[:0], pre...)
-	if !l.flush(ctx, false) {
-		return 0, false
-	}
-	label := ctx.queueExit(nil, resume, 0, reason, opcode)
-	ctx.values = append(ctx.values[:0], pre...)
-	return label, true
-}
-
 // iterate spends one unit of the safepoint budget at a loop back-edge:
 // decrement journalBudget and branch to the loop head while budget remains,
 // otherwise yield to the safepoint at the header. The caller has already
@@ -2789,43 +2687,6 @@ func (l arm64Lowerer) overflow(ctx *lowering, op step) {
 	a.Emit(
 		arm64.RET(),
 	)
-}
-
-// flush writes every dirty local and live operand to its VM stack home
-// in boxed form. commit clears dirty marks — only the hot path may do that;
-// a guard's cold path flushes a copy of the state and must leave the symbolic
-// state of the surviving hot path untouched.
-func (l arm64Lowerer) flush(ctx *lowering, commit bool) bool {
-	a := ctx.assembler
-	vStack := ctx.pin(scratchStack)
-	addr := l.base(ctx, vStack)
-	for fi := range ctx.frames {
-		f := &ctx.frames[fi]
-		for idx := range f.kinds {
-			if !f.dirty[idx] {
-				continue
-			}
-			boxed, ok := l.box(ctx, f.locals[idx])
-			if !ok {
-				return false
-			}
-			a.Emit(arm64.STR(boxed, addr, int16((f.base+idx)*8)))
-			if commit {
-				f.dirty[idx] = false
-			}
-		}
-	}
-	for j, v := range ctx.values {
-		if v.kind == types.KindRef && commit {
-			return false
-		}
-		boxed, ok := l.box(ctx, v)
-		if !ok {
-			return false
-		}
-		a.Emit(arm64.STR(boxed, addr, int16(ctx.slot(j)*8)))
-	}
-	return true
 }
 
 // reload pulls operands back from VM stack homes after a call or continuation.
@@ -3382,6 +3243,13 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 	return true
 }
 
+func (l arm64Lowerer) guardBoxable(ctx *lowering, v asm.VReg, fail asm.Label) {
+	ext := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.SBFX(ext, v, 0, boxableWidth))
+	ctx.assembler.Emit(arm64.CMP(ext, v))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+}
+
 func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 	if ctx.count() < 3 || ctx.values[len(ctx.values)-2].kind != types.KindI32 || ctx.values[len(ctx.values)-3].kind != types.KindRef {
 		return false
@@ -3475,6 +3343,14 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 
 	ctx.values = pre[: len(pre)-3 : len(pre)-3]
 	return l.exit(ctx, op.ip+1, prof.ExitTerminalOp, int(op.op))
+}
+
+// sign32 sign-extends a raw i32's low lane for signed division and
+// shifts; zero32 zero-extends it for their unsigned counterparts.
+func (l arm64Lowerer) sign32(ctx *lowering, v asm.VReg) asm.VReg {
+	out := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.SXTW(out, v))
+	return out
 }
 
 // errorGet reads a guest Error's payload. It mirrors the threaded handler:
@@ -3626,6 +3502,69 @@ func (l arm64Lowerer) coroValue(ctx *lowering, op step) bool {
 	return true
 }
 
+// guardI64 deopts when v is a heap-promoted i64.
+func (l arm64Lowerer) guardI64(ctx *lowering, v asm.VReg, ip int) bool {
+	fail, ok := l.sideExit(ctx, ctx.values, ip, prof.ExitGuardKind, ctx.opcode(ip))
+	if !ok {
+		return false
+	}
+	tag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LSRI(tag, v, uint8(types.VBits)))
+	want := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(want, tagI64>>types.VBits)...)
+	ctx.assembler.Emit(arm64.CMP(tag, want))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+	return true
+}
+
+// sign64 sign-extends the 49-bit value lane of a boxed i64 to a full raw
+// i64 value.
+func (l arm64Lowerer) sign64(ctx *lowering, v asm.VReg) asm.VReg {
+	out := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.SBFX(out, v, 0, boxableWidth))
+	return out
+}
+
+// exit deopts to the threaded interpreter: flush every live value boxed,
+// publish sp, record the live frame chain, and report a fallback at resume.
+func (l arm64Lowerer) exit(ctx *lowering, resume int, reason prof.ExitReason, opcode int) bool {
+	return l.trap(ctx, trapFallback, resume, reason, opcode)
+}
+
+// trap unwinds the inlined native state into the journal and returns to the Go
+// wrapper: every live value is flushed boxed, sp is published, the frame chain
+// is recorded resuming at resume, and the trap kind is reported. trapFallback
+// resumes threaded dispatch; trapYield re-enters native after a safepoint.
+func (l arm64Lowerer) trap(ctx *lowering, kind, resume int, reason prof.ExitReason, opcode int) bool {
+	if !l.flush(ctx, false) {
+		return false
+	}
+	id := -1
+	if kind == trapFallback {
+		id = len(ctx.descriptors)
+		ctx.descriptors = append(ctx.descriptors, exitDescriptor{reason: reason, opcode: opcode})
+	}
+	l.trapFlushed(ctx, kind, resume, id)
+	return true
+}
+
+func (l arm64Lowerer) trapFlushed(ctx *lowering, kind, resume, exitID int) {
+	a := ctx.assembler
+	vCtrl := ctx.pin(scratchCtrl)
+	vBP := ctx.pin(scratchBP)
+	sp := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ADDI(sp, vBP, uint16(ctx.sp())))
+	a.Emit(arm64.STR(sp, vCtrl, int16(journalSP*8)))
+	l.unwind(ctx, vCtrl, resume)
+	vExit := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDI(vExit, uint64(exitID+1))...)
+	a.Emit(arm64.STR(vExit, vCtrl, int16(journalExitID*8)))
+	l.report(ctx, vCtrl, kind, resume)
+	a.Emit(
+		arm64.RET(),
+	)
+}
+
 // guardHeap loads a heap cell or branches to fail on a non-ref tag.
 func (arm64Lowerer) guardHeap(ctx *lowering, ref asm.VReg, fail asm.Label) (asm.VReg, asm.VReg, asm.VReg) {
 	a := ctx.assembler
@@ -3742,6 +3681,116 @@ func (l arm64Lowerer) report(ctx *lowering, vCtrl asm.VReg, trap, nextIP int) {
 	a.Emit(arm64.STR(vIP, vCtrl, int16(journalNextIP*8)))
 }
 
+func (l arm64Lowerer) releaseBoxUnlessEqual(ctx *lowering, old, val asm.VReg, pre []value, ip int) {
+	done := ctx.assembler.Label()
+	ctx.assembler.Emit(arm64.CMP(old, val))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, done))
+	l.releaseBox(ctx, old, pre, ip)
+	ctx.assembler.Bind(done)
+	ctx.values = append(ctx.values[:0], pre...)
+}
+
+func (l arm64Lowerer) releaseBox(ctx *lowering, v asm.VReg, pre []value, ip int) {
+	l.refOnly(ctx, v, func(addr asm.VReg) {
+		l.releaseRef(ctx, addr, pre, ip)
+	})
+}
+
+func (l arm64Lowerer) retainBoxUnlessEqual(ctx *lowering, old, val asm.VReg) {
+	done := ctx.assembler.Label()
+	ctx.assembler.Emit(arm64.CMP(old, val))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, done))
+	l.retainBox(ctx, val)
+	ctx.assembler.Bind(done)
+}
+
+func (l arm64Lowerer) retainBox(ctx *lowering, v asm.VReg) {
+	l.refOnly(ctx, v, func(addr asm.VReg) {
+		l.retainRef(ctx, addr)
+	})
+}
+
+func (l arm64Lowerer) retainRef(ctx *lowering, addr asm.VReg) {
+	base := l.rcBase(ctx)
+	rc := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDRR(rc, base, addr))
+	ctx.assembler.Emit(arm64.ADDI(rc, rc, 1))
+	ctx.assembler.Emit(arm64.STRR(rc, base, addr))
+}
+
+// releaseRef decrements addr after guardRC proves it will stay live.
+func (l arm64Lowerer) releaseRef(ctx *lowering, addr asm.VReg, pre []value, ip int) {
+	fail, ok := l.sideExit(ctx, pre, ip, prof.ExitGuardValue, ctx.opcode(ip))
+	if !ok {
+		return
+	}
+	rcBase := l.rcBase(ctx)
+	rc := l.guardRC(ctx, addr, rcBase, fail)
+	ctx.assembler.Emit(arm64.SUBI(rc, rc, 1))
+	ctx.assembler.Emit(arm64.STRR(rc, rcBase, addr))
+}
+
+// sideExit snapshots a guard fallback from the pre-op stack shape. The snapshot
+// may include inlined frames; trapFlushed records the frame chain so the Go
+// wrapper can rebuild the same threaded resume shape.
+func (l arm64Lowerer) sideExit(ctx *lowering, pre []value, resume int, reason prof.ExitReason, opcode int) (asm.Label, bool) {
+	ctx.values = append(ctx.values[:0], pre...)
+	if !l.flush(ctx, false) {
+		return 0, false
+	}
+	label := ctx.queueExit(nil, resume, 0, reason, opcode)
+	ctx.values = append(ctx.values[:0], pre...)
+	return label, true
+}
+
+// flush writes every dirty local and live operand to its VM stack home
+// in boxed form. commit clears dirty marks — only the hot path may do that;
+// a guard's cold path flushes a copy of the state and must leave the symbolic
+// state of the surviving hot path untouched.
+func (l arm64Lowerer) flush(ctx *lowering, commit bool) bool {
+	a := ctx.assembler
+	vStack := ctx.pin(scratchStack)
+	addr := l.base(ctx, vStack)
+	for fi := range ctx.frames {
+		f := &ctx.frames[fi]
+		for idx := range f.kinds {
+			if !f.dirty[idx] {
+				continue
+			}
+			boxed, ok := l.box(ctx, f.locals[idx])
+			if !ok {
+				return false
+			}
+			a.Emit(arm64.STR(boxed, addr, int16((f.base+idx)*8)))
+			if commit {
+				f.dirty[idx] = false
+			}
+		}
+	}
+	for j, v := range ctx.values {
+		if v.kind == types.KindRef && commit {
+			return false
+		}
+		boxed, ok := l.box(ctx, v)
+		if !ok {
+			return false
+		}
+		a.Emit(arm64.STR(boxed, addr, int16(ctx.slot(j)*8)))
+	}
+	return true
+}
+
+// base returns &stack[bp] for slot-relative loads and stores.
+func (l arm64Lowerer) base(ctx *lowering, vStack asm.VReg) asm.VReg {
+	a := ctx.assembler
+	vBP := ctx.pin(scratchBP)
+	off := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LSLI(off, vBP, 3))
+	addr := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ADD(addr, vStack, off))
+	return addr
+}
+
 // box produces the boxed form of v in a fresh register. A marker materializes
 // its function ref and retains it, because the interpreter state being rebuilt
 // will release it through the frame it pushes.
@@ -3819,43 +3868,6 @@ func (l arm64Lowerer) retain(ctx *lowering, fn int) {
 	a.Emit(arm64.STRR(rc, base, slot))
 }
 
-func (l arm64Lowerer) retainBox(ctx *lowering, v asm.VReg) {
-	l.refOnly(ctx, v, func(addr asm.VReg) {
-		l.retainRef(ctx, addr)
-	})
-}
-
-func (l arm64Lowerer) releaseBox(ctx *lowering, v asm.VReg, pre []value, ip int) {
-	l.refOnly(ctx, v, func(addr asm.VReg) {
-		l.releaseRef(ctx, addr, pre, ip)
-	})
-}
-
-func (l arm64Lowerer) releaseBoxUnlessEqual(ctx *lowering, old, val asm.VReg, pre []value, ip int) {
-	done := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.CMP(old, val))
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, done))
-	l.releaseBox(ctx, old, pre, ip)
-	ctx.assembler.Bind(done)
-	ctx.values = append(ctx.values[:0], pre...)
-}
-
-func (l arm64Lowerer) retainBoxUnlessEqual(ctx *lowering, old, val asm.VReg) {
-	done := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.CMP(old, val))
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, done))
-	l.retainBox(ctx, val)
-	ctx.assembler.Bind(done)
-}
-
-func (l arm64Lowerer) retainRef(ctx *lowering, addr asm.VReg) {
-	base := l.rcBase(ctx)
-	rc := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDRR(rc, base, addr))
-	ctx.assembler.Emit(arm64.ADDI(rc, rc, 1))
-	ctx.assembler.Emit(arm64.STRR(rc, base, addr))
-}
-
 // guardRC keeps releases that could free objects in the interpreter.
 func (arm64Lowerer) guardRC(ctx *lowering, addr, rcBase asm.VReg, fail asm.Label) asm.VReg {
 	a := ctx.assembler
@@ -3864,18 +3876,6 @@ func (arm64Lowerer) guardRC(ctx *lowering, addr, rcBase asm.VReg, fail asm.Label
 	a.Emit(arm64.CMPI(rc, 1))
 	a.Emit(arm64.BCondLabel(arm64.OpBLE, fail))
 	return rc
-}
-
-// releaseRef decrements addr after guardRC proves it will stay live.
-func (l arm64Lowerer) releaseRef(ctx *lowering, addr asm.VReg, pre []value, ip int) {
-	fail, ok := l.sideExit(ctx, pre, ip, prof.ExitGuardValue, ctx.opcode(ip))
-	if !ok {
-		return
-	}
-	rcBase := l.rcBase(ctx)
-	rc := l.guardRC(ctx, addr, rcBase, fail)
-	ctx.assembler.Emit(arm64.SUBI(rc, rc, 1))
-	ctx.assembler.Emit(arm64.STRR(rc, rcBase, addr))
 }
 
 func (l arm64Lowerer) refOnly(ctx *lowering, v asm.VReg, body func(asm.VReg)) {
