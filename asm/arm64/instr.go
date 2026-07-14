@@ -218,20 +218,6 @@ const (
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-func newInst(op Op, dst asm.Operand, srcs ...asm.Operand) asm.Instruction {
-	var src1, src2, src3 asm.Operand
-	if len(srcs) > 0 {
-		src1 = srcs[0]
-	}
-	if len(srcs) > 1 {
-		src2 = srcs[1]
-	}
-	if len(srcs) > 2 {
-		src3 = srcs[2]
-	}
-	return asm.Instruction{Op: uint16(op), Dst: dst, Src1: src1, Src2: src2, Src3: src3}
-}
-
 func newReg3(op Op, dst, src1, src2 asm.Reg) asm.Instruction {
 	return newInst(op, regOperand(dst), regOperand(src1), regOperand(src2))
 }
@@ -270,6 +256,20 @@ func newCmpImm(op Op, src asm.Reg, v int64) asm.Instruction {
 
 func newBranch(op Op, offset int64) asm.Instruction {
 	return newInst(op, nil, nil, imm(offset))
+}
+
+func newInst(op Op, dst asm.Operand, srcs ...asm.Operand) asm.Instruction {
+	var src1, src2, src3 asm.Operand
+	if len(srcs) > 0 {
+		src1 = srcs[0]
+	}
+	if len(srcs) > 1 {
+		src2 = srcs[1]
+	}
+	if len(srcs) > 2 {
+		src3 = srcs[2]
+	}
+	return asm.Instruction{Op: uint16(op), Dst: dst, Src1: src1, Src2: src2, Src3: src3}
 }
 
 // ---------------------------------------------------------------------------
@@ -391,6 +391,27 @@ func MOV(dst, src asm.Reg) asm.Instruction { return newReg2(OpMOV, dst, src) }
 // MOVI dst, #imm — move 64-bit immediate (pseudo, expanded by assembler)
 func MOVI(dst asm.Reg, val int64) asm.Instruction {
 	return newInst(OpMOVI, regOperand(dst), imm(val))
+}
+
+// Each instruction must be passed to Emit separately.
+func LDI(dst asm.Reg, val uint64) []asm.Instruction {
+	if val == 0 {
+		return []asm.Instruction{MOVZ(dst, 0, 0)}
+	}
+
+	insts := make([]asm.Instruction, 0, 4)
+	for shift := uint8(0); shift <= 48; shift += 16 {
+		part := uint16(val >> shift)
+		if part == 0 {
+			continue
+		}
+		if len(insts) == 0 {
+			insts = append(insts, MOVZ(dst, part, shift))
+			continue
+		}
+		insts = append(insts, MOVK(dst, part, shift))
+	}
+	return insts
 }
 
 // MOVZ dst, #imm, LSL #shift  — zero other bits
@@ -634,27 +655,6 @@ func CBZLabel(reg asm.Reg, id asm.Label) asm.Instruction {
 
 func CBNZLabel(reg asm.Reg, id asm.Label) asm.Instruction {
 	return asm.Instruction{Op: uint16(OpCBNZ), Src1: regOperand(reg), Src2: asm.LabelOperand{ID: id}}
-}
-
-// Each instruction must be passed to Emit separately.
-func LDI(dst asm.Reg, val uint64) []asm.Instruction {
-	if val == 0 {
-		return []asm.Instruction{MOVZ(dst, 0, 0)}
-	}
-
-	insts := make([]asm.Instruction, 0, 4)
-	for shift := uint8(0); shift <= 48; shift += 16 {
-		part := uint16(val >> shift)
-		if part == 0 {
-			continue
-		}
-		if len(insts) == 0 {
-			insts = append(insts, MOVZ(dst, part, shift))
-			continue
-		}
-		insts = append(insts, MOVK(dst, part, shift))
-	}
-	return insts
 }
 
 // ---------------------------------------------------------------------------

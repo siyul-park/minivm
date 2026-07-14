@@ -1100,6 +1100,11 @@ func (e *Encoder) decodeReg2(inst asm.Instruction) (dst, src asm.PReg, err error
 	return dstOp.Reg, srcOp.Reg, nil
 }
 
+// decodeRegShift decodes (dst, src, shift_amount) for immediate-shift instructions.
+func (e *Encoder) decodeRegShift(inst asm.Instruction) (dst, src asm.PReg, shift int64, err error) {
+	return e.decodeRegImm(inst)
+}
+
 func (e *Encoder) decodeRegImm(inst asm.Instruction) (dst, src asm.PReg, imm int64, err error) {
 	dstOp, ok := inst.Dst.(asm.PRegOperand)
 	if !ok {
@@ -1114,11 +1119,6 @@ func (e *Encoder) decodeRegImm(inst asm.Instruction) (dst, src asm.PReg, imm int
 		return asm.PReg{}, asm.PReg{}, 0, ErrMissingImmediate
 	}
 	return dstOp.Reg, srcOp.Reg, immOp.Value, nil
-}
-
-// decodeRegShift decodes (dst, src, shift_amount) for immediate-shift instructions.
-func (e *Encoder) decodeRegShift(inst asm.Instruction) (dst, src asm.PReg, shift int64, err error) {
-	return e.decodeRegImm(inst)
 }
 
 func (e *Encoder) decodeRegImm2(inst asm.Instruction) (dst, src asm.PReg, imm1, imm2 int64, err error) {
@@ -1288,9 +1288,6 @@ func (e *Encoder) decodeTestBranch(inst asm.Instruction) (r asm.PReg, bit uint8,
 	return rOp.Reg, uint8(packed & 0xFF), packed >> 8, nil
 }
 
-// reg extracts the 5-bit register ID from a PReg.
-func reg(r asm.PReg) uint32 { return uint32(r.ID()) & 0x1F }
-
 // encR3 emits a standard 3-register instruction (Rm<<16 | Rn<<5 | Rd).
 func encR3(base uint32, d, n, m asm.PReg) ([]byte, error) {
 	b, err := intBase(base, d, n, m)
@@ -1325,35 +1322,6 @@ func encRImm12(base uint32, d, n asm.PReg, imm int64) ([]byte, error) {
 		return nil, err
 	}
 	return enc(b | (uint32(imm)&0xFFF)<<10 | reg(n)<<5 | reg(d)), nil
-}
-
-// sameKind verifies that every reg has the given type and a uniform 32- or
-// 64-bit width. Returns the shared width.
-func sameKind(typ asm.RegType, regs ...asm.PReg) (asm.RegWidth, error) {
-	if len(regs) == 0 {
-		return 0, asm.ErrInvalidOperand
-	}
-	width := regs[0].Width()
-	if regs[0].Type() != typ || (width != asm.Width32 && width != asm.Width64) {
-		return 0, asm.ErrInvalidOperand
-	}
-	for _, r := range regs[1:] {
-		if r.Type() != typ || r.Width() != width {
-			return 0, asm.ErrInvalidOperand
-		}
-	}
-	return width, nil
-}
-
-func intBase(base uint32, regs ...asm.PReg) (uint32, error) {
-	width, err := sameKind(asm.RegTypeInt, regs...)
-	if err != nil {
-		return 0, err
-	}
-	if width == asm.Width32 {
-		base &^= 1 << 31
-	}
-	return base, nil
 }
 
 func logicalImmediate(base uint32, dst, src asm.PReg, imm int64) (uint32, error) {
@@ -1405,9 +1373,15 @@ func validTestBit(src asm.PReg, bit uint8) error {
 	return nil
 }
 
-func floatMatch(regs ...asm.PReg) error {
-	_, err := sameKind(asm.RegTypeFloat, regs...)
-	return err
+func intBase(base uint32, regs ...asm.PReg) (uint32, error) {
+	width, err := sameKind(asm.RegTypeInt, regs...)
+	if err != nil {
+		return 0, err
+	}
+	if width == asm.Width32 {
+		base &^= 1 << 31
+	}
+	return base, nil
 }
 
 func encodeFloatUnary(single, double uint32, dst, src asm.PReg) ([]byte, error) {
@@ -1418,6 +1392,32 @@ func encodeFloatUnary(single, double uint32, dst, src asm.PReg) ([]byte, error) 
 		return enc(single | reg(src)<<5 | reg(dst)), nil
 	}
 	return enc(double | reg(src)<<5 | reg(dst)), nil
+}
+
+// reg extracts the 5-bit register ID from a PReg.
+func reg(r asm.PReg) uint32 { return uint32(r.ID()) & 0x1F }
+
+func floatMatch(regs ...asm.PReg) error {
+	_, err := sameKind(asm.RegTypeFloat, regs...)
+	return err
+}
+
+// sameKind verifies that every reg has the given type and a uniform 32- or
+// 64-bit width. Returns the shared width.
+func sameKind(typ asm.RegType, regs ...asm.PReg) (asm.RegWidth, error) {
+	if len(regs) == 0 {
+		return 0, asm.ErrInvalidOperand
+	}
+	width := regs[0].Width()
+	if regs[0].Type() != typ || (width != asm.Width32 && width != asm.Width64) {
+		return 0, asm.ErrInvalidOperand
+	}
+	for _, r := range regs[1:] {
+		if r.Type() != typ || r.Width() != width {
+			return 0, asm.ErrInvalidOperand
+		}
+	}
+	return width, nil
 }
 
 // checkBranchOffset validates that offset is 4-byte aligned and its
