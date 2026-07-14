@@ -46,20 +46,7 @@ func BenchmarkControl_IterativeFib(b *testing.B) {
 		require.Equal(b, types.I32(iterativeFibReference(30)), value)
 		vm.Reset()
 
-		var runErr, popErr error
-		b.ReportAllocs()
-		b.ResetTimer()
-		for b.Loop() {
-			runErr = vm.Run(context.Background())
-			b.StopTimer()
-			value, popErr = vm.Pop()
-			vm.Reset()
-			b.StartTimer()
-		}
-		b.StopTimer()
-		require.NoError(b, runErr)
-		require.NoError(b, popErr)
-		require.Equal(b, types.I32(iterativeFibReference(30)), value)
+		benchmarkRun(b, vm, types.BoxI32(iterativeFibReference(30)))
 	})
 }
 
@@ -75,19 +62,6 @@ func BenchmarkControl_Sieve(b *testing.B) {
 		require.Equal(b, types.I32(sieveReference(256)), value)
 		vm.Reset()
 
-		var runErr, popErr error
-		b.ReportAllocs()
-		b.ResetTimer()
-		for b.Loop() {
-			runErr = vm.Run(context.Background())
-			b.StopTimer()
-			value, popErr = vm.Pop()
-			vm.Reset()
-			b.StartTimer()
-		}
-		b.StopTimer()
-		require.NoError(b, runErr)
-		require.NoError(b, popErr)
-		require.Equal(b, types.I32(sieveReference(256)), value)
+		benchmarkRun(b, vm, types.BoxI32(sieveReference(256)))
 	})
 }

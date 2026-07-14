@@ -38,20 +38,7 @@ func BenchmarkNumeric_BranchTree(b *testing.B) {
 		require.Equal(b, types.I32(want), value)
 		vm.Reset()
 
-		var runErr, popErr error
-		b.ReportAllocs()
-		b.ResetTimer()
-		for b.Loop() {
-			runErr = vm.Run(ctx)
-			b.StopTimer()
-			value, popErr = vm.Pop()
-			vm.Reset()
-			b.StartTimer()
-		}
-		b.StopTimer()
-		require.NoError(b, runErr)
-		require.NoError(b, popErr)
-		require.Equal(b, types.I32(want), value)
+		benchmarkRun(b, vm, types.BoxI32(want))
 	})
 
 	if runtime.GOARCH == "arm64" {
@@ -89,20 +76,7 @@ func BenchmarkNumeric_BranchTree(b *testing.B) {
 			require.Equal(b, types.I32(want), value)
 			vm.Reset()
 
-			var runErr, popErr error
-			b.ReportAllocs()
-			b.ResetTimer()
-			for b.Loop() {
-				runErr = vm.Run(ctx)
-				b.StopTimer()
-				value, popErr = vm.Pop()
-				vm.Reset()
-				b.StartTimer()
-			}
-			b.StopTimer()
-			require.NoError(b, runErr)
-			require.NoError(b, popErr)
-			require.Equal(b, types.I32(want), value)
+			benchmarkRun(b, vm, types.BoxI32(want))
 		})
 	}
 
@@ -131,7 +105,6 @@ func BenchmarkNumeric_BranchTree(b *testing.B) {
 			value, popErr = vm.Pop()
 			pool.Put(vm)
 		}
-		b.StopTimer()
 		require.NoError(b, runErr)
 		require.NoError(b, popErr)
 		require.Equal(b, types.I32(want), value)
