@@ -175,6 +175,8 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 		}
 
 		st := r.op(&clone, op, startFP)
+		terminalMutation := op == instr.STRUCT_SET || op == instr.ARRAY_SET && !r.continuableArraySet(&clone, t)
+		st.terminal = terminalMutation
 		if op == instr.CALL && r.callsAnchor(&clone, a) {
 			r.skipCall(&clone, a.addr)
 			st.callee = a.addr
@@ -233,11 +235,10 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 			r.publish(a, tree, t)
 			return captureResult{trace: t, outcome: prof.CaptureOutcomePartial}, nil
 		}
-		// Heap mutations still lower as terminal native fast paths: the hot
-		// path performs the store and resumes at the next threaded instruction;
-		// guard failures resume at the opcode so the interpreter owns the full
-		// handler semantics.
-		if op == instr.ARRAY_SET || op == instr.STRUCT_SET {
+		// Ref-bearing array writes and struct writes remain terminal native fast
+		// paths. Primitive array writes can continue because their guarded store
+		// has no recursive release or post-store deopt point.
+		if terminalMutation {
 			if clone.fp != startFP {
 				t.kind = aborted
 				result.reason = prof.CaptureReasonNestedTerminal
@@ -326,6 +327,18 @@ func (r *Tracer) heap(heap []types.Value) []types.Value {
 	out := make([]types.Value, len(heap))
 	for idx, val := range heap {
 		switch v := val.(type) {
+		case types.TypedArray[bool]:
+			out[idx] = append(types.TypedArray[bool](nil), v...)
+		case types.TypedArray[int8]:
+			out[idx] = append(types.TypedArray[int8](nil), v...)
+		case types.TypedArray[int32]:
+			out[idx] = append(types.TypedArray[int32](nil), v...)
+		case types.TypedArray[int64]:
+			out[idx] = append(types.TypedArray[int64](nil), v...)
+		case types.TypedArray[float32]:
+			out[idx] = append(types.TypedArray[float32](nil), v...)
+		case types.TypedArray[float64]:
+			out[idx] = append(types.TypedArray[float64](nil), v...)
 		case *types.Closure:
 			clone := *v
 			clone.Upvals = append([]types.Boxed(nil), v.Upvals...)
@@ -335,6 +348,39 @@ func (r *Tracer) heap(heap []types.Value) []types.Value {
 		}
 	}
 	return out
+}
+
+func (r *Tracer) primitiveArray(i *Interpreter) bool {
+	if i.sp < 3 || i.stack[i.sp-3].Kind() != types.KindRef {
+		return false
+	}
+	addr := i.stack[i.sp-3].Ref()
+	if addr <= 0 || addr >= len(i.heap) {
+		return false
+	}
+	switch i.heap[addr].(type) {
+	case types.TypedArray[bool],
+		types.TypedArray[int8],
+		types.TypedArray[int32],
+		types.TypedArray[int64],
+		types.TypedArray[float32],
+		types.TypedArray[float64]:
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *Tracer) continuableArraySet(i *Interpreter, t *trace) bool {
+	if !r.primitiveArray(i) {
+		return false
+	}
+	for _, op := range t.ops {
+		if op.depth != 0 || op.op == instr.CALL || op.op == instr.RETURN_CALL {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *Tracer) codes(i *Interpreter) [][]func(*Interpreter) {

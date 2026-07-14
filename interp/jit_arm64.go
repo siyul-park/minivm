@@ -37,6 +37,7 @@ const (
 )
 
 const branchTableLimit = 32
+const nativeBackend = true
 
 // Boxing tags used by scalar lowering, derived from the Kind
 // tag layout so they track any reordering of the Kind enum. i1/i8 share the i32
@@ -98,6 +99,8 @@ func (l arm64Lowerer) enter(ctx *lowering) {
 
 func (l arm64Lowerer) materializeExits(ctx *lowering) {
 	for _, exit := range ctx.exits {
+		ctx.reuse = false
+		ctx.spare = asm.VReg{}
 		ctx.values = exit.values
 		ctx.frames = exit.frames
 		ctx.assembler.Bind(exit.label)
@@ -580,10 +583,14 @@ func (l arm64Lowerer) steps(ctx *lowering, ops []step) (bool, bool) {
 		case instr.ARRAY_LEN:
 			ok = l.arrayLen(ctx, op)
 		case instr.ARRAY_SET:
+			terminal := op.terminal || ctx.count() > 0 && ctx.values[len(ctx.values)-1].kind == types.KindRef
 			if !l.arraySet(ctx, op) {
 				return false, false
 			}
-			return true, idx == len(ops)-1
+			if terminal {
+				return true, idx == len(ops)-1
+			}
+			ok = true
 		case instr.STRUCT_GET:
 			if !l.structGet(ctx, op) {
 				return false, false
@@ -873,7 +880,11 @@ func (l arm64Lowerer) localGet(ctx *lowering, op step) bool {
 		return false
 	}
 	if f.locals[idx].kind == types.KindRef {
-		l.retainBox(ctx, f.locals[idx].reg)
+		if ctx.leaf {
+			l.retainKnownBox(ctx, f.locals[idx].reg)
+		} else {
+			l.retainBox(ctx, f.locals[idx].reg)
+		}
 	}
 	ctx.push(f.locals[idx])
 	return true
@@ -1237,6 +1248,8 @@ func (l arm64Lowerer) arrayGetKnown(ctx *lowering, op step) bool {
 }
 
 func (l arm64Lowerer) enterBlock(ctx *lowering, state []slot) {
+	ctx.reuse = false
+	ctx.spare = asm.VReg{}
 	ctx.values = ctx.values[:0]
 	for _, slot := range state {
 		ctx.values = append(ctx.values, value{kind: slot.kind, ref: slot.ref, raw: slot.refKnown})
@@ -2730,9 +2743,15 @@ func (l arm64Lowerer) loadLocal(ctx *lowering, f *activation, idx, ip int) bool 
 		return false
 	}
 	vStack := ctx.pin(scratchStack)
-	addr := l.base(ctx, vStack)
-	reg := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDR(reg, addr, int16((f.base+idx)*8)))
+	reg, reusable := l.localReg(ctx, f, idx)
+	if reusable {
+		l.baseTo(ctx, vStack, reg)
+		ctx.assembler.Emit(arm64.LDR(reg, reg, int16((f.base+idx)*8)))
+	} else {
+		addr := l.base(ctx, vStack)
+		reg = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDR(reg, addr, int16((f.base+idx)*8)))
+	}
 	if kind == types.KindI64 {
 		// A heap-promoted i64 is a ref the trace cannot read as a value; guard
 		// the inline tag and deopt at the load if it promoted, then sign-extend
@@ -3110,26 +3129,83 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 		return false
 	}
 	a := ctx.assembler
-	fail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardShape, int(op.op))
-	if !ok {
-		return false
+	var fail, bounds, valueFail asm.Label
+	switch {
+	case kind == types.KindRef || op.terminal:
+		fail, ok = l.sideExit(ctx, pre, op.ip, prof.ExitGuardShape, int(op.op))
+		if !ok {
+			return false
+		}
+		bounds, ok = l.sideExit(ctx, pre, op.ip, prof.ExitGuardBounds, int(op.op))
+		if !ok {
+			return false
+		}
+		valueFail, ok = l.sideExit(ctx, pre, op.ip, prof.ExitGuardValue, int(op.op))
+		if !ok {
+			return false
+		}
+	default:
+		// A continuable primitive store is a state barrier: materialize the
+		// pre-op frame once, then let all guards share that resumable snapshot.
+		// Clearing the local register cache bounds no-spill pressure and makes
+		// subsequent operations reload from the homes just written.
+		if !l.flush(ctx, false) {
+			return false
+		}
+		for idx := range ctx.frames {
+			clear(ctx.frames[idx].loaded)
+			clear(ctx.frames[idx].dirty)
+		}
+		ctx.reuse = len(ctx.values) == 3
+		fail = ctx.queueExit(nil, op.ip, 0, prof.ExitGuardShape, int(op.op))
+		bounds = ctx.queueExit(nil, op.ip, 0, prof.ExitGuardBounds, int(op.op))
+		valueFail = ctx.queueExit(nil, op.ip, 0, prof.ExitGuardValue, int(op.op))
 	}
-	bounds, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardBounds, int(op.op))
-	if !ok {
-		return false
+	var addr, itab, data, scratch asm.VReg
+	remat := false
+	if kind != types.KindRef && !op.terminal {
+		work := l.localScratch(ctx)
+		if work.Width() == asm.WidthUndefined && val.known && val.kind.Repr() == types.KindI32 {
+			work = val.reg
+			remat = true
+		}
+		cell := asm.VReg{}
+		if ctx.leaf {
+			cell = ctx.pin(scratchSP)
+		}
+		addr, itab, data, scratch = l.heapRef(ctx, ref, work, cell)
+	} else {
+		addr, itab, data = l.guardHeap(ctx, ref, fail)
 	}
-	valueFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardValue, int(op.op))
-	if !ok {
-		return false
+	if kind != types.KindRef && !op.terminal {
+		l.guardItabTo(ctx, itab, scratch, want, fail)
+	} else {
+		l.guardItab(ctx, itab, want, fail)
 	}
-	addr, itab, data := l.guardHeap(ctx, ref, fail)
-	l.guardItab(ctx, itab, want, fail)
 
-	dataPtr, n := l.sliceHeader(ctx, data, base)
+	var dataPtr, n asm.VReg
+	if kind != types.KindRef && !op.terminal {
+		dataPtr = itab
+		n = data
+		l.sliceHeaderTo(ctx, data, dataPtr, n, base)
+	} else {
+		dataPtr, n = l.sliceHeader(ctx, data, base)
+	}
 	l.guardIndex(ctx, idx, n, bounds)
 
-	rcBase := l.rcBase(ctx)
-	rc := l.guardRC(ctx, addr, rcBase, valueFail)
+	var rcBase, rc, rcAddr asm.VReg
+	if kind != types.KindRef && !op.terminal {
+		rcBase = scratch
+		l.rcBaseTo(ctx, rcBase)
+		ctx.assembler.Emit(arm64.MOV(n, addr))
+		rcAddr = addr
+		rc = n
+		l.guardRCTo(ctx, rc, rcAddr, rcBase, valueFail)
+	} else {
+		rcBase = l.rcBase(ctx)
+		rcAddr = addr
+		rc = l.guardRC(ctx, rcAddr, rcBase, valueFail)
+	}
 
 	if kind == types.KindRef {
 		// The container's refcount deopt point (guardRC above) runs before the
@@ -3140,30 +3216,53 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 		old := a.Reg(asm.RegTypeInt, asm.Width64)
 		a.Emit(arm64.LDRR(old, dataPtr, idx))
 		l.releaseBoxUnlessEqual(ctx, old, val.reg, pre, op.ip)
+		a.Emit(arm64.SUBI(rc, rc, 1))
+		a.Emit(arm64.STRR(rc, rcBase, rcAddr))
+		a.Emit(arm64.STRR(val.reg, dataPtr, idx))
 	} else {
+		// All primitive-store guards have passed, so release the consumed array
+		// operand before address formation. This shortens addr/rc liveness and
+		// keeps mutation loops within the no-spill register budget.
+		a.Emit(arm64.SUBI(rc, rc, 1))
+		a.Emit(arm64.STRR(rc, rcBase, rcAddr))
 		switch kind {
 		case types.KindI1, types.KindI8:
-			elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
-			a.Emit(arm64.ADD(elemAddr, dataPtr, idx))
-			a.Emit(arm64.STRB(val.reg, elemAddr, 0))
+			target := n
+			if remat {
+				target = scratch
+			}
+			a.Emit(arm64.ADD(target, dataPtr, idx))
+			if remat {
+				a.Emit(arm64.LDI(val.reg, uint64(val.imm))...)
+			}
+			a.Emit(arm64.STRB(val.reg, target, 0))
 		case types.KindI32, types.KindF32:
-			elemAddr := a.Reg(asm.RegTypeInt, asm.Width64)
-			off := a.Reg(asm.RegTypeInt, asm.Width64)
-			a.Emit(arm64.LSLI(off, idx, scale))
-			a.Emit(arm64.ADD(elemAddr, dataPtr, off))
-			a.Emit(arm64.STRW(val.reg, elemAddr, 0))
+			target := n
+			if remat {
+				target = scratch
+			}
+			a.Emit(arm64.LSLI(target, idx, scale))
+			a.Emit(arm64.ADD(target, dataPtr, target))
+			if remat {
+				a.Emit(arm64.LDI(val.reg, uint64(val.imm))...)
+			}
+			a.Emit(arm64.STRW(val.reg, target, 0))
 		case types.KindI64, types.KindF64:
+			if remat {
+				a.Emit(arm64.LDI(val.reg, uint64(val.imm))...)
+			}
 			a.Emit(arm64.STRR(val.reg, dataPtr, idx))
 		}
-	}
-	a.Emit(arm64.SUBI(rc, rc, 1))
-	a.Emit(arm64.STRR(rc, rcBase, addr))
-	if kind == types.KindRef {
-		a.Emit(arm64.STRR(val.reg, dataPtr, idx))
+		if !op.terminal && remat {
+			ctx.spare = rc
+		}
 	}
 
-	ctx.values = pre[: len(pre)-3 : len(pre)-3]
-	return l.exit(ctx, op.ip+1, prof.ExitTerminalOp, int(op.op))
+	ctx.values = ctx.values[: len(ctx.values)-3 : len(ctx.values)-3]
+	if kind == types.KindRef || op.terminal {
+		return l.exit(ctx, op.ip+1, prof.ExitTerminalOp, int(op.op))
+	}
+	return true
 }
 
 func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
@@ -3565,6 +3664,31 @@ func (l arm64Lowerer) trapFlushed(ctx *lowering, kind, resume, exitID int) {
 	)
 }
 
+// heapRef loads a heap cell for a value already proven to have ref kind by the
+// symbolic stack. The object itab guard still rejects null or a different heap
+// shape before the payload is used.
+func (arm64Lowerer) heapRef(ctx *lowering, ref, off, cell asm.VReg) (asm.VReg, asm.VReg, asm.VReg, asm.VReg) {
+	a := ctx.assembler
+	addr := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ANDI(addr, ref, maskI32))
+	if cell.Width() == asm.WidthUndefined {
+		cell = a.Reg(asm.RegTypeInt, asm.Width64)
+	}
+	a.Emit(arm64.LDR(cell, ctx.pin(scratchCtrl), int16(journalHeap*8)))
+	if off.Width() == asm.WidthUndefined {
+		off = a.Reg(asm.RegTypeInt, asm.Width64)
+	}
+	a.Emit(arm64.LSLI(off, addr, 4))
+	a.Emit(arm64.ADD(cell, cell, off))
+	itab := ref
+	data := off
+	a.Emit(
+		arm64.LDR(itab, cell, 0),
+		arm64.LDR(data, cell, 8),
+	)
+	return addr, itab, data, cell
+}
+
 // guardHeap loads a heap cell or branches to fail on a non-ref tag.
 func (arm64Lowerer) guardHeap(ctx *lowering, ref asm.VReg, fail asm.Label) (asm.VReg, asm.VReg, asm.VReg) {
 	a := ctx.assembler
@@ -3592,13 +3716,17 @@ func (arm64Lowerer) guardHeap(ctx *lowering, ref asm.VReg, fail asm.Label) (asm.
 	return addr, itab, data
 }
 
-func (arm64Lowerer) sliceHeader(ctx *lowering, data asm.VReg, base int16) (asm.VReg, asm.VReg) {
-	ptr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	n := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+func (arm64Lowerer) sliceHeaderTo(ctx *lowering, data, ptr, n asm.VReg, base int16) {
 	ctx.assembler.Emit(
 		arm64.LDR(ptr, data, base+sliceData),
 		arm64.LDR(n, data, base+sliceLen),
 	)
+}
+
+func (l arm64Lowerer) sliceHeader(ctx *lowering, data asm.VReg, base int16) (asm.VReg, asm.VReg) {
+	ptr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	n := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	l.sliceHeaderTo(ctx, data, ptr, n, base)
 	return ptr, n
 }
 
@@ -3616,11 +3744,15 @@ func (arm64Lowerer) matchItab(ctx *lowering, got asm.VReg, want uintptr, hit asm
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, hit))
 }
 
-func (arm64Lowerer) guardItab(ctx *lowering, got asm.VReg, want uintptr, fail asm.Label) {
-	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDI(v, uint64(want))...)
-	ctx.assembler.Emit(arm64.CMP(got, v))
+func (arm64Lowerer) guardItabTo(ctx *lowering, got, scratch asm.VReg, want uintptr, fail asm.Label) {
+	ctx.assembler.Emit(arm64.LDI(scratch, uint64(want))...)
+	ctx.assembler.Emit(arm64.CMP(got, scratch))
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
+}
+
+func (l arm64Lowerer) guardItab(ctx *lowering, got asm.VReg, want uintptr, fail asm.Label) {
+	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	l.guardItabTo(ctx, got, v, want, fail)
 }
 
 func (arm64Lowerer) matchKind(ctx *lowering, got asm.VReg, want types.Kind, hit asm.Label) {
@@ -3710,6 +3842,18 @@ func (l arm64Lowerer) retainBox(ctx *lowering, v asm.VReg) {
 	})
 }
 
+func (l arm64Lowerer) retainKnownBox(ctx *lowering, v asm.VReg) {
+	a := ctx.assembler
+	addr := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.ANDI(addr, v, maskI32))
+	base := ctx.pin(scratchSP)
+	l.rcBaseTo(ctx, base)
+	rc := a.Reg(asm.RegTypeInt, asm.Width64)
+	a.Emit(arm64.LDRR(rc, base, addr))
+	a.Emit(arm64.ADDI(rc, rc, 1))
+	a.Emit(arm64.STRR(rc, base, addr))
+}
+
 func (l arm64Lowerer) retainRef(ctx *lowering, addr asm.VReg) {
 	base := l.rcBase(ctx)
 	rc := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -3757,7 +3901,7 @@ func (l arm64Lowerer) flush(ctx *lowering, commit bool) bool {
 			if !f.dirty[idx] {
 				continue
 			}
-			boxed, ok := l.box(ctx, f.locals[idx])
+			boxed, ok := l.boxHome(ctx, f.locals[idx])
 			if !ok {
 				return false
 			}
@@ -3771,7 +3915,7 @@ func (l arm64Lowerer) flush(ctx *lowering, commit bool) bool {
 		if v.kind == types.KindRef && commit {
 			return false
 		}
-		boxed, ok := l.box(ctx, v)
+		boxed, ok := l.boxHome(ctx, v)
 		if !ok {
 			return false
 		}
@@ -3780,15 +3924,88 @@ func (l arm64Lowerer) flush(ctx *lowering, commit bool) bool {
 	return true
 }
 
-// base returns &stack[bp] for slot-relative loads and stores.
-func (l arm64Lowerer) base(ctx *lowering, vStack asm.VReg) asm.VReg {
-	a := ctx.assembler
+func (arm64Lowerer) localScratch(ctx *lowering) asm.VReg {
+	for fi := range ctx.frames {
+		frame := &ctx.frames[fi]
+		for _, local := range frame.locals {
+			reg := local.reg
+			if reg.Width() == asm.WidthUndefined {
+				continue
+			}
+			used := false
+			for _, value := range ctx.values {
+				if value.reg.Width() != asm.WidthUndefined && value.reg.ID() == reg.ID() {
+					used = true
+					break
+				}
+			}
+			if !used {
+				return reg
+			}
+		}
+	}
+	return asm.VReg{}
+}
+
+func (l arm64Lowerer) localReg(ctx *lowering, target *activation, idx int) (asm.VReg, bool) {
+	reg := target.locals[idx].reg
+	if !ctx.reuse || reg.Width() == asm.WidthUndefined {
+		return asm.VReg{}, false
+	}
+	for _, value := range ctx.values {
+		if value.reg.Width() != asm.WidthUndefined && value.reg.ID() == reg.ID() {
+			return asm.VReg{}, false
+		}
+	}
+	for fi := range ctx.frames {
+		frame := &ctx.frames[fi]
+		for li, value := range frame.locals {
+			if frame == target && li == idx || !frame.loaded[li] {
+				continue
+			}
+			if value.reg.Width() != asm.WidthUndefined && value.reg.ID() == reg.ID() {
+				return asm.VReg{}, false
+			}
+		}
+	}
+	return reg, true
+}
+
+func (l arm64Lowerer) baseTo(ctx *lowering, vStack, addr asm.VReg) {
 	vBP := ctx.pin(scratchBP)
-	off := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.LSLI(off, vBP, 3))
-	addr := a.Reg(asm.RegTypeInt, asm.Width64)
-	a.Emit(arm64.ADD(addr, vStack, off))
+	ctx.assembler.Emit(arm64.LSLI(addr, vBP, 3))
+	ctx.assembler.Emit(arm64.ADD(addr, vStack, addr))
+}
+
+func (l arm64Lowerer) base(ctx *lowering, vStack asm.VReg) asm.VReg {
+	if ctx.leaf {
+		addr := ctx.pin(scratchSP)
+		l.baseTo(ctx, vStack, addr)
+		return addr
+	}
+	addr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	l.baseTo(ctx, vStack, addr)
 	return addr
+}
+
+func (l arm64Lowerer) boxHome(ctx *lowering, v value) (asm.VReg, bool) {
+	if ctx.spare.Width() != asm.WidthUndefined && ctx.spare.ID() != v.reg.ID() && v.raw {
+		var tag uint64
+		switch v.kind {
+		case types.KindI1:
+			tag = tagI1
+		case types.KindI8:
+			tag = tagI8
+		case types.KindI32:
+			tag = tagI32
+		default:
+			return l.box(ctx, v)
+		}
+		ctx.assembler.Emit(arm64.ANDI(ctx.spare, v.reg, maskI32))
+		ctx.assembler.Emit(arm64.MOVK(ctx.spare, uint16(tag>>48), 48))
+		return ctx.spare, true
+	}
+	return l.box(ctx, v)
 }
 
 // box produces the boxed form of v in a fresh register. A marker materializes
@@ -3869,12 +4086,16 @@ func (l arm64Lowerer) retain(ctx *lowering, fn int) {
 }
 
 // guardRC keeps releases that could free objects in the interpreter.
-func (arm64Lowerer) guardRC(ctx *lowering, addr, rcBase asm.VReg, fail asm.Label) asm.VReg {
+func (arm64Lowerer) guardRCTo(ctx *lowering, rc, addr, rcBase asm.VReg, fail asm.Label) {
 	a := ctx.assembler
-	rc := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.LDRR(rc, rcBase, addr))
 	a.Emit(arm64.CMPI(rc, 1))
 	a.Emit(arm64.BCondLabel(arm64.OpBLE, fail))
+}
+
+func (l arm64Lowerer) guardRC(ctx *lowering, addr, rcBase asm.VReg, fail asm.Label) asm.VReg {
+	rc := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	l.guardRCTo(ctx, rc, addr, rcBase, fail)
 	return rc
 }
 
@@ -3895,9 +4116,13 @@ func (l arm64Lowerer) refOnly(ctx *lowering, v asm.VReg, body func(asm.VReg)) {
 	ctx.assembler.Bind(done)
 }
 
-func (arm64Lowerer) rcBase(ctx *lowering) asm.VReg {
-	base := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+func (arm64Lowerer) rcBaseTo(ctx *lowering, base asm.VReg) {
 	ctx.assembler.Emit(arm64.LDR(base, ctx.pin(scratchCtrl), int16(journalRC*8)))
+}
+
+func (l arm64Lowerer) rcBase(ctx *lowering) asm.VReg {
+	base := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	l.rcBaseTo(ctx, base)
 	return base
 }
 
@@ -3932,9 +4157,22 @@ func zeroValue(kind types.Kind) (types.Boxed, bool) {
 	}
 }
 
+func isLeaf(blocks []block) bool {
+	for _, block := range blocks {
+		for _, step := range block.steps {
+			switch step.op {
+			case instr.CALL, instr.RETURN_CALL:
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // lower emits one plan through the common block pipeline.
 func lower(ctx *lowering, plan plan) bool {
 	l := arm64Lowerer{}
+	ctx.leaf = isLeaf(plan.blocks)
 	l.enter(ctx)
 	ctx.blocks = plan.blocks
 	ctx.kind = plan.kind
@@ -3963,6 +4201,8 @@ func lower(ctx *lowering, plan plan) bool {
 	}
 	for n := 0; n < len(ctx.work); n++ {
 		work := ctx.work[n]
+		ctx.reuse = false
+		ctx.spare = asm.VReg{}
 		ctx.values = work.values
 		ctx.frames = work.frames
 		ctx.assembler.Bind(work.label)

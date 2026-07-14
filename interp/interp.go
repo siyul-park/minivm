@@ -30,7 +30,8 @@ type Interpreter struct {
 	exits    map[anchor]func(*Interpreter)
 	stubs    []func(*Interpreter)
 	natives  []unsafe.Pointer
-	tried    map[int]bool
+	tried    map[anchor]bool
+	loops    map[anchor]uint8
 	journal  []uint64
 
 	types       []types.Type
@@ -63,6 +64,7 @@ type Interpreter struct {
 	gas int64
 
 	threshold int64
+	eager     bool
 	tick      int
 	fuel      int64
 	limit     int
@@ -103,6 +105,7 @@ type option struct {
 }
 
 const heapRunway = 64
+const loopWarmup = 8
 
 func WithHook(fn func(*Interpreter) error) func(*option) {
 	return func(o *option) { o.hook = fn }
@@ -237,6 +240,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		profiler:  opt.profiler,
 		samples:   samples,
 		threshold: threshold,
+		eager:     opt.threshold == 0,
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
 		globals:   make([]types.Boxed, len(prog.Globals)),
@@ -247,7 +251,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		exits:     map[anchor]func(*Interpreter){},
 		stubs:     make([]func(*Interpreter), len(prog.Constants)+1),
 		natives:   make([]unsafe.Pointer, len(prog.Constants)+1),
-		tried:     map[int]bool{},
+		tried:     map[anchor]bool{},
+		loops:     map[anchor]uint8{},
 		dynamic:   map[int]bool{},
 		journal:   make([]uint64, journalHead+journalStride*opt.frame),
 		frames:    make([]frame, opt.frame),
@@ -346,6 +351,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		coros:     i.coros,
 		globals:   i.globalKinds,
 		exact:     opt.tick == 1,
+		hot:       nativeBackend && i.threshold >= 0,
+		backedge:  (*Interpreter).observeLoop,
 	}
 	i.code[0] = c.Compile(prog.Code, i.module.LocalKinds(), types.Kinds(i.module.Captures))
 
@@ -978,47 +985,71 @@ func (i *Interpreter) safepoint() error {
 func (i *Interpreter) observe(f *frame) error {
 	i.sample(f)
 	if f.ip == 0 {
-		if _, err := i.tracer.capture(i, anchor{addr: f.addr, ip: 0}); err != nil {
+		if _, err := i.tracer.capture(i, anchor{addr: f.addr}); err != nil {
 			return err
 		}
 	}
-	// A hot loop header sampled mid-function: f.ip is genuinely at the back-edge
-	// target, so the clone's operand stack matches the header and a one-iteration
-	// loop trace can be recorded from the live state. A loopy function's entry
-	// trace aborts on the unrolled body, so the one-shot entry threshold never
-	// installs anything; compile here, once the function is hot and the loop
-	// trace first appears, so the loop header gets its own native. The hotness
-	// gate keeps WithThreshold(-1) a pure interpreter.
-	samples := i.samples.Samples(f.addr)
-	if i.threshold >= 0 && f.ip > 0 &&
-		samples >= uint64(i.threshold) &&
-		i.exits[anchor{addr: f.addr, ip: f.ip}] == nil {
-		for _, h := range i.tracer.headers(i, f.addr) {
-			if h != f.ip {
-				continue
-			}
-			result, err := i.tracer.capture(i, anchor{addr: f.addr, ip: f.ip})
-			if err != nil {
-				return err
-			}
-			if result.trace != nil {
-				root := anchor{addr: f.addr, ip: f.ip}
-				if i.cache != nil {
-					i.cache.request(cacheRequest{root: root, trigger: prof.TriggerHot})
-				} else if err := i.compile(root); err != nil {
-					return err
-				}
-			}
-			break
-		}
+	if err := i.observeLoop(f); err != nil {
+		return err
 	}
-	if i.cache == nil && i.threshold >= 0 && samples >= uint64(i.threshold) && !i.tried[f.addr] {
-		i.tried[f.addr] = true
-		if err := i.compile(anchor{addr: f.addr}); err != nil {
+	samples := i.samples.Samples(f.addr)
+	root := anchor{addr: f.addr}
+	if i.cache == nil && i.threshold >= 0 && samples >= uint64(i.threshold) && !i.tried[root] {
+		i.tried[root] = true
+		if err := i.compile(root); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// observeLoop records and compiles a hot loop from an exact header state. It is
+// called both by periodic sampling and by JIT-enabled backward branches so a
+// deterministic tick phase cannot permanently miss a loop header.
+func (i *Interpreter) observeLoop(f *frame) error {
+	if i.threshold < 0 || f == nil || f.ip <= 0 {
+		return nil
+	}
+	root := anchor{addr: f.addr, ip: f.ip}
+	if i.exits[root] != nil || i.tried[root] {
+		return nil
+	}
+	var found bool
+	for _, header := range i.tracer.headers(i, f.addr) {
+		if header == f.ip {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	samples := i.samples.Samples(f.addr)
+	if i.eager {
+		if samples == 0 {
+			i.sample(f)
+		}
+		hits := i.loops[root] + 1
+		i.loops[root] = hits
+		if hits < loopWarmup {
+			return nil
+		}
+	} else if samples < uint64(i.threshold) {
+		return nil
+	}
+	i.tried[root] = true
+	result, err := i.tracer.capture(i, root)
+	if err != nil {
+		return err
+	}
+	if result.trace == nil {
+		return nil
+	}
+	if i.cache != nil {
+		i.cache.request(cacheRequest{root: root, trigger: prof.TriggerHot})
+		return nil
+	}
+	return i.compile(root)
 }
 
 // call wraps a native trace Entry Callable. The CALL handler has already
@@ -1721,6 +1752,8 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 		coros:     i.coros,
 		globals:   i.globalKinds,
 		exact:     i.tick == 1,
+		hot:       nativeBackend && i.threshold >= 0,
+		backedge:  (*Interpreter).observeLoop,
 	}
 	if dynamic {
 		i.coros[addr] = i.yields(fn.Code)
@@ -1980,7 +2013,16 @@ func (i *Interpreter) remove(addr int) {
 			delete(i.exits, a)
 		}
 	}
-	delete(i.tried, addr)
+	for a := range i.tried {
+		if a.addr == addr {
+			delete(i.tried, a)
+		}
+	}
+	for a := range i.loops {
+		if a.addr == addr {
+			delete(i.loops, a)
+		}
+	}
 	if i.tracer != nil {
 		i.tracer.remove(addr)
 	}

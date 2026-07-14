@@ -2430,10 +2430,26 @@ func arraySlice() jen.Code {
 }
 
 func br() jen.Code {
-	return jen.Func().Params(jen.Id("c").Add(jen.Op("*").Add(jen.Id("threader")))).Params(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter"))))).Block(jen.List(jen.Id("offset")).Op(":=").List(jen.Id("instr").Dot("ParseI16").Call(jen.Id("c").Dot("code"), jen.Id("c").Dot("ip").Op("+").Add(jen.Lit(1)))),
-		jen.List(jen.Id("c").Dot("ip")).Op("+=").List(jen.Lit(3)),
-		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.List(jen.Id("f")).Op(":=").List(jen.Id("i").Dot("fr")),
-			jen.List(jen.Id("f").Dot("ip")).Op("+=").List(jen.Id("offset").Op("+").Add(jen.Lit(3))))))
+	apply := []jen.Code{
+		jen.Id("f").Op(":=").Id("i").Dot("fr"),
+		jen.Id("f").Dot("ip").Op("+=").Id("offset").Op("+").Lit(3),
+	}
+	observe := append([]jen.Code(nil), apply...)
+	observe = append(observe,
+		jen.If(jen.Id("err").Op(":=").Id("c").Dot("backedge").Call(jen.Id("i"), jen.Id("f")), jen.Id("err").Op("!=").Nil()).Block(
+			jen.Panic(jen.Id("err")),
+		),
+	)
+	return jen.Func().Params(jen.Id("c").Op("*").Id("threader")).Params(
+		jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")),
+	).Block(
+		jen.Id("offset").Op(":=").Id("instr").Dot("ParseI16").Call(jen.Id("c").Dot("code"), jen.Id("c").Dot("ip").Op("+").Lit(1)),
+		jen.Id("c").Dot("ip").Op("+=").Lit(3),
+		jen.If(jen.Op("!").Id("c").Dot("hot").Op("||").Id("c").Dot("backedge").Op("==").Nil().Op("||").Id("offset").Op(">").Lit(-3)).Block(
+			jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(apply...)),
+		),
+		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(observe...)),
+	)
 }
 
 func brTable() jen.Code {

@@ -53,7 +53,7 @@ The canonical cross-runtime suite shows both the strengths and the current limit
 - `RecursiveFib(35)` places `minivm/default` near wazero and ahead of the script runtimes measured here, while remaining zero-allocation after warmup.
 - `IterativeFib(30)` and `BranchTree(96)` show the adaptive default tier in the same order of magnitude as wazero while remaining allocation-free.
 - `TypedArraySum(256)` is allocation-free in all minivm modes, but wazero remains materially faster in this fixture.
-- `Sieve(256)` favors the pure threaded interpreter: **16.33 us** versus about **40 us** for `default` and eager `jit`. The benchmark records the gap but does not isolate whether it comes from profiling, fallback, or unsupported paths.
+- `Sieve(256)` now favors native loop traces: `default` is **5.165 us** and eager `jit` is **5.172 us**, versus **15.831 us** for the threaded interpreter. All three modes allocate only the typed array itself (`1,048 B`, `2 allocs`).
 - `IndirectRecursiveFib(20)` is a clear weak point: `minivm/default` is substantially slower than wazero despite remaining allocation-free.
 - `AllocationGraph(128)` exposes object-management cost. minivm is faster than Tengo, Goja, and Yaegi, but slower than gpython and gopher-lua in this fixture.
 
@@ -69,7 +69,7 @@ These results are workload measurements, not general language rankings. The runt
 | `threaded` | `interp.New(prog, interp.WithThreshold(-1))` | JIT disabled; pure threaded execution |
 | `jit` | `interp.New(prog, interp.WithThreshold(0))` | eager profiling/compilation policy; not a precompiled or guaranteed-native steady state |
 
-The `jit` label therefore means **threshold zero**, not “fully warmed native code.” It can be slower than `default` when early compilation produces incomplete traces or when the workload is dominated by unsupported allocation and mutation paths.
+The `jit` label therefore means **threshold zero**, not “fully warmed native code.” Function and module entries become eligible on the first sample, while loop roots reached through an unconditional backward branch wait for eight exact back-edges so the first iteration does not bias the recorded branch path. It can still be slower than `default` when early entry compilation produces incomplete traces or when the workload is dominated by unsupported allocation paths.
 
 Each runtime measures an already prepared callable through result recovery. Compilation, module construction, fixture injection, warmup, and minivm `Reset` are excluded. Runtime-specific host-call and result-conversion costs remain part of the measured invocation, so small differences should not be interpreted as VM-core instruction throughput alone.
 
@@ -89,9 +89,9 @@ Environment: Apple M4 Pro, `darwin/arm64`, Go 1.26.2. Command: `go test -tags=co
 | IterativeFib(30) | goja | 2,137 | 368 | 20 |
 | IterativeFib(30) | gpython | 2,440 | 2,448 | 88 |
 | IterativeFib(30) | yaegi | 2,695 | 2,036 | 101 |
-| Sieve(256) | minivm/default | 40,195 | 28,968 | 407 |
-| Sieve(256) | minivm/threaded | 16,328 | 1,048 | 2 |
-| Sieve(256) | minivm/jit | 39,960 | 28,968 | 407 |
+| Sieve(256) | minivm/default | 5,165 | 1,048 | 2 |
+| Sieve(256) | minivm/threaded | 15,831 | 1,048 | 2 |
+| Sieve(256) | minivm/jit | 5,172 | 1,048 | 2 |
 | Sieve(256) | native | 229.9 | 0 | 0 |
 | Sieve(256) | wazero | 642.4 | 8 | 1 |
 | Sieve(256) | tengo | 51,497 | 122,504 | 1,611 |
@@ -248,7 +248,7 @@ For the deep-recursion `fib(35)` result with JIT enabled, see the cross-runtime 
 
 On ARM64, minivm compiles hot recorded traces to native code. Supported paths include numeric operations, direct calls, selected indirect function dispatch, ref-counted slots, selected read-only heap operations, and loops with safepoint polling.
 
-Unsupported paths either deoptimize or continue through the threaded interpreter. These include allocation, mutation, host calls, heap-promoted i64 values, and unsupported heap shapes.
+Unsupported paths either deoptimize or continue through the threaded interpreter. These include allocation, ref-bearing or complex mutation, host calls, heap-promoted i64 values, and unsupported heap shapes. Guarded primitive typed-array stores can remain inside native loop traces.
 
 The default threshold is `4096` executed instructions, which is about 32 samples at the default tick interval of 128.
 
@@ -256,9 +256,10 @@ The default threshold is `4096` executed instructions, which is about 32 samples
 
 The current canonical kernels show that native trace coverage is workload-dependent:
 
-- adaptive `default` is effective for direct recursive calls, iterative numeric loops, typed-array reads, and branch-heavy scalar code
-- threshold-zero `jit` is not equivalent to a warmed native cache and may compile too early to outperform the adaptive default
-- allocation and mutation-heavy kernels such as `Sieve` and `AllocationGraph` can remain faster in the threaded interpreter
+- adaptive `default` is effective for direct recursive calls, iterative numeric loops, typed-array reads, guarded primitive typed-array writes, and branch-heavy scalar code
+- threshold-zero `jit` is not equivalent to a warmed native cache, but exact back-edge warmup keeps loop capture from over-specializing the first iteration
+- `Sieve(256)` now runs about 3.1 times faster in `default` and eager `jit` than in the threaded interpreter, while preserving the same allocation count
+- allocation-heavy object kernels such as `AllocationGraph` remain limited by heap management rather than scalar trace throughput
 - indirect recursive calls remain substantially slower than wazero and are a priority for call-target and trace-continuation optimization
 
 Use the complete cross-runtime table above for current numbers. Do not infer JIT entry solely from the `jit` sub-benchmark name; profiler metrics are required when a benchmark specifically claims native entry.

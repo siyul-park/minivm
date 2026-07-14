@@ -169,9 +169,11 @@ With the default tick of `128`, this is about `32` samples.
 
 | Setting | Effect |
 |---|---|
-| `WithThreshold(0)` | compile on the first sample |
+| `WithThreshold(0)` | make entries eligible on the first sample and unconditional-backedge loop roots after eight exact hits |
 | `WithThreshold(n > 0)` | compile after the rounded sample threshold |
 | `WithThreshold(n < 0)` | disable compilation |
+
+JIT-enabled unconditional backward branches observe their target after updating the live frame IP, so those module and function loops cannot be permanently missed by the periodic tick phase. Threshold-zero capture for those roots waits eight exact hits to avoid specializing on an unrepresentative first iteration.
 
 Pool members use the same rounded threshold. With a shared cache, trigger counts are aggregated so only one member compiles each module or function slot.
 

@@ -117,6 +117,92 @@ func TestARM64_ArraySetAfterNestedCalls(t *testing.T) {
 	require.Equal(t, jitOut, out)
 }
 
+func arm64CountingLoop(t *testing.T, limit int32) *program.Program {
+	t.Helper()
+	b := program.NewBuilder()
+	loop := b.Label()
+	done := b.Label()
+	b.Locals(types.TypeI32)
+	b.Emit(instr.I32_CONST, 0).
+		Emit(instr.LOCAL_SET, 0).
+		Bind(loop).
+		Emit(instr.LOCAL_GET, 0).
+		Emit(instr.I32_CONST, uint64(uint32(limit))).
+		Emit(instr.I32_GE_S).
+		BrIf(done).
+		Emit(instr.LOCAL_GET, 0).
+		Emit(instr.I32_CONST, 1).
+		Emit(instr.I32_ADD).
+		Emit(instr.LOCAL_SET, 0).
+		Br(loop).
+		Bind(done).
+		Emit(instr.LOCAL_GET, 0)
+	prog, err := b.Build()
+	require.NoError(t, err)
+	return prog
+}
+
+func TestARM64_BackedgeCompilesModuleLoop(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	i := New(arm64CountingLoop(t, 64), WithTick(1<<20), WithThreshold(0))
+	defer i.Close()
+	require.NoError(t, i.Run(context.Background()))
+	value, err := i.PopBoxed()
+	require.NoError(t, err)
+	require.Equal(t, types.BoxI32(64), value)
+
+	headers := i.tracer.headers(i, 0)
+	require.NotEmpty(t, headers)
+	require.True(t, i.tried[anchor{ip: headers[0]}])
+	require.NotEmpty(t, i.exits)
+}
+
+func TestARM64_BackedgeWarmsEagerLoop(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	i := New(arm64CountingLoop(t, 4), WithTick(1<<20), WithThreshold(0))
+	defer i.Close()
+	headers := i.tracer.headers(i, 0)
+	require.NotEmpty(t, headers)
+	root := anchor{ip: headers[0]}
+
+	require.NoError(t, i.Run(context.Background()))
+	_, err := i.PopBoxed()
+	require.NoError(t, err)
+	require.False(t, i.tried[root])
+	i.Reset()
+
+	require.NoError(t, i.Run(context.Background()))
+	_, err = i.PopBoxed()
+	require.NoError(t, err)
+	require.True(t, i.tried[root])
+}
+
+func TestARM64_BackedgeKeepsSampleThreshold(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	i := New(arm64CountingLoop(t, 4), WithTick(1<<20), WithThreshold(1))
+	defer i.Close()
+	headers := i.tracer.headers(i, 0)
+	require.NotEmpty(t, headers)
+	root := anchor{ip: headers[0]}
+
+	for range 2 {
+		require.NoError(t, i.Run(context.Background()))
+		_, err := i.PopBoxed()
+		require.NoError(t, err)
+		i.Reset()
+	}
+	require.False(t, i.tried[root])
+}
+
 // AbortedSideExitDoesNotComplete protects partial unsupported traces from
 // miscompile where a captured side-exit fragment that recorded a few
 // supported opcodes and then aborted on an unsupported one (MAP_NEW_DEFAULT
@@ -343,6 +429,138 @@ func TestCompiler_Compile(t *testing.T) {
 			require.Less(t, id, len(entry.exits))
 			require.Equal(t, exitDescriptor{reason: prof.ExitGuardBounds, opcode: int(instr.ARRAY_GET)}, entry.exits[id])
 			require.Equal(t, uint64(id+1), encoded)
+		})
+
+		t.Run("primitive array set loop", func(t *testing.T) {
+			array := make(types.TypedArray[int32], 64)
+			b := program.NewBuilder()
+			loop := b.Label()
+			done := b.Label()
+			b.Locals(types.TypeI32)
+			b.Const(array)
+			b.Emit(instr.I32_CONST, 0).
+				Emit(instr.LOCAL_SET, 0).
+				Bind(loop).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 64).
+				Emit(instr.I32_GE_S).
+				BrIf(done).
+				ConstGet(array).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.ARRAY_SET).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.I32_ADD).
+				Emit(instr.LOCAL_SET, 0).
+				Br(loop).
+				Bind(done).
+				ConstGet(array).
+				Emit(instr.I32_CONST, 0).
+				Emit(instr.ARRAY_GET)
+			prog, err := b.Build()
+			require.NoError(t, err)
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+
+			compiled := compiler.Compile(i, anchor{})
+			require.NoError(t, compiled.err)
+			require.NotNil(t, compiled.module, "%+v", compiled)
+			i.install(compiled.module, false)
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(1), value)
+		})
+
+		t.Run("primitive array set branch", func(t *testing.T) {
+			array := make(types.TypedArray[int32], 16)
+			b := program.NewBuilder()
+			loop := b.Label()
+			skip := b.Label()
+			done := b.Label()
+			b.Locals(types.TypeI32)
+			b.Const(array)
+			b.Emit(instr.I32_CONST, 0).
+				Emit(instr.LOCAL_SET, 0).
+				Bind(loop).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 16).
+				Emit(instr.I32_GE_S).
+				BrIf(done).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.I32_AND).
+				BrIf(skip).
+				ConstGet(array).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.I32_ADD).
+				Emit(instr.ARRAY_SET).
+				Bind(skip).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.I32_ADD).
+				Emit(instr.LOCAL_SET, 0).
+				Br(loop).
+				Bind(done).
+				ConstGet(array).
+				Emit(instr.I32_CONST, 0).
+				Emit(instr.ARRAY_GET).
+				ConstGet(array).
+				Emit(instr.I32_CONST, 2).
+				Emit(instr.ARRAY_GET).
+				Emit(instr.I32_ADD)
+			prog, err := b.Build()
+			require.NoError(t, err)
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+
+			compiled := compiler.Compile(i, anchor{})
+			require.NoError(t, compiled.err)
+			require.NotNil(t, compiled.module, "%+v", compiled)
+			i.install(compiled.module, false)
+
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(4), value)
+		})
+
+		t.Run("primitive array set continues", func(t *testing.T) {
+			array := types.TypedArray[int32]{1}
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.ARRAY_SET),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_GET),
+			}, program.WithConstants(array))
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+
+			compiled := compiler.Compile(i, anchor{})
+			require.NoError(t, compiled.err)
+			require.NotNil(t, compiled.module, "%+v", compiled)
+			i.install(compiled.module, false)
+
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(2), value)
+			require.Equal(t, int32(2), array[0])
 		})
 
 		t.Run("array get value guard", func(t *testing.T) {

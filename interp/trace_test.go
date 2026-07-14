@@ -73,6 +73,43 @@ func TestTracer_Capture(t *testing.T) {
 		require.Equal(t, instr.YIELD, tr.ops[len(tr.ops)-1].op)
 	})
 
+	t.Run("continues after primitive array set", func(t *testing.T) {
+		array := types.TypedArray[int32]{1}
+		tracer := NewTracer()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.ARRAY_SET),
+			instr.New(instr.I32_CONST, 7),
+		}, program.WithConstants(array))
+		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		defer i.Close()
+
+		result, err := tracer.capture(i, anchor{})
+		require.NoError(t, err)
+		require.NotNil(t, result.trace)
+		require.Equal(t, completed, result.trace.kind)
+		require.Equal(t, instr.I32_CONST, result.trace.ops[len(result.trace.ops)-1].op)
+	})
+
+	t.Run("isolates primitive array writes", func(t *testing.T) {
+		array := types.TypedArray[int32]{1}
+		tracer := NewTracer()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.ARRAY_SET),
+		}, program.WithConstants(array))
+		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		defer i.Close()
+
+		_, err := tracer.capture(i, anchor{})
+		require.NoError(t, err)
+		require.Equal(t, int32(1), array[0])
+	})
+
 	t.Run("cuts an oversized trace at a resumable boundary", func(t *testing.T) {
 		code := make([]instr.Instruction, opLimit+1)
 		for j := range code {

@@ -54,6 +54,11 @@ func TestPlan(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "module loop",
+			plan: plan{anchor: anchor{ip: 4}, kind: entryLoop, blocks: []block{{anchor: anchor{ip: 4}, term: terminator{kind: terminateBranch, edges: []edge{jump(0, 4)}}}}},
+			want: true,
+		},
+		{
 			name: "module",
 			plan: plan{anchor: anchor{}, kind: entryModule, blocks: []block{{anchor: anchor{}, term: terminator{kind: terminateComplete}}}},
 			want: true,
@@ -153,6 +158,16 @@ func TestPlan(t *testing.T) {
 			{steps: []step{{op: instr.I32_ADD}}},
 			{steps: []step{{op: instr.I32_CONST}, {op: instr.STRUCT_SET}}},
 		}))
+		require.True(t, noSpill([]block{{steps: []step{
+			{op: instr.ARRAY_SET},
+			{op: instr.I32_ADD},
+		}}}))
+	})
+
+	t.Run("requested plans", func(t *testing.T) {
+		first := plan{anchor: anchor{addr: 1, ip: 4}}
+		second := plan{anchor: anchor{addr: 1, ip: 8}}
+		require.Equal(t, []plan{second}, requestedPlans([]plan{first, second}, second.anchor))
 	})
 
 }
