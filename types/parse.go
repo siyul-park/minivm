@@ -7,53 +7,6 @@ import (
 	"github.com/siyul-park/minivm/instr"
 )
 
-// Parse parses a type string produced by Type.String().
-// Supported: "i32", "i64", "f32", "f64", "ref", "[]<elem>",
-// "iterator[elem]", "map[key]elem", "func(params) returns", "struct {fields}".
-func Parse(s string) (Type, error) {
-	s = strings.TrimSpace(s)
-	switch s {
-	case "i1":
-		return TypeI1, nil
-	case "i8":
-		return TypeI8, nil
-	case "i32":
-		return TypeI32, nil
-	case "i64":
-		return TypeI64, nil
-	case "f32":
-		return TypeF32, nil
-	case "f64":
-		return TypeF64, nil
-	case "ref":
-		return TypeRef, nil
-	case "string":
-		return TypeString, nil
-	case "error":
-		return TypeError, nil
-	}
-	if strings.HasPrefix(s, "[]") {
-		elem, err := Parse(s[2:])
-		if err != nil {
-			return nil, err
-		}
-		return NewArrayType(elem), nil
-	}
-	if strings.HasPrefix(s, "iterator[") {
-		return parseIteratorType(s)
-	}
-	if strings.HasPrefix(s, "map[") {
-		return parseMapType(s)
-	}
-	if strings.HasPrefix(s, "func(") {
-		return parseFunctionType(s)
-	}
-	if strings.HasPrefix(s, "struct {") {
-		return parseStructType(s)
-	}
-	return nil, fmt.Errorf("unknown type: %q", s)
-}
-
 // ParseFunction parses lines from Function.String() output:
 //
 //	line 0:       FunctionType string ("func(params) returns")
@@ -117,6 +70,53 @@ func ParseFunction(lines []string) (*Function, error) {
 	fn := NewFunction(ft, locals, codeInstrs)
 	fn.Captures = captures
 	return fn, nil
+}
+
+// Parse parses a type string produced by Type.String().
+// Supported: "i32", "i64", "f32", "f64", "ref", "[]<elem>",
+// "iterator[elem]", "map[key]elem", "func(params) returns", "struct {fields}".
+func Parse(s string) (Type, error) {
+	s = strings.TrimSpace(s)
+	switch s {
+	case "i1":
+		return TypeI1, nil
+	case "i8":
+		return TypeI8, nil
+	case "i32":
+		return TypeI32, nil
+	case "i64":
+		return TypeI64, nil
+	case "f32":
+		return TypeF32, nil
+	case "f64":
+		return TypeF64, nil
+	case "ref":
+		return TypeRef, nil
+	case "string":
+		return TypeString, nil
+	case "error":
+		return TypeError, nil
+	}
+	if strings.HasPrefix(s, "[]") {
+		elem, err := Parse(s[2:])
+		if err != nil {
+			return nil, err
+		}
+		return NewArrayType(elem), nil
+	}
+	if strings.HasPrefix(s, "iterator[") {
+		return parseIteratorType(s)
+	}
+	if strings.HasPrefix(s, "map[") {
+		return parseMapType(s)
+	}
+	if strings.HasPrefix(s, "func(") {
+		return parseFunctionType(s)
+	}
+	if strings.HasPrefix(s, "struct {") {
+		return parseStructType(s)
+	}
+	return nil, fmt.Errorf("unknown type: %q", s)
 }
 
 func parseIteratorType(s string) (*IteratorType, error) {

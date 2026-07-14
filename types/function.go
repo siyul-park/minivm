@@ -142,10 +142,6 @@ func (f *Function) Kind() Kind {
 	return KindRef
 }
 
-func (f *Function) Type() Type {
-	return f.Typ
-}
-
 func (f *Function) String() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("%s\n", f.Type().String()))
@@ -165,6 +161,10 @@ func (f *Function) String() string {
 	}
 	sb.WriteString(instr.Format(f.Code))
 	return sb.String()
+}
+
+func (f *Function) Type() Type {
+	return f.Typ
 }
 
 // LocalKinds returns the kind of each stack slot addressable by LOCAL_*

@@ -88,14 +88,6 @@ func NewMap(typ *MapType) *Map {
 	return NewMapWithCapacity(typ, 0)
 }
 
-func NewMapWithCapacity(typ *MapType, capacity int) *Map {
-	return &Map{
-		Typ:     typ,
-		Zero:    Zero(typ.ElemKind),
-		entries: make(map[MapKey]MapEntry, capacity),
-	}
-}
-
 func NewMapForType(typ *MapType, capacity int) Value {
 	switch typ.KeyKind {
 	case KindI8:
@@ -112,6 +104,14 @@ func NewMapForType(typ *MapType, capacity int) Value {
 		return NewTypedMap[float64](typ, capacity)
 	default:
 		return NewMapWithCapacity(typ, capacity)
+	}
+}
+
+func NewMapWithCapacity(typ *MapType, capacity int) *Map {
+	return &Map{
+		Typ:     typ,
+		Zero:    Zero(typ.ElemKind),
+		entries: make(map[MapKey]MapEntry, capacity),
 	}
 }
 
@@ -165,8 +165,6 @@ func (m *TypedMap[K]) Kind() Kind { return KindRef }
 
 func (m *TypedMap[K]) Type() Type { return m.Typ }
 
-func (m *TypedMap[K]) Len() int { return len(m.entries) }
-
 func (m *TypedMap[K]) Get(key K) (Boxed, bool) {
 	value, ok := m.entries[key]
 	return value, ok
@@ -186,12 +184,6 @@ func (m *TypedMap[K]) Delete(key K) (Boxed, bool) {
 	return old, ok
 }
 
-func (m *TypedMap[K]) Range(fn func(K, Boxed)) {
-	for key, value := range m.entries {
-		fn(key, value)
-	}
-}
-
 func (m *TypedMap[K]) Clear(fn func(Boxed)) {
 	for key, value := range m.entries {
 		fn(value)
@@ -206,6 +198,14 @@ func (m *TypedMap[K]) String() string {
 	})
 	sort.Strings(parts)
 	return fmt.Sprintf("%s{%s}", m.Typ, strings.Join(parts, ", "))
+}
+
+func (m *TypedMap[K]) Len() int { return len(m.entries) }
+
+func (m *TypedMap[K]) Range(fn func(K, Boxed)) {
+	for key, value := range m.entries {
+		fn(key, value)
+	}
 }
 
 func (m *TypedMap[K]) Refs(dst []Ref) []Ref {
@@ -223,8 +223,6 @@ func (m *TypedMap[K]) Refs(dst []Ref) []Ref {
 func (m *Map) Kind() Kind { return KindRef }
 
 func (m *Map) Type() Type { return m.Typ }
-
-func (m *Map) Len() int { return len(m.entries) }
 
 func (m *Map) Get(key MapKey) (MapEntry, bool) {
 	entry, ok := m.entries[key]
@@ -245,12 +243,6 @@ func (m *Map) Delete(key MapKey) (MapEntry, bool) {
 	return old, ok
 }
 
-func (m *Map) Range(fn func(MapKey, MapEntry)) {
-	for key, entry := range m.entries {
-		fn(key, entry)
-	}
-}
-
 func (m *Map) Clear(fn func(MapEntry)) {
 	for key, entry := range m.entries {
 		fn(entry)
@@ -265,6 +257,14 @@ func (m *Map) String() string {
 	})
 	sort.Strings(parts)
 	return fmt.Sprintf("%s{%s}", m.Typ, strings.Join(parts, ", "))
+}
+
+func (m *Map) Len() int { return len(m.entries) }
+
+func (m *Map) Range(fn func(MapKey, MapEntry)) {
+	for key, entry := range m.entries {
+		fn(key, entry)
+	}
 }
 
 func (m *Map) Refs(dst []Ref) []Ref {

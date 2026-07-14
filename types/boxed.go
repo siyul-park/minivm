@@ -97,14 +97,6 @@ func Unbox(v Boxed) Value {
 	}
 }
 
-func (v Boxed) Kind() Kind {
-	u := uint64(v)
-	if u>>52 == 0x7FF && u&0x000FFFFFFFFFFFFF != 0 {
-		return Kind((u >> VBits) & TMask)
-	}
-	return KindF64
-}
-
 func (v Boxed) Type() Type {
 	switch v.Kind() {
 	case KindI32:
@@ -126,12 +118,42 @@ func (v Boxed) Type() Type {
 	}
 }
 
-func (v Boxed) I32() int32 {
-	return int32(v & VMask)
-}
-
 func (v Boxed) I8() int8 {
 	return int8(v & VMask)
+}
+
+func (v Boxed) String() string {
+	switch v.Kind() {
+	case KindI32, KindI8:
+		return fmt.Sprintf("%d", v.I32())
+	case KindI1:
+		if v.Bool() {
+			return "true"
+		}
+		return "false"
+	case KindI64:
+		return fmt.Sprintf("%d", v.I64())
+	case KindF32:
+		return fmt.Sprintf("%g", v.F32())
+	case KindF64:
+		return fmt.Sprintf("%g", v.F64())
+	case KindRef:
+		return fmt.Sprintf("%d", v.Ref())
+	default:
+		return "<invalid>"
+	}
+}
+
+func (v Boxed) Kind() Kind {
+	u := uint64(v)
+	if u>>52 == 0x7FF && u&0x000FFFFFFFFFFFFF != 0 {
+		return Kind((u >> VBits) & TMask)
+	}
+	return KindF64
+}
+
+func (v Boxed) I32() int32 {
+	return int32(v & VMask)
 }
 
 func (v Boxed) I64() int64 {
@@ -156,26 +178,4 @@ func (v Boxed) Bool() bool {
 
 func (v Boxed) Ref() int {
 	return int(int32(v & VMask))
-}
-
-func (v Boxed) String() string {
-	switch v.Kind() {
-	case KindI32, KindI8:
-		return fmt.Sprintf("%d", v.I32())
-	case KindI1:
-		if v.Bool() {
-			return "true"
-		}
-		return "false"
-	case KindI64:
-		return fmt.Sprintf("%d", v.I64())
-	case KindF32:
-		return fmt.Sprintf("%g", v.F32())
-	case KindF64:
-		return fmt.Sprintf("%g", v.F64())
-	case KindRef:
-		return fmt.Sprintf("%d", v.Ref())
-	default:
-		return "<invalid>"
-	}
 }
