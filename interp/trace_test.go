@@ -1,7 +1,6 @@
 package interp
 
 import (
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -130,44 +129,37 @@ func TestTracer_Capture(t *testing.T) {
 		const workers = attemptLimit + 1
 		interpreters := make([]*Interpreter, workers)
 		errs := make(chan error, workers)
-		start := make(chan struct{})
-		var ready sync.WaitGroup
-		ready.Add(workers)
-		for idx := range workers {
+		interpreters[0] = New(prog, WithTracer(tracer), WithThreshold(-1))
+		go func() {
+			_, err := tracer.capture(interpreters[0], anchor{})
+			errs <- err
+		}()
+		<-iter.entered
+
+		started := make(chan struct{})
+		for idx := 1; idx < workers; idx++ {
 			i := New(prog, WithTracer(tracer), WithThreshold(-1))
 			interpreters[idx] = i
 			go func() {
-				ready.Done()
-				<-start
+				started <- struct{}{}
 				_, err := tracer.capture(i, anchor{})
 				errs <- err
 			}()
 		}
-		ready.Wait()
-		close(start)
-		<-iter.entered
-
-		deadline := time.Now().Add(100 * time.Millisecond)
-		for time.Now().Before(deadline) {
-			tracer.mu.Lock()
-			attempts := tracer.trees[anchor{}].attempts
-			tracer.mu.Unlock()
-			if attempts > 1 {
-				break
-			}
-			runtime.Gosched()
+		for range workers - 1 {
+			<-started
 		}
-
-		tracer.mu.Lock()
-		attempts := tracer.trees[anchor{}].attempts
-		tracer.mu.Unlock()
 		close(release)
+
 		for range workers {
 			require.NoError(t, <-errs)
 		}
 		for _, i := range interpreters {
 			require.NoError(t, i.Close())
 		}
+		tracer.mu.Lock()
+		attempts := tracer.trees[anchor{}].attempts
+		tracer.mu.Unlock()
 		require.Equal(t, 1, attempts)
 	})
 
