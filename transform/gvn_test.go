@@ -34,7 +34,11 @@ func TestGlobalValueNumberingPass_Run(t *testing.T) {
 		).MustBuild()
 		prog := program.New(nil, program.WithConstants(fn))
 
-		runGVNPass(t, prog)
+		manager := pass.NewManager()
+		pass.Register(manager, analysis.NewBasicBlocksAnalysis())
+		pass.Register(manager, analysis.NewGlobalValueNumberingAnalysis())
+		_, err := NewGlobalValueNumberingPass().Run(manager, prog)
+		require.NoError(t, err)
 
 		want := instr.Marshal([]instr.Instruction{
 			instr.New(instr.LOCAL_GET, 0),
@@ -64,7 +68,11 @@ func TestGlobalValueNumberingPass_Run(t *testing.T) {
 		fn := fb.MustBuild()
 		prog := program.New(nil, program.WithConstants(fn))
 
-		runGVNPass(t, prog)
+		manager := pass.NewManager()
+		pass.Register(manager, analysis.NewBasicBlocksAnalysis())
+		pass.Register(manager, analysis.NewGlobalValueNumberingAnalysis())
+		_, err := NewGlobalValueNumberingPass().Run(manager, prog)
+		require.NoError(t, err)
 
 		code := instr.Format(fn.Code)
 		require.Equal(t, 2, strings.Count(code, "local.tee"), "captured at both arms")
@@ -86,7 +94,11 @@ func TestGlobalValueNumberingPass_Run(t *testing.T) {
 		})
 		before := instr.Format(prog.Code)
 
-		runGVNPass(t, prog)
+		manager := pass.NewManager()
+		pass.Register(manager, analysis.NewBasicBlocksAnalysis())
+		pass.Register(manager, analysis.NewGlobalValueNumberingAnalysis())
+		_, err := NewGlobalValueNumberingPass().Run(manager, prog)
+		require.NoError(t, err)
 		require.Equal(t, before, instr.Format(prog.Code), "no locals to allocate at the top level")
 	})
 
@@ -123,13 +135,4 @@ func TestGlobalValueNumberingPass_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, want, got)
 	})
-}
-
-func runGVNPass(t *testing.T, prog *program.Program) {
-	t.Helper()
-	m := pass.NewManager()
-	pass.Register(m, analysis.NewBasicBlocksAnalysis())
-	pass.Register(m, analysis.NewGlobalValueNumberingAnalysis())
-	_, err := NewGlobalValueNumberingPass().Run(m, prog)
-	require.NoError(t, err)
 }
