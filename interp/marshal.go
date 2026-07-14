@@ -359,87 +359,6 @@ func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*marshalPla
 	return nil, fmt.Errorf("%w: type=%s", ErrUnsupportedMarshalType, t)
 }
 
-// customPlan returns a plan for a Go type that opts into its own conversion via
-// ValueMarshaler / ValueUnmarshaler. A direction the type does not implement
-// surfaces ErrUnsupportedMarshalType, so round-trip use should implement both.
-func (m *codec) customPlan(t reflect.Type) (*marshalPlan, bool) {
-	ptr := reflect.PointerTo(t)
-	marshalable := t.Implements(valueMarshalerType) || ptr.Implements(valueMarshalerType)
-	unmarshalable := t.Implements(valueUnmarshalerType) || ptr.Implements(valueUnmarshalerType)
-	if !marshalable && !unmarshalable {
-		return nil, false
-	}
-	plan := &marshalPlan{VMType: types.TypeRef, Type: t, marshal: (*marshalState).marshalUnsupported, unmarshal: (*unmarshalState).unmarshalUnsupported}
-	if marshalable {
-		plan.marshal = m.marshalCustom(t)
-	}
-	if unmarshalable {
-		plan.unmarshal = (*unmarshalState).unmarshalCustom
-	}
-	return plan, true
-}
-
-// converterPlan returns a plan for a type handled by a Converter, whether
-// registered via WithConverter or built in (time.Time, complex). A user
-// registration overrides the built-in for the same type. A nil direction stays
-// unsupported.
-func (m *codec) converterPlan(t reflect.Type) (*marshalPlan, bool) {
-	c, ok := m.converters[t]
-	if !ok {
-		c, ok = builtinConverters[t]
-	}
-	if !ok {
-		return nil, false
-	}
-	vmType := c.VMType
-	if vmType == nil {
-		vmType = types.TypeRef
-	}
-	plan := &marshalPlan{VMType: vmType, Type: t, marshal: (*marshalState).marshalUnsupported, unmarshal: (*unmarshalState).unmarshalUnsupported}
-	if c.Marshal != nil {
-		plan.marshal = m.marshalConverter(c)
-	}
-	if c.Unmarshal != nil {
-		plan.unmarshal = m.unmarshalConverter(c)
-	}
-	return plan, true
-}
-
-func (m *codec) marshalCustom(t reflect.Type) marshaler {
-	value := t.Implements(valueMarshalerType)
-	return func(s *marshalState, v reflect.Value) (types.Value, error) {
-		if !v.CanAddr() {
-			p := reflect.New(v.Type())
-			p.Elem().Set(v)
-			v = p.Elem()
-		}
-		var vm ValueMarshaler
-		if value {
-			vm = v.Interface().(ValueMarshaler)
-		} else {
-			vm = v.Addr().Interface().(ValueMarshaler)
-		}
-		return vm.MarshalVM(s.i)
-	}
-}
-
-func (m *codec) marshalConverter(c Converter) marshaler {
-	return func(s *marshalState, v reflect.Value) (types.Value, error) {
-		if !v.CanInterface() {
-			p := reflect.New(v.Type())
-			p.Elem().Set(v)
-			v = p.Elem()
-		}
-		return c.Marshal(s.i, v.Interface())
-	}
-}
-
-func (m *codec) unmarshalConverter(c Converter) unmarshaler {
-	return func(s *unmarshalState, val types.Value, dst reflect.Value) error {
-		return c.Unmarshal(s.i, val, dst.Addr().Interface())
-	}
-}
-
 func (m *codec) compileStructType(t reflect.Type, seen map[reflect.Type]bool) (*types.StructType, []fieldPlan, error) {
 	fields := make([]types.StructField, 0, t.NumField())
 	plans := make([]fieldPlan, 0, t.NumField())
@@ -544,15 +463,104 @@ func (m *codec) compileFunctionType(t reflect.Type, skip int, seen map[reflect.T
 	return &types.FunctionType{Params: params, Returns: returns}, nil
 }
 
-func (s *marshalState) value(v reflect.Value) (types.Value, error) {
-	if !v.IsValid() {
-		return types.Null, nil
+// customPlan returns a plan for a Go type that opts into its own conversion via
+// ValueMarshaler / ValueUnmarshaler. A direction the type does not implement
+// surfaces ErrUnsupportedMarshalType, so round-trip use should implement both.
+func (m *codec) customPlan(t reflect.Type) (*marshalPlan, bool) {
+	ptr := reflect.PointerTo(t)
+	marshalable := t.Implements(valueMarshalerType) || ptr.Implements(valueMarshalerType)
+	unmarshalable := t.Implements(valueUnmarshalerType) || ptr.Implements(valueUnmarshalerType)
+	if !marshalable && !unmarshalable {
+		return nil, false
 	}
-	p, err := s.m.plan(v.Type())
-	if err != nil {
-		return nil, err
+	plan := &marshalPlan{VMType: types.TypeRef, Type: t, marshal: (*marshalState).marshalUnsupported, unmarshal: (*unmarshalState).unmarshalUnsupported}
+	if marshalable {
+		plan.marshal = m.marshalCustom(t)
 	}
-	return p.marshal(s, v)
+	if unmarshalable {
+		plan.unmarshal = (*unmarshalState).unmarshalCustom
+	}
+	return plan, true
+}
+
+// converterPlan returns a plan for a type handled by a Converter, whether
+// registered via WithConverter or built in (time.Time, complex). A user
+// registration overrides the built-in for the same type. A nil direction stays
+// unsupported.
+func (m *codec) converterPlan(t reflect.Type) (*marshalPlan, bool) {
+	c, ok := m.converters[t]
+	if !ok {
+		c, ok = builtinConverters[t]
+	}
+	if !ok {
+		return nil, false
+	}
+	vmType := c.VMType
+	if vmType == nil {
+		vmType = types.TypeRef
+	}
+	plan := &marshalPlan{VMType: vmType, Type: t, marshal: (*marshalState).marshalUnsupported, unmarshal: (*unmarshalState).unmarshalUnsupported}
+	if c.Marshal != nil {
+		plan.marshal = m.marshalConverter(c)
+	}
+	if c.Unmarshal != nil {
+		plan.unmarshal = m.unmarshalConverter(c)
+	}
+	return plan, true
+}
+
+func (m *codec) marshalCustom(t reflect.Type) marshaler {
+	value := t.Implements(valueMarshalerType)
+	return func(s *marshalState, v reflect.Value) (types.Value, error) {
+		if !v.CanAddr() {
+			p := reflect.New(v.Type())
+			p.Elem().Set(v)
+			v = p.Elem()
+		}
+		var vm ValueMarshaler
+		if value {
+			vm = v.Interface().(ValueMarshaler)
+		} else {
+			vm = v.Addr().Interface().(ValueMarshaler)
+		}
+		return vm.MarshalVM(s.i)
+	}
+}
+
+func (m *codec) marshalConverter(c Converter) marshaler {
+	return func(s *marshalState, v reflect.Value) (types.Value, error) {
+		if !v.CanInterface() {
+			p := reflect.New(v.Type())
+			p.Elem().Set(v)
+			v = p.Elem()
+		}
+		return c.Marshal(s.i, v.Interface())
+	}
+}
+
+func (m *codec) unmarshalConverter(c Converter) unmarshaler {
+	return func(s *unmarshalState, val types.Value, dst reflect.Value) error {
+		return c.Unmarshal(s.i, val, dst.Addr().Interface())
+	}
+}
+
+func (s *marshalState) hostObject(ptr reflect.Value, slots []hostSlot, vm *types.StructType) *HostObject {
+	bound := make([]hostSlot, len(slots))
+	copy(bound, slots)
+	for idx := range bound {
+		if !bound[idx].isMethod() {
+			continue
+		}
+		fn := s.wrapFunc(ptr.Method(bound[idx].method), bound[idx].fnType)
+		bound[idx].addr = s.alloc(fn)
+	}
+	return &HostObject{
+		Typ:      vm,
+		Receiver: ptr,
+		data:     unsafe.Pointer(ptr.Pointer()),
+		slots:    bound,
+		interp:   s.i,
+	}
 }
 
 func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *HostFunction {
@@ -613,25 +621,6 @@ func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *Host
 		}
 		return returns, nil
 	})
-}
-
-func (s *marshalState) hostObject(ptr reflect.Value, slots []hostSlot, vm *types.StructType) *HostObject {
-	bound := make([]hostSlot, len(slots))
-	copy(bound, slots)
-	for idx := range bound {
-		if !bound[idx].isMethod() {
-			continue
-		}
-		fn := s.wrapFunc(ptr.Method(bound[idx].method), bound[idx].fnType)
-		bound[idx].addr = s.alloc(fn)
-	}
-	return &HostObject{
-		Typ:      vm,
-		Receiver: ptr,
-		data:     unsafe.Pointer(ptr.Pointer()),
-		slots:    bound,
-		interp:   s.i,
-	}
 }
 
 func (s *marshalState) boxFieldAt(base unsafe.Pointer, pf fieldPlan, typ types.Type) (types.Boxed, error) {
@@ -890,6 +879,17 @@ func (s *marshalState) marshalAny(v reflect.Value) (types.Value, error) {
 		return types.Null, nil
 	}
 	return s.value(v.Elem())
+}
+
+func (s *marshalState) value(v reflect.Value) (types.Value, error) {
+	if !v.IsValid() {
+		return types.Null, nil
+	}
+	p, err := s.m.plan(v.Type())
+	if err != nil {
+		return nil, err
+	}
+	return p.marshal(s, v)
 }
 
 func (s *marshalState) marshalCycle(v reflect.Value) (types.Value, error) {
@@ -1630,38 +1630,6 @@ func (m *codec) typeOf(k reflect.Kind) types.Type {
 	}
 }
 
-func bitsOf(val types.Value) (types.Kind, uint64, bool) {
-	switch v := val.(type) {
-	case types.I1:
-		if v {
-			return types.KindI32, 1, true
-		}
-		return types.KindI32, 0, true
-	case types.I8:
-		return types.KindI32, uint64(uint32(int32(v))), true
-	case types.I32:
-		return types.KindI32, uint64(uint32(v)), true
-	case types.I64:
-		return types.KindI64, uint64(v), true
-	case types.F32:
-		return types.KindF32, uint64(math.Float32bits(float32(v))), true
-	case types.F64:
-		return types.KindF64, math.Float64bits(float64(v)), true
-	case types.Boxed:
-		switch v.Kind() {
-		case types.KindI32, types.KindI8, types.KindI1:
-			return types.KindI32, uint64(uint32(v.I32())), true
-		case types.KindI64:
-			return types.KindI64, uint64(v.I64()), true
-		case types.KindF32:
-			return types.KindF32, uint64(math.Float32bits(v.F32())), true
-		case types.KindF64:
-			return types.KindF64, math.Float64bits(v.F64()), true
-		}
-	}
-	return 0, 0, false
-}
-
 func asInt(val types.Value) (int64, bool) {
 	kind, bits, ok := bitsOf(val)
 	if !ok {
@@ -1692,21 +1660,6 @@ func asUint(val types.Value) (uint64, bool) {
 	}
 }
 
-func asFloat(val types.Value) (float64, bool) {
-	kind, bits, ok := bitsOf(val)
-	if !ok {
-		return 0, false
-	}
-	switch kind {
-	case types.KindF32:
-		return float64(math.Float32frombits(uint32(bits))), true
-	case types.KindF64:
-		return math.Float64frombits(bits), true
-	default:
-		return 0, false
-	}
-}
-
 // unmarshalComplex decodes a {Real, Imag} struct into a *complex64 or
 // *complex128 destination. Shared by both complex builtin Converters.
 func unmarshalComplex(i *Interpreter, val types.Value, dst any) error {
@@ -1726,6 +1679,53 @@ func unmarshalComplex(i *Interpreter, val types.Value, dst any) error {
 	}
 	out.SetComplex(c)
 	return nil
+}
+
+func asFloat(val types.Value) (float64, bool) {
+	kind, bits, ok := bitsOf(val)
+	if !ok {
+		return 0, false
+	}
+	switch kind {
+	case types.KindF32:
+		return float64(math.Float32frombits(uint32(bits))), true
+	case types.KindF64:
+		return math.Float64frombits(bits), true
+	default:
+		return 0, false
+	}
+}
+
+func bitsOf(val types.Value) (types.Kind, uint64, bool) {
+	switch v := val.(type) {
+	case types.I1:
+		if v {
+			return types.KindI32, 1, true
+		}
+		return types.KindI32, 0, true
+	case types.I8:
+		return types.KindI32, uint64(uint32(int32(v))), true
+	case types.I32:
+		return types.KindI32, uint64(uint32(v)), true
+	case types.I64:
+		return types.KindI64, uint64(v), true
+	case types.F32:
+		return types.KindF32, uint64(math.Float32bits(float32(v))), true
+	case types.F64:
+		return types.KindF64, math.Float64bits(float64(v)), true
+	case types.Boxed:
+		switch v.Kind() {
+		case types.KindI32, types.KindI8, types.KindI1:
+			return types.KindI32, uint64(uint32(v.I32())), true
+		case types.KindI64:
+			return types.KindI64, uint64(v.I64()), true
+		case types.KindF32:
+			return types.KindF32, uint64(math.Float32bits(v.F32())), true
+		case types.KindF64:
+			return types.KindF64, math.Float64bits(v.F64()), true
+		}
+	}
+	return 0, 0, false
 }
 
 // structOf resolves val to a *types.Struct, following a heap ref when needed.

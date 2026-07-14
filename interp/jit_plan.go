@@ -194,40 +194,6 @@ func (p plan) valid() bool {
 	return true
 }
 
-func local(id int) int {
-	return -id - 2
-}
-
-func localID(block int) (int, bool) {
-	if block >= noBlock {
-		return 0, false
-	}
-	return -block - 2, true
-}
-
-func jump(addr, ip int) edge {
-	return edge{anchor: anchor{addr: addr, ip: ip}, block: noBlock}
-}
-
-func jumps(addr int, ips []int) []edge {
-	edges := make([]edge, len(ips))
-	for i, ip := range ips {
-		edges[i] = jump(addr, ip)
-	}
-	return edges
-}
-
-func resolve(module *types.Function, heap []types.Value, addr int) *types.Function {
-	if addr == 0 {
-		return module
-	}
-	if addr < 0 || addr >= len(heap) {
-		return nil
-	}
-	fn, _ := heap[addr].(*types.Function)
-	return fn
-}
-
 func staticPlan(input *compileInput) ([]plan, error) {
 	if input == nil || input.function == nil || len(input.function.Code) == 0 || input.installed {
 		return nil, nil
@@ -498,6 +464,33 @@ func suffix(p *plan, tr *trace, idx int, input *compileInput) []int {
 	return nil
 }
 
+func local(id int) int {
+	return -id - 2
+}
+
+func jumps(addr int, ips []int) []edge {
+	edges := make([]edge, len(ips))
+	for i, ip := range ips {
+		edges[i] = jump(addr, ip)
+	}
+	return edges
+}
+
+func jump(addr, ip int) edge {
+	return edge{anchor: anchor{addr: addr, ip: ip}, block: noBlock}
+}
+
+func resolve(module *types.Function, heap []types.Value, addr int) *types.Function {
+	if addr == 0 {
+		return module
+	}
+	if addr < 0 || addr >= len(heap) {
+		return nil
+	}
+	fn, _ := heap[addr].(*types.Function)
+	return fn
+}
+
 func store(p *plan, blocks []block, tail bool) []int {
 	start := len(p.blocks)
 	ids := make([]int, len(blocks))
@@ -521,6 +514,13 @@ func store(p *plan, blocks []block, tail bool) []int {
 		}
 	}
 	return ids
+}
+
+func localID(block int) (int, bool) {
+	if block >= noBlock {
+		return 0, false
+	}
+	return -block - 2, true
 }
 
 func wire(p *plan, roots map[anchor]int) {
