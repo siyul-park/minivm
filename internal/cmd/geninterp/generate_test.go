@@ -25,12 +25,10 @@ func TestGenerate(t *testing.T) {
 		require.NotContains(t, source, ".borrowI64(")
 	})
 	t.Run("checks generated files", func(t *testing.T) {
-		t.Chdir(t.TempDir())
-
-		generated := output{path: filepath.Join("interp", "threaded.go"), data: []byte("generated")}
+		generated := output{path: filepath.Join(t.TempDir(), "interp", "threaded.go"), data: []byte("generated")}
 		var stdout bytes.Buffer
 		require.NoError(t, generated.sync(false, &stdout))
-		require.Equal(t, "interp/threaded.go\n", stdout.String())
+		require.Equal(t, generated.path+"\n", stdout.String())
 		require.NoError(t, generated.sync(true, &stdout))
 
 		require.NoError(t, os.WriteFile(generated.path, []byte("stale"), 0o644))

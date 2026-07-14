@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -582,70 +583,69 @@ func TestREPL_Run(t *testing.T) {
 	})
 
 	t.Run("save then load round-trips through file", func(t *testing.T) {
-		t.Chdir(t.TempDir())
+		path := filepath.Join(t.TempDir(), "prog.mvm")
 
 		var out1 bytes.Buffer
 		r1 := NewREPL(
-			strings.NewReader("i32.const 1\ni32.const 2\ni32.add\n.save prog.mvm\n.quit\n"),
+			strings.NewReader("i32.const 1\ni32.const 2\ni32.add\n.save "+path+"\n.quit\n"),
 			&out1,
 			OS(),
 		)
 		require.NoError(t, r1.Run(context.Background()))
-		require.Contains(t, out1.String(), "saved prog.mvm")
-		data, err := os.ReadFile("prog.mvm")
+		require.Contains(t, out1.String(), "saved "+path)
+		data, err := os.ReadFile(path)
 		require.NoError(t, err)
 		require.Contains(t, string(data), "i32.add")
 
 		var out2 bytes.Buffer
 		r2 := NewREPL(
-			strings.NewReader(".load prog.mvm\n.show\n.quit\n"),
+			strings.NewReader(".load "+path+"\n.show\n.quit\n"),
 			&out2,
 			OS(),
 		)
 		require.NoError(t, r2.Run(context.Background()))
-		require.Contains(t, out2.String(), "loaded prog.mvm")
+		require.Contains(t, out2.String(), "loaded "+path)
 		require.Contains(t, out2.String(), "i32.add")
 		require.Equal(t, 3, len(r2.instrs))
 	})
 
 	t.Run("load replaces current state", func(t *testing.T) {
-		t.Chdir(t.TempDir())
-		require.NoError(t, os.WriteFile("replacement.mvm", []byte("0000:\ti32.const 0x00000063\n0005:\treturn\n"), 0o644))
+		path := filepath.Join(t.TempDir(), "replacement.mvm")
+		require.NoError(t, os.WriteFile(path, []byte("0000:\ti32.const 0x00000063\n0005:\treturn\n"), 0o644))
 
 		var out bytes.Buffer
 		r := NewREPL(
-			strings.NewReader("i32.const 1\ni32.const 2\n.load replacement.mvm\n.show\n.quit\n"),
+			strings.NewReader("i32.const 1\ni32.const 2\n.load "+path+"\n.show\n.quit\n"),
 			&out,
 			OS(),
 		)
 		require.NoError(t, r.Run(context.Background()))
 		output := out.String()
-		require.Contains(t, output, "loaded replacement.mvm")
+		require.Contains(t, output, "loaded "+path)
 		require.Contains(t, output, "i32.const 0x00000063")
 		require.NotContains(t, output, "i32.const 0x00000001")
 		require.Equal(t, 2, len(r.instrs))
 	})
 
 	t.Run("load reports parse errors", func(t *testing.T) {
-		t.Chdir(t.TempDir())
-		require.NoError(t, os.WriteFile("broken.mvm", []byte("not-an-instruction xyz\n"), 0o644))
+		path := filepath.Join(t.TempDir(), "broken.mvm")
+		require.NoError(t, os.WriteFile(path, []byte("not-an-instruction xyz\n"), 0o644))
 
 		var out bytes.Buffer
-		r := NewREPL(strings.NewReader(".load broken.mvm\n.quit\n"), &out, OS())
+		r := NewREPL(strings.NewReader(".load "+path+"\n.quit\n"), &out, OS())
 		require.NoError(t, r.Run(context.Background()))
 		require.Contains(t, out.String(), "error:")
 	})
 
 	t.Run("load reports missing file", func(t *testing.T) {
-		t.Chdir(t.TempDir())
+		path := filepath.Join(t.TempDir(), "missing.mvm")
 		var out bytes.Buffer
-		r := NewREPL(strings.NewReader(".load missing.mvm\n.quit\n"), &out, OS())
+		r := NewREPL(strings.NewReader(".load "+path+"\n.quit\n"), &out, OS())
 		require.NoError(t, r.Run(context.Background()))
 		require.Contains(t, out.String(), "error:")
 	})
 
 	t.Run("save and load require a path", func(t *testing.T) {
-		t.Chdir(t.TempDir())
 		var out bytes.Buffer
 		r := NewREPL(strings.NewReader(".save\n.load\n.quit\n"), &out, OS())
 		require.NoError(t, r.Run(context.Background()))
