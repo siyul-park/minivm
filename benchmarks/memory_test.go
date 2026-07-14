@@ -53,7 +53,9 @@ func TestMemory_AllocationGraph(t *testing.T) {
 }
 
 func BenchmarkMemory_TypedArraySum(b *testing.B) {
-	prog := typedArraySum(256)
+	const size int32 = 256
+	want := typedArraySumReference(size)
+	prog := typedArraySum(size)
 	require.NoError(b, program.Verify(prog))
 
 	b.Run("threaded", func(b *testing.B) {
@@ -62,10 +64,10 @@ func BenchmarkMemory_TypedArraySum(b *testing.B) {
 		require.NoError(b, vm.Run(context.Background()))
 		value, err := vm.Pop()
 		require.NoError(b, err)
-		require.Equal(b, types.I32(typedArraySumReference(256)), value)
+		require.Equal(b, types.I32(want), value)
 		vm.Reset()
 
-		benchmarkRun(b, vm, types.BoxI32(typedArraySumReference(256)))
+		benchmarkRun(b, vm, types.BoxI32(want))
 	})
 
 	if runtime.GOARCH == "arm64" {
@@ -79,7 +81,7 @@ func BenchmarkMemory_TypedArraySum(b *testing.B) {
 				require.NoError(b, warm.Run(ctx))
 				value, err := warm.Pop()
 				require.NoError(b, err)
-				require.Equal(b, types.I32(typedArraySumReference(256)), value)
+				require.Equal(b, types.I32(want), value)
 				warm.Reset()
 			}
 			require.NoError(b, warm.Close())
@@ -100,16 +102,20 @@ func BenchmarkMemory_TypedArraySum(b *testing.B) {
 			require.NoError(b, vm.Run(ctx))
 			value, err := vm.Pop()
 			require.NoError(b, err)
-			require.Equal(b, types.I32(typedArraySumReference(256)), value)
+			require.Equal(b, types.I32(want), value)
 			vm.Reset()
 
-			benchmarkRun(b, vm, types.BoxI32(typedArraySumReference(256)))
+			benchmarkRun(b, vm, types.BoxI32(want))
 		})
 	}
+
+	compareTypedArraySum(b, size, want)
 }
 
 func BenchmarkMemory_AllocationGraph(b *testing.B) {
-	prog := allocationGraph(128)
+	const depth int32 = 128
+	want := depth
+	prog := allocationGraph(depth)
 	require.NoError(b, program.Verify(prog))
 
 	b.Run("threaded", func(b *testing.B) {
@@ -118,9 +124,11 @@ func BenchmarkMemory_AllocationGraph(b *testing.B) {
 		require.NoError(b, vm.Run(context.Background()))
 		value, err := vm.Pop()
 		require.NoError(b, err)
-		require.Equal(b, types.I32(128), value)
+		require.Equal(b, types.I32(want), value)
 		vm.Reset()
 
-		benchmarkRun(b, vm, types.BoxI32(128))
+		benchmarkRun(b, vm, types.BoxI32(want))
 	})
+
+	compareAllocationGraph(b, depth, want)
 }

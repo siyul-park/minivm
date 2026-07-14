@@ -47,49 +47,64 @@ func TestCall_ClosureCounter(t *testing.T) {
 }
 
 func BenchmarkCall_RecursiveFib(b *testing.B) {
+	const n int32 = 20
+	want := recursiveFibReference(n)
+	prog := recursiveFib(n)
+	require.NoError(b, program.Verify(prog))
+
 	b.Run("threaded", func(b *testing.B) {
-		prog := recursiveFib(20)
-		require.NoError(b, program.Verify(prog))
 		vm := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		defer vm.Close()
 		require.NoError(b, vm.Run(context.Background()))
 		value, err := vm.Pop()
 		require.NoError(b, err)
-		require.Equal(b, types.I32(recursiveFibReference(20)), value)
+		require.Equal(b, types.I32(want), value)
 		vm.Reset()
 
-		benchmarkRun(b, vm, types.BoxI32(recursiveFibReference(20)))
+		benchmarkRun(b, vm, types.BoxI32(want))
 	})
+
+	compareRecursiveFib(b, n, want)
 }
 
 func BenchmarkCall_IndirectRecursiveFib(b *testing.B) {
+	const n int32 = 20
+	want := recursiveFibReference(n)
+	prog := indirectRecursiveFib(n)
+	require.NoError(b, program.Verify(prog))
+
 	b.Run("threaded", func(b *testing.B) {
-		prog := indirectRecursiveFib(20)
-		require.NoError(b, program.Verify(prog))
 		vm := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		defer vm.Close()
 		require.NoError(b, vm.Run(context.Background()))
 		value, err := vm.Pop()
 		require.NoError(b, err)
-		require.Equal(b, types.I32(recursiveFibReference(20)), value)
+		require.Equal(b, types.I32(want), value)
 		vm.Reset()
 
-		benchmarkRun(b, vm, types.BoxI32(recursiveFibReference(20)))
+		benchmarkRun(b, vm, types.BoxI32(want))
 	})
+
+	compareIndirectRecursiveFib(b, n, want)
 }
 
 func BenchmarkCall_ClosureCounter(b *testing.B) {
+	const count = 128
+	want := int32(count)
+	prog := closureCounter(count)
+	require.NoError(b, program.Verify(prog))
+
 	b.Run("threaded", func(b *testing.B) {
-		prog := closureCounter(128)
-		require.NoError(b, program.Verify(prog))
 		vm := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		defer vm.Close()
 		require.NoError(b, vm.Run(context.Background()))
 		value, err := vm.Pop()
 		require.NoError(b, err)
-		require.Equal(b, types.I32(128), value)
+		require.Equal(b, types.I32(want), value)
 		vm.Reset()
 
-		benchmarkRun(b, vm, types.BoxI32(128))
+		benchmarkRun(b, vm, types.BoxI32(want))
 	})
+
+	compareClosureCounter(b, count, want)
 }

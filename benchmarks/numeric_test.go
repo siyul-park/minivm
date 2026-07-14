@@ -25,7 +25,9 @@ func TestNumeric_BranchTree(t *testing.T) {
 }
 
 func BenchmarkNumeric_BranchTree(b *testing.B) {
-	prog, want := branchTree(37, 96)
+	const input int32 = 37
+	const nodes = 96
+	prog, want := branchTree(input, nodes)
 	require.NoError(b, program.Verify(prog))
 
 	b.Run("threaded", func(b *testing.B) {
@@ -109,4 +111,6 @@ func BenchmarkNumeric_BranchTree(b *testing.B) {
 		require.NoError(b, popErr)
 		require.Equal(b, types.I32(want), value)
 	})
+
+	compareBranchTree(b, input, nodes, want)
 }

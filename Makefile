@@ -129,7 +129,30 @@ benchmark-nightly:
 	@(cd benchmarks && go test -run='^$$' -bench='^(BenchmarkControl|BenchmarkCall|BenchmarkMemory|BenchmarkNumeric)' -benchmem -benchtime=$(benchmark-time) -count=$(benchmark-count) $(test-options) ./...)
 
 benchmark-compare:
-	@(cd benchmarks && go test -tags=compare -run='^$$' -bench='^BenchmarkCompare' -benchmem -benchtime=$(benchmark-time) $(test-options) ./...)
+	@comparisons="$$(cd benchmarks && go test -tags=compare -run='^$$' -bench='^(BenchmarkControl|BenchmarkCall|BenchmarkMemory|BenchmarkNumeric)' -benchmem -benchtime=$(benchmark-time) $(test-options) ./...)" || { status=$$?; printf '%s\n' "$$comparisons"; exit $$status; }; \
+	printf '%s\n' "$$comparisons"; \
+	for scenario in \
+		BenchmarkControl_IterativeFib \
+		BenchmarkControl_Sieve \
+		BenchmarkCall_RecursiveFib \
+		BenchmarkCall_IndirectRecursiveFib \
+		BenchmarkCall_ClosureCounter \
+		BenchmarkMemory_TypedArraySum \
+		BenchmarkMemory_AllocationGraph \
+		BenchmarkNumeric_BranchTree; do \
+		for runtime in native tengo gopher_lua goja; do \
+			printf '%s\n' "$$comparisons" | grep -q "^$$scenario/$$runtime-" || { printf 'missing comparison %s/%s\n' "$$scenario" "$$runtime"; exit 1; }; \
+		done; \
+	done; \
+	for scenario in \
+		BenchmarkControl_IterativeFib \
+		BenchmarkControl_Sieve \
+		BenchmarkCall_RecursiveFib \
+		BenchmarkCall_IndirectRecursiveFib \
+		BenchmarkMemory_TypedArraySum \
+		BenchmarkNumeric_BranchTree; do \
+		printf '%s\n' "$$comparisons" | grep -q "^$$scenario/wazero-" || { printf 'missing comparison %s/wazero\n' "$$scenario"; exit 1; }; \
+	done
 
 lint: fmt vet
 

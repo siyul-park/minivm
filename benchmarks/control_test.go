@@ -35,33 +35,43 @@ func TestControl_Sieve(t *testing.T) {
 }
 
 func BenchmarkControl_IterativeFib(b *testing.B) {
+	const n int32 = 30
+	want := iterativeFibReference(n)
+	prog := iterativeFib(n)
+	require.NoError(b, program.Verify(prog))
+
 	b.Run("threaded", func(b *testing.B) {
-		prog := iterativeFib(30)
-		require.NoError(b, program.Verify(prog))
 		vm := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		defer vm.Close()
 		require.NoError(b, vm.Run(context.Background()))
 		value, err := vm.Pop()
 		require.NoError(b, err)
-		require.Equal(b, types.I32(iterativeFibReference(30)), value)
+		require.Equal(b, types.I32(want), value)
 		vm.Reset()
 
-		benchmarkRun(b, vm, types.BoxI32(iterativeFibReference(30)))
+		benchmarkRun(b, vm, types.BoxI32(want))
 	})
+
+	compareIterativeFib(b, n, want)
 }
 
 func BenchmarkControl_Sieve(b *testing.B) {
+	const size int32 = 256
+	want := sieveReference(size)
+	prog := sieve(size)
+	require.NoError(b, program.Verify(prog))
+
 	b.Run("threaded", func(b *testing.B) {
-		prog := sieve(256)
-		require.NoError(b, program.Verify(prog))
 		vm := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		defer vm.Close()
 		require.NoError(b, vm.Run(context.Background()))
 		value, err := vm.Pop()
 		require.NoError(b, err)
-		require.Equal(b, types.I32(sieveReference(256)), value)
+		require.Equal(b, types.I32(want), value)
 		vm.Reset()
 
-		benchmarkRun(b, vm, types.BoxI32(sieveReference(256)))
+		benchmarkRun(b, vm, types.BoxI32(want))
 	})
+
+	compareSieve(b, size, want)
 }
