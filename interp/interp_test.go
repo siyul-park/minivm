@@ -18,9 +18,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type upperMarshaler struct{}
+type upperMarshaler byte
 
-type contextKey struct{}
+type contextKey byte
 
 type contextHost struct{}
 
@@ -43,7 +43,7 @@ func (v *trackedValue) Close() error {
 }
 
 func (*contextHost) Value(ctx context.Context) int32 {
-	if ctx.Value(contextKey{}) == "value" {
+	if ctx.Value(contextKey(0)) == "value" {
 		return 7
 	}
 	return 0
@@ -4122,7 +4122,7 @@ func TestWithHook(t *testing.T) {
 }
 
 func TestWithMarshaler(t *testing.T) {
-	i := New(program.New(nil), WithMarshaler(upperMarshaler{}))
+	i := New(program.New(nil), WithMarshaler(upperMarshaler(0)))
 	defer i.Close()
 
 	v, err := i.Marshal("go")
