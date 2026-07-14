@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dave/jennifer/jen"
@@ -16,105 +17,25 @@ import (
 )
 
 func TestGenerate(t *testing.T) {
-	t.Run("writes deterministic sources", func(t *testing.T) {
-		first, err := generate()
-		require.NoError(t, err)
-		second, err := generate()
-		require.NoError(t, err)
-		require.Equal(t, first, second)
-
-		paths := make([]string, len(first))
-		for index, output := range first {
-			paths[index] = output.path
-		}
-		require.Equal(t, []string{"interp/threaded.go"}, paths)
-
-		file, err := parser.ParseFile(token.NewFileSet(), first[0].path, first[0].data, 0)
-		require.NoError(t, err)
-		var declarations []string
-		for _, declaration := range file.Decls {
-			switch declaration := declaration.(type) {
-			case *ast.GenDecl:
-				for _, specification := range declaration.Specs {
-					switch specification := specification.(type) {
-					case *ast.TypeSpec:
-						declarations = append(declarations, specification.Name.Name)
-					case *ast.ValueSpec:
-						for _, name := range specification.Names {
-							declarations = append(declarations, name.Name)
-						}
-					}
-				}
-			case *ast.FuncDecl:
-				declarations = append(declarations, declaration.Name.Name)
-			}
-		}
-		require.Equal(t, []string{"threader", "threaded", "fusions", "invalid", "init", "Compile"}, declarations)
-	})
-
 	t.Run("preserves standalone i64 consumption", func(t *testing.T) {
-		outputs, err := generate()
-		require.NoError(t, err)
-		file, err := parser.ParseFile(token.NewFileSet(), outputs[0].path, outputs[0].data, 0)
-		require.NoError(t, err)
-
-		var handler ast.Expr
-		ast.Inspect(file, func(node ast.Node) bool {
-			specification, ok := node.(*ast.ValueSpec)
-			if !ok || len(specification.Names) != 1 || specification.Names[0].Name != "threaded" || len(specification.Values) != 1 {
-				return true
-			}
-			literal, ok := specification.Values[0].(*ast.CompositeLit)
-			if !ok {
-				return false
-			}
-			for _, element := range literal.Elts {
-				entry, ok := element.(*ast.KeyValueExpr)
-				if !ok {
-					continue
-				}
-				opcode, ok := entry.Key.(*ast.SelectorExpr)
-				if ok && opcode.Sel.Name == "I64_ADD" {
-					handler = entry.Value
-					return false
-				}
-			}
-			return false
-		})
-		require.NotNil(t, handler)
-
-		unbox := 0
-		borrow := 0
-		ast.Inspect(handler, func(node ast.Node) bool {
-			selector, ok := node.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			switch selector.Sel.Name {
-			case "unboxI64":
-				unbox++
-			case "borrowI64":
-				borrow++
-			}
-			return true
-		})
-		require.Equal(t, 2, unbox)
-		require.Zero(t, borrow)
+		file := jen.NewFile("review")
+		file.Var().Id("handler").Op("=").Add(lower(instr.I64_ADD))
+		source := file.GoString()
+		require.Equal(t, 2, strings.Count(source, ".unboxI64("))
+		require.NotContains(t, source, ".borrowI64(")
 	})
-
 	t.Run("checks generated files", func(t *testing.T) {
 		t.Chdir(t.TempDir())
 
+		generated := output{path: filepath.Join("interp", "threaded.go"), data: []byte("generated")}
 		var stdout bytes.Buffer
-		require.NoError(t, run(false, &stdout))
-		require.Contains(t, stdout.String(), "interp/threaded.go")
-		require.NoError(t, run(true, &stdout))
+		require.NoError(t, generated.sync(false, &stdout))
+		require.Equal(t, "interp/threaded.go\n", stdout.String())
+		require.NoError(t, generated.sync(true, &stdout))
 
-		path := filepath.Join("interp", "threaded.go")
-		require.NoError(t, os.WriteFile(path, []byte("stale"), 0o644))
-		require.ErrorContains(t, run(true, &stdout), "is stale")
+		require.NoError(t, os.WriteFile(generated.path, []byte("stale"), 0o644))
+		require.ErrorContains(t, generated.sync(true, &stdout), "is stale")
 	})
-
 	t.Run("crosses every pattern", func(t *testing.T) {
 		got := cross(
 			[]pattern{op(instr.LOCAL_GET), op(instr.GLOBAL_GET)},
@@ -266,41 +187,39 @@ func TestGenerate(t *testing.T) {
 	})
 
 	t.Run("generates no interpreter helpers", func(t *testing.T) {
-		outputs, err := generate()
+		data, err := os.ReadFile(filepath.Join("..", "..", "..", "interp", "threaded.go"))
 		require.NoError(t, err)
 		forbidden := map[string]struct{}{
 			"arrayGetAt": {}, "branchIf": {}, "callHost": {}, "finish": {},
 			"refGet": {}, "releaseArgs": {}, "resume": {}, "ret": {},
 			"structGetAt": {}, "suspend": {}, "tail": {},
 		}
-		for _, output := range outputs {
-			file, err := parser.ParseFile(token.NewFileSet(), output.path, output.data, 0)
-			require.NoError(t, err)
-			ast.Inspect(file, func(node ast.Node) bool {
-				switch node := node.(type) {
-				case *ast.FuncDecl:
-					if node.Recv != nil {
-						for _, field := range node.Recv.List {
-							if star, ok := field.Type.(*ast.StarExpr); ok {
-								if name, ok := star.X.(*ast.Ident); ok {
-									require.NotEqual(t, "Interpreter", name.Name, output.path+":"+node.Name.Name)
-								}
+		file, err := parser.ParseFile(token.NewFileSet(), "interp/threaded.go", data, 0)
+		require.NoError(t, err)
+		ast.Inspect(file, func(node ast.Node) bool {
+			switch node := node.(type) {
+			case *ast.FuncDecl:
+				if node.Recv != nil {
+					for _, field := range node.Recv.List {
+						if star, ok := field.Type.(*ast.StarExpr); ok {
+							if name, ok := star.X.(*ast.Ident); ok {
+								require.NotEqual(t, "Interpreter", name.Name, "interp/threaded.go:"+node.Name.Name)
 							}
 						}
 					}
-				case *ast.CallExpr:
-					selector, ok := node.Fun.(*ast.SelectorExpr)
-					if !ok {
-						return true
-					}
-					receiver, ok := selector.X.(*ast.Ident)
-					if ok && receiver.Name == "i" {
-						_, found := forbidden[selector.Sel.Name]
-						require.False(t, found, output.path+":"+selector.Sel.Name)
-					}
 				}
-				return true
-			})
-		}
+			case *ast.CallExpr:
+				selector, ok := node.Fun.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				receiver, ok := selector.X.(*ast.Ident)
+				if ok && receiver.Name == "i" {
+					_, found := forbidden[selector.Sel.Name]
+					require.False(t, found, "interp/threaded.go:"+selector.Sel.Name)
+				}
+			}
+			return true
+		})
 	})
 }

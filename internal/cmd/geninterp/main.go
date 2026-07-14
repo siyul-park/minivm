@@ -24,26 +24,33 @@ func run(check bool, stdout io.Writer) error {
 		return fmt.Errorf("generate fusion: %w", err)
 	}
 	for _, output := range outputs {
-		if check {
-			actual, err := os.ReadFile(output.path)
-			if err != nil {
-				return fmt.Errorf("read %s: %w", output.path, err)
-			}
-			if !bytes.Equal(actual, output.data) {
-				return fmt.Errorf("%s is stale", output.path)
-			}
-			continue
+		if err := output.sync(check, stdout); err != nil {
+			return err
 		}
-		dir := filepath.Dir(output.path)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("create %s: %w", dir, err)
+	}
+	return nil
+}
+
+func (o output) sync(check bool, stdout io.Writer) error {
+	if check {
+		actual, err := os.ReadFile(o.path)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", o.path, err)
 		}
-		if err := os.WriteFile(output.path, output.data, 0o644); err != nil {
-			return fmt.Errorf("write %s: %w", output.path, err)
+		if !bytes.Equal(actual, o.data) {
+			return fmt.Errorf("%s is stale", o.path)
 		}
-		if _, err := fmt.Fprintln(stdout, output.path); err != nil {
-			return fmt.Errorf("report %s: %w", output.path, err)
-		}
+		return nil
+	}
+	dir := filepath.Dir(o.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
+	if err := os.WriteFile(o.path, o.data, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", o.path, err)
+	}
+	if _, err := fmt.Fprintln(stdout, o.path); err != nil {
+		return fmt.Errorf("report %s: %w", o.path, err)
 	}
 	return nil
 }
