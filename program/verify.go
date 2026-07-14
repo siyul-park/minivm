@@ -168,21 +168,6 @@ func (c *checker) handlers() error {
 	return nil
 }
 
-// starts is the set of byte offsets that begin an instruction, plus the
-// past-the-end offset that closes the final protected region.
-func (c *checker) starts() map[int]bool {
-	starts := map[int]bool{len(c.code): true}
-	for ip := 0; ip < len(c.code); {
-		starts[ip] = true
-		w, ok := c.width(ip)
-		if !ok {
-			break
-		}
-		ip += w
-	}
-	return starts
-}
-
 // structure walks the code once, proving every instruction decodes within
 // bounds, names a defined opcode, and carries in-range pool/local/upval indices.
 func (c *checker) structure() error {
@@ -318,6 +303,21 @@ func (c *checker) blocks() ([]*block, error) {
 		slices.Sort(b.preds)
 	}
 	return blocks, nil
+}
+
+// starts is the set of byte offsets that begin an instruction, plus the
+// past-the-end offset that closes the final protected region.
+func (c *checker) starts() map[int]bool {
+	starts := map[int]bool{len(c.code): true}
+	for ip := 0; ip < len(c.code); {
+		starts[ip] = true
+		w, ok := c.width(ip)
+		if !ok {
+			break
+		}
+		ip += w
+	}
+	return starts
 }
 
 // link records an edge from block src to the block containing dst, failing when
@@ -581,6 +581,18 @@ func (c *checker) call(st *stack, ip int, op instr.Opcode, tail bool) (bool, err
 	return false, nil
 }
 
+func (c *checker) last(b *block) (instr.Opcode, int) {
+	ip := b.start
+	for ip < b.end {
+		width, _ := c.width(ip)
+		if ip+width >= b.end {
+			break
+		}
+		ip += width
+	}
+	return instr.Opcode(c.code[ip]), ip
+}
+
 // width returns the bounds-checked byte length of the instruction at ip,
 // reporting ok=false when a variable-width count byte reaches past the code.
 func (c *checker) width(ip int) (int, bool) {
@@ -596,18 +608,6 @@ func (c *checker) width(ip int) (int, bool) {
 		off += 1 + int(c.code[ip+off])*(-w)
 	}
 	return off, true
-}
-
-func (c *checker) last(b *block) (instr.Opcode, int) {
-	ip := b.start
-	for ip < b.end {
-		width, _ := c.width(ip)
-		if ip+width >= b.end {
-			break
-		}
-		ip += width
-	}
-	return instr.Opcode(c.code[ip]), ip
 }
 
 func (c *checker) fail(ip int, op instr.Opcode, err error) error {

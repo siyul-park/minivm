@@ -24,12 +24,6 @@ func NewBuilder() *Builder {
 	return &Builder{code: instr.NewBuilder()}
 }
 
-// Emit appends one instruction built from op and operands.
-func (b *Builder) Emit(op instr.Opcode, operands ...uint64) *Builder {
-	b.code.Emit(op, operands...)
-	return b
-}
-
 // Label allocates an unbound branch target.
 func (b *Builder) Label() instr.Label {
 	return b.code.Label()
@@ -71,6 +65,12 @@ func (b *Builder) Try(start, end, catch instr.Label, depth int) *Builder {
 // ConstGet interns v and emits CONST_GET for its index.
 func (b *Builder) ConstGet(v types.Value) *Builder {
 	return b.Emit(instr.CONST_GET, uint64(b.Const(v)))
+}
+
+// Emit appends one instruction built from op and operands.
+func (b *Builder) Emit(op instr.Opcode, operands ...uint64) *Builder {
+	b.code.Emit(op, operands...)
+	return b
 }
 
 // Const interns v into the constant pool and returns its index. Comparable
