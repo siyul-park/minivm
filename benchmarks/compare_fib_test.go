@@ -64,23 +64,24 @@ var fibWasm = []byte{
 }
 
 // fibGo is a pure-Go recursive fib used as the native baseline.
-func fibGo(n int32) int32 {
-	if n < 2 {
-		return n
-	}
-	return fibGo(n-1) + fibGo(n-2)
-}
-
 // BenchmarkCompare_RecursiveFib compares recursive fib(35) across runtimes.
 // Each sub-benchmark creates its runtime and compiles its program once
 // outside the timed loop, then calls fib(35) b.N times.
 func BenchmarkCompare_RecursiveFib(b *testing.B) {
 	b.Run("native", func(b *testing.B) {
+		var fib func(int32) int32
+		fib = func(n int32) int32 {
+			if n < 2 {
+				return n
+			}
+			return fib(n-1) + fib(n-2)
+		}
+
 		var value int32
 		b.ReportAllocs()
 		b.ResetTimer()
 		for n := 0; n < b.N; n++ {
-			value = fibGo(fibN)
+			value = fib(fibN)
 		}
 		b.StopTimer()
 		require.Equal(b, recursiveFibReference(fibN), value)
