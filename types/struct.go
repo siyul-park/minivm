@@ -24,12 +24,6 @@ type StructField struct {
 var _ Traceable = (*Struct)(nil)
 var _ Type = (*StructType)(nil)
 
-func FieldWithName(name string) func(*StructField) {
-	return func(f *StructField) {
-		f.Name = name
-	}
-}
-
 func NewStruct(typ *StructType, fields ...Boxed) *Struct {
 	s := &Struct{
 		Typ: typ,
@@ -41,6 +35,27 @@ func NewStruct(typ *StructType, fields ...Boxed) *Struct {
 	}
 	for i, field := range fields {
 		s.SetField(i, field)
+	}
+	return s
+}
+
+func NewStructType(fields ...StructField) *StructType {
+	return &StructType{Fields: fields}
+}
+
+func FieldWithName(name string) func(*StructField) {
+	return func(f *StructField) {
+		f.Name = name
+	}
+}
+
+func NewStructField(typ Type, opts ...func(field *StructField)) StructField {
+	s := StructField{
+		Type: typ,
+		Kind: typ.Kind(),
+	}
+	for _, opt := range opts {
+		opt(&s)
 	}
 	return s
 }
@@ -132,32 +147,6 @@ func (s *Struct) Refs(dst []Ref) []Ref {
 	return dst
 }
 
-func (s *Struct) field(i int, f StructField) Boxed {
-	bits := s.Data[i]
-	switch f.Kind {
-	case KindI32:
-		return BoxI32(int32(uint32(bits)))
-	case KindI8:
-		return BoxI8(int8(uint32(bits)))
-	case KindI1:
-		return BoxI1(bits != 0)
-	case KindI64:
-		return BoxI64(int64(bits))
-	case KindF32:
-		return BoxF32(math.Float32frombits(uint32(bits)))
-	case KindF64:
-		return BoxF64(math.Float64frombits(bits))
-	case KindRef:
-		return Boxed(bits)
-	default:
-		return 0
-	}
-}
-
-func NewStructType(fields ...StructField) *StructType {
-	return &StructType{Fields: fields}
-}
-
 func (t *StructType) FieldByName(name string) (StructField, bool) {
 	for _, field := range t.Fields {
 		if field.Name == name {
@@ -231,13 +220,24 @@ func (t *StructType) Equals(other Type) bool {
 	return true
 }
 
-func NewStructField(typ Type, opts ...func(field *StructField)) StructField {
-	s := StructField{
-		Type: typ,
-		Kind: typ.Kind(),
+func (s *Struct) field(i int, f StructField) Boxed {
+	bits := s.Data[i]
+	switch f.Kind {
+	case KindI32:
+		return BoxI32(int32(uint32(bits)))
+	case KindI8:
+		return BoxI8(int8(uint32(bits)))
+	case KindI1:
+		return BoxI1(bits != 0)
+	case KindI64:
+		return BoxI64(int64(bits))
+	case KindF32:
+		return BoxF32(math.Float32frombits(uint32(bits)))
+	case KindF64:
+		return BoxF64(math.Float64frombits(bits))
+	case KindRef:
+		return Boxed(bits)
+	default:
+		return 0
 	}
-	for _, opt := range opts {
-		opt(&s)
-	}
-	return s
 }

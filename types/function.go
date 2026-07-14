@@ -38,6 +38,17 @@ func NewFunctionBuilder(typ *FunctionType) *FunctionBuilder {
 	return &FunctionBuilder{code: instr.NewBuilder(), typ: typ}
 }
 
+func NewFunction(typ *FunctionType, locals []Type, instrs []instr.Instruction) *Function {
+	if typ == nil {
+		typ = &FunctionType{}
+	}
+	return &Function{
+		Typ:    typ,
+		Locals: locals,
+		Code:   instr.Marshal(instrs),
+	}
+}
+
 func (b *FunctionBuilder) WithParams(ps ...Type) *FunctionBuilder {
 	b.typ.Params = append(b.typ.Params, ps...)
 	return b
@@ -125,17 +136,6 @@ func (b *FunctionBuilder) Build() (*Function, error) {
 		Code:     instr.Marshal(instrs),
 		Handlers: b.code.Handlers(),
 	}, nil
-}
-
-func NewFunction(typ *FunctionType, locals []Type, instrs []instr.Instruction) *Function {
-	if typ == nil {
-		typ = &FunctionType{}
-	}
-	return &Function{
-		Typ:    typ,
-		Locals: locals,
-		Code:   instr.Marshal(instrs),
-	}
 }
 
 func (f *Function) Kind() Kind {

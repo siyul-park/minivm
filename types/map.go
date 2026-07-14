@@ -358,26 +358,6 @@ func (k MapKey) String() string {
 	}
 }
 
-func (k MapKey) value(entry MapEntry) Value {
-	if entry.Key != 0 {
-		return entry.Key
-	}
-	switch k.Kind {
-	case KindI32:
-		return I32(int32(k.Bits))
-	case KindI64:
-		return I64(int64(k.Bits))
-	case KindF32:
-		return F32(math.Float32frombits(uint32(k.Bits)))
-	case KindF64:
-		return F64(math.Float64frombits(k.Bits))
-	case KindRef:
-		return Ref(int32(k.Bits))
-	default:
-		return BoxedNull
-	}
-}
-
 func (t *MapType) Kind() Kind { return KindRef }
 
 func (t *MapType) String() string {
@@ -397,6 +377,26 @@ func (t *MapType) Equals(other Type) bool {
 		return false
 	}
 	return t.Key.Equals(o.Key) && t.Elem.Equals(o.Elem)
+}
+
+func (k MapKey) value(entry MapEntry) Value {
+	if entry.Key != 0 {
+		return entry.Key
+	}
+	switch k.Kind {
+	case KindI32:
+		return I32(int32(k.Bits))
+	case KindI64:
+		return I64(int64(k.Bits))
+	case KindF32:
+		return F32(math.Float32frombits(uint32(k.Bits)))
+	case KindF64:
+		return F64(math.Float64frombits(k.Bits))
+	case KindRef:
+		return Ref(int32(k.Bits))
+	default:
+		return BoxedNull
+	}
 }
 
 // formatKey renders a native map key through its boxed value's String form.

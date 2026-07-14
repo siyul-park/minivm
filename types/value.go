@@ -32,6 +32,21 @@ type Iterator interface {
 	Done() bool
 }
 
+// Kind is the operand value classification. It is defined in instr (the lowest
+// package) and aliased here so instruction metadata and the value model share
+// one type; its methods (String, IsNumeric, Size) live on instr.Kind.
+type Kind = instr.Kind
+
+const (
+	KindF64 = instr.KindF64
+	KindF32 = instr.KindF32
+	KindI64 = instr.KindI64
+	KindI32 = instr.KindI32
+	KindI8  = instr.KindI8
+	KindI1  = instr.KindI1
+	KindRef = instr.KindRef
+)
+
 func Zero(kind Kind) Boxed {
 	switch kind {
 	case KindI32:
@@ -76,18 +91,3 @@ func Kinds(ts []Type) []Kind {
 	}
 	return out
 }
-
-// Kind is the operand value classification. It is defined in instr (the lowest
-// package) and aliased here so instruction metadata and the value model share
-// one type; its methods (String, IsNumeric, Size) live on instr.Kind.
-type Kind = instr.Kind
-
-const (
-	KindF64 = instr.KindF64
-	KindF32 = instr.KindF32
-	KindI64 = instr.KindI64
-	KindI32 = instr.KindI32
-	KindI8  = instr.KindI8
-	KindI1  = instr.KindI1
-	KindRef = instr.KindRef
-)

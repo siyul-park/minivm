@@ -7,17 +7,17 @@ import (
 
 type Boxed uint64
 
-var (
-	BoxedNull  = BoxRef(0)
-	BoxedFalse = Box(0, KindI1)
-	BoxedTrue  = Box(1, KindI1)
-)
-
 const (
 	TBits = 3
 	TMask = (1 << TBits) - 1
 	VBits = 52 - TBits
 	VMask = (1 << VBits) - 1
+)
+
+var (
+	BoxedNull  = BoxRef(0)
+	BoxedFalse = Box(0, KindI1)
+	BoxedTrue  = Box(1, KindI1)
 )
 
 var _ Value = Boxed(0)
