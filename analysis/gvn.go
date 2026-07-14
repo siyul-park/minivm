@@ -242,17 +242,6 @@ func (g *gnumbering) meet(out []map[int]bool, preds []int) map[int]bool {
 	return in
 }
 
-// define records that group id is materialized at off (the byte after the
-// producing expression), where a LOCAL_TEE captures it for later reloads.
-func (g *gnumbering) define(gid, off int) {
-	for _, o := range g.out.Defs[gid] {
-		if o == off {
-			return
-		}
-	}
-	g.out.Defs[gid] = append(g.out.Defs[gid], off)
-}
-
 // step folds one instruction into the abstract stack, mirroring the block-local
 // analysis but also threading the global id of each value. It returns false when
 // the effect is indeterminate, ending numbering for the rest of the block.
@@ -445,6 +434,17 @@ func (g *gnumbering) pure(ip, end int, inst instr.Instruction) bool {
 	return true
 }
 
+// define records that group id is materialized at off (the byte after the
+// producing expression), where a LOCAL_TEE captures it for later reloads.
+func (g *gnumbering) define(gid, off int) {
+	for _, o := range g.out.Defs[gid] {
+		if o == off {
+			return
+		}
+	}
+	g.out.Defs[gid] = append(g.out.Defs[gid], off)
+}
+
 func (g *gnumbering) reset(block int) {
 	g.block = block
 	g.gen[block] = map[int]gcompute{}
@@ -454,10 +454,6 @@ func (g *gnumbering) reset(block int) {
 	g.home = map[int]int{}
 	g.first = map[int]gslot{}
 	g.ver = map[string]int{}
-}
-
-func (g *gnumbering) push(s gslot) {
-	g.stack = append(g.stack, s)
 }
 
 func (g *gnumbering) pop() gslot {
@@ -476,6 +472,10 @@ func (g *gnumbering) pushLeaf(ip, end int, numKey, globalKey string, kind instr.
 		g.exprs[numKey] = num
 	}
 	g.push(gslot{num: num, gid: g.idOf(globalKey), start: ip, end: end, kind: kind, pure: true})
+}
+
+func (g *gnumbering) push(s gslot) {
+	g.stack = append(g.stack, s)
 }
 
 func (g *gnumbering) fresh() int {
