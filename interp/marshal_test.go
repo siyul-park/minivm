@@ -205,7 +205,7 @@ func TestInterpreter_Marshal(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
 
-		value, err := i.Marshal(hostCounter{Count: 7})
+		value, err := i.Marshal(hostFields{Count: 7})
 		require.NoError(t, err)
 		host, ok := value.(*HostObject)
 		require.True(t, ok)
@@ -447,12 +447,12 @@ func TestInterpreter_Unmarshal(t *testing.T) {
 	t.Run("host object receiver", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
-		value, err := i.Marshal(hostCounter{Count: 7})
+		value, err := i.Marshal(hostFields{Count: 7})
 		require.NoError(t, err)
-		var dst hostCounter
+		var dst hostFields
 
 		require.NoError(t, i.Unmarshal(value, &dst))
-		require.Equal(t, hostCounter{Count: 7}, dst)
+		require.Equal(t, hostFields{Count: 7}, dst)
 	})
 
 	t.Run("invalid target", func(t *testing.T) {

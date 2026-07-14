@@ -8,31 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type hostCounter struct {
-	Count int32
-}
-
-func (c *hostCounter) Bump(n int32) int32 {
-	c.Count += n
-	return c.Count
-}
-
-type hostUserID int64
-
-func (id hostUserID) Next() hostUserID {
-	return id + 1
-}
-
-func (id *hostUserID) Bump(n int64) hostUserID {
-	*id += hostUserID(n)
-	return *id
-}
-
-func (id *hostUserID) Value() hostUserID {
-	return *id
-}
-
 type hostFields struct {
+	Count  int32
 	Bool   bool
 	I8     int8
 	I16    int16
@@ -52,7 +29,27 @@ type hostFields struct {
 	hidden int32
 }
 
+func (h *hostFields) Bump(n int32) int32 {
+	h.Count += n
+	return h.Count
+}
+
 func (*hostFields) Touch() {}
+
+type hostUserID int64
+
+func (id hostUserID) Next() hostUserID {
+	return id + 1
+}
+
+func (id *hostUserID) Bump(n int64) hostUserID {
+	*id += hostUserID(n)
+	return *id
+}
+
+func (id *hostUserID) Value() hostUserID {
+	return *id
+}
 
 func TestNewHostFunction(t *testing.T) {
 	typ := &types.FunctionType{
@@ -89,7 +86,7 @@ func TestHostFunction_String(t *testing.T) {
 func TestHostObject_Kind(t *testing.T) {
 	i := New(program.New(nil))
 	defer i.Close()
-	value, err := i.Marshal(hostCounter{Count: 1})
+	value, err := i.Marshal(hostFields{Count: 1})
 	require.NoError(t, err)
 	host := value.(*HostObject)
 
@@ -99,7 +96,7 @@ func TestHostObject_Kind(t *testing.T) {
 func TestHostObject_Type(t *testing.T) {
 	i := New(program.New(nil))
 	defer i.Close()
-	value, err := i.Marshal(hostCounter{Count: 1})
+	value, err := i.Marshal(hostFields{Count: 1})
 	require.NoError(t, err)
 	host := value.(*HostObject)
 
@@ -109,11 +106,11 @@ func TestHostObject_Type(t *testing.T) {
 func TestHostObject_String(t *testing.T) {
 	i := New(program.New(nil))
 	defer i.Close()
-	value, err := i.Marshal(hostCounter{Count: 1})
+	value, err := i.Marshal(hostFields{Count: 1})
 	require.NoError(t, err)
 	host := value.(*HostObject)
 
-	require.Equal(t, "host<interp.hostCounter>", host.String())
+	require.Equal(t, "host<interp.hostFields>", host.String())
 	require.Equal(t, "host<>", (&HostObject{}).String())
 }
 
@@ -121,12 +118,13 @@ func TestHostObject_Refs(t *testing.T) {
 	t.Run("bound methods", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
-		value, err := i.Marshal(hostCounter{Count: 1})
+		value, err := i.Marshal(hostFields{Count: 1})
 		require.NoError(t, err)
 		host := value.(*HostObject)
-		method := host.Field(host.Typ.FieldIndex("Bump"))
+		bump := host.Field(host.Typ.FieldIndex("Bump"))
+		touch := host.Field(host.Typ.FieldIndex("Touch"))
 
-		require.Equal(t, []types.Ref{9, types.Ref(method.Ref())}, host.Refs([]types.Ref{9}))
+		require.Equal(t, []types.Ref{9, types.Ref(bump.Ref()), types.Ref(touch.Ref())}, host.Refs([]types.Ref{9}))
 	})
 
 	t.Run("no methods", func(t *testing.T) {
@@ -154,7 +152,7 @@ func TestHostObject_Field(t *testing.T) {
 	t.Run("data and method fields", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
-		value, err := i.Marshal(hostCounter{Count: 1})
+		value, err := i.Marshal(hostFields{Count: 1})
 		require.NoError(t, err)
 		host := value.(*HostObject)
 
