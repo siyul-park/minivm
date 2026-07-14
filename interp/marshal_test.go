@@ -12,8 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type marshalCount int32
-
 type marshalCustom int32
 
 func (v marshalCustom) MarshalVM(*Interpreter) (types.Value, error) {
@@ -143,12 +141,13 @@ func TestInterpreter_Marshal(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
 
-		count := marshalCount(7)
-		value, err := i.Marshal(&count)
+		type count int32
+		n := count(7)
+		value, err := i.Marshal(&n)
 		require.NoError(t, err)
 		require.Equal(t, types.I32(7), value)
 
-		var nilCount *marshalCount
+		var nilCount *count
 		value, err = i.Marshal(nilCount)
 		require.NoError(t, err)
 		require.Equal(t, types.Ref(0), value)
