@@ -2,16 +2,18 @@ package cli
 
 import (
 	"bytes"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestWithFS(t *testing.T) {
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.WriteFile("main.vm", []byte("0000:\ti32.const 0x00000007\n"), 0o644))
+
 	out := bytes.NewBuffer(nil)
-	fsys := newMemFS()
-	fsys.files["main.vm"] = []byte("0000:\ti32.const 0x00000007\n")
-	root := Root(WithFS(fsys))
+	root := Root(WithFS(OS()))
 	root.SetOut(out)
 	root.SetErr(out)
 	root.SetArgs([]string{"run", "main.vm"})
