@@ -11,6 +11,11 @@ import (
 	"github.com/siyul-park/minivm/asm/arm64"
 )
 
+// noFrameArch disables spilling so register exhaustion remains observable.
+type noFrameArch struct{ asm.Arch }
+
+func (noFrameArch) Frame() asm.Frame { return nil }
+
 // TestAssembler_Build covers the public round-trip: Assembler.Build emits a
 // Code with the encoded bytes for a trivial add+ret, then Link binds it to
 // a buffer and the Callable executes natively.

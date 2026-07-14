@@ -59,9 +59,3 @@ func TestLink(t *testing.T) {
 		require.Equal(t, uint64(42), ctxBuf[0])
 	})
 }
-
-// noFrameArch wraps an asm.Arch to report no Frame, exercising the
-// nil-Frame-disables-spilling contract documented on asm.Frame.
-type noFrameArch struct{ asm.Arch }
-
-func (noFrameArch) Frame() asm.Frame { return nil }
