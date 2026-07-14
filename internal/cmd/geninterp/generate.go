@@ -122,21 +122,6 @@ func compile(file *jen.File) {
 	)
 }
 
-func matches(pattern pattern) jen.Code {
-	size := pattern.width()
-	condition := jen.Id("start").Op("+").Lit(size).Op("<=").Len(jen.Id("c").Dot("code"))
-	offset := width(pattern[0].op)
-	for _, current := range pattern[1:] {
-		condition = condition.Op("&&").Qual("github.com/siyul-park/minivm/instr", "Opcode").Call(jen.Id("c").Dot("code").Index(add(jen.Id("start"), offset))).Op("==").Qual("github.com/siyul-park/minivm/instr", symbol(current.op))
-		offset += width(current.op)
-	}
-	return condition
-}
-
-func symbol(op instr.Opcode) string {
-	return strings.ToUpper(strings.ReplaceAll(instr.TypeOf(op).Mnemonic, ".", "_"))
-}
-
 func fusions(patterns []pattern) (jen.Code, error) {
 	var groups [256][]pattern
 	for _, pattern := range patterns {
@@ -174,4 +159,19 @@ func fusions(patterns []pattern) (jen.Code, error) {
 			group.Line().Add(entry)
 		}
 	}), nil
+}
+
+func matches(pattern pattern) jen.Code {
+	size := pattern.width()
+	condition := jen.Id("start").Op("+").Lit(size).Op("<=").Len(jen.Id("c").Dot("code"))
+	offset := width(pattern[0].op)
+	for _, current := range pattern[1:] {
+		condition = condition.Op("&&").Qual("github.com/siyul-park/minivm/instr", "Opcode").Call(jen.Id("c").Dot("code").Index(add(jen.Id("start"), offset))).Op("==").Qual("github.com/siyul-park/minivm/instr", symbol(current.op))
+		offset += width(current.op)
+	}
+	return condition
+}
+
+func symbol(op instr.Opcode) string {
+	return strings.ToUpper(strings.ReplaceAll(instr.TypeOf(op).Mnemonic, ".", "_"))
 }

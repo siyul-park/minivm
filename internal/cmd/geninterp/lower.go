@@ -496,17 +496,6 @@ func bind(emit func() jen.Code) lowerer {
 	}
 }
 
-func handler(op instr.Opcode, compile, body []jen.Code) jen.Code {
-	code := append([]jen.Code(nil), compile...)
-	code = append(code,
-		jen.Id("c").Dot("ip").Op("+=").Lit(width(op)),
-		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
-	)
-	return jen.Func().Params(jen.Id("c").Op("*").Id("threader")).Params(
-		jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")),
-	).Block(code...)
-}
-
 func lower(op instr.Opcode) jen.Code {
 	context := state{width: width(op), standalone: true}
 	result, err := lowerers[op](&context, step{match: match{op: op}, kind: instr.KindAny})
@@ -646,19 +635,6 @@ func source(state *state, current step) (value, error) {
 	return result, nil
 }
 
-func slotField(op instr.Opcode) (string, bool) {
-	switch op {
-	case instr.LOCAL_GET:
-		return "locals", true
-	case instr.GLOBAL_GET:
-		return "globals", true
-	case instr.UPVAL_GET:
-		return "captures", true
-	default:
-		return "", false
-	}
-}
-
 func slotHandler(current step, input value, field string) jen.Code {
 	compile := append([]jen.Code(nil), input.compile...)
 	scalar := materialize(input, false, width(current.op))
@@ -734,23 +710,6 @@ func materialize(input value, retain bool, advance int) []jen.Code {
 		jen.Id("i").Dot("sp").Op("++"),
 		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 	)
-}
-
-func kindName(kind instr.Kind) (string, bool) {
-	switch kind.Repr() {
-	case instr.KindI32:
-		return "I32", true
-	case instr.KindI64:
-		return "I64", true
-	case instr.KindF32:
-		return "F32", true
-	case instr.KindF64:
-		return "F64", true
-	case instr.KindRef:
-		return "Ref", true
-	default:
-		return "", false
-	}
 }
 
 func ref(state *state, current step) (value, error) {
@@ -1080,18 +1039,15 @@ func branch(state *state, current step) (value, error) {
 	return value{op: current.op, head: consumer.head, compile: compile}, nil
 }
 
-func jump(condition jen.Code, consume, advance int) []jen.Code {
-	if consume == 0 {
-		return []jen.Code{
-			jen.If(condition).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
-			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
-		}
-	}
-	return []jen.Code{
-		jen.Id("i").Dot("sp").Op("-=").Lit(consume),
-		jen.If(condition).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
-		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
-	}
+func handler(op instr.Opcode, compile, body []jen.Code) jen.Code {
+	code := append([]jen.Code(nil), compile...)
+	code = append(code,
+		jen.Id("c").Dot("ip").Op("+=").Lit(width(op)),
+		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
+	)
+	return jen.Func().Params(jen.Id("c").Op("*").Id("threader")).Params(
+		jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")),
+	).Block(code...)
 }
 
 func dispatch(tail bool, label string, advance int) jen.Code {
@@ -1133,10 +1089,6 @@ func enter(callee target, typ, locals jen.Code, advance int) []jen.Code {
 		jen.Id("c").Dot("ip").Op("+=").Lit(3),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(frame(callee, 0, false, advance, nil)...)),
 	}
-}
-
-func frameOverflow() jen.Code {
-	return jen.If(jen.Id("i").Dot("fp").Op("==").Len(jen.Id("i").Dot("frames"))).Block(jen.Panic(jen.Id("ErrFrameOverflow")))
 }
 
 func frame(callee target, targetSlots int, releaseTarget bool, advance int, coroutine jen.Code) []jen.Code {
@@ -1284,6 +1236,10 @@ func replace(callee target, targetSlots int, releaseTarget bool, advance int, la
 	return body
 }
 
+func frameOverflow() jen.Code {
+	return jen.If(jen.Id("i").Dot("fp").Op("==").Len(jen.Id("i").Dot("frames"))).Block(jen.Panic(jen.Id("ErrFrameOverflow")))
+}
+
 func host(tail bool, advance int) []jen.Code {
 	return []jen.Code{
 		jen.Id("params").Op(":=").Len(jen.Id("fn").Dot("Typ").Dot("Params")),
@@ -1413,28 +1369,6 @@ func retire() []jen.Code {
 	}
 }
 
-func bounds(offset, size, length jen.Code) jen.Code {
-	return jen.If(jen.Add(offset).Op("<").Lit(0).Op("||").Add(offset).Op("+").Add(size).Op(">").Add(length)).Block(
-		jen.Panic(jen.Id("ErrIndexOutOfRange")),
-	)
-}
-
-func overflow() jen.Code {
-	return jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow")))
-}
-
-func arity(op instr.Opcode) (int, bool) {
-	if op == instr.I32_EQZ || op == instr.I64_EQZ {
-		return 1, true
-	}
-	for _, family := range families {
-		if slices.Contains(family.binary, op) || slices.Contains(family.compare, op) {
-			return 2, true
-		}
-	}
-	return 0, false
-}
-
 // lookup emits ARRAY_GET and STRUCT_GET from a resolved index expression.
 func lookup(op instr.Opcode, index jen.Code, advance int) []jen.Code {
 	body := []jen.Code{
@@ -1521,6 +1455,12 @@ func lookup(op instr.Opcode, index jen.Code, advance int) []jen.Code {
 	)
 }
 
+func bounds(offset, size, length jen.Code) jen.Code {
+	return jen.If(jen.Add(offset).Op("<").Lit(0).Op("||").Add(offset).Op("+").Add(size).Op(">").Add(length)).Block(
+		jen.Panic(jen.Id("ErrIndexOutOfRange")),
+	)
+}
+
 // numeric emits one numeric operation from virtual and resident operands.
 func numeric(consumer instr.Opcode, inputs []value, advance int, label string, conditional bool) ([]jen.Code, error) {
 	arity, ok := arity(consumer)
@@ -1593,6 +1533,32 @@ func numeric(consumer instr.Opcode, inputs []value, advance int, label string, c
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
 	)
 	return compile, nil
+}
+
+func jump(condition jen.Code, consume, advance int) []jen.Code {
+	if consume == 0 {
+		return []jen.Code{
+			jen.If(condition).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
+			jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
+		}
+	}
+	return []jen.Code{
+		jen.Id("i").Dot("sp").Op("-=").Lit(consume),
+		jen.If(condition).Block(jen.Id("i").Dot("fr").Dot("ip").Op("+=").Id("offset")),
+		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
+	}
+}
+
+func arity(op instr.Opcode) (int, bool) {
+	if op == instr.I32_EQZ || op == instr.I64_EQZ {
+		return 1, true
+	}
+	for _, family := range families {
+		if slices.Contains(family.binary, op) || slices.Contains(family.compare, op) {
+			return 2, true
+		}
+	}
+	return 0, false
 }
 
 func checked(consumer instr.Opcode, inputs []value, kind instr.Kind) ([]jen.Code, error) {
@@ -1868,6 +1834,23 @@ func load(current step, slot, offset int, label string, standalone bool) (value,
 	return loader.finish(result, current, indexed)
 }
 
+func slotField(op instr.Opcode) (string, bool) {
+	switch op {
+	case instr.LOCAL_GET:
+		return "locals", true
+	case instr.GLOBAL_GET:
+		return "globals", true
+	case instr.UPVAL_GET:
+		return "captures", true
+	default:
+		return "", false
+	}
+}
+
+func overflow() jen.Code {
+	return jen.If(jen.Id("i").Dot("sp").Op("==").Len(jen.Id("i").Dot("stack"))).Block(jen.Panic(jen.Id("ErrStackOverflow")))
+}
+
 func temp(index int) string {
 	return fmt.Sprintf("v%d", index)
 }
@@ -1917,6 +1900,23 @@ func take(kind instr.Kind, index jen.Code) jen.Code {
 		panic(fmt.Sprintf("unsupported consumed kind %s", kind))
 	}
 	return value.Dot(name).Call()
+}
+
+func kindName(kind instr.Kind) (string, bool) {
+	switch kind.Repr() {
+	case instr.KindI32:
+		return "I32", true
+	case instr.KindI64:
+		return "I64", true
+	case instr.KindF32:
+		return "F32", true
+	case instr.KindF64:
+		return "F64", true
+	case instr.KindRef:
+		return "Ref", true
+	default:
+		return "", false
+	}
 }
 
 func immediate(kind instr.Kind, at jen.Code) jen.Code {
