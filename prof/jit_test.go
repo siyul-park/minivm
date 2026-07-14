@@ -7,26 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCollector_Metrics(t *testing.T) {
-	c := prof.NewCollector()
-	c.RecordCapture(1, 2, prof.CaptureOutcomePartial, prof.CaptureReasonOpLimit)
-	c.RecordCompile(1, 2, prof.TriggerHot, prof.FrontendTrace, prof.CompileOutcomeEmitted, prof.CompileReasonNone)
-	c.RegisterYield(1, 2, prof.EntryStart, prof.FrontendTrace).Inc()
-
-	first := c.Metrics()
-	require.Equal(t, first, c.Metrics())
-	names := make([]string, len(first))
-	for index, metric := range first {
-		names[index] = metric.Name
-	}
-	require.Equal(t, []string{
-		"vm_samples_total",
-		"vm_jit_trace_captures_total",
-		"vm_jit_compiles_total",
-		"vm_jit_native_yields_total",
-	}, names)
-}
-
 func TestCollector_RecordCapture(t *testing.T) {
 	c := prof.NewCollector()
 	c.RecordCapture(2, 11, prof.CaptureOutcomePartial, prof.CaptureReasonOpLimit)

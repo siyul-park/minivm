@@ -5,17 +5,6 @@ import (
 	"strings"
 )
 
-func Unmarshal(code []byte) []Instruction {
-	var instrs []Instruction
-	for ip := 0; ip < len(code); {
-		inst := Instruction(code[ip:])
-		width := inst.Width()
-		instrs = append(instrs, code[ip:ip+width])
-		ip += width
-	}
-	return instrs
-}
-
 func Marshal(instrs []Instruction) []byte {
 	var code []byte
 	for _, instr := range instrs {
@@ -61,4 +50,15 @@ func Format(code []byte) string {
 		ip += len(inst)
 	}
 	return sb.String()
+}
+
+func Unmarshal(code []byte) []Instruction {
+	var instrs []Instruction
+	for ip := 0; ip < len(code); {
+		inst := Instruction(code[ip:])
+		width := inst.Width()
+		instrs = append(instrs, code[ip:ip+width])
+		ip += width
+	}
+	return instrs
 }

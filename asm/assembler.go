@@ -57,11 +57,6 @@ func (a *Assembler) Label() Label {
 	return id
 }
 
-// Bind anchors a label at the current instruction index.
-func (a *Assembler) Bind(id Label) {
-	a.labels[id] = len(a.insts)
-}
-
 // Entry marks the current position as a named callable entry. The label is bound
 // to the current instruction index. Multiple entries allow one Code to expose
 // several callables at distinct offsets.
@@ -74,6 +69,11 @@ func (a *Assembler) Bind(id Label) {
 func (a *Assembler) Entry(id Label) {
 	a.Bind(id)
 	a.entries = append(a.entries, id)
+}
+
+// Bind anchors a label at the current instruction index.
+func (a *Assembler) Bind(id Label) {
+	a.labels[id] = len(a.insts)
 }
 
 // Pin forces v to occupy preg. A vreg can be pinned to only one preg; a
@@ -209,35 +209,6 @@ func (a *Assembler) collectRelaxations(
 	return idx, repl
 }
 
-// spliceRelaxations rebuilds insts with every collected replacement spliced
-// in and rebases labels across the resulting per-instruction length deltas.
-func spliceRelaxations(insts []Instruction, labels map[Label]int, idx []int, repl [][]Instruction) ([]Instruction, map[Label]int) {
-	prefix := make([]int, len(insts)+1)
-	for k, i := range idx {
-		prefix[i+1] = len(repl[k]) - 1
-	}
-	for i := 0; i < len(insts); i++ {
-		prefix[i+1] += prefix[i]
-	}
-
-	out := make([]Instruction, 0, len(insts)+prefix[len(insts)])
-	k := 0
-	for i, inst := range insts {
-		if k < len(idx) && idx[k] == i {
-			out = append(out, repl[k]...)
-			k++
-			continue
-		}
-		out = append(out, inst)
-	}
-
-	newLabels := make(map[Label]int, len(labels))
-	for id, pos := range labels {
-		newLabels[id] = pos + prefix[pos]
-	}
-	return out, newLabels
-}
-
 // draft encodes each instruction with #0 substituted for label operands so
 // widths can be measured without knowing label offsets.
 func (a *Assembler) draft(insts []Instruction) ([][]byte, []int, error) {
@@ -304,4 +275,33 @@ func (a *Assembler) final(
 		out = append(out, bytes...)
 	}
 	return out, relocs, nil
+}
+
+// spliceRelaxations rebuilds insts with every collected replacement spliced
+// in and rebases labels across the resulting per-instruction length deltas.
+func spliceRelaxations(insts []Instruction, labels map[Label]int, idx []int, repl [][]Instruction) ([]Instruction, map[Label]int) {
+	prefix := make([]int, len(insts)+1)
+	for k, i := range idx {
+		prefix[i+1] = len(repl[k]) - 1
+	}
+	for i := 0; i < len(insts); i++ {
+		prefix[i+1] += prefix[i]
+	}
+
+	out := make([]Instruction, 0, len(insts)+prefix[len(insts)])
+	k := 0
+	for i, inst := range insts {
+		if k < len(idx) && idx[k] == i {
+			out = append(out, repl[k]...)
+			k++
+			continue
+		}
+		out = append(out, inst)
+	}
+
+	newLabels := make(map[Label]int, len(labels))
+	for id, pos := range labels {
+		newLabels[id] = pos + prefix[pos]
+	}
+	return out, newLabels
 }

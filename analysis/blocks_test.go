@@ -9,9 +9,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNewBasicBlocksAnalysis(t *testing.T) {
+	require.NotNil(t, NewBasicBlocksAnalysis())
+}
+
+func TestBlocks(t *testing.T) {
+	fn := types.NewFunctionBuilder(nil).Emit(instr.New(instr.NOP)).MustBuild()
+	got, err := Blocks(fn)
+	require.NoError(t, err)
+	require.Equal(t, []*BasicBlock{{Start: 0, End: 1}}, got)
+}
+
 func TestBasicBlocksAnalysis_Run(t *testing.T) {
 	tests := []struct {
-		name   string
 		fn     *types.Function
 		blocks []*BasicBlock
 		err    error
@@ -198,21 +208,18 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 			},
 		},
 		{
-			name: "invalid br target",
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.BR, 10),
 			).MustBuild(),
 			err: ErrInvalidJump,
 		},
 		{
-			name: "invalid br_table target",
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.BR_TABLE, 1, 0, 10),
 			).MustBuild(),
 			err: ErrInvalidJump,
 		},
 		{
-			name: "br_table repeated targets are deduplicated",
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.BR_TABLE, 2, 5, 5, 5),
@@ -225,7 +232,6 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 			},
 		},
 		{
-			name: "br_if duplicate edge is deduplicated",
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.BR_IF, 0),
@@ -238,7 +244,6 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 			},
 		},
 		{
-			name: "branch to virtual exit",
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.I32_CONST, 1),
 				instr.New(instr.BR_IF, 5),
@@ -250,7 +255,6 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 			},
 		},
 		{
-			name: "invalid br target after map lookup",
 			fn: types.NewFunctionBuilder(nil).Emit(
 				instr.New(instr.BR, 100),
 			).MustBuild(),
@@ -262,11 +266,7 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 		m := pass.NewManager()
 		pass.Register[*types.Function, []*BasicBlock](m, NewBasicBlocksAnalysis())
 
-		name := tt.name
-		if name == "" {
-			name = tt.fn.String()
-		}
-		t.Run(name, func(t *testing.T) {
+		t.Run(tt.fn.String(), func(t *testing.T) {
 			actual, err := pass.GetResult[[]*BasicBlock](m, tt.fn)
 			if tt.err != nil {
 				require.ErrorIs(t, err, tt.err)

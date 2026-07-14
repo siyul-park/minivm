@@ -18,13 +18,6 @@ var (
 	ErrMunmapFailed   = errors.New("munmap failed")
 )
 
-func allocMemory(size int) (memory, error) {
-	if size <= 0 {
-		return nil, fmt.Errorf("%w: %d", ErrInvalidSize, size)
-	}
-	return nil, fmt.Errorf("%w: unsupported platform %s/%s", ErrMmapFailed, runtime.GOOS, runtime.GOARCH)
-}
-
 func (m memory) executable() error {
 	if len(m) == 0 {
 		return nil
@@ -63,4 +56,11 @@ func (m memory) free() error {
 		return nil
 	}
 	return fmt.Errorf("%w: unsupported platform %s/%s", ErrMunmapFailed, runtime.GOOS, runtime.GOARCH)
+}
+
+func allocMemory(size int) (memory, error) {
+	if size <= 0 {
+		return nil, fmt.Errorf("%w: %d", ErrInvalidSize, size)
+	}
+	return nil, fmt.Errorf("%w: unsupported platform %s/%s", ErrMmapFailed, runtime.GOOS, runtime.GOARCH)
 }

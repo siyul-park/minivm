@@ -3516,6 +3516,10 @@ var (
 						Elems: make([]types.Boxed, size),
 						Typ:   typ,
 					}
+					for j := range val.Elems {
+						val.Elems[j] = types.BoxedNull
+					}
+					i.retains(0, int(size))
 					i.stack[i.sp-1] = types.BoxRef(i.alloc(val))
 					i.fr.ip += 3
 				}

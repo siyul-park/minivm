@@ -8,6 +8,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNewEncoder(t *testing.T) {
+	require.NotNil(t, NewEncoder())
+}
+
 func TestEncoder_Encode(t *testing.T) {
 	encoder := NewEncoder()
 

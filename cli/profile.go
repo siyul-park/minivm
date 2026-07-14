@@ -428,16 +428,23 @@ func collect(metrics []prof.Metric) profile {
 	return p
 }
 
-func metricAnchor(metric prof.Metric) anchor {
-	return anchor{fn: metricInt(metric, "func"), ip: metricInt(metric, "ip")}
-}
-
 func metricEntry(metric prof.Metric) entry {
 	return entry{
 		anchor:   metricAnchor(metric),
 		kind:     metricLabel(metric, "kind"),
 		frontend: metricLabel(metric, "frontend"),
 	}
+}
+
+func metricAnchor(metric prof.Metric) anchor {
+	return anchor{fn: metricInt(metric, "func"), ip: metricInt(metric, "ip")}
+}
+
+func metricInt(metric prof.Metric, key string) int {
+	// Metrics come from the internal collector; missing or malformed labels use
+	// the zero value, matching the collector's default function and IP IDs.
+	value, _ := strconv.Atoi(metricLabel(metric, key))
+	return value
 }
 
 func metricLabel(metric prof.Metric, key string) string {
@@ -447,13 +454,6 @@ func metricLabel(metric prof.Metric, key string) string {
 		}
 	}
 	return ""
-}
-
-func metricInt(metric prof.Metric, key string) int {
-	// Metrics come from the internal collector; missing or malformed labels use
-	// the zero value, matching the collector's default function and IP IDs.
-	value, _ := strconv.Atoi(metricLabel(metric, key))
-	return value
 }
 
 func mergeKind(current, next string) string {

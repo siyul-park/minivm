@@ -7,9 +7,7 @@ package instr
 type Kind byte
 
 // Tag values are runtime-only (never serialized: constants round-trip as text),
-// so they are laid out for fast classification rather than for stability. The
-// kinds that share the i32 representation — i32, i8, i1 — all carry bit 0b100,
-// so "computes as i32" is a single mask (see reprI32 / IsI32Repr).
+// so their numeric layout is not a compatibility contract.
 const (
 	KindF64 Kind = iota // 0b000
 	KindF32             // 0b001
@@ -25,12 +23,6 @@ const (
 // operand whose concrete kind is not statically fixed. It is not a real value
 // kind, so it sits outside the iota range and prints as "unknown".
 const KindAny Kind = 0xFF
-
-// reprI32 is the tag bit shared by every Kind in the i32 representation
-// (i32, i8, i1): a 32-bit integer slot, an i32 payload, and the i32.* operators.
-// The shared bit makes the representation test a single mask. This mirrors the
-// JVM "computational type": boolean/byte/short/char/int all compute as int.
-const reprI32 = KindI32 // 0b100
 
 func (k Kind) String() string {
 	switch k {
@@ -67,10 +59,12 @@ func (k Kind) IsNumeric() bool {
 // Repr returns the kind k is computed and stored as: i1 and i8 reduce to i32,
 // every other kind is its own representation.
 func (k Kind) Repr() Kind {
-	if k&reprI32 != 0 {
+	switch k {
+	case KindI1, KindI8:
 		return KindI32
+	default:
+		return k
 	}
-	return k
 }
 
 func (k Kind) Size() int {

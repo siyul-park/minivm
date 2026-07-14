@@ -8,6 +8,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestTag(t *testing.T) {
+	require.Equal(t, uint64(Box(0, KindI32)), Tag(KindI32))
+}
+
 func TestIsBoxable(t *testing.T) {
 	tests := []struct {
 		val      int64
@@ -57,47 +61,6 @@ func TestIsBoxable(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
 			require.Equal(t, tt.expected, IsBoxable(tt.val))
-		})
-	}
-}
-
-func TestTag(t *testing.T) {
-	require.Equal(t, uint64(Box(0, KindI32)), Tag(KindI32))
-}
-
-func TestUnbox(t *testing.T) {
-	tests := []struct {
-		val   Boxed
-		unbox Value
-	}{
-		{
-			val:   BoxI32(0),
-			unbox: I32(0),
-		},
-		{
-			val:   BoxI64(0),
-			unbox: I64(0),
-		},
-		{
-			val:   BoxF32(0),
-			unbox: F32(0),
-		},
-		{
-			val:   BoxF64(0),
-			unbox: F64(0),
-		},
-		{
-			val:   BoxRef(3),
-			unbox: Ref(3),
-		},
-		{
-			val:   Box(0, Kind(255)),
-			unbox: nil,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
-			require.Equal(t, tt.unbox, Unbox(tt.val))
 		})
 	}
 }
@@ -250,6 +213,60 @@ func TestBoxRef(t *testing.T) {
 	}
 }
 
+func TestBox(t *testing.T) {
+	tests := []struct {
+		val  uint64
+		kind Kind
+	}{
+		{val: 0, kind: KindI32},
+		{val: 1, kind: KindI32},
+		{val: 0, kind: KindRef},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%d/%d", tt.val, tt.kind), func(t *testing.T) {
+			b := Box(tt.val, tt.kind)
+			require.Equal(t, tt.kind, b.Kind())
+		})
+	}
+}
+
+func TestUnbox(t *testing.T) {
+	tests := []struct {
+		val   Boxed
+		unbox Value
+	}{
+		{
+			val:   BoxI32(0),
+			unbox: I32(0),
+		},
+		{
+			val:   BoxI64(0),
+			unbox: I64(0),
+		},
+		{
+			val:   BoxF32(0),
+			unbox: F32(0),
+		},
+		{
+			val:   BoxF64(0),
+			unbox: F64(0),
+		},
+		{
+			val:   BoxRef(3),
+			unbox: Ref(3),
+		},
+		{
+			val:   Box(0, Kind(255)),
+			unbox: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
+			require.Equal(t, tt.unbox, Unbox(tt.val))
+		})
+	}
+}
+
 func TestBoxed_Kind(t *testing.T) {
 	tests := []struct {
 		val  Boxed
@@ -316,6 +333,35 @@ func TestBoxed_Type(t *testing.T) {
 	}
 }
 
+func TestBoxed_I32(t *testing.T) {
+	require.Equal(t, int32(-42), BoxI32(-42).I32())
+}
+
+func TestBoxed_I8(t *testing.T) {
+	require.Equal(t, int8(-8), BoxI8(-8).I8())
+}
+
+func TestBoxed_I64(t *testing.T) {
+	require.Equal(t, int64(-64), BoxI64(-64).I64())
+}
+
+func TestBoxed_F32(t *testing.T) {
+	require.Equal(t, float32(3.5), BoxF32(3.5).F32())
+}
+
+func TestBoxed_F64(t *testing.T) {
+	require.Equal(t, 6.25, BoxF64(6.25).F64())
+}
+
+func TestBoxed_Bool(t *testing.T) {
+	require.True(t, BoxI32(1).Bool())
+	require.False(t, BoxI32(0).Bool())
+}
+
+func TestBoxed_Ref(t *testing.T) {
+	require.Equal(t, 42, BoxRef(42).Ref())
+}
+
 func TestBoxed_String(t *testing.T) {
 	tests := []struct {
 		val Boxed
@@ -349,28 +395,6 @@ func TestBoxed_String(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(fmt.Sprint(tt.val), func(t *testing.T) {
 			require.Equal(t, tt.str, tt.val.String())
-		})
-	}
-}
-
-func TestBoxed_Bool(t *testing.T) {
-	require.True(t, BoxI32(1).Bool())
-	require.False(t, BoxI32(0).Bool())
-}
-
-func TestBox(t *testing.T) {
-	tests := []struct {
-		val  uint64
-		kind Kind
-	}{
-		{val: 0, kind: KindI32},
-		{val: 1, kind: KindI32},
-		{val: 0, kind: KindRef},
-	}
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%d/%d", tt.val, tt.kind), func(t *testing.T) {
-			b := Box(tt.val, tt.kind)
-			require.Equal(t, tt.kind, b.Kind())
 		})
 	}
 }

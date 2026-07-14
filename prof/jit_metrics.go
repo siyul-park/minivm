@@ -339,18 +339,6 @@ func appendEntryCounters(out []Metric, name string, rows map[entryKey]*Counter) 
 	return out
 }
 
-func counterFor[K comparable](rows *map[K]*Counter, key K) *Counter {
-	if *rows == nil {
-		*rows = make(map[K]*Counter)
-	}
-	counter := (*rows)[key]
-	if counter == nil {
-		counter = &Counter{}
-		(*rows)[key] = counter
-	}
-	return counter
-}
-
 func activeKeys[K comparable](rows map[K]*Counter) []K {
 	keys := make([]K, 0, len(rows))
 	for key, counter := range rows {
@@ -367,6 +355,18 @@ func mergeCounters[K comparable](destination *map[K]*Counter, source map[K]*Coun
 			counterFor(destination, key).value += counter.value
 		}
 	}
+}
+
+func counterFor[K comparable](rows *map[K]*Counter, key K) *Counter {
+	if *rows == nil {
+		*rows = make(map[K]*Counter)
+	}
+	counter := (*rows)[key]
+	if counter == nil {
+		counter = &Counter{}
+		(*rows)[key] = counter
+	}
+	return counter
 }
 
 func resetCounters[K comparable](rows map[K]*Counter) {

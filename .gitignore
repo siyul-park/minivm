@@ -39,4 +39,5 @@ dist/
 .codegraph/
 .superpowers/
 # Local agent plans
+docs/plans/
 docs/superpowers/

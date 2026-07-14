@@ -17,6 +17,20 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
+// REPL evaluates one assembly instruction per iteration, rebuilding a
+// program from accumulated history and re-running it through a fresh
+// interpreter each step.
+type REPL struct {
+	in        io.Reader
+	out       io.Writer
+	fs        WriteFS
+	instrs    []instr.Instruction
+	codeLen   int // byte length of instr.Marshal(instrs); updated incrementally
+	constants []types.Value
+	types     []types.Type
+	debugger  *debug.Debugger // nil until first .break; breakpoint storage only
+}
+
 const prompt = "> "
 const blockPrompt = "... "
 const debugPrompt = "debug> "
@@ -71,20 +85,6 @@ Debug commands:
   .help               show this help
   .quit  /  .exit     exit the REPL
 `
-
-// REPL evaluates one assembly instruction per iteration, rebuilding a
-// program from accumulated history and re-running it through a fresh
-// interpreter each step.
-type REPL struct {
-	in        io.Reader
-	out       io.Writer
-	fs        WriteFS
-	instrs    []instr.Instruction
-	codeLen   int // byte length of instr.Marshal(instrs); updated incrementally
-	constants []types.Value
-	types     []types.Type
-	debugger  *debug.Debugger // nil until first .break; breakpoint storage only
-}
 
 // NewREPL returns a new REPL that reads from in and writes to out. fs
 // backs .load and .save; pass nil to disable those commands (callers
@@ -271,14 +271,6 @@ func (r *REPL) addType(s string) error {
 	return nil
 }
 
-func (r *REPL) clear() {
-	r.instrs = nil
-	r.codeLen = 0
-	r.constants = nil
-	r.types = nil
-	r.debugger = nil
-}
-
 // load replaces REPL state with the program parsed from path. Merging
 // into existing state would require renumbering instruction-embedded
 // constant and type indices; replace keeps the semantics simple and
@@ -308,6 +300,14 @@ func (r *REPL) load(path string) error {
 	r.types = append([]types.Type(nil), prog.Types...)
 	fmt.Fprintf(r.out, "loaded %s\n", path)
 	return nil
+}
+
+func (r *REPL) clear() {
+	r.instrs = nil
+	r.codeLen = 0
+	r.constants = nil
+	r.types = nil
+	r.debugger = nil
 }
 
 // save writes the current program to path in Program.String() format,
@@ -503,25 +503,6 @@ func (r *REPL) doEnable(arg string, on bool) error {
 	return nil
 }
 
-func (r *REPL) printBreakpoints() {
-	if r.debugger == nil {
-		fmt.Fprintln(r.out, "no breakpoints")
-		return
-	}
-	bps := r.debugger.Breakpoints()
-	if len(bps) == 0 {
-		fmt.Fprintln(r.out, "no breakpoints")
-		return
-	}
-	for _, bp := range bps {
-		state := "enabled"
-		if !bp.Enabled {
-			state = "disabled"
-		}
-		fmt.Fprintf(r.out, "breakpoint %d: func=%d ip=%d %s hits=%d\n", bp.ID, bp.Func, bp.IP, state, bp.Hits)
-	}
-}
-
 func (r *REPL) doDebug(ctx context.Context, scanner *bufio.Scanner) error {
 	if len(r.instrs) == 0 {
 		fmt.Fprintln(r.out, "(empty)")
@@ -636,6 +617,25 @@ func (r *REPL) debugLoop(ctx context.Context, scanner *bufio.Scanner, vm *interp
 		default:
 			fmt.Fprintf(r.out, "unknown debug command: %q (step/next/finish/continue/stack/locals/globals/frames/breaks/break/clear/quit)\n", line)
 		}
+	}
+}
+
+func (r *REPL) printBreakpoints() {
+	if r.debugger == nil {
+		fmt.Fprintln(r.out, "no breakpoints")
+		return
+	}
+	bps := r.debugger.Breakpoints()
+	if len(bps) == 0 {
+		fmt.Fprintln(r.out, "no breakpoints")
+		return
+	}
+	for _, bp := range bps {
+		state := "enabled"
+		if !bp.Enabled {
+			state = "disabled"
+		}
+		fmt.Fprintf(r.out, "breakpoint %d: func=%d ip=%d %s hits=%d\n", bp.ID, bp.Func, bp.IP, state, bp.Hits)
 	}
 }
 

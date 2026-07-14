@@ -7,6 +7,71 @@ import (
 	"github.com/siyul-park/minivm/instr"
 )
 
+// ParseFunction parses lines from Function.String() output:
+//
+//	line 0:       FunctionType string ("func(params) returns")
+//	lines 1..k-1: local type strings (one per line)
+//	lines k..:    disassembly lines ("0000:\t…")
+func ParseFunction(lines []string) (*Function, error) {
+	if len(lines) == 0 {
+		return nil, fmt.Errorf("empty function definition")
+	}
+
+	typ, err := Parse(lines[0])
+	if err != nil {
+		return nil, fmt.Errorf("function type: %w", err)
+	}
+	ft, ok := typ.(*FunctionType)
+	if !ok {
+		return nil, fmt.Errorf("expected func type, got %q", lines[0])
+	}
+
+	// Captures are emitted first, each prefixed with "capture ".
+	capturesEnd := 1
+	var captures []Type
+	for capturesEnd < len(lines) {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(lines[capturesEnd]), "capture ")
+		if !ok {
+			break
+		}
+		t, err := Parse(strings.TrimSpace(rest))
+		if err != nil {
+			return nil, fmt.Errorf("capture type: %w", err)
+		}
+		captures = append(captures, t)
+		capturesEnd++
+	}
+
+	// Find where disassembly starts: first line that is either offset-prefixed
+	// ("NNNN:\t…") or a plain instruction (not parseable as a type).
+	localsEnd := capturesEnd
+	for localsEnd < len(lines) {
+		line := strings.TrimSpace(lines[localsEnd])
+		if isFormatLine(line) || isInstrLine(line) {
+			break
+		}
+		localsEnd++
+	}
+
+	var locals []Type
+	for _, l := range lines[capturesEnd:localsEnd] {
+		t, err := Parse(strings.TrimSpace(l))
+		if err != nil {
+			return nil, fmt.Errorf("local type: %w", err)
+		}
+		locals = append(locals, t)
+	}
+
+	codeInstrs, err := instr.ParseAll(strings.NewReader(strings.Join(lines[localsEnd:], "\n")))
+	if err != nil {
+		return nil, fmt.Errorf("function code: %w", err)
+	}
+
+	fn := NewFunction(ft, locals, codeInstrs)
+	fn.Captures = captures
+	return fn, nil
+}
+
 // Parse parses a type string produced by Type.String().
 // Supported: "i32", "i64", "f32", "f64", "ref", "[]<elem>",
 // "iterator[elem]", "map[key]elem", "func(params) returns", "struct {fields}".
@@ -174,71 +239,6 @@ func parseStructType(s string) (*StructType, error) {
 		fields = append(fields, NewStructField(t))
 	}
 	return NewStructType(fields...), nil
-}
-
-// ParseFunction parses lines from Function.String() output:
-//
-//	line 0:       FunctionType string ("func(params) returns")
-//	lines 1..k-1: local type strings (one per line)
-//	lines k..:    disassembly lines ("0000:\t…")
-func ParseFunction(lines []string) (*Function, error) {
-	if len(lines) == 0 {
-		return nil, fmt.Errorf("empty function definition")
-	}
-
-	typ, err := Parse(lines[0])
-	if err != nil {
-		return nil, fmt.Errorf("function type: %w", err)
-	}
-	ft, ok := typ.(*FunctionType)
-	if !ok {
-		return nil, fmt.Errorf("expected func type, got %q", lines[0])
-	}
-
-	// Captures are emitted first, each prefixed with "capture ".
-	capturesEnd := 1
-	var captures []Type
-	for capturesEnd < len(lines) {
-		rest, ok := strings.CutPrefix(strings.TrimSpace(lines[capturesEnd]), "capture ")
-		if !ok {
-			break
-		}
-		t, err := Parse(strings.TrimSpace(rest))
-		if err != nil {
-			return nil, fmt.Errorf("capture type: %w", err)
-		}
-		captures = append(captures, t)
-		capturesEnd++
-	}
-
-	// Find where disassembly starts: first line that is either offset-prefixed
-	// ("NNNN:\t…") or a plain instruction (not parseable as a type).
-	localsEnd := capturesEnd
-	for localsEnd < len(lines) {
-		line := strings.TrimSpace(lines[localsEnd])
-		if isFormatLine(line) || isInstrLine(line) {
-			break
-		}
-		localsEnd++
-	}
-
-	var locals []Type
-	for _, l := range lines[capturesEnd:localsEnd] {
-		t, err := Parse(strings.TrimSpace(l))
-		if err != nil {
-			return nil, fmt.Errorf("local type: %w", err)
-		}
-		locals = append(locals, t)
-	}
-
-	codeInstrs, err := instr.ParseAll(strings.NewReader(strings.Join(lines[localsEnd:], "\n")))
-	if err != nil {
-		return nil, fmt.Errorf("function code: %w", err)
-	}
-
-	fn := NewFunction(ft, locals, codeInstrs)
-	fn.Captures = captures
-	return fn, nil
 }
 
 // isInstrLine reports whether s looks like a plain instruction line without an

@@ -264,6 +264,8 @@ func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
 	return result
 }
 
+func (noSpillArch) Frame() asm.Frame { return nil }
+
 func (current compileResult) prefer(candidate compileResult) compileResult {
 	if reasonPriority(candidate.reason) > reasonPriority(current.reason) ||
 		reasonPriority(candidate.reason) == reasonPriority(current.reason) && candidate.frontend > current.frontend {
@@ -356,13 +358,6 @@ func (m counters) yield() {
 	}
 }
 
-func (noSpillArch) Frame() asm.Frame { return nil }
-
-// frame returns the innermost (currently executing) frame.
-func (ctx *lowering) frame() *activation {
-	return &ctx.frames[len(ctx.frames)-1]
-}
-
 // push appends one operand to the symbolic stack.
 func (ctx *lowering) push(v value) {
 	ctx.values = append(ctx.values, v)
@@ -404,6 +399,11 @@ func (ctx *lowering) opcode(ip int) int {
 		return prof.OpcodeNone
 	}
 	return int(fn.Code[ip])
+}
+
+// frame returns the innermost (currently executing) frame.
+func (ctx *lowering) frame() *activation {
+	return &ctx.frames[len(ctx.frames)-1]
 }
 
 // snapshot deep-copies operand and frame state for a deferred branch. Callers

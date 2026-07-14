@@ -17,6 +17,10 @@ func TestCoroutine_Type(t *testing.T) {
 	require.Equal(t, &types.FunctionType{}, (&Coroutine{}).Type())
 }
 
+func TestCoroutine_String(t *testing.T) {
+	require.Equal(t, "coroutine", (&Coroutine{}).String())
+}
+
 func TestCoroutine_Refs(t *testing.T) {
 	co := &Coroutine{
 		ref:    3,
@@ -24,7 +28,7 @@ func TestCoroutine_Refs(t *testing.T) {
 		upvals: []types.Boxed{types.BoxRef(7), types.BoxF64(2)},
 		value:  types.BoxRef(9),
 	}
-	require.ElementsMatch(t, []types.Ref{3, 5, 7, 9}, co.Refs(nil))
+	require.Equal(t, []types.Ref{1, 3, 5, 7, 9}, co.Refs([]types.Ref{1}))
 
-	require.Empty(t, (&Coroutine{value: types.BoxI32(1)}).Refs(nil))
+	require.Equal(t, []types.Ref{1}, (&Coroutine{value: types.BoxI32(1)}).Refs([]types.Ref{1}))
 }

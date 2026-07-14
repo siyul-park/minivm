@@ -32,12 +32,12 @@ func TestClosure_String(t *testing.T) {
 func TestClosure_Refs(t *testing.T) {
 	t.Run("no upvalues reports the template", func(t *testing.T) {
 		cl := NewClosure(nil, 7, nil)
-		require.Equal(t, []Ref{Ref(7)}, cl.Refs(nil))
+		require.Equal(t, []Ref{Ref(5), Ref(7)}, cl.Refs([]Ref{5}))
 	})
 
 	t.Run("ref upvalues follow the template", func(t *testing.T) {
 		cl := NewClosure(nil, 7, []Boxed{BoxI32(1), BoxRef(9), BoxRef(4)})
-		require.Equal(t, []Ref{Ref(7), Ref(9), Ref(4)}, cl.Refs(nil))
+		require.Equal(t, []Ref{Ref(5), Ref(7), Ref(9), Ref(4)}, cl.Refs([]Ref{5}))
 	})
 
 	t.Run("primitive upvalues are skipped", func(t *testing.T) {

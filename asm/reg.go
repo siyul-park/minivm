@@ -30,19 +30,8 @@ type VReg struct {
 // RegType distinguishes the integer and floating-point register banks.
 type RegType uint8
 
-const (
-	RegTypeInt RegType = iota
-	RegTypeFloat
-)
-
 // RegWidth declares whether a register holds a 32- or 64-bit lane.
 type RegWidth uint8
-
-const (
-	WidthUndefined RegWidth = 0
-	Width32        RegWidth = 32
-	Width64        RegWidth = 64
-)
 
 // RegMask is a bitmask of physical register IDs (0..63).
 type RegMask uint64
@@ -58,6 +47,17 @@ type RegInfo struct {
 	Scratch     RegMask
 }
 
+const (
+	RegTypeInt RegType = iota
+	RegTypeFloat
+)
+
+const (
+	WidthUndefined RegWidth = 0
+	Width32        RegWidth = 32
+	Width64        RegWidth = 64
+)
+
 // NewPReg constructs a physical register descriptor.
 func NewPReg(id uint8, typ RegType, w RegWidth) PReg {
 	return PReg{id: id, typ: typ, width: w}
@@ -66,15 +66,6 @@ func NewPReg(id uint8, typ RegType, w RegWidth) PReg {
 // NewVReg constructs a virtual register descriptor.
 func NewVReg(id int32, typ RegType, w RegWidth) VReg {
 	return VReg{id: id, typ: typ, width: w}
-}
-
-// NewRegMask builds a mask from a list of physical register IDs.
-func NewRegMask(ids []uint8) RegMask {
-	var m RegMask
-	for _, id := range ids {
-		m |= 1 << id
-	}
-	return m
 }
 
 // NewRegInfo describes an architecture's register banks and reserved IDs.
@@ -86,6 +77,15 @@ func NewRegInfo(numInt, numFloat uint8, intReserved, fltReserved, scratch []uint
 		FltReserved: NewRegMask(fltReserved),
 		Scratch:     NewRegMask(scratch),
 	}
+}
+
+// NewRegMask builds a mask from a list of physical register IDs.
+func NewRegMask(ids []uint8) RegMask {
+	var m RegMask
+	for _, id := range ids {
+		m |= 1 << id
+	}
+	return m
 }
 
 func (r PReg) ID() uint8       { return r.id }

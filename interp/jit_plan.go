@@ -54,26 +54,6 @@ type plan struct {
 
 type entryKind uint8
 
-const (
-	entryInvalid entryKind = iota
-	entryFunction
-	entryLoop
-	entryModule
-)
-
-func (kind entryKind) profile() prof.EntryKind {
-	switch kind {
-	case entryModule:
-		return prof.EntryStart
-	case entryFunction:
-		return prof.EntryCall
-	case entryLoop:
-		return prof.EntryLoop
-	default:
-		return prof.EntryNone
-	}
-}
-
 type block struct {
 	anchor anchor
 	tail   bool
@@ -106,6 +86,13 @@ type terminator struct {
 type terminatorKind uint8
 
 const (
+	entryInvalid entryKind = iota
+	entryFunction
+	entryLoop
+	entryModule
+)
+
+const (
 	terminateFallthrough terminatorKind = iota
 	terminateBranch
 	terminateBranchIf
@@ -116,29 +103,6 @@ const (
 )
 
 const noBlock = -1
-
-func local(id int) int {
-	return -id - 2
-}
-
-func localID(block int) (int, bool) {
-	if block >= noBlock {
-		return 0, false
-	}
-	return -block - 2, true
-}
-
-func jump(addr, ip int) edge {
-	return edge{anchor: anchor{addr: addr, ip: ip}, block: noBlock}
-}
-
-func jumps(addr int, ips []int) []edge {
-	edges := make([]edge, len(ips))
-	for i, ip := range ips {
-		edges[i] = jump(addr, ip)
-	}
-	return edges
-}
 
 func newCompileInput(i *Interpreter, addr int) (*compileInput, bool) {
 	fn, ok := i.function(addr)
@@ -157,15 +121,17 @@ func newCompileInput(i *Interpreter, addr int) (*compileInput, bool) {
 	}, true
 }
 
-func resolve(module *types.Function, heap []types.Value, addr int) *types.Function {
-	if addr == 0 {
-		return module
+func (kind entryKind) profile() prof.EntryKind {
+	switch kind {
+	case entryModule:
+		return prof.EntryStart
+	case entryFunction:
+		return prof.EntryCall
+	case entryLoop:
+		return prof.EntryLoop
+	default:
+		return prof.EntryNone
 	}
-	if addr < 0 || addr >= len(heap) {
-		return nil
-	}
-	fn, _ := heap[addr].(*types.Function)
-	return fn
 }
 
 func (p plan) valid() bool {
@@ -498,6 +464,33 @@ func suffix(p *plan, tr *trace, idx int, input *compileInput) []int {
 	return nil
 }
 
+func local(id int) int {
+	return -id - 2
+}
+
+func jumps(addr int, ips []int) []edge {
+	edges := make([]edge, len(ips))
+	for i, ip := range ips {
+		edges[i] = jump(addr, ip)
+	}
+	return edges
+}
+
+func jump(addr, ip int) edge {
+	return edge{anchor: anchor{addr: addr, ip: ip}, block: noBlock}
+}
+
+func resolve(module *types.Function, heap []types.Value, addr int) *types.Function {
+	if addr == 0 {
+		return module
+	}
+	if addr < 0 || addr >= len(heap) {
+		return nil
+	}
+	fn, _ := heap[addr].(*types.Function)
+	return fn
+}
+
 func store(p *plan, blocks []block, tail bool) []int {
 	start := len(p.blocks)
 	ids := make([]int, len(blocks))
@@ -521,6 +514,13 @@ func store(p *plan, blocks []block, tail bool) []int {
 		}
 	}
 	return ids
+}
+
+func localID(block int) (int, bool) {
+	if block >= noBlock {
+		return 0, false
+	}
+	return -block - 2, true
 }
 
 func wire(p *plan, roots map[anchor]int) {

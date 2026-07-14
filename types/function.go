@@ -38,6 +38,17 @@ func NewFunctionBuilder(typ *FunctionType) *FunctionBuilder {
 	return &FunctionBuilder{code: instr.NewBuilder(), typ: typ}
 }
 
+func NewFunction(typ *FunctionType, locals []Type, instrs []instr.Instruction) *Function {
+	if typ == nil {
+		typ = &FunctionType{}
+	}
+	return &Function{
+		Typ:    typ,
+		Locals: locals,
+		Code:   instr.Marshal(instrs),
+	}
+}
+
 func (b *FunctionBuilder) WithParams(ps ...Type) *FunctionBuilder {
 	b.typ.Params = append(b.typ.Params, ps...)
 	return b
@@ -127,23 +138,8 @@ func (b *FunctionBuilder) Build() (*Function, error) {
 	}, nil
 }
 
-func NewFunction(typ *FunctionType, locals []Type, instrs []instr.Instruction) *Function {
-	if typ == nil {
-		typ = &FunctionType{}
-	}
-	return &Function{
-		Typ:    typ,
-		Locals: locals,
-		Code:   instr.Marshal(instrs),
-	}
-}
-
 func (f *Function) Kind() Kind {
 	return KindRef
-}
-
-func (f *Function) Type() Type {
-	return f.Typ
 }
 
 func (f *Function) String() string {
@@ -165,6 +161,10 @@ func (f *Function) String() string {
 	}
 	sb.WriteString(instr.Format(f.Code))
 	return sb.String()
+}
+
+func (f *Function) Type() Type {
+	return f.Typ
 }
 
 // LocalKinds returns the kind of each stack slot addressable by LOCAL_*

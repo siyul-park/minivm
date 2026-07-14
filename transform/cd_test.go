@@ -1,14 +1,20 @@
 package transform
 
 import (
+	"context"
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/pass"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNewConstantDeduplicationPass(t *testing.T) {
+	require.NotNil(t, NewConstantDeduplicationPass())
+}
 
 func TestConstantDeduplicationPass_Run(t *testing.T) {
 	tests := []struct {
@@ -109,4 +115,29 @@ func TestConstantDeduplicationPass_Run(t *testing.T) {
 			require.Equal(t, tt.expected, actual)
 		})
 	}
+
+	t.Run("preserves execution", func(t *testing.T) {
+		prog := program.New(
+			[]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.I32_ADD),
+			},
+			program.WithConstants(types.I32(21), types.I32(21)),
+		)
+		before := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
+		defer before.Close()
+		require.NoError(t, before.Run(context.Background()))
+		want, err := before.Pop()
+		require.NoError(t, err)
+
+		_, err = NewConstantDeduplicationPass().Run(pass.NewManager(), prog)
+		require.NoError(t, err)
+		after := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
+		defer after.Close()
+		require.NoError(t, after.Run(context.Background()))
+		got, err := after.Pop()
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	})
 }

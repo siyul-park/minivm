@@ -437,6 +437,16 @@ For `interp.Interpreter.Run`, opcode examples live in the package-level `runTest
 
 Behavior that does not fit one row, such as entry-frame `YIELD` resume behavior, should be an explicit subtest after the table loop.
 
+### 6.10 Benchmarks
+
+Benchmarks follow the same public owner and hierarchy as correctness tests. Use `BenchmarkNewFoo` for `NewFoo` and `BenchmarkFoo_Bar` for `Foo.Bar`; put workloads and execution modes below that owner.
+
+Validate each fixture once before timing and validate the final result or checksum after timing. Use deterministic inputs and `b.Loop()`. Keep construction, verification, expected-result computation, reset, cleanup, result checks, and warmup outside the timer unless one is the named operation.
+
+Name lifecycle states explicitly and consistently within their owner hierarchy, such as `Threaded`/`JITWarm` for interpreter API benchmarks and `threaded`/`jit_warm` for VM kernels. Do not label interpreter fallback as JIT throughput. Prove native emission and entry before timing a warm path when the package can observe them.
+
+Keep direct interpreter costs in `interp/interp_test.go`, runtime-neutral multi-opcode kernels in `benchmarks/`, and external comparisons behind the `compare` build tag. Do not create benchmark DSLs, service-domain canonical workloads, golden timings, or aggregate scores.
+
 ## 7. Git and PRs
 
 Keep commits focused. A commit should have one reason to exist.

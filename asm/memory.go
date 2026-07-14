@@ -19,25 +19,6 @@ var (
 	ErrMunmapFailed   = errors.New("munmap failed")
 )
 
-func allocMemory(size int) (memory, error) {
-	if size <= 0 {
-		return nil, fmt.Errorf("%w: %d", ErrInvalidSize, size)
-	}
-
-	page := os.Getpagesize()
-	size = (size + page - 1) &^ (page - 1)
-
-	data, err := syscall.Mmap(
-		-1, 0, size,
-		syscall.PROT_READ|syscall.PROT_WRITE,
-		syscall.MAP_ANON|syscall.MAP_PRIVATE,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrMmapFailed, err)
-	}
-	return data, nil
-}
-
 func (m memory) executable() error {
 	if len(m) == 0 {
 		return nil
@@ -100,4 +81,23 @@ func (m memory) free() error {
 		return fmt.Errorf("%w: %w", ErrMunmapFailed, err)
 	}
 	return nil
+}
+
+func allocMemory(size int) (memory, error) {
+	if size <= 0 {
+		return nil, fmt.Errorf("%w: %d", ErrInvalidSize, size)
+	}
+
+	page := os.Getpagesize()
+	size = (size + page - 1) &^ (page - 1)
+
+	data, err := syscall.Mmap(
+		-1, 0, size,
+		syscall.PROT_READ|syscall.PROT_WRITE,
+		syscall.MAP_ANON|syscall.MAP_PRIVATE,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrMmapFailed, err)
+	}
+	return data, nil
 }

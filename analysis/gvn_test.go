@@ -9,6 +9,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNewGlobalValueNumberingAnalysis(t *testing.T) {
+	require.NotNil(t, NewGlobalValueNumberingAnalysis())
+}
+
 func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 	i32t := &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}}
 

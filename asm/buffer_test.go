@@ -7,6 +7,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNewBuffer(t *testing.T) {
+	buffer, err := NewBuffer(1)
+	require.NoError(t, err)
+	defer buffer.Free()
+	require.NotEmpty(t, buffer.mem)
+}
+
 func TestBuffer_Write(t *testing.T) {
 	t.Run("appends bytes and returns stable pointer", func(t *testing.T) {
 		b, err := NewBuffer(64)
@@ -71,4 +78,10 @@ func TestBuffer_Write(t *testing.T) {
 		require.ErrorIs(t, err, ErrInvalidArgs)
 		require.True(t, b.sealed)
 	})
+}
+
+func TestBuffer_Free(t *testing.T) {
+	buffer, err := NewBuffer(1)
+	require.NoError(t, err)
+	require.NoError(t, buffer.Free())
 }

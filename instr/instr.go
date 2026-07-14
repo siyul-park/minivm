@@ -60,14 +60,6 @@ func New(op Opcode, operands ...uint64) Instruction {
 	return code
 }
 
-func (i Instruction) Type() Type {
-	return TypeOf(i.Opcode())
-}
-
-func (i Instruction) Opcode() Opcode {
-	return Opcode(i[0])
-}
-
 func (i Instruction) SetOperand(index int, value uint64) {
 	typ := i.Type()
 
@@ -113,40 +105,6 @@ func (i Instruction) Operand(index int) uint64 {
 	return operands[index]
 }
 
-func (i Instruction) Operands() []uint64 {
-	typ := i.Type()
-
-	var operands []uint64
-	offset := 1
-	idx := 0
-	for _, w := range typ.Widths {
-		count := idx + 1
-		if w < 0 {
-			operands = append(operands, uint64(i[offset]))
-			count += int(i[offset])
-			w *= -1
-			offset++
-			idx++
-		}
-		for ; idx < count; idx++ {
-			switch w {
-			case 1:
-				operands = append(operands, uint64(i[offset]))
-			case 2:
-				operands = append(operands, uint64(*(*uint16)(unsafe.Pointer(&i[offset]))))
-			case 4:
-				operands = append(operands, uint64(*(*uint32)(unsafe.Pointer(&i[offset]))))
-			case 8:
-				operands = append(operands, *(*uint64)(unsafe.Pointer(&i[offset])))
-			default:
-				return nil
-			}
-			offset += w
-		}
-	}
-	return operands
-}
-
 func (i Instruction) Width() int {
 	typ := i.Type()
 	offset := 1
@@ -184,4 +142,46 @@ func (i Instruction) String() string {
 		}
 	}
 	return sb.String()
+}
+
+func (i Instruction) Operands() []uint64 {
+	typ := i.Type()
+
+	var operands []uint64
+	offset := 1
+	idx := 0
+	for _, w := range typ.Widths {
+		count := idx + 1
+		if w < 0 {
+			operands = append(operands, uint64(i[offset]))
+			count += int(i[offset])
+			w *= -1
+			offset++
+			idx++
+		}
+		for ; idx < count; idx++ {
+			switch w {
+			case 1:
+				operands = append(operands, uint64(i[offset]))
+			case 2:
+				operands = append(operands, uint64(*(*uint16)(unsafe.Pointer(&i[offset]))))
+			case 4:
+				operands = append(operands, uint64(*(*uint32)(unsafe.Pointer(&i[offset]))))
+			case 8:
+				operands = append(operands, *(*uint64)(unsafe.Pointer(&i[offset])))
+			default:
+				return nil
+			}
+			offset += w
+		}
+	}
+	return operands
+}
+
+func (i Instruction) Type() Type {
+	return TypeOf(i.Opcode())
+}
+
+func (i Instruction) Opcode() Opcode {
+	return Opcode(i[0])
 }

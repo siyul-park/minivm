@@ -6,6 +6,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNewIteratorType(t *testing.T) {
+	typ := NewIteratorType(TypeI32)
+	require.Equal(t, TypeI32, typ.Elem)
+}
+
 func TestIteratorType_Kind(t *testing.T) {
 	require.Equal(t, KindRef, NewIteratorType(TypeI32).Kind())
 }

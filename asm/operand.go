@@ -62,31 +62,21 @@ func Mem(base Operand, offset int64) MemOperand {
 	return MemOperand{Base: base, Offset: offset}
 }
 
-func (VRegOperand) operand() {}
-
 func (o VRegOperand) String() string {
 	return o.Reg.String()
 }
-
-func (PRegOperand) operand() {}
 
 func (o PRegOperand) String() string {
 	return o.Reg.String()
 }
 
-func (ImmOperand) operand() {}
-
 func (o ImmOperand) String() string {
 	return fmt.Sprintf("#%d", o.Value)
 }
 
-func (LabelOperand) operand() {}
-
 func (o LabelOperand) String() string {
 	return fmt.Sprintf("label%d", o.ID)
 }
-
-func (MemOperand) operand() {}
 
 func (o MemOperand) String() string {
 	if o.Offset != 0 {
@@ -94,3 +84,13 @@ func (o MemOperand) String() string {
 	}
 	return fmt.Sprintf("[%s]", o.Base)
 }
+
+func (VRegOperand) operand() {}
+
+func (PRegOperand) operand() {}
+
+func (ImmOperand) operand() {}
+
+func (LabelOperand) operand() {}
+
+func (MemOperand) operand() {}

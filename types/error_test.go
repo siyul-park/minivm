@@ -7,16 +7,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestError_Kind(t *testing.T) {
-	require.Equal(t, KindRef, NewError(ErrorCodeNone, "", BoxedNull).Kind())
+func TestNewError(t *testing.T) {
+	e := NewError(42, "boom", BoxRef(3))
+	require.Equal(t, ErrorCode(42), e.Code())
+	require.Equal(t, "boom", e.Error())
+	require.Equal(t, BoxRef(3), e.Value())
 }
 
-func TestError_Type(t *testing.T) {
-	require.Equal(t, TypeError, NewError(ErrorCodeNone, "", BoxedNull).Type())
-}
-
-func TestError_String(t *testing.T) {
-	require.Equal(t, `error("boom")`, NewError(ErrorCodeNone, "boom", BoxedNull).String())
+func TestWrapError(t *testing.T) {
+	sentinel := errors.New("cause")
+	e := WrapError(ErrorCodeUserBase, sentinel)
+	require.Equal(t, ErrorCodeUserBase, e.Code())
+	require.ErrorIs(t, e, sentinel)
+	require.Nil(t, WrapError(ErrorCodeNone, nil))
 }
 
 func TestError_Error(t *testing.T) {
@@ -26,10 +29,7 @@ func TestError_Error(t *testing.T) {
 func TestError_Unwrap(t *testing.T) {
 	sentinel := errors.New("cause")
 	e := WrapError(ErrorCodeNone, sentinel)
-	require.Equal(t, "cause", e.Error())
-	require.ErrorIs(t, e, sentinel)
-	require.Equal(t, BoxedNull, e.Value())
-	require.Nil(t, WrapError(ErrorCodeNone, nil))
+	require.ErrorIs(t, e.Unwrap(), sentinel)
 }
 
 func TestError_Value(t *testing.T) {
@@ -46,9 +46,25 @@ func TestError_Code(t *testing.T) {
 	require.ErrorIs(t, e, sentinel)
 }
 
+func TestError_Kind(t *testing.T) {
+	require.Equal(t, KindRef, NewError(ErrorCodeNone, "", BoxedNull).Kind())
+}
+
+func TestError_Type(t *testing.T) {
+	require.Equal(t, TypeError, NewError(ErrorCodeNone, "", BoxedNull).Type())
+}
+
+func TestError_String(t *testing.T) {
+	require.Equal(t, `error("boom")`, NewError(ErrorCodeNone, "boom", BoxedNull).String())
+}
+
 func TestError_Refs(t *testing.T) {
-	require.Nil(t, NewError(ErrorCodeNone, "", BoxI32(7)).Refs(nil))
-	require.Equal(t, []Ref{Ref(3)}, NewError(ErrorCodeNone, "", BoxRef(3)).Refs(nil))
+	require.Equal(t, []Ref{9}, NewError(ErrorCodeNone, "", BoxI32(7)).Refs([]Ref{9}))
+	require.Equal(t, []Ref{Ref(9), Ref(3)}, NewError(ErrorCodeNone, "", BoxRef(3)).Refs([]Ref{9}))
+}
+
+func TestErrorType_Kind(t *testing.T) {
+	require.Equal(t, KindRef, TypeError.Kind())
 }
 
 func TestErrorType_String(t *testing.T) {

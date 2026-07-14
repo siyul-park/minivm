@@ -7,66 +7,25 @@
 
 [English](README.md) · **한국어**
 
-**어디에나 손쉽게 내장하는 빠른 바이트코드 VM.**
+## Go를 위한 작고 내장하기 쉬운 바이트코드 VM
 
-minivm은 Go 프로그램 안에서 작은 바이트코드 프로그램을 실행하고, 호스트 함수를 호출하며, 스택/힙/fuel/hook 제한 아래에서 동작합니다. 시작은 빠른 스레디드 인터프리터, 핫 함수와 루프는 트레이스 JIT가 네이티브 ARM64 코드로 자동 컴파일합니다.
+성능, 자원, 호스트 연동에 대한 통제력을 유지하면서 Go 애플리케이션 안에서
+동적 로직을 실행합니다.
+
+- **제한된 실행** — 스택, 힙, 호출 깊이, fuel, hook, context를 제어합니다.
+- **직접적인 호스트 연동** — 타입이 지정된 리플렉션 없는 함수로 Go를 호출합니다.
+- **적응형 성능** — 스레디드 인터프리터로 시작해 핫 ARM64 함수와 루프를
+  네이티브 코드로 승격합니다.
 
 ```bash
 go get github.com/siyul-park/minivm
 ```
 
-> Go 1.26.2 이상. VM 코어는 Go 표준 라이브러리만 사용합니다.
+> Go 1.26.2 이상이 필요합니다. VM 코어는 Go 표준 라이브러리만 사용합니다.
 
-전체 문서: [`docs/README.md`](docs/README.md)
+## 빠른 시작
 
-## 왜 minivm인가
-
-| 필요한 것 | minivm이 주는 것 |
-|---|---|
-| 런타임 로직 내장 | 일급 함수, 로컬/글로벌, ref, 배열, 구조체, 맵, 문자열, 코루틴, 구조화된 에러를 갖춘 바이트코드 |
-| Go 코드 호출 | 리플렉션 없는 `HostFunction`, 일반 Go 값용 `Marshal` / `Unmarshal` |
-| 실행 경계 제어 | stack, heap, frame, fuel, context, hook 제한 |
-| JIT 전에도 빠른 실행 | 클로저 기반 스레디드 디스패치와 재귀 워크로드에서 거의 0에 가까운 할당 |
-| 필요한 곳만 네이티브 속도 | 핫 함수와 루프를 위한 적응형 ARM64 트레이스 JIT |
-
-## 만들 수 있는 것
-
-- **스크립팅 엔진** — 사용자 정의 로직을 호스트 정책 아래에서 실행
-- **룰 엔진** — 재배포 없이 런타임에 복잡한 조건을 평가
-- **DSL 런타임** — 검증된 VM 위에 도메인 특화 명령어 셋을 정의
-- **플러그인 시스템** — GC가 관리하는 격리 환경에서 바이트코드를 실행
-
-## 성능
-
-재귀 `fib(35)` — darwin/arm64, Apple M4 Pro, Go 1.26.2. minivm은 두 번 측정합니다. **interp**는 순수 스레디드 인터프리터, **JIT**는 기본 `New`로 ARM64에서 핫 함수와 루프를 기록해 네이티브 코드로 컴파일합니다:
-
-| 런타임 | ns/op | B/op | allocs/op | vs native Go | 실행 모델 |
-|---|---|---|---|---|---|
-| native Go | 19,324,275 | 0 | 0 | 1× | 컴파일 |
-| wazero | 44,409,757 | 16 | 2 | 2.3× | WASM → 네이티브 JIT |
-| **minivm (JIT)** | **51,911,961** | **4,918** | **45** | **2.7×** | **스레디드 인터프리터 + ARM64 트레이스 JIT** |
-| minivm (interp) | 669,343,195 | 288 | 2 | 35× | 스레디드 인터프리터 |
-| tengo | 1,138,199,604 | 312,799,988 | 39,088,179 | 59× | 바이트코드 VM |
-| gopher-lua | 1,462,044,917 | 971,008 | 3,793 | 76× | 레지스터 VM |
-| goja | 2,052,722,000 | 383,488 | 46,384 | 106× | 바이트코드 VM |
-
-JIT는 이 워크로드에서 **13× 효과**를 냅니다(호출당 669 ms → 52 ms). 순수 인터프리터 기준으로도 minivm은 할당이 적고, 여기서 측정한 스크립트 VM보다 빠릅니다.
-
-단일 명령어 처리량 (스레디드 인터프리터, JIT 비활성화):
-
-| 워크로드 | ns/op |
-|---|---|
-| i32/i64/f32/f64 산술 | ~11–13 |
-| 분기 (`br`, `br_if`) | ~10–14 |
-| 바이트코드 함수 호출 | ~15–16 |
-| 호스트 함수 호출 | ~18 |
-| 배열 / 구조체 연산 | ~30–44 |
-
-전체 결과: [`docs/benchmarks.md`](docs/benchmarks.md)
-
-## 사용법
-
-### 바이트코드 실행
+`6 × 7`을 계산하는 바이트코드 프로그램을 실행합니다.
 
 ```go
 prog := program.New([]instr.Instruction{
@@ -85,9 +44,30 @@ if err := vm.Run(context.Background()); err != nil {
 result, _ := vm.Pop() // types.I32(42)
 ```
 
-### 바이트코드에서 Go 함수 호출
+minivm의 실행 모델은 명확합니다. 바이트코드를 입력하고, 통제된 런타임에서
+실행한 뒤, 타입이 지정된 값을 꺼냅니다.
 
-Go 코드를 바이트코드에서 호출 가능한 함수로 노출합니다:
+## minivm을 선택하는 이유
+
+| 기능 | 제공하는 가치 |
+|---|---|
+| 내장형 런타임 | 일급 함수, 로컬, 글로벌, 클로저, ref, 문자열, 배열, 구조체, 맵, 코루틴, 구조화된 에러 |
+| 호스트 연동 | 타입이 지정된 `HostFunction`과 일반 Go 값용 `Marshal`, `Unmarshal` |
+| 자원 제어 | 스택, 힙, 프레임, fuel, context, hook, 디버거 제어 |
+| 빠른 기본 실행 | 핵심 워크로드에서 낮은 정상 상태 할당을 유지하는 클로저 기반 스레디드 디스패치 |
+| 핫 경로 가속 | 지원되는 함수와 루프를 위한 적응형 ARM64 트레이스 JIT |
+| 안전한 실행 허용 | 실행 전 정적 바이트코드 검증 |
+
+### 활용 분야
+
+- 호스트 정책 아래에서 사용자 동작을 실행하는 **스크립팅 엔진**
+- 재배포 없이 런타임 결정을 바꾸는 **룰 엔진**
+- 작고 독립적인 실행 계층이 필요한 **DSL 런타임**
+- 확장 로직을 호스트 애플리케이션과 분리하는 **플러그인 시스템**
+
+## 바이트코드에서 Go 호출
+
+타입이 지정된 호스트 함수로 Go 동작을 노출합니다.
 
 ```go
 lookup := interp.NewHostFunction(
@@ -96,53 +76,43 @@ lookup := interp.NewHostFunction(
         Returns: []types.Type{types.TypeI32},
     },
     func(vm *interp.Interpreter, params []types.Boxed) ([]types.Boxed, error) {
-        id := params[0].I32()
-        price := db.GetPrice(int(id))
+        price := db.GetPrice(int(params[0].I32()))
         return []types.Boxed{types.BoxI32(price)}, nil
     },
 )
-
-prog := program.New(
-    []instr.Instruction{
-        instr.New(instr.I32_CONST, 42), // 상품 ID
-        instr.New(instr.CONST_GET, 0),  // 함수 참조
-        instr.New(instr.CALL),
-    },
-    program.WithConstants(lookup),
-)
 ```
 
-파라미터는 타입 안전한 `[]Boxed`로 전달됩니다. 리플렉션이나 `interface{}` 박싱은 없습니다.
+파라미터와 결과는 타입이 지정된 `[]types.Boxed`로 유지됩니다. 직접 호출
+경로에는 리플렉션이나 `interface{}` 박싱이 필요하지 않습니다.
 
-### 함수 정의
+마샬링, 호스트 객체, 수명 규칙은 [호스트 연동](docs/host-integration.md)을
+참고하세요.
 
-함수는 `FunctionBuilder`로 작성하는 일급 상수입니다:
+## 성능
 
-```go
-factorial := types.NewFunctionBuilder(&types.FunctionType{
-    Params:  []types.Type{types.TypeI32},
-    Returns: []types.Type{types.TypeI32},
-}).WithLocals(types.TypeI32).Emit(
-    instr.New(instr.LOCAL_GET, 0),
-    instr.New(instr.I32_CONST, 1),
-    instr.New(instr.I32_LT_S),
-    instr.New(instr.BR_IF, 14),     // n < 1이면 1 반환
-    instr.New(instr.LOCAL_GET, 0),
-    instr.New(instr.I32_CONST, 1),
-    instr.New(instr.I32_SUB),
-    instr.New(instr.CONST_GET, 0),
-    instr.New(instr.CALL),          // factorial(n-1)
-    instr.New(instr.LOCAL_GET, 0),
-    instr.New(instr.I32_MUL),       // n * factorial(n-1)
-    instr.New(instr.RETURN),
-    instr.New(instr.I32_CONST, 1),
-    instr.New(instr.RETURN),
-).Build()
-```
+minivm은 JIT 컴파일 전에도 실용적인 성능을 제공하고, 반복 실행으로 네이티브
+트레이스의 이점이 커지는 경로를 추가로 가속하도록 설계했습니다.
+
+Apple M4 Pro, `darwin/arm64`, Go 1.26.2에서 측정한 대표 중앙값입니다
+(`ns/op`, 낮을수록 좋음).
+
+| 런타임 | 반복 피보나치 | 재귀 피보나치 | 분기 트리 |
+|---|---:|---:|---:|
+| native Go | 8.444 | 19,129,096 | 77.55 |
+| wazero | 47.98 | 44,150,405 | 156.3 |
+| **minivm/default** | **69.9** | **47,048,123** | **222.4** |
+| minivm/threaded | 718.5 | 487,293,996 | 949.4 |
+
+`minivm/default`는 적응형 ARM64 트레이스 JIT 정책을 사용합니다. 성능은
+워크로드마다 다릅니다. 지원하지 않는 경로는 스레디드 인터프리터에서 계속
+실행되며, 아직 트레이싱의 이점을 얻지 못하는 워크로드도 있습니다.
+
+전체 비교표, 메모리 결과, 측정 범위, 재현 명령은
+[벤치마크](docs/benchmarks.md)를 참고하세요.
+
+## 런타임 도구
 
 ### 신뢰할 수 없는 바이트코드 검증
-
-외부에서 생성했거나 신뢰할 수 없는 바이트코드는 인터프리터를 만들기 전에 검증하세요:
 
 ```go
 if err := program.Verify(prog); err != nil {
@@ -150,80 +120,79 @@ if err := program.Verify(prog); err != nil {
 }
 ```
 
-`run` CLI 명령은 실행 전에 이 검사를 수행합니다. 검증 모델과 한계는 [`docs/verification.md`](docs/verification.md)를 참고하세요.
+검증기는 실행 전에 잘못된 제어 흐름, 스택 동작, 타입 불일치를 거부합니다.
+`run` CLI는 불러온 프로그램을 기본적으로 검증합니다.
 
-### AOT 최적화
-
-VM에 넘기기 전에 상수 연산을 접습니다:
+### 실행 전 최적화
 
 ```go
-prog, err := optimize.NewOptimizer(optimize.O1).Optimize(prog)
+prog, err := optimize.NewOptimizer(optimize.O2).Optimize(prog)
 ```
 
-`O1`이 모든 함수에 적용하는 두 가지 저비용 로컬 패스:
+최적화 단계는 로컬 상수 폴딩과 중복 제거부터 데드 코드 제거, 블록 간 전역 값
+번호화까지 지원합니다.
 
-- **상수 폴딩** — `I32_CONST 3, I32_CONST 4, I32_ADD` → `I32_CONST 7`
-- **상수 중복 제거** — 동일한 값은 하나의 슬롯으로 통합
-
-대수 단순화와 데드 코드 제거까지 원하면 `O2`, 블록 사이 전역 값 번호화까지 원하면 `O3`를 사용하세요.
-
-## JIT
-
-ARM64에서는 핫 함수와 루프를 네이티브 trace 코드로 실행할 수 있습니다. 지원하지 않는 경로는 스레디드 인터프리터에서 계속 실행됩니다. 자세한 내용은 [`docs/jit-internals.md`](docs/jit-internals.md)를 참고하세요.
-
-## 명령어 셋
-
-WebAssembly를 참고한 커스텀 명령어 셋입니다. opcode는 1바이트, 피연산자는 고정 폭 또는 길이 접두사 형식입니다.
-
-| 분류 | 명령어 |
-|---|---|
-| 스택 | `NOP` `DROP` `DUP` `SWAP` `SELECT` |
-| 제어 흐름 | `BR` `BR_IF` `BR_TABLE` `CALL` `RETURN` `RETURN_CALL` `UNREACHABLE` |
-| 코루틴 | `YIELD` `RESUME` `CORO_DONE` `CORO_VALUE` |
-| 변수 | `LOCAL_GET/SET/TEE` &nbsp; `GLOBAL_GET/SET/TEE` &nbsp; `UPVAL_GET/SET` &nbsp; `CONST_GET` |
-| 정수 | `I32_CONST` `I64_CONST` — 산술, 비트 연산, 비교, 변환 |
-| 부동소수점 | `F32_CONST` `F64_CONST` — 산술, 비교, 변환 |
-| 레퍼런스 | `REF_NULL` `REF_TEST` `REF_CAST` `REF_IS_NULL` `REF_EQ/NE` `REF_NEW/GET/SET` |
-| 문자열 | `STRING_NEW_UTF32` `STRING_ENCODE_UTF32` `STRING_ITER` `STRING_LEN` `STRING_CONCAT` 및 비교 |
-| 배열 | `ARRAY_NEW` `ARRAY_NEW_DEFAULT` `ARRAY_LEN` `ARRAY_GET/SET` `ARRAY_FILL/COPY` `ARRAY_APPEND/DELETE/SLICE` |
-| 구조체 | `STRUCT_NEW` `STRUCT_NEW_DEFAULT` `STRUCT_GET/SET` |
-| 맵 | `MAP_NEW` `MAP_NEW_DEFAULT` `MAP_LEN` `MAP_GET/LOOKUP` `MAP_SET/DELETE/CLEAR` `MAP_KEYS/ITER` |
-| 클로저 | `CLOSURE_NEW` |
-| 에러 | `THROW` `ERROR_NEW` `ERROR_GET` `ERROR_CODE` |
-
-전체 opcode 참조: [`docs/instruction-set.md`](docs/instruction-set.md)
-
-## 옵션
+### 실행 제어
 
 ```go
 vm := interp.New(prog,
-    interp.WithStack(4096),     // 값 스택 용량         (기본값: 1024)
-    interp.WithHeap(512),       // 초기 힙 용량         (기본값: 128)
-    interp.WithFrame(256),      // 최대 호출 깊이       (기본값: 128)
-    interp.WithThreshold(4096), // JIT 트리거 틱; 0=첫 샘플, 음수=비활성화
-    interp.WithTick(128),       // 샘플/폴링 주기       (기본값: 128)
-    interp.WithFuel(10_000),    // 명령어 예산          (기본값: 무제한)
-    interp.WithHook(func(vm *interp.Interpreter) error {
-        return nil // 매 틱 호출 — 상태 확인 또는 정책 적용
-    }),
+    interp.WithStack(4096),
+    interp.WithHeap(512),
+    interp.WithFrame(256),
+    interp.WithFuel(10_000),
+    interp.WithThreshold(4096),
+    interp.WithTick(128),
 )
 ```
 
-`WithTick`은 프로파일 샘플, context 취소 확인, hook 호출 주기, fuel 소비를 함께 제어합니다. `WithFuel(0)`은 무제한이며, 0이 아닌 값은 내부에서 가장 가까운 tick 간격으로 올림합니다. Hook은 `Run` 고루틴에서 동기적으로 실행됩니다.
+정책 검사는 hook을 사용하고, 명령어 단위 중단점과 단계 실행은
+`NewDebugger`와 `WithDebugger`를 사용합니다.
 
-바이트코드 단위 디버깅(중단점, `Step`, `Next`, `Finish`)은 `NewDebugger` + `WithDebugger`를 사용하세요. JIT는 비활성화됩니다. 자세한 내용: [`docs/debugging.md`](docs/debugging.md).
+## 아키텍처
+
+```text
+Program -> verifier / optimizer -> threaded interpreter -> ARM64 trace JIT
+                                   |                    |
+                                   +-- 항상 실행 가능 --+-- 핫 경로만
+```
+
+스레디드 인터프리터가 완전한 실행 엔진입니다. 트레이스 JIT는 적응형 가속
+계층으로, 지원되는 핫 경로는 네이티브 ARM64 코드로 컴파일하고 지원하지 않거나
+콜드 상태인 모든 경로는 인터프리터에서 계속 실행합니다.
+
+명령어 셋은 WebAssembly를 참고했지만 의도적으로 독자 설계했습니다. 1바이트
+opcode와 고정 폭 또는 길이 접두사 피연산자를 사용합니다.
+
+- [아키텍처](docs/architecture.md)
+- [명령어 셋](docs/instruction-set.md)
+- [JIT 내부 구조](docs/jit-internals.md)
+- [메모리 모델](docs/memory-model.md)
 
 ## 구현 현황
 
-| 기능 | |
+| 기능 | 상태 |
 |---|---|
-| 스레디드 인터프리터 | ✅ |
-| AOT 최적화 (O1-O3) | ✅ |
-| ARM64 트레이스 JIT — 숫자 연산, 로컬, 글로벌, 분기 | ✅ |
-| ARM64 트레이스 JIT — 호출, 업밸류, 레퍼런스, 힙 읽기, 루프 | ✅ |
-| x86-64 JIT | 🔲 계획 중 (`asm/amd64`는 아직 코드를 내보내지 않는 placeholder) |
+| 스레디드 인터프리터 | ✅ 사용 가능 |
+| 정적 바이트코드 검증기 | ✅ 사용 가능 |
+| AOT 최적화 (`O1`-`O3`) | ✅ 사용 가능 |
+| ARM64 트레이스 JIT | ✅ 사용 가능 |
+| 디버거와 프로파일러 | ✅ 사용 가능 |
+| x86-64 JIT | 🔲 계획 중 |
 
-우선순위와 향후 방향은 [`docs/roadmap.md`](docs/roadmap.md)를 참고하세요.
+x86-64 어셈블러 패키지는 현재 코드를 내보내지 않는 placeholder입니다. 현재
+우선순위는 [로드맵](docs/roadmap.md)을 참고하세요.
+
+## 문서
+
+| 문서 | 용도 |
+|---|---|
+| [문서 목록](docs/README.md) | 전체 프로젝트 문서 탐색 |
+| [호환성](docs/compatibility.md) | Go, 플랫폼, CGO, 빌드 태그 지원 확인 |
+| [호스트 연동](docs/host-integration.md) | 바이트코드와 Go 값 및 함수 연결 |
+| [검증](docs/verification.md) | 정적 실행 허용 검사와 한계 이해 |
+| [디버깅](docs/debugging.md) | 중단점, 단계 실행, 상태 조회 사용 |
+| [테스트](docs/testing.md) | 실행 가능한 명세와 자동화 게이트 이해 |
+| [벤치마크](docs/benchmarks.md) | 성능과 할당 측정 재현 |
 
 ## 라이선스
 

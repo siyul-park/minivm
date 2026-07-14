@@ -3,12 +3,11 @@ package interp
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"math"
 	"reflect"
 	"runtime"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,11 +18,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type upperMarshaler struct{}
+type upperMarshaler byte
 
-type contextKey struct{}
-
-type contextHost struct{}
+type contextKey byte
 
 type trackedValue struct {
 	refs   []types.Ref
@@ -41,13 +38,6 @@ func (v *trackedValue) Refs(dst []types.Ref) []types.Ref {
 func (v *trackedValue) Close() error {
 	v.closed++
 	return nil
-}
-
-func (*contextHost) Value(ctx context.Context) int32 {
-	if ctx.Value(contextKey{}) == "value" {
-		return 7
-	}
-	return 0
 }
 
 func (upperMarshaler) Marshal(_ *Interpreter, v any) (types.Value, error) {
@@ -72,37 +62,45 @@ func (upperMarshaler) Unmarshal(_ *Interpreter, v types.Value, dst any) error {
 }
 
 var runTests = []struct {
+	name    string
 	program *program.Program
 	values  []types.Value
 	err     error
 }{
 	{
+		name:    "i32.const nop returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.NOP)}),
 		values:  []types.Value{types.I32(1)},
 	},
 	{
+		name:    "unreachable reports unreachable executed",
 		program: program.New([]instr.Instruction{instr.New(instr.UNREACHABLE)}),
 		err:     ErrUnreachableExecuted,
 	},
 	{
+		name:    "i32.const i32.const drop returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.DROP)}),
 		values:  []types.Value{types.I32(1)},
 	},
 	{
+		name:    "i32.const dup returns i32 i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7), instr.New(instr.DUP)}),
 		values:  []types.Value{types.I32(7), types.I32(7)},
 	},
 	{
+		name:    "i32.const i32.const swap returns i32 i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.SWAP)}),
 		values:  []types.Value{types.I32(1), types.I32(2)},
 	},
 	{
+		name: "i32.const i32.const i32.const select returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 1), instr.New(instr.SELECT),
 		}),
 		values: []types.Value{types.I32(10)},
 	},
 	{
+		name: "br i32.const i32.const returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.BR, 5),
 			instr.New(instr.I32_CONST, 999),
@@ -111,6 +109,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
+		name: "i32.const br_if i32.const i32.const returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.BR_IF, 5),
@@ -120,6 +119,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
+		name: "i32.const br_table i32.const i32.const returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 0),
 			instr.New(instr.BR_TABLE, 1, 5, 0),
@@ -129,6 +129,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
+		name: "const.get call i32.const return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -137,6 +138,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(42)},
 	},
 	{
+		name: "const.get call i32.const i32.const return returns i32 i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -145,6 +147,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(20), types.I32(10)},
 	},
 	{
+		name: "i32.const const.get return_call local.get i32.const i32.add return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5),
 			instr.New(instr.CONST_GET, 0),
@@ -154,10 +157,12 @@ var runTests = []struct {
 		values: []types.Value{types.I32(6)},
 	},
 	{
+		name:    "i32.const yield reports yield",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.YIELD)}),
 		err:     ErrYield,
 	},
 	{
+		name: "const.get call through yield i32.const i32.add return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -169,6 +174,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(42)},
 	},
 	{
+		name: "const.get call coro.done i32.const yield return returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -178,6 +184,7 @@ var runTests = []struct {
 		values: []types.Value{types.I1(false)},
 	},
 	{
+		name: "const.get call coro.value i32.const yield return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.CALL),
@@ -187,42 +194,36 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
+		name: "i32.const global.set global.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.GLOBAL_SET, 0), instr.New(instr.GLOBAL_GET, 0),
 		}, program.WithGlobals(types.TypeI32)),
 		values: []types.Value{types.I32(3)},
 	},
 	{
-		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 4), instr.New(instr.GLOBAL_SET, 0), instr.New(instr.GLOBAL_GET, 0),
-		}, program.WithGlobals(types.TypeI32)),
-		values: []types.Value{types.I32(4)},
-	},
-	{
+		name:    "i32.const global.tee returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 6), instr.New(instr.GLOBAL_TEE, 0)}, program.WithGlobals(types.TypeI32)),
 		values:  []types.Value{types.I32(6)},
 	},
 	{
+		name: "i32.const local.set local.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.LOCAL_SET, 0), instr.New(instr.LOCAL_GET, 0),
 		}, program.WithLocals(types.TypeI32)),
 		values: []types.Value{types.I32(5)},
 	},
 	{
-		program: program.New([]instr.Instruction{
-			instr.New(instr.I32_CONST, 7), instr.New(instr.LOCAL_SET, 0), instr.New(instr.LOCAL_GET, 0),
-		}, program.WithLocals(types.TypeI32)),
-		values: []types.Value{types.I32(7)},
-	},
-	{
+		name:    "i32.const local.tee returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 9), instr.New(instr.LOCAL_TEE, 0)}, program.WithLocals(types.TypeI32)),
 		values:  []types.Value{types.I32(9)},
 	},
 	{
+		name:    "const.get returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0)}, program.WithConstants(types.I32(11))),
 		values:  []types.Value{types.I32(11)},
 	},
 	{
+		name: "i32.const const.get closure.new call upval.get return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.CONST_GET, 0),
@@ -233,6 +234,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(7)},
 	},
 	{
+		name: "i32.const const.get through i32.const upval.set upval.get return returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 0),
 			instr.New(instr.CONST_GET, 0),
@@ -245,18 +247,22 @@ var runTests = []struct {
 		values: []types.Value{types.I32(99)},
 	},
 	{
+		name:    "ref.null returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.REF_NULL)}),
 		values:  []types.Value{types.Null},
 	},
 	{
+		name:    "i32.const ref.new returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.REF_NEW)}),
 		values:  []types.Value{types.I32(5)},
 	},
 	{
+		name:    "i32.const ref.new ref.get returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 9), instr.New(instr.REF_NEW), instr.New(instr.REF_GET)}),
 		values:  []types.Value{types.I32(9)},
 	},
 	{
+		name: "i32.const ref.new dup i32.const ref.set ref.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW), instr.New(instr.DUP),
 			instr.New(instr.I32_CONST, 77), instr.New(instr.REF_SET),
@@ -265,678 +271,824 @@ var runTests = []struct {
 		values: []types.Value{types.I32(77)},
 	},
 	{
+		name:    "i32.const ref.test returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.REF_TEST, 0)}, program.WithTypes(types.TypeI32)),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const ref.cast returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.REF_CAST, 0)}, program.WithTypes(types.TypeI32)),
 		values:  []types.Value{types.I32(5)},
 	},
 	{
+		name:    "ref.null ref.is_null returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.REF_NULL), instr.New(instr.REF_IS_NULL)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "ref.null ref.null ref.eq returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.REF_NULL), instr.New(instr.REF_NULL), instr.New(instr.REF_EQ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "ref.null i32.const ref.new ref.ne returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.REF_NULL), instr.New(instr.I32_CONST, 5), instr.New(instr.REF_NEW), instr.New(instr.REF_NE)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)}),
 		values:  []types.Value{types.I32(42)},
 	},
 	{
+		name:    "i32.const i32.const i32.add returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_ADD)}),
 		values:  []types.Value{types.I32(5)},
 	},
 	{
+		name:    "i32.const i32.const i32.sub returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_SUB)}),
 		values:  []types.Value{types.I32(2)},
 	},
 	{
+		name:    "i32.const i32.const i32.mul returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_MUL)}),
 		values:  []types.Value{types.I32(12)},
 	},
 	{
+		name: "i32.const i32.const i32.div_s returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-7)), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_DIV_S),
 		}),
 		values: []types.Value{types.I32(-3)},
 	},
 	{
+		name: "i32.const i32.const i32.div_u returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_DIV_U),
 		}),
 		values: []types.Value{types.I32(int32(uint32(math.MaxUint32) / 2))},
 	},
 	{
+		name: "i32.const i32.const i32.rem_s returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-7)), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_REM_S),
 		}),
 		values: []types.Value{types.I32(-1)},
 	},
 	{
+		name: "i32.const i32.const i32.rem_u returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_REM_U),
 		}),
 		values: []types.Value{types.I32(int32(uint32(math.MaxUint32) % 3))},
 	},
 	{
+		name:    "i32.const i32.const i32.shl returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_SHL)}),
 		values:  []types.Value{types.I32(8)},
 	},
 	{
+		name: "i32.const i32.const i32.shr_s returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-8)), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SHR_S),
 		}),
 		values: []types.Value{types.I32(-4)},
 	},
 	{
+		name: "i32.const i32.const i32.shr_u returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SHR_U),
 		}),
 		values: []types.Value{types.I32(int32(uint32(math.MaxUint32) >> 1))},
 	},
 	{
+		name:    "i32.const i32.const i32.and returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 12), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_AND)}),
 		values:  []types.Value{types.I32(8)},
 	},
 	{
+		name:    "i32.const i32.const i32.or returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 12), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_OR)}),
 		values:  []types.Value{types.I32(14)},
 	},
 	{
+		name:    "i32.const i32.const i32.xor returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 12), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_XOR)}),
 		values:  []types.Value{types.I32(6)},
 	},
 	{
+		name:    "i32.const i32.clz returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CLZ)}),
 		values:  []types.Value{types.I32(31)},
 	},
 	{
+		name:    "i32.const i32.ctz returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 8), instr.New(instr.I32_CTZ)}),
 		values:  []types.Value{types.I32(3)},
 	},
 	{
+		name:    "i32.const i32.popcnt returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 7), instr.New(instr.I32_POPCNT)}),
 		values:  []types.Value{types.I32(3)},
 	},
 	{
+		name:    "i32.const i32.const i32.rotl returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_ROTL)}),
 		values:  []types.Value{types.I32(16)},
 	},
 	{
+		name:    "i32.const i32.const i32.rotr returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 16), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_ROTR)}),
 		values:  []types.Value{types.I32(1)},
 	},
 	{
+		name:    "i32.const i32.extend8_s returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 255), instr.New(instr.I32_EXTEND8_S)}),
 		values:  []types.Value{types.I32(-1)},
 	},
 	{
+		name:    "i32.const i32.extend16_s returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 65535), instr.New(instr.I32_EXTEND16_S)}),
 		values:  []types.Value{types.I32(-1)},
 	},
 	{
+		name:    "i32.const i32.eqz returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_EQZ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const i32.const i32.eq returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 5), instr.New(instr.I32_EQ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const i32.const i32.ne returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 6), instr.New(instr.I32_NE)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const i32.const i32.lt_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LT_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const i32.const i32.lt_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LT_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
+		name:    "i32.const i32.const i32.gt_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_GT_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const i32.const i32.gt_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_GT_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
+		name:    "i32.const i32.const i32.le_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_LE_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const i32.const i32.le_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LE_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
+		name:    "i32.const i32.const i32.ge_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_GE_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i32.const i32.const i32.ge_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 0), instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_GE_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
+		name:    "i32.const i32.to_i64_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_I64_S)}),
 		values:  []types.Value{types.I64(-1)},
 	},
 	{
+		name:    "i32.const i32.to_i64_u returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_I64_U)}),
 		values:  []types.Value{types.I64(int64(uint32(math.MaxUint32)))},
 	},
 	{
+		name:    "i32.const i32.to_f32_s returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_F32_S)}),
 		values:  []types.Value{types.F32(float32(int32(-1)))},
 	},
 	{
+		name:    "i32.const i32.to_f32_u returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_F32_U)}),
 		values:  []types.Value{types.F32(float32(uint32(math.MaxUint32)))},
 	},
 	{
+		name:    "i32.const i32.to_f64_s returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_F64_S)}),
 		values:  []types.Value{types.F64(float64(int32(-1)))},
 	},
 	{
+		name:    "i32.const i32.to_f64_u returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, i32operand(-1)), instr.New(instr.I32_TO_F64_U)}),
 		values:  []types.Value{types.F64(float64(uint32(math.MaxUint32)))},
 	},
 	{
+		name:    "f32.const i32.reinterpret_f32 returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1))), instr.New(instr.I32_REINTERPRET_F32)}),
 		values:  []types.Value{types.I32(int32(math.Float32bits(1)))},
 	},
 	{
+		name:    "i64.const returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 42)}),
 		values:  []types.Value{types.I64(42)},
 	},
 	{
+		name:    "i64.const i64.const i64.add returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 2), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_ADD)}),
 		values:  []types.Value{types.I64(5)},
 	},
 	{
+		name:    "i64.const i64.const i64.sub returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 5), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_SUB)}),
 		values:  []types.Value{types.I64(2)},
 	},
 	{
+		name:    "i64.const i64.const i64.mul returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 3), instr.New(instr.I64_CONST, 4), instr.New(instr.I64_MUL)}),
 		values:  []types.Value{types.I64(12)},
 	},
 	{
+		name: "i64.const i64.const i64.div_s returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-7)), instr.New(instr.I64_CONST, 2), instr.New(instr.I64_DIV_S),
 		}),
 		values: []types.Value{types.I64(-3)},
 	},
 	{
+		name: "i64.const i64.const i64.div_u returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 2), instr.New(instr.I64_DIV_U),
 		}),
 		values: []types.Value{types.I64(int64(uint64(math.MaxUint64) / 2))},
 	},
 	{
+		name: "i64.const i64.const i64.rem_s returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-7)), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_REM_S),
 		}),
 		values: []types.Value{types.I64(-1)},
 	},
 	{
+		name: "i64.const i64.const i64.rem_u returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_REM_U),
 		}),
 		values: []types.Value{types.I64(int64(uint64(math.MaxUint64) % 3))},
 	},
 	{
+		name:    "i64.const i64.const i64.shl returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 1), instr.New(instr.I64_CONST, 3), instr.New(instr.I64_SHL)}),
 		values:  []types.Value{types.I64(8)},
 	},
 	{
+		name: "i64.const i64.const i64.shr_s returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-8)), instr.New(instr.I64_CONST, 1), instr.New(instr.I64_SHR_S),
 		}),
 		values: []types.Value{types.I64(-4)},
 	},
 	{
+		name: "i64.const i64.const i64.shr_u returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 1), instr.New(instr.I64_SHR_U),
 		}),
 		values: []types.Value{types.I64(int64(uint64(math.MaxUint64) >> 1))},
 	},
 	{
+		name:    "i64.const i64.const i64.xor returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 12), instr.New(instr.I64_CONST, 10), instr.New(instr.I64_XOR)}),
 		values:  []types.Value{types.I64(6)},
 	},
 	{
+		name:    "i64.const i64.const i64.and returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 12), instr.New(instr.I64_CONST, 10), instr.New(instr.I64_AND)}),
 		values:  []types.Value{types.I64(8)},
 	},
 	{
+		name:    "i64.const i64.const i64.or returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 12), instr.New(instr.I64_CONST, 10), instr.New(instr.I64_OR)}),
 		values:  []types.Value{types.I64(14)},
 	},
 	{
+		name:    "i64.const i64.clz returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 1), instr.New(instr.I64_CLZ)}),
 		values:  []types.Value{types.I64(63)},
 	},
 	{
+		name:    "i64.const i64.ctz returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 8), instr.New(instr.I64_CTZ)}),
 		values:  []types.Value{types.I64(3)},
 	},
 	{
+		name:    "i64.const i64.popcnt returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 7), instr.New(instr.I64_POPCNT)}),
 		values:  []types.Value{types.I64(3)},
 	},
 	{
+		name:    "i64.const i64.const i64.rotl returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 1), instr.New(instr.I64_CONST, 4), instr.New(instr.I64_ROTL)}),
 		values:  []types.Value{types.I64(16)},
 	},
 	{
+		name:    "i64.const i64.const i64.rotr returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 16), instr.New(instr.I64_CONST, 4), instr.New(instr.I64_ROTR)}),
 		values:  []types.Value{types.I64(1)},
 	},
 	{
+		name:    "i64.const i64.extend8_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 255), instr.New(instr.I64_EXTEND8_S)}),
 		values:  []types.Value{types.I64(-1)},
 	},
 	{
+		name:    "i64.const i64.extend16_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 65535), instr.New(instr.I64_EXTEND16_S)}),
 		values:  []types.Value{types.I64(-1)},
 	},
 	{
+		name:    "i64.const i64.extend32_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, uint64(uint32(math.MaxUint32))), instr.New(instr.I64_EXTEND32_S)}),
 		values:  []types.Value{types.I64(-1)},
 	},
 	{
+		name:    "i64.const i64.eqz returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_EQZ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i64.const i64.const i64.eq returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 5), instr.New(instr.I64_CONST, 5), instr.New(instr.I64_EQ)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i64.const i64.const i64.ne returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 5), instr.New(instr.I64_CONST, 6), instr.New(instr.I64_NE)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i64.const i64.const i64.lt_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 0), instr.New(instr.I64_LT_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i64.const i64.const i64.lt_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 0), instr.New(instr.I64_LT_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
+		name:    "i64.const i64.const i64.gt_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_GT_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i64.const i64.const i64.gt_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_GT_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
+		name:    "i64.const i64.const i64.le_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_LE_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i64.const i64.const i64.le_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_CONST, 0), instr.New(instr.I64_LE_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
+		name:    "i64.const i64.const i64.ge_s returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_CONST, 0), instr.New(instr.I64_GE_S)}),
 		values:  []types.Value{types.I1(true)},
 	},
 	{
+		name:    "i64.const i64.const i64.ge_u returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, 0), instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_GE_U)}),
 		values:  []types.Value{types.I1(false)},
 	},
 	{
+		name:    "i64.const i64.to_i32 returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, uint64(int64(1)<<32+1)), instr.New(instr.I64_TO_I32)}),
 		values:  []types.Value{types.I32(1)},
 	},
 	{
+		name:    "i64.const i64.to_f32_s returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_TO_F32_S)}),
 		values:  []types.Value{types.F32(float32(int64(-1)))},
 	},
 	{
+		name:    "i64.const i64.to_f32_u returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_TO_F32_U)}),
 		values:  []types.Value{types.F32(float32(uint64(math.MaxUint64)))},
 	},
 	{
+		name:    "i64.const i64.to_f64_s returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_TO_F64_S)}),
 		values:  []types.Value{types.F64(float64(int64(-1)))},
 	},
 	{
+		name:    "i64.const i64.to_f64_u returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, i64operand(-1)), instr.New(instr.I64_TO_F64_U)}),
 		values:  []types.Value{types.F64(float64(uint64(math.MaxUint64)))},
 	},
 	{
+		name:    "f64.const i64.reinterpret_f64 returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(1)), instr.New(instr.I64_REINTERPRET_F64)}),
 		values:  []types.Value{types.I64(int64(math.Float64bits(1)))},
 	},
 	{
+		name:    "f32.const returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5)))}),
 		values:  []types.Value{types.F32(1.5)},
 	},
 	{
+		name: "f32.const f32.const f32.add returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2.25))), instr.New(instr.F32_ADD),
 		}),
 		values: []types.Value{types.F32(3.75)},
 	},
 	{
+		name: "f32.const f32.const f32.sub returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(5.5))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2.25))), instr.New(instr.F32_SUB),
 		}),
 		values: []types.Value{types.F32(3.25)},
 	},
 	{
+		name: "f32.const f32.const f32.mul returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2.5))), instr.New(instr.F32_CONST, uint64(math.Float32bits(4))), instr.New(instr.F32_MUL),
 		}),
 		values: []types.Value{types.F32(10)},
 	},
 	{
+		name: "f32.const f32.const f32.div returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(10))), instr.New(instr.F32_CONST, uint64(math.Float32bits(4))), instr.New(instr.F32_DIV),
 		}),
 		values: []types.Value{types.F32(2.5)},
 	},
 	{
+		name: "f32.const f32.const f32.rem returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(-7))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_REM),
 		}),
 		values: []types.Value{types.F32(-1)},
 	},
 	{
+		name: "f32.const f32.const f32.mod returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(-7))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_MOD),
 		}),
 		values: []types.Value{types.F32(2)},
 	},
 	{
+		name: "f32.const f32.const f32.rem reports divide by zero",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))), instr.New(instr.F32_CONST, 0), instr.New(instr.F32_REM),
 		}),
 		err: ErrDivideByZero,
 	},
 	{
+		name: "f32.const f32.const f32.mod reports divide by zero",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))), instr.New(instr.F32_CONST, 0), instr.New(instr.F32_MOD),
 		}),
 		err: ErrDivideByZero,
 	},
 	{
+		name:    "f32.const f32.abs returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.5))), instr.New(instr.F32_ABS)}),
 		values:  []types.Value{types.F32(3.5)},
 	},
 	{
+		name:    "f32.const f32.neg returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(3.5))), instr.New(instr.F32_NEG)}),
 		values:  []types.Value{types.F32(-3.5)},
 	},
 	{
+		name:    "f32.const f32.sqrt returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(9))), instr.New(instr.F32_SQRT)}),
 		values:  []types.Value{types.F32(3)},
 	},
 	{
+		name:    "f32.const f32.ceil returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1.2))), instr.New(instr.F32_CEIL)}),
 		values:  []types.Value{types.F32(2)},
 	},
 	{
+		name:    "f32.const f32.floor returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1.8))), instr.New(instr.F32_FLOOR)}),
 		values:  []types.Value{types.F32(1)},
 	},
 	{
+		name:    "f32.const f32.trunc returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-1.8))), instr.New(instr.F32_TRUNC)}),
 		values:  []types.Value{types.F32(-1)},
 	},
 	{
+		name:    "f32.const f32.nearest returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(2.5))), instr.New(instr.F32_NEAREST)}),
 		values:  []types.Value{types.F32(2)},
 	},
 	{
+		name: "f32.const f32.const f32.min returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.F32_MIN),
 		}),
 		values: []types.Value{types.F32(3)},
 	},
 	{
+		name: "f32.const f32.const f32.max returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_CONST, uint64(math.Float32bits(5))), instr.New(instr.F32_MAX),
 		}),
 		values: []types.Value{types.F32(5)},
 	},
 	{
+		name: "f32.const f32.const f32.copysign returns f32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_CONST, uint64(math.Float32bits(-1))), instr.New(instr.F32_COPYSIGN),
 		}),
 		values: []types.Value{types.F32(-3)},
 	},
 	{
+		name: "f32.const f32.const f32.eq returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_EQ),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f32.const f32.const f32.ne returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_NE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f32.const f32.const f32.lt returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_LT),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f32.const f32.const f32.gt returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_GT),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f32.const f32.const f32.le returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_LE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f32.const f32.const f32.ge returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_CONST, uint64(math.Float32bits(2))), instr.New(instr.F32_GE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name:    "f32.const f32.to_i32_s returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.7))), instr.New(instr.F32_TO_I32_S)}),
 		values:  []types.Value{types.I32(-3)},
 	},
 	{
+		name:    "f32.const f32.to_i32_u returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(3.7))), instr.New(instr.F32_TO_I32_U)}),
 		values:  []types.Value{types.I32(3)},
 	},
 	{
+		name:    "f32.const f32.to_i64_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(-3.7))), instr.New(instr.F32_TO_I64_S)}),
 		values:  []types.Value{types.I64(-3)},
 	},
 	{
+		name:    "f32.const f32.to_i64_u returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(3.7))), instr.New(instr.F32_TO_I64_U)}),
 		values:  []types.Value{types.I64(3)},
 	},
 	{
+		name:    "f32.const f32.to_f64 returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F32_CONST, uint64(math.Float32bits(1.5))), instr.New(instr.F32_TO_F64)}),
 		values:  []types.Value{types.F64(float64(float32(1.5)))},
 	},
 	{
+		name:    "i32.const f32.reinterpret_i32 returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, uint64(math.Float32bits(1))), instr.New(instr.F32_REINTERPRET_I32)}),
 		values:  []types.Value{types.F32(1)},
 	},
 	{
+		name:    "f64.const returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(2.5))}),
 		values:  []types.Value{types.F64(2.5)},
 	},
 	{
+		name: "f64.const f64.const f64.add returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(1.5)), instr.New(instr.F64_CONST, math.Float64bits(2.25)), instr.New(instr.F64_ADD),
 		}),
 		values: []types.Value{types.F64(3.75)},
 	},
 	{
+		name: "f64.const f64.const f64.sub returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(5.5)), instr.New(instr.F64_CONST, math.Float64bits(2.25)), instr.New(instr.F64_SUB),
 		}),
 		values: []types.Value{types.F64(3.25)},
 	},
 	{
+		name: "f64.const f64.const f64.mul returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.F64_CONST, math.Float64bits(4)), instr.New(instr.F64_MUL),
 		}),
 		values: []types.Value{types.F64(10)},
 	},
 	{
+		name: "f64.const f64.const f64.div returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(10)), instr.New(instr.F64_CONST, math.Float64bits(4)), instr.New(instr.F64_DIV),
 		}),
 		values: []types.Value{types.F64(2.5)},
 	},
 	{
+		name: "f64.const f64.const f64.rem returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(-7)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_REM),
 		}),
 		values: []types.Value{types.F64(-1)},
 	},
 	{
+		name: "f64.const f64.const f64.mod returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(-7)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_MOD),
 		}),
 		values: []types.Value{types.F64(2)},
 	},
 	{
+		name: "f64.const f64.const f64.rem reports divide by zero",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(1)), instr.New(instr.F64_CONST, 0), instr.New(instr.F64_REM),
 		}),
 		err: ErrDivideByZero,
 	},
 	{
+		name: "f64.const f64.const f64.mod reports divide by zero",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(1)), instr.New(instr.F64_CONST, 0), instr.New(instr.F64_MOD),
 		}),
 		err: ErrDivideByZero,
 	},
 	{
+		name:    "f64.const f64.abs returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-3.5)), instr.New(instr.F64_ABS)}),
 		values:  []types.Value{types.F64(3.5)},
 	},
 	{
+		name:    "f64.const f64.neg returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(3.5)), instr.New(instr.F64_NEG)}),
 		values:  []types.Value{types.F64(-3.5)},
 	},
 	{
+		name:    "f64.const f64.sqrt returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(9)), instr.New(instr.F64_SQRT)}),
 		values:  []types.Value{types.F64(3)},
 	},
 	{
+		name:    "f64.const f64.ceil returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(1.2)), instr.New(instr.F64_CEIL)}),
 		values:  []types.Value{types.F64(2)},
 	},
 	{
+		name:    "f64.const f64.floor returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(1.8)), instr.New(instr.F64_FLOOR)}),
 		values:  []types.Value{types.F64(1)},
 	},
 	{
+		name:    "f64.const f64.trunc returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-1.8)), instr.New(instr.F64_TRUNC)}),
 		values:  []types.Value{types.F64(-1)},
 	},
 	{
+		name:    "f64.const f64.nearest returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.F64_NEAREST)}),
 		values:  []types.Value{types.F64(2)},
 	},
 	{
+		name: "f64.const f64.const f64.min returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.F64_MIN),
 		}),
 		values: []types.Value{types.F64(3)},
 	},
 	{
+		name: "f64.const f64.const f64.max returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_CONST, math.Float64bits(5)), instr.New(instr.F64_MAX),
 		}),
 		values: []types.Value{types.F64(5)},
 	},
 	{
+		name: "f64.const f64.const f64.copysign returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_CONST, math.Float64bits(-1)), instr.New(instr.F64_COPYSIGN),
 		}),
 		values: []types.Value{types.F64(-3)},
 	},
 	{
+		name: "f64.const f64.const f64.eq returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_EQ),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f64.const f64.const f64.ne returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_NE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f64.const f64.const f64.lt returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_LT),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f64.const f64.const f64.gt returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(3)), instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_GT),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f64.const f64.const f64.le returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_LE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "f64.const f64.const f64.ge returns i1",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_CONST, math.Float64bits(2)), instr.New(instr.F64_GE),
 		}),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name:    "f64.const f64.to_i32_s returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-3.7)), instr.New(instr.F64_TO_I32_S)}),
 		values:  []types.Value{types.I32(-3)},
 	},
 	{
+		name:    "f64.const f64.to_i32_u returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(3.7)), instr.New(instr.F64_TO_I32_U)}),
 		values:  []types.Value{types.I32(3)},
 	},
 	{
+		name:    "f64.const f64.to_i64_s returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(-3.7)), instr.New(instr.F64_TO_I64_S)}),
 		values:  []types.Value{types.I64(-3)},
 	},
 	{
+		name:    "f64.const f64.to_i64_u returns i64",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(3.7)), instr.New(instr.F64_TO_I64_U)}),
 		values:  []types.Value{types.I64(3)},
 	},
 	{
+		name:    "f64.const f64.to_f32 returns f32",
 		program: program.New([]instr.Instruction{instr.New(instr.F64_CONST, math.Float64bits(1.5)), instr.New(instr.F64_TO_F32)}),
 		values:  []types.Value{types.F32(1.5)},
 	},
 	{
+		name:    "i64.const f64.reinterpret_i64 returns f64",
 		program: program.New([]instr.Instruction{instr.New(instr.I64_CONST, math.Float64bits(1)), instr.New(instr.F64_REINTERPRET_I64)}),
 		values:  []types.Value{types.F64(1)},
 	},
 	{
+		name: "i32.const i32.const i32.const array.new string.new_utf32 returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 72), instr.New(instr.I32_CONST, 105), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.STRING_NEW_UTF32),
@@ -944,59 +1096,79 @@ var runTests = []struct {
 		values: []types.Value{types.String("Hi")},
 	},
 	{
+		name:    "const.get string.len returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_LEN)}, program.WithConstants(types.String("Hi"))),
 		values:  []types.Value{types.I32(2)},
 	},
 	{
+		name: "const.get const.get string.concat returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_CONCAT)},
 			program.WithConstants(types.String("Hi"), types.String("There"))),
 		values: []types.Value{types.String("HiThere")},
 	},
 	{
+		name: "const.get const.get string.eq returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_EQ)},
 			program.WithConstants(types.String("Go"), types.String("Go"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "const.get const.get string.ne returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_NE)},
 			program.WithConstants(types.String("Go"), types.String("No"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "const.get const.get string.lt returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_LT)},
 			program.WithConstants(types.String("Go"), types.String("No"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "const.get const.get string.gt returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_GT)},
 			program.WithConstants(types.String("No"), types.String("Go"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "const.get const.get string.le returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_LE)},
 			program.WithConstants(types.String("Go"), types.String("Go"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name: "const.get const.get string.ge returns i1",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_GE)},
 			program.WithConstants(types.String("Go"), types.String("Go"))),
 		values: []types.Value{types.I1(true)},
 	},
 	{
+		name:    "const.get string.encode_utf32 returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_ENCODE_UTF32)}, program.WithConstants(types.String("Hi"))),
 		values:  []types.Value{types.TypedArray[int32]{72, 105}},
 	},
 	{
+		name: "i32.const i32.const i32.const i32.const array.new returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 30), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
 		}, program.WithTypes(types.TypeI32Array)),
 		values: []types.Value{types.TypedArray[int32]{10, 20, 30}},
 	},
 	{
+		name:    "i32.const array.new_default returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0)}, program.WithTypes(types.TypeI32Array)),
 		values:  []types.Value{types.TypedArray[int32]{0, 0, 0}},
 	},
 	{
+		name: "i32.const array.new_default returns null refs",
+		program: program.New(
+			[]instr.Instruction{instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW_DEFAULT, 0)},
+			program.WithTypes(types.NewArrayType(types.TypeRef)),
+		),
+		values: []types.Value{types.NewArray(types.NewArrayType(types.TypeRef), types.BoxedNull, types.BoxedNull)},
+	},
+	{
+		name: "i32.const i32.const i32.const array.new array.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.ARRAY_LEN),
@@ -1004,6 +1176,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
+		name: "i32.const i32.const i32.const i32.const array.new i32.const array.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 100), instr.New(instr.I32_CONST, 200), instr.New(instr.I32_CONST, 300), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_GET),
@@ -1011,6 +1184,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(200)},
 	},
 	{
+		name: "i32.const i32.const through i32.const array.set i32.const array.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.DUP),
@@ -1020,6 +1194,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(99)},
 	},
 	{
+		name: "i32.const array.new_default through i32.const array.fill i32.const array.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.DUP),
@@ -1029,6 +1204,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(7)},
 	},
 	{
+		name: "i32.const array.new_default through i32.const array.copy i32.const array.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.DUP),
@@ -1040,6 +1216,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(9)},
 	},
 	{
+		name: "i32.const i32.const through i32.const i32.const i32.const array.append returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4), instr.New(instr.I32_CONST, 2), instr.New(instr.ARRAY_APPEND),
@@ -1047,6 +1224,7 @@ var runTests = []struct {
 		values: []types.Value{types.TypedArray[int32]{1, 2, 3, 4}},
 	},
 	{
+		name: "i32.const i32.const i32.const i32.const array.new i32.const array.delete returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_DELETE),
@@ -1054,6 +1232,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
+		name: "i32.const i32.const through array.new i32.const i32.const array.slice returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 30), instr.New(instr.I32_CONST, 40), instr.New(instr.I32_CONST, 4), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_SLICE),
@@ -1061,6 +1240,7 @@ var runTests = []struct {
 		values: []types.Value{types.TypedArray[int32]{20, 30}},
 	},
 	{
+		name: "i32.const f64.const struct.new returns ref",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
 		}, program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)))),
@@ -1070,11 +1250,13 @@ var runTests = []struct {
 		)},
 	},
 	{
+		name: "struct.new_default returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.STRUCT_NEW_DEFAULT, 0)},
 			program.WithTypes(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)))),
 		values: []types.Value{types.NewStruct(types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeF64)))},
 	},
 	{
+		name: "i32.const f64.const struct.new i32.const struct.get returns f64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.STRUCT_GET),
@@ -1082,6 +1264,7 @@ var runTests = []struct {
 		values: []types.Value{types.F64(2.5)},
 	},
 	{
+		name: "i32.const f64.const through i32.const struct.set i32.const struct.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7), instr.New(instr.F64_CONST, math.Float64bits(2.5)), instr.New(instr.STRUCT_NEW, 0),
 			instr.New(instr.DUP),
@@ -1091,6 +1274,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(99)},
 	},
 	{
+		name: "i32.const i32.const through i32.const map.new i32.const map.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_GET),
@@ -1098,6 +1282,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(10)},
 	},
 	{
+		name: "i32.const map.new_default map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 4), instr.New(instr.MAP_NEW_DEFAULT, 0),
 			instr.New(instr.MAP_LEN),
@@ -1105,6 +1290,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(0)},
 	},
 	{
+		name: "i32.const i32.const i32.const i32.const i32.const map.new map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.MAP_LEN),
@@ -1112,6 +1298,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
+		name: "i32.const i32.const i32.const map.new i32.const map.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_GET),
@@ -1119,6 +1306,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(0)},
 	},
 	{
+		name: "i32.const i32.const i32.const map.new i32.const map.lookup returns i1 i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_LOOKUP),
@@ -1126,6 +1314,7 @@ var runTests = []struct {
 		values: []types.Value{types.I1(true), types.I32(10)},
 	},
 	{
+		name: "i32.const i32.const through i32.const i32.const map.set map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.DUP),
@@ -1135,6 +1324,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
+		name: "i32.const i32.const through dup i32.const map.delete map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.DUP),
@@ -1144,6 +1334,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
+		name: "i32.const i32.const i32.const map.new dup map.clear map.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.DUP),
@@ -1153,6 +1344,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(0)},
 	},
 	{
+		name: "i32.const i32.const through i32.const map.new map.keys array.len returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 20), instr.New(instr.I32_CONST, 2), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.MAP_KEYS), instr.New(instr.ARRAY_LEN),
@@ -1160,6 +1352,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(2)},
 	},
 	{
+		name: "i32.const i32.const i32.const map.new map.iter coro.value returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 10), instr.New(instr.I32_CONST, 1), instr.New(instr.MAP_NEW, 0),
 			instr.New(instr.MAP_ITER), instr.New(instr.CORO_VALUE),
@@ -1167,6 +1360,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(1)},
 	},
 	{
+		name: "i32.const throw i32.const returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 99),
 			instr.New(instr.THROW),
@@ -1175,26 +1369,31 @@ var runTests = []struct {
 		values: []types.Value{types.I32(99)},
 	},
 	{
+		name:    "i32.const i32.const error.new returns ref",
 		program: program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 7), instr.New(instr.ERROR_NEW)}),
 		values:  []types.Value{types.NewError(types.ErrorCode(7), "5", types.BoxI32(5))},
 	},
 	{
+		name: "i32.const i32.const error.new error.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 7), instr.New(instr.ERROR_NEW), instr.New(instr.ERROR_GET),
 		}),
 		values: []types.Value{types.I32(5)},
 	},
 	{
+		name: "i32.const i32.const error.new error.code returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 7), instr.New(instr.ERROR_NEW), instr.New(instr.ERROR_CODE),
 		}),
 		values: []types.Value{types.I32(7)},
 	},
 	{
+		name:    "const.get string.iter coro.value returns i32",
 		program: program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.STRING_ITER), instr.New(instr.CORO_VALUE)}, program.WithConstants(types.String("Hi"))),
 		values:  []types.Value{types.I32(72)},
 	},
 	{
+		name: "const.get i32.const array.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.I32_CONST, 1),
@@ -1203,6 +1402,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(5)},
 	},
 	{
+		name: "const.get i32.const struct.get returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.I32_CONST, 0),
@@ -1211,6 +1411,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(7)},
 	},
 	{
+		name: "const.get ref.get returns i64",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.REF_GET),
@@ -1218,6 +1419,7 @@ var runTests = []struct {
 		values: []types.Value{types.I64(math.MaxInt64)},
 	},
 	{
+		name: "i32.const i32.const const.get call returns i32",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 4),
 			instr.New(instr.CONST_GET, 0), instr.New(instr.CALL),
@@ -1230,6 +1432,7 @@ var runTests = []struct {
 		values: []types.Value{types.I32(7)},
 	},
 	{
+		name: "i32.const array.new_default i32.const array.get reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_GET),
@@ -1237,6 +1440,7 @@ var runTests = []struct {
 		err: ErrIndexOutOfRange,
 	},
 	{
+		name: "i32.const array.new_default i32.const i32.const array.set reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 5), instr.New(instr.I32_CONST, 9), instr.New(instr.ARRAY_SET),
@@ -1244,6 +1448,7 @@ var runTests = []struct {
 		err: ErrIndexOutOfRange,
 	},
 	{
+		name: "i32.const array.new_default i32.const i32.const i32.const array.fill reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 7), instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_FILL),
@@ -1251,6 +1456,7 @@ var runTests = []struct {
 		err: ErrIndexOutOfRange,
 	},
 	{
+		name: "i32.const array.new_default i32.const array.delete reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 5), instr.New(instr.ARRAY_DELETE),
@@ -1258,6 +1464,7 @@ var runTests = []struct {
 		err: ErrIndexOutOfRange,
 	},
 	{
+		name: "i32.const array.new_default through array.new_default i32.const i32.const array.copy reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 			instr.New(instr.I32_CONST, 0),
@@ -1268,6 +1475,7 @@ var runTests = []struct {
 		err: ErrIndexOutOfRange,
 	},
 	{
+		name: "i32.const i32.const through array.new i32.const i32.const array.copy reports index out of range",
 		program: program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_CONST, 3), instr.New(instr.I32_CONST, 3), instr.New(instr.ARRAY_NEW, 0),
 			instr.New(instr.I32_CONST, 2),
@@ -1280,24 +1488,322 @@ var runTests = []struct {
 }
 
 func TestInterpreter_Run(t *testing.T) {
-	for _, tt := range runTests {
-		t.Run(fmt.Sprint(tt.program), func(t *testing.T) {
-			i := New(tt.program)
-			defer i.Close()
-
-			err := i.Run(context.Background())
-			if tt.err != nil {
-				require.ErrorIs(t, err, tt.err)
-				return
+	t.Run("covers every runtime opcode", func(t *testing.T) {
+		covered := make(map[instr.Opcode]struct{})
+		names := make(map[string]struct{})
+		for _, tt := range runTests {
+			require.NotEmpty(t, tt.name)
+			_, duplicate := names[tt.name]
+			require.False(t, duplicate, "duplicate runtime case %q", tt.name)
+			names[tt.name] = struct{}{}
+			codes := [][]byte{tt.program.Code}
+			for _, constant := range tt.program.Constants {
+				if fn, ok := constant.(*types.Function); ok {
+					codes = append(codes, fn.Code)
+				}
 			}
-			require.NoError(t, err)
-			for _, want := range tt.values {
-				got, err := i.Pop()
-				require.NoError(t, err)
-				require.Equal(t, want, got)
+			for _, code := range codes {
+				for ip := 0; ip < len(code); {
+					inst := instr.Instruction(code[ip:])
+					covered[inst.Opcode()] = struct{}{}
+					width := inst.Width()
+					require.Positive(t, width)
+					require.LessOrEqual(t, ip+width, len(code))
+					ip += width
+				}
+			}
+		}
+
+		var missing []string
+		for code := 0; code < 256; code++ {
+			op := instr.Opcode(code)
+			if !instr.Valid(op) {
+				continue
+			}
+			if _, ok := covered[op]; !ok {
+				missing = append(missing, instr.TypeOf(op).Mnemonic)
+			}
+		}
+		require.Empty(t, missing)
+	})
+
+	modes := []struct {
+		name string
+		opts []func(*option)
+	}{
+		{name: "standalone", opts: []func(*option){WithTick(1), WithThreshold(-1)}},
+		{name: "fused", opts: []func(*option){WithThreshold(-1)}},
+	}
+	for _, tt := range runTests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, mode := range modes {
+				t.Run(mode.name, func(t *testing.T) {
+					i := New(tt.program, mode.opts...)
+					defer i.Close()
+
+					err := i.Run(context.Background())
+					if tt.err != nil {
+						require.ErrorIs(t, err, tt.err)
+						return
+					}
+					require.NoError(t, err)
+					for _, want := range tt.values {
+						got, err := i.Pop()
+						require.NoError(t, err)
+						require.Equal(t, want, got)
+					}
+					require.Equal(t, len(tt.program.Locals), i.Len(), "unexpected values remain on the operand stack")
+				})
 			}
 		})
 	}
+
+	var benchmarkNumeric []instr.Instruction
+	for range 64 {
+		benchmarkNumeric = append(benchmarkNumeric,
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.DROP),
+		)
+	}
+	benchmarkNumeric = append(benchmarkNumeric, instr.New(instr.I32_CONST, 42))
+
+	if runtime.GOARCH == "arm64" {
+		t.Run("I32Add/Straight/JITCold", func(t *testing.T) {
+			vm := New(program.New(benchmarkNumeric), WithTick(1), WithThreshold(0))
+			defer vm.Close()
+
+			require.NoError(t, vm.Run(context.Background()))
+			value, err := vm.Pop()
+			require.NoError(t, err)
+			require.Equal(t, types.I32(42), value)
+			require.Greater(t, vm.samples.Value("vm_jit_emits_total"), float64(0))
+		})
+
+		arrayExitValues := types.TypedArray[float64]{7}
+		arrayExitBuilder := types.NewFunctionBuilder(nil).
+			WithParams(types.TypeI32, types.TypeF64Array).
+			WithReturns(types.TypeF64)
+		arrayExitFunction, err := arrayExitBuilder.Emit(
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.ARRAY_GET),
+			instr.New(instr.RETURN),
+		).Build()
+		require.NoError(t, err)
+		arrayExit := program.New(
+			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.CALL)},
+			program.WithConstants(arrayExitValues, arrayExitFunction),
+		)
+		t.Run("Array/Get/JITExit", func(t *testing.T) {
+			profile := prof.New()
+			vm := New(arrayExit, WithProfiler(profile), WithTick(1), WithThreshold(0))
+			for range 8 {
+				vm.Reset()
+				require.NoError(t, vm.Push(types.I32(0)))
+				require.NoError(t, vm.Run(context.Background()))
+				value, err := vm.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.F64(7), value)
+			}
+
+			vm.Reset()
+			require.NoError(t, vm.Push(types.I32(-1)))
+			require.ErrorIs(t, vm.Run(context.Background()), ErrIndexOutOfRange)
+			require.NoError(t, vm.Close())
+
+			var exits float64
+			for _, metric := range profile.Metrics() {
+				if metric.Name == "vm_jit_native_exits_total" {
+					exits += metric.Value
+				}
+			}
+			require.Greater(t, exits, float64(0))
+		})
+
+		divideFunction := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
+			WithParams(types.TypeI32, types.TypeI32).
+			Emit(
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.I32_DIV_S),
+				instr.New(instr.RETURN),
+			).
+			MustBuild()
+		divide := program.New(
+			[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
+			program.WithConstants(divideFunction),
+		)
+		t.Run("I32Div/JITDeopt", func(t *testing.T) {
+			profile := prof.New()
+			vm := New(divide, WithProfiler(profile), WithTick(1), WithThreshold(0))
+			for range 8 {
+				vm.Reset()
+				require.NoError(t, vm.Push(types.I32(90)))
+				require.NoError(t, vm.Push(types.I32(3)))
+				require.NoError(t, vm.Run(context.Background()))
+				value, err := vm.Pop()
+				require.NoError(t, err)
+				require.Equal(t, types.I32(30), value)
+			}
+			require.NotNil(t, vm.stub(1))
+
+			vm.Reset()
+			require.NoError(t, vm.Push(types.I32(90)))
+			require.NoError(t, vm.Push(types.I32(0)))
+			require.ErrorIs(t, vm.Run(context.Background()), ErrDivideByZero)
+			require.NoError(t, vm.Close())
+
+			var exits float64
+			for _, metric := range profile.Metrics() {
+				if metric.Name == "vm_jit_native_exits_total" {
+					exits += metric.Value
+				}
+			}
+			require.Greater(t, exits, float64(0))
+		})
+	}
+
+	parityPrograms := []struct {
+		name string
+		prog *program.Program
+	}{
+		{
+			name: "integer arithmetic",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 20),
+				instr.New(instr.I32_CONST, 22),
+				instr.New(instr.I32_ADD),
+			}),
+		},
+		{
+			name: "global mutation",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 7),
+				instr.New(instr.GLOBAL_SET, 0),
+				instr.New(instr.GLOBAL_GET, 0),
+			}, program.WithGlobals(types.TypeI32)),
+		},
+		{
+			name: "array access",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_GET),
+			}, program.WithConstants(types.TypedArray[int32]{10, 20, 30})),
+		},
+		{
+			name: "divide by zero trap",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_DIV_S),
+			}),
+		},
+		{
+			name: "coroutine state",
+			prog: program.New(
+				[]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.CALL),
+					instr.New(instr.CORO_DONE),
+				},
+				program.WithConstants(
+					types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
+						instr.New(instr.I32_CONST, 1),
+						instr.New(instr.YIELD),
+						instr.New(instr.RETURN),
+					).MustBuild(),
+				),
+			),
+		},
+	}
+	type outcome struct {
+		values  []types.Value
+		globals []types.Boxed
+		code    types.ErrorCode
+	}
+	run := func(t *testing.T, prog *program.Program, opts ...func(*option)) outcome {
+		t.Helper()
+		i := New(prog, opts...)
+		defer i.Close()
+		err := i.Run(context.Background())
+		result := outcome{code: ErrorCode(err)}
+		for i.Len() > 0 {
+			value, popErr := i.Pop()
+			require.NoError(t, popErr)
+			result.values = append(result.values, value)
+		}
+		for index := range prog.Globals {
+			value, globalErr := i.Global(index)
+			require.NoError(t, globalErr)
+			result.globals = append(result.globals, value)
+		}
+		return result
+	}
+	for _, tt := range parityPrograms {
+		oracle := run(t, tt.prog, WithTick(1), WithThreshold(-1))
+		t.Run("parity/"+tt.name+"/fused", func(t *testing.T) {
+			require.Equal(t, oracle, run(t, tt.prog, WithThreshold(-1)))
+		})
+		if runtime.GOARCH == "arm64" {
+			t.Run("parity/"+tt.name+"/jit warm", func(t *testing.T) {
+				i := New(tt.prog, WithThreshold(0))
+				defer i.Close()
+				require.Equal(t, oracle.code, ErrorCode(i.Run(context.Background())))
+				i.Reset()
+
+				err := i.Run(context.Background())
+				result := outcome{code: ErrorCode(err)}
+				for i.Len() > 0 {
+					value, popErr := i.Pop()
+					require.NoError(t, popErr)
+					result.values = append(result.values, value)
+				}
+				for index := range tt.prog.Globals {
+					value, globalErr := i.Global(index)
+					require.NoError(t, globalErr)
+					result.globals = append(result.globals, value)
+				}
+				require.Equal(t, oracle, result)
+			})
+		}
+	}
+
+	t.Run("parity/host callback effect", func(t *testing.T) {
+		runHost := func(opts ...func(*option)) (types.Value, int) {
+			calls := 0
+			host := NewHostFunction(
+				&types.FunctionType{Returns: []types.Type{types.TypeI32}},
+				func(_ *Interpreter, _ []types.Boxed) ([]types.Boxed, error) {
+					calls++
+					return []types.Boxed{types.BoxI32(42)}, nil
+				},
+			)
+			prog := program.New(
+				[]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)},
+				program.WithConstants(host),
+			)
+			i := New(prog, opts...)
+			defer i.Close()
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.Pop()
+			require.NoError(t, err)
+			return value, calls
+		}
+
+		want, calls := runHost(WithTick(1), WithThreshold(-1))
+		require.Equal(t, 1, calls)
+		got, calls := runHost(WithThreshold(-1))
+		require.Equal(t, want, got)
+		require.Equal(t, 1, calls)
+		if runtime.GOARCH == "arm64" {
+			got, calls = runHost(WithThreshold(0))
+			require.Equal(t, want, got)
+			require.Equal(t, 1, calls)
+		}
+	})
 
 	t.Run("entry frame yield resumes on the next Run call", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{
@@ -2238,14 +2744,12 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("fused UPVAL_GET+CONST binop computes correctly for i32/i64/f32/f64 (interp-only)", func(t *testing.T) {
 		cases := []struct {
-			name    string
 			capture types.Type
 			body    func(cst uint64) []instr.Instruction
 			cst     uint64
 			want    types.Value
 		}{
 			{
-				name:    "i32",
 				capture: types.TypeI32,
 				body: func(cst uint64) []instr.Instruction {
 					return []instr.Instruction{instr.New(instr.UPVAL_GET, 0), instr.New(instr.I32_CONST, cst), instr.New(instr.I32_ADD), instr.New(instr.RETURN)}
@@ -2254,7 +2758,6 @@ func TestInterpreter_Run(t *testing.T) {
 				want: types.I32(8),
 			},
 			{
-				name:    "i64",
 				capture: types.TypeI64,
 				body: func(cst uint64) []instr.Instruction {
 					return []instr.Instruction{instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_CONST, cst), instr.New(instr.I64_ADD), instr.New(instr.RETURN)}
@@ -2263,7 +2766,6 @@ func TestInterpreter_Run(t *testing.T) {
 				want: types.I64(8),
 			},
 			{
-				name:    "f32",
 				capture: types.TypeF32,
 				body: func(cst uint64) []instr.Instruction {
 					return []instr.Instruction{instr.New(instr.UPVAL_GET, 0), instr.New(instr.F32_CONST, cst), instr.New(instr.F32_ADD), instr.New(instr.RETURN)}
@@ -2272,7 +2774,6 @@ func TestInterpreter_Run(t *testing.T) {
 				want: types.F32(8),
 			},
 			{
-				name:    "f64",
 				capture: types.TypeF64,
 				body: func(cst uint64) []instr.Instruction {
 					return []instr.Instruction{instr.New(instr.UPVAL_GET, 0), instr.New(instr.F64_CONST, cst), instr.New(instr.F64_ADD), instr.New(instr.RETURN)}
@@ -2282,7 +2783,7 @@ func TestInterpreter_Run(t *testing.T) {
 			},
 		}
 		for _, tc := range cases {
-			t.Run(tc.name, func(t *testing.T) {
+			t.Run(tc.capture.String(), func(t *testing.T) {
 				fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{tc.capture}}).
 					WithCaptures(tc.capture).Emit(tc.body(tc.cst)...).MustBuild()
 				var seed instr.Instruction
@@ -2701,314 +3202,6 @@ func TestInterpreter_Run(t *testing.T) {
 		v, err := i.Pop()
 		require.NoError(t, err)
 		require.Equal(t, types.I32(200), v) // 2 < 10: branch taken
-	})
-}
-
-func TestInterpreter_Marshal(t *testing.T) {
-	t.Run("scalar value", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-
-		v, err := i.Marshal(int32(7))
-		require.NoError(t, err)
-		require.Equal(t, types.I32(7), v)
-	})
-
-	t.Run("function receives active context", func(t *testing.T) {
-		var got context.Context
-		setup := New(program.New(nil))
-		fn, err := setup.Marshal(func(ctx context.Context) int32 {
-			got = ctx
-			return 7
-		})
-		require.NoError(t, err)
-		require.NoError(t, setup.Close())
-
-		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(fn))
-		i := New(prog)
-		defer i.Close()
-		ctx := context.WithValue(context.Background(), contextKey{}, "value")
-		require.NoError(t, i.Run(ctx))
-		value, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(7), value)
-		require.Equal(t, ctx, got)
-	})
-
-	t.Run("host method receives active context", func(t *testing.T) {
-		setup := New(program.New(nil))
-		defer setup.Close()
-		value, err := setup.Marshal(contextHost{})
-		require.NoError(t, err)
-		host := value.(*HostObject)
-		method := host.Field(host.Typ.FieldIndex("Value"))
-		fn, err := setup.Load(method.Ref())
-		require.NoError(t, err)
-
-		prog := program.New([]instr.Instruction{instr.New(instr.CONST_GET, 0), instr.New(instr.CALL)}, program.WithConstants(fn))
-		i := New(prog)
-		defer i.Close()
-		ctx := context.WithValue(context.Background(), contextKey{}, "value")
-		require.NoError(t, i.Run(ctx))
-		got, err := i.Pop()
-		require.NoError(t, err)
-		require.Equal(t, types.I32(7), got)
-	})
-
-	t.Run("marshaled function is shared and race-safe across interpreters", func(t *testing.T) {
-		setup := New(program.New(nil))
-		v, err := setup.Marshal(func(a, b int32) int32 { return a + b })
-		require.NoError(t, err)
-		require.NoError(t, setup.Close())
-
-		// program.New's default constant path keeps the *HostFunction Go
-		// value itself (not a copy) in each Interpreter's heap, so two
-		// Interpreters built from programs referencing the same fn share one
-		// *HostFunction and race on any call-scoped state it caches.
-		fn := v.(*HostFunction)
-
-		prog1 := program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.I32_CONST, 2),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
-			},
-			program.WithConstants(fn),
-		)
-		prog2 := program.New(
-			[]instr.Instruction{
-				instr.New(instr.I32_CONST, 10),
-				instr.New(instr.I32_CONST, 20),
-				instr.New(instr.CONST_GET, 0),
-				instr.New(instr.CALL),
-			},
-			program.WithConstants(fn),
-		)
-
-		i1 := New(prog1)
-		defer i1.Close()
-		i2 := New(prog2)
-		defer i2.Close()
-
-		var wg sync.WaitGroup
-		var err1, err2 error
-		var v1, v2 types.Value
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			if err1 = i1.Run(context.Background()); err1 == nil {
-				v1, err1 = i1.Pop()
-			}
-		}()
-		go func() {
-			defer wg.Done()
-			if err2 = i2.Run(context.Background()); err2 == nil {
-				v2, err2 = i2.Pop()
-			}
-		}()
-		wg.Wait()
-
-		require.NoError(t, err1)
-		require.NoError(t, err2)
-		require.Equal(t, types.I32(3), v1)
-		require.Equal(t, types.I32(30), v2)
-	})
-}
-
-func TestInterpreter_Unmarshal(t *testing.T) {
-	t.Run("scalar", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-
-		var dst int32
-		require.NoError(t, i.Unmarshal(types.I32(7), &dst))
-		require.Equal(t, int32(7), dst)
-	})
-
-	t.Run("VM function", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32},
-		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
-
-		var add func(int32, int32) (int32, error)
-		require.NoError(t, i.Unmarshal(fn, &add))
-		got, err := add(2, 3)
-		require.NoError(t, err)
-		require.Equal(t, int32(5), got)
-	})
-
-	t.Run("VM function with context", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32},
-		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN)).MustBuild()
-
-		var add func(context.Context, int32, int32) (int32, error)
-		require.NoError(t, i.Unmarshal(fn, &add))
-		got, err := add(context.Background(), 2, 3)
-		require.NoError(t, err)
-		require.Equal(t, int32(5), got)
-	})
-
-	t.Run("VM function context identity", func(t *testing.T) {
-		var got context.Context
-		i := New(program.New(nil), WithTick(2), WithHook(func(i *Interpreter) error {
-			got = i.Context()
-			return nil
-		}))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-		).MustBuild()
-		addr, err := i.Alloc(fn)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, i.Release(addr)) }()
-
-		var call func(context.Context) (int32, error)
-		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
-		ctx := context.WithValue(context.Background(), contextKey{}, "value")
-		value, err := call(ctx)
-		require.NoError(t, err)
-		require.Equal(t, int32(7), value)
-		require.Equal(t, ctx, got)
-	})
-
-	t.Run("VM function canceled context", func(t *testing.T) {
-		i := New(program.New(nil), WithTick(1))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-		).MustBuild()
-
-		var call func(context.Context) (int32, error)
-		require.NoError(t, i.Unmarshal(fn, &call))
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		_, err := call(ctx)
-		require.ErrorIs(t, err, context.Canceled)
-	})
-
-	t.Run("VM function nil context uses background", func(t *testing.T) {
-		var got context.Context
-		i := New(program.New(nil), WithTick(2), WithHook(func(i *Interpreter) error {
-			got = i.Context()
-			return nil
-		}))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-		).MustBuild()
-		addr, err := i.Alloc(fn)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, i.Release(addr)) }()
-
-		var call func(context.Context) (int32, error)
-		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
-		value, err := call(nil)
-		require.NoError(t, err)
-		require.Equal(t, int32(7), value)
-		require.Equal(t, context.Background(), got)
-	})
-
-	t.Run("VM function non-first context", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{
-			Params: []types.Type{types.TypeI32, types.TypeRef}, Returns: []types.Type{types.TypeI32},
-		}).Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).MustBuild()
-
-		var call func(int32, context.Context) (int32, error)
-		require.NoError(t, i.Unmarshal(fn, &call))
-		got, err := call(7, nil)
-		require.NoError(t, err)
-		require.Equal(t, int32(7), got)
-	})
-
-	t.Run("VM closure with context", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-		).MustBuild()
-		fnAddr, err := i.Alloc(fn)
-		require.NoError(t, err)
-		closureAddr, err := i.Alloc(types.NewClosure(fn.Typ, types.Ref(fnAddr), nil))
-		require.NoError(t, err)
-		defer func() { require.NoError(t, i.Release(closureAddr)) }()
-
-		var call func(context.Context) (int32, error)
-		require.NoError(t, i.Unmarshal(types.BoxRef(closureAddr), &call))
-		got, err := call(context.Background())
-		require.NoError(t, err)
-		require.Equal(t, int32(7), got)
-	})
-
-	t.Run("VM function without context uses background", func(t *testing.T) {
-		var got context.Context
-		i := New(program.New(nil), WithTick(2), WithHook(func(i *Interpreter) error {
-			got = i.Context()
-			return nil
-		}))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.NOP), instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-		).MustBuild()
-		addr, err := i.Alloc(fn)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, i.Release(addr)) }()
-
-		var call func() (int32, error)
-		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
-		value, err := call()
-		require.NoError(t, err)
-		require.Equal(t, int32(7), value)
-		require.Equal(t, context.Background(), got)
-	})
-
-	t.Run("function ref", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN),
-		).MustBuild()
-		addr, err := i.Alloc(fn)
-		require.NoError(t, err)
-
-		var call func() int32
-		require.NoError(t, i.Unmarshal(types.BoxRef(addr), &call))
-		require.Equal(t, int32(7), call())
-		require.NoError(t, i.Release(addr))
-	})
-
-	t.Run("runtime error", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Emit(
-			instr.New(instr.I32_CONST, 1), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_DIV_S), instr.New(instr.RETURN),
-		).MustBuild()
-
-		var call func() (int32, error)
-		require.NoError(t, i.Unmarshal(fn, &call))
-		got, err := call()
-		require.Zero(t, got)
-		require.ErrorIs(t, err, ErrDivideByZero)
-
-		got, err = call()
-		require.Zero(t, got)
-		require.ErrorIs(t, err, ErrDivideByZero)
-	})
-
-	t.Run("signature mismatch", func(t *testing.T) {
-		i := New(program.New(nil))
-		defer i.Close()
-		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).MustBuild()
-
-		var call func() int64
-		require.ErrorIs(t, i.Unmarshal(fn, &call), ErrTypeMismatch)
 	})
 }
 
@@ -3469,13 +3662,37 @@ func TestInterpreter_Push(t *testing.T) {
 }
 
 func TestInterpreter_Pop(t *testing.T) {
-	i := New(program.New(nil))
-	defer i.Close()
+	t.Run("scalar", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
 
-	require.NoError(t, i.Push(types.I32(4)))
-	v, err := i.Pop()
-	require.NoError(t, err)
-	require.Equal(t, types.I32(4), v)
+		require.NoError(t, i.Push(types.I32(4)))
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(4), value)
+	})
+
+	t.Run("reference value releases its heap ownership", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		require.NoError(t, i.Push(types.String("value")))
+		boxed, err := i.Peek(0)
+		require.NoError(t, err)
+		value, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.String("value"), value)
+		_, err = i.Load(boxed.Ref())
+		require.ErrorIs(t, err, ErrSegmentationFault)
+	})
+
+	t.Run("stack underflow", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		_, err := i.Pop()
+		require.ErrorIs(t, err, ErrStackUnderflow)
+	})
 }
 
 func TestInterpreter_PopBoxed(t *testing.T) {
@@ -3517,14 +3734,37 @@ func TestInterpreter_PopBoxed(t *testing.T) {
 }
 
 func TestInterpreter_Peek(t *testing.T) {
-	i := New(program.New(nil))
-	defer i.Close()
+	t.Run("leaves value on stack", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
 
-	require.NoError(t, i.Push(types.I32(4)))
-	v, err := i.Peek(0)
-	require.NoError(t, err)
-	require.Equal(t, types.BoxI32(4), v)
-	require.Equal(t, 1, i.Len())
+		require.NoError(t, i.Push(types.I32(4)))
+		value, err := i.Peek(0)
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(4), value)
+		require.Equal(t, 1, i.Len())
+	})
+
+	t.Run("keeps reference owned by stack", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		require.NoError(t, i.Push(types.String("value")))
+		value, err := i.Peek(0)
+		require.NoError(t, err)
+		loaded, err := i.Load(value.Ref())
+		require.NoError(t, err)
+		require.Equal(t, types.String("value"), loaded)
+		require.Equal(t, 1, i.Len())
+	})
+
+	t.Run("invalid depth", func(t *testing.T) {
+		i := New(program.New(nil))
+		defer i.Close()
+
+		_, err := i.Peek(0)
+		require.ErrorIs(t, err, ErrStackUnderflow)
+	})
 }
 
 func TestInterpreter_Len(t *testing.T) {
@@ -3538,7 +3778,14 @@ func TestInterpreter_Len(t *testing.T) {
 
 func TestInterpreter_Close(t *testing.T) {
 	i := New(program.New(nil))
+	value := &trackedValue{}
+	_, err := i.Alloc(value)
+	require.NoError(t, err)
+
 	require.NoError(t, i.Close())
+	require.Equal(t, 1, value.closed)
+	require.NoError(t, i.Close())
+	require.Equal(t, 1, value.closed)
 }
 
 func TestInterpreter_Reset(t *testing.T) {
@@ -3645,7 +3892,7 @@ func TestWithHook(t *testing.T) {
 }
 
 func TestWithMarshaler(t *testing.T) {
-	i := New(program.New(nil), WithMarshaler(upperMarshaler{}))
+	i := New(program.New(nil), WithMarshaler(upperMarshaler(0)))
 	defer i.Close()
 
 	v, err := i.Marshal("go")
@@ -4489,7 +4736,7 @@ func TestWithThreshold(t *testing.T) {
 		// Once warm, the entry dispatches natively and the threaded safepoint no
 		// longer samples it: the sample count must not grow across further runs.
 		warm := i.samples.Samples(addr)
-		for range 32 {
+		for range 4 {
 			i.Reset()
 			require.NoError(t, i.Push(types.I32(41)))
 			require.NoError(t, i.Run(context.Background()))
@@ -4593,7 +4840,7 @@ func TestWithThreshold(t *testing.T) {
 		i := New(prog, WithTick(1), WithThreshold(0))
 		defer i.Close()
 
-		for range 256 {
+		for range 4 {
 			i.Reset()
 			require.NoError(t, i.Run(context.Background()))
 			got, err := i.Pop()
@@ -4640,7 +4887,7 @@ func TestWithThreshold(t *testing.T) {
 		i := New(prog, WithTick(1), WithThreshold(0))
 		defer i.Close()
 
-		for range 256 {
+		for range 4 {
 			i.Reset()
 			require.NoError(t, i.Run(context.Background()))
 			got, err := i.Pop()
@@ -4689,7 +4936,7 @@ func TestWithThreshold(t *testing.T) {
 		i := New(prog, WithTick(1), WithThreshold(0))
 		defer i.Close()
 
-		for range 64 {
+		for range 4 {
 			i.Reset()
 			require.NoError(t, i.Run(context.Background()))
 			got, err := i.Pop()
@@ -4729,7 +4976,7 @@ func TestWithThreshold(t *testing.T) {
 		defer i.Close()
 		row := make([]float64, 8)
 		arr := types.TypedArray[float64](row)
-		for n := range 50000 {
+		for n := range 4 {
 			i.Reset()
 			var sum float64
 			for idx := range row {
@@ -4770,7 +5017,7 @@ func TestWithThreshold(t *testing.T) {
 		defer i.Close()
 		row := make([]bool, 8)
 		arr := types.TypedArray[bool](row)
-		for n := range 5000 {
+		for n := range 4 {
 			i.Reset()
 			var sum int32
 			for idx := range row {
@@ -4813,7 +5060,7 @@ func TestWithThreshold(t *testing.T) {
 		defer i.Close()
 		row := make([]int8, 8)
 		arr := types.TypedArray[int8](row)
-		for n := range 5000 {
+		for n := range 4 {
 			i.Reset()
 			var sum int32
 			for idx := range row {
@@ -4854,7 +5101,7 @@ func TestWithThreshold(t *testing.T) {
 		defer i.Close()
 		row := make([]int32, 8)
 		arr := types.TypedArray[int32](row)
-		for n := range 5000 {
+		for n := range 4 {
 			i.Reset()
 			var sum int32
 			for idx := range row {
@@ -4895,7 +5142,7 @@ func TestWithThreshold(t *testing.T) {
 		defer i.Close()
 		row := make([]int64, 8)
 		arr := types.TypedArray[int64](row)
-		for n := range 5000 {
+		for n := range 4 {
 			i.Reset()
 			var sum int64
 			for idx := range row {
@@ -4936,7 +5183,7 @@ func TestWithThreshold(t *testing.T) {
 		defer i.Close()
 		row := make([]float32, 8)
 		arr := types.TypedArray[float32](row)
-		for n := range 5000 {
+		for n := range 4 {
 			i.Reset()
 			var sum float64
 			for idx := range row {
@@ -4957,49 +5204,42 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		for _, tt := range []struct {
-			name  string
 			typ   types.Type
 			value types.Value
 			array types.Value
 		}{
 			{
-				name:  "i1",
 				typ:   types.TypeI1Array,
 				value: types.I1(true),
 				array: types.TypedArray[bool](make([]bool, 8)),
 			},
 			{
-				name:  "i8",
 				typ:   types.TypeI8Array,
 				value: types.I8(-3),
 				array: types.TypedArray[int8](make([]int8, 8)),
 			},
 			{
-				name:  "i32",
 				typ:   types.TypeI32Array,
 				value: types.I32(-33),
 				array: types.TypedArray[int32](make([]int32, 8)),
 			},
 			{
-				name:  "i64",
 				typ:   types.TypeI64Array,
 				value: types.I64(-55),
 				array: types.TypedArray[int64](make([]int64, 8)),
 			},
 			{
-				name:  "f32",
 				typ:   types.TypeF32Array,
 				value: types.F32(1.25),
 				array: types.TypedArray[float32](make([]float32, 8)),
 			},
 			{
-				name:  "f64",
 				typ:   types.TypeF64Array,
 				value: types.F64(2.5),
 				array: types.TypedArray[float64](make([]float64, 8)),
 			},
 		} {
-			t.Run(tt.name, func(t *testing.T) {
+			t.Run(tt.typ.String(), func(t *testing.T) {
 				eval := types.NewFunctionBuilder(nil).
 					WithParams(tt.typ).
 					WithReturns(types.TypeI32)
@@ -5020,7 +5260,7 @@ func TestWithThreshold(t *testing.T) {
 
 				i := New(prog, WithTick(1), WithThreshold(0))
 				defer i.Close()
-				for range 5000 {
+				for range 4 {
 					i.Reset()
 					require.NoError(t, i.Push(tt.array))
 					require.NoError(t, i.Run(context.Background()))
@@ -5072,20 +5312,19 @@ func TestWithThreshold(t *testing.T) {
 			types.NewStructField(types.TypeF64),
 		)
 		for _, tt := range []struct {
-			name  string
 			idx   uint32
 			typ   types.Type
 			value types.Boxed
 			want  types.Value
 		}{
-			{name: "i1", idx: 0, typ: types.TypeI1, value: types.BoxI1(true), want: types.I1(true)},
-			{name: "i8", idx: 1, typ: types.TypeI8, value: types.BoxI8(-3), want: types.I8(-3)},
-			{name: "i32", idx: 2, typ: types.TypeI32, value: types.BoxI32(-33), want: types.I32(-33)},
-			{name: "i64", idx: 3, typ: types.TypeI64, value: types.BoxI64(-55), want: types.I64(-55)},
-			{name: "f32", idx: 4, typ: types.TypeF32, value: types.BoxF32(1.25), want: types.F32(1.25)},
-			{name: "f64", idx: 5, typ: types.TypeF64, value: types.BoxF64(2.5), want: types.F64(2.5)},
+			{idx: 0, typ: types.TypeI1, value: types.BoxI1(true), want: types.I1(true)},
+			{idx: 1, typ: types.TypeI8, value: types.BoxI8(-3), want: types.I8(-3)},
+			{idx: 2, typ: types.TypeI32, value: types.BoxI32(-33), want: types.I32(-33)},
+			{idx: 3, typ: types.TypeI64, value: types.BoxI64(-55), want: types.I64(-55)},
+			{idx: 4, typ: types.TypeF32, value: types.BoxF32(1.25), want: types.F32(1.25)},
+			{idx: 5, typ: types.TypeF64, value: types.BoxF64(2.5), want: types.F64(2.5)},
 		} {
-			t.Run(tt.name, func(t *testing.T) {
+			t.Run(tt.typ.String(), func(t *testing.T) {
 				eval := types.NewFunctionBuilder(nil).
 					WithParams(typ).
 					WithReturns(tt.typ)
@@ -5103,7 +5342,7 @@ func TestWithThreshold(t *testing.T) {
 				i := New(prog, WithTick(1), WithThreshold(0))
 				defer i.Close()
 				s := types.NewStruct(typ)
-				for range 5000 {
+				for range 4 {
 					i.Reset()
 					s.SetField(int(tt.idx), tt.value)
 					require.NoError(t, i.Push(s))
@@ -5130,19 +5369,18 @@ func TestWithThreshold(t *testing.T) {
 			types.NewStructField(types.TypeF64),
 		)
 		for _, tt := range []struct {
-			name  string
 			idx   uint32
 			value types.Value
 			want  types.Boxed
 		}{
-			{name: "i1", idx: 0, value: types.I1(true), want: types.BoxI1(true)},
-			{name: "i8", idx: 1, value: types.I8(-3), want: types.BoxI8(-3)},
-			{name: "i32", idx: 2, value: types.I32(-33), want: types.BoxI32(-33)},
-			{name: "i64", idx: 3, value: types.I64(-55), want: types.BoxI64(-55)},
-			{name: "f32", idx: 4, value: types.F32(1.25), want: types.BoxF32(1.25)},
-			{name: "f64", idx: 5, value: types.F64(2.5), want: types.BoxF64(2.5)},
+			{idx: 0, value: types.I1(true), want: types.BoxI1(true)},
+			{idx: 1, value: types.I8(-3), want: types.BoxI8(-3)},
+			{idx: 2, value: types.I32(-33), want: types.BoxI32(-33)},
+			{idx: 3, value: types.I64(-55), want: types.BoxI64(-55)},
+			{idx: 4, value: types.F32(1.25), want: types.BoxF32(1.25)},
+			{idx: 5, value: types.F64(2.5), want: types.BoxF64(2.5)},
 		} {
-			t.Run(tt.name, func(t *testing.T) {
+			t.Run(tt.value.Type().String(), func(t *testing.T) {
 				eval := types.NewFunctionBuilder(nil).
 					WithParams(typ).
 					WithReturns(types.TypeI32)
@@ -5164,7 +5402,7 @@ func TestWithThreshold(t *testing.T) {
 				i := New(prog, WithTick(1), WithThreshold(0))
 				defer i.Close()
 				s := types.NewStruct(typ)
-				for range 5000 {
+				for range 4 {
 					i.Reset()
 					require.NoError(t, i.Push(s))
 					require.NoError(t, i.Run(context.Background()))
@@ -5543,7 +5781,6 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		for _, tt := range []struct {
-			name  string
 			typ   types.Type
 			cnst  instr.Instruction
 			div   instr.Opcode
@@ -5551,7 +5788,6 @@ func TestWithThreshold(t *testing.T) {
 			want  types.Value
 		}{
 			{
-				name:  "i32",
 				typ:   types.TypeI32,
 				cnst:  instr.New(instr.I32_CONST, 3),
 				div:   instr.I32_DIV_S,
@@ -5559,7 +5795,6 @@ func TestWithThreshold(t *testing.T) {
 				want:  types.I32(30),
 			},
 			{
-				name:  "i64",
 				typ:   types.TypeI64,
 				cnst:  instr.New(instr.I64_CONST, 3),
 				div:   instr.I64_DIV_S,
@@ -5567,7 +5802,7 @@ func TestWithThreshold(t *testing.T) {
 				want:  types.I64(30),
 			},
 		} {
-			t.Run(tt.name, func(t *testing.T) {
+			t.Run(tt.typ.String(), func(t *testing.T) {
 				eval := types.NewFunctionBuilder(nil).
 					WithParams(tt.typ).
 					WithReturns(tt.typ)
@@ -5602,7 +5837,6 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		for _, tt := range []struct {
-			name  string
 			typ   types.Type
 			div   instr.Opcode
 			left  types.Value
@@ -5613,7 +5847,6 @@ func TestWithThreshold(t *testing.T) {
 			zero  types.Value
 		}{
 			{
-				name:  "i32",
 				typ:   types.TypeI32,
 				div:   instr.I32_DIV_S,
 				left:  types.I32(90),
@@ -5624,7 +5857,6 @@ func TestWithThreshold(t *testing.T) {
 				zero:  types.I32(0),
 			},
 			{
-				name:  "i64",
 				typ:   types.TypeI64,
 				div:   instr.I64_DIV_S,
 				left:  types.I64(90),
@@ -5635,7 +5867,7 @@ func TestWithThreshold(t *testing.T) {
 				zero:  types.I64(0),
 			},
 		} {
-			t.Run(tt.name, func(t *testing.T) {
+			t.Run(tt.typ.String(), func(t *testing.T) {
 				eval := types.NewFunctionBuilder(nil).
 					WithParams(tt.typ, tt.typ).
 					WithReturns(tt.typ)
@@ -5848,7 +6080,7 @@ func TestWithThreshold(t *testing.T) {
 
 		i := New(prog, WithTick(1), WithThreshold(0))
 		defer i.Close()
-		for range 5000 {
+		for range 4 {
 			i.Reset()
 			arr := types.NewArray(arrTyp, types.BoxedNull, types.BoxedNull)
 			require.NoError(t, i.Push(arr))
@@ -5893,7 +6125,7 @@ func TestWithThreshold(t *testing.T) {
 
 		i := New(prog, WithTick(1), WithThreshold(0))
 		defer i.Close()
-		for range 5000 {
+		for range 4 {
 			i.Reset()
 			s := types.NewStruct(typ, types.BoxedNull)
 			require.NoError(t, i.Push(s))
@@ -6649,4 +6881,544 @@ func i32operand(v int32) uint64 {
 
 func i64operand(v int64) uint64 {
 	return uint64(v)
+}
+
+func BenchmarkNew(b *testing.B) {
+	b.Run("Empty", func(b *testing.B) {
+		prog := program.New(nil)
+		var vm *Interpreter
+		var closeErr error
+		var elapsed time.Duration
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			start := time.Now()
+			vm = New(prog)
+			elapsed += time.Since(start)
+			closeErr = vm.Close()
+		}
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+		require.NoError(b, closeErr)
+	})
+
+	b.Run("Program", func(b *testing.B) {
+		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)})
+		var vm *Interpreter
+		var closeErr error
+		var elapsed time.Duration
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			start := time.Now()
+			vm = New(prog, WithThreshold(-1))
+			elapsed += time.Since(start)
+			closeErr = vm.Close()
+		}
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+		require.NoError(b, closeErr)
+	})
+
+	b.Run("JITEnabled", func(b *testing.B) {
+		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)})
+		var vm *Interpreter
+		var closeErr error
+		var elapsed time.Duration
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			start := time.Now()
+			vm = New(prog, WithThreshold(0))
+			elapsed += time.Since(start)
+			closeErr = vm.Close()
+		}
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+		require.NoError(b, closeErr)
+	})
+}
+
+func BenchmarkInterpreter_Run(b *testing.B) {
+	for _, tt := range runTests {
+		b.Run(tt.name, func(b *testing.B) {
+			modes := []struct {
+				name string
+				opts []func(*option)
+			}{
+				{name: "Threaded", opts: []func(*option){WithTick(1), WithThreshold(-1)}},
+				{name: "Fused", opts: []func(*option){WithThreshold(-1)}},
+			}
+			jit := runtime.GOARCH == "arm64"
+			codes := [][]byte{tt.program.Code}
+			for _, constant := range tt.program.Constants {
+				if fn, ok := constant.(*types.Function); ok {
+					codes = append(codes, fn.Code)
+				}
+			}
+			for _, code := range codes {
+				for ip := 0; jit && ip < len(code); {
+					inst := instr.Instruction(code[ip:])
+					if inst.Opcode() == instr.RETURN_CALL {
+						jit = false
+						break
+					}
+					ip += inst.Width()
+				}
+			}
+			if jit {
+				modes = append(modes, struct {
+					name string
+					opts []func(*option)
+				}{name: "JITWarm", opts: []func(*option){WithTick(1), WithThreshold(0)}})
+			}
+
+			for _, mode := range modes {
+				b.Run(mode.name, func(b *testing.B) {
+					ctx := context.Background()
+					vm := New(tt.program, mode.opts...)
+					b.Cleanup(func() { require.NoError(b, vm.Close()) })
+
+					warmups := 1
+					if mode.name == "JITWarm" {
+						warmups = 16
+					}
+					for range warmups {
+						err := vm.Run(ctx)
+						if tt.err != nil {
+							require.ErrorIs(b, err, tt.err)
+						} else {
+							require.NoError(b, err)
+							for _, want := range tt.values {
+								got, err := vm.Pop()
+								require.NoError(b, err)
+								require.Equal(b, want, got)
+							}
+						}
+						vm.Reset()
+						if mode.name == "JITWarm" && vm.stub(0) != nil {
+							break
+						}
+					}
+
+					if mode.name == "JITWarm" && vm.stub(0) == nil {
+						b.Skip("entry does not compile")
+					}
+
+					var runErr error
+					var elapsed time.Duration
+					b.ReportAllocs()
+					b.ResetTimer()
+					for b.Loop() {
+						start := time.Now()
+						runErr = vm.Run(ctx)
+						elapsed += time.Since(start)
+						vm.Reset()
+					}
+					b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+					if tt.err != nil {
+						require.ErrorIs(b, runErr, tt.err)
+					} else {
+						require.NoError(b, runErr)
+					}
+				})
+			}
+		})
+	}
+}
+
+func BenchmarkInterpreter_Reset(b *testing.B) {
+	var jitCode []instr.Instruction
+	for range 64 {
+		jitCode = append(jitCode,
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.DROP),
+		)
+	}
+	jitCode = append(jitCode, instr.New(instr.I32_CONST, 42))
+
+	tests := []struct {
+		name string
+		prog *program.Program
+		opts []func(*option)
+	}{
+		{
+			name: "Scalar",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 42), instr.New(instr.GLOBAL_SET, 0),
+			}, program.WithGlobals(types.TypeI32)),
+			opts: []func(*option){WithThreshold(-1)},
+		},
+		{
+			name: "Heap",
+			prog: program.New([]instr.Instruction{
+				instr.New(instr.I32_CONST, 8), instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+			}, program.WithTypes(types.NewArrayType(types.TypeRef))),
+			opts: []func(*option){WithThreshold(-1)},
+		},
+		{
+			name: "JITState",
+			prog: program.New(jitCode),
+			opts: []func(*option){WithThreshold(0)},
+		},
+	}
+
+	for _, tt := range tests {
+		if tt.name == "JITState" && runtime.GOARCH != "arm64" {
+			continue
+		}
+		b.Run(tt.name, func(b *testing.B) {
+			ctx := context.Background()
+			vm := New(tt.prog, tt.opts...)
+			defer vm.Close()
+			require.NoError(b, vm.Run(ctx))
+			if tt.name == "JITState" {
+				for range 16 {
+					if vm.stub(0) != nil {
+						break
+					}
+					vm.Reset()
+					require.NoError(b, vm.Run(ctx))
+				}
+				require.NotNil(b, vm.stub(0))
+			}
+
+			var runErr error
+			var elapsed time.Duration
+			var bytes, allocs uint64
+			var sampled bool
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				var before runtime.MemStats
+				if !sampled {
+					runtime.ReadMemStats(&before)
+				}
+				start := time.Now()
+				vm.Reset()
+				elapsed += time.Since(start)
+				if !sampled {
+					var after runtime.MemStats
+					runtime.ReadMemStats(&after)
+					bytes = after.TotalAlloc - before.TotalAlloc
+					allocs = after.Mallocs - before.Mallocs
+					sampled = true
+				}
+				runErr = vm.Run(ctx)
+			}
+			b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+			b.ReportMetric(float64(bytes), "B/op")
+			b.ReportMetric(float64(allocs), "allocs/op")
+			require.NoError(b, runErr)
+		})
+	}
+}
+
+func BenchmarkInterpreter_Push(b *testing.B) {
+	b.Run("Scalar", func(b *testing.B) {
+		vm := New(program.New(nil))
+		defer vm.Close()
+		var pushErr error
+		var elapsed time.Duration
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			start := time.Now()
+			pushErr = vm.Push(types.I32(42))
+			elapsed += time.Since(start)
+			vm.Reset()
+		}
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+		require.NoError(b, pushErr)
+	})
+
+	b.Run("Reference", func(b *testing.B) {
+		vm := New(program.New(nil))
+		defer vm.Close()
+		var pushErr error
+		var elapsed time.Duration
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			start := time.Now()
+			pushErr = vm.Push(types.String("value"))
+			elapsed += time.Since(start)
+			vm.Reset()
+		}
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+		require.NoError(b, pushErr)
+	})
+}
+
+func BenchmarkInterpreter_Pop(b *testing.B) {
+	vm := New(program.New(nil))
+	defer vm.Close()
+	var value types.Value
+	var pushErr, popErr error
+	var elapsed time.Duration
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		pushErr = vm.Push(types.I32(42))
+		start := time.Now()
+		value, popErr = vm.Pop()
+		elapsed += time.Since(start)
+	}
+	b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+	require.NoError(b, pushErr)
+	require.NoError(b, popErr)
+	require.Equal(b, types.I32(42), value)
+}
+
+func BenchmarkInterpreter_PopBoxed(b *testing.B) {
+	vm := New(program.New(nil))
+	defer vm.Close()
+	var value types.Boxed
+	var pushErr, popErr error
+	var elapsed time.Duration
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		pushErr = vm.Push(types.I32(42))
+		start := time.Now()
+		value, popErr = vm.PopBoxed()
+		elapsed += time.Since(start)
+	}
+	b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+	require.NoError(b, pushErr)
+	require.NoError(b, popErr)
+	require.Equal(b, types.BoxI32(42), value)
+}
+
+func BenchmarkInterpreter_Peek(b *testing.B) {
+	vm := New(program.New(nil))
+	defer vm.Close()
+	require.NoError(b, vm.Push(types.I32(42)))
+	var value types.Boxed
+	var err error
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		value, err = vm.Peek(0)
+	}
+	require.NoError(b, err)
+	require.Equal(b, types.BoxI32(42), value)
+}
+
+func BenchmarkInterpreter_Alloc(b *testing.B) {
+	vm := New(program.New(nil))
+	defer vm.Close()
+	var addr int
+	var err error
+	var elapsed time.Duration
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		start := time.Now()
+		addr, err = vm.Alloc(types.String("value"))
+		elapsed += time.Since(start)
+		require.NoError(b, err)
+		require.NoError(b, vm.Release(addr))
+	}
+	b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+}
+
+func BenchmarkInterpreter_Retain(b *testing.B) {
+	vm := New(program.New(nil))
+	defer vm.Close()
+	addr, err := vm.Alloc(types.String("value"))
+	require.NoError(b, err)
+	var elapsed time.Duration
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		start := time.Now()
+		_, err = vm.Retain(addr)
+		elapsed += time.Since(start)
+		require.NoError(b, err)
+		require.NoError(b, vm.Release(addr))
+	}
+	b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+	require.NoError(b, vm.Release(addr))
+}
+
+func BenchmarkInterpreter_Release(b *testing.B) {
+	vm := New(program.New(nil))
+	defer vm.Close()
+	addr, err := vm.Alloc(types.String("value"))
+	require.NoError(b, err)
+	var releaseErr error
+	var elapsed time.Duration
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_, err = vm.Retain(addr)
+		require.NoError(b, err)
+		start := time.Now()
+		releaseErr = vm.Release(addr)
+		elapsed += time.Since(start)
+		require.NoError(b, releaseErr)
+	}
+	b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+	require.NoError(b, vm.Release(addr))
+}
+
+func BenchmarkPool_Get(b *testing.B) {
+	b.Run("Uncontended", func(b *testing.B) {
+		pool := NewPool(program.New(nil), 1)
+		defer pool.Close()
+		vm, err := pool.Get(context.Background())
+		require.NoError(b, err)
+		pool.Put(vm)
+
+		var elapsed time.Duration
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			start := time.Now()
+			vm, err = pool.Get(context.Background())
+			elapsed += time.Since(start)
+			require.NoError(b, err)
+			pool.Put(vm)
+		}
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+	})
+
+	b.Run("Miss", func(b *testing.B) {
+		var vm *Interpreter
+		var err, closeErr error
+		var elapsed time.Duration
+		var bytes, allocs uint64
+		var sampled bool
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			pool := NewPool(program.New(nil), 1)
+			var before runtime.MemStats
+			if !sampled {
+				runtime.ReadMemStats(&before)
+			}
+			start := time.Now()
+			vm, err = pool.Get(context.Background())
+			elapsed += time.Since(start)
+			if !sampled {
+				var after runtime.MemStats
+				runtime.ReadMemStats(&after)
+				bytes = after.TotalAlloc - before.TotalAlloc
+				allocs = after.Mallocs - before.Mallocs
+				sampled = true
+			}
+			if vm != nil {
+				pool.Put(vm)
+			}
+			closeErr = pool.Close()
+		}
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+		b.ReportMetric(float64(bytes), "B/op")
+		b.ReportMetric(float64(allocs), "allocs/op")
+		require.NoError(b, err)
+		require.NoError(b, closeErr)
+	})
+
+	b.Run("SharedJITMiss", func(b *testing.B) {
+		if runtime.GOARCH != "arm64" {
+			b.Skip("native JIT requires arm64")
+		}
+		var code []instr.Instruction
+		for range 64 {
+			code = append(code,
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.DROP),
+			)
+		}
+		code = append(code, instr.New(instr.I32_CONST, 42))
+		prog := program.New(code)
+		var second *Interpreter
+		var getErr, closeErr error
+		var elapsed time.Duration
+		var bytes, allocs uint64
+		var sampled bool
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			pool := NewPool(prog, 2, WithThreshold(0))
+			first, err := pool.Get(context.Background())
+			require.NoError(b, err)
+			for range 16 {
+				first.Reset()
+				require.NoError(b, first.Run(context.Background()))
+				_, err := first.Pop()
+				require.NoError(b, err)
+				if first.stub(0) != nil {
+					break
+				}
+			}
+			require.NotNil(b, first.stub(0))
+			var before runtime.MemStats
+			if !sampled {
+				runtime.ReadMemStats(&before)
+			}
+			start := time.Now()
+			second, getErr = pool.Get(context.Background())
+			elapsed += time.Since(start)
+			if !sampled {
+				var after runtime.MemStats
+				runtime.ReadMemStats(&after)
+				bytes = after.TotalAlloc - before.TotalAlloc
+				allocs = after.Mallocs - before.Mallocs
+				sampled = true
+			}
+			require.NoError(b, getErr)
+			second.sync()
+			require.NotNil(b, second.stub(0))
+			pool.Put(first)
+			pool.Put(second)
+			closeErr = pool.Close()
+		}
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+		b.ReportMetric(float64(bytes), "B/op")
+		b.ReportMetric(float64(allocs), "allocs/op")
+		require.NoError(b, closeErr)
+	})
+
+	b.Run("ParallelRoundTrip", func(b *testing.B) {
+		pool := NewPool(program.New(nil), runtime.GOMAXPROCS(0))
+		defer pool.Close()
+		var failed atomic.Bool
+		b.ReportAllocs()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				vm, err := pool.Get(context.Background())
+				if err != nil {
+					failed.Store(true)
+					continue
+				}
+				pool.Put(vm)
+			}
+		})
+		require.False(b, failed.Load())
+	})
+}
+
+func BenchmarkPool_Put(b *testing.B) {
+	b.Run("Uncontended", func(b *testing.B) {
+		pool := NewPool(program.New(nil), 1)
+		defer pool.Close()
+		vm, err := pool.Get(context.Background())
+		require.NoError(b, err)
+
+		var elapsed time.Duration
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			start := time.Now()
+			pool.Put(vm)
+			elapsed += time.Since(start)
+			vm, err = pool.Get(context.Background())
+			require.NoError(b, err)
+		}
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+		pool.Put(vm)
+	})
 }

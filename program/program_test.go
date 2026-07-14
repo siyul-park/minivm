@@ -8,25 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestProgram_String(t *testing.T) {
-	t.Run("with code", func(t *testing.T) {
-		prog := New([]instr.Instruction{instr.New(instr.NOP)})
-		require.Equal(t, ".code\n0000:\tnop\n", prog.String())
-	})
-	t.Run("empty", func(t *testing.T) {
-		prog := New(nil)
-		require.Equal(t, ".code\n", prog.String())
-	})
-	t.Run("with handlers", func(t *testing.T) {
-		prog := New(nil, WithHandlers(instr.Handler{Start: 0, End: 10, Catch: 20, Depth: 1}))
-		require.Contains(t, prog.String(), ".handlers")
-		require.Contains(t, prog.String(), "start=0")
-		require.Contains(t, prog.String(), "end=10")
-		require.Contains(t, prog.String(), "catch=20")
-		require.Contains(t, prog.String(), "depth=1")
-	})
-}
-
 func TestWithConstants(t *testing.T) {
 	prog := New(nil, WithConstants(types.I32(1), types.I64(2)))
 	require.Len(t, prog.Constants, 2)
@@ -48,9 +29,41 @@ func TestWithLocals(t *testing.T) {
 	require.Equal(t, types.TypeI64, prog.Locals[1])
 }
 
+func TestWithGlobals(t *testing.T) {
+	prog := New(nil, WithGlobals(types.TypeI32, types.TypeRef))
+	require.Equal(t, []types.Type{types.TypeI32, types.TypeRef}, prog.Globals)
+}
+
 func TestWithHandlers(t *testing.T) {
 	h := instr.Handler{Start: 0, End: 10, Catch: 20, Depth: 1}
 	prog := New(nil, WithHandlers(h))
 	require.Len(t, prog.Handlers, 1)
 	require.Equal(t, h, prog.Handlers[0])
+}
+
+func TestNew(t *testing.T) {
+	body := []instr.Instruction{instr.New(instr.I32_CONST, 42), instr.New(instr.DROP)}
+	prog := New(body, WithLocals(types.TypeI32), WithGlobals(types.TypeRef))
+	require.Equal(t, body, instr.Unmarshal(prog.Code))
+	require.Equal(t, []types.Type{types.TypeI32}, prog.Locals)
+	require.Equal(t, []types.Type{types.TypeRef}, prog.Globals)
+}
+
+func TestProgram_String(t *testing.T) {
+	t.Run("with code", func(t *testing.T) {
+		prog := New([]instr.Instruction{instr.New(instr.NOP)})
+		require.Equal(t, ".code\n0000:\tnop\n", prog.String())
+	})
+	t.Run("empty", func(t *testing.T) {
+		prog := New(nil)
+		require.Equal(t, ".code\n", prog.String())
+	})
+	t.Run("with handlers", func(t *testing.T) {
+		prog := New(nil, WithHandlers(instr.Handler{Start: 0, End: 10, Catch: 20, Depth: 1}))
+		require.Contains(t, prog.String(), ".handlers")
+		require.Contains(t, prog.String(), "start=0")
+		require.Contains(t, prog.String(), "end=10")
+		require.Contains(t, prog.String(), "catch=20")
+		require.Contains(t, prog.String(), "depth=1")
+	})
 }

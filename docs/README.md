@@ -17,6 +17,7 @@ This directory uses a single-owner model. Each topic owns one area of behavior; 
 | Pass manager and optimizer levels | `pass-system.md` |
 | Host functions and marshaling | `host-integration.md` |
 | Platform and backend support | `compatibility.md` |
+| Testing contracts and ownership | `testing.md` |
 | Benchmark results and methodology | `benchmarks.md` |
 | Debugger API | `debugging.md` |
 | Current priorities | `roadmap.md` |
@@ -34,6 +35,7 @@ Keep detailed explanations in the document that owns the topic. Other documents 
 - Put boxed value layout and kind rules in `value-representation.md`.
 - Put JIT implementation contracts in `jit-internals.md`.
 - Put generated opcode-fusion rules and backend coverage in `fusion.md`.
+- Put test ownership and completeness status in `testing.md`.
 - Put benchmark numbers in `benchmarks.md`.
 - Put host conversion details in `host-integration.md`.
 - Put platform support in `compatibility.md`.

@@ -54,8 +54,8 @@ jobs:
       - name: Initialize Project
         run: make init
 
-      - name: Generate Coverage
-        run: make coverage
+      - name: Generate and Check Coverage
+        run: make coverage-check
 
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v7
@@ -66,49 +66,20 @@ jobs:
 
   benchmark:
     needs: check
-    if: github.ref == 'refs/heads/main'
-    strategy:
-      matrix:
-        os: [ ubuntu-24.04 ]
-        go: [ '1.26.2' ]
-    name: Benchmark Comparison ${{ matrix.os }} @ Go ${{ matrix.go }}
-    runs-on: ${{ matrix.os }}
-    continue-on-error: true
+    name: Benchmark Report
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout Previous Code
+      - name: Checkout Code
         uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.before }}
-          path: previous
 
-      - name: Checkout New Code
-        uses: actions/checkout@v7
-        with:
-          path: new
-
-      - name: Set up Go for Benchmarking
+      - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: ${{ matrix.go }}
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            benchmarks/go.sum
 
-      - name: Install Benchmark Dependencies
-        run: go install golang.org/x/perf/cmd/benchstat@latest
-
-      - name: Initialize Previous Code
-        working-directory: previous
-        run: make init
-
-      - name: Run Benchmark (Previous)
-        working-directory: previous
-        run: make benchmark test-options="-count=10" | tee benchmark.txt
-
-      - name: Initialize New Code
-        working-directory: new
-        run: make init
-
-      - name: Run Benchmark (New)
-        working-directory: new
-        run: make benchmark test-options="-count=10" | tee benchmark.txt
-
-      - name: Compare Benchmark Results
-        run: benchstat previous/benchmark.txt new/benchmark.txt
+      - name: Run Pull Request Benchmark Subset
+        run: make benchmark-pr

@@ -45,6 +45,10 @@ func NewArrayType(elem Type) *ArrayType {
 
 func (a TypedArray[T]) Kind() Kind { return KindRef }
 
+func (a TypedArray[T]) String() string {
+	return formatSlice(a.Type(), len(a), func(i int) string { return formatElem(a[i]) })
+}
+
 func (a TypedArray[T]) Type() Type {
 	var zero T
 	switch any(zero).(type) {
@@ -63,15 +67,13 @@ func (a TypedArray[T]) Type() Type {
 	}
 }
 
-func (a TypedArray[T]) String() string {
-	return formatSlice(a.Type(), len(a), func(i int) string { return formatElem(a[i]) })
-}
-
 func (a *Array) Kind() Kind { return KindRef }
-func (a *Array) Type() Type { return a.Typ }
+
 func (a *Array) String() string {
 	return formatSlice(a.Type(), len(a.Elems), func(i int) string { return a.Elems[i].String() })
 }
+
+func (a *Array) Type() Type { return a.Typ }
 
 func (a *Array) Refs(dst []Ref) []Ref {
 	for _, e := range a.Elems {

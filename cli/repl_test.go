@@ -5,17 +5,23 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-	"testing/fstest"
-	"time"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNewREPL(t *testing.T) {
+	out := bytes.NewBuffer(nil)
+	repl := NewREPL(strings.NewReader(""), out, nil)
+	require.NotNil(t, repl)
+	require.NoError(t, repl.Run(context.Background()))
+	require.Contains(t, out.String(), "MiniVM Assembly REPL")
+}
 
 func TestREPL_Run(t *testing.T) {
 	tests := []struct {
@@ -577,106 +583,73 @@ func TestREPL_Run(t *testing.T) {
 	})
 
 	t.Run("save then load round-trips through file", func(t *testing.T) {
-		memFS := newMemFS()
+		path := filepath.Join(t.TempDir(), "prog.mvm")
 
 		var out1 bytes.Buffer
 		r1 := NewREPL(
-			strings.NewReader("i32.const 1\ni32.const 2\ni32.add\n.save prog.mvm\n.quit\n"),
+			strings.NewReader("i32.const 1\ni32.const 2\ni32.add\n.save "+path+"\n.quit\n"),
 			&out1,
-			memFS,
+			OS(),
 		)
 		require.NoError(t, r1.Run(context.Background()))
-		require.Contains(t, out1.String(), "saved prog.mvm")
-		require.Contains(t, memFS.files, "prog.mvm")
+		require.Contains(t, out1.String(), "saved "+path)
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.Contains(t, string(data), "i32.add")
 
 		var out2 bytes.Buffer
 		r2 := NewREPL(
-			strings.NewReader(".load prog.mvm\n.show\n.quit\n"),
+			strings.NewReader(".load "+path+"\n.show\n.quit\n"),
 			&out2,
-			memFS,
+			OS(),
 		)
 		require.NoError(t, r2.Run(context.Background()))
-		require.Contains(t, out2.String(), "loaded prog.mvm")
+		require.Contains(t, out2.String(), "loaded "+path)
 		require.Contains(t, out2.String(), "i32.add")
 		require.Equal(t, 3, len(r2.instrs))
 	})
 
 	t.Run("load replaces current state", func(t *testing.T) {
-		memFS := newMemFS()
-		memFS.files["replacement.mvm"] = []byte("0000:\ti32.const 0x00000063\n0005:\treturn\n")
+		path := filepath.Join(t.TempDir(), "replacement.mvm")
+		require.NoError(t, os.WriteFile(path, []byte("0000:\ti32.const 0x00000063\n0005:\treturn\n"), 0o644))
 
 		var out bytes.Buffer
 		r := NewREPL(
-			strings.NewReader("i32.const 1\ni32.const 2\n.load replacement.mvm\n.show\n.quit\n"),
+			strings.NewReader("i32.const 1\ni32.const 2\n.load "+path+"\n.show\n.quit\n"),
 			&out,
-			memFS,
+			OS(),
 		)
 		require.NoError(t, r.Run(context.Background()))
 		output := out.String()
-		require.Contains(t, output, "loaded replacement.mvm")
+		require.Contains(t, output, "loaded "+path)
 		require.Contains(t, output, "i32.const 0x00000063")
 		require.NotContains(t, output, "i32.const 0x00000001")
 		require.Equal(t, 2, len(r.instrs))
 	})
 
 	t.Run("load reports parse errors", func(t *testing.T) {
-		memFS := newMemFS()
-		memFS.files["broken.mvm"] = []byte("not-an-instruction xyz\n")
+		path := filepath.Join(t.TempDir(), "broken.mvm")
+		require.NoError(t, os.WriteFile(path, []byte("not-an-instruction xyz\n"), 0o644))
 
 		var out bytes.Buffer
-		r := NewREPL(strings.NewReader(".load broken.mvm\n.quit\n"), &out, memFS)
+		r := NewREPL(strings.NewReader(".load "+path+"\n.quit\n"), &out, OS())
 		require.NoError(t, r.Run(context.Background()))
 		require.Contains(t, out.String(), "error:")
 	})
 
 	t.Run("load reports missing file", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "missing.mvm")
 		var out bytes.Buffer
-		r := NewREPL(strings.NewReader(".load missing.mvm\n.quit\n"), &out, newMemFS())
+		r := NewREPL(strings.NewReader(".load "+path+"\n.quit\n"), &out, OS())
 		require.NoError(t, r.Run(context.Background()))
 		require.Contains(t, out.String(), "error:")
 	})
 
 	t.Run("save and load require a path", func(t *testing.T) {
 		var out bytes.Buffer
-		r := NewREPL(strings.NewReader(".save\n.load\n.quit\n"), &out, newMemFS())
+		r := NewREPL(strings.NewReader(".save\n.load\n.quit\n"), &out, OS())
 		require.NoError(t, r.Run(context.Background()))
 		require.Contains(t, out.String(), "usage: .save")
 		require.Contains(t, out.String(), "usage: .load")
 	})
-}
-
-// memFS is a tiny in-memory WriteFS used only by the load/save tests.
-// It deliberately stays self-contained instead of routing through
-// fstest.MapFS to avoid forcing the production code to depend on a
-// specific map representation.
-type memFS struct {
-	files map[string][]byte
-}
-
-func newMemFS() *memFS { return &memFS{files: map[string][]byte{}} }
-
-func (m *memFS) Open(name string) (fs.File, error) {
-	data, ok := m.files[name]
-	if !ok {
-		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
-	}
-	mapFS := fstest.MapFS{name: &fstest.MapFile{Data: append([]byte(nil), data...), ModTime: time.Now()}}
-	return mapFS.Open(name)
-}
-
-func (m *memFS) Create(name string) (io.WriteCloser, error) {
-	return &memWriter{fs: m, name: name}, nil
-}
-
-type memWriter struct {
-	fs   *memFS
-	name string
-	buf  bytes.Buffer
-}
-
-func (w *memWriter) Write(p []byte) (int, error) { return w.buf.Write(p) }
-
-func (w *memWriter) Close() error {
-	w.fs.files[w.name] = w.buf.Bytes()
-	return nil
 }

@@ -6,7 +6,6 @@ import (
 	"runtime"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/prof"
@@ -16,34 +15,35 @@ import (
 )
 
 func TestNewPool(t *testing.T) {
-	p := NewPool(program.New([]instr.Instruction{instr.New(instr.NOP)}), 0)
-	defer p.Close()
-	require.Equal(t, 1, p.size)
+	t.Run("constructs members lazily", func(t *testing.T) {
+		p := NewPool(program.New([]instr.Instruction{instr.New(instr.NOP)}), 2)
+		defer p.Close()
+		require.Zero(t, p.live.Load())
+
+		first, err := p.Get(context.Background())
+		require.NoError(t, err)
+		second, err := p.Get(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, int64(2), p.live.Load())
+		p.Put(first)
+		p.Put(second)
+	})
+
+	t.Run("normalizes non-positive size", func(t *testing.T) {
+		p := NewPool(program.New([]instr.Instruction{instr.New(instr.NOP)}), 0)
+		defer p.Close()
+		first, err := p.Get(context.Background())
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err = p.Get(ctx)
+		require.ErrorIs(t, err, context.Canceled)
+		p.Put(first)
+	})
 }
 
 func TestPool_Get(t *testing.T) {
-	for _, tt := range runTests {
-		t.Run(fmt.Sprint(tt.program), func(t *testing.T) {
-			p := NewPool(tt.program, 1)
-			defer p.Close()
-
-			i, err := p.Get(context.Background())
-			require.NoError(t, err)
-			defer p.Put(i)
-
-			err = i.Run(context.Background())
-			if tt.err != nil {
-				require.ErrorIs(t, err, tt.err)
-				return
-			}
-			require.NoError(t, err)
-			for _, want := range tt.values {
-				got, err := i.Pop()
-				require.NoError(t, err)
-				require.Equal(t, want, got)
-			}
-		})
-	}
 
 	t.Run("reuses an idle interpreter", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
@@ -59,7 +59,7 @@ func TestPool_Get(t *testing.T) {
 		require.Same(t, i1, i2)
 	})
 
-	t.Run("blocks until put or context canceled", func(t *testing.T) {
+	t.Run("returns context error while waiting", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
 		p := NewPool(prog, 1)
 		defer p.Close()
@@ -67,10 +67,17 @@ func TestPool_Get(t *testing.T) {
 		i, err := p.Get(context.Background())
 		require.NoError(t, err)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-		defer cancel()
-		_, err = p.Get(ctx)
-		require.ErrorIs(t, err, context.DeadlineExceeded)
+		ctx, cancel := context.WithCancel(context.Background())
+		started := make(chan struct{})
+		result := make(chan error, 1)
+		go func() {
+			close(started)
+			_, err := p.Get(ctx)
+			result <- err
+		}()
+		<-started
+		cancel()
+		require.ErrorIs(t, <-result, context.Canceled)
 
 		p.Put(i)
 	})

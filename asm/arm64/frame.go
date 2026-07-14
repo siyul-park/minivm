@@ -14,12 +14,12 @@ import "github.com/siyul-park/minivm/asm"
 // alignment AArch64 requires for SP-relative access.
 type frame struct{}
 
-var _ asm.Frame = frame{}
-
 const (
 	spillSlotBytes = 8
 	maxFrameAdjust = 4080
 )
+
+var _ asm.Frame = frame{}
 
 // Enter reserves the spill area. SP updates stay within ARM64's unshifted
 // add/sub immediate range while preserving 16-byte alignment after every step.

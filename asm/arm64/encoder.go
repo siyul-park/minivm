@@ -9,6 +9,12 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// Encoder
+// ---------------------------------------------------------------------------
+
+type Encoder struct{}
+
+// ---------------------------------------------------------------------------
 // Sentinel errors
 // ---------------------------------------------------------------------------
 
@@ -25,15 +31,7 @@ var (
 	ErrUnexpectedRegisterOperand = errors.New("unexpected register operand")
 )
 
-// ---------------------------------------------------------------------------
-// Encoder
-// ---------------------------------------------------------------------------
-
-type Encoder struct{}
-
 var _ asm.Encoder = (*Encoder)(nil)
-
-func NewEncoder() *Encoder { return &Encoder{} }
 
 // condCode maps a conditional-branch opcode to the 4-bit AArch64 condition code.
 var condCode = map[Op]uint32{
@@ -203,6 +201,8 @@ var floatTernaryOpcodes = map[Op]struct{ single, double uint32 }{
 	OpFNMADD: {0x1F200000, 0x1F600000},
 	OpFNMSUB: {0x1F208000, 0x1F608000},
 }
+
+func NewEncoder() *Encoder { return &Encoder{} }
 
 func (e *Encoder) Encode(inst asm.Instruction) ([]byte, error) {
 	op := Op(inst.Op)
@@ -1057,138 +1057,6 @@ func (e *Encoder) encodeFloatTernary(op32, op64 uint32, inst asm.Instruction) ([
 // Operand decoders
 // ---------------------------------------------------------------------------
 
-// reg extracts the 5-bit register ID from a PReg.
-func reg(r asm.PReg) uint32 { return uint32(r.ID()) & 0x1F }
-
-// encR3 emits a standard 3-register instruction (Rm<<16 | Rn<<5 | Rd).
-func encR3(base uint32, d, n, m asm.PReg) ([]byte, error) {
-	b, err := intBase(base, d, n, m)
-	if err != nil {
-		return nil, err
-	}
-	return enc(b | reg(m)<<16 | reg(n)<<5 | reg(d)), nil
-}
-
-// encR2 emits a standard 2-register instruction (Rn<<5 | Rd).
-func encR2(base uint32, d, n asm.PReg) ([]byte, error) {
-	b, err := intBase(base, d, n)
-	if err != nil {
-		return nil, err
-	}
-	return enc(b | reg(n)<<5 | reg(d)), nil
-}
-
-// encR4 emits a standard 4-register instruction (Rm<<16 | Ra<<10 | Rn<<5 | Rd).
-func encR4(base uint32, d, n, m, a asm.PReg) ([]byte, error) {
-	b, err := intBase(base, d, n, m, a)
-	if err != nil {
-		return nil, err
-	}
-	return enc(b | reg(m)<<16 | reg(a)<<10 | reg(n)<<5 | reg(d)), nil
-}
-
-// encRImm12 emits an arithmetic-immediate (imm12<<10 | Rn<<5 | Rd).
-func encRImm12(base uint32, d, n asm.PReg, imm int64) ([]byte, error) {
-	b, err := intBase(base, d, n)
-	if err != nil {
-		return nil, err
-	}
-	return enc(b | (uint32(imm)&0xFFF)<<10 | reg(n)<<5 | reg(d)), nil
-}
-
-// sameKind verifies that every reg has the given type and a uniform 32- or
-// 64-bit width. Returns the shared width.
-func sameKind(typ asm.RegType, regs ...asm.PReg) (asm.RegWidth, error) {
-	if len(regs) == 0 {
-		return 0, asm.ErrInvalidOperand
-	}
-	width := regs[0].Width()
-	if regs[0].Type() != typ || (width != asm.Width32 && width != asm.Width64) {
-		return 0, asm.ErrInvalidOperand
-	}
-	for _, r := range regs[1:] {
-		if r.Type() != typ || r.Width() != width {
-			return 0, asm.ErrInvalidOperand
-		}
-	}
-	return width, nil
-}
-
-func intBase(base uint32, regs ...asm.PReg) (uint32, error) {
-	width, err := sameKind(asm.RegTypeInt, regs...)
-	if err != nil {
-		return 0, err
-	}
-	if width == asm.Width32 {
-		base &^= 1 << 31
-	}
-	return base, nil
-}
-
-func logicalImmediate(base uint32, dst, src asm.PReg, imm int64) (uint32, error) {
-	base, err := intBase(base, dst, src)
-	if err != nil {
-		return 0, err
-	}
-	is64 := dst.Width() == asm.Width64
-	immr, imms, ok := encodeLogicalImm(uint64(imm), is64)
-	if !ok {
-		return 0, ErrMissingImmediate
-	}
-	if is64 {
-		base |= 1 << 22
-	} else {
-		base &^= 1 << 22
-	}
-	return base | immr<<16 | imms<<10 | reg(src)<<5 | reg(dst), nil
-}
-
-func bitfieldBase(base uint32, dst, src asm.PReg) (uint32, uint32, error) {
-	base, err := intBase(base, dst, src)
-	if err != nil {
-		return 0, 0, err
-	}
-	if dst.Width() == asm.Width32 {
-		return base &^ (1 << 22), 31, nil
-	}
-	return base, 63, nil
-}
-
-func validMoveImmediate(dst asm.PReg, shift int64) error {
-	if _, err := intBase(0, dst); err != nil {
-		return err
-	}
-	if shift < 0 || shift%16 != 0 || shift > 48 || (dst.Width() == asm.Width32 && shift > 16) {
-		return asm.ErrInvalidOperand
-	}
-	return nil
-}
-
-func validTestBit(src asm.PReg, bit uint8) error {
-	if _, err := intBase(0, src); err != nil {
-		return err
-	}
-	if bit >= 64 || (src.Width() == asm.Width32 && bit >= 32) {
-		return asm.ErrInvalidOperand
-	}
-	return nil
-}
-
-func floatMatch(regs ...asm.PReg) error {
-	_, err := sameKind(asm.RegTypeFloat, regs...)
-	return err
-}
-
-func encodeFloatUnary(single, double uint32, dst, src asm.PReg) ([]byte, error) {
-	if err := floatMatch(dst, src); err != nil {
-		return nil, err
-	}
-	if dst.Width() == asm.Width32 {
-		return enc(single | reg(src)<<5 | reg(dst)), nil
-	}
-	return enc(double | reg(src)<<5 | reg(dst)), nil
-}
-
 func (e *Encoder) decodeReg4(inst asm.Instruction) (dst, src1, src2, src3 asm.PReg, err error) {
 	dstOp, ok := inst.Dst.(asm.PRegOperand)
 	if !ok {
@@ -1232,6 +1100,11 @@ func (e *Encoder) decodeReg2(inst asm.Instruction) (dst, src asm.PReg, err error
 	return dstOp.Reg, srcOp.Reg, nil
 }
 
+// decodeRegShift decodes (dst, src, shift_amount) for immediate-shift instructions.
+func (e *Encoder) decodeRegShift(inst asm.Instruction) (dst, src asm.PReg, shift int64, err error) {
+	return e.decodeRegImm(inst)
+}
+
 func (e *Encoder) decodeRegImm(inst asm.Instruction) (dst, src asm.PReg, imm int64, err error) {
 	dstOp, ok := inst.Dst.(asm.PRegOperand)
 	if !ok {
@@ -1246,11 +1119,6 @@ func (e *Encoder) decodeRegImm(inst asm.Instruction) (dst, src asm.PReg, imm int
 		return asm.PReg{}, asm.PReg{}, 0, ErrMissingImmediate
 	}
 	return dstOp.Reg, srcOp.Reg, immOp.Value, nil
-}
-
-// decodeRegShift decodes (dst, src, shift_amount) for immediate-shift instructions.
-func (e *Encoder) decodeRegShift(inst asm.Instruction) (dst, src asm.PReg, shift int64, err error) {
-	return e.decodeRegImm(inst)
 }
 
 func (e *Encoder) decodeRegImm2(inst asm.Instruction) (dst, src asm.PReg, imm1, imm2 int64, err error) {
@@ -1418,6 +1286,138 @@ func (e *Encoder) decodeTestBranch(inst asm.Instruction) (r asm.PReg, bit uint8,
 	}
 	packed := immOp.Value
 	return rOp.Reg, uint8(packed & 0xFF), packed >> 8, nil
+}
+
+// encR3 emits a standard 3-register instruction (Rm<<16 | Rn<<5 | Rd).
+func encR3(base uint32, d, n, m asm.PReg) ([]byte, error) {
+	b, err := intBase(base, d, n, m)
+	if err != nil {
+		return nil, err
+	}
+	return enc(b | reg(m)<<16 | reg(n)<<5 | reg(d)), nil
+}
+
+// encR2 emits a standard 2-register instruction (Rn<<5 | Rd).
+func encR2(base uint32, d, n asm.PReg) ([]byte, error) {
+	b, err := intBase(base, d, n)
+	if err != nil {
+		return nil, err
+	}
+	return enc(b | reg(n)<<5 | reg(d)), nil
+}
+
+// encR4 emits a standard 4-register instruction (Rm<<16 | Ra<<10 | Rn<<5 | Rd).
+func encR4(base uint32, d, n, m, a asm.PReg) ([]byte, error) {
+	b, err := intBase(base, d, n, m, a)
+	if err != nil {
+		return nil, err
+	}
+	return enc(b | reg(m)<<16 | reg(a)<<10 | reg(n)<<5 | reg(d)), nil
+}
+
+// encRImm12 emits an arithmetic-immediate (imm12<<10 | Rn<<5 | Rd).
+func encRImm12(base uint32, d, n asm.PReg, imm int64) ([]byte, error) {
+	b, err := intBase(base, d, n)
+	if err != nil {
+		return nil, err
+	}
+	return enc(b | (uint32(imm)&0xFFF)<<10 | reg(n)<<5 | reg(d)), nil
+}
+
+func logicalImmediate(base uint32, dst, src asm.PReg, imm int64) (uint32, error) {
+	base, err := intBase(base, dst, src)
+	if err != nil {
+		return 0, err
+	}
+	is64 := dst.Width() == asm.Width64
+	immr, imms, ok := encodeLogicalImm(uint64(imm), is64)
+	if !ok {
+		return 0, ErrMissingImmediate
+	}
+	if is64 {
+		base |= 1 << 22
+	} else {
+		base &^= 1 << 22
+	}
+	return base | immr<<16 | imms<<10 | reg(src)<<5 | reg(dst), nil
+}
+
+func bitfieldBase(base uint32, dst, src asm.PReg) (uint32, uint32, error) {
+	base, err := intBase(base, dst, src)
+	if err != nil {
+		return 0, 0, err
+	}
+	if dst.Width() == asm.Width32 {
+		return base &^ (1 << 22), 31, nil
+	}
+	return base, 63, nil
+}
+
+func validMoveImmediate(dst asm.PReg, shift int64) error {
+	if _, err := intBase(0, dst); err != nil {
+		return err
+	}
+	if shift < 0 || shift%16 != 0 || shift > 48 || (dst.Width() == asm.Width32 && shift > 16) {
+		return asm.ErrInvalidOperand
+	}
+	return nil
+}
+
+func validTestBit(src asm.PReg, bit uint8) error {
+	if _, err := intBase(0, src); err != nil {
+		return err
+	}
+	if bit >= 64 || (src.Width() == asm.Width32 && bit >= 32) {
+		return asm.ErrInvalidOperand
+	}
+	return nil
+}
+
+func intBase(base uint32, regs ...asm.PReg) (uint32, error) {
+	width, err := sameKind(asm.RegTypeInt, regs...)
+	if err != nil {
+		return 0, err
+	}
+	if width == asm.Width32 {
+		base &^= 1 << 31
+	}
+	return base, nil
+}
+
+func encodeFloatUnary(single, double uint32, dst, src asm.PReg) ([]byte, error) {
+	if err := floatMatch(dst, src); err != nil {
+		return nil, err
+	}
+	if dst.Width() == asm.Width32 {
+		return enc(single | reg(src)<<5 | reg(dst)), nil
+	}
+	return enc(double | reg(src)<<5 | reg(dst)), nil
+}
+
+// reg extracts the 5-bit register ID from a PReg.
+func reg(r asm.PReg) uint32 { return uint32(r.ID()) & 0x1F }
+
+func floatMatch(regs ...asm.PReg) error {
+	_, err := sameKind(asm.RegTypeFloat, regs...)
+	return err
+}
+
+// sameKind verifies that every reg has the given type and a uniform 32- or
+// 64-bit width. Returns the shared width.
+func sameKind(typ asm.RegType, regs ...asm.PReg) (asm.RegWidth, error) {
+	if len(regs) == 0 {
+		return 0, asm.ErrInvalidOperand
+	}
+	width := regs[0].Width()
+	if regs[0].Type() != typ || (width != asm.Width32 && width != asm.Width64) {
+		return 0, asm.ErrInvalidOperand
+	}
+	for _, r := range regs[1:] {
+		if r.Type() != typ || r.Width() != width {
+			return 0, asm.ErrInvalidOperand
+		}
+	}
+	return width, nil
 }
 
 // checkBranchOffset validates that offset is 4-byte aligned and its

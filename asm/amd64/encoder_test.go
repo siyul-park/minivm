@@ -9,7 +9,7 @@ import (
 	"github.com/siyul-park/minivm/asm/amd64"
 )
 
-func TestArch(t *testing.T) {
+func TestNew(t *testing.T) {
 	t.Run("register info is present", func(t *testing.T) {
 		arch := amd64.New()
 		require.NotZero(t, arch.Registers())
