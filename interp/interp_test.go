@@ -7117,48 +7117,51 @@ func BenchmarkNew(b *testing.B) {
 	b.Run("Empty", func(b *testing.B) {
 		prog := program.New(nil)
 		var vm *Interpreter
+		var closeErr error
+		var elapsed time.Duration
 		b.ReportAllocs()
 		b.ResetTimer()
-		var closeErr error
 		for b.Loop() {
+			start := time.Now()
 			vm = New(prog)
-			b.StopTimer()
+			elapsed += time.Since(start)
 			closeErr = vm.Close()
-			b.StartTimer()
 		}
-		b.StopTimer()
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 		require.NoError(b, closeErr)
 	})
 
 	b.Run("Program", func(b *testing.B) {
 		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)})
 		var vm *Interpreter
+		var closeErr error
+		var elapsed time.Duration
 		b.ReportAllocs()
 		b.ResetTimer()
-		var closeErr error
 		for b.Loop() {
+			start := time.Now()
 			vm = New(prog, WithThreshold(-1))
-			b.StopTimer()
+			elapsed += time.Since(start)
 			closeErr = vm.Close()
-			b.StartTimer()
 		}
-		b.StopTimer()
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 		require.NoError(b, closeErr)
 	})
 
 	b.Run("JITEnabled", func(b *testing.B) {
 		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 42)})
 		var vm *Interpreter
+		var closeErr error
+		var elapsed time.Duration
 		b.ReportAllocs()
 		b.ResetTimer()
-		var closeErr error
 		for b.Loop() {
+			start := time.Now()
 			vm = New(prog, WithThreshold(0))
-			b.StopTimer()
+			elapsed += time.Since(start)
 			closeErr = vm.Close()
-			b.StartTimer()
 		}
-		b.StopTimer()
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 		require.NoError(b, closeErr)
 	})
 }
@@ -7411,15 +7414,16 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 				}
 
 				var runErr error
+				var elapsed time.Duration
 				b.ReportAllocs()
 				b.ResetTimer()
 				for b.Loop() {
+					start := time.Now()
 					runErr = vm.Run(ctx)
-					b.StopTimer()
+					elapsed += time.Since(start)
 					vm.Reset()
-					b.StartTimer()
 				}
-				b.StopTimer()
+				b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 				require.NoError(b, runErr)
 			})
 		}
@@ -7431,21 +7435,35 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			var runErr, popErr, closeErr error
 			var value types.Value
 			var emits float64
+			var elapsed time.Duration
+			var bytes, allocs uint64
+			var sampled bool
 			b.ReportAllocs()
 			b.ReportMetric(float64(len(numeric)), "opcodes/op")
 			b.ResetTimer()
 			for b.Loop() {
-				b.StopTimer()
 				vm := New(program.New(numeric), WithTick(1), WithThreshold(0))
-				b.StartTimer()
+				var before runtime.MemStats
+				if !sampled {
+					runtime.ReadMemStats(&before)
+				}
+				start := time.Now()
 				runErr = vm.Run(ctx)
-				b.StopTimer()
+				elapsed += time.Since(start)
+				if !sampled {
+					var after runtime.MemStats
+					runtime.ReadMemStats(&after)
+					bytes = after.TotalAlloc - before.TotalAlloc
+					allocs = after.Mallocs - before.Mallocs
+					sampled = true
+				}
 				value, popErr = vm.Pop()
 				emits = metric(vm, "vm_jit_emits_total")
 				closeErr = vm.Close()
-				b.StartTimer()
 			}
-			b.StopTimer()
+			b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+			b.ReportMetric(float64(bytes), "B/op")
+			b.ReportMetric(float64(allocs), "allocs/op")
 			require.NoError(b, runErr)
 			require.NoError(b, popErr)
 			require.NoError(b, closeErr)
@@ -7495,10 +7513,12 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			require.Greater(b, exits, float64(0))
 
 			var runErr, closeErr error
+			var elapsed time.Duration
+			var bytes, allocs uint64
+			var sampled bool
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				b.StopTimer()
 				vm := New(arrayExit, WithCache(cache), WithTick(1), WithThreshold(0))
 				require.NoError(b, vm.Push(types.I32(0)))
 				require.NoError(b, vm.Run(ctx))
@@ -7507,13 +7527,25 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 				require.Equal(b, types.F64(7), value)
 				vm.Reset()
 				require.NoError(b, vm.Push(types.I32(-1)))
-				b.StartTimer()
+				var before runtime.MemStats
+				if !sampled {
+					runtime.ReadMemStats(&before)
+				}
+				start := time.Now()
 				runErr = vm.Run(ctx)
-				b.StopTimer()
+				elapsed += time.Since(start)
+				if !sampled {
+					var after runtime.MemStats
+					runtime.ReadMemStats(&after)
+					bytes = after.TotalAlloc - before.TotalAlloc
+					allocs = after.Mallocs - before.Mallocs
+					sampled = true
+				}
 				closeErr = vm.Close()
-				b.StartTimer()
 			}
-			b.StopTimer()
+			b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+			b.ReportMetric(float64(bytes), "B/op")
+			b.ReportMetric(float64(allocs), "allocs/op")
 			require.ErrorIs(b, runErr, ErrIndexOutOfRange)
 			require.NoError(b, closeErr)
 		})
@@ -7560,10 +7592,12 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 			require.Greater(b, exits, float64(0))
 
 			var runErr, closeErr error
+			var elapsed time.Duration
+			var bytes, allocs uint64
+			var sampled bool
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				b.StopTimer()
 				vm := New(divide, WithCache(cache), WithTick(1), WithThreshold(0))
 				require.NoError(b, vm.Push(types.I32(90)))
 				require.NoError(b, vm.Push(types.I32(3)))
@@ -7574,13 +7608,25 @@ func BenchmarkInterpreter_Run(b *testing.B) {
 				vm.Reset()
 				require.NoError(b, vm.Push(types.I32(90)))
 				require.NoError(b, vm.Push(types.I32(0)))
-				b.StartTimer()
+				var before runtime.MemStats
+				if !sampled {
+					runtime.ReadMemStats(&before)
+				}
+				start := time.Now()
 				runErr = vm.Run(ctx)
-				b.StopTimer()
+				elapsed += time.Since(start)
+				if !sampled {
+					var after runtime.MemStats
+					runtime.ReadMemStats(&after)
+					bytes = after.TotalAlloc - before.TotalAlloc
+					allocs = after.Mallocs - before.Mallocs
+					sampled = true
+				}
 				closeErr = vm.Close()
-				b.StartTimer()
 			}
-			b.StopTimer()
+			b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+			b.ReportMetric(float64(bytes), "B/op")
+			b.ReportMetric(float64(allocs), "allocs/op")
 			require.ErrorIs(b, runErr, ErrDivideByZero)
 			require.NoError(b, closeErr)
 		})
@@ -7645,15 +7691,33 @@ func BenchmarkInterpreter_Reset(b *testing.B) {
 				require.NotNil(b, vm.stub(0))
 			}
 
+			var runErr error
+			var elapsed time.Duration
+			var bytes, allocs uint64
+			var sampled bool
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
+				var before runtime.MemStats
+				if !sampled {
+					runtime.ReadMemStats(&before)
+				}
+				start := time.Now()
 				vm.Reset()
-				b.StopTimer()
-				require.NoError(b, vm.Run(ctx))
-				b.StartTimer()
+				elapsed += time.Since(start)
+				if !sampled {
+					var after runtime.MemStats
+					runtime.ReadMemStats(&after)
+					bytes = after.TotalAlloc - before.TotalAlloc
+					allocs = after.Mallocs - before.Mallocs
+					sampled = true
+				}
+				runErr = vm.Run(ctx)
 			}
-			b.StopTimer()
+			b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+			b.ReportMetric(float64(bytes), "B/op")
+			b.ReportMetric(float64(allocs), "allocs/op")
+			require.NoError(b, runErr)
 		})
 	}
 }
@@ -7662,32 +7726,34 @@ func BenchmarkInterpreter_Push(b *testing.B) {
 	b.Run("Scalar", func(b *testing.B) {
 		vm := New(program.New(nil))
 		defer vm.Close()
-		b.ReportAllocs()
 		var pushErr error
+		var elapsed time.Duration
+		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
+			start := time.Now()
 			pushErr = vm.Push(types.I32(42))
-			b.StopTimer()
+			elapsed += time.Since(start)
 			vm.Reset()
-			b.StartTimer()
 		}
-		b.StopTimer()
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 		require.NoError(b, pushErr)
 	})
 
 	b.Run("Reference", func(b *testing.B) {
 		vm := New(program.New(nil))
 		defer vm.Close()
-		b.ReportAllocs()
 		var pushErr error
+		var elapsed time.Duration
+		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
+			start := time.Now()
 			pushErr = vm.Push(types.String("value"))
-			b.StopTimer()
+			elapsed += time.Since(start)
 			vm.Reset()
-			b.StartTimer()
 		}
-		b.StopTimer()
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 		require.NoError(b, pushErr)
 	})
 }
@@ -7695,37 +7761,41 @@ func BenchmarkInterpreter_Push(b *testing.B) {
 func BenchmarkInterpreter_Pop(b *testing.B) {
 	vm := New(program.New(nil))
 	defer vm.Close()
+	var value types.Value
+	var pushErr, popErr error
+	var elapsed time.Duration
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		b.StopTimer()
-		require.NoError(b, vm.Push(types.I32(42)))
-		b.StartTimer()
-		value, err := vm.Pop()
-		b.StopTimer()
-		require.NoError(b, err)
-		require.Equal(b, types.I32(42), value)
-		b.StartTimer()
+		pushErr = vm.Push(types.I32(42))
+		start := time.Now()
+		value, popErr = vm.Pop()
+		elapsed += time.Since(start)
 	}
-	b.StopTimer()
+	b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+	require.NoError(b, pushErr)
+	require.NoError(b, popErr)
+	require.Equal(b, types.I32(42), value)
 }
 
 func BenchmarkInterpreter_PopBoxed(b *testing.B) {
 	vm := New(program.New(nil))
 	defer vm.Close()
+	var value types.Boxed
+	var pushErr, popErr error
+	var elapsed time.Duration
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		b.StopTimer()
-		require.NoError(b, vm.Push(types.I32(42)))
-		b.StartTimer()
-		value, err := vm.PopBoxed()
-		b.StopTimer()
-		require.NoError(b, err)
-		require.Equal(b, types.BoxI32(42), value)
-		b.StartTimer()
+		pushErr = vm.Push(types.I32(42))
+		start := time.Now()
+		value, popErr = vm.PopBoxed()
+		elapsed += time.Since(start)
 	}
-	b.StopTimer()
+	b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+	require.NoError(b, pushErr)
+	require.NoError(b, popErr)
+	require.Equal(b, types.BoxI32(42), value)
 }
 
 func BenchmarkInterpreter_Peek(b *testing.B) {
@@ -7739,7 +7809,6 @@ func BenchmarkInterpreter_Peek(b *testing.B) {
 	for b.Loop() {
 		value, err = vm.Peek(0)
 	}
-	b.StopTimer()
 	require.NoError(b, err)
 	require.Equal(b, types.BoxI32(42), value)
 }
@@ -7749,16 +7818,17 @@ func BenchmarkInterpreter_Alloc(b *testing.B) {
 	defer vm.Close()
 	var addr int
 	var err error
+	var elapsed time.Duration
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
+		start := time.Now()
 		addr, err = vm.Alloc(types.String("value"))
-		b.StopTimer()
+		elapsed += time.Since(start)
 		require.NoError(b, err)
 		require.NoError(b, vm.Release(addr))
-		b.StartTimer()
 	}
-	b.StopTimer()
+	b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 }
 
 func BenchmarkInterpreter_Retain(b *testing.B) {
@@ -7766,16 +7836,17 @@ func BenchmarkInterpreter_Retain(b *testing.B) {
 	defer vm.Close()
 	addr, err := vm.Alloc(types.String("value"))
 	require.NoError(b, err)
+	var elapsed time.Duration
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
+		start := time.Now()
 		_, err = vm.Retain(addr)
-		b.StopTimer()
+		elapsed += time.Since(start)
 		require.NoError(b, err)
 		require.NoError(b, vm.Release(addr))
-		b.StartTimer()
 	}
-	b.StopTimer()
+	b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 	require.NoError(b, vm.Release(addr))
 }
 
@@ -7784,19 +7855,19 @@ func BenchmarkInterpreter_Release(b *testing.B) {
 	defer vm.Close()
 	addr, err := vm.Alloc(types.String("value"))
 	require.NoError(b, err)
+	var releaseErr error
+	var elapsed time.Duration
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		b.StopTimer()
 		_, err = vm.Retain(addr)
 		require.NoError(b, err)
-		b.StartTimer()
-		releaseErr := vm.Release(addr)
-		b.StopTimer()
+		start := time.Now()
+		releaseErr = vm.Release(addr)
+		elapsed += time.Since(start)
 		require.NoError(b, releaseErr)
-		b.StartTimer()
 	}
-	b.StopTimer()
+	b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 	require.NoError(b, vm.Release(addr))
 }
 
@@ -7808,36 +7879,51 @@ func BenchmarkPool_Get(b *testing.B) {
 		require.NoError(b, err)
 		pool.Put(vm)
 
+		var elapsed time.Duration
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
+			start := time.Now()
 			vm, err = pool.Get(context.Background())
-			b.StopTimer()
+			elapsed += time.Since(start)
 			require.NoError(b, err)
 			pool.Put(vm)
-			b.StartTimer()
 		}
-		b.StopTimer()
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 	})
 
 	b.Run("Miss", func(b *testing.B) {
 		var vm *Interpreter
 		var err, closeErr error
+		var elapsed time.Duration
+		var bytes, allocs uint64
+		var sampled bool
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
-			b.StopTimer()
 			pool := NewPool(program.New(nil), 1)
-			b.StartTimer()
+			var before runtime.MemStats
+			if !sampled {
+				runtime.ReadMemStats(&before)
+			}
+			start := time.Now()
 			vm, err = pool.Get(context.Background())
-			b.StopTimer()
+			elapsed += time.Since(start)
+			if !sampled {
+				var after runtime.MemStats
+				runtime.ReadMemStats(&after)
+				bytes = after.TotalAlloc - before.TotalAlloc
+				allocs = after.Mallocs - before.Mallocs
+				sampled = true
+			}
 			if vm != nil {
 				pool.Put(vm)
 			}
 			closeErr = pool.Close()
-			b.StartTimer()
 		}
-		b.StopTimer()
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+		b.ReportMetric(float64(bytes), "B/op")
+		b.ReportMetric(float64(allocs), "allocs/op")
 		require.NoError(b, err)
 		require.NoError(b, closeErr)
 	})
@@ -7859,10 +7945,12 @@ func BenchmarkPool_Get(b *testing.B) {
 		prog := program.New(code)
 		var second *Interpreter
 		var getErr, closeErr error
+		var elapsed time.Duration
+		var bytes, allocs uint64
+		var sampled bool
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
-			b.StopTimer()
 			pool := NewPool(prog, 2, WithThreshold(0))
 			first, err := pool.Get(context.Background())
 			require.NoError(b, err)
@@ -7876,18 +7964,30 @@ func BenchmarkPool_Get(b *testing.B) {
 				}
 			}
 			require.NotNil(b, first.stub(0))
-			b.StartTimer()
+			var before runtime.MemStats
+			if !sampled {
+				runtime.ReadMemStats(&before)
+			}
+			start := time.Now()
 			second, getErr = pool.Get(context.Background())
-			b.StopTimer()
+			elapsed += time.Since(start)
+			if !sampled {
+				var after runtime.MemStats
+				runtime.ReadMemStats(&after)
+				bytes = after.TotalAlloc - before.TotalAlloc
+				allocs = after.Mallocs - before.Mallocs
+				sampled = true
+			}
 			require.NoError(b, getErr)
 			second.sync()
 			require.NotNil(b, second.stub(0))
 			pool.Put(first)
 			pool.Put(second)
 			closeErr = pool.Close()
-			b.StartTimer()
 		}
-		b.StopTimer()
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+		b.ReportMetric(float64(bytes), "B/op")
+		b.ReportMetric(float64(allocs), "allocs/op")
 		require.NoError(b, closeErr)
 	})
 
@@ -7917,16 +8017,17 @@ func BenchmarkPool_Put(b *testing.B) {
 		vm, err := pool.Get(context.Background())
 		require.NoError(b, err)
 
+		var elapsed time.Duration
 		b.ReportAllocs()
 		b.ResetTimer()
 		for b.Loop() {
+			start := time.Now()
 			pool.Put(vm)
-			b.StopTimer()
+			elapsed += time.Since(start)
 			vm, err = pool.Get(context.Background())
 			require.NoError(b, err)
-			b.StartTimer()
 		}
-		b.StopTimer()
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 		pool.Put(vm)
 	})
 }
