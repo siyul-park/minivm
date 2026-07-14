@@ -14,13 +14,6 @@ import (
 
 type marshalCount int32
 
-type marshalRecord struct {
-	Name   string
-	Values []int32
-	Fixed  [2]uint16
-	Lookup map[string]int64
-}
-
 type marshalCustom int32
 
 func (v marshalCustom) MarshalVM(*Interpreter) (types.Value, error) {
@@ -74,10 +67,10 @@ func TestInterpreter_Marshal(t *testing.T) {
 	t.Run("host method receives active context", func(t *testing.T) {
 		setup := New(program.New(nil))
 		defer setup.Close()
-		value, err := setup.Marshal(contextHost{})
+		value, err := setup.Marshal(hostFields{})
 		require.NoError(t, err)
 		host := value.(*HostObject)
-		method := host.Field(host.Typ.FieldIndex("Value"))
+		method := host.Field(host.Typ.FieldIndex("Context"))
 		fn, err := setup.Load(method.Ref())
 		require.NoError(t, err)
 
@@ -168,7 +161,12 @@ func TestInterpreter_Marshal(t *testing.T) {
 	t.Run("nested collections", func(t *testing.T) {
 		i := New(program.New(nil))
 		defer i.Close()
-		src := marshalRecord{
+		src := struct {
+			Name   string
+			Values []int32
+			Fixed  [2]uint16
+			Lookup map[string]int64
+		}{
 			Name:   "vm",
 			Values: []int32{1, 2, 3},
 			Fixed:  [2]uint16{4, 5},
@@ -177,7 +175,12 @@ func TestInterpreter_Marshal(t *testing.T) {
 
 		value, err := i.Marshal(src)
 		require.NoError(t, err)
-		var dst marshalRecord
+		var dst struct {
+			Name   string
+			Values []int32
+			Fixed  [2]uint16
+			Lookup map[string]int64
+		}
 		require.NoError(t, i.Unmarshal(value, &dst))
 		require.Equal(t, src, dst)
 	})

@@ -22,8 +22,6 @@ type upperMarshaler byte
 
 type contextKey byte
 
-type contextHost struct{}
-
 type trackedValue struct {
 	refs   []types.Ref
 	closed int
@@ -40,13 +38,6 @@ func (v *trackedValue) Refs(dst []types.Ref) []types.Ref {
 func (v *trackedValue) Close() error {
 	v.closed++
 	return nil
-}
-
-func (*contextHost) Value(ctx context.Context) int32 {
-	if ctx.Value(contextKey(0)) == "value" {
-		return 7
-	}
-	return 0
 }
 
 func (upperMarshaler) Marshal(_ *Interpreter, v any) (types.Value, error) {

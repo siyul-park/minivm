@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"context"
 	"testing"
 
 	"github.com/siyul-park/minivm/program"
@@ -27,6 +28,13 @@ type hostFields struct {
 	Text   string
 	Value  types.Value
 	hidden int32
+}
+
+func (*hostFields) Context(ctx context.Context) int32 {
+	if ctx.Value(contextKey(0)) == "value" {
+		return 7
+	}
+	return 0
 }
 
 func (h *hostFields) Bump(n int32) int32 {
@@ -122,9 +130,10 @@ func TestHostObject_Refs(t *testing.T) {
 		require.NoError(t, err)
 		host := value.(*HostObject)
 		bump := host.Field(host.Typ.FieldIndex("Bump"))
+		context := host.Field(host.Typ.FieldIndex("Context"))
 		touch := host.Field(host.Typ.FieldIndex("Touch"))
 
-		require.Equal(t, []types.Ref{9, types.Ref(bump.Ref()), types.Ref(touch.Ref())}, host.Refs([]types.Ref{9}))
+		require.Equal(t, []types.Ref{9, types.Ref(bump.Ref()), types.Ref(context.Ref()), types.Ref(touch.Ref())}, host.Refs([]types.Ref{9}))
 	})
 
 	t.Run("no methods", func(t *testing.T) {
