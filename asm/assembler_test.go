@@ -191,7 +191,7 @@ func TestAssembler_Build(t *testing.T) {
 			a.Emit(arm64.LDR(flag, ctx, 0))
 			tc.emit(a, flag, zero)
 
-			const fillerCount = 280_000
+			const fillerCount = 1 << 18
 			a.Emit(arm64.LDI(filler, 1)...)
 			for i := 0; i < fillerCount; i++ {
 				a.Emit(arm64.ADDI(filler, filler, 1))
