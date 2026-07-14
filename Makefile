@@ -2,6 +2,7 @@ coverage-min ?= 72.8
 benchmark-pr-time ?= 100ms
 benchmark-time ?= 1s
 benchmark-count ?= 5
+fuzz-parallel ?= 4
 GOIMPORTS ?= goimports
 -include .env
 
@@ -154,11 +155,11 @@ doc: init
 	@godoc -http=:6060
 
 fuzz:
-	@go test -run='^$$' -fuzz='^FuzzInstructionRoundTrip$$' -fuzztime=10s $(test-options) ./instr
-	@go test -run='^$$' -fuzz='^FuzzParse$$' -fuzztime=10s $(test-options) ./instr
-	@go test -run='^$$' -fuzz='^FuzzInterpreterParity$$' -fuzztime=10s $(test-options) ./interp
-	@go test -run='^$$' -fuzz='^FuzzOptimizerParity$$' -fuzztime=10s $(test-options) ./optimize
-	@go test -run='^$$' -fuzz='^FuzzParseProgram$$' -fuzztime=10s $(test-options) ./program
-	@go test -run='^$$' -fuzz='^FuzzVerify$$' -fuzztime=10s $(test-options) ./program
-	@go test -run='^$$' -fuzz='^FuzzParseFunction$$' -fuzztime=10s $(test-options) ./types
-	@go test -run='^$$' -fuzz='^FuzzParseType$$' -fuzztime=10s $(test-options) ./types
+	@go test -run='^$$' -fuzz='^FuzzInstructionRoundTrip$$' -fuzztime=10s -parallel=$(fuzz-parallel) $(test-options) ./instr
+	@go test -run='^$$' -fuzz='^FuzzParse$$' -fuzztime=10s -parallel=$(fuzz-parallel) $(test-options) ./instr
+	@go test -run='^$$' -fuzz='^FuzzInterpreterParity$$' -fuzztime=10s -parallel=$(fuzz-parallel) $(test-options) ./interp
+	@go test -run='^$$' -fuzz='^FuzzOptimizerParity$$' -fuzztime=10s -parallel=$(fuzz-parallel) $(test-options) ./optimize
+	@go test -run='^$$' -fuzz='^FuzzParseProgram$$' -fuzztime=10s -parallel=$(fuzz-parallel) $(test-options) ./program
+	@go test -run='^$$' -fuzz='^FuzzVerify$$' -fuzztime=10s -parallel=$(fuzz-parallel) $(test-options) ./program
+	@go test -run='^$$' -fuzz='^FuzzParseFunction$$' -fuzztime=10s -parallel=$(fuzz-parallel) $(test-options) ./types
+	@go test -run='^$$' -fuzz='^FuzzParseType$$' -fuzztime=10s -parallel=$(fuzz-parallel) $(test-options) ./types
