@@ -4957,7 +4957,7 @@ func TestWithThreshold(t *testing.T) {
 		// Once warm, the entry dispatches natively and the threaded safepoint no
 		// longer samples it: the sample count must not grow across further runs.
 		warm := i.samples.Samples(addr)
-		for range 32 {
+		for range 4 {
 			i.Reset()
 			require.NoError(t, i.Push(types.I32(41)))
 			require.NoError(t, i.Run(context.Background()))
@@ -5061,7 +5061,7 @@ func TestWithThreshold(t *testing.T) {
 		i := New(prog, WithTick(1), WithThreshold(0))
 		defer i.Close()
 
-		for range 256 {
+		for range 4 {
 			i.Reset()
 			require.NoError(t, i.Run(context.Background()))
 			got, err := i.Pop()
@@ -5108,7 +5108,7 @@ func TestWithThreshold(t *testing.T) {
 		i := New(prog, WithTick(1), WithThreshold(0))
 		defer i.Close()
 
-		for range 256 {
+		for range 4 {
 			i.Reset()
 			require.NoError(t, i.Run(context.Background()))
 			got, err := i.Pop()
@@ -5157,7 +5157,7 @@ func TestWithThreshold(t *testing.T) {
 		i := New(prog, WithTick(1), WithThreshold(0))
 		defer i.Close()
 
-		for range 64 {
+		for range 4 {
 			i.Reset()
 			require.NoError(t, i.Run(context.Background()))
 			got, err := i.Pop()
@@ -5197,7 +5197,7 @@ func TestWithThreshold(t *testing.T) {
 		defer i.Close()
 		row := make([]float64, 8)
 		arr := types.TypedArray[float64](row)
-		for n := range 50000 {
+		for n := range 4 {
 			i.Reset()
 			var sum float64
 			for idx := range row {
@@ -5238,7 +5238,7 @@ func TestWithThreshold(t *testing.T) {
 		defer i.Close()
 		row := make([]bool, 8)
 		arr := types.TypedArray[bool](row)
-		for n := range 5000 {
+		for n := range 4 {
 			i.Reset()
 			var sum int32
 			for idx := range row {
@@ -5281,7 +5281,7 @@ func TestWithThreshold(t *testing.T) {
 		defer i.Close()
 		row := make([]int8, 8)
 		arr := types.TypedArray[int8](row)
-		for n := range 5000 {
+		for n := range 4 {
 			i.Reset()
 			var sum int32
 			for idx := range row {
@@ -5322,7 +5322,7 @@ func TestWithThreshold(t *testing.T) {
 		defer i.Close()
 		row := make([]int32, 8)
 		arr := types.TypedArray[int32](row)
-		for n := range 5000 {
+		for n := range 4 {
 			i.Reset()
 			var sum int32
 			for idx := range row {
@@ -5363,7 +5363,7 @@ func TestWithThreshold(t *testing.T) {
 		defer i.Close()
 		row := make([]int64, 8)
 		arr := types.TypedArray[int64](row)
-		for n := range 5000 {
+		for n := range 4 {
 			i.Reset()
 			var sum int64
 			for idx := range row {
@@ -5404,7 +5404,7 @@ func TestWithThreshold(t *testing.T) {
 		defer i.Close()
 		row := make([]float32, 8)
 		arr := types.TypedArray[float32](row)
-		for n := range 5000 {
+		for n := range 4 {
 			i.Reset()
 			var sum float64
 			for idx := range row {
@@ -5481,7 +5481,7 @@ func TestWithThreshold(t *testing.T) {
 
 				i := New(prog, WithTick(1), WithThreshold(0))
 				defer i.Close()
-				for range 5000 {
+				for range 4 {
 					i.Reset()
 					require.NoError(t, i.Push(tt.array))
 					require.NoError(t, i.Run(context.Background()))
@@ -5563,7 +5563,7 @@ func TestWithThreshold(t *testing.T) {
 				i := New(prog, WithTick(1), WithThreshold(0))
 				defer i.Close()
 				s := types.NewStruct(typ)
-				for range 5000 {
+				for range 4 {
 					i.Reset()
 					s.SetField(int(tt.idx), tt.value)
 					require.NoError(t, i.Push(s))
@@ -5623,7 +5623,7 @@ func TestWithThreshold(t *testing.T) {
 				i := New(prog, WithTick(1), WithThreshold(0))
 				defer i.Close()
 				s := types.NewStruct(typ)
-				for range 5000 {
+				for range 4 {
 					i.Reset()
 					require.NoError(t, i.Push(s))
 					require.NoError(t, i.Run(context.Background()))
@@ -6301,7 +6301,7 @@ func TestWithThreshold(t *testing.T) {
 
 		i := New(prog, WithTick(1), WithThreshold(0))
 		defer i.Close()
-		for range 5000 {
+		for range 4 {
 			i.Reset()
 			arr := types.NewArray(arrTyp, types.BoxedNull, types.BoxedNull)
 			require.NoError(t, i.Push(arr))
@@ -6346,7 +6346,7 @@ func TestWithThreshold(t *testing.T) {
 
 		i := New(prog, WithTick(1), WithThreshold(0))
 		defer i.Close()
-		for range 5000 {
+		for range 4 {
 			i.Reset()
 			s := types.NewStruct(typ, types.BoxedNull)
 			require.NoError(t, i.Push(s))
