@@ -11,31 +11,30 @@ import (
 
 func TestErrorCode(t *testing.T) {
 	tests := []struct {
-		name string
 		err  error
 		want types.ErrorCode
 	}{
-		{name: "nil", want: types.ErrorCodeNone},
-		{name: "yield", err: ErrYield, want: types.ErrorCodeNone},
-		{name: "guest error", err: types.NewError(42, "guest", types.BoxedNull), want: 42},
-		{name: "unknown opcode", err: ErrUnknownOpcode, want: TrapCodeUnknownOpcode},
-		{name: "unreachable", err: ErrUnreachableExecuted, want: TrapCodeUnreachableExecuted},
-		{name: "segmentation fault", err: ErrSegmentationFault, want: TrapCodeSegmentationFault},
-		{name: "stack overflow", err: ErrStackOverflow, want: TrapCodeStackOverflow},
-		{name: "stack underflow", err: ErrStackUnderflow, want: TrapCodeStackUnderflow},
-		{name: "frame overflow", err: ErrFrameOverflow, want: TrapCodeFrameOverflow},
-		{name: "frame underflow", err: ErrFrameUnderflow, want: TrapCodeFrameUnderflow},
-		{name: "type mismatch", err: ErrTypeMismatch, want: TrapCodeTypeMismatch},
-		{name: "divide by zero", err: ErrDivideByZero, want: TrapCodeDivideByZero},
-		{name: "index out of range", err: ErrIndexOutOfRange, want: TrapCodeIndexOutOfRange},
-		{name: "fuel exhausted", err: ErrFuelExhausted, want: TrapCodeFuelExhausted},
-		{name: "heap exhausted", err: ErrHeapExhausted, want: TrapCodeHeapExhausted},
-		{name: "coroutine done", err: ErrCoroutineDone, want: TrapCodeCoroutineDone},
-		{name: "uncaught exception", err: ErrUncaughtException, want: TrapCodeUncaughtException},
-		{name: "host error", err: errors.New("host"), want: TrapCodeHostError},
+		{want: types.ErrorCodeNone},
+		{err: ErrYield, want: types.ErrorCodeNone},
+		{err: types.NewError(42, "guest", types.BoxedNull), want: 42},
+		{err: ErrUnknownOpcode, want: TrapCodeUnknownOpcode},
+		{err: ErrUnreachableExecuted, want: TrapCodeUnreachableExecuted},
+		{err: ErrSegmentationFault, want: TrapCodeSegmentationFault},
+		{err: ErrStackOverflow, want: TrapCodeStackOverflow},
+		{err: ErrStackUnderflow, want: TrapCodeStackUnderflow},
+		{err: ErrFrameOverflow, want: TrapCodeFrameOverflow},
+		{err: ErrFrameUnderflow, want: TrapCodeFrameUnderflow},
+		{err: ErrTypeMismatch, want: TrapCodeTypeMismatch},
+		{err: ErrDivideByZero, want: TrapCodeDivideByZero},
+		{err: ErrIndexOutOfRange, want: TrapCodeIndexOutOfRange},
+		{err: ErrFuelExhausted, want: TrapCodeFuelExhausted},
+		{err: ErrHeapExhausted, want: TrapCodeHeapExhausted},
+		{err: ErrCoroutineDone, want: TrapCodeCoroutineDone},
+		{err: ErrUncaughtException, want: TrapCodeUncaughtException},
+		{err: errors.New("host"), want: TrapCodeHostError},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(fmt.Sprint(tt.err), func(t *testing.T) {
 			require.Equal(t, tt.want, ErrorCode(tt.err))
 			if tt.err != nil {
 				require.Equal(t, tt.want, ErrorCode(&RuntimeError{Err: fmt.Errorf("wrapped: %w", tt.err)}))
