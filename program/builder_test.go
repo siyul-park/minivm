@@ -8,12 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type constantValue struct{ id byte }
-
-func (*constantValue) Kind() types.Kind { return types.KindRef }
-func (*constantValue) Type() types.Type { return types.TypeRef }
-func (*constantValue) String() string   { return "constant" }
-
 func TestNewBuilder(t *testing.T) {
 	prog, err := NewBuilder().Build()
 	require.NoError(t, err)
@@ -113,8 +107,8 @@ func TestBuilder_Const(t *testing.T) {
 
 	t.Run("uses pointer identity", func(t *testing.T) {
 		b := NewBuilder()
-		first := &constantValue{id: 1}
-		second := &constantValue{id: 2}
+		first := &types.Function{}
+		second := &types.Function{}
 
 		require.Equal(t, 0, b.Const(first))
 		require.Equal(t, 0, b.Const(first))
