@@ -16,7 +16,6 @@ Read when adding or changing a public API, opcode, verifier rule, interpreter be
 | verifier policy | `program/verify.go` and `TestVerify/defines_a_policy_for_every_opcode` |
 | runtime opcode corpus | `interp/interp_test.go` `runTests` and `TestInterpreter_Run/covers_every_runtime_opcode` |
 | backend support | `docs/instruction-set.md` |
-| migration execution | `docs/plans/test-benchmark-rework.md` |
 
 ## Test Layers
 
@@ -857,6 +856,20 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 
 White-box tests remain only when exported behavior cannot directly protect the invariant: reference counts and free-list reuse, generated handler completeness, verifier dataflow policies, trace/cache state transitions, journal materialization, register allocation, relocation encoding, executable-buffer W^X and pointer stability, and architecture ABI encoding.
 
+## Automated Gates
+
+| Command | Contract |
+|---|---|
+| `make check` | generated files, module tidiness, formatting, vet, race tests, and ARM64 build checks |
+| `make coverage-check` | full coverage run and total coverage of at least the recorded 72.8% baseline |
+| `make fuzz` | bounded smoke runs for every declared fuzz target |
+| `make benchmark-pr` | quick deterministic benchmark report; no performance threshold |
+| `make benchmark-core` | all canonical package and VM-kernel benchmarks |
+| `make benchmark-nightly` | repeated canonical suite for scheduled reporting |
+| `make benchmark-compare` | optional `compare`-tagged external runtime suite |
+
+Coverage and contract ownership are separate. A line-coverage increase does not replace an owner test, opcode row, parity case, or trust-boundary fuzz target. Performance jobs fail only when fixtures or benchmark execution fail; measured regressions remain report-only until stable variance and practical thresholds are recorded.
+
 ## Maintenance Notes
 
 - Add a public owner test with every behavior-bearing exported symbol.
@@ -871,4 +884,3 @@ White-box tests remain only when exported behavior cannot directly protect the i
 - `docs/instruction-set.md` - opcode semantics and backend capability
 - `docs/verification.md` - verifier architecture and policies
 - `docs/benchmarks.md` - benchmark methodology
-- `docs/plans/test-benchmark-rework.md` - phased migration and review log
