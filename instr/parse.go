@@ -53,15 +53,20 @@ func ParseI8(code []byte, offset int) int {
 	return int(int8(code[offset]))
 }
 
+// ParseI16 reads a little-endian signed 16-bit value from code[offset:].
+func ParseI16(code []byte, offset int) int {
+	return int(int16(uint16(ParseU16(code, offset))))
+}
+
 // ParseU16 reads a little-endian unsigned 16-bit value from code[offset:].
 func ParseU16(code []byte, offset int) int {
 	return int(uint16(code[offset]) |
 		uint16(code[offset+1])<<8)
 }
 
-// ParseI16 reads a little-endian signed 16-bit value from code[offset:].
-func ParseI16(code []byte, offset int) int {
-	return int(int16(uint16(ParseU16(code, offset))))
+// ParseI32 reads a little-endian signed 32-bit value from code[offset:].
+func ParseI32(code []byte, offset int) int {
+	return int(int32(uint32(ParseU32(code, offset))))
 }
 
 // ParseU32 reads a little-endian unsigned 32-bit value from code[offset:].
@@ -72,9 +77,30 @@ func ParseU32(code []byte, offset int) int {
 		uint32(code[offset+3])<<24)
 }
 
-// ParseI32 reads a little-endian signed 32-bit value from code[offset:].
-func ParseI32(code []byte, offset int) int {
-	return int(int32(uint32(ParseU32(code, offset))))
+// ParseAll reads from r line by line and parses each non-empty line as an
+// assembly instruction. It returns the first error encountered with the line
+// number for context.
+func ParseAll(r io.Reader) ([]Instruction, error) {
+	var instrs []Instruction
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxParseLineBytes)
+	line := 1
+	for ; scanner.Scan(); line++ {
+		inst, err := Parse(scanner.Text())
+		if err != nil {
+			return nil, fmt.Errorf("line %d: %w", line, err)
+		}
+		if inst != nil {
+			instrs = append(instrs, inst)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		if strings.Contains(err.Error(), "token too long") {
+			return nil, fmt.Errorf("line %d exceeds maximum allowed size of %d bytes", line, maxParseLineBytes)
+		}
+		return nil, fmt.Errorf("line %d: %w", line, err)
+	}
+	return instrs, nil
 }
 
 // Parse parses a single assembly instruction line.
@@ -117,32 +143,6 @@ func Parse(line string) (Instruction, error) {
 	}
 
 	return New(op, operands...), nil
-}
-
-// ParseAll reads from r line by line and parses each non-empty line as an
-// assembly instruction. It returns the first error encountered with the line
-// number for context.
-func ParseAll(r io.Reader) ([]Instruction, error) {
-	var instrs []Instruction
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxParseLineBytes)
-	line := 1
-	for ; scanner.Scan(); line++ {
-		inst, err := Parse(scanner.Text())
-		if err != nil {
-			return nil, fmt.Errorf("line %d: %w", line, err)
-		}
-		if inst != nil {
-			instrs = append(instrs, inst)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		if strings.Contains(err.Error(), "token too long") {
-			return nil, fmt.Errorf("line %d exceeds maximum allowed size of %d bytes", line, maxParseLineBytes)
-		}
-		return nil, fmt.Errorf("line %d: %w", line, err)
-	}
-	return instrs, nil
 }
 
 func parseOperands(fields []string, widths []int) ([]uint64, error) {
