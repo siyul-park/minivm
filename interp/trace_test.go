@@ -129,6 +129,44 @@ func TestTracer_Capture(t *testing.T) {
 		}
 	})
 
+	t.Run("preserves typed array aliases", func(t *testing.T) {
+		shared := types.TypedArray[int32]{0}
+		backing := types.TypedArray[int32]{0, 0, 0}
+		tests := []struct {
+			name      string
+			first     types.TypedArray[int32]
+			second    types.TypedArray[int32]
+			setIndex  uint64
+			readIndex uint64
+			original  func() int32
+		}{
+			{name: "same slice", first: shared, second: shared, original: func() int32 { return shared[0] }},
+			{name: "overlapping subslices", first: backing[:2:2], second: backing[1:3], setIndex: 1, original: func() int32 { return backing[1] }},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				tracer := NewTracer()
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.I32_CONST, tt.setIndex),
+					instr.New(instr.I32_CONST, 1),
+					instr.New(instr.ARRAY_SET),
+					instr.New(instr.CONST_GET, 1),
+					instr.New(instr.I32_CONST, tt.readIndex),
+					instr.New(instr.ARRAY_GET),
+				}, program.WithConstants(tt.first, tt.second))
+				i := New(prog, WithTracer(tracer), WithThreshold(-1))
+				defer i.Close()
+
+				result, err := tracer.capture(i, anchor{})
+				require.NoError(t, err)
+				require.NotNil(t, result.trace)
+				require.Equal(t, types.BoxI32(1), result.trace.ops[len(result.trace.ops)-1].seen)
+				require.Zero(t, tt.original())
+			})
+		}
+	})
+
 	t.Run("cuts an oversized trace at a resumable boundary", func(t *testing.T) {
 		code := make([]instr.Instruction, opLimit+1)
 		for j := range code {

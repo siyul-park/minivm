@@ -135,26 +135,7 @@ func TestARM64_Backedge(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b := program.NewBuilder()
-			loop := b.Label()
-			done := b.Label()
-			b.Locals(types.TypeI32)
-			b.Emit(instr.I32_CONST, 0).
-				Emit(instr.LOCAL_SET, 0).
-				Bind(loop).
-				Emit(instr.LOCAL_GET, 0).
-				Emit(instr.I32_CONST, uint64(uint32(tt.limit))).
-				Emit(instr.I32_GE_S).
-				BrIf(done).
-				Emit(instr.LOCAL_GET, 0).
-				Emit(instr.I32_CONST, 1).
-				Emit(instr.I32_ADD).
-				Emit(instr.LOCAL_SET, 0).
-				Br(loop).
-				Bind(done).
-				Emit(instr.LOCAL_GET, 0)
-			prog, err := b.Build()
-			require.NoError(t, err)
+			prog := counter(t, tt.limit)
 
 			i := New(prog, WithTick(1<<20), WithThreshold(tt.threshold))
 			defer i.Close()

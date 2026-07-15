@@ -3891,6 +3891,71 @@ func TestWithHook(t *testing.T) {
 	require.Equal(t, 3, calls)
 }
 
+func counter(tb testing.TB, limit int32) *program.Program {
+	tb.Helper()
+	b := program.NewBuilder()
+	loop := b.Label()
+	done := b.Label()
+	b.Locals(types.TypeI32)
+	b.Emit(instr.I32_CONST, 0).
+		Emit(instr.LOCAL_SET, 0).
+		Bind(loop).
+		Emit(instr.LOCAL_GET, 0).
+		Emit(instr.I32_CONST, uint64(uint32(limit))).
+		Emit(instr.I32_GE_S).
+		BrIf(done).
+		Emit(instr.LOCAL_GET, 0).
+		Emit(instr.I32_CONST, 1).
+		Emit(instr.I32_ADD).
+		Emit(instr.LOCAL_SET, 0).
+		Br(loop).
+		Bind(done).
+		Emit(instr.LOCAL_GET, 0)
+	prog, err := b.Build()
+	require.NoError(tb, err)
+	return prog
+}
+
+func TestInterpreter_BackedgeDefersHeaderScanUntilHot(t *testing.T) {
+	prog := counter(t, 64)
+
+	i := New(prog, WithTick(1<<20), WithThreshold(1<<30))
+	defer i.Close()
+	require.Empty(t, i.tracer.loops)
+
+	require.NoError(t, i.Run(context.Background()))
+	value, err := i.PopBoxed()
+	require.NoError(t, err)
+	require.Equal(t, types.BoxI32(64), value)
+	require.Empty(t, i.tracer.loops)
+	require.Empty(t, i.warmup)
+	require.Empty(t, i.tried)
+}
+
+func TestInterpreter_EnableBackedgesPreservesInstalledHandler(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+	prog := counter(t, 2)
+
+	i := New(prog, WithThreshold(1))
+	defer i.Close()
+
+	headers := i.tracer.headers(i, 0)
+	require.NotEmpty(t, headers)
+	root := anchor{ip: headers[0]}
+	fallback := i.code[0][root.ip]
+	native := func(*Interpreter) {}
+	i.exits[root] = fallback
+	i.code[0][root.ip] = native
+
+	i.enableBackedges(0)
+
+	require.Equal(t, reflect.ValueOf(native).Pointer(), reflect.ValueOf(i.code[0][root.ip]).Pointer())
+	require.NotNil(t, i.exits[root])
+	require.True(t, i.backedges[0])
+}
+
 func TestWithMarshaler(t *testing.T) {
 	i := New(program.New(nil), WithMarshaler(upperMarshaler(0)))
 	defer i.Close()
@@ -6934,6 +6999,20 @@ func BenchmarkNew(b *testing.B) {
 		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 		require.NoError(b, closeErr)
 	})
+}
+
+func BenchmarkInterpreter_PreHotBackedge(b *testing.B) {
+	vm := New(counter(b, 256), WithTick(1<<20), WithThreshold(1<<30))
+	b.Cleanup(func() { require.NoError(b, vm.Close()) })
+	ctx := context.Background()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		require.NoError(b, vm.Run(ctx))
+		_, err := vm.PopBoxed()
+		require.NoError(b, err)
+		vm.Reset()
+	}
 }
 
 func BenchmarkInterpreter_Run(b *testing.B) {

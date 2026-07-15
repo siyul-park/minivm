@@ -173,9 +173,9 @@ With the default tick of `128`, this is about `32` samples.
 | `WithThreshold(n > 0)` | compile after the rounded sample threshold |
 | `WithThreshold(n < 0)` | disable compilation |
 
-JIT-enabled unconditional backward branches observe their target after updating the live frame IP, so those module and function loops cannot be permanently missed by the periodic tick phase. Threshold-zero capture for those roots waits eight exact hits to avoid specializing on an unrepresentative first iteration.
+Threshold-zero mode installs exact unconditional-backedge observation immediately and waits eight exact hits before capturing a loop root. For positive thresholds, cold functions keep the ordinary branch handler; the periodic sampler rethreads a function once when it becomes hot, after which unconditional backedges report their already-known target without a header scan. This prevents deterministic tick phases from missing a hot loop without adding pre-hot loop overhead.
 
-Pool members use the same rounded threshold. With a shared cache, trigger counts are aggregated so only one member compiles each module or function slot.
+Pool members use the same rounded threshold. With a shared cache, trigger counts are aggregated so only one member compiles at a time, while a per-function queue retains distinct exact loop roots and prioritizes newer side-exit work.
 
 minivm does not currently tier beyond the ARM64 trace backend.
 

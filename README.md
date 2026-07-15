@@ -100,8 +100,8 @@ Representative medians measured July 15, 2026, on Apple M4 Pro,
 |---|---:|---:|---:|---:|
 | native Go | 8.337 | 20,957,448 | 247.8 | 77.39 |
 | wazero | 49.84 | 46,785,131 | 645.4 | 156.9 |
-| **minivm/default** | **71.83** | **48,426,669** | **5,269** | **228.0** |
-| minivm/threaded | 730.9 | 512,675,498 | 16,143 | 986.4 |
+| **minivm/default** | **71.83** | **48,426,669** | **5,048** | **228.0** |
+| minivm/threaded | 730.9 | 512,675,498 | 15,542 | 986.4 |
 
 `minivm/default` uses the adaptive ARM64 trace-JIT policy. Results vary by
 workload: unsupported paths remain in the threaded interpreter, and some

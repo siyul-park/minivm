@@ -315,6 +315,7 @@ func (r *Tracer) clone(i *Interpreter) Interpreter {
 	out.globals = slices.Clone(i.globals)
 	out.instrs = slices.Clone(i.instrs)
 	out.code = slices.Clone(r.exactCodes(i))
+	out.backedges = make([]bool, len(i.backedges))
 	out.exits = map[anchor]func(*Interpreter){}
 	out.stubs = make([]func(*Interpreter), len(out.code))
 	out.tried = map[anchor]bool{}
@@ -349,29 +350,99 @@ func cloneMutation(i *Interpreter, cloned map[int]bool) {
 	}
 	switch value := value.(type) {
 	case types.TypedArray[bool]:
-		i.heap[addr] = slices.Clone(value)
+		cloneTypedAliases(i.heap, value, cloned)
 	case types.TypedArray[int8]:
-		i.heap[addr] = slices.Clone(value)
+		cloneTypedAliases(i.heap, value, cloned)
 	case types.TypedArray[int32]:
-		i.heap[addr] = slices.Clone(value)
+		cloneTypedAliases(i.heap, value, cloned)
 	case types.TypedArray[int64]:
-		i.heap[addr] = slices.Clone(value)
+		cloneTypedAliases(i.heap, value, cloned)
 	case types.TypedArray[float32]:
-		i.heap[addr] = slices.Clone(value)
+		cloneTypedAliases(i.heap, value, cloned)
 	case types.TypedArray[float64]:
-		i.heap[addr] = slices.Clone(value)
+		cloneTypedAliases(i.heap, value, cloned)
 	case *types.Array:
 		clone := *value
 		clone.Elems = slices.Clone(value.Elems)
 		i.heap[addr] = &clone
+		cloned[addr] = true
 	case *types.Struct:
 		clone := *value
 		clone.Data = slices.Clone(value.Data)
 		i.heap[addr] = &clone
-	default:
+		cloned[addr] = true
+	}
+}
+
+type arrayElem interface {
+	bool | int8 | int32 | int64 | float32 | float64
+}
+
+type arrayAlias[T arrayElem] struct {
+	addr  int
+	array types.TypedArray[T]
+	start uintptr
+	end   uintptr
+}
+
+func cloneTypedAliases[T arrayElem](heap []types.Value, target types.TypedArray[T], cloned map[int]bool) {
+	if len(target) == 0 {
 		return
 	}
-	cloned[addr] = true
+	var zero T
+	size := unsafe.Sizeof(zero)
+	start := uintptr(unsafe.Pointer(unsafe.SliceData(target)))
+	end := start + uintptr(len(target))*size
+	aliases := make([]arrayAlias[T], 0, len(heap))
+	for addr, value := range heap {
+		array, ok := value.(types.TypedArray[T])
+		if !ok || len(array) == 0 {
+			continue
+		}
+		aliasStart := uintptr(unsafe.Pointer(unsafe.SliceData(array)))
+		aliases = append(aliases, arrayAlias[T]{
+			addr:  addr,
+			array: array,
+			start: aliasStart,
+			end:   aliasStart + uintptr(len(array))*size,
+		})
+	}
+	selected := make([]bool, len(aliases))
+	for changed := true; changed; {
+		changed = false
+		for idx, alias := range aliases {
+			if selected[idx] || alias.start >= end || start >= alias.end {
+				continue
+			}
+			selected[idx] = true
+			start = min(start, alias.start)
+			end = max(end, alias.end)
+			changed = true
+		}
+	}
+	var base *T
+	for idx, alias := range aliases {
+		if selected[idx] && alias.start == start {
+			base = unsafe.SliceData(alias.array)
+			break
+		}
+	}
+	if base == nil {
+		return
+	}
+	// Recorded array operations can observe only the current lengths. Clone the
+	// transitive union of overlapping visible ranges once, then rebuild each
+	// slice at its original offset so speculative writes preserve aliasing.
+	backing := make([]T, int((end-start)/size))
+	copy(backing, unsafe.Slice(base, len(backing)))
+	for idx, alias := range aliases {
+		if !selected[idx] {
+			continue
+		}
+		offset := int((alias.start - start) / size)
+		heap[alias.addr] = types.TypedArray[T](backing[offset : offset+len(alias.array)])
+		cloned[alias.addr] = true
+	}
 }
 
 func mutationTarget(i *Interpreter) (int, types.Value, bool) {

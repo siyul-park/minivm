@@ -18,7 +18,8 @@ type Cache struct {
 	buffers []*asm.Buffer
 	hits    []atomic.Int64
 	state   []atomic.Int32
-	pending []cacheRequest
+	active  []cacheRequest
+	pending [][]cacheRequest
 	refs    atomic.Int64
 
 	mu     sync.Mutex
@@ -42,7 +43,8 @@ func NewCache(prog *program.Program) *Cache {
 	c := &Cache{
 		hits:    make([]atomic.Int64, size),
 		state:   make([]atomic.Int32, size),
-		pending: make([]cacheRequest, size),
+		active:  make([]cacheRequest, size),
+		pending: make([][]cacheRequest, size),
 	}
 	c.refs.Store(1)
 	c.modules.Store(&mods)
@@ -90,11 +92,12 @@ func (c *Cache) claim(addr int, threshold int64) (cacheRequest, bool) {
 	if c.state[addr].Load() != cacheCold {
 		return cacheRequest{}, false
 	}
-	request := c.pending[addr]
-	if request.trigger == prof.TriggerNone {
-		request = cacheRequest{root: anchor{addr: addr}, trigger: prof.TriggerHot}
+	request := cacheRequest{root: anchor{addr: addr}, trigger: prof.TriggerHot}
+	if len(c.pending[addr]) > 0 {
+		request = c.pending[addr][0]
+		c.pending[addr] = c.pending[addr][1:]
 	}
-	c.pending[addr] = cacheRequest{}
+	c.active[addr] = request
 	c.state[addr].Store(cacheBuild)
 	return request, true
 }
@@ -111,10 +114,33 @@ func (c *Cache) request(next cacheRequest) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	trigger := c.pending[addr].trigger
-	if trigger == prof.TriggerNone || trigger == prof.TriggerHot && next.trigger == prof.TriggerSideExit {
-		c.pending[addr] = next
+	if c.active[addr].trigger != prof.TriggerNone && c.active[addr].root == next.root && next.trigger == prof.TriggerHot {
+		return
 	}
+	pending := c.pending[addr]
+	for idx := range pending {
+		if pending[idx].root != next.root {
+			continue
+		}
+		if pending[idx].trigger == prof.TriggerSideExit || next.trigger == prof.TriggerHot {
+			return
+		}
+		copy(pending[idx:], pending[idx+1:])
+		pending = pending[:len(pending)-1]
+		break
+	}
+	if next.trigger == prof.TriggerSideExit {
+		insert := 0
+		for insert < len(pending) && pending[insert].trigger == prof.TriggerSideExit {
+			insert++
+		}
+		pending = append(pending, cacheRequest{})
+		copy(pending[insert+1:], pending[insert:])
+		pending[insert] = next
+	} else {
+		pending = append(pending, next)
+	}
+	c.pending[addr] = pending
 	if c.state[addr].Load() == cacheReady {
 		c.state[addr].Store(cacheCold)
 	}
@@ -140,7 +166,7 @@ func (c *Cache) publish(addr int, mod *module, buf *asm.Buffer) {
 		c.modules.Store(&next)
 		for target := range mod.entries {
 			if target.addr >= 0 && target.addr < len(c.state) && target.addr != addr &&
-				c.state[target.addr].Load() == cacheCold && c.pending[target.addr].trigger == prof.TriggerNone {
+				c.state[target.addr].Load() == cacheCold && len(c.pending[target.addr]) == 0 {
 				c.state[target.addr].Store(cacheReady)
 			}
 		}
@@ -164,7 +190,8 @@ func (c *Cache) release() error {
 
 func (c *Cache) finishLocked(addr int) {
 	if addr >= 0 && addr < len(c.state) {
-		if c.pending[addr].trigger == prof.TriggerNone {
+		c.active[addr] = cacheRequest{}
+		if len(c.pending[addr]) == 0 {
 			c.state[addr].Store(cacheReady)
 		} else {
 			c.state[addr].Store(cacheCold)

@@ -81,10 +81,12 @@ Pool interpreters use a shared `Cache`:
 - compiled modules publish immutable `asm.Callable`s
 - each interpreter installs those callables into its own dispatch table at a safepoint
 
-The cache claims a build's root and trigger together. A side-exit or loop-root
-request arriving while that build is active remains pending; publication
-finishes only the claimed build and leaves the pending request cold for the
-next winner. This prevents a completed build from clearing newer trace work.
+The cache claims a build's root and trigger together. Each function owns a
+coalescing queue of exact anchors rather than one pending slot: distinct loop
+roots are retained, duplicate hot requests are discarded while active, and
+side-exit requests take priority because they represent newer trace work.
+Publication finishes only the claimed build and leaves queued requests cold for
+the next winner.
 
 The published native code is shared. The dispatch table remains interpreter-local.
 
@@ -127,13 +129,15 @@ Each recorded step stores the data needed for speculative lowering:
 - partial-trace resume boundary
 - selected heap values for read-only fast paths
 
-The tracer aborts before host calls and allocation. It records ref-bearing array writes and struct writes only as terminal fallback boundaries. A primitive typed-array write may remain inside the trace when it occurs in the anchor frame before any inlined call. Capture deep-copies typed arrays, boxed arrays, and structs before stepping mutations so speculative execution never changes the live interpreter heap. The clone also owns mutable dispatch metadata and suppresses external finalizers, so speculative reference reclamation cannot alter live functions, trace trees, or host resources.
+The tracer aborts before host calls and allocation. It records ref-bearing array writes and struct writes only as terminal fallback boundaries. A primitive typed-array write may remain inside the trace when it occurs in the anchor frame before any inlined call. Capture clones every overlapping visible range of aliased primitive typed arrays into one replacement backing store, preserving slice offsets while leaving the live heap unchanged. Boxed arrays and structs are copied before their terminal mutation. The clone also owns mutable dispatch metadata and suppresses external finalizers, so speculative reference reclamation cannot alter live functions, trace trees, or host resources.
 
 Every recorded `trace` has one outcome: `loop`, `returned`, `completed`, `partial`, or `aborted`. The trace frontend maps usable outcomes to plan terminators and excludes aborted fragments from learned continuations. When an observed block runs out of steps, lowering decides completion from that block's terminator, never from the root trace. This prevents an unsupported side fragment from being mistaken for normal completion.
 
 `Tracer.capture` serializes recording and returns an already-published root when one exists, so sampling and compilation cannot record the same entry concurrently. A tracer is bound to one `program.Program`; binding it to a different program clears exact bytecode, tree, and loop caches before reuse.
 
 `Tracer.headers` (the static loop-header scan) uses `instr.Targets(code, ip)` rather than switching on `BR`/`BR_IF` directly, so a loop formed only through a backward `BR_TABLE` case target is recognized as a header too.
+
+Non-eager functions initially keep the ordinary generated `BR` handler. When periodic sampling first reaches the rounded threshold, the interpreter rethreads that function once with an exact unconditional-backedge callback, preserving installed native handlers and replacing only their threaded fallbacks. Eager mode enables the callback from construction. Cold loops therefore pay no callback, mutex, or header-scan cost.
 
 ## Trace Snapshots
 
