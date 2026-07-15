@@ -3889,8 +3889,12 @@ func (l arm64Lowerer) flush(ctx *lowering, commit bool) bool {
 			}
 		}
 	}
+	// A non-raw ref carries the retain taken when it was pushed, so committing it
+	// transfers that edge to the stack. A raw marker instead retains inside box()
+	// for an interpreter frame to release; a commit rebuilds no frame, so nothing
+	// would balance it.
 	for j, v := range ctx.values {
-		if v.kind == types.KindRef && commit {
+		if v.kind == types.KindRef && commit && v.raw {
 			return false
 		}
 		boxed, ok := l.boxHome(ctx, v)

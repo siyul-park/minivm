@@ -62,7 +62,7 @@ go test -run='^$' -bench='^Benchmark(Array|Struct|TypedMap|Map)_Refs$' \
 - Primitive array mutation stays on the native loop path in `Sieve(256)`: `default` is **5.052 us** and eager `jit` is **5.017 us**, versus **15.385 us** threaded. All three modes allocate `1,048 B` in `2` allocations.
 - Threshold-zero `jit` is not a warmed-JIT guarantee. It matches `default` on Sieve and BranchTree, but is slower on IterativeFib, TypedArraySum, and recursive Fibonacci because it can compile before representative traces are learned.
 - Allocation-heavy workloads remain interpreter-bound. `AllocationGraph(128)` is fastest in minivm's threaded mode at **7.513 us**; adaptive and eager modes add profiling cost without native coverage.
-- Indirect recursion remains a major gap: `IndirectRecursiveFib(20)` takes about **598 us** in adaptive/eager modes, versus **41.8 us** in wazero.
+- Indirect recursion reaches the native self-call path in adaptive mode: `IndirectRecursiveFib(20)` is **80.55 us** in `default`, versus **557 us** threaded and **41.8 us** in wazero. Eager `jit` stays at **575 us**, consistent with the threshold-zero note above.
 
 These results are workload measurements, not general language rankings. The runtimes use different value models, safety boundaries, host-call conventions, and compilation strategies.
 
@@ -124,9 +124,9 @@ Each minivm kernel times `Interpreter.Run` only. Result extraction, reset, fixtu
 | RecursiveFib(35) | Goja | 2,033,197,667 | 375,360 | 46,373 |
 | RecursiveFib(35) | gpython | 5,238,414,292 | 13,378,035,520 | 149,350,319 |
 | RecursiveFib(35) | Yaegi | 5,439,306,583 | 11,324,340,056 | 263,043,718 |
-| IndirectRecursiveFib(20) | minivm/default | 598,302 | 0 | 0 |
-| IndirectRecursiveFib(20) | minivm/threaded | 564,863 | 0 | 0 |
-| IndirectRecursiveFib(20) | minivm/jit | 598,147 | 0 | 0 |
+| IndirectRecursiveFib(20) | minivm/default | 80,548 | 0 | 0 |
+| IndirectRecursiveFib(20) | minivm/threaded | 556,996 | 0 | 0 |
+| IndirectRecursiveFib(20) | minivm/jit | 575,222 | 0 | 0 |
 | IndirectRecursiveFib(20) | native Go | 15,610 | 0 | 0 |
 | IndirectRecursiveFib(20) | wazero | 41,827 | 8 | 1 |
 | IndirectRecursiveFib(20) | Tengo | 919,605 | 319,345 | 28,655 |

@@ -1030,3 +1030,125 @@ func TestArm64Lowerer_QueuesEachState(t *testing.T) {
 	require.NotEqual(t, first, second)
 	require.Len(t, ctx.work, 2)
 }
+
+// TestARM64_SelfCallWithRefArg protects self-recursive functions that
+// forward their own callee ref along as an argument (indirect recursion, as
+// in an idiomatic `fib := func(n, self) { ... self(n-1, self) ... }`).
+// arm64Lowerer.flush used to reject committing state at a self-call whenever
+// any live operand was a KindRef, including a ref parameter merely being
+// passed through — so every self-recursive function forwarding a ref
+// argument to itself failed to lower, rejecting the whole compile and
+// leaving the function fully interpreted. flush now only rejects a raw ref
+// (one whose retain belongs to an interpreter frame that flush never
+// rebuilds); a live non-raw ref parameter no longer blocks the self-call
+// fast path.
+func TestARM64_SelfCallWithRefArg(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	const n int32 = 20
+	const want = 6765
+
+	build := func() *program.Program {
+		b := types.NewFunctionBuilder(nil).
+			Params(types.TypeI32, types.TypeRef).
+			Returns(types.TypeI32)
+		base := b.Label()
+		fn := b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).
+			BrIf(base).
+			Emit(
+				instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL),
+				instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_SUB),
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL),
+				instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+			).
+			Bind(base).
+			Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).
+			MustBuild()
+		return program.New(
+			[]instr.Instruction{
+				instr.New(instr.I32_CONST, uint64(uint32(n))),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.CALL),
+			},
+			program.WithConstants(fn),
+		)
+	}
+
+	t.Run("matches interpreter", func(t *testing.T) {
+		// WithTick(1) puts the threaded compiler in exact mode (interp.go: `exact:
+		// i.tick == 1`), which makes deep concrete self-recursion pathologically
+		// slow to plan; the default tick still reaches the hot threshold quickly
+		// across repeated runs without that cost.
+		jit := New(build(), WithThreshold(1))
+		defer jit.Close()
+
+		var got types.Boxed
+		for iter := 0; iter < 64; iter++ {
+			require.NoError(t, jit.Run(context.Background()))
+			value, err := jit.PopBoxed()
+			require.NoError(t, err)
+			got = value
+			jit.Reset()
+		}
+		require.Equal(t, types.BoxI32(want), got)
+
+		ref := New(build(), WithThreshold(-1))
+		defer ref.Close()
+		require.NoError(t, ref.Run(context.Background()))
+		refValue, err := ref.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, refValue, got)
+	})
+
+	t.Run("compiles natively", func(t *testing.T) {
+		// Drive the interpreter for real up to the exact moment it enters fib's
+		// own frame (three real steps: I32_CONST, CONST_GET, CONST_GET+CALL —
+		// the threaded compiler fuses some of these), landing i.fr at
+		// (fnAddr, ip=0) with n and the self ref already live as locals 0 and
+		// 1. That is the same live state a genuine self-call trace capture
+		// sees, and it lets the test compile and install deterministically
+		// instead of racing the sampling-driven hot-check threshold.
+		profile := prof.New()
+		i := New(build(), WithProfiler(profile), WithThreshold(-1))
+
+		for iter := 0; iter < 3; iter++ {
+			i.fr.code[i.fr.ip](i)
+		}
+		root := anchor{addr: i.fr.addr}
+		require.Equal(t, 0, i.fr.ip)
+
+		capture := i.tracer.capture(i, root)
+		require.NotNil(t, capture.trace)
+		i.stubs[root.addr] = i.code[root.addr][0]
+
+		compiler, err := newCompiler()
+		require.NoError(t, err)
+		defer compiler.Close()
+
+		compiled := compiler.Compile(i, root)
+		require.NoError(t, compiled.err)
+		require.NotNil(t, compiled.module, "%+v", compiled)
+		entry, ok := compiled.module.entries[root]
+		require.True(t, ok)
+		require.Equal(t, entryFunction, entry.kind)
+
+		i.install(compiled.module, true)
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(want), value)
+		require.NoError(t, i.Close())
+
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0))
+	})
+}
