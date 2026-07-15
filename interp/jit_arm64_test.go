@@ -135,7 +135,26 @@ func TestARM64_Backedge(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prog := counter(t, tt.limit)
+			b := program.NewBuilder()
+			loop := b.Label()
+			done := b.Label()
+			b.Locals(types.TypeI32)
+			b.Emit(instr.I32_CONST, 0).
+				Emit(instr.LOCAL_SET, 0).
+				Bind(loop).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, uint64(uint32(tt.limit))).
+				Emit(instr.I32_GE_S).
+				BrIf(done).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.I32_ADD).
+				Emit(instr.LOCAL_SET, 0).
+				Br(loop).
+				Bind(done).
+				Emit(instr.LOCAL_GET, 0)
+			prog, err := b.Build()
+			require.NoError(t, err)
 
 			i := New(prog, WithTick(1<<20), WithThreshold(tt.threshold))
 			defer i.Close()
@@ -324,8 +343,7 @@ func TestCompiler_Compile(t *testing.T) {
 				require.NoError(t, i.SetGlobal(0, value))
 			}
 			root := anchor{}
-			capture, err := i.tracer.capture(i, root)
-			require.NoError(t, err)
+			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
 			i.stubs[root.addr] = i.code[root.addr][0]
 			compiler, err := newCompiler()
@@ -365,8 +383,7 @@ func TestCompiler_Compile(t *testing.T) {
 			}
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
 			root := anchor{}
-			capture, err := i.tracer.capture(i, root)
-			require.NoError(t, err)
+			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
 			i.stubs[root.addr] = i.code[root.addr][0]
 			compiler, err := newCompiler()
@@ -531,8 +548,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NoError(t, i.SetGlobal(0, value))
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
 			root := anchor{}
-			capture, err := i.tracer.capture(i, root)
-			require.NoError(t, err)
+			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
 			i.stubs[root.addr] = i.code[root.addr][0]
 			compiler, err := newCompiler()
@@ -567,8 +583,7 @@ func TestCompiler_Compile(t *testing.T) {
 			}
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
 			root := anchor{}
-			capture, err := i.tracer.capture(i, root)
-			require.NoError(t, err)
+			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
 			i.stubs[root.addr] = i.code[root.addr][0]
 			compiler, err := newCompiler()
@@ -609,8 +624,7 @@ func TestCompiler_Compile(t *testing.T) {
 			defer i.Close()
 			require.NoError(t, i.SetGlobal(0, types.BoxI32(0)))
 			root := anchor{}
-			capture, err := i.tracer.capture(i, root)
-			require.NoError(t, err)
+			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
 			i.stubs[root.addr] = i.code[root.addr][0]
 			compiler, err := newCompiler()
@@ -641,8 +655,7 @@ func TestCompiler_Compile(t *testing.T) {
 			i := New(program.New(instructions), WithThreshold(-1))
 			defer i.Close()
 			root := anchor{}
-			capture, err := i.tracer.capture(i, root)
-			require.NoError(t, err)
+			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
 			i.stubs[root.addr] = i.code[root.addr][0]
 			compiler, err := newCompiler()
@@ -732,8 +745,7 @@ func TestCompiler_Compile(t *testing.T) {
 			root := anchor{addr: addr, ip: header}
 			addrLabel := strconv.Itoa(addr)
 			headerLabel := strconv.Itoa(header)
-			capture, err := i.tracer.capture(i, root)
-			require.NoError(t, err)
+			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
 			i.stubs[root.addr] = i.code[root.addr][0]
 			compiler, err := newCompiler()
@@ -781,8 +793,7 @@ func TestCompiler_Compile(t *testing.T) {
 			i.fr.bp = 0
 			i.sp = 0
 			root := anchor{addr: addr}
-			capture, err := i.tracer.capture(i, root)
-			require.NoError(t, err)
+			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
 			i.stubs[root.addr] = i.code[root.addr][0]
 			compiler, err := newCompiler()

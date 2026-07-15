@@ -44,8 +44,7 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, WithTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		result, err := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
-		require.NoError(t, err)
+		result := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
 		require.NotNil(t, result.trace)
 		tr := result.trace
 		require.Equal(t, completed, tr.kind)
@@ -64,8 +63,7 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, WithTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		result, err := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
-		require.NoError(t, err)
+		result := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
 		require.NotNil(t, result.trace)
 		tr := result.trace
 		require.Equal(t, returned, tr.kind)
@@ -86,8 +84,7 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, WithTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		result, err := tracer.capture(i, anchor{})
-		require.NoError(t, err)
+		result := tracer.capture(i, anchor{})
 		require.NotNil(t, result.trace)
 		require.Equal(t, completed, result.trace.kind)
 		require.Equal(t, instr.I32_CONST, result.trace.ops[len(result.trace.ops)-1].op)
@@ -122,8 +119,7 @@ func TestTracer_Capture(t *testing.T) {
 				i := New(prog, WithTracer(tracer), WithThreshold(-1))
 				defer i.Close()
 
-				_, err := tracer.capture(i, anchor{})
-				require.NoError(t, err)
+				tracer.capture(i, anchor{})
 				require.Equal(t, types.BoxI32(1), tt.read())
 			})
 		}
@@ -158,8 +154,7 @@ func TestTracer_Capture(t *testing.T) {
 				i := New(prog, WithTracer(tracer), WithThreshold(-1))
 				defer i.Close()
 
-				result, err := tracer.capture(i, anchor{})
-				require.NoError(t, err)
+				result := tracer.capture(i, anchor{})
 				require.NotNil(t, result.trace)
 				require.Equal(t, types.BoxI32(1), result.trace.ops[len(result.trace.ops)-1].seen)
 				require.Zero(t, tt.original())
@@ -176,8 +171,7 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(program.New(code), WithTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		result, err := tracer.capture(i, anchor{addr: 0, ip: 0})
-		require.NoError(t, err)
+		result := tracer.capture(i, anchor{addr: 0, ip: 0})
 		require.NotNil(t, result.trace)
 		tr := result.trace
 		require.Equal(t, partial, tr.kind)
@@ -200,8 +194,7 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, WithTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		result, err := tracer.capture(i, anchor{addr: 0, ip: 0})
-		require.NoError(t, err)
+		result := tracer.capture(i, anchor{addr: 0, ip: 0})
 		require.NotNil(t, result.trace)
 		tr := result.trace
 		require.Equal(t, partial, tr.kind)
@@ -222,11 +215,11 @@ func TestTracer_Capture(t *testing.T) {
 
 		const workers = attemptLimit + 1
 		interpreters := make([]*Interpreter, workers)
-		errs := make(chan error, workers)
+		done := make(chan struct{}, workers)
 		interpreters[0] = New(prog, WithTracer(tracer), WithThreshold(-1))
 		go func() {
-			_, err := tracer.capture(interpreters[0], anchor{})
-			errs <- err
+			tracer.capture(interpreters[0], anchor{})
+			done <- struct{}{}
 		}()
 		<-iter.entered
 
@@ -236,8 +229,8 @@ func TestTracer_Capture(t *testing.T) {
 			interpreters[idx] = i
 			go func() {
 				started <- struct{}{}
-				_, err := tracer.capture(i, anchor{})
-				errs <- err
+				tracer.capture(i, anchor{})
+				done <- struct{}{}
 			}()
 		}
 		for range workers - 1 {
@@ -246,7 +239,7 @@ func TestTracer_Capture(t *testing.T) {
 		close(release)
 
 		for range workers {
-			require.NoError(t, <-errs)
+			<-done
 		}
 		for _, i := range interpreters {
 			require.NoError(t, i.Close())
@@ -275,15 +268,15 @@ func TestTracer_Capture(t *testing.T) {
 		tree := tracer.tree(root)
 		tree.root = &trace{anchor: root, kind: completed}
 
-		done := make(chan error, 1)
+		done := make(chan struct{}, 1)
 		go func() {
-			_, err := tracer.exit(i, root, anchor{addr: 0, ip: 1})
-			done <- err
+			tracer.branch(i, root, anchor{addr: 0, ip: 1})
+			done <- struct{}{}
 		}()
 		<-iter.entered
 		tracer.remove(0)
 		close(release)
-		require.NoError(t, <-done)
+		<-done
 
 		require.Empty(t, tree.branches)
 		require.Nil(t, tracer.rootAt(root))
@@ -307,15 +300,14 @@ func TestTracer_Capture(t *testing.T) {
 		i.stack[0] = types.BoxRef(addr)
 		i.sp = 1
 
-		done := make(chan error, 1)
+		done := make(chan struct{}, 1)
 		go func() {
-			_, err := tracer.capture(i, anchor{})
-			done <- err
+			tracer.capture(i, anchor{})
+			done <- struct{}{}
 		}()
 
 		select {
-		case err := <-done:
-			require.NoError(t, err)
+		case <-done:
 		case <-time.After(time.Second):
 			t.Fatal("capture deadlocked while reclaiming a function")
 		}
@@ -340,8 +332,7 @@ func TestTracer_Capture(t *testing.T) {
 		i.stack[0] = types.BoxRef(addr)
 		i.sp = 1
 
-		_, err := tracer.capture(i, anchor{})
-		require.NoError(t, err)
+		tracer.capture(i, anchor{})
 		require.Zero(t, value.closed)
 	})
 
@@ -355,8 +346,7 @@ func TestTracer_Capture(t *testing.T) {
 		defer i.Close()
 
 		for range attemptLimit + 1 {
-			tr, err := tracer.capture(i, anchor{})
-			require.NoError(t, err)
+			tr := tracer.capture(i, anchor{})
 			require.Nil(t, tr.trace)
 		}
 

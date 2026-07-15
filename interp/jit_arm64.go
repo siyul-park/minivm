@@ -1436,10 +1436,7 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 		stack := ctx.pin(scratchStack)
 		base := l.base(ctx, stack)
 		for idx := params; idx < len(localKinds); idx++ {
-			zero, ok := zeroValue(localKinds[idx])
-			if !ok {
-				return false
-			}
+			zero := types.Zero(localKinds[idx])
 			reg := a.Reg(asm.RegTypeInt, asm.Width64)
 			a.Emit(arm64.LDI(reg, uint64(zero))...)
 			a.Emit(arm64.STR(reg, base, int16((ctx.sp()-params+idx)*8)))
@@ -3718,18 +3715,18 @@ func (arm64Lowerer) guardHeap(ctx *lowering, ref asm.VReg, fail asm.Label) (asm.
 	return addr, itab, data
 }
 
-func (arm64Lowerer) sliceHeaderTo(ctx *lowering, data, ptr, n asm.VReg, base int16) {
-	ctx.assembler.Emit(
-		arm64.LDR(ptr, data, base+sliceData),
-		arm64.LDR(n, data, base+sliceLen),
-	)
-}
-
 func (l arm64Lowerer) sliceHeader(ctx *lowering, data asm.VReg, base int16) (asm.VReg, asm.VReg) {
 	ptr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	n := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	l.sliceHeaderTo(ctx, data, ptr, n, base)
 	return ptr, n
+}
+
+func (arm64Lowerer) sliceHeaderTo(ctx *lowering, data, ptr, n asm.VReg, base int16) {
+	ctx.assembler.Emit(
+		arm64.LDR(ptr, data, base+sliceData),
+		arm64.LDR(n, data, base+sliceLen),
+	)
 }
 
 // guardIndex uses one unsigned check: sign-extended negative i32 indexes are
@@ -3746,15 +3743,15 @@ func (arm64Lowerer) matchItab(ctx *lowering, got asm.VReg, want uintptr, hit asm
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, hit))
 }
 
+func (l arm64Lowerer) guardItab(ctx *lowering, got asm.VReg, want uintptr, fail asm.Label) {
+	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	l.guardItabTo(ctx, got, v, want, fail)
+}
+
 func (arm64Lowerer) guardItabTo(ctx *lowering, got, scratch asm.VReg, want uintptr, fail asm.Label) {
 	ctx.assembler.Emit(arm64.LDI(scratch, uint64(want))...)
 	ctx.assembler.Emit(arm64.CMP(got, scratch))
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
-}
-
-func (l arm64Lowerer) guardItab(ctx *lowering, got asm.VReg, want uintptr, fail asm.Label) {
-	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	l.guardItabTo(ctx, got, v, want, fail)
 }
 
 func (arm64Lowerer) matchKind(ctx *lowering, got asm.VReg, want types.Kind, hit asm.Label) {
@@ -3844,6 +3841,8 @@ func (l arm64Lowerer) retainBox(ctx *lowering, v asm.VReg) {
 	})
 }
 
+// retainKnownBox retains a boxed value already proven to be a ref, avoiding a
+// tag guard and reusing the pinned spare register on leaf plans.
 func (l arm64Lowerer) retainKnownBox(ctx *lowering, v asm.VReg) {
 	a := ctx.assembler
 	addr := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -3926,6 +3925,8 @@ func (l arm64Lowerer) flush(ctx *lowering, commit bool) bool {
 	return true
 }
 
+// localScratch returns a flushed local register that is no longer live in the
+// operand stack, or an undefined register when none can be reused safely.
 func (arm64Lowerer) localScratch(ctx *lowering) asm.VReg {
 	for fi := range ctx.frames {
 		frame := &ctx.frames[fi]
@@ -3949,6 +3950,8 @@ func (arm64Lowerer) localScratch(ctx *lowering) asm.VReg {
 	return asm.VReg{}
 }
 
+// localReg reuses target's pre-barrier register only when no live operand or
+// reloaded local aliases it.
 func (l arm64Lowerer) localReg(ctx *lowering, target *activation, idx int) (asm.VReg, bool) {
 	reg := target.locals[idx].reg
 	if !ctx.reuseLocals || reg.Width() == asm.WidthUndefined {
@@ -3973,12 +3976,6 @@ func (l arm64Lowerer) localReg(ctx *lowering, target *activation, idx int) (asm.
 	return reg, true
 }
 
-func (l arm64Lowerer) baseTo(ctx *lowering, vStack, addr asm.VReg) {
-	vBP := ctx.pin(scratchBP)
-	ctx.assembler.Emit(arm64.LSLI(addr, vBP, 3))
-	ctx.assembler.Emit(arm64.ADD(addr, vStack, addr))
-}
-
 func (l arm64Lowerer) base(ctx *lowering, vStack asm.VReg) asm.VReg {
 	if ctx.leaf {
 		addr := ctx.pin(scratchSP)
@@ -3988,6 +3985,12 @@ func (l arm64Lowerer) base(ctx *lowering, vStack asm.VReg) asm.VReg {
 	addr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	l.baseTo(ctx, vStack, addr)
 	return addr
+}
+
+func (l arm64Lowerer) baseTo(ctx *lowering, vStack, addr asm.VReg) {
+	vBP := ctx.pin(scratchBP)
+	ctx.assembler.Emit(arm64.LSLI(addr, vBP, 3))
+	ctx.assembler.Emit(arm64.ADD(addr, vStack, addr))
 }
 
 func (l arm64Lowerer) boxHome(ctx *lowering, v value) (asm.VReg, bool) {
@@ -4088,17 +4091,17 @@ func (l arm64Lowerer) retain(ctx *lowering, fn int) {
 }
 
 // guardRC keeps releases that could free objects in the interpreter.
+func (l arm64Lowerer) guardRC(ctx *lowering, addr, rcBase asm.VReg, fail asm.Label) asm.VReg {
+	rc := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	l.guardRCTo(ctx, rc, addr, rcBase, fail)
+	return rc
+}
+
 func (arm64Lowerer) guardRCTo(ctx *lowering, rc, addr, rcBase asm.VReg, fail asm.Label) {
 	a := ctx.assembler
 	a.Emit(arm64.LDRR(rc, rcBase, addr))
 	a.Emit(arm64.CMPI(rc, 1))
 	a.Emit(arm64.BCondLabel(arm64.OpBLE, fail))
-}
-
-func (l arm64Lowerer) guardRC(ctx *lowering, addr, rcBase asm.VReg, fail asm.Label) asm.VReg {
-	rc := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	l.guardRCTo(ctx, rc, addr, rcBase, fail)
-	return rc
 }
 
 func (l arm64Lowerer) refOnly(ctx *lowering, v asm.VReg, body func(asm.VReg)) {
@@ -4118,63 +4121,27 @@ func (l arm64Lowerer) refOnly(ctx *lowering, v asm.VReg, body func(asm.VReg)) {
 	ctx.assembler.Bind(done)
 }
 
-func (arm64Lowerer) rcBaseTo(ctx *lowering, base asm.VReg) {
-	ctx.assembler.Emit(arm64.LDR(base, ctx.pin(scratchCtrl), int16(journalRC*8)))
-}
-
 func (l arm64Lowerer) rcBase(ctx *lowering) asm.VReg {
 	base := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	l.rcBaseTo(ctx, base)
 	return base
 }
 
-func join(steps, tail []int) []int {
-	if len(steps) == 0 {
-		return tail
-	}
-	if len(tail) == 0 {
-		return steps
-	}
-	return append(append([]int(nil), steps...), tail...)
-}
-
-func zeroValue(kind types.Kind) (types.Boxed, bool) {
-	switch kind {
-	case types.KindI1:
-		return types.BoxI1(false), true
-	case types.KindI8:
-		return types.BoxI8(0), true
-	case types.KindI32:
-		return types.BoxI32(0), true
-	case types.KindI64:
-		return types.BoxI64(0), true
-	case types.KindF32:
-		return types.BoxF32(0), true
-	case types.KindF64:
-		return types.BoxF64(0), true
-	case types.KindRef:
-		return types.BoxedNull, true
-	default:
-		return 0, false
-	}
-}
-
-func isLeaf(blocks []block) bool {
-	for _, block := range blocks {
-		for _, step := range block.steps {
-			switch step.op {
-			case instr.CALL, instr.RETURN_CALL:
-				return false
-			}
-		}
-	}
-	return true
+func (arm64Lowerer) rcBaseTo(ctx *lowering, base asm.VReg) {
+	ctx.assembler.Emit(arm64.LDR(base, ctx.pin(scratchCtrl), int16(journalRC*8)))
 }
 
 // lower emits one plan through the common block pipeline.
 func lower(ctx *lowering, plan plan) bool {
 	l := arm64Lowerer{}
-	ctx.leaf = isLeaf(plan.blocks)
+	ctx.leaf = true
+	for _, block := range plan.blocks {
+		for _, step := range block.steps {
+			if step.op == instr.CALL || step.op == instr.RETURN_CALL {
+				ctx.leaf = false
+			}
+		}
+	}
 	l.enter(ctx)
 	ctx.blocks = plan.blocks
 	ctx.kind = plan.kind
@@ -4215,4 +4182,14 @@ func lower(ctx *lowering, plan plan) bool {
 	}
 	l.materializeExits(ctx)
 	return true
+}
+
+func join(steps, tail []int) []int {
+	if len(steps) == 0 {
+		return tail
+	}
+	if len(tail) == 0 {
+		return steps
+	}
+	return append(append([]int(nil), steps...), tail...)
 }

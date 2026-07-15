@@ -83,8 +83,9 @@ Pool interpreters use a shared `Cache`:
 
 The cache claims a build's root and trigger together. Each function owns a
 coalescing queue of exact anchors rather than one pending slot: distinct loop
-roots are retained, duplicate hot requests are discarded while active, and
-side-exit requests take priority because they represent newer trace work.
+roots are retained, duplicate requests are discarded, and a side exit arriving
+behind an active hot build remains queued because it represents newer trace work.
+Side-exit requests take priority over queued hot roots.
 Publication finishes only the claimed build and leaves queued requests cold for
 the next winner.
 

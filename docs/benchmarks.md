@@ -59,7 +59,7 @@ go test -run='^$' -bench='^Benchmark(Array|Struct|TypedMap|Map)_Refs$' \
 
 - `RecursiveFib(35)` places `minivm/default` at **48.43 ms**, within about **3.5%** of wazero's **46.79 ms**, while remaining allocation-free after warmup.
 - Adaptive native traces reduce `IterativeFib(30)` from **730.9 ns** threaded to **71.83 ns**, `TypedArraySum(256)` from **6.239 us** to **655.2 ns**, and `BranchTree(96)` from **986.4 ns** to **228.0 ns**.
-- Primitive array mutation stays on the native loop path in `Sieve(256)`: `default` is **5.048 us** and eager `jit` is **5.033 us**, versus **15.542 us** threaded. All three modes allocate `1,048 B` in `2` allocations.
+- Primitive array mutation stays on the native loop path in `Sieve(256)`: `default` is **5.052 us** and eager `jit` is **5.017 us**, versus **15.385 us** threaded. All three modes allocate `1,048 B` in `2` allocations.
 - Threshold-zero `jit` is not a warmed-JIT guarantee. It matches `default` on Sieve and BranchTree, but is slower on IterativeFib, TypedArraySum, and recursive Fibonacci because it can compile before representative traces are learned.
 - Allocation-heavy workloads remain interpreter-bound. `AllocationGraph(128)` is fastest in minivm's threaded mode at **7.513 us**; adaptive and eager modes add profiling cost without native coverage.
 - Indirect recursion remains a major gap: `IndirectRecursiveFib(20)` takes about **598 us** in adaptive/eager modes, versus **41.8 us** in wazero.
@@ -94,9 +94,9 @@ Each minivm kernel times `Interpreter.Run` only. Result extraction, reset, fixtu
 | IterativeFib(30) | Goja | 2,166 | 368 | 20 |
 | IterativeFib(30) | gpython | 2,427 | 2,448 | 88 |
 | IterativeFib(30) | Yaegi | 2,709 | 2,036 | 101 |
-| Sieve(256) | minivm/default | 5,048 | 1,048 | 2 |
-| Sieve(256) | minivm/threaded | 15,542 | 1,048 | 2 |
-| Sieve(256) | minivm/jit | 5,033 | 1,048 | 2 |
+| Sieve(256) | minivm/default | 5,052 | 1,048 | 2 |
+| Sieve(256) | minivm/threaded | 15,385 | 1,048 | 2 |
+| Sieve(256) | minivm/jit | 5,017 | 1,048 | 2 |
 | Sieve(256) | native Go | 247.8 | 0 | 0 |
 | Sieve(256) | wazero | 645.4 | 8 | 1 |
 | Sieve(256) | Tengo | 51,918 | 122,504 | 1,611 |
@@ -211,7 +211,7 @@ Scalar stack access, reset, retain/release, and uncontended pool reuse are alloc
 
 | Case | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|
-| pre-hot unconditional backedge | 2,383 | 0 | 0 |
+| pre-hot unconditional backedge | 2,446 | 0 | 0 |
 
 This benchmark guards the cold-path boundary: exact backedge observation is installed only after periodic sampling marks a function hot, rather than adding a callback or header scan to every cold loop iteration.
 

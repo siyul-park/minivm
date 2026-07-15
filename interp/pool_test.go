@@ -97,7 +97,7 @@ func TestPool_Get(t *testing.T) {
 		}
 
 		// A called function with a branch tree: members share one Tracer, so one
-		// interpreter warming a side exit (Tracer.exit mutating tree.branches/hits)
+		// interpreter warming a side exit (Tracer.branch mutating tree.branches/hits)
 		// runs concurrently with another lowering the same root (rootAt reading it).
 		// Before the fix that races the shared tree; the snapshot isolates the reader.
 		b := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32)

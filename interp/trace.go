@@ -91,10 +91,15 @@ func (r *Tracer) bind(prog *program.Program) bool {
 	return r.prog == prog
 }
 
-func (r *Tracer) exit(i *Interpreter, root anchor, target anchor) (int64, error) {
+func (r *Tracer) branch(i *Interpreter, root anchor, target anchor) int64 {
 	r.mu.Lock()
 	tree := r.tree(root)
-	id := r.exitIndex(tree, target)
+	id, ok := tree.exits[target]
+	if !ok {
+		id = len(tree.hits)
+		tree.exits[target] = id
+		tree.hits = append(tree.hits, 0)
+	}
 	tree.hits[id]++
 	hits := tree.hits[id]
 	if branch := tree.branches[id]; branch != nil {
@@ -103,25 +108,22 @@ func (r *Tracer) exit(i *Interpreter, root anchor, target anchor) (int64, error)
 		// cannot be folded into the parent trace, so recompiling that parent
 		// would only publish the same pair again.
 		if branch.kind == loop && hits != exitThreshold {
-			return 0, nil
+			return 0
 		}
-		return hits, nil
+		return hits
 	}
 	r.mu.Unlock()
 
-	result, err := r.capture(i, anchor{addr: target.addr, ip: target.ip})
-	if err != nil {
-		return hits, err
-	}
+	result := r.capture(i, anchor{addr: target.addr, ip: target.ip})
 	r.mu.Lock()
 	if r.trees[root] == tree {
 		tree.branches[id] = result.trace
 	}
 	r.mu.Unlock()
-	return hits, nil
+	return hits
 }
 
-func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err error) {
+func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 	r.recordMu.Lock()
 	defer r.recordMu.Unlock()
 	defer func() {
@@ -135,24 +137,24 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 	if tree != nil && tree.root != nil {
 		t := tree.root
 		r.mu.Unlock()
-		return captureResult{trace: t}, nil
+		return captureResult{trace: t}
 	}
 	if a.ip == 0 && (i.fr == nil || i.fr.addr != a.addr || i.fr.ip != 0) {
 		r.mu.Unlock()
-		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonInvalidAnchor}, nil
+		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonInvalidAnchor}
 	}
 	if tree == nil {
 		tree = r.tree(a)
 	}
 	if tree.attempts >= attemptLimit {
 		r.mu.Unlock()
-		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonAttemptLimit}, nil
+		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonAttemptLimit}
 	}
 	tree.attempts++
 	r.mu.Unlock()
 
 	if a.addr < 0 || a.addr >= len(i.instrs) || a.ip < 0 || a.ip >= len(i.instrs[a.addr]) {
-		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonInvalidAnchor}, nil
+		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonInvalidAnchor}
 	}
 
 	clone := r.clone(i)
@@ -179,7 +181,14 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 		}
 
 		st := r.op(&clone, op, startFP)
-		terminalMutation := op == instr.STRUCT_SET || op == instr.ARRAY_SET && (hasCall || !primitiveArray(&clone))
+		terminalMutation := false
+		if op == instr.ARRAY_SET || op == instr.STRUCT_SET {
+			if cloned == nil {
+				cloned = map[int]bool{}
+			}
+			primitive := cloneMutation(&clone, cloned)
+			terminalMutation = op == instr.STRUCT_SET || hasCall || !primitive
+		}
 		st.terminal = terminalMutation
 		if op == instr.CALL && r.callsAnchor(&clone, a) {
 			r.skipCall(&clone, a.addr)
@@ -197,7 +206,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 			t.ops = append(t.ops, st)
 			t.kind = returned
 			r.publish(a, tree, t)
-			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}
 		}
 		// YIELD/RESUME and exception-producing ops have side effects a trace
 		// cannot represent. In the anchor frame, record the op as the
@@ -214,13 +223,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 			t.ops = append(t.ops, st)
 			t.kind = returned
 			r.publish(a, tree, t)
-			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
-		}
-		if op == instr.ARRAY_SET || op == instr.STRUCT_SET {
-			if cloned == nil {
-				cloned = map[int]bool{}
-			}
-			cloneMutation(&clone, cloned)
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}
 		}
 		if !r.step(&clone, f.addr, f.ip) {
 			t.kind = aborted
@@ -247,7 +250,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 			})
 			t.kind = partial
 			r.publish(a, tree, t)
-			return captureResult{trace: t, outcome: prof.CaptureOutcomePartial}, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePartial}
 		}
 		// Ref-bearing array writes and struct writes remain terminal native fast
 		// paths. Primitive array writes can continue because their guarded store
@@ -260,27 +263,27 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 			}
 			t.kind = returned
 			r.publish(a, tree, t)
-			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}
 		}
 		switch {
 		case op == instr.RETURN && st.depth == 0:
 			t.kind = returned
 			r.publish(a, tree, t)
-			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}
 		case clone.fr.addr >= 0 && clone.fr.addr < len(clone.instrs) && clone.fr.ip >= len(clone.instrs[clone.fr.addr]):
 			if clone.fr.addr == 0 {
 				t.kind = completed
 			}
 			r.publish(a, tree, t)
-			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}
 		case clone.fr.addr == a.addr && clone.fr.ip == a.ip:
 			t.kind = loop
 			r.publish(a, tree, t)
-			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}
 		case clone.fp < startFP:
 			t.kind = returned
 			r.publish(a, tree, t)
-			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}
 		}
 	}
 	if len(t.ops) >= opLimit {
@@ -296,10 +299,10 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 			result.reason = prof.CaptureReasonUnsupportedOp
 		}
 		result.outcome = prof.CaptureOutcomeRejected
-		return result, nil
+		return result
 	}
 	r.publish(a, tree, t)
-	return captureResult{trace: t, outcome: prof.CaptureOutcomePartial, reason: result.reason}, nil
+	return captureResult{trace: t, outcome: prof.CaptureOutcomePartial, reason: result.reason}
 }
 
 func (r *Tracer) clone(i *Interpreter) Interpreter {
@@ -343,49 +346,70 @@ func (r *Tracer) clone(i *Interpreter) Interpreter {
 	return out
 }
 
-func cloneMutation(i *Interpreter, cloned map[int]bool) {
-	addr, value, ok := mutationTarget(i)
-	if !ok || cloned[addr] {
-		return
+// cloneMutation isolates the next mutation target and reports whether it is a
+// primitive typed array whose store may continue inside the trace.
+func cloneMutation(i *Interpreter, cloned map[int]bool) bool {
+	if i.sp < 3 || i.stack[i.sp-3].Kind() != types.KindRef {
+		return false
 	}
+	addr := i.stack[i.sp-3].Ref()
+	if addr <= 0 || addr >= len(i.heap) {
+		return false
+	}
+	value := i.heap[addr]
 	switch value := value.(type) {
 	case types.TypedArray[bool]:
-		cloneTypedAliases(i.heap, value, cloned)
+		if !cloned[addr] {
+			cloneTypedAliases(i.heap, value, cloned)
+		}
+		return true
 	case types.TypedArray[int8]:
-		cloneTypedAliases(i.heap, value, cloned)
+		if !cloned[addr] {
+			cloneTypedAliases(i.heap, value, cloned)
+		}
+		return true
 	case types.TypedArray[int32]:
-		cloneTypedAliases(i.heap, value, cloned)
+		if !cloned[addr] {
+			cloneTypedAliases(i.heap, value, cloned)
+		}
+		return true
 	case types.TypedArray[int64]:
-		cloneTypedAliases(i.heap, value, cloned)
+		if !cloned[addr] {
+			cloneTypedAliases(i.heap, value, cloned)
+		}
+		return true
 	case types.TypedArray[float32]:
-		cloneTypedAliases(i.heap, value, cloned)
+		if !cloned[addr] {
+			cloneTypedAliases(i.heap, value, cloned)
+		}
+		return true
 	case types.TypedArray[float64]:
-		cloneTypedAliases(i.heap, value, cloned)
+		if !cloned[addr] {
+			cloneTypedAliases(i.heap, value, cloned)
+		}
+		return true
 	case *types.Array:
-		clone := *value
-		clone.Elems = slices.Clone(value.Elems)
-		i.heap[addr] = &clone
-		cloned[addr] = true
+		if !cloned[addr] {
+			clone := *value
+			clone.Elems = slices.Clone(value.Elems)
+			i.heap[addr] = &clone
+			cloned[addr] = true
+		}
 	case *types.Struct:
-		clone := *value
-		clone.Data = slices.Clone(value.Data)
-		i.heap[addr] = &clone
-		cloned[addr] = true
+		if !cloned[addr] {
+			clone := *value
+			clone.Data = slices.Clone(value.Data)
+			i.heap[addr] = &clone
+			cloned[addr] = true
+		}
 	}
+	return false
 }
 
-type arrayElem interface {
-	bool | int8 | int32 | int64 | float32 | float64
-}
-
-type arrayAlias[T arrayElem] struct {
-	addr  int
-	array types.TypedArray[T]
-	start uintptr
-	end   uintptr
-}
-
-func cloneTypedAliases[T arrayElem](heap []types.Value, target types.TypedArray[T], cloned map[int]bool) {
+// cloneTypedAliases copies the connected component of typed-array ranges that
+// overlap target. Address arithmetic only identifies overlap; each original
+// slice copies its own visible range into the replacement backing store.
+func cloneTypedAliases[T bool | int8 | int32 | int64 | float32 | float64](heap []types.Value, target types.TypedArray[T], cloned map[int]bool) {
 	if len(target) == 0 {
 		return
 	}
@@ -393,84 +417,61 @@ func cloneTypedAliases[T arrayElem](heap []types.Value, target types.TypedArray[
 	size := unsafe.Sizeof(zero)
 	start := uintptr(unsafe.Pointer(unsafe.SliceData(target)))
 	end := start + uintptr(len(target))*size
-	aliases := make([]arrayAlias[T], 0, len(heap))
+	aliases := make([]struct {
+		addr  int
+		array types.TypedArray[T]
+		start uintptr
+		end   uintptr
+	}, 0, len(heap))
 	for addr, value := range heap {
 		array, ok := value.(types.TypedArray[T])
 		if !ok || len(array) == 0 {
 			continue
 		}
 		aliasStart := uintptr(unsafe.Pointer(unsafe.SliceData(array)))
-		aliases = append(aliases, arrayAlias[T]{
+		aliases = append(aliases, struct {
+			addr  int
+			array types.TypedArray[T]
+			start uintptr
+			end   uintptr
+		}{
 			addr:  addr,
 			array: array,
 			start: aliasStart,
 			end:   aliasStart + uintptr(len(array))*size,
 		})
 	}
-	selected := make([]bool, len(aliases))
-	for changed := true; changed; {
-		changed = false
-		for idx, alias := range aliases {
-			if selected[idx] || alias.start >= end || start >= alias.end {
+	for {
+		previousStart, previousEnd := start, end
+		for _, alias := range aliases {
+			if alias.start >= end || start >= alias.end {
 				continue
 			}
-			selected[idx] = true
 			start = min(start, alias.start)
 			end = max(end, alias.end)
-			changed = true
 		}
-	}
-	var base *T
-	for idx, alias := range aliases {
-		if selected[idx] && alias.start == start {
-			base = unsafe.SliceData(alias.array)
+		if start == previousStart && end == previousEnd {
 			break
 		}
 	}
-	if base == nil {
-		return
-	}
-	// Recorded array operations can observe only the current lengths. Clone the
+	// Recorded array operations can observe only the current lengths. Copy the
 	// transitive union of overlapping visible ranges once, then rebuild each
 	// slice at its original offset so speculative writes preserve aliasing.
 	backing := make([]T, int((end-start)/size))
-	copy(backing, unsafe.Slice(base, len(backing)))
-	for idx, alias := range aliases {
-		if !selected[idx] {
+	for _, alias := range aliases {
+		if alias.start >= end || start >= alias.end {
+			continue
+		}
+		offset := int((alias.start - start) / size)
+		copy(backing[offset:offset+len(alias.array)], alias.array)
+	}
+	for _, alias := range aliases {
+		if alias.start >= end || start >= alias.end {
 			continue
 		}
 		offset := int((alias.start - start) / size)
 		heap[alias.addr] = types.TypedArray[T](backing[offset : offset+len(alias.array)])
 		cloned[alias.addr] = true
-	}
-}
-
-func mutationTarget(i *Interpreter) (int, types.Value, bool) {
-	if i.sp < 3 || i.stack[i.sp-3].Kind() != types.KindRef {
-		return 0, nil, false
-	}
-	addr := i.stack[i.sp-3].Ref()
-	if addr <= 0 || addr >= len(i.heap) {
-		return 0, nil, false
-	}
-	return addr, i.heap[addr], true
-}
-
-func primitiveArray(i *Interpreter) bool {
-	_, value, ok := mutationTarget(i)
-	if !ok {
-		return false
-	}
-	switch value.(type) {
-	case types.TypedArray[bool],
-		types.TypedArray[int8],
-		types.TypedArray[int32],
-		types.TypedArray[int64],
-		types.TypedArray[float32],
-		types.TypedArray[float64]:
-		return true
-	default:
-		return false
 	}
 }
 
@@ -751,16 +752,6 @@ func (r *Tracer) headers(i *Interpreter, addr int) []int {
 	}
 	r.loops[addr] = hs
 	return hs
-}
-
-func (r *Tracer) exitIndex(tree *tree, target anchor) int {
-	if idx, ok := tree.exits[target]; ok {
-		return idx
-	}
-	idx := len(tree.hits)
-	tree.exits[target] = idx
-	tree.hits = append(tree.hits, 0)
-	return idx
 }
 
 func (r *Tracer) unrecordableReason(i *Interpreter, op instr.Opcode) prof.CaptureReason {

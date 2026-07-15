@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -21,9 +22,9 @@ type Cache struct {
 	active  []cacheRequest
 	pending [][]cacheRequest
 	refs    atomic.Int64
+	closed  bool
 
-	mu     sync.Mutex
-	closed bool
+	mu sync.Mutex
 }
 
 type cacheRequest struct {
@@ -114,7 +115,9 @@ func (c *Cache) request(next cacheRequest) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.active[addr].trigger != prof.TriggerNone && c.active[addr].root == next.root && next.trigger == prof.TriggerHot {
+	active := c.active[addr]
+	sameRoot := active.trigger != prof.TriggerNone && active.root == next.root
+	if sameRoot && (active.trigger == prof.TriggerSideExit || next.trigger == prof.TriggerHot) {
 		return
 	}
 	pending := c.pending[addr]
@@ -134,9 +137,7 @@ func (c *Cache) request(next cacheRequest) {
 		for insert < len(pending) && pending[insert].trigger == prof.TriggerSideExit {
 			insert++
 		}
-		pending = append(pending, cacheRequest{})
-		copy(pending[insert+1:], pending[insert:])
-		pending[insert] = next
+		pending = slices.Insert(pending, insert, next)
 	} else {
 		pending = append(pending, next)
 	}

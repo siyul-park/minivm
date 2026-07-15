@@ -70,10 +70,11 @@ type lowering struct {
 	descriptors []exitDescriptor
 	saved       []value
 
-	addr        int
-	returns     int
-	kind        entryKind
-	leaf        bool
+	addr    int
+	returns int
+	kind    entryKind
+	leaf    bool
+
 	reuseLocals bool
 	spare       asm.VReg
 }

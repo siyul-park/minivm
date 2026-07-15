@@ -347,7 +347,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		i.globals[j] = i.zero(kind)
 	}
 
-	c := i.threader(0, i.eager)
+	i.backedges[0] = nativeBackend && i.eager
+	c := i.threader(i.backedges[0])
 	i.code[0] = c.Compile(prog.Code, i.module.LocalKinds(), types.Kinds(i.module.Captures))
 
 	for j, v := range prog.Constants {
@@ -977,16 +978,13 @@ func (i *Interpreter) safepoint() error {
 // The caller guarantees the entry fallback is still nil, so the gates that the
 // threaded safepoint used to repeat on that lookup are already satisfied.
 func (i *Interpreter) observe(f *frame) error {
-	i.sample(f)
+	samples := i.sample(f)
 	if f.ip == 0 {
-		if _, err := i.tracer.capture(i, anchor{addr: f.addr}); err != nil {
-			return err
-		}
+		i.tracer.capture(i, anchor{addr: f.addr})
 	}
-	if err := i.observeLoop(f); err != nil {
+	if err := i.observeLoop(f, samples); err != nil {
 		return err
 	}
-	samples := i.samples.Samples(f.addr)
 	root := anchor{addr: f.addr}
 	if i.cache == nil && i.threshold >= 0 && samples >= uint64(i.threshold) && !i.tried[root] {
 		i.tried[root] = true
@@ -999,9 +997,9 @@ func (i *Interpreter) observe(f *frame) error {
 
 // observeLoop records a sampled loop only after the function is hot, then
 // verifies that the sampled IP is a static loop header.
-func (i *Interpreter) observeLoop(f *frame) error {
-	if i.threshold < 0 || f == nil || f.ip <= 0 ||
-		!i.eager && i.samples.Samples(f.addr) < uint64(i.threshold) {
+func (i *Interpreter) observeLoop(f *frame, samples uint64) error {
+	if i.threshold < 0 || f.ip <= 0 ||
+		!i.eager && samples < uint64(i.threshold) {
 		return nil
 	}
 	for _, header := range i.tracer.headers(i, f.addr) {
@@ -1017,7 +1015,7 @@ func (i *Interpreter) observeLoop(f *frame) error {
 // once when periodic profiling reaches the threshold, so cold BR handlers stay
 // unchanged and no header scan is needed here.
 func (i *Interpreter) observeBackedge(f *frame) error {
-	if f == nil || f.ip <= 0 {
+	if f.ip <= 0 {
 		return nil
 	}
 	return i.captureLoop(f)
@@ -1039,10 +1037,7 @@ func (i *Interpreter) captureLoop(f *frame) error {
 		}
 	}
 	i.tried[root] = true
-	result, err := i.tracer.capture(i, root)
-	if err != nil {
-		return err
-	}
+	result := i.tracer.capture(i, root)
 	if result.trace == nil {
 		return nil
 	}
@@ -1180,10 +1175,7 @@ func (i *Interpreter) loop(callable asm.Callable, stats counters) func(*Interpre
 }
 
 func (i *Interpreter) exit(root anchor) {
-	hits, err := i.tracer.exit(i, root, anchor{addr: i.fr.addr, ip: i.fr.ip})
-	if err != nil {
-		panic(err)
-	}
+	hits := i.tracer.branch(i, root, anchor{addr: i.fr.addr, ip: i.fr.ip})
 	if i.cache != nil {
 		if hits < exitThreshold || hits%exitThreshold != 0 {
 			return
@@ -1310,28 +1302,29 @@ func (i *Interpreter) function(addr int) (*types.Function, bool) {
 	return fn, ok
 }
 
-// sample records one profile hit for the frame's current instruction.
-func (i *Interpreter) sample(f *frame) {
+// sample records one profile hit for the frame's current instruction and
+// returns the updated function count.
+func (i *Interpreter) sample(f *frame) uint64 {
 	i.samples.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
-	if i.eager || i.threshold < 0 || i.samples.Samples(f.addr) < uint64(i.threshold) {
-		return
+	samples := i.samples.Samples(f.addr)
+	if nativeBackend && !i.eager && i.threshold >= 0 && samples >= uint64(i.threshold) {
+		i.enableBackedges(f.addr)
 	}
-	i.enableBackedges(f.addr)
+	return samples
 }
 
 // enableBackedges rethreads one hot function with exact unconditional
 // back-edge observation. Cold functions keep the original zero-overhead BR
 // handler until periodic sampling reaches the configured threshold.
 func (i *Interpreter) enableBackedges(addr int) {
-	if !nativeBackend || addr < 0 || addr >= len(i.backedges) ||
-		i.backedges[addr] {
+	if addr < 0 || addr >= len(i.backedges) || i.backedges[addr] {
 		return
 	}
 	fn, ok := i.function(addr)
 	if !ok || fn == nil {
 		return
 	}
-	c := i.threader(addr, true)
+	c := i.threader(true)
 	previous := i.code[addr]
 	compiled := c.Compile(fn.Code, fn.LocalKinds(), types.Kinds(fn.Captures))
 	// Rethreading replaces only interpreted handlers. Installed native entries
@@ -1347,6 +1340,7 @@ func (i *Interpreter) enableBackedges(addr int) {
 		compiled[root.ip] = previous[root.ip]
 	}
 	i.code[addr] = compiled
+	i.backedges[addr] = true
 	for idx := 0; idx < i.fp; idx++ {
 		if i.frames[idx].addr == addr {
 			i.frames[idx].code = i.code[addr]
@@ -1788,7 +1782,8 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if addr >= len(i.coros) {
 		i.coros = append(i.coros, make([]bool, n-len(i.coros))...)
 	}
-	c := i.threader(addr, i.eager)
+	i.backedges[addr] = nativeBackend && i.eager
+	c := i.threader(i.backedges[addr])
 	if dynamic {
 		i.coros[addr] = i.yields(fn.Code)
 	}
@@ -1803,7 +1798,7 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 // threader builds generated dispatch state. The loop callback is injected at
 // runtime instead of referenced by the generated global handler table, avoiding
 // an initialization cycle through trace compilation.
-func (i *Interpreter) threader(addr int, backedges bool) *threader {
+func (i *Interpreter) threader(backedge bool) *threader {
 	c := &threader{
 		types:     i.types,
 		constants: i.constants,
@@ -1812,11 +1807,8 @@ func (i *Interpreter) threader(addr int, backedges bool) *threader {
 		globals:   i.globalKinds,
 		exact:     i.tick == 1,
 	}
-	if nativeBackend && backedges {
+	if backedge {
 		c.backedge = (*Interpreter).observeBackedge
-	}
-	if addr >= 0 && addr < len(i.backedges) {
-		i.backedges[addr] = c.backedge != nil
 	}
 	return c
 }
