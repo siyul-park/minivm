@@ -70,12 +70,12 @@ type lowering struct {
 	descriptors []exitDescriptor
 	saved       []value
 
-	addr    int
-	returns int
-	kind    entryKind
-	leaf    bool
-	reuse   bool
-	spare   asm.VReg
+	addr        int
+	returns     int
+	kind        entryKind
+	leaf        bool
+	reuseLocals bool
+	spare       asm.VReg
 }
 
 // value is one typed operand: a register plus the runtime kind the trace
@@ -228,16 +228,6 @@ func (c *compiler) Close() error {
 	return c.buffer.Free()
 }
 
-func requestedPlans(plans []plan, root anchor) []plan {
-	selected := plans[:0]
-	for _, planned := range plans {
-		if planned.anchor == root {
-			selected = append(selected, planned)
-		}
-	}
-	return selected
-}
-
 // Compile selects and lowers the first frontend that emits native code.
 func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
 	input, ok := newCompileInput(i, root.addr)
@@ -254,10 +244,12 @@ func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
 		if err != nil {
 			return compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeError, reason: prof.CompileReasonError, err: err}
 		}
-		plans = requestedPlans(plans, root)
 		result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan})
 		mod := &module{entries: map[anchor]native{}}
 		for _, plan := range plans {
+			if plan.anchor != root {
+				continue
+			}
 			if !plan.valid() {
 				result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonInvalidPlan})
 				continue

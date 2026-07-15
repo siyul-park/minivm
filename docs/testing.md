@@ -825,7 +825,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `ARRAY_NEW_DEFAULT` | `array.new_default` | ✅ | fixed metadata | ✅ | ✅ | ⬜ | Runtime corpus only |
 | `ARRAY_LEN` | `array.len` | ✅ | fixed metadata | ✅ | — | ✅ | Runtime corpus only |
 | `ARRAY_GET` | `array.get` | ✅ | fixed metadata | ✅ | ✅ | ✅ | Representative differential |
-| `ARRAY_SET` | `array.set` | ✅ | fixed metadata | ✅ | ✅ | ◐ | Runtime corpus only |
+| `ARRAY_SET` | `array.set` | ✅ | fixed metadata | ✅ | ✅ | ◐ | Representative differential |
 | `ARRAY_FILL` | `array.fill` | ✅ | fixed metadata | ✅ | ✅ | ⬜ | Runtime corpus only |
 | `ARRAY_COPY` | `array.copy` | ✅ | fixed metadata | ✅ | ✅ | ⬜ | Runtime corpus only |
 | `ARRAY_APPEND` | `array.append` | ✅ | indeterminate arity | ✅ | — | ⬜ | Runtime corpus only |

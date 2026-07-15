@@ -164,12 +164,6 @@ func TestPlan(t *testing.T) {
 		}}}))
 	})
 
-	t.Run("requested plans", func(t *testing.T) {
-		first := plan{anchor: anchor{addr: 1, ip: 4}}
-		second := plan{anchor: anchor{addr: 1, ip: 8}}
-		require.Equal(t, []plan{second}, requestedPlans([]plan{first, second}, second.anchor))
-	})
-
 }
 
 func TestStaticPlan(t *testing.T) {

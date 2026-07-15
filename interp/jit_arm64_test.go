@@ -117,90 +117,66 @@ func TestARM64_ArraySetAfterNestedCalls(t *testing.T) {
 	require.Equal(t, jitOut, out)
 }
 
-func arm64CountingLoop(t *testing.T, limit int32) *program.Program {
-	t.Helper()
-	b := program.NewBuilder()
-	loop := b.Label()
-	done := b.Label()
-	b.Locals(types.TypeI32)
-	b.Emit(instr.I32_CONST, 0).
-		Emit(instr.LOCAL_SET, 0).
-		Bind(loop).
-		Emit(instr.LOCAL_GET, 0).
-		Emit(instr.I32_CONST, uint64(uint32(limit))).
-		Emit(instr.I32_GE_S).
-		BrIf(done).
-		Emit(instr.LOCAL_GET, 0).
-		Emit(instr.I32_CONST, 1).
-		Emit(instr.I32_ADD).
-		Emit(instr.LOCAL_SET, 0).
-		Br(loop).
-		Bind(done).
-		Emit(instr.LOCAL_GET, 0)
-	prog, err := b.Build()
-	require.NoError(t, err)
-	return prog
-}
-
-func TestARM64_BackedgeCompilesModuleLoop(t *testing.T) {
+func TestARM64_Backedge(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
 		t.Skip("native JIT is only available on arm64")
 	}
 
-	i := New(arm64CountingLoop(t, 64), WithTick(1<<20), WithThreshold(0))
-	defer i.Close()
-	require.NoError(t, i.Run(context.Background()))
-	value, err := i.PopBoxed()
-	require.NoError(t, err)
-	require.Equal(t, types.BoxI32(64), value)
-
-	headers := i.tracer.headers(i, 0)
-	require.NotEmpty(t, headers)
-	require.True(t, i.tried[anchor{ip: headers[0]}])
-	require.NotEmpty(t, i.exits)
-}
-
-func TestARM64_BackedgeWarmsEagerLoop(t *testing.T) {
-	if runtime.GOARCH != "arm64" {
-		t.Skip("native JIT is only available on arm64")
+	tests := []struct {
+		name      string
+		limit     int32
+		threshold int
+		attempted []bool
+		installed bool
+	}{
+		{name: "compiles module loop", limit: 64, threshold: 0, attempted: []bool{true}, installed: true},
+		{name: "warms eager loop", limit: 4, threshold: 0, attempted: []bool{false, true}},
+		{name: "keeps sample threshold", limit: 4, threshold: 1, attempted: []bool{false, false}},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := program.NewBuilder()
+			loop := b.Label()
+			done := b.Label()
+			b.Locals(types.TypeI32)
+			b.Emit(instr.I32_CONST, 0).
+				Emit(instr.LOCAL_SET, 0).
+				Bind(loop).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, uint64(uint32(tt.limit))).
+				Emit(instr.I32_GE_S).
+				BrIf(done).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.I32_ADD).
+				Emit(instr.LOCAL_SET, 0).
+				Br(loop).
+				Bind(done).
+				Emit(instr.LOCAL_GET, 0)
+			prog, err := b.Build()
+			require.NoError(t, err)
 
-	i := New(arm64CountingLoop(t, 4), WithTick(1<<20), WithThreshold(0))
-	defer i.Close()
-	headers := i.tracer.headers(i, 0)
-	require.NotEmpty(t, headers)
-	root := anchor{ip: headers[0]}
+			i := New(prog, WithTick(1<<20), WithThreshold(tt.threshold))
+			defer i.Close()
+			headers := i.tracer.headers(i, 0)
+			require.NotEmpty(t, headers)
+			root := anchor{ip: headers[0]}
 
-	require.NoError(t, i.Run(context.Background()))
-	_, err := i.PopBoxed()
-	require.NoError(t, err)
-	require.False(t, i.tried[root])
-	i.Reset()
-
-	require.NoError(t, i.Run(context.Background()))
-	_, err = i.PopBoxed()
-	require.NoError(t, err)
-	require.True(t, i.tried[root])
-}
-
-func TestARM64_BackedgeKeepsSampleThreshold(t *testing.T) {
-	if runtime.GOARCH != "arm64" {
-		t.Skip("native JIT is only available on arm64")
+			for run, attempted := range tt.attempted {
+				require.NoError(t, i.Run(context.Background()))
+				value, err := i.PopBoxed()
+				require.NoError(t, err)
+				require.Equal(t, types.BoxI32(tt.limit), value)
+				require.Equal(t, attempted, i.tried[root])
+				if run+1 < len(tt.attempted) {
+					i.Reset()
+				}
+			}
+			if tt.installed {
+				require.NotEmpty(t, i.exits)
+			}
+		})
 	}
-
-	i := New(arm64CountingLoop(t, 4), WithTick(1<<20), WithThreshold(1))
-	defer i.Close()
-	headers := i.tracer.headers(i, 0)
-	require.NotEmpty(t, headers)
-	root := anchor{ip: headers[0]}
-
-	for range 2 {
-		require.NoError(t, i.Run(context.Background()))
-		_, err := i.PopBoxed()
-		require.NoError(t, err)
-		i.Reset()
-	}
-	require.False(t, i.tried[root])
 }
 
 // AbortedSideExitDoesNotComplete protects partial unsupported traces from

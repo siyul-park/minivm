@@ -1,6 +1,8 @@
 package interp
 
 import (
+	"maps"
+	"slices"
 	"sort"
 	"sync"
 	"unsafe"
@@ -159,6 +161,8 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 
 	t := &trace{anchor: a}
 	startFP := clone.fp
+	hasCall := false
+	var cloned map[int]bool
 	for len(t.ops) < opLimit {
 		f := clone.fr
 		if f.addr < 0 || f.addr >= len(clone.instrs) || f.ip < 0 || f.ip >= len(clone.instrs[f.addr]) {
@@ -175,12 +179,13 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 		}
 
 		st := r.op(&clone, op, startFP)
-		terminalMutation := op == instr.STRUCT_SET || op == instr.ARRAY_SET && !r.continuableArraySet(&clone, t)
+		terminalMutation := op == instr.STRUCT_SET || op == instr.ARRAY_SET && (hasCall || !primitiveArray(&clone))
 		st.terminal = terminalMutation
 		if op == instr.CALL && r.callsAnchor(&clone, a) {
 			r.skipCall(&clone, a.addr)
 			st.callee = a.addr
 			t.ops = append(t.ops, st)
+			hasCall = true
 			continue
 		}
 		// A tail call back to the entry anchor closes the trace as a native loop
@@ -211,6 +216,12 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 			r.publish(a, tree, t)
 			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
 		}
+		if op == instr.ARRAY_SET || op == instr.STRUCT_SET {
+			if cloned == nil {
+				cloned = map[int]bool{}
+			}
+			cloneMutation(&clone, cloned)
+		}
 		if !r.step(&clone, f.addr, f.ip) {
 			t.kind = aborted
 			result.reason = prof.CaptureReasonStepTrap
@@ -219,6 +230,9 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 
 		r.finish(&clone, &st, op)
 		t.ops = append(t.ops, st)
+		if op == instr.CALL || op == instr.RETURN_CALL {
+			hasCall = true
+		}
 		// A backward edge to a different header starts a distinct loop trace.
 		// Stop this linear prefix at the header instead of unrolling the loop up
 		// to opLimit; threaded execution will make that header hot and compile it
@@ -291,74 +305,92 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 func (r *Tracer) clone(i *Interpreter) Interpreter {
 	out := *i
 	out.compiler = nil
+	out.cache = nil
+	out.tracer = nil
 	out.hook = nil
+	out.speculative = true
 	out.threshold = -1
 
 	out.constants = i.constants
-	out.globals = append([]types.Boxed(nil), i.globals...)
-	out.instrs = i.instrs
-	out.code = r.codes(i)
+	out.globals = slices.Clone(i.globals)
+	out.instrs = slices.Clone(i.instrs)
+	out.code = slices.Clone(r.exactCodes(i))
 	out.exits = map[anchor]func(*Interpreter){}
 	out.stubs = make([]func(*Interpreter), len(out.code))
-	out.journal = append([]uint64(nil), i.journal...)
-	out.frames = append([]frame(nil), i.frames...)
-	out.stack = append([]types.Boxed(nil), i.stack...)
-	out.heap = r.heap(i.heap)
-	out.free = append([]int(nil), i.free...)
-	out.rc = append([]int(nil), i.rc...)
+	out.tried = map[anchor]bool{}
+	out.warmup = map[anchor]uint8{}
+	out.journal = slices.Clone(i.journal)
+	out.coros = slices.Clone(i.coros)
+	out.handlers = slices.Clone(i.handlers)
+	out.dynamic = map[int]bool{}
+	out.frames = slices.Clone(i.frames)
+	out.stack = slices.Clone(i.stack)
+	out.heap = slices.Clone(i.heap)
+	out.free = slices.Clone(i.free)
+	out.rc = slices.Clone(i.rc)
 	out.trial = nil
 	out.work = nil
 	out.refbuf = nil
-	out.interned = make(map[string]types.Ref, len(i.interned))
-	for key, val := range i.interned {
-		out.interned[key] = val
-	}
+	out.interned = map[string]types.Ref{}
 	for idx := 0; idx < out.fp; idx++ {
 		addr := out.frames[idx].addr
 		if addr >= 0 && addr < len(out.code) {
 			out.frames[idx].code = out.code[addr]
 		}
-		out.frames[idx].upvals = append([]types.Boxed(nil), out.frames[idx].upvals...)
+		out.frames[idx].upvals = slices.Clone(out.frames[idx].upvals)
 	}
 	return out
 }
 
-func (r *Tracer) heap(heap []types.Value) []types.Value {
-	out := make([]types.Value, len(heap))
-	for idx, val := range heap {
-		switch v := val.(type) {
-		case types.TypedArray[bool]:
-			out[idx] = append(types.TypedArray[bool](nil), v...)
-		case types.TypedArray[int8]:
-			out[idx] = append(types.TypedArray[int8](nil), v...)
-		case types.TypedArray[int32]:
-			out[idx] = append(types.TypedArray[int32](nil), v...)
-		case types.TypedArray[int64]:
-			out[idx] = append(types.TypedArray[int64](nil), v...)
-		case types.TypedArray[float32]:
-			out[idx] = append(types.TypedArray[float32](nil), v...)
-		case types.TypedArray[float64]:
-			out[idx] = append(types.TypedArray[float64](nil), v...)
-		case *types.Closure:
-			clone := *v
-			clone.Upvals = append([]types.Boxed(nil), v.Upvals...)
-			out[idx] = &clone
-		default:
-			out[idx] = val
-		}
+func cloneMutation(i *Interpreter, cloned map[int]bool) {
+	addr, value, ok := mutationTarget(i)
+	if !ok || cloned[addr] {
+		return
 	}
-	return out
+	switch value := value.(type) {
+	case types.TypedArray[bool]:
+		i.heap[addr] = slices.Clone(value)
+	case types.TypedArray[int8]:
+		i.heap[addr] = slices.Clone(value)
+	case types.TypedArray[int32]:
+		i.heap[addr] = slices.Clone(value)
+	case types.TypedArray[int64]:
+		i.heap[addr] = slices.Clone(value)
+	case types.TypedArray[float32]:
+		i.heap[addr] = slices.Clone(value)
+	case types.TypedArray[float64]:
+		i.heap[addr] = slices.Clone(value)
+	case *types.Array:
+		clone := *value
+		clone.Elems = slices.Clone(value.Elems)
+		i.heap[addr] = &clone
+	case *types.Struct:
+		clone := *value
+		clone.Data = slices.Clone(value.Data)
+		i.heap[addr] = &clone
+	default:
+		return
+	}
+	cloned[addr] = true
 }
 
-func (r *Tracer) primitiveArray(i *Interpreter) bool {
+func mutationTarget(i *Interpreter) (int, types.Value, bool) {
 	if i.sp < 3 || i.stack[i.sp-3].Kind() != types.KindRef {
-		return false
+		return 0, nil, false
 	}
 	addr := i.stack[i.sp-3].Ref()
 	if addr <= 0 || addr >= len(i.heap) {
+		return 0, nil, false
+	}
+	return addr, i.heap[addr], true
+}
+
+func primitiveArray(i *Interpreter) bool {
+	_, value, ok := mutationTarget(i)
+	if !ok {
 		return false
 	}
-	switch i.heap[addr].(type) {
+	switch value.(type) {
 	case types.TypedArray[bool],
 		types.TypedArray[int8],
 		types.TypedArray[int32],
@@ -371,19 +403,7 @@ func (r *Tracer) primitiveArray(i *Interpreter) bool {
 	}
 }
 
-func (r *Tracer) continuableArraySet(i *Interpreter, t *trace) bool {
-	if !r.primitiveArray(i) {
-		return false
-	}
-	for _, op := range t.ops {
-		if op.depth != 0 || op.op == instr.CALL || op.op == instr.RETURN_CALL {
-			return false
-		}
-	}
-	return true
-}
-
-func (r *Tracer) codes(i *Interpreter) [][]func(*Interpreter) {
+func (r *Tracer) exactCodes(i *Interpreter) [][]func(*Interpreter) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if len(r.exact) == len(i.instrs) {
@@ -732,14 +752,10 @@ func (r *Tracer) unrecordableReason(i *Interpreter, op instr.Opcode) prof.Captur
 // lower a root without holding r.mu while the recorder keeps mutating the live
 // tree under lock — the concurrent map read/write that races a pooled Tracer.
 func (t *tree) snapshot() *tree {
-	branches := make(map[int]*trace, len(t.branches))
-	for id, tr := range t.branches {
-		branches[id] = tr
-	}
 	return &tree{
 		root:     t.root,
-		branches: branches,
-		hits:     append([]int64(nil), t.hits...),
+		branches: maps.Clone(t.branches),
+		hits:     slices.Clone(t.hits),
 	}
 }
 

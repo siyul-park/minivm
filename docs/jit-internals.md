@@ -127,7 +127,7 @@ Each recorded step stores the data needed for speculative lowering:
 - partial-trace resume boundary
 - selected heap values for read-only fast paths
 
-The tracer aborts before host calls and allocation. It records ref-bearing array writes and struct writes only as terminal fallback boundaries. A primitive typed-array write may remain inside the trace when it occurs in the anchor frame before any inlined call. Capture deep-copies primitive typed arrays so speculative execution never mutates the live interpreter heap.
+The tracer aborts before host calls and allocation. It records ref-bearing array writes and struct writes only as terminal fallback boundaries. A primitive typed-array write may remain inside the trace when it occurs in the anchor frame before any inlined call. Capture deep-copies typed arrays, boxed arrays, and structs before stepping mutations so speculative execution never changes the live interpreter heap. The clone also owns mutable dispatch metadata and suppresses external finalizers, so speculative reference reclamation cannot alter live functions, trace trees, or host resources.
 
 Every recorded `trace` has one outcome: `loop`, `returned`, `completed`, `partial`, or `aborted`. The trace frontend maps usable outcomes to plan terminators and excludes aborted fragments from learned continuations. When an observed block runs out of steps, lowering decides completion from that block's terminator, never from the root trace. This prevents an unsupported side fragment from being mistaken for normal completion.
 

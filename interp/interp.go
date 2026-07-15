@@ -17,11 +17,12 @@ import (
 )
 
 type Interpreter struct {
-	ctx       context.Context
-	done      <-chan struct{}
-	tracer    *Tracer
-	hook      func(*Interpreter) error
-	marshaler Marshaler
+	ctx         context.Context
+	done        <-chan struct{}
+	tracer      *Tracer
+	hook        func(*Interpreter) error
+	marshaler   Marshaler
+	speculative bool
 
 	compiler *compiler
 	cache    *Cache
@@ -31,7 +32,7 @@ type Interpreter struct {
 	stubs    []func(*Interpreter)
 	natives  []unsafe.Pointer
 	tried    map[anchor]bool
-	loops    map[anchor]uint8
+	warmup   map[anchor]uint8
 	journal  []uint64
 
 	types       []types.Type
@@ -252,7 +253,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		stubs:     make([]func(*Interpreter), len(prog.Constants)+1),
 		natives:   make([]unsafe.Pointer, len(prog.Constants)+1),
 		tried:     map[anchor]bool{},
-		loops:     map[anchor]uint8{},
+		warmup:    map[anchor]uint8{},
 		dynamic:   map[int]bool{},
 		journal:   make([]uint64, journalHead+journalStride*opt.frame),
 		frames:    make([]frame, opt.frame),
@@ -344,16 +345,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		i.globals[j] = i.zero(kind)
 	}
 
-	c := &threader{
-		types:     i.types,
-		constants: i.constants,
-		heap:      i.heap,
-		coros:     i.coros,
-		globals:   i.globalKinds,
-		exact:     opt.tick == 1,
-		hot:       nativeBackend && i.threshold >= 0,
-		backedge:  (*Interpreter).observeLoop,
-	}
+	c := i.threader()
 	i.code[0] = c.Compile(prog.Code, i.module.LocalKinds(), types.Kinds(i.module.Captures))
 
 	for j, v := range prog.Constants {
@@ -1029,8 +1021,8 @@ func (i *Interpreter) observeLoop(f *frame) error {
 		if samples == 0 {
 			i.sample(f)
 		}
-		hits := i.loops[root] + 1
-		i.loops[root] = hits
+		hits := i.warmup[root] + 1
+		i.warmup[root] = hits
 		if hits < loopWarmup {
 			return nil
 		}
@@ -1745,16 +1737,7 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if addr >= len(i.coros) {
 		i.coros = append(i.coros, make([]bool, n-len(i.coros))...)
 	}
-	c := &threader{
-		types:     i.types,
-		constants: i.constants,
-		heap:      i.heap,
-		coros:     i.coros,
-		globals:   i.globalKinds,
-		exact:     i.tick == 1,
-		hot:       nativeBackend && i.threshold >= 0,
-		backedge:  (*Interpreter).observeLoop,
-	}
+	c := i.threader()
 	if dynamic {
 		i.coros[addr] = i.yields(fn.Code)
 	}
@@ -1764,6 +1747,24 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if dynamic {
 		i.dynamic[addr] = true
 	}
+}
+
+// threader builds generated dispatch state. The loop callback is injected at
+// runtime instead of referenced by the generated global handler table, avoiding
+// an initialization cycle through trace compilation.
+func (i *Interpreter) threader() *threader {
+	c := &threader{
+		types:     i.types,
+		constants: i.constants,
+		heap:      i.heap,
+		coros:     i.coros,
+		globals:   i.globalKinds,
+		exact:     i.tick == 1,
+	}
+	if nativeBackend && i.threshold >= 0 {
+		c.backedge = (*Interpreter).observeLoop
+	}
+	return c
 }
 
 // recount rebuilds baseline counts from constant roots and heap edges after
@@ -1993,8 +1994,12 @@ func (i *Interpreter) finalize(addr int, v types.Value) {
 	if s, ok := v.(types.String); ok && i.interned[string(s)] == types.Ref(addr) {
 		delete(i.interned, string(s))
 	}
-	if c, ok := v.(io.Closer); ok {
-		_ = c.Close()
+	// External finalizers belong to committed execution, never speculative
+	// trace capture.
+	if !i.speculative {
+		if c, ok := v.(io.Closer); ok {
+			_ = c.Close()
+		}
 	}
 }
 
@@ -2018,9 +2023,9 @@ func (i *Interpreter) remove(addr int) {
 			delete(i.tried, a)
 		}
 	}
-	for a := range i.loops {
+	for a := range i.warmup {
 		if a.addr == addr {
-			delete(i.loops, a)
+			delete(i.warmup, a)
 		}
 	}
 	if i.tracer != nil {

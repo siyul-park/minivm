@@ -99,7 +99,7 @@ func (l arm64Lowerer) enter(ctx *lowering) {
 
 func (l arm64Lowerer) materializeExits(ctx *lowering) {
 	for _, exit := range ctx.exits {
-		ctx.reuse = false
+		ctx.reuseLocals = false
 		ctx.spare = asm.VReg{}
 		ctx.values = exit.values
 		ctx.frames = exit.frames
@@ -1248,7 +1248,7 @@ func (l arm64Lowerer) arrayGetKnown(ctx *lowering, op step) bool {
 }
 
 func (l arm64Lowerer) enterBlock(ctx *lowering, state []slot) {
-	ctx.reuse = false
+	ctx.reuseLocals = false
 	ctx.spare = asm.VReg{}
 	ctx.values = ctx.values[:0]
 	for _, slot := range state {
@@ -3129,9 +3129,9 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 		return false
 	}
 	a := ctx.assembler
+	continuable := kind != types.KindRef && !op.terminal
 	var fail, bounds, valueFail asm.Label
-	switch {
-	case kind == types.KindRef || op.terminal:
+	if !continuable {
 		fail, ok = l.sideExit(ctx, pre, op.ip, prof.ExitGuardShape, int(op.op))
 		if !ok {
 			return false
@@ -3144,7 +3144,7 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 		if !ok {
 			return false
 		}
-	default:
+	} else {
 		// A continuable primitive store is a state barrier: materialize the
 		// pre-op frame once, then let all guards share that resumable snapshot.
 		// Clearing the local register cache bounds no-spill pressure and makes
@@ -3156,14 +3156,14 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 			clear(ctx.frames[idx].loaded)
 			clear(ctx.frames[idx].dirty)
 		}
-		ctx.reuse = len(ctx.values) == 3
+		ctx.reuseLocals = len(ctx.values) == 3
 		fail = ctx.queueExit(nil, op.ip, 0, prof.ExitGuardShape, int(op.op))
 		bounds = ctx.queueExit(nil, op.ip, 0, prof.ExitGuardBounds, int(op.op))
 		valueFail = ctx.queueExit(nil, op.ip, 0, prof.ExitGuardValue, int(op.op))
 	}
 	var addr, itab, data, scratch asm.VReg
 	remat := false
-	if kind != types.KindRef && !op.terminal {
+	if continuable {
 		work := l.localScratch(ctx)
 		if work.Width() == asm.WidthUndefined && val.known && val.kind.Repr() == types.KindI32 {
 			work = val.reg
@@ -3177,14 +3177,14 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 	} else {
 		addr, itab, data = l.guardHeap(ctx, ref, fail)
 	}
-	if kind != types.KindRef && !op.terminal {
+	if continuable {
 		l.guardItabTo(ctx, itab, scratch, want, fail)
 	} else {
 		l.guardItab(ctx, itab, want, fail)
 	}
 
 	var dataPtr, n asm.VReg
-	if kind != types.KindRef && !op.terminal {
+	if continuable {
 		dataPtr = itab
 		n = data
 		l.sliceHeaderTo(ctx, data, dataPtr, n, base)
@@ -3194,7 +3194,7 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 	l.guardIndex(ctx, idx, n, bounds)
 
 	var rcBase, rc, rcAddr asm.VReg
-	if kind != types.KindRef && !op.terminal {
+	if continuable {
 		rcBase = scratch
 		l.rcBaseTo(ctx, rcBase)
 		ctx.assembler.Emit(arm64.MOV(n, addr))
@@ -3253,13 +3253,13 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 			}
 			a.Emit(arm64.STRR(val.reg, dataPtr, idx))
 		}
-		if !op.terminal && remat {
+		if continuable && remat {
 			ctx.spare = rc
 		}
 	}
 
 	ctx.values = ctx.values[: len(ctx.values)-3 : len(ctx.values)-3]
-	if kind == types.KindRef || op.terminal {
+	if !continuable {
 		return l.exit(ctx, op.ip+1, prof.ExitTerminalOp, int(op.op))
 	}
 	return true
@@ -3665,8 +3665,8 @@ func (l arm64Lowerer) trapFlushed(ctx *lowering, kind, resume, exitID int) {
 }
 
 // heapRef loads a heap cell for a value already proven to have ref kind by the
-// symbolic stack. The object itab guard still rejects null or a different heap
-// shape before the payload is used.
+// symbolic stack. It reuses ref and off as outputs, so callers use it only after
+// a state barrier whose exits reload boxed operands from their stack homes.
 func (arm64Lowerer) heapRef(ctx *lowering, ref, off, cell asm.VReg) (asm.VReg, asm.VReg, asm.VReg, asm.VReg) {
 	a := ctx.assembler
 	addr := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -3689,7 +3689,9 @@ func (arm64Lowerer) heapRef(ctx *lowering, ref, off, cell asm.VReg) (asm.VReg, a
 	return addr, itab, data, cell
 }
 
-// guardHeap loads a heap cell or branches to fail on a non-ref tag.
+// guardHeap loads a heap cell or branches to fail on a non-ref tag. Unlike
+// heapRef, it preserves ref because queued side exits may still need the boxed
+// operand.
 func (arm64Lowerer) guardHeap(ctx *lowering, ref asm.VReg, fail asm.Label) (asm.VReg, asm.VReg, asm.VReg) {
 	a := ctx.assembler
 	tag := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -3949,7 +3951,7 @@ func (arm64Lowerer) localScratch(ctx *lowering) asm.VReg {
 
 func (l arm64Lowerer) localReg(ctx *lowering, target *activation, idx int) (asm.VReg, bool) {
 	reg := target.locals[idx].reg
-	if !ctx.reuse || reg.Width() == asm.WidthUndefined {
+	if !ctx.reuseLocals || reg.Width() == asm.WidthUndefined {
 		return asm.VReg{}, false
 	}
 	for _, value := range ctx.values {
@@ -4201,7 +4203,7 @@ func lower(ctx *lowering, plan plan) bool {
 	}
 	for n := 0; n < len(ctx.work); n++ {
 		work := ctx.work[n]
-		ctx.reuse = false
+		ctx.reuseLocals = false
 		ctx.spare = asm.VReg{}
 		ctx.values = work.values
 		ctx.frames = work.frames

@@ -2445,7 +2445,7 @@ func br() jen.Code {
 	).Block(
 		jen.Id("offset").Op(":=").Id("instr").Dot("ParseI16").Call(jen.Id("c").Dot("code"), jen.Id("c").Dot("ip").Op("+").Lit(1)),
 		jen.Id("c").Dot("ip").Op("+=").Lit(3),
-		jen.If(jen.Op("!").Id("c").Dot("hot").Op("||").Id("c").Dot("backedge").Op("==").Nil().Op("||").Id("offset").Op(">").Lit(-3)).Block(
+		jen.If(jen.Id("c").Dot("backedge").Op("==").Nil().Op("||").Id("offset").Op(">").Lit(-3)).Block(
 			jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(apply...)),
 		),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(observe...)),

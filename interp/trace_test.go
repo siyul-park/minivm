@@ -93,21 +93,40 @@ func TestTracer_Capture(t *testing.T) {
 		require.Equal(t, instr.I32_CONST, result.trace.ops[len(result.trace.ops)-1].op)
 	})
 
-	t.Run("isolates primitive array writes", func(t *testing.T) {
-		array := types.TypedArray[int32]{1}
-		tracer := NewTracer()
-		prog := program.New([]instr.Instruction{
-			instr.New(instr.CONST_GET, 0),
-			instr.New(instr.I32_CONST, 0),
-			instr.New(instr.I32_CONST, 2),
-			instr.New(instr.ARRAY_SET),
-		}, program.WithConstants(array))
-		i := New(prog, WithTracer(tracer), WithThreshold(-1))
-		defer i.Close()
+	t.Run("isolates captured mutations", func(t *testing.T) {
+		primitive := types.TypedArray[int32]{1}
+		array := types.NewArray(types.TypeI32Array, types.BoxI32(1))
+		structure := types.NewStruct(
+			types.NewStructType(types.NewStructField(types.TypeI32)),
+			types.BoxI32(1),
+		)
+		tests := []struct {
+			name  string
+			value types.Value
+			op    instr.Opcode
+			read  func() types.Boxed
+		}{
+			{name: "primitive array", value: primitive, op: instr.ARRAY_SET, read: func() types.Boxed { return types.BoxI32(primitive[0]) }},
+			{name: "boxed array", value: array, op: instr.ARRAY_SET, read: func() types.Boxed { return array.Elems[0] }},
+			{name: "struct", value: structure, op: instr.STRUCT_SET, read: func() types.Boxed { return structure.Field(0) }},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				tracer := NewTracer()
+				prog := program.New([]instr.Instruction{
+					instr.New(instr.CONST_GET, 0),
+					instr.New(instr.I32_CONST, 0),
+					instr.New(instr.I32_CONST, 2),
+					instr.New(tt.op),
+				}, program.WithConstants(tt.value))
+				i := New(prog, WithTracer(tracer), WithThreshold(-1))
+				defer i.Close()
 
-		_, err := tracer.capture(i, anchor{})
-		require.NoError(t, err)
-		require.Equal(t, int32(1), array[0])
+				_, err := tracer.capture(i, anchor{})
+				require.NoError(t, err)
+				require.Equal(t, types.BoxI32(1), tt.read())
+			})
+		}
 	})
 
 	t.Run("cuts an oversized trace at a resumable boundary", func(t *testing.T) {
@@ -232,7 +251,7 @@ func TestTracer_Capture(t *testing.T) {
 		require.Nil(t, tracer.rootAt(root))
 	})
 
-	t.Run("does not deadlock when recording reclaims a function", func(t *testing.T) {
+	t.Run("isolates function reclamation", func(t *testing.T) {
 		tracer := NewTracer()
 		i := New(
 			program.New([]instr.Instruction{instr.New(instr.DROP)}),
@@ -241,7 +260,12 @@ func TestTracer_Capture(t *testing.T) {
 		)
 		defer i.Close()
 
-		addr := i.keep(&types.Function{Code: []byte{byte(instr.NOP)}})
+		fn := &types.Function{Code: []byte{byte(instr.NOP)}}
+		addr := i.keep(fn)
+		i.bind(addr, fn, true)
+		root := anchor{addr: addr}
+		tracer.trees[root] = &tree{root: &trace{anchor: root, kind: completed}}
+		require.NotEmpty(t, tracer.exactCodes(i)[addr])
 		i.stack[0] = types.BoxRef(addr)
 		i.sp = 1
 
@@ -258,6 +282,29 @@ func TestTracer_Capture(t *testing.T) {
 			t.Fatal("capture deadlocked while reclaiming a function")
 		}
 		require.NotNil(t, tracer.rootAt(anchor{}))
+		require.NotNil(t, tracer.rootAt(root))
+		require.NotEmpty(t, i.instrs[addr])
+		require.NotEmpty(t, tracer.exactCodes(i)[addr])
+		require.True(t, i.dynamic[addr])
+	})
+
+	t.Run("does not finalize live values while recording", func(t *testing.T) {
+		tracer := NewTracer()
+		i := New(
+			program.New([]instr.Instruction{instr.New(instr.DROP)}),
+			WithTracer(tracer),
+			WithThreshold(-1),
+		)
+		defer i.Close()
+
+		value := &trackedValue{}
+		addr := i.keep(value)
+		i.stack[0] = types.BoxRef(addr)
+		i.sp = 1
+
+		_, err := tracer.capture(i, anchor{})
+		require.NoError(t, err)
+		require.Zero(t, value.closed)
 	})
 
 	t.Run("does not publish aborted traces", func(t *testing.T) {
@@ -349,11 +396,11 @@ func TestTracer_IsolatesPrograms(t *testing.T) {
 
 	left := New(first, WithTracer(tracer), WithThreshold(-1))
 	defer left.Close()
-	before := tracer.codes(left)
+	before := tracer.exactCodes(left)
 
 	right := New(second, WithTracer(tracer), WithThreshold(-1))
 	defer right.Close()
-	after := right.tracer.codes(right)
+	after := right.tracer.exactCodes(right)
 
 	require.Same(t, tracer, left.tracer)
 	require.NotSame(t, tracer, right.tracer)
@@ -369,7 +416,7 @@ func TestTracer_Remove(t *testing.T) {
 	i := New(first, WithTracer(tracer), WithThreshold(-1))
 	defer i.Close()
 
-	exact := tracer.codes(i)
+	exact := tracer.exactCodes(i)
 	require.NotNil(t, exact[1])
 	tracer.remove(1)
 	require.Nil(t, tracer.exact)
@@ -379,6 +426,6 @@ func TestTracer_Remove(t *testing.T) {
 		Build()
 	require.NoError(t, err)
 	i.bind(1, second, true)
-	rebuilt := tracer.codes(i)
+	rebuilt := tracer.exactCodes(i)
 	require.NotSame(t, &exact[1][0], &rebuilt[1][0])
 }
