@@ -103,8 +103,7 @@ type activation struct {
 	kinds  []types.Kind
 	upvals []types.Kind
 	locals []value
-	loaded []bool
-	dirty  []bool
+	state  []localState
 
 	addr     int
 	base     int
@@ -119,6 +118,13 @@ type activation struct {
 // every local unloaded and every operand awaiting reload. If the branch
 // returned from an inlined callee, tail keeps the caller path that must run
 // after the deferred block stitches back into the caller frame.
+type localState uint8
+
+const (
+	localLoaded localState = 1 << iota
+	localDirty
+)
+
 type work struct {
 	label  asm.Label
 	block  int
@@ -205,7 +211,7 @@ const nativeFrameLimit = 128
 const loopBudget = 1 << 13
 
 func newActivation(addr int, fn *types.Function, base, opBase int) activation {
-	kinds := fn.LocalKinds()
+	kinds := fn.Slots()
 	upvals := types.Kinds(fn.Captures)
 	returns := 0
 	if fn.Typ != nil {
@@ -216,8 +222,7 @@ func newActivation(addr int, fn *types.Function, base, opBase int) activation {
 		kinds:   kinds,
 		upvals:  upvals,
 		locals:  make([]value, len(kinds)),
-		loaded:  make([]bool, len(kinds)),
-		dirty:   make([]bool, len(kinds)),
+		state:   make([]localState, len(kinds)),
 		addr:    addr,
 		base:    base,
 		opBase:  opBase,
@@ -231,7 +236,7 @@ func (c *compiler) Close() error {
 
 // Compile selects and lowers the first frontend that emits native code.
 func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
-	input, ok := newCompileInput(i, root.addr)
+	input, ok := input(i, root.addr)
 	if !ok {
 		return compileResult{anchor: root, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoInput}
 	}
@@ -443,8 +448,7 @@ func (ctx *lowering) snapshot() ([]value, []activation) {
 	for i, f := range ctx.frames {
 		frames[i] = f
 		frames[i].locals = make([]value, len(f.locals))
-		frames[i].loaded = make([]bool, len(f.loaded))
-		frames[i].dirty = make([]bool, len(f.dirty))
+		frames[i].state = make([]localState, len(f.state))
 	}
 	return values, frames
 }

@@ -9,15 +9,15 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-type ConstantDeduplicationPass struct{}
+type DedupPass struct{}
 
-var _ pass.Pass[*program.Program] = (*ConstantDeduplicationPass)(nil)
+var _ pass.Pass[*program.Program] = (*DedupPass)(nil)
 
-func NewConstantDeduplicationPass() *ConstantDeduplicationPass {
-	return &ConstantDeduplicationPass{}
+func NewDedupPass() *DedupPass {
+	return &DedupPass{}
 }
 
-func (p *ConstantDeduplicationPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
+func (p *DedupPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
 	fns := functions(prog)
 
 	constants := prog.Constants
@@ -33,7 +33,10 @@ func (p *ConstantDeduplicationPass) Run(m *pass.Manager, prog *program.Program) 
 			switch inst.Opcode() {
 			case instr.CONST_GET:
 				constUsed[inst.Operand(0)] = true
-			case instr.ARRAY_NEW, instr.ARRAY_NEW_DEFAULT, instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT:
+			case instr.REF_TEST, instr.REF_CAST,
+				instr.ARRAY_NEW, instr.ARRAY_NEW_DEFAULT,
+				instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT,
+				instr.MAP_NEW, instr.MAP_NEW_DEFAULT:
 				typeUsed[inst.Operand(0)] = true
 			default:
 			}
@@ -73,7 +76,10 @@ func (p *ConstantDeduplicationPass) Run(m *pass.Manager, prog *program.Program) 
 			case instr.CONST_GET:
 				idx := inst.Operand(0)
 				inst.SetOperand(0, uint64(constIndex[idx]))
-			case instr.ARRAY_NEW, instr.ARRAY_NEW_DEFAULT, instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT:
+			case instr.REF_TEST, instr.REF_CAST,
+				instr.ARRAY_NEW, instr.ARRAY_NEW_DEFAULT,
+				instr.STRUCT_NEW, instr.STRUCT_NEW_DEFAULT,
+				instr.MAP_NEW, instr.MAP_NEW_DEFAULT:
 				idx := inst.Operand(0)
 				inst.SetOperand(0, uint64(typeIndex[idx]))
 			default:

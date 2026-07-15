@@ -12,19 +12,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewOptimizer(t *testing.T) {
-	optimizer := NewOptimizer(O2)
+func TestNew(t *testing.T) {
+	optimizer := New(O2)
 	require.Equal(t, O2, optimizer.Level())
 }
 
 func TestOptimizer_Level(t *testing.T) {
-	o := NewOptimizer(O0)
+	o := New(O0)
 	require.Equal(t, O0, o.Level())
 }
 
-func TestOptimizer_AddPass(t *testing.T) {
-	o := NewOptimizer(O0)
-	o.AddPass(transform.NewConstantFoldingPass())
+func TestOptimizer_Add(t *testing.T) {
+	o := New(O0)
+	o.Add(transform.NewFoldPass())
 
 	prog := program.New([]instr.Instruction{
 		instr.New(instr.I32_CONST, 1),
@@ -40,7 +40,7 @@ func TestOptimizer_AddPass(t *testing.T) {
 
 func TestOptimizer_Optimize(t *testing.T) {
 	t.Run("O0 passthrough", func(t *testing.T) {
-		o := NewOptimizer(O0)
+		o := New(O0)
 		prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
 		result, err := o.Optimize(prog)
 		require.NoError(t, err)
@@ -48,7 +48,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 	})
 
 	t.Run("O1", func(t *testing.T) {
-		o := NewOptimizer(O1)
+		o := New(O1)
 		prog := program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 20),
@@ -86,7 +86,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 	})
 
 	t.Run("O2", func(t *testing.T) {
-		o := NewOptimizer(O2)
+		o := New(O2)
 		prog := program.New(
 			[]instr.Instruction{
 				instr.New(instr.I32_CONST, 20),
@@ -134,7 +134,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(prog))
 
-		got, err := NewOptimizer(O3).Optimize(prog)
+		got, err := New(O3).Optimize(prog)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(got))
 
@@ -171,7 +171,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 		}
 
 		before := build()
-		optimized, err := NewOptimizer(O3).Optimize(build())
+		optimized, err := New(O3).Optimize(build())
 		require.NoError(t, err)
 
 		fn := optimized.Constants[0].(*types.Function)
@@ -228,7 +228,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 		}
 
 		before := build()
-		optimized, err := NewOptimizer(O3).Optimize(build())
+		optimized, err := New(O3).Optimize(build())
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(optimized))
 
@@ -274,7 +274,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 		}
 
 		before := build()
-		optimized, err := NewOptimizer(O3).Optimize(build())
+		optimized, err := New(O3).Optimize(build())
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(optimized))
 
@@ -334,7 +334,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 		}
 
 		before := build()
-		optimized, err := NewOptimizer(O3).Optimize(build())
+		optimized, err := New(O3).Optimize(build())
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(optimized))
 		require.Len(t, optimized.Types, 1, "a referenced program type is not dropped")
@@ -398,7 +398,7 @@ func TestOptimizer_Optimize(t *testing.T) {
 				want = append(want, value)
 			}
 
-			optimized, err := NewOptimizer(O3).Optimize(tt.prog)
+			optimized, err := New(O3).Optimize(tt.prog)
 			require.NoError(t, err)
 			got := interp.New(optimized, interp.WithThreshold(-1))
 			defer got.Close()

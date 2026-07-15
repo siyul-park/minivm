@@ -49,22 +49,22 @@ func NewFunction(typ *FunctionType, locals []Type, instrs []instr.Instruction) *
 	}
 }
 
-func (b *FunctionBuilder) WithParams(ps ...Type) *FunctionBuilder {
+func (b *FunctionBuilder) Params(ps ...Type) *FunctionBuilder {
 	b.typ.Params = append(b.typ.Params, ps...)
 	return b
 }
 
-func (b *FunctionBuilder) WithReturns(rs ...Type) *FunctionBuilder {
+func (b *FunctionBuilder) Returns(rs ...Type) *FunctionBuilder {
 	b.typ.Returns = append(b.typ.Returns, rs...)
 	return b
 }
 
-func (b *FunctionBuilder) WithLocals(ls ...Type) *FunctionBuilder {
+func (b *FunctionBuilder) Locals(ls ...Type) *FunctionBuilder {
 	b.locals = append(b.locals, ls...)
 	return b
 }
 
-func (b *FunctionBuilder) WithCaptures(cs ...Type) *FunctionBuilder {
+func (b *FunctionBuilder) Captures(cs ...Type) *FunctionBuilder {
 	b.captures = append(b.captures, cs...)
 	return b
 }
@@ -167,12 +167,12 @@ func (f *Function) Type() Type {
 	return f.Typ
 }
 
-// LocalKinds returns the kind of each stack slot addressable by LOCAL_*
+// Slots returns the kind of each stack slot addressable by LOCAL_*
 // opcodes: first the function's params (in order), then its declared
 // locals. The kinds are the slots' declared kinds (i1/i8 stay narrow); a
 // consumer that computes through a slot reduces it with Kind.Repr at the point
 // of use. Returns nil when the function has neither.
-func (f *Function) LocalKinds() []Kind {
+func (f *Function) Slots() []Kind {
 	if f.Typ == nil {
 		return Kinds(f.Locals)
 	}

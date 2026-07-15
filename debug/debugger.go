@@ -27,10 +27,10 @@ type Debugger struct {
 
 	breakpoints map[int]*Breakpoint
 
-	stop        *Stop
-	skip        *skipPoint
-	pausedDepth int
-	depth       int
+	stop       *Stop
+	skip       *skipPoint
+	pauseDepth int
+	depth      int
 
 	next int
 }
@@ -55,10 +55,7 @@ const (
 var ErrStopped = errors.New("debug stopped")
 
 func NewDebugger() *Debugger {
-	return &Debugger{
-		breakpoints: make(map[int]*Breakpoint),
-		next:        1,
-	}
+	return &Debugger{}
 }
 
 func (d *Debugger) Hook(i *interp.Interpreter) error {
@@ -72,19 +69,19 @@ func (d *Debugger) Hook(i *interp.Interpreter) error {
 
 	if bp := d.breakpoint(i, fn, ip); bp != nil {
 		bp.Hits++
-		return d.stopped(fn, ip, fp, bp.ID)
+		return d.pause(fn, ip, fp, bp.ID)
 	}
 
 	switch d.mode {
 	case debugStep:
-		return d.stopped(fn, ip, fp, 0)
+		return d.pause(fn, ip, fp, 0)
 	case debugNext:
 		if fp <= d.depth {
-			return d.stopped(fn, ip, fp, 0)
+			return d.pause(fn, ip, fp, 0)
 		}
 	case debugFinish:
 		if fp < d.depth {
-			return d.stopped(fn, ip, fp, 0)
+			return d.pause(fn, ip, fp, 0)
 		}
 	}
 	return nil
@@ -185,13 +182,13 @@ func (d *Debugger) breakpoint(i *interp.Interpreter, fn, ip int) *Breakpoint {
 	return hit
 }
 
-func (d *Debugger) stopped(fn, ip, depth, bp int) error {
+func (d *Debugger) pause(fn, ip, depth, bp int) error {
 	d.stop = &Stop{
 		Func:       fn,
 		IP:         ip,
 		Breakpoint: bp,
 	}
-	d.pausedDepth = depth
+	d.pauseDepth = depth
 	d.mode = debugContinue
 	return ErrStopped
 }
@@ -209,8 +206,8 @@ func (d *Debugger) resume() {
 }
 
 func (d *Debugger) stopDepth() int {
-	if d.pausedDepth > 0 {
-		return d.pausedDepth
+	if d.pauseDepth > 0 {
+		return d.pauseDepth
 	}
 	return 1
 }

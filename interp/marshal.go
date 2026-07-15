@@ -406,7 +406,7 @@ func (m *codec) compileHostObject(t reflect.Type, seen map[reflect.Type]bool) (*
 				return nil, nil, nil, fmt.Errorf("host field %s: %w", f.Name, err)
 			}
 			fields = append(fields, types.NewStructField(typ, types.FieldWithName(f.Name)))
-			slots = append(slots, hostSlot{field: idx, offset: f.Offset, kind: kind})
+			slots = append(slots, hostSlot{index: idx, offset: f.Offset, kind: kind})
 			data = append(data, fieldPlan{Index: idx, Offset: f.Offset, Kind: kind, Plan: p})
 			names[f.Name] = true
 		}
@@ -416,7 +416,7 @@ func (m *codec) compileHostObject(t reflect.Type, seen map[reflect.Type]bool) (*
 			return nil, nil, nil, fmt.Errorf("%w: host value type=%s", ErrUnsupportedMarshalType, t)
 		}
 		fields = append(fields, types.NewStructField(typ, types.FieldWithName("Value")))
-		slots = append(slots, hostSlot{field: 0, kind: t.Kind()})
+		slots = append(slots, hostSlot{kind: t.Kind()})
 		names["Value"] = true
 	}
 	methodType := reflect.PointerTo(t)
@@ -430,7 +430,7 @@ func (m *codec) compileHostObject(t reflect.Type, seen map[reflect.Type]bool) (*
 			return nil, nil, nil, fmt.Errorf("method %s: %w", method.Name, err)
 		}
 		fields = append(fields, types.NewStructField(fnType, types.FieldWithName(method.Name)))
-		slots = append(slots, hostSlot{field: -1, method: idx, fnType: fnType})
+		slots = append(slots, hostSlot{index: -idx - 1, fnType: fnType})
 		names[method.Name] = true
 	}
 	return types.NewStructType(fields...), slots, data, nil
@@ -551,7 +551,7 @@ func (s *marshalState) hostObject(ptr reflect.Value, slots []hostSlot, vm *types
 		if !bound[idx].isMethod() {
 			continue
 		}
-		fn := s.wrapFunc(ptr.Method(bound[idx].method), bound[idx].fnType)
+		fn := s.wrapFunc(ptr.Method(bound[idx].method()), bound[idx].fnType)
 		bound[idx].addr = s.alloc(fn)
 	}
 	return &HostObject{

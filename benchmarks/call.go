@@ -7,7 +7,7 @@ import (
 )
 
 func recursiveFib(n int32) *program.Program {
-	b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).WithParams(types.TypeI32)
+	b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).Params(types.TypeI32)
 	base := b.Label()
 	fn := b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).
 		BrIf(base).
@@ -29,7 +29,7 @@ func recursiveFib(n int32) *program.Program {
 
 func indirectRecursiveFib(n int32) *program.Program {
 	b := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		WithParams(types.TypeI32, types.TypeRef)
+		Params(types.TypeI32, types.TypeRef)
 	base := b.Label()
 	fn := b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).
 		BrIf(base).
@@ -56,7 +56,7 @@ func indirectRecursiveFib(n int32) *program.Program {
 
 func closureCounter(count int) *program.Program {
 	fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-		WithCaptures(types.TypeI32).
+		Captures(types.TypeI32).
 		Emit(
 			instr.New(instr.UPVAL_GET, 0),
 			instr.New(instr.I32_CONST, 1),

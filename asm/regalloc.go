@@ -2,9 +2,9 @@ package asm
 
 import "errors"
 
-// regAlloc is the assembler's physical-register pool. It tracks which
+// allocator is the assembler's physical-register pool. It tracks which
 // physical registers are free, currently bound to a vreg, or off-limits.
-// regAlloc exposes the bookkeeping primitives — picking, reserving, and
+// allocator exposes the bookkeeping primitives — picking, reserving, and
 // releasing — while leaving instruction-stream policy (linear scan,
 // lifetime tracking, pin preemption) to its caller (rewriter).
 //
@@ -19,7 +19,7 @@ import "errors"
 // Two maps track the current binding in both directions so callers can ask
 // either "what preg does this vreg occupy?" (bindings) or "who owns this
 // preg slot?" (owners) without maintaining their own reverse table.
-type regAlloc struct {
+type allocator struct {
 	avail    [2]RegMask
 	excluded [2]RegMask
 	blocked  [2]RegMask
@@ -37,8 +37,8 @@ type regKey struct {
 
 var ErrNoRegistersAvailable = errors.New("no registers available")
 
-func newRegAlloc(info RegInfo) *regAlloc {
-	return &regAlloc{
+func newAllocator(info RegInfo) *allocator {
+	return &allocator{
 		avail: [2]RegMask{
 			RegTypeInt:   info.Allocatable(RegTypeInt),
 			RegTypeFloat: info.Allocatable(RegTypeFloat),
@@ -51,7 +51,7 @@ func newRegAlloc(info RegInfo) *regAlloc {
 // alloc draws a fresh physical register for vreg from the available pool,
 // binds them, and returns the assignment. Already-bound vregs return their
 // existing binding unchanged.
-func (a *regAlloc) alloc(vreg VReg) (PReg, error) {
+func (a *allocator) alloc(vreg VReg) (PReg, error) {
 	if pr, ok := a.bindings[vreg.ID()]; ok {
 		return pr, nil
 	}
@@ -71,7 +71,7 @@ func (a *regAlloc) alloc(vreg VReg) (PReg, error) {
 
 // reserve binds vreg to a specific preg, evicting any prior binding for
 // vreg. Returns ErrNoRegistersAvailable if preg is blocked.
-func (a *regAlloc) reserve(vreg VReg, preg PReg) error {
+func (a *allocator) reserve(vreg VReg, preg PReg) error {
 	if prev, ok := a.bindings[vreg.ID()]; ok {
 		if prev == preg {
 			return nil
@@ -90,7 +90,7 @@ func (a *regAlloc) reserve(vreg VReg, preg PReg) error {
 }
 
 // free releases vreg's current binding back into the available pool.
-func (a *regAlloc) free(vreg VReg) {
+func (a *allocator) free(vreg VReg) {
 	preg, ok := a.bindings[vreg.ID()]
 	if !ok {
 		return
@@ -106,7 +106,7 @@ func (a *regAlloc) free(vreg VReg) {
 
 // block marks preg permanently unusable (neither alloc nor reserve can
 // claim it).
-func (a *regAlloc) block(preg PReg) {
+func (a *allocator) block(preg PReg) {
 	typ := preg.Type()
 	a.blocked[typ] = a.blocked[typ].Set(preg.ID())
 	a.avail[typ] = a.avail[typ].Clear(preg.ID())
@@ -114,19 +114,19 @@ func (a *regAlloc) block(preg PReg) {
 
 // exclude marks preg unavailable for alloc but still reservable. ABI
 // scratch registers use this so lowerers can pin them explicitly.
-func (a *regAlloc) exclude(preg PReg) {
+func (a *allocator) exclude(preg PReg) {
 	typ := preg.Type()
 	a.excluded[typ] = a.excluded[typ].Set(preg.ID())
 }
 
 // owner reports the vreg that currently holds preg's slot, if any. The
 // query is width-insensitive — X0 and W0 occupy the same slot.
-func (a *regAlloc) owner(preg PReg) (int32, bool) {
+func (a *allocator) owner(preg PReg) (int32, bool) {
 	id, ok := a.owners[regKey{typ: preg.Type(), id: preg.ID()}]
 	return id, ok
 }
 
-func (a *regAlloc) bind(vreg VReg, preg PReg) {
+func (a *allocator) bind(vreg VReg, preg PReg) {
 	a.bindings[vreg.ID()] = preg
 	a.owners[regKey{typ: preg.Type(), id: preg.ID()}] = vreg.ID()
 }

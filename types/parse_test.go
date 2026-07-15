@@ -72,7 +72,7 @@ func TestParseFunction(t *testing.T) {
 			// with locals
 			lines: strings.Split(
 				NewFunctionBuilder(&FunctionType{Params: []Type{TypeI32}, Returns: []Type{TypeI32}}).
-					WithLocals(TypeI32, TypeI64).
+					Locals(TypeI32, TypeI64).
 					Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
 					MustBuild().String(),
 				"\n",
@@ -82,8 +82,8 @@ func TestParseFunction(t *testing.T) {
 			// with captures and locals
 			lines: strings.Split(
 				NewFunctionBuilder(&FunctionType{Returns: []Type{TypeI32}}).
-					WithCaptures(TypeI32, TypeRef).
-					WithLocals(TypeI64).
+					Captures(TypeI32, TypeRef).
+					Locals(TypeI64).
 					Emit(instr.New(instr.I32_CONST, 42), instr.New(instr.RETURN)).
 					MustBuild().String(),
 				"\n",

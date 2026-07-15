@@ -223,6 +223,38 @@ func TestVerify(t *testing.T) {
 		require.NoError(t, Verify(prog))
 	})
 
+	t.Run("types/global set mismatch", func(t *testing.T) {
+		prog := New([]instr.Instruction{
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))),
+			instr.New(instr.GLOBAL_SET, 0),
+		}, WithGlobals(types.TypeI32))
+		require.ErrorIs(t, Verify(prog), ErrTypeMismatch)
+	})
+
+	t.Run("types/global tee mismatch", func(t *testing.T) {
+		prog := New([]instr.Instruction{
+			instr.New(instr.F32_CONST, uint64(math.Float32bits(1))),
+			instr.New(instr.GLOBAL_TEE, 0),
+		}, WithGlobals(types.TypeI32))
+		require.ErrorIs(t, Verify(prog), ErrTypeMismatch)
+	})
+
+	t.Run("types/dynamic global accepts scalar", func(t *testing.T) {
+		prog := New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.GLOBAL_SET, 0),
+		}, WithGlobals(types.TypeRef))
+		require.NoError(t, Verify(prog))
+	})
+
+	t.Run("types/global concrete ref mismatch", func(t *testing.T) {
+		prog := New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.GLOBAL_SET, 0),
+		}, WithConstants(types.TypedArray[float32]{1}), WithGlobals(types.NewArrayType(types.TypeI32)))
+		require.ErrorIs(t, Verify(prog), ErrTypeMismatch)
+	})
+
 	t.Run("bounds/global index", func(t *testing.T) {
 		prog := New([]instr.Instruction{instr.New(instr.GLOBAL_GET, 9)}, WithGlobals(types.TypeI32))
 		require.ErrorIs(t, Verify(prog), ErrIndexOutOfRange)

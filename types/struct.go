@@ -61,12 +61,7 @@ func NewStructField(typ Type, opts ...func(field *StructField)) StructField {
 }
 
 func (s *Struct) FieldByName(name string) Boxed {
-	for i, f := range s.Typ.Fields {
-		if f.Name == name {
-			return s.field(i, f)
-		}
-	}
-	return 0
+	return s.Field(s.Typ.FieldIndex(name))
 }
 
 func (s *Struct) Field(i int) Boxed {
@@ -148,12 +143,11 @@ func (s *Struct) Refs(dst []Ref) []Ref {
 }
 
 func (t *StructType) FieldByName(name string) (StructField, bool) {
-	for _, field := range t.Fields {
-		if field.Name == name {
-			return field, true
-		}
+	idx := t.FieldIndex(name)
+	if idx < 0 {
+		return StructField{}, false
 	}
-	return StructField{}, false
+	return t.Fields[idx], true
 }
 
 // FieldIndex returns the index of the field named name, or -1 if no such
@@ -185,20 +179,19 @@ func (t *StructType) String() string {
 }
 
 func (t *StructType) Cast(other Type) bool {
-	if o, ok := other.(*StructType); ok {
-		if o == other {
-			return true
-		}
-		if len(t.Fields) >= len(o.Fields) {
+	if t == other {
+		return true
+	}
+	o, ok := other.(*StructType)
+	if !ok || len(t.Fields) > len(o.Fields) {
+		return false
+	}
+	for i, f := range t.Fields {
+		if !f.Type.Equals(o.Fields[i].Type) {
 			return false
 		}
-		for i, f := range o.Fields {
-			if !f.Type.Equals(t.Fields[i].Type) {
-				return false
-			}
-		}
 	}
-	return false
+	return true
 }
 
 func (t *StructType) Equals(other Type) bool {

@@ -16,7 +16,7 @@ import (
 // and a stack frame, so run also remaps the caller's label→index table to
 // account for the inserted instructions.
 type rewriter struct {
-	pool  *regAlloc
+	pool  *allocator
 	frame Frame
 	pins  map[int32]PReg
 	last  map[int32]int
@@ -40,7 +40,7 @@ const MaxSpillSlots = 512
 
 func newRewriter(arch Arch, insts []Instruction, pins map[int32]PReg) *rewriter {
 	info := arch.Registers()
-	pool := newRegAlloc(info)
+	pool := newAllocator(info)
 	for i := uint8(0); i < 64; i++ {
 		if info.Scratch.Contains(i) {
 			pool.exclude(NewPReg(i, RegTypeInt, Width64))
@@ -55,7 +55,7 @@ func newRewriter(arch Arch, insts []Instruction, pins map[int32]PReg) *rewriter 
 		spilled:  make(map[int32]bool),
 		slotOf:   make(map[int32]int),
 	}
-	r.last = r.scanLastUses(insts)
+	r.last = r.scan(insts)
 	for id, pr := range pins {
 		r.widths[id] = pr.Width()
 	}
@@ -393,9 +393,9 @@ func (r *rewriter) resolve(v VReg) (PReg, bool) {
 	return NewPReg(pr.ID(), pr.Type(), w), true
 }
 
-// scanLastUses returns the highest instruction index at which each vreg is
+// scan returns the highest instruction index at which each vreg is
 // referenced (use or def).
-func (*rewriter) scanLastUses(insts []Instruction) map[int32]int {
+func (*rewriter) scan(insts []Instruction) map[int32]int {
 	last := make(map[int32]int)
 	for i, inst := range insts {
 		if dst, ok := inst.Def(); ok {

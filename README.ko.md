@@ -126,7 +126,7 @@ if err := program.Verify(prog); err != nil {
 ### 실행 전 최적화
 
 ```go
-prog, err := optimize.NewOptimizer(optimize.O2).Optimize(prog)
+prog, err := optimize.New(optimize.O2).Optimize(prog)
 ```
 
 최적화 단계는 로컬 상수 폴딩과 중복 제거부터 데드 코드 제거, 블록 간 전역 값

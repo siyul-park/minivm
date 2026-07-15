@@ -9,15 +9,15 @@ import (
 	"github.com/siyul-park/minivm/program"
 )
 
-type DeadCodeEliminationPass struct{}
+type DCEPass struct{}
 
-var _ pass.Pass[*program.Program] = (*DeadCodeEliminationPass)(nil)
+var _ pass.Pass[*program.Program] = (*DCEPass)(nil)
 
-func NewDeadCodeEliminationPass() *DeadCodeEliminationPass {
-	return &DeadCodeEliminationPass{}
+func NewDCEPass() *DCEPass {
+	return &DCEPass{}
 }
 
-func (p *DeadCodeEliminationPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
+func (p *DCEPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
 	for i, fn := range functions(prog) {
 		code := fn.Code
 
@@ -113,7 +113,7 @@ func (p *DeadCodeEliminationPass) Run(m *pass.Manager, prog *program.Program) (p
 // legal for top-level code (slot == 0), matching program.Verify. DCE runs
 // after verification and must not silently repair a target that verification
 // would have rejected.
-func (p *DeadCodeEliminationPass) validate(target, size, slot int) error {
+func (p *DCEPass) validate(target, size, slot int) error {
 	if target < 0 || target > size || (target == size && slot != 0) {
 		return analysis.ErrInvalidJump
 	}
@@ -124,7 +124,7 @@ func (p *DeadCodeEliminationPass) validate(target, size, slot int) error {
 // boundary moves to the first surviving instruction at or after its old offset,
 // so a region whose body was removed collapses cleanly. offsets[i] is the new
 // position of the instruction that began at old offset i, or -1 if removed.
-func (p *DeadCodeEliminationPass) rehandle(handlers []instr.Handler, offsets []int, size int) []instr.Handler {
+func (p *DCEPass) rehandle(handlers []instr.Handler, offsets []int, size int) []instr.Handler {
 	if len(handlers) == 0 {
 		return handlers
 	}
@@ -140,7 +140,7 @@ func (p *DeadCodeEliminationPass) rehandle(handlers []instr.Handler, offsets []i
 	return remapped
 }
 
-func (p *DeadCodeEliminationPass) relocate(offsets []int, off, size int) int {
+func (p *DCEPass) relocate(offsets []int, off, size int) int {
 	for off < len(offsets) && offsets[off] == -1 {
 		off++
 	}

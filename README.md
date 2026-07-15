@@ -126,7 +126,7 @@ mismatches before execution. The `run` CLI verifies loaded programs by default.
 ### Optimize ahead of execution
 
 ```go
-prog, err := optimize.NewOptimizer(optimize.O2).Optimize(prog)
+prog, err := optimize.New(optimize.O2).Optimize(prog)
 ```
 
 Optimization levels range from local constant folding and deduplication to

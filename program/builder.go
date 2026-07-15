@@ -140,22 +140,12 @@ func (b *Builder) Build() (*Program, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	var opts []func(*Program)
-	if len(b.locals) > 0 {
-		opts = append(opts, WithLocals(b.locals...))
-	}
-	if len(b.globals) > 0 {
-		opts = append(opts, WithGlobals(b.globals...))
-	}
-	if len(b.constants) > 0 {
-		opts = append(opts, WithConstants(b.constants...))
-	}
-	if len(b.typs) > 0 {
-		opts = append(opts, WithTypes(b.typs...))
-	}
-	if handlers := b.code.Handlers(); len(handlers) > 0 {
-		opts = append(opts, WithHandlers(handlers...))
-	}
-	return New(instrs, opts...), nil
+	return &Program{
+		Code:      instr.Marshal(instrs),
+		Locals:    b.locals,
+		Globals:   b.globals,
+		Constants: b.constants,
+		Types:     b.typs,
+		Handlers:  b.code.Handlers(),
+	}, nil
 }

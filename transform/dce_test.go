@@ -13,11 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewDeadCodeEliminationPass(t *testing.T) {
-	require.NotNil(t, NewDeadCodeEliminationPass())
+func TestNewDCEPass(t *testing.T) {
+	require.NotNil(t, NewDCEPass())
 }
 
-func TestDeadCodeEliminationPass_Run(t *testing.T) {
+func TestDCEPass_Run(t *testing.T) {
 	tests := []struct {
 		program  *program.Program
 		expected *program.Program
@@ -167,11 +167,11 @@ func TestDeadCodeEliminationPass_Run(t *testing.T) {
 
 	for _, tt := range tests {
 		m := pass.NewManager()
-		pass.Register[*types.Function, []*analysis.BasicBlock](m, analysis.NewBasicBlocksAnalysis())
+		pass.Register[*types.Function, []*analysis.BasicBlock](m, analysis.NewBlocksAnalysis())
 
 		t.Run(tt.program.String(), func(t *testing.T) {
 			actual := tt.program
-			_, err := NewDeadCodeEliminationPass().Run(m, actual)
+			_, err := NewDCEPass().Run(m, actual)
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, actual)
 		})
@@ -186,9 +186,9 @@ func TestDeadCodeEliminationPass_Run(t *testing.T) {
 		prog := program.New(nil, program.WithConstants(fn))
 
 		m := pass.NewManager()
-		pass.Register[*types.Function, []*analysis.BasicBlock](m, analysis.NewBasicBlocksAnalysis())
+		pass.Register[*types.Function, []*analysis.BasicBlock](m, analysis.NewBlocksAnalysis())
 
-		_, err := NewDeadCodeEliminationPass().Run(m, prog)
+		_, err := NewDCEPass().Run(m, prog)
 		require.ErrorIs(t, err, analysis.ErrInvalidJump)
 	})
 
@@ -205,8 +205,8 @@ func TestDeadCodeEliminationPass_Run(t *testing.T) {
 		require.NoError(t, err)
 
 		manager := pass.NewManager()
-		pass.Register(manager, analysis.NewBasicBlocksAnalysis())
-		_, err = NewDeadCodeEliminationPass().Run(manager, prog)
+		pass.Register(manager, analysis.NewBlocksAnalysis())
+		_, err = NewDCEPass().Run(manager, prog)
 		require.NoError(t, err)
 		after := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		defer after.Close()

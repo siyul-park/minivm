@@ -174,7 +174,7 @@ func TestStructType_Cast(t *testing.T) {
 
 	require.True(t, typ.Cast(typ))
 	require.True(t, typ.Cast(NewStructType(NewStructField(TypeI32), NewStructField(TypeI64))))
-	require.True(t, typ.Cast(NewStructType(NewStructField(TypeI64))))
+	require.False(t, typ.Cast(NewStructType(NewStructField(TypeI64))))
 	require.False(t, typ.Cast(TypeI32))
 }
 

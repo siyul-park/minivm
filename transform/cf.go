@@ -10,15 +10,15 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-type ConstantFoldingPass struct{}
+type FoldPass struct{}
 
-var _ pass.Pass[*program.Program] = (*ConstantFoldingPass)(nil)
+var _ pass.Pass[*program.Program] = (*FoldPass)(nil)
 
-func NewConstantFoldingPass() *ConstantFoldingPass {
-	return &ConstantFoldingPass{}
+func NewFoldPass() *FoldPass {
+	return &FoldPass{}
 }
 
-func (p *ConstantFoldingPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
+func (p *FoldPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
 	// A folded comparison yields i1 (its dynamic kind), not i32. There is no i1
 	// immediate, so the boolean is interned into the constant pool and read with
 	// CONST_GET; the two singletons are appended at most once per run.
@@ -505,12 +505,12 @@ func (p *ConstantFoldingPass) Run(m *pass.Manager, prog *program.Program) (pass.
 }
 
 // replace folds the [ip, ip+width) range to inst and returns the next ip.
-func (p *ConstantFoldingPass) replace(code []byte, ip, width int, inst instr.Instruction) int {
+func (p *FoldPass) replace(code []byte, ip, width int, inst instr.Instruction) int {
 	p.fold(code[ip:ip+width], inst)
 	return ip + width - inst.Width()
 }
 
-func (p *ConstantFoldingPass) fold(code []byte, inst instr.Instruction) {
+func (p *FoldPass) fold(code []byte, inst instr.Instruction) {
 	for i := range code {
 		code[i] = byte(instr.NOP)
 	}

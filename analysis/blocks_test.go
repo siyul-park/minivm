@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewBasicBlocksAnalysis(t *testing.T) {
-	require.NotNil(t, NewBasicBlocksAnalysis())
+func TestNewBlocksAnalysis(t *testing.T) {
+	require.NotNil(t, NewBlocksAnalysis())
 }
 
 func TestBlocks(t *testing.T) {
@@ -20,7 +20,7 @@ func TestBlocks(t *testing.T) {
 	require.Equal(t, []*BasicBlock{{Start: 0, End: 1}}, got)
 }
 
-func TestBasicBlocksAnalysis_Run(t *testing.T) {
+func TestBlocksAnalysis_Run(t *testing.T) {
 	tests := []struct {
 		fn     *types.Function
 		blocks []*BasicBlock
@@ -63,6 +63,16 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 					Succs: nil,
 					Preds: nil,
 				},
+			},
+		},
+		{
+			fn: types.NewFunctionBuilder(nil).Emit(
+				instr.New(instr.RETURN_CALL),
+				instr.New(instr.I32_CONST, 1),
+			).MustBuild(),
+			blocks: []*BasicBlock{
+				{Start: 0, End: 1},
+				{Start: 1, End: 6},
 			},
 		},
 		{
@@ -264,7 +274,7 @@ func TestBasicBlocksAnalysis_Run(t *testing.T) {
 
 	for _, tt := range tests {
 		m := pass.NewManager()
-		pass.Register[*types.Function, []*BasicBlock](m, NewBasicBlocksAnalysis())
+		pass.Register[*types.Function, []*BasicBlock](m, NewBlocksAnalysis())
 
 		t.Run(tt.fn.String(), func(t *testing.T) {
 			actual, err := pass.GetResult[[]*BasicBlock](m, tt.fn)
@@ -288,7 +298,7 @@ func BenchmarkBasicBlocksAnalysis_Run(b *testing.B) {
 		fn := types.NewFunctionBuilder(nil).Emit(emit...).MustBuild()
 
 		m := pass.NewManager()
-		analysis := NewBasicBlocksAnalysis()
+		analysis := NewBlocksAnalysis()
 
 		b.ResetTimer()
 		for b.Loop() {

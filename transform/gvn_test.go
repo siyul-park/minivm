@@ -14,11 +14,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewGlobalValueNumberingPass(t *testing.T) {
-	require.NotNil(t, NewGlobalValueNumberingPass())
+func TestNewGVNPass(t *testing.T) {
+	require.NotNil(t, NewGVNPass())
 }
 
-func TestGlobalValueNumberingPass_Run(t *testing.T) {
+func TestGVNPass_Run(t *testing.T) {
 	i32t := &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}}
 
 	t.Run("captures a within-block subexpression like CSE", func(t *testing.T) {
@@ -35,9 +35,9 @@ func TestGlobalValueNumberingPass_Run(t *testing.T) {
 		prog := program.New(nil, program.WithConstants(fn))
 
 		manager := pass.NewManager()
-		pass.Register(manager, analysis.NewBasicBlocksAnalysis())
-		pass.Register(manager, analysis.NewGlobalValueNumberingAnalysis())
-		_, err := NewGlobalValueNumberingPass().Run(manager, prog)
+		pass.Register(manager, analysis.NewBlocksAnalysis())
+		pass.Register(manager, analysis.NewGVNAnalysis())
+		_, err := NewGVNPass().Run(manager, prog)
 		require.NoError(t, err)
 
 		want := instr.Marshal([]instr.Instruction{
@@ -69,9 +69,9 @@ func TestGlobalValueNumberingPass_Run(t *testing.T) {
 		prog := program.New(nil, program.WithConstants(fn))
 
 		manager := pass.NewManager()
-		pass.Register(manager, analysis.NewBasicBlocksAnalysis())
-		pass.Register(manager, analysis.NewGlobalValueNumberingAnalysis())
-		_, err := NewGlobalValueNumberingPass().Run(manager, prog)
+		pass.Register(manager, analysis.NewBlocksAnalysis())
+		pass.Register(manager, analysis.NewGVNAnalysis())
+		_, err := NewGVNPass().Run(manager, prog)
 		require.NoError(t, err)
 
 		code := instr.Format(fn.Code)
@@ -95,9 +95,9 @@ func TestGlobalValueNumberingPass_Run(t *testing.T) {
 		before := instr.Format(prog.Code)
 
 		manager := pass.NewManager()
-		pass.Register(manager, analysis.NewBasicBlocksAnalysis())
-		pass.Register(manager, analysis.NewGlobalValueNumberingAnalysis())
-		_, err := NewGlobalValueNumberingPass().Run(manager, prog)
+		pass.Register(manager, analysis.NewBlocksAnalysis())
+		pass.Register(manager, analysis.NewGVNAnalysis())
+		_, err := NewGVNPass().Run(manager, prog)
 		require.NoError(t, err)
 		require.Equal(t, before, instr.Format(prog.Code), "no locals to allocate at the top level")
 	})
@@ -124,9 +124,9 @@ func TestGlobalValueNumberingPass_Run(t *testing.T) {
 		require.NoError(t, err)
 
 		manager := pass.NewManager()
-		pass.Register(manager, analysis.NewBasicBlocksAnalysis())
-		pass.Register(manager, analysis.NewGlobalValueNumberingAnalysis())
-		_, err = NewGlobalValueNumberingPass().Run(manager, prog)
+		pass.Register(manager, analysis.NewBlocksAnalysis())
+		pass.Register(manager, analysis.NewGVNAnalysis())
+		_, err = NewGVNPass().Run(manager, prog)
 		require.NoError(t, err)
 		after := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		defer after.Close()

@@ -49,7 +49,7 @@ type emitCounts struct {
 }
 
 func (m *jitMetrics) appendMetrics(out []Metric, collector *Collector) []Metric {
-	captures := activeKeys(m.captures)
+	captures := active(m.captures)
 	sort.Slice(captures, func(i, j int) bool { return captures[i].less(captures[j]) })
 	for _, key := range captures {
 		out = append(out, Metric{
@@ -64,7 +64,7 @@ func (m *jitMetrics) appendMetrics(out []Metric, collector *Collector) []Metric 
 		})
 	}
 
-	compiles := activeKeys(m.compiles)
+	compiles := active(m.compiles)
 	sort.Slice(compiles, func(i, j int) bool { return compiles[i].less(compiles[j]) })
 	for _, key := range compiles {
 		out = append(out, Metric{
@@ -99,10 +99,10 @@ func (m *jitMetrics) appendMetrics(out []Metric, collector *Collector) []Metric 
 		}
 	}
 
-	out = appendEntryCounters(out, "vm_jit_native_entries_total", m.entries)
-	out = appendEntryCounters(out, "vm_jit_native_yields_total", m.yields)
+	out = appendEntries(out, "vm_jit_native_entries_total", m.entries)
+	out = appendEntries(out, "vm_jit_native_yields_total", m.yields)
 
-	exits := activeKeys(m.exits)
+	exits := active(m.exits)
 	sort.Slice(exits, func(i, j int) bool { return exits[i].less(exits[j]) })
 	for _, key := range exits {
 		opcode := "none"
@@ -126,8 +126,8 @@ func (m *jitMetrics) appendMetrics(out []Metric, collector *Collector) []Metric 
 }
 
 func (m *jitMetrics) merge(other *jitMetrics) {
-	mergeCounters(&m.captures, other.captures)
-	mergeCounters(&m.compiles, other.compiles)
+	merge(&m.captures, other.captures)
+	merge(&m.compiles, other.compiles)
 	if len(other.emits) > 0 && m.emits == nil {
 		m.emits = make(map[entryKey]*emitCounts)
 	}
@@ -143,21 +143,21 @@ func (m *jitMetrics) merge(other *jitMetrics) {
 		destination.emits += source.emits
 		destination.bytes += source.bytes
 	}
-	mergeCounters(&m.entries, other.entries)
-	mergeCounters(&m.yields, other.yields)
-	mergeCounters(&m.exits, other.exits)
+	merge(&m.entries, other.entries)
+	merge(&m.yields, other.yields)
+	merge(&m.exits, other.exits)
 }
 
 func (m *jitMetrics) reset() {
-	resetCounters(m.captures)
-	resetCounters(m.compiles)
+	reset(m.captures)
+	reset(m.compiles)
 	for _, counters := range m.emits {
 		counters.emits = 0
 		counters.bytes = 0
 	}
-	resetCounters(m.entries)
-	resetCounters(m.yields)
-	resetCounters(m.exits)
+	reset(m.entries)
+	reset(m.yields)
+	reset(m.exits)
 }
 
 func (k captureKey) less(other captureKey) bool {
@@ -330,8 +330,8 @@ func (v ExitReason) label() string {
 	}
 }
 
-func appendEntryCounters(out []Metric, name string, rows map[entryKey]*Counter) []Metric {
-	keys := activeKeys(rows)
+func appendEntries(out []Metric, name string, rows map[entryKey]*Counter) []Metric {
+	keys := active(rows)
 	sort.Slice(keys, func(i, j int) bool { return keys[i].less(keys[j]) })
 	for _, key := range keys {
 		out = append(out, Metric{Name: name, Labels: key.labels(), Value: float64(rows[key].value)})
@@ -339,7 +339,7 @@ func appendEntryCounters(out []Metric, name string, rows map[entryKey]*Counter) 
 	return out
 }
 
-func activeKeys[K comparable](rows map[K]*Counter) []K {
+func active[K comparable](rows map[K]*Counter) []K {
 	keys := make([]K, 0, len(rows))
 	for key, counter := range rows {
 		if counter.value > 0 {
@@ -349,15 +349,15 @@ func activeKeys[K comparable](rows map[K]*Counter) []K {
 	return keys
 }
 
-func mergeCounters[K comparable](destination *map[K]*Counter, source map[K]*Counter) {
-	for key, counter := range source {
-		if counter.value > 0 {
-			counterFor(destination, key).value += counter.value
+func merge[K comparable](destination *map[K]*Counter, source map[K]*Counter) {
+	for key, row := range source {
+		if row.value > 0 {
+			counter(destination, key).value += row.value
 		}
 	}
 }
 
-func counterFor[K comparable](rows *map[K]*Counter, key K) *Counter {
+func counter[K comparable](rows *map[K]*Counter, key K) *Counter {
 	if *rows == nil {
 		*rows = make(map[K]*Counter)
 	}
@@ -369,7 +369,7 @@ func counterFor[K comparable](rows *map[K]*Counter, key K) *Counter {
 	return counter
 }
 
-func resetCounters[K comparable](rows map[K]*Counter) {
+func reset[K comparable](rows map[K]*Counter) {
 	for _, counter := range rows {
 		counter.value = 0
 	}

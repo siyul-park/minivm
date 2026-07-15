@@ -10,8 +10,8 @@ func NewPipeline[U any]() *Pipeline[U] {
 	return &Pipeline[U]{}
 }
 
-// AddPass appends a transform to the pipeline.
-func (p *Pipeline[U]) AddPass(pass Pass[U]) {
+// Add appends a transform to the pipeline.
+func (p *Pipeline[U]) Add(pass Pass[U]) {
 	p.passes = append(p.passes, pass)
 }
 

@@ -175,18 +175,18 @@ func (a *Assembler) relax(insts []Instruction, labels map[Label]int) ([]Instruct
 			return nil, nil, err
 		}
 
-		idx, repl := a.collectRelaxations(relaxer, insts, labels, offsets)
+		idx, repl := a.collect(relaxer, insts, labels, offsets)
 		if len(idx) == 0 {
 			return insts, labels, nil
 		}
-		insts, labels = spliceRelaxations(insts, labels, idx, repl)
+		insts, labels = splice(insts, labels, idx, repl)
 	}
 }
 
-// collectRelaxations drafts every out-of-range intra-Code label branch's
+// collect drafts every out-of-range intra-Code label branch's
 // Relaxer replacement in instruction order. idx and repl are parallel:
 // idx[k] is the original index of the branch replaced by repl[k].
-func (a *Assembler) collectRelaxations(
+func (a *Assembler) collect(
 	relaxer Relaxer, insts []Instruction, labels map[Label]int, offsets []int,
 ) (idx []int, repl [][]Instruction) {
 	for i, inst := range insts {
@@ -277,9 +277,9 @@ func (a *Assembler) final(
 	return out, relocs, nil
 }
 
-// spliceRelaxations rebuilds insts with every collected replacement spliced
+// splice rebuilds insts with every collected replacement spliced
 // in and rebases labels across the resulting per-instruction length deltas.
-func spliceRelaxations(insts []Instruction, labels map[Label]int, idx []int, repl [][]Instruction) ([]Instruction, map[Label]int) {
+func splice(insts []Instruction, labels map[Label]int, idx []int, repl [][]Instruction) ([]Instruction, map[Label]int) {
 	prefix := make([]int, len(insts)+1)
 	for k, i := range idx {
 		prefix[i+1] = len(repl[k]) - 1

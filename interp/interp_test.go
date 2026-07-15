@@ -230,7 +230,7 @@ var runTests = []struct {
 			instr.New(instr.CLOSURE_NEW),
 			instr.New(instr.CALL),
 		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-			WithCaptures(types.TypeI32).Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.RETURN)).MustBuild())),
+			Captures(types.TypeI32).Emit(instr.New(instr.UPVAL_GET, 0), instr.New(instr.RETURN)).MustBuild())),
 		values: []types.Value{types.I32(7)},
 	},
 	{
@@ -241,7 +241,7 @@ var runTests = []struct {
 			instr.New(instr.CLOSURE_NEW),
 			instr.New(instr.CALL),
 		}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-			WithCaptures(types.TypeI32).Emit(
+			Captures(types.TypeI32).Emit(
 			instr.New(instr.I32_CONST, 99), instr.New(instr.UPVAL_SET, 0), instr.New(instr.UPVAL_GET, 0), instr.New(instr.RETURN),
 		).MustBuild())),
 		values: []types.Value{types.I32(99)},
@@ -1659,8 +1659,8 @@ func TestInterpreter_Run(t *testing.T) {
 
 		arrayExitValues := types.TypedArray[float64]{7}
 		arrayExitBuilder := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeI32, types.TypeF64Array).
-			WithReturns(types.TypeF64)
+			Params(types.TypeI32, types.TypeF64Array).
+			Returns(types.TypeF64)
 		arrayExitFunction, err := arrayExitBuilder.Emit(
 			instr.New(instr.LOCAL_GET, 1),
 			instr.New(instr.LOCAL_GET, 0),
@@ -1699,7 +1699,7 @@ func TestInterpreter_Run(t *testing.T) {
 		})
 
 		divideFunction := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-			WithParams(types.TypeI32, types.TypeI32).
+			Params(types.TypeI32, types.TypeI32).
 			Emit(
 				instr.New(instr.LOCAL_GET, 0),
 				instr.New(instr.LOCAL_GET, 1),
@@ -2345,7 +2345,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("UPVAL_GET retains a ref capture (generic path)", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{}).
-			WithCaptures(types.TypeRef).Emit(
+			Captures(types.TypeRef).Emit(
 			instr.New(instr.UPVAL_GET, 0), instr.New(instr.DROP),
 			instr.New(instr.RETURN),
 		).MustBuild()
@@ -2371,7 +2371,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("UPVAL_SET releases a ref capture when overwritten (generic path)", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-			WithCaptures(types.TypeRef).Emit(
+			Captures(types.TypeRef).Emit(
 			instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW),
 			instr.New(instr.UPVAL_SET, 0),
 			instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN),
@@ -2393,7 +2393,7 @@ func TestInterpreter_Run(t *testing.T) {
 		oldHuge := int64(1) << 50
 		newHuge := int64(1) << 51
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64}}).
-			WithCaptures(types.TypeI64).Emit(
+			Captures(types.TypeI64).Emit(
 			instr.New(instr.I64_CONST, i64operand(newHuge)),
 			instr.New(instr.UPVAL_SET, 0),
 			instr.New(instr.UPVAL_GET, 0),
@@ -2782,7 +2782,7 @@ func TestInterpreter_Run(t *testing.T) {
 		})
 		t.Run("upval", func(t *testing.T) {
 			fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64}}).
-				WithCaptures(types.TypeI64).Emit(
+				Captures(types.TypeI64).Emit(
 				instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
 				instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_ADD),
 				instr.New(instr.RETURN),
@@ -2861,7 +2861,7 @@ func TestInterpreter_Run(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(tc.capture.String(), func(t *testing.T) {
 				fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{tc.capture}}).
-					WithCaptures(tc.capture).Emit(tc.body(tc.cst)...).MustBuild()
+					Captures(tc.capture).Emit(tc.body(tc.cst)...).MustBuild()
 				var seed instr.Instruction
 				switch tc.capture {
 				case types.TypeI32:
@@ -2892,8 +2892,8 @@ func TestInterpreter_Run(t *testing.T) {
 
 	t.Run("fused UPVAL_GET+LOCAL_GET binop computes correctly for i32 (interp-only)", func(t *testing.T) {
 		fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-			WithCaptures(types.TypeI32).
-			WithLocals(types.TypeI32).Emit(
+			Captures(types.TypeI32).
+			Locals(types.TypeI32).Emit(
 			instr.New(instr.I32_CONST, i32operand(3)), instr.New(instr.LOCAL_SET, 0),
 			instr.New(instr.UPVAL_GET, 0), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_ADD),
 			instr.New(instr.RETURN),
@@ -2943,7 +2943,7 @@ func TestInterpreter_Run(t *testing.T) {
 		})
 		t.Run("global+upval i64", func(t *testing.T) {
 			fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI64}}).
-				WithCaptures(types.TypeI64).Emit(
+				Captures(types.TypeI64).Emit(
 				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.UPVAL_GET, 0), instr.New(instr.I64_ADD),
 				instr.New(instr.RETURN),
 			).MustBuild()
@@ -2967,7 +2967,7 @@ func TestInterpreter_Run(t *testing.T) {
 	t.Run("fused UPVAL_GET+source pair binop computes correctly (interp-only)", func(t *testing.T) {
 		t.Run("upval+const f32", func(t *testing.T) {
 			fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeF32}}).
-				WithCaptures(types.TypeF32).Emit(
+				Captures(types.TypeF32).Emit(
 				instr.New(instr.UPVAL_GET, 0), instr.New(instr.F32_CONST, uint64(math.Float32bits(3))), instr.New(instr.F32_ADD),
 				instr.New(instr.RETURN),
 			).MustBuild()
@@ -2987,7 +2987,7 @@ func TestInterpreter_Run(t *testing.T) {
 		})
 		t.Run("upval+upval i32", func(t *testing.T) {
 			fn := types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
-				WithCaptures(types.TypeI32, types.TypeI32).Emit(
+				Captures(types.TypeI32, types.TypeI32).Emit(
 				instr.New(instr.UPVAL_GET, 0), instr.New(instr.UPVAL_GET, 1), instr.New(instr.I32_ADD),
 				instr.New(instr.RETURN),
 			).MustBuild()
@@ -3377,6 +3377,49 @@ func TestInterpreter_SetGlobal(t *testing.T) {
 		v, err := i.Global(0)
 		require.NoError(t, err)
 		require.Equal(t, types.BoxI32(8), v)
+	})
+
+	t.Run("rejects incompatible type", func(t *testing.T) {
+		prog := program.New(nil, program.WithGlobals(types.TypeI32))
+		i := New(prog)
+		defer i.Close()
+
+		require.ErrorIs(t, i.SetGlobal(0, types.BoxF32(1)), ErrTypeMismatch)
+	})
+
+	t.Run("accepts dynamic ref value", func(t *testing.T) {
+		prog := program.New(nil, program.WithGlobals(types.TypeRef))
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.SetGlobal(0, types.BoxI32(8)))
+	})
+
+	t.Run("accepts heap backed i64", func(t *testing.T) {
+		prog := program.New(nil, program.WithGlobals(types.TypeI64))
+		i := New(prog)
+		defer i.Close()
+
+		require.NoError(t, i.Push(types.I64(1<<60)))
+		val, err := i.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, types.KindRef, val.Kind())
+		require.NoError(t, i.SetGlobal(0, val))
+	})
+
+	t.Run("rejects incompatible concrete ref type", func(t *testing.T) {
+		prog := program.New(nil, program.WithGlobals(types.NewArrayType(types.TypeI32)))
+		i := New(prog)
+		defer i.Close()
+
+		matching, err := i.Alloc(types.TypedArray[int32]{1})
+		require.NoError(t, err)
+		require.NoError(t, i.SetGlobal(0, types.BoxRef(matching)))
+
+		mismatching, err := i.Alloc(types.TypedArray[float32]{1})
+		require.NoError(t, err)
+		require.ErrorIs(t, i.SetGlobal(0, types.BoxRef(mismatching)), ErrTypeMismatch)
+		require.NoError(t, i.Release(mismatching))
 	})
 
 	t.Run("preserves same reference", func(t *testing.T) {
@@ -4174,7 +4217,7 @@ func TestWithFrame(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 
-		b := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32)
+		b := types.NewFunctionBuilder(nil).Params(types.TypeI32).Returns(types.TypeI32)
 		base := b.Label()
 		b.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.I32_EQZ)).
@@ -4303,7 +4346,7 @@ func TestWithHeap(t *testing.T) {
 	t.Run("collects cycles at adaptive goal", func(t *testing.T) {
 		const capacity = 2 * heapRunway
 
-		i := New(program.New(nil), WithHeap(capacity), WithMaxHeap(capacity))
+		i := New(program.New(nil), WithHeap(capacity), WithHeapLimit(capacity))
 		defer i.Close()
 
 		_, err := i.Alloc(types.I32(1))
@@ -4345,7 +4388,7 @@ func TestWithHeap(t *testing.T) {
 	t.Run("paces from live set", func(t *testing.T) {
 		const capacity = 3 * heapRunway
 
-		i := New(program.New(nil), WithHeap(capacity), WithMaxHeap(capacity))
+		i := New(program.New(nil), WithHeap(capacity), WithHeapLimit(capacity))
 		defer i.Close()
 
 		for n := range heapRunway + 1 {
@@ -4393,7 +4436,7 @@ func TestWithHeap(t *testing.T) {
 	t.Run("resets adaptive goal", func(t *testing.T) {
 		const capacity = 3 * heapRunway
 
-		i := New(program.New(nil), WithHeap(capacity), WithMaxHeap(4*heapRunway))
+		i := New(program.New(nil), WithHeap(capacity), WithHeapLimit(4*heapRunway))
 		defer i.Close()
 
 		for n := range capacity {
@@ -4424,17 +4467,17 @@ func TestWithHeap(t *testing.T) {
 	})
 }
 
-func TestWithMaxHeap(t *testing.T) {
+func TestWithHeapLimit(t *testing.T) {
 	t.Run("rejects live heap at limit", func(t *testing.T) {
 		prog := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1), instr.New(instr.REF_NEW)})
-		i := New(prog, WithMaxHeap(1))
+		i := New(prog, WithHeapLimit(1))
 		defer i.Close()
 
 		require.ErrorIs(t, i.Run(context.Background()), ErrHeapExhausted)
 	})
 
 	t.Run("preserves host-owned reference", func(t *testing.T) {
-		i := New(program.New(nil), WithHeap(2), WithMaxHeap(2))
+		i := New(program.New(nil), WithHeap(2), WithHeapLimit(2))
 		defer i.Close()
 
 		value := &trackedValue{}
@@ -4458,7 +4501,7 @@ func TestWithMaxHeap(t *testing.T) {
 		mid := types.NewArray(types.NewArrayType(types.TypeRef), types.BoxRef(leafAddr))
 		root := types.NewArray(types.NewArrayType(types.TypeRef), types.BoxRef(midAddr), types.BoxRef(midAddr))
 		prog := program.New(nil, program.WithConstants(leaf, mid, root))
-		i := New(prog, WithHeap(4), WithMaxHeap(4))
+		i := New(prog, WithHeap(4), WithHeapLimit(4))
 		defer i.Close()
 
 		_, err := i.Alloc(types.String("blocked"))
@@ -4478,7 +4521,7 @@ func TestWithMaxHeap(t *testing.T) {
 	})
 
 	t.Run("collects unreachable cycle", func(t *testing.T) {
-		i := New(program.New(nil), WithHeap(3), WithMaxHeap(3))
+		i := New(program.New(nil), WithHeap(3), WithHeapLimit(3))
 		defer i.Close()
 
 		left := &trackedValue{}
@@ -4504,7 +4547,7 @@ func TestWithMaxHeap(t *testing.T) {
 	})
 
 	t.Run("preserves host-rooted cycle", func(t *testing.T) {
-		i := New(program.New(nil), WithHeap(3), WithMaxHeap(3))
+		i := New(program.New(nil), WithHeap(3), WithHeapLimit(3))
 		defer i.Close()
 
 		left := &trackedValue{}
@@ -4541,7 +4584,7 @@ func TestWithMaxHeap(t *testing.T) {
 	})
 
 	t.Run("collects self cycle", func(t *testing.T) {
-		i := New(program.New(nil), WithHeap(2), WithMaxHeap(2))
+		i := New(program.New(nil), WithHeap(2), WithHeapLimit(2))
 		defer i.Close()
 
 		value := &trackedValue{}
@@ -4559,7 +4602,7 @@ func TestWithMaxHeap(t *testing.T) {
 	})
 
 	t.Run("collects duplicate cycle edges", func(t *testing.T) {
-		i := New(program.New(nil), WithHeap(3), WithMaxHeap(3))
+		i := New(program.New(nil), WithHeap(3), WithHeapLimit(3))
 		defer i.Close()
 
 		left := &trackedValue{}
@@ -4587,7 +4630,7 @@ func TestWithMaxHeap(t *testing.T) {
 	})
 
 	t.Run("settles dead edges to live object", func(t *testing.T) {
-		i := New(program.New(nil), WithHeap(4), WithMaxHeap(4))
+		i := New(program.New(nil), WithHeap(4), WithHeapLimit(4))
 		defer i.Close()
 
 		left := &trackedValue{}
@@ -4779,7 +4822,7 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
-		eval, err := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32).
+		eval, err := types.NewFunctionBuilder(nil).Params(types.TypeI32).Returns(types.TypeI32).
 			Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.I32_CONST, 1)).
 			Emit(instr.New(instr.I32_ADD)).
@@ -4935,7 +4978,7 @@ func TestWithThreshold(t *testing.T) {
 		row := make([]float64, 8)
 		b := program.NewBuilder()
 		featIdx := b.Const(types.TypedArray[float64](row))
-		fb := types.NewFunctionBuilder(nil).WithReturns(types.TypeF64)
+		fb := types.NewFunctionBuilder(nil).Returns(types.TypeF64)
 		fb.Emit(instr.New(instr.F64_CONST, math.Float64bits(0)))
 		for split := range 16 {
 			fb.Emit(instr.New(instr.CONST_GET, uint64(featIdx)))
@@ -5032,8 +5075,8 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeF64Array).
-			WithReturns(types.TypeF64)
+			Params(types.TypeF64Array).
+			Returns(types.TypeF64)
 		eval.Emit(instr.New(instr.F64_CONST, math.Float64bits(0)))
 		for idx := range 64 {
 			eval.Emit(instr.New(instr.LOCAL_GET, 0)).
@@ -5073,8 +5116,8 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeI1Array).
-			WithReturns(types.TypeI32)
+			Params(types.TypeI1Array).
+			Returns(types.TypeI32)
 		eval.Emit(instr.New(instr.I32_CONST, 0))
 		for idx := range 64 {
 			eval.Emit(instr.New(instr.LOCAL_GET, 0)).
@@ -5116,8 +5159,8 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeI8Array).
-			WithReturns(types.TypeI32)
+			Params(types.TypeI8Array).
+			Returns(types.TypeI32)
 		eval.Emit(instr.New(instr.I32_CONST, 0))
 		for idx := range 64 {
 			eval.Emit(instr.New(instr.LOCAL_GET, 0)).
@@ -5157,8 +5200,8 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeI32Array).
-			WithReturns(types.TypeI32)
+			Params(types.TypeI32Array).
+			Returns(types.TypeI32)
 		eval.Emit(instr.New(instr.I32_CONST, 0))
 		for idx := range 64 {
 			eval.Emit(instr.New(instr.LOCAL_GET, 0)).
@@ -5198,8 +5241,8 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeI64Array).
-			WithReturns(types.TypeI64)
+			Params(types.TypeI64Array).
+			Returns(types.TypeI64)
 		eval.Emit(instr.New(instr.I64_CONST, 0))
 		for idx := range 64 {
 			eval.Emit(instr.New(instr.LOCAL_GET, 0)).
@@ -5239,8 +5282,8 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeF32Array).
-			WithReturns(types.TypeF32)
+			Params(types.TypeF32Array).
+			Returns(types.TypeF32)
 		eval.Emit(instr.New(instr.F32_CONST, uint64(math.Float32bits(0))))
 		for idx := range 64 {
 			eval.Emit(instr.New(instr.LOCAL_GET, 0)).
@@ -5317,8 +5360,8 @@ func TestWithThreshold(t *testing.T) {
 		} {
 			t.Run(tt.typ.String(), func(t *testing.T) {
 				eval := types.NewFunctionBuilder(nil).
-					WithParams(tt.typ).
-					WithReturns(types.TypeI32)
+					Params(tt.typ).
+					Returns(types.TypeI32)
 				for idx := range 64 {
 					eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 						Emit(instr.New(instr.I32_CONST, uint64(uint32(idx%8)))).
@@ -5402,8 +5445,8 @@ func TestWithThreshold(t *testing.T) {
 		} {
 			t.Run(tt.typ.String(), func(t *testing.T) {
 				eval := types.NewFunctionBuilder(nil).
-					WithParams(typ).
-					WithReturns(tt.typ)
+					Params(typ).
+					Returns(tt.typ)
 				eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 					Emit(instr.New(instr.I32_CONST, uint64(tt.idx))).
 					Emit(instr.New(instr.STRUCT_GET)).
@@ -5458,8 +5501,8 @@ func TestWithThreshold(t *testing.T) {
 		} {
 			t.Run(tt.value.Type().String(), func(t *testing.T) {
 				eval := types.NewFunctionBuilder(nil).
-					WithParams(typ).
-					WithReturns(types.TypeI32)
+					Params(typ).
+					Returns(types.TypeI32)
 				for range 64 {
 					eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 						Emit(instr.New(instr.I32_CONST, uint64(tt.idx))).
@@ -5496,7 +5539,7 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
-		b := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32)
+		b := types.NewFunctionBuilder(nil).Params(types.TypeI32).Returns(types.TypeI32)
 		neg := b.Label()
 		small := b.Label()
 		tiny := b.Label()
@@ -5607,8 +5650,8 @@ func TestWithThreshold(t *testing.T) {
 		}
 		row := make([]float64, 2)
 		b := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeF64Array).
-			WithReturns(types.TypeF64)
+			Params(types.TypeF64Array).
+			Returns(types.TypeF64)
 		left := b.Label()
 		leftLow := b.Label()
 		b.Emit(instr.New(instr.LOCAL_GET, 0)).
@@ -5732,8 +5775,8 @@ func TestWithThreshold(t *testing.T) {
 		}
 		row := []float64{10, 20}
 		b := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeI32, types.TypeF64Array).
-			WithReturns(types.TypeF64)
+			Params(types.TypeI32, types.TypeF64Array).
+			Returns(types.TypeF64)
 		neg := b.Label()
 		b.Emit(instr.New(instr.LOCAL_GET, 1)).
 			Emit(instr.New(instr.LOCAL_GET, 0)).
@@ -5821,8 +5864,8 @@ func TestWithThreshold(t *testing.T) {
 		}
 		row := []float64{7}
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeI32, types.TypeF64Array).
-			WithReturns(types.TypeF64)
+			Params(types.TypeI32, types.TypeF64Array).
+			Returns(types.TypeF64)
 		eval.Emit(instr.New(instr.LOCAL_GET, 1)).
 			Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.ARRAY_GET)).
@@ -5880,8 +5923,8 @@ func TestWithThreshold(t *testing.T) {
 		} {
 			t.Run(tt.typ.String(), func(t *testing.T) {
 				eval := types.NewFunctionBuilder(nil).
-					WithParams(tt.typ).
-					WithReturns(tt.typ)
+					Params(tt.typ).
+					Returns(tt.typ)
 				fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 					Emit(tt.cnst).
 					Emit(instr.New(tt.div)).
@@ -5945,8 +5988,8 @@ func TestWithThreshold(t *testing.T) {
 		} {
 			t.Run(tt.typ.String(), func(t *testing.T) {
 				eval := types.NewFunctionBuilder(nil).
-					WithParams(tt.typ, tt.typ).
-					WithReturns(tt.typ)
+					Params(tt.typ, tt.typ).
+					Returns(tt.typ)
 				fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 					Emit(instr.New(instr.LOCAL_GET, 1)).
 					Emit(instr.New(tt.div)).
@@ -5992,8 +6035,8 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeRef).
-			WithReturns(types.TypeI32)
+			Params(types.TypeRef).
+			Returns(types.TypeI32)
 		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.ARRAY_LEN)).
 			Emit(instr.New(instr.RETURN)).
@@ -6038,8 +6081,8 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeRef).
-			WithReturns(types.TypeI32)
+			Params(types.TypeRef).
+			Returns(types.TypeI32)
 		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.I32_CONST, 0)).
 			Emit(instr.New(instr.STRUCT_GET)).
@@ -6087,8 +6130,8 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeRef).
-			WithReturns(types.TypeI32)
+			Params(types.TypeRef).
+			Returns(types.TypeI32)
 		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.STRING_LEN)).
 			Emit(instr.New(instr.RETURN)).
@@ -6123,8 +6166,8 @@ func TestWithThreshold(t *testing.T) {
 		}
 		arrTyp := types.NewArrayType(types.TypeString)
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(arrTyp, types.TypeString).
-			WithReturns(types.TypeI32)
+			Params(arrTyp, types.TypeString).
+			Returns(types.TypeI32)
 		// Store the same host-pushed local into index 0 twice in a row: the
 		// second ARRAY_SET observes old==val (both reads of LOCAL_GET 1 name
 		// the same ref), exercising releaseBoxUnlessEqual's aliased-store path
@@ -6175,8 +6218,8 @@ func TestWithThreshold(t *testing.T) {
 		}
 		typ := types.NewStructType(types.NewStructField(types.TypeString))
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(typ, types.TypeString).
-			WithReturns(types.TypeI32)
+			Params(typ, types.TypeString).
+			Returns(types.TypeI32)
 		// Same aliased-store exercise as the array-set case, applied to a
 		// ref-kind struct field, verified via STRUCT_GET + STRING_LEN.
 		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
@@ -6219,8 +6262,8 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeI64Array).
-			WithReturns(types.TypeI64)
+			Params(types.TypeI64Array).
+			Returns(types.TypeI64)
 		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.I32_CONST, 0)).
 			Emit(instr.New(instr.ARRAY_GET)).
@@ -6261,8 +6304,8 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeI64Array).
-			WithReturns(types.TypeI64)
+			Params(types.TypeI64Array).
+			Returns(types.TypeI64)
 		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.I32_CONST, 0)).
 			Emit(instr.New(instr.ARRAY_GET)).
@@ -6303,8 +6346,8 @@ func TestWithThreshold(t *testing.T) {
 			t.Skip("native JIT is only available on arm64")
 		}
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeI64Array).
-			WithReturns(types.TypeI64)
+			Params(types.TypeI64Array).
+			Returns(types.TypeI64)
 		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.I32_CONST, 0)).
 			Emit(instr.New(instr.ARRAY_GET)).
@@ -6351,8 +6394,8 @@ func TestWithThreshold(t *testing.T) {
 		}
 		typ := types.NewStructType(types.NewStructField(types.TypeI64))
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(typ).
-			WithReturns(types.TypeI64)
+			Params(typ).
+			Returns(types.TypeI64)
 		fn, err := eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.I32_CONST, 0)).
 			Emit(instr.New(instr.STRUCT_GET)).
@@ -6394,8 +6437,8 @@ func TestWithThreshold(t *testing.T) {
 		}
 		row := make([]float64, 2)
 		first := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeF64Array).
-			WithReturns(types.TypeF64)
+			Params(types.TypeF64Array).
+			Returns(types.TypeF64)
 		firstLeft := first.Label()
 		first.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.I32_CONST, 0)).
@@ -6412,8 +6455,8 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 
 		second := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeF64Array).
-			WithReturns(types.TypeF64)
+			Params(types.TypeF64Array).
+			Returns(types.TypeF64)
 		secondLeft := second.Label()
 		second.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.I32_CONST, 1)).
@@ -6430,8 +6473,8 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeF64Array).
-			WithReturns(types.TypeF64)
+			Params(types.TypeF64Array).
+			Returns(types.TypeF64)
 		eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.CONST_GET, 1)).
 			Emit(instr.New(instr.CALL)).
@@ -6516,8 +6559,8 @@ func TestWithThreshold(t *testing.T) {
 		}
 		row := make([]float64, 2)
 		first := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeF64Array).
-			WithReturns(types.TypeF64)
+			Params(types.TypeF64Array).
+			Returns(types.TypeF64)
 		firstLeft := first.Label()
 		first.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.I32_CONST, 0)).
@@ -6534,8 +6577,8 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 
 		second := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeF64Array).
-			WithReturns(types.TypeF64)
+			Params(types.TypeF64Array).
+			Returns(types.TypeF64)
 		secondLeft := second.Label()
 		secondLeftLow := second.Label()
 		secondRightLow := second.Label()
@@ -6572,8 +6615,8 @@ func TestWithThreshold(t *testing.T) {
 		require.NoError(t, err)
 
 		eval := types.NewFunctionBuilder(nil).
-			WithParams(types.TypeF64Array).
-			WithReturns(types.TypeF64)
+			Params(types.TypeF64Array).
+			Returns(types.TypeF64)
 		eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.CONST_GET, 1)).
 			Emit(instr.New(instr.CALL)).
@@ -6701,7 +6744,7 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
-		b := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32)
+		b := types.NewFunctionBuilder(nil).Params(types.TypeI32).Returns(types.TypeI32)
 		zero := b.Label()
 		one := b.Label()
 		two := b.Label()
@@ -6801,7 +6844,7 @@ func TestWithThreshold(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
-		choice := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32)
+		choice := types.NewFunctionBuilder(nil).Params(types.TypeI32).Returns(types.TypeI32)
 		zero := choice.Label()
 		one := choice.Label()
 		two := choice.Label()
@@ -6823,7 +6866,7 @@ func TestWithThreshold(t *testing.T) {
 		choiceFn, err := choice.Build()
 		require.NoError(t, err)
 
-		eval := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32)
+		eval := types.NewFunctionBuilder(nil).Params(types.TypeI32).Returns(types.TypeI32)
 		eval.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.CONST_GET, 0)).
 			Emit(instr.New(instr.CALL)).

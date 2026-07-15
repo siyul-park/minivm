@@ -77,7 +77,7 @@ If no registered analysis produces `R`, `GetResult` returns `ErrUnregisteredAnal
 
 ```go
 pl := pass.NewPipeline[*program.Program]()
-pl.AddPass(transform.NewConstantFoldingPass())
+pl.Add(transform.NewFoldPass())
 
 prog, err := pl.Run(m, prog)
 ```
@@ -129,33 +129,33 @@ Rules:
 
 ## Optimizer Levels
 
-`optimize.NewOptimizer(level)` registers required analyses and builds a cumulative pipeline.
+`optimize.New(level)` registers required analyses and builds a cumulative pipeline.
 
 ```text
 O0  no transforms
 
-O1  ConstantFoldingPass
-    ConstantDeduplicationPass
+O1  FoldPass
+    DedupPass
 
-O2  ConstantFoldingPass
-    AlgebraicSimplificationPass
-    ConstantDeduplicationPass
-    DeadCodeEliminationPass
+O2  FoldPass
+    AlgebraicPass
+    DedupPass
+    DCEPass
 
-O3  ConstantFoldingPass
-    AlgebraicSimplificationPass
-    GlobalValueNumberingPass
-    ConstantDeduplicationPass
-    DeadCodeEliminationPass
+O3  FoldPass
+    AlgebraicPass
+    GVNPass
+    DedupPass
+    DCEPass
 ```
 
-`Optimize(prog)` runs the configured pipeline. `AddPass(p)` appends a custom transform.
+`Optimize(prog)` runs the configured pipeline. `Add(p)` appends a custom transform.
 
 Because analyses are invalidated between transforms, each pass receives fresh analysis data.
 
 ## Basic Blocks
 
-`BasicBlocksAnalysis` is shared by the optimizer and JIT.
+`BlocksAnalysis` is shared by the optimizer and JIT.
 
 Each block contains:
 
@@ -176,21 +176,21 @@ A branch to the past-the-end offset has no successor block: the analysis models
 it as a virtual exit for any function, top-level or not. `program.Verify` is the
 sole owner of whether that virtual exit is legal, and it only accepts one for
 top-level code (slot `0`); a function body that branches to its own end is
-malformed. `BasicBlocksAnalysis` stays permissive because the JIT needs the
-same CFG shape regardless of scope; `DeadCodeEliminationPass` additionally
+malformed. `BlocksAnalysis` stays permissive because the JIT needs the
+same CFG shape regardless of scope; `DCEPass` additionally
 re-checks scope before repairing a branch offset, since blind relocation
 would otherwise silently propagate a target that verification would have
 rejected.
 
 `BR`, `BR_IF`, and `BR_TABLE` targets are computed once in `instr.Targets`
-and reused by `program.Verify` and `BasicBlocksAnalysis`, so the same
+and reused by `program.Verify` and `BlocksAnalysis`, so the same
 arithmetic is not duplicated at each call site.
 
 Keep these boundary rules consistent with the JIT and verifier.
 
 ## Global Value Numbering
 
-`GlobalValueNumberingAnalysis` finds redundant pure computations within and across basic blocks.
+`GVNAnalysis` finds redundant pure computations within and across basic blocks.
 
 It abstractly interprets the operand stack and assigns value numbers to computed values.
 
@@ -208,7 +208,7 @@ Opaque values do not match across blocks, but may still match within their own b
 
 ## Constant Folding
 
-`ConstantFoldingPass` folds small constant windows.
+`FoldPass` folds small constant windows.
 
 ```text
 CONST CONST OP -> CONST result
@@ -222,7 +222,7 @@ Comparison folds produce `i1`, matching runtime comparison results. Because ther
 
 ## Algebraic Simplification
 
-`AlgebraicSimplificationPass` performs integer peepholes where the right operand is a constant.
+`AlgebraicPass` performs integer peepholes where the right operand is a constant.
 
 Supported identities:
 

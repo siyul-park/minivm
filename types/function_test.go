@@ -15,23 +15,23 @@ func TestNewFunctionBuilder(t *testing.T) {
 	require.Equal(t, &FunctionType{}, fn.Typ)
 }
 
-func TestFunctionBuilder_WithParams(t *testing.T) {
-	fn := NewFunctionBuilder(nil).WithParams(TypeI32, TypeRef).MustBuild()
+func TestFunctionBuilder_Params(t *testing.T) {
+	fn := NewFunctionBuilder(nil).Params(TypeI32, TypeRef).MustBuild()
 	require.Equal(t, []Type{TypeI32, TypeRef}, fn.Typ.Params)
 }
 
-func TestFunctionBuilder_WithReturns(t *testing.T) {
-	fn := NewFunctionBuilder(nil).WithReturns(TypeI32, TypeRef).MustBuild()
+func TestFunctionBuilder_Returns(t *testing.T) {
+	fn := NewFunctionBuilder(nil).Returns(TypeI32, TypeRef).MustBuild()
 	require.Equal(t, []Type{TypeI32, TypeRef}, fn.Typ.Returns)
 }
 
-func TestFunctionBuilder_WithLocals(t *testing.T) {
-	fn := NewFunctionBuilder(nil).WithLocals(TypeI32, TypeRef).MustBuild()
+func TestFunctionBuilder_Locals(t *testing.T) {
+	fn := NewFunctionBuilder(nil).Locals(TypeI32, TypeRef).MustBuild()
 	require.Equal(t, []Type{TypeI32, TypeRef}, fn.Locals)
 }
 
-func TestFunctionBuilder_WithCaptures(t *testing.T) {
-	fn := NewFunctionBuilder(nil).WithCaptures(TypeI32, TypeF64).MustBuild()
+func TestFunctionBuilder_Captures(t *testing.T) {
+	fn := NewFunctionBuilder(nil).Captures(TypeI32, TypeF64).MustBuild()
 	require.Equal(t, []Type{TypeI32, TypeF64}, fn.Captures)
 }
 
@@ -141,15 +141,15 @@ func TestFunction_String(t *testing.T) {
 
 	t.Run("with captures", func(t *testing.T) {
 		fn := NewFunctionBuilder(&FunctionType{Returns: []Type{TypeI32}}).
-			WithCaptures(TypeI32, TypeRef).
-			WithLocals(TypeI64).
+			Captures(TypeI32, TypeRef).
+			Locals(TypeI64).
 			Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.RETURN)).
 			MustBuild()
 		require.Contains(t, fn.String(), "capture i32\ncapture ref\n")
 	})
 }
 
-func TestFunction_LocalKinds(t *testing.T) {
+func TestFunction_Slots(t *testing.T) {
 	tests := []struct {
 		fn   *Function
 		want []Kind
@@ -161,7 +161,7 @@ func TestFunction_LocalKinds(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("params=%v,locals=%v", tt.fn.Typ.Params, tt.fn.Locals), func(t *testing.T) {
-			require.Equal(t, tt.want, tt.fn.LocalKinds())
+			require.Equal(t, tt.want, tt.fn.Slots())
 		})
 	}
 }

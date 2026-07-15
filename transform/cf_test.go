@@ -15,11 +15,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewConstantFoldingPass(t *testing.T) {
-	require.NotNil(t, NewConstantFoldingPass())
+func TestNewFoldPass(t *testing.T) {
+	require.NotNil(t, NewFoldPass())
 }
 
-func TestConstantFoldingPass_Run(t *testing.T) {
+func TestFoldPass_Run(t *testing.T) {
 	tests := []struct {
 		program  *program.Program
 		expected *program.Program
@@ -2064,11 +2064,11 @@ func TestConstantFoldingPass_Run(t *testing.T) {
 
 	for _, tt := range tests {
 		m := pass.NewManager()
-		pass.Register[*types.Function, []*analysis.BasicBlock](m, analysis.NewBasicBlocksAnalysis())
+		pass.Register[*types.Function, []*analysis.BasicBlock](m, analysis.NewBlocksAnalysis())
 
 		t.Run(tt.program.String(), func(t *testing.T) {
 			actual := tt.program
-			_, err := NewConstantFoldingPass().Run(m, actual)
+			_, err := NewFoldPass().Run(m, actual)
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, actual)
 		})
@@ -2087,8 +2087,8 @@ func TestConstantFoldingPass_Run(t *testing.T) {
 		require.NoError(t, err)
 
 		manager := pass.NewManager()
-		pass.Register(manager, analysis.NewBasicBlocksAnalysis())
-		_, err = NewConstantFoldingPass().Run(manager, prog)
+		pass.Register(manager, analysis.NewBlocksAnalysis())
+		_, err = NewFoldPass().Run(manager, prog)
 		require.NoError(t, err)
 		after := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		defer after.Close()

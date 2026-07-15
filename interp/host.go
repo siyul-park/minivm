@@ -31,13 +31,12 @@ type HostObject struct {
 	interp   *Interpreter
 }
 
-// hostSlot maps a VM field index to either a Go struct field (field ≥ 0) or a
-// bound method (field < 0; addr is the *HostFunction heap address).
+// hostSlot maps a VM field to storage metadata or a bound method. Negative
+// index values encode method indexes as -index-1; addr is the heap address.
 // kind is the reflect.Kind of the Go field; reflect.Interface indicates a
 // types.Value-implementing interface.
 type hostSlot struct {
-	field  int
-	method int
+	index  int
 	addr   int
 	offset uintptr
 	kind   reflect.Kind
@@ -145,7 +144,9 @@ func (h *HostObject) SetRaw(i int, bits uint64) {
 	}
 }
 
-func (s hostSlot) isMethod() bool { return s.field < 0 }
+func (s hostSlot) isMethod() bool { return s.index < 0 }
+
+func (s hostSlot) method() int { return -s.index - 1 }
 
 func (h *HostObject) lookup(i int) (hostSlot, bool) {
 	if i < 0 || i >= len(h.slots) {

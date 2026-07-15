@@ -100,7 +100,7 @@ func TestPool_Get(t *testing.T) {
 		// interpreter warming a side exit (Tracer.branch mutating tree.branches/hits)
 		// runs concurrently with another lowering the same root (rootAt reading it).
 		// Before the fix that races the shared tree; the snapshot isolates the reader.
-		b := types.NewFunctionBuilder(nil).WithParams(types.TypeI32).WithReturns(types.TypeI32)
+		b := types.NewFunctionBuilder(nil).Params(types.TypeI32).Returns(types.TypeI32)
 		neg := b.Label()
 		small := b.Label()
 		tiny := b.Label()
@@ -278,7 +278,7 @@ func TestPool_Get(t *testing.T) {
 		if runtime.GOARCH != "arm64" {
 			t.Skip("native JIT is only available on arm64")
 		}
-		b := types.NewFunctionBuilder(nil).WithParams(types.TypeI32, types.TypeI32).WithReturns(types.TypeI32)
+		b := types.NewFunctionBuilder(nil).Params(types.TypeI32, types.TypeI32).Returns(types.TypeI32)
 		b.Emit(instr.New(instr.LOCAL_GET, 0)).
 			Emit(instr.New(instr.LOCAL_GET, 1)).
 			Emit(instr.New(instr.I32_DIV_S)).

@@ -9,7 +9,7 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// GlobalValueNumberingAnalysis extends local value numbering across basic-block
+// GVNAnalysis extends local value numbering across basic-block
 // boundaries. It assigns every value-producing instruction a function-wide
 // value number, then runs an available-expression dataflow over those numbers
 // (intersection across predecessors, with an optimistic ⊤ initialization that
@@ -27,13 +27,13 @@ import (
 // an opaque value never matches another — and it is the precision the common
 // cases (expressions over parameters and SSA-like temporaries, loop-invariant
 // recomputation) need.
-type GlobalValueNumberingAnalysis struct{}
+type GVNAnalysis struct{}
 
-// GlobalValueNumbering is the per-function result. Redundant maps each redundant
+// GVN is the per-function result. Redundant maps each redundant
 // recomputation's finalizing offset to how it is eliminated; Defs maps a captured
 // value's group id to the definition offsets that must receive a LOCAL_TEE so the
 // value is available to reload at every redundant use of that group.
-type GlobalValueNumbering struct {
+type GVN struct {
 	Redundant map[int]Redundancy
 	Defs      map[int][]int
 }
@@ -64,10 +64,10 @@ type gslot struct {
 	pure  bool
 }
 
-// gcompute records the first computation of a global group id within a block:
+// compute records the first computation of a global group id within a block:
 // the finalizing offset, the expression byte range, its kind, and whether the
 // range is contiguous (safe to delete and reload).
-type gcompute struct {
+type compute struct {
 	ip     int
 	start  int
 	end    int
@@ -75,18 +75,18 @@ type gcompute struct {
 	contig bool
 }
 
-// gnumbering holds the interpreter and dataflow state for one function. The
+// numbering holds the interpreter and dataflow state for one function. The
 // keys table, gen sets, and id counters accumulate across the whole function;
 // the stack and the block-local numbering tables reset at every block.
-type gnumbering struct {
-	out *GlobalValueNumbering
+type numbering struct {
+	out *GVN
 
 	blocks []*BasicBlock
 	locals []types.Type
 	stable []bool
 
 	keys map[string]int
-	gen  []map[int]gcompute
+	gen  []map[int]compute
 
 	stack    []gslot
 	exprs    map[string]int
@@ -100,13 +100,13 @@ type gnumbering struct {
 	block int
 }
 
-var _ pass.Analysis[*types.Function, *GlobalValueNumbering] = (*GlobalValueNumberingAnalysis)(nil)
+var _ pass.Analysis[*types.Function, *GVN] = (*GVNAnalysis)(nil)
 
-func NewGlobalValueNumberingAnalysis() *GlobalValueNumberingAnalysis {
-	return &GlobalValueNumberingAnalysis{}
+func NewGVNAnalysis() *GVNAnalysis {
+	return &GVNAnalysis{}
 }
 
-func newGNumbering(fn *types.Function, blocks []*BasicBlock) *gnumbering {
+func newNumbering(fn *types.Function, blocks []*BasicBlock) *numbering {
 	var locals []types.Type
 	if fn.Typ != nil {
 		locals = append(locals, fn.Typ.Params...)
@@ -128,23 +128,23 @@ func newGNumbering(fn *types.Function, blocks []*BasicBlock) *gnumbering {
 		ip += inst.Width()
 	}
 
-	return &gnumbering{
-		out:    &GlobalValueNumbering{Redundant: map[int]Redundancy{}, Defs: map[int][]int{}},
+	return &numbering{
+		out:    &GVN{Redundant: map[int]Redundancy{}, Defs: map[int][]int{}},
 		blocks: blocks,
 		locals: locals,
 		stable: stable,
 		keys:   map[string]int{},
-		gen:    make([]map[int]gcompute, len(blocks)),
+		gen:    make([]map[int]compute, len(blocks)),
 	}
 }
 
-func (a *GlobalValueNumberingAnalysis) Run(m *pass.Manager, fn *types.Function) (*GlobalValueNumbering, error) {
+func (a *GVNAnalysis) Run(m *pass.Manager, fn *types.Function) (*GVN, error) {
 	blocks, err := pass.GetResult[[]*BasicBlock](m, fn)
 	if err != nil {
 		return nil, err
 	}
 
-	g := newGNumbering(fn, blocks)
+	g := newNumbering(fn, blocks)
 	for block, blk := range blocks {
 		g.reset(block)
 		for ip := blk.Start; ip < blk.End; {
@@ -161,7 +161,7 @@ func (a *GlobalValueNumberingAnalysis) Run(m *pass.Manager, fn *types.Function) 
 
 // available converts every block-first computation of an already-available value
 // into a cross-block redundancy and records the rest as definitions to capture.
-func (g *gnumbering) available() {
+func (g *numbering) available() {
 	in := g.solve()
 	for block, gen := range g.gen {
 		for gid, c := range gen {
@@ -183,7 +183,7 @@ func (g *gnumbering) available() {
 // predecessors' AVAIL_out, AVAIL_out is AVAIL_in plus the block's generated ids.
 // Non-entry blocks start optimistically at the universe of all generated ids so
 // the intersection converges correctly across loop back-edges.
-func (g *gnumbering) solve() []map[int]bool {
+func (g *numbering) solve() []map[int]bool {
 	universe := map[int]bool{}
 	for _, gen := range g.gen {
 		for gid := range gen {
@@ -224,7 +224,7 @@ func (g *gnumbering) solve() []map[int]bool {
 
 // meet intersects the predecessors' available sets; an empty predecessor list
 // (entry, catch, or dead block) yields the empty set.
-func (g *gnumbering) meet(out []map[int]bool, preds []int) map[int]bool {
+func (g *numbering) meet(out []map[int]bool, preds []int) map[int]bool {
 	if len(preds) == 0 {
 		return map[int]bool{}
 	}
@@ -245,7 +245,7 @@ func (g *gnumbering) meet(out []map[int]bool, preds []int) map[int]bool {
 // step folds one instruction into the abstract stack, mirroring the block-local
 // analysis but also threading the global id of each value. It returns false when
 // the effect is indeterminate, ending numbering for the rest of the block.
-func (g *gnumbering) step(ip int, inst instr.Instruction) bool {
+func (g *numbering) step(ip int, inst instr.Instruction) bool {
 	op := inst.Opcode()
 	end := ip + inst.Width()
 
@@ -375,7 +375,7 @@ func (g *gnumbering) step(ip int, inst instr.Instruction) bool {
 // block-local number for within-block redundancy (with a usable local home) and
 // the global id for cross-block redundancy, records the first computation of a
 // new global id in the block's gen set, and flags later identical computations.
-func (g *gnumbering) pure(ip, end int, inst instr.Instruction) bool {
+func (g *numbering) pure(ip, end int, inst instr.Instruction) bool {
 	op := inst.Opcode()
 	t := instr.TypeOf(op)
 	if len(g.stack) < len(t.Pop) {
@@ -410,7 +410,7 @@ func (g *gnumbering) pure(ip, end int, inst instr.Instruction) bool {
 		g.first[num] = gslot{start: start, end: end, kind: kind, pure: contig}
 		if gid >= 0 {
 			if _, ok := g.gen[g.block][gid]; !ok {
-				g.gen[g.block][gid] = gcompute{ip: ip, start: start, end: end, kind: kind, contig: contig}
+				g.gen[g.block][gid] = compute{ip: ip, start: start, end: end, kind: kind, contig: contig}
 			}
 		}
 	} else if contig {
@@ -436,7 +436,7 @@ func (g *gnumbering) pure(ip, end int, inst instr.Instruction) bool {
 
 // define records that group id is materialized at off (the byte after the
 // producing expression), where a LOCAL_TEE captures it for later reloads.
-func (g *gnumbering) define(gid, off int) {
+func (g *numbering) define(gid, off int) {
 	for _, o := range g.out.Defs[gid] {
 		if o == off {
 			return
@@ -445,9 +445,9 @@ func (g *gnumbering) define(gid, off int) {
 	g.out.Defs[gid] = append(g.out.Defs[gid], off)
 }
 
-func (g *gnumbering) reset(block int) {
+func (g *numbering) reset(block int) {
 	g.block = block
-	g.gen[block] = map[int]gcompute{}
+	g.gen[block] = map[int]compute{}
 	g.stack = g.stack[:0]
 	g.exprs = map[string]int{}
 	g.localNum = map[int]int{}
@@ -456,7 +456,7 @@ func (g *gnumbering) reset(block int) {
 	g.ver = map[string]int{}
 }
 
-func (g *gnumbering) pop() gslot {
+func (g *numbering) pop() gslot {
 	if len(g.stack) == 0 {
 		return gslot{num: g.fresh(), gid: -1}
 	}
@@ -465,7 +465,7 @@ func (g *gnumbering) pop() gslot {
 	return s
 }
 
-func (g *gnumbering) pushLeaf(ip, end int, numKey, globalKey string, kind instr.Kind) {
+func (g *numbering) pushLeaf(ip, end int, numKey, globalKey string, kind instr.Kind) {
 	num, ok := g.exprs[numKey]
 	if !ok {
 		num = g.fresh()
@@ -474,11 +474,11 @@ func (g *gnumbering) pushLeaf(ip, end int, numKey, globalKey string, kind instr.
 	g.push(gslot{num: num, gid: g.idOf(globalKey), start: ip, end: end, kind: kind, pure: true})
 }
 
-func (g *gnumbering) push(s gslot) {
+func (g *numbering) push(s gslot) {
 	g.stack = append(g.stack, s)
 }
 
-func (g *gnumbering) fresh() int {
+func (g *numbering) fresh() int {
 	num := g.seq
 	g.seq++
 	return num
@@ -486,7 +486,7 @@ func (g *gnumbering) fresh() int {
 
 // idOf interns a global key into a stable group id, or returns -1 for the empty
 // key (an opaque value with no cross-block identity).
-func (g *gnumbering) idOf(key string) int {
+func (g *numbering) idOf(key string) int {
 	if key == "" {
 		return -1
 	}
@@ -501,7 +501,7 @@ func (g *gnumbering) idOf(key string) int {
 
 // holder returns a local slot that currently holds block-local number num, or
 // -1 when no live local does.
-func (g *gnumbering) holder(num int) int {
+func (g *numbering) holder(num int) int {
 	if slot, ok := g.home[num]; ok && g.localNum[slot] == num {
 		return slot
 	}
@@ -510,12 +510,12 @@ func (g *gnumbering) holder(num int) int {
 
 // leaf builds a version-qualified block-local key for a mutable load so a store
 // to the same slot ends its reuse window within the block.
-func (g *gnumbering) leaf(space string, index int) string {
+func (g *numbering) leaf(space string, index int) string {
 	id := space + ":" + strconv.Itoa(index)
 	return id + ":" + strconv.Itoa(g.ver[id])
 }
 
-func (g *gnumbering) numKey(op instr.Opcode, nums []int) string {
+func (g *numbering) numKey(op instr.Opcode, nums []int) string {
 	if commutative(op) && len(nums) == 2 && nums[0] > nums[1] {
 		nums[0], nums[1] = nums[1], nums[0]
 	}
@@ -530,7 +530,7 @@ func (g *gnumbering) numKey(op instr.Opcode, nums []int) string {
 
 // globalKey builds the cross-block key for a pure op from its inputs' group ids,
 // returning "" when any input is opaque (the result is then opaque too).
-func (g *gnumbering) globalKey(op instr.Opcode, ids []int) string {
+func (g *numbering) globalKey(op instr.Opcode, ids []int) string {
 	for _, id := range ids {
 		if id < 0 {
 			return ""
@@ -549,7 +549,7 @@ func (g *gnumbering) globalKey(op instr.Opcode, ids []int) string {
 	return sb.String()
 }
 
-func (g *gnumbering) kindOf(slot int) instr.Kind {
+func (g *numbering) kindOf(slot int) instr.Kind {
 	if slot < 0 || slot >= len(g.locals) || g.locals[slot] == nil {
 		return instr.KindAny
 	}

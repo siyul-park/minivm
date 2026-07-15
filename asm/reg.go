@@ -40,11 +40,11 @@ type RegMask uint64
 // architecture and the IDs the assembler must avoid (ABI-reserved,
 // frame pointer, link register, etc.).
 type RegInfo struct {
-	NumInt      uint8
-	NumFloat    uint8
-	IntReserved RegMask
-	FltReserved RegMask
-	Scratch     RegMask
+	NumInt        uint8
+	NumFloat      uint8
+	IntReserved   RegMask
+	FloatReserved RegMask
+	Scratch       RegMask
 }
 
 const (
@@ -71,11 +71,11 @@ func NewVReg(id int32, typ RegType, w RegWidth) VReg {
 // NewRegInfo describes an architecture's register banks and reserved IDs.
 func NewRegInfo(numInt, numFloat uint8, intReserved, fltReserved, scratch []uint8) RegInfo {
 	return RegInfo{
-		NumInt:      numInt,
-		NumFloat:    numFloat,
-		IntReserved: NewRegMask(intReserved),
-		FltReserved: NewRegMask(fltReserved),
-		Scratch:     NewRegMask(scratch),
+		NumInt:        numInt,
+		NumFloat:      numFloat,
+		IntReserved:   NewRegMask(intReserved),
+		FloatReserved: NewRegMask(fltReserved),
+		Scratch:       NewRegMask(scratch),
 	}
 }
 
@@ -164,7 +164,7 @@ func (ri RegInfo) Allocatable(typ RegType) RegMask {
 		reserved = ri.IntReserved
 	} else {
 		count = ri.NumFloat
-		reserved = ri.FltReserved
+		reserved = ri.FloatReserved
 	}
 
 	mask := RegMask((1 << count) - 1)
