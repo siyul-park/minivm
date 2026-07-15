@@ -52,7 +52,7 @@ type Interpreter struct {
 	stack    []types.Boxed
 	heap     []types.Value
 	base     int
-	goal     int
+	target   int
 	interned map[string]types.Ref
 	free     []int
 	rc       []int
@@ -96,7 +96,6 @@ type option struct {
 	tracer     *Tracer
 	profiler   *prof.Profiler
 	threshold  int
-	cutoff     int
 
 	frame   int
 	stack   int
@@ -315,9 +314,9 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 
 	i.base = len(i.heap)
 	i.recount()
-	i.goal = max(cap(i.heap), i.base+heapRunway)
+	i.target = max(cap(i.heap), i.base+heapRunway)
 	if i.limit > 0 {
-		i.goal = max(min(i.goal, i.limit), i.base)
+		i.target = max(min(i.target, i.limit), i.base)
 	}
 
 	i.module = &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
@@ -1050,7 +1049,7 @@ func (i *Interpreter) traceLoop(f *frame) error {
 func (i *Interpreter) call(root anchor, callable asm.Callable, stats counters) func(*Interpreter) {
 	return func(i *Interpreter) {
 		stats.enter()
-		ctx := i.context()
+		ctx := i.journalPtr()
 		i.fr.code = nil
 		i.fr.upvals = nil
 		// Refresh the back-edge budget like loop does: an entry trace can carry a
@@ -1102,7 +1101,7 @@ func (i *Interpreter) call(root anchor, callable asm.Callable, stats counters) f
 func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters) func(*Interpreter) {
 	return func(i *Interpreter) {
 		stats.enter()
-		ctx := i.context()
+		ctx := i.journalPtr()
 		i.fr.code = nil
 		i.fr.upvals = nil
 		i.journal[journalBudget] = loopBudget
@@ -1142,7 +1141,7 @@ func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters) 
 func (i *Interpreter) loop(callable asm.Callable, stats counters) func(*Interpreter) {
 	return func(i *Interpreter) {
 		stats.enter()
-		ctx := i.context()
+		ctx := i.journalPtr()
 		// Decouple the loop's safepoint cadence from tick: a native iteration does
 		// the work of a whole loop body, so yielding every tick (1 under exact
 		// dispatch) would drown the loop in deopt/re-enter churn. Run many
@@ -1412,10 +1411,10 @@ func (i *Interpreter) restore(f *frame, addr int) {
 	f.upvals = nil
 }
 
-// context resets and fills the journal handed to native code: stack/global base
+// journalPtr resets and fills the journal handed to native code: stack/global base
 // pointers, current frame BP/SP, pointer cells for native fast paths, and the
 // per-call frame budget. It returns &journal[0], passed to native code in X0.
-func (i *Interpreter) context() unsafe.Pointer {
+func (i *Interpreter) journalPtr() unsafe.Pointer {
 	i.journal[journalStack] = 0
 	if len(i.stack) > 0 {
 		i.journal[journalStack] = uint64(uintptr(unsafe.Pointer(&i.stack[0])))
@@ -1705,7 +1704,7 @@ func (i *Interpreter) keep(val types.Value) int {
 }
 
 func (i *Interpreter) alloc(val types.Value) int {
-	collected := i.goal > 0 && len(i.heap)-len(i.free) >= i.goal
+	collected := i.target > 0 && len(i.heap)-len(i.free) >= i.target
 	if collected {
 		i.gc()
 	}
@@ -1880,11 +1879,11 @@ func (i *Interpreter) gc() {
 
 func (i *Interpreter) pace() {
 	live := len(i.heap) - len(i.free)
-	goal := live + max(live-i.base, heapRunway)
+	target := live + max(live-i.base, heapRunway)
 	if i.limit > 0 {
-		goal = min(goal, i.limit)
+		target = min(target, i.limit)
 	}
-	i.goal = max(goal, live)
+	i.target = max(target, live)
 }
 
 // scan derives each object's external incoming count. Exact rc includes both

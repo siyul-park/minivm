@@ -320,7 +320,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NotNil(t, compiled.module, "%+v", compiled)
 			entry, ok := compiled.module.entries[root]
 			require.True(t, ok)
-			require.NoError(t, entry.callable.Call(i.context()))
+			require.NoError(t, entry.callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
 			encoded := i.journal[journalExitID]
 			require.NotZero(t, encoded)
@@ -360,7 +360,7 @@ func TestCompiler_Compile(t *testing.T) {
 				require.NoError(t, i.SetGlobal(0, value))
 			}
 
-			require.NoError(t, entry.callable.Call(i.context()))
+			require.NoError(t, entry.callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
 			encoded := i.journal[journalExitID]
 			require.NotZero(t, encoded)
@@ -395,7 +395,7 @@ func TestCompiler_Compile(t *testing.T) {
 			entry, ok := compiled.module.entries[root]
 			require.True(t, ok)
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(2)))
-			require.NoError(t, entry.callable.Call(i.context()))
+			require.NoError(t, entry.callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
 			encoded := i.journal[journalExitID]
 			require.NotZero(t, encoded)
@@ -596,7 +596,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.True(t, ok)
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(1)))
 
-			require.NoError(t, entry.callable.Call(i.context()))
+			require.NoError(t, entry.callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
 			encoded := i.journal[journalExitID]
 			require.NotZero(t, encoded)
@@ -637,7 +637,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.True(t, ok)
 			require.NoError(t, i.SetGlobal(0, types.BoxI32(1)))
 
-			require.NoError(t, entry.callable.Call(i.context()))
+			require.NoError(t, entry.callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
 			encoded := i.journal[journalExitID]
 			require.NotZero(t, encoded)
@@ -667,7 +667,7 @@ func TestCompiler_Compile(t *testing.T) {
 			entry, ok := compiled.module.entries[root]
 			require.True(t, ok)
 
-			require.NoError(t, entry.callable.Call(i.context()))
+			require.NoError(t, entry.callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
 			encoded := i.journal[journalExitID]
 			require.NotZero(t, encoded)
@@ -694,7 +694,7 @@ func TestCompiler_Compile(t *testing.T) {
 			entry, ok := compiled.module.entries[root]
 			require.True(t, ok)
 
-			require.NoError(t, entry.callable.Call(i.context()))
+			require.NoError(t, entry.callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
 			encoded := i.journal[journalExitID]
 			require.NotZero(t, encoded)

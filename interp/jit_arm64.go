@@ -3736,13 +3736,6 @@ func (arm64Lowerer) guardIndex(ctx *lowering, idx, n asm.VReg, fail asm.Label) {
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBCS, fail))
 }
 
-func (arm64Lowerer) matchItab(ctx *lowering, got asm.VReg, want uintptr, hit asm.Label) {
-	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDI(v, uint64(want))...)
-	ctx.assembler.Emit(arm64.CMP(got, v))
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, hit))
-}
-
 func (l arm64Lowerer) guardItab(ctx *lowering, got asm.VReg, want uintptr, fail asm.Label) {
 	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	l.guardItabTo(ctx, got, v, want, fail)
@@ -3752,11 +3745,6 @@ func (arm64Lowerer) guardItabTo(ctx *lowering, got, scratch asm.VReg, want uintp
 	ctx.assembler.Emit(arm64.LDI(scratch, uint64(want))...)
 	ctx.assembler.Emit(arm64.CMP(got, scratch))
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
-}
-
-func (arm64Lowerer) matchKind(ctx *lowering, got asm.VReg, want types.Kind, hit asm.Label) {
-	ctx.assembler.Emit(arm64.CMPI(got, uint16(want)))
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, hit))
 }
 
 // unwind appends one journal frame record per live symbolic frame,
