@@ -47,7 +47,7 @@ go test -run='^$' -bench='^BenchmarkInterpreter_Run/.*/Threaded$' \
   -benchmem -benchtime=300ms -count=3 ./interp
 
 # Cold unconditional-backedge overhead
-go test -run='^$' -bench='^BenchmarkInterpreter_ColdBackedge$' \
+go test -run='^$' -bench='^BenchmarkInterpreter_Run/ColdBackedge$' \
   -benchmem -benchtime=300ms -count=3 ./interp
 
 # Reference traversal
@@ -207,11 +207,11 @@ Scalar stack access, reset, retain/release, and uncontended pool reuse are alloc
 
 ## JIT Activation Overhead
 
-`BenchmarkInterpreter_ColdBackedge` runs a 256-iteration counting loop with `WithTick(1<<20)` and `WithThreshold(1<<30)`, including `Run`, `PopBoxed`, and `Reset`. The function remains below the sample threshold, so it keeps the ordinary generated `BR` handler.
+`BenchmarkInterpreter_Run/ColdBackedge` runs a 256-iteration counting loop with `WithTick(1<<20)` and `WithThreshold(1<<30)`, measuring `Run` only; result extraction and reset remain outside the reported duration. The function remains below the sample threshold, so it keeps the ordinary generated `BR` handler.
 
 | Case | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|
-| cold unconditional backedge | 2,446 | 0 | 0 |
+| cold unconditional backedge | 2,324 | 0 | 0 |
 
 This benchmark guards the cold-path boundary: exact backedge observation is installed only after periodic sampling marks a function hot, rather than adding a callback or header scan to every cold loop iteration.
 

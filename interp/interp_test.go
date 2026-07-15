@@ -7012,41 +7012,54 @@ func BenchmarkNew(b *testing.B) {
 	})
 }
 
-func BenchmarkInterpreter_ColdBackedge(b *testing.B) {
-	builder := program.NewBuilder()
-	loop := builder.Label()
-	done := builder.Label()
-	builder.Locals(types.TypeI32)
-	builder.Emit(instr.I32_CONST, 0).
-		Emit(instr.LOCAL_SET, 0).
-		Bind(loop).
-		Emit(instr.LOCAL_GET, 0).
-		Emit(instr.I32_CONST, 256).
-		Emit(instr.I32_GE_S).
-		BrIf(done).
-		Emit(instr.LOCAL_GET, 0).
-		Emit(instr.I32_CONST, 1).
-		Emit(instr.I32_ADD).
-		Emit(instr.LOCAL_SET, 0).
-		Br(loop).
-		Bind(done).
-		Emit(instr.LOCAL_GET, 0)
-	prog, err := builder.Build()
-	require.NoError(b, err)
-	vm := New(prog, WithTick(1<<20), WithThreshold(1<<30))
-	b.Cleanup(func() { require.NoError(b, vm.Close()) })
-	ctx := context.Background()
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		require.NoError(b, vm.Run(ctx))
-		_, err := vm.PopBoxed()
-		require.NoError(b, err)
-		vm.Reset()
-	}
-}
-
 func BenchmarkInterpreter_Run(b *testing.B) {
+	b.Run("ColdBackedge", func(b *testing.B) {
+		builder := program.NewBuilder()
+		loop := builder.Label()
+		done := builder.Label()
+		builder.Locals(types.TypeI32)
+		builder.Emit(instr.I32_CONST, 0).
+			Emit(instr.LOCAL_SET, 0).
+			Bind(loop).
+			Emit(instr.LOCAL_GET, 0).
+			Emit(instr.I32_CONST, 256).
+			Emit(instr.I32_GE_S).
+			BrIf(done).
+			Emit(instr.LOCAL_GET, 0).
+			Emit(instr.I32_CONST, 1).
+			Emit(instr.I32_ADD).
+			Emit(instr.LOCAL_SET, 0).
+			Br(loop).
+			Bind(done).
+			Emit(instr.LOCAL_GET, 0)
+		prog, err := builder.Build()
+		require.NoError(b, err)
+		vm := New(prog, WithTick(1<<20), WithThreshold(1<<30))
+		b.Cleanup(func() { require.NoError(b, vm.Close()) })
+		ctx := context.Background()
+		require.NoError(b, vm.Run(ctx))
+		value, err := vm.PopBoxed()
+		require.NoError(b, err)
+		require.Equal(b, types.BoxI32(256), value)
+		vm.Reset()
+
+		var runErr error
+		var elapsed time.Duration
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			start := time.Now()
+			runErr = vm.Run(ctx)
+			elapsed += time.Since(start)
+			value, err = vm.PopBoxed()
+			vm.Reset()
+		}
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+		require.NoError(b, runErr)
+		require.NoError(b, err)
+		require.Equal(b, types.BoxI32(256), value)
+	})
+
 	for _, tt := range runTests {
 		b.Run(tt.name, func(b *testing.B) {
 			modes := []struct {
