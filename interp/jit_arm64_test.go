@@ -1030,3 +1030,61 @@ func TestArm64Lowerer_QueuesEachState(t *testing.T) {
 	require.NotEqual(t, first, second)
 	require.Len(t, ctx.work, 2)
 }
+
+// SelfCallWithRefArg protects a self-recursive function that forwards its own
+// callee ref as an argument. flush used to refuse a committing flush whenever
+// any live operand was a KindRef, including a ref parameter merely passed
+// through, so every such self-call failed to lower and rejected the whole
+// compile. A rejected anchor is never retried, so the function stayed
+// interpreted for the process lifetime while still returning the right value.
+func TestARM64_SelfCallWithRefArg(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	b := types.NewFunctionBuilder(nil).
+		Params(types.TypeI32, types.TypeRef).
+		Returns(types.TypeI32)
+	base := b.Label()
+	fib := b.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_LT_S)).
+		BrIf(base).
+		Emit(
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 2), instr.New(instr.I32_SUB),
+			instr.New(instr.LOCAL_GET, 1), instr.New(instr.LOCAL_GET, 1), instr.New(instr.CALL),
+			instr.New(instr.I32_ADD), instr.New(instr.RETURN),
+		).
+		Bind(base).
+		Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN)).
+		MustBuild()
+	prog := program.New(
+		[]instr.Instruction{
+			instr.New(instr.I32_CONST, 20),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.CALL),
+		},
+		program.WithConstants(fib),
+	)
+
+	profile := prof.New()
+	i := New(prog, WithProfiler(profile))
+
+	for range 64 {
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(6765), value)
+		i.Reset()
+	}
+	require.NoError(t, i.Close())
+
+	var entries float64
+	for _, metric := range profile.Metrics() {
+		if metric.Name == "vm_jit_native_entries_total" {
+			entries += metric.Value
+		}
+	}
+	require.Greater(t, entries, float64(0))
+}
