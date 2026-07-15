@@ -20,11 +20,12 @@ type shape struct {
 }
 
 type step struct {
-	op    instr.Opcode
-	args  [2]uint64
-	seen  types.Boxed
-	arg   types.Boxed
-	shape shape
+	op       instr.Opcode
+	args     [2]uint64
+	seen     types.Boxed
+	arg      types.Boxed
+	shape    shape
+	terminal bool
 
 	fn     int
 	ip     int
@@ -144,7 +145,7 @@ func (p plan) valid() bool {
 			return false
 		}
 	case entryLoop:
-		if p.anchor.addr <= 0 || p.anchor.ip <= 0 {
+		if p.anchor.addr < 0 || p.anchor.ip <= 0 {
 			return false
 		}
 	case entryModule:
@@ -539,8 +540,8 @@ func wire(p *plan, roots map[anchor]int) {
 
 func noSpill(blocks []block) bool {
 	for _, block := range blocks {
-		if len(block.steps) > 0 {
-			switch block.steps[len(block.steps)-1].op {
+		for _, step := range block.steps {
+			switch step.op {
 			case instr.ARRAY_SET, instr.STRUCT_SET:
 				return true
 			}

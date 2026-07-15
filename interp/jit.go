@@ -73,6 +73,10 @@ type lowering struct {
 	addr    int
 	returns int
 	kind    entryKind
+	leaf    bool
+
+	reuseLocals bool
+	spare       asm.VReg
 }
 
 // value is one typed operand: a register plus the runtime kind the trace
@@ -244,6 +248,9 @@ func (c *compiler) Compile(i *Interpreter, root anchor) compileResult {
 		result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeEmpty, reason: prof.CompileReasonNoPlan})
 		mod := &module{entries: map[anchor]native{}}
 		for _, plan := range plans {
+			if plan.anchor != root {
+				continue
+			}
 			if !plan.valid() {
 				result = result.prefer(compileResult{anchor: root, frontend: frontend.kind, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonInvalidPlan})
 				continue

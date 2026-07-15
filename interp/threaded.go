@@ -22,6 +22,7 @@ type threader struct {
 	code      []byte
 	ip        int
 	exact     bool
+	backedge  func(*Interpreter, *frame) error
 }
 
 var (
@@ -87,9 +88,18 @@ var (
 		instr.BR: func(c *threader) func(i *Interpreter) {
 			offset := instr.ParseI16(c.code, c.ip+1)
 			c.ip += 3
+			if c.backedge == nil || offset > -3 {
+				return func(i *Interpreter) {
+					f := i.fr
+					f.ip += offset + 3
+				}
+			}
 			return func(i *Interpreter) {
 				f := i.fr
 				f.ip += offset + 3
+				if err := c.backedge(i, f); err != nil {
+					panic(err)
+				}
 			}
 		},
 		instr.BR_IF: func(c *threader) func(i *Interpreter) {

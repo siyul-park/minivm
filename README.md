@@ -93,15 +93,15 @@ lifetime rules.
 minivm is designed to be useful before JIT compilation and faster when repeated
 execution makes native traces worthwhile.
 
-Representative medians from the canonical suite on Apple M4 Pro,
+Representative medians measured July 15, 2026, on Apple M4 Pro,
 `darwin/arm64`, Go 1.26.2 (`ns/op`, lower is better):
 
-| Runtime | Iterative Fib | Recursive Fib | Branch Tree |
-|---|---:|---:|---:|
-| native Go | 8.444 | 19,129,096 | 77.55 |
-| wazero | 47.98 | 44,150,405 | 156.3 |
-| **minivm/default** | **69.9** | **47,048,123** | **222.4** |
-| minivm/threaded | 718.5 | 487,293,996 | 949.4 |
+| Runtime | Iterative Fib (30) | Recursive Fib (35) | Sieve (256) | Branch Tree (96) |
+|---|---:|---:|---:|---:|
+| native Go | 8.337 | 20,957,448 | 247.8 | 77.39 |
+| wazero | 49.84 | 46,785,131 | 645.4 | 156.9 |
+| **minivm/default** | **71.83** | **48,426,669** | **5,052** | **228.0** |
+| minivm/threaded | 730.9 | 512,675,498 | 15,385 | 986.4 |
 
 `minivm/default` uses the adaptive ARM64 trace-JIT policy. Results vary by
 workload: unsupported paths remain in the threaded interpreter, and some

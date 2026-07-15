@@ -65,6 +65,6 @@ Keep inputs deterministic. Add a kernel only when it exposes a distinct VM signa
 
 ## Related Docs
 
-- `../docs/benchmarks.md` - benchmark ownership, methodology, and historical measurements
+- `../docs/benchmarks.md` - current measurements, ownership, and methodology
 - `../docs/instruction-set.md` - opcode semantics and JIT support
 - `../docs/jit-internals.md` - trace and native execution lifecycle

@@ -81,16 +81,19 @@ Pool interpreters use a shared `Cache`:
 - compiled modules publish immutable `asm.Callable`s
 - each interpreter installs those callables into its own dispatch table at a safepoint
 
-The cache claims a build's root and trigger together. A side-exit or loop-root
-request arriving while that build is active remains pending; publication
-finishes only the claimed build and leaves the pending request cold for the
-next winner. This prevents a completed build from clearing newer trace work.
+The cache claims a build's root and trigger together. Each function owns a
+coalescing queue of exact anchors rather than one pending slot: distinct loop
+roots are retained, duplicate requests are discarded, and a side exit arriving
+behind an active hot build remains queued because it represents newer trace work.
+Side-exit requests take priority over queued hot roots.
+Publication finishes only the claimed build and leaves queued requests cold for
+the next winner.
 
 The published native code is shared. The dispatch table remains interpreter-local.
 
 ## Compiler
 
-`compiler` is private to `interp` and lives in `jit.go`. The interpreter calls only `compiler.Compile(i, addr)` and receives an opaque `module`; it does not select or inspect a compilation strategy.
+`compiler` is private to `interp` and lives in `jit.go`. The interpreter calls only `compiler.Compile(i, root)` and receives an opaque `module`; it does not select or inspect a compilation strategy. A frontend may discover several recorded roots, but compilation selects only the requested anchor so later loop attempts do not re-emit already-installed entries.
 
 The compiler builds one read-only `compileInput`, then runs two ordered frontends:
 
@@ -127,13 +130,15 @@ Each recorded step stores the data needed for speculative lowering:
 - partial-trace resume boundary
 - selected heap values for read-only fast paths
 
-The tracer aborts before host calls, allocation, and mutating heap operations. These remain interpreter-owned.
+The tracer aborts before host calls and allocation. It records ref-bearing array writes and struct writes only as terminal fallback boundaries. A primitive typed-array write may remain inside the trace when it occurs in the anchor frame before any inlined call. Capture clones every overlapping visible range of aliased primitive typed arrays into one replacement backing store, preserving slice offsets while leaving the live heap unchanged. Boxed arrays and structs are copied before their terminal mutation. The clone also owns mutable dispatch metadata and suppresses external finalizers, so speculative reference reclamation cannot alter live functions, trace trees, or host resources.
 
 Every recorded `trace` has one outcome: `loop`, `returned`, `completed`, `partial`, or `aborted`. The trace frontend maps usable outcomes to plan terminators and excludes aborted fragments from learned continuations. When an observed block runs out of steps, lowering decides completion from that block's terminator, never from the root trace. This prevents an unsupported side fragment from being mistaken for normal completion.
 
 `Tracer.capture` serializes recording and returns an already-published root when one exists, so sampling and compilation cannot record the same entry concurrently. A tracer is bound to one `program.Program`; binding it to a different program clears exact bytecode, tree, and loop caches before reuse.
 
 `Tracer.headers` (the static loop-header scan) uses `instr.Targets(code, ip)` rather than switching on `BR`/`BR_IF` directly, so a loop formed only through a backward `BR_TABLE` case target is recognized as a header too.
+
+Non-eager functions initially keep the ordinary generated `BR` handler. When periodic sampling first reaches the rounded threshold, the interpreter rethreads that function once with an exact unconditional-backedge callback, preserving installed native handlers and replacing only their threaded fallbacks. Eager mode enables the callback from construction. Cold loops therefore pay no callback, mutex, or header-scan cost.
 
 ## Trace Snapshots
 
@@ -193,12 +198,12 @@ corrupting the native stack at runtime.
 
 Register allocation (`asm/rewriter.go`) is a single linear-scan pass: it spills the vreg with the farthest-away next use to a stack slot at the stream position where pressure was observed. Rewritten labels target the start of any inserted reload/store prefix, and labels on a return target its inserted frame epilogue. Only a call whose target label is bound inside the same `Code` (an intra-Code self-call, which runs through the shared epilogue on return) reserves the caller's spill area again before continuing; a call to a label resolved externally by `Link` never runs this `Code`'s epilogue, so the rewriter must not re-reserve after it. `Assembler.Entry` documents the matching limitation for non-primary entries: only the primary entry (offset 0) runs the frame prologue, so `Build` returns `asm.ErrEntryRequiresFrame` when spilling occurs and a non-primary entry exists.
 
-Linear spill state is unsafe across a loop back-edge, and terminal `ARRAY_SET` or `STRUCT_SET` blocks can combine paths before their exit. Two layers enforce safety:
+Linear spill state is unsafe across a loop back-edge, and mutation blocks can combine paths around state materialization. Two layers enforce safety:
 
 - `asm/rewriter.go` rejects spilling for code containing an intra-code backward branch.
-- `noSpill` scans every block in the completed plan, including learned continuations, and forbids spilling when a terminal mutation is present.
+- `noSpill` scans every step in the completed plan, including learned continuations, and forbids spilling whenever `ARRAY_SET` or `STRUCT_SET` is present.
 
-When a plan forbids spilling, the compiler wraps the target architecture in `noSpillArch`. Its `Frame()` returns `nil` according to the assembler contract, so register exhaustion rejects native compilation cleanly and threaded dispatch remains installed.
+When a plan forbids spilling, the compiler wraps the target architecture in `noSpillArch`. Its `Frame()` returns `nil` according to the assembler contract, so register exhaustion rejects native compilation cleanly and threaded dispatch remains installed. Continuable primitive array stores therefore lower through an explicit state barrier and reuse dead registers rather than depending on spill slots.
 
 Native code does not marshal parameters or returns. It writes results and trap state into the journal, and the Go wrapper restores interpreter state from there.
 
@@ -274,7 +279,7 @@ Native lowering supports selected calls:
 
 A call may lower to native `BL` when the observed target is a JIT-eligible `*types.Function` with matching arity.
 
-Unsupported targets fall back, including host calls, allocation, heap mutation, maps, unsupported functions, and unsupported closures.
+Unsupported targets fall back, including host calls, allocation, maps, unsupported functions, unsupported closures, and heap mutations outside the selected guarded fast paths.
 
 Static plans recognize direct `CONST_GET function; CALL` pairs. Each interpreter owns a fixed-size `natives` slot array; installing or synchronizing a function entry publishes its executable address atomically. The caller loads the slot at runtime and uses `BLR`, so compile order does not matter: a null slot falls back at the CALL, while a later callee installation is visible without recompiling the caller. Self-recursion remains on the established trace self-call path, and `RETURN_CALL` remains threaded.
 
@@ -316,13 +321,13 @@ Before that fallback triggers, `asm.Assembler.encode` runs a branch relaxation f
 
 A loop root is anchored at a loop header: the target of a backward branch.
 
-The tracer discovers headers statically. Once the function or module is hot, it records one iteration from the live state at the header.
+The tracer discovers headers statically. Periodic samples still drive normal hotness, while JIT-enabled unconditional backward `BR` handlers also notify the interpreter after moving the live frame to the exact target header. This prevents a deterministic tick phase from permanently missing those loops. Threshold-zero mode waits for eight exact hits on those headers before capture so the first iteration does not over-specialize the recorded branch path.
 
 Loop lowering builds the normal native prologue, binds a back-edge label, lowers the loop body, commits loop-carried locals to VM stack homes, decrements `journalBudget`, and branches back while budget remains.
 
 Loop-carried locals round-trip through the VM stack each iteration. This avoids a cross-back-edge register fixpoint.
 
-Loops whose header is the function entry (`ip == 0`) remain threaded.
+Module loops at `addr == 0` are valid when their header IP is positive. Only loops whose header is the module or function entry (`ip == 0`) remain threaded.
 
 Loop callables install at:
 
@@ -391,16 +396,13 @@ Ref reads retain loaded refs. `CORO_VALUE` retains the value and releases the ha
 
 Heap-promoted `i64` values fall back before boxing.
 
-Primitive `ARRAY_SET` and `STRUCT_SET` are terminal mutations. The hot path may perform the store, flush state, and resume threaded execution at the next instruction. Shape, bounds, field-kind, or release failure deoptimizes at the original opcode so the interpreter owns full semantics.
+A primitive typed-array `ARRAY_SET` may continue through native execution when it occurs in the anchor frame before any inlined call. Lowering first materializes one resumable pre-op snapshot, clears the local register cache, and lets shape, bounds, and release guards share that snapshot. Guard failure resumes at the original opcode; success performs the primitive store and continues to later operations or the loop back-edge.
 
-A loop body that inlines two or more branchy calls before a terminal
-`ARRAY_SET`/`STRUCT_SET` can push register pressure past the physical bank.
-The allocator rejects spilling across backward edges, and the compiler disables
-spilling for loop and terminal-mutation roots; register exhaustion then keeps
-threaded dispatch installed (regression test:
-`interp.TestInterpreter_JITArraySetAfterBranchyCallsInLoop`).
+Ref-bearing `ARRAY_SET` and `STRUCT_SET` remain terminal mutations. Their hot path may perform the store and resume threaded execution at the next instruction, while recursive release or any failed guard remains interpreter-owned.
 
-Allocation and complex ref-bearing mutations stay threaded.
+Mutation plans are always no-spill. Leaf traces reuse pinned and dead registers for stack homes, heap cells, refcounts, and boxing scratch so primitive mutation loops fit the physical register bank. A mutation after inlined calls retains the terminal boundary; register exhaustion still rejects compilation cleanly instead of spilling across a back-edge (regression test: `interp.TestARM64_ArraySetAfterNestedCalls`).
+
+Allocation and complex ref-bearing mutations stay threaded or terminate the native trace.
 
 ## Structured Errors
 

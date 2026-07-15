@@ -1,6 +1,8 @@
 package interp
 
 import (
+	"maps"
+	"slices"
 	"sort"
 	"sync"
 	"unsafe"
@@ -89,10 +91,15 @@ func (r *Tracer) bind(prog *program.Program) bool {
 	return r.prog == prog
 }
 
-func (r *Tracer) exit(i *Interpreter, root anchor, target anchor) (int64, error) {
+func (r *Tracer) branch(i *Interpreter, root anchor, target anchor) int64 {
 	r.mu.Lock()
 	tree := r.tree(root)
-	id := r.exitIndex(tree, target)
+	id, ok := tree.exits[target]
+	if !ok {
+		id = len(tree.hits)
+		tree.exits[target] = id
+		tree.hits = append(tree.hits, 0)
+	}
 	tree.hits[id]++
 	hits := tree.hits[id]
 	if branch := tree.branches[id]; branch != nil {
@@ -101,25 +108,22 @@ func (r *Tracer) exit(i *Interpreter, root anchor, target anchor) (int64, error)
 		// cannot be folded into the parent trace, so recompiling that parent
 		// would only publish the same pair again.
 		if branch.kind == loop && hits != exitThreshold {
-			return 0, nil
+			return 0
 		}
-		return hits, nil
+		return hits
 	}
 	r.mu.Unlock()
 
-	result, err := r.capture(i, anchor{addr: target.addr, ip: target.ip})
-	if err != nil {
-		return hits, err
-	}
+	result := r.capture(i, anchor{addr: target.addr, ip: target.ip})
 	r.mu.Lock()
 	if r.trees[root] == tree {
 		tree.branches[id] = result.trace
 	}
 	r.mu.Unlock()
-	return hits, nil
+	return hits
 }
 
-func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err error) {
+func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 	r.recordMu.Lock()
 	defer r.recordMu.Unlock()
 	defer func() {
@@ -133,24 +137,24 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 	if tree != nil && tree.root != nil {
 		t := tree.root
 		r.mu.Unlock()
-		return captureResult{trace: t}, nil
+		return captureResult{trace: t}
 	}
 	if a.ip == 0 && (i.fr == nil || i.fr.addr != a.addr || i.fr.ip != 0) {
 		r.mu.Unlock()
-		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonInvalidAnchor}, nil
+		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonInvalidAnchor}
 	}
 	if tree == nil {
 		tree = r.tree(a)
 	}
 	if tree.attempts >= attemptLimit {
 		r.mu.Unlock()
-		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonAttemptLimit}, nil
+		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonAttemptLimit}
 	}
 	tree.attempts++
 	r.mu.Unlock()
 
 	if a.addr < 0 || a.addr >= len(i.instrs) || a.ip < 0 || a.ip >= len(i.instrs[a.addr]) {
-		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonInvalidAnchor}, nil
+		return captureResult{outcome: prof.CaptureOutcomeRejected, reason: prof.CaptureReasonInvalidAnchor}
 	}
 
 	clone := r.clone(i)
@@ -159,6 +163,8 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 
 	t := &trace{anchor: a}
 	startFP := clone.fp
+	hasCall := false
+	var cloned map[int]bool
 	for len(t.ops) < opLimit {
 		f := clone.fr
 		if f.addr < 0 || f.addr >= len(clone.instrs) || f.ip < 0 || f.ip >= len(clone.instrs[f.addr]) {
@@ -175,10 +181,20 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 		}
 
 		st := r.op(&clone, op, startFP)
+		terminalMutation := false
+		if op == instr.ARRAY_SET || op == instr.STRUCT_SET {
+			if cloned == nil {
+				cloned = map[int]bool{}
+			}
+			primitive := cloneTarget(&clone, cloned)
+			terminalMutation = op == instr.STRUCT_SET || hasCall || !primitive
+		}
+		st.terminal = terminalMutation
 		if op == instr.CALL && r.callsAnchor(&clone, a) {
 			r.skipCall(&clone, a.addr)
 			st.callee = a.addr
 			t.ops = append(t.ops, st)
+			hasCall = true
 			continue
 		}
 		// A tail call back to the entry anchor closes the trace as a native loop
@@ -190,7 +206,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 			t.ops = append(t.ops, st)
 			t.kind = returned
 			r.publish(a, tree, t)
-			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}
 		}
 		// YIELD/RESUME and exception-producing ops have side effects a trace
 		// cannot represent. In the anchor frame, record the op as the
@@ -207,7 +223,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 			t.ops = append(t.ops, st)
 			t.kind = returned
 			r.publish(a, tree, t)
-			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}
 		}
 		if !r.step(&clone, f.addr, f.ip) {
 			t.kind = aborted
@@ -217,6 +233,9 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 
 		r.finish(&clone, &st, op)
 		t.ops = append(t.ops, st)
+		if op == instr.CALL || op == instr.RETURN_CALL {
+			hasCall = true
+		}
 		// A backward edge to a different header starts a distinct loop trace.
 		// Stop this linear prefix at the header instead of unrolling the loop up
 		// to opLimit; threaded execution will make that header hot and compile it
@@ -231,13 +250,12 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 			})
 			t.kind = partial
 			r.publish(a, tree, t)
-			return captureResult{trace: t, outcome: prof.CaptureOutcomePartial}, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePartial}
 		}
-		// Heap mutations still lower as terminal native fast paths: the hot
-		// path performs the store and resumes at the next threaded instruction;
-		// guard failures resume at the opcode so the interpreter owns the full
-		// handler semantics.
-		if op == instr.ARRAY_SET || op == instr.STRUCT_SET {
+		// Ref-bearing array writes and struct writes remain terminal native fast
+		// paths. Primitive array writes can continue because their guarded store
+		// has no recursive release or post-store deopt point.
+		if terminalMutation {
 			if clone.fp != startFP {
 				t.kind = aborted
 				result.reason = prof.CaptureReasonNestedTerminal
@@ -245,27 +263,27 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 			}
 			t.kind = returned
 			r.publish(a, tree, t)
-			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}
 		}
 		switch {
 		case op == instr.RETURN && st.depth == 0:
 			t.kind = returned
 			r.publish(a, tree, t)
-			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}
 		case clone.fr.addr >= 0 && clone.fr.addr < len(clone.instrs) && clone.fr.ip >= len(clone.instrs[clone.fr.addr]):
 			if clone.fr.addr == 0 {
 				t.kind = completed
 			}
 			r.publish(a, tree, t)
-			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}
 		case clone.fr.addr == a.addr && clone.fr.ip == a.ip:
 			t.kind = loop
 			r.publish(a, tree, t)
-			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}
 		case clone.fp < startFP:
 			t.kind = returned
 			r.publish(a, tree, t)
-			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}, nil
+			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}
 		}
 	}
 	if len(t.ops) >= opLimit {
@@ -281,63 +299,183 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult, err er
 			result.reason = prof.CaptureReasonUnsupportedOp
 		}
 		result.outcome = prof.CaptureOutcomeRejected
-		return result, nil
+		return result
 	}
 	r.publish(a, tree, t)
-	return captureResult{trace: t, outcome: prof.CaptureOutcomePartial, reason: result.reason}, nil
+	return captureResult{trace: t, outcome: prof.CaptureOutcomePartial, reason: result.reason}
 }
 
 func (r *Tracer) clone(i *Interpreter) Interpreter {
 	out := *i
 	out.compiler = nil
+	out.cache = nil
+	out.tracer = nil
 	out.hook = nil
+	out.speculative = true
 	out.threshold = -1
 
 	out.constants = i.constants
-	out.globals = append([]types.Boxed(nil), i.globals...)
-	out.instrs = i.instrs
-	out.code = r.codes(i)
+	out.globals = slices.Clone(i.globals)
+	out.instrs = slices.Clone(i.instrs)
+	out.code = slices.Clone(r.exactCodes(i))
+	out.backedges = make([]bool, len(i.backedges))
 	out.exits = map[anchor]func(*Interpreter){}
 	out.stubs = make([]func(*Interpreter), len(out.code))
-	out.journal = append([]uint64(nil), i.journal...)
-	out.frames = append([]frame(nil), i.frames...)
-	out.stack = append([]types.Boxed(nil), i.stack...)
-	out.heap = r.heap(i.heap)
-	out.free = append([]int(nil), i.free...)
-	out.rc = append([]int(nil), i.rc...)
+	out.tried = map[anchor]bool{}
+	out.loopHits = map[anchor]uint8{}
+	out.journal = slices.Clone(i.journal)
+	out.coros = slices.Clone(i.coros)
+	out.handlers = slices.Clone(i.handlers)
+	out.dynamic = map[int]bool{}
+	out.frames = slices.Clone(i.frames)
+	out.stack = slices.Clone(i.stack)
+	out.heap = slices.Clone(i.heap)
+	out.free = slices.Clone(i.free)
+	out.rc = slices.Clone(i.rc)
 	out.trial = nil
 	out.work = nil
 	out.refbuf = nil
-	out.interned = make(map[string]types.Ref, len(i.interned))
-	for key, val := range i.interned {
-		out.interned[key] = val
-	}
+	out.interned = map[string]types.Ref{}
 	for idx := 0; idx < out.fp; idx++ {
 		addr := out.frames[idx].addr
 		if addr >= 0 && addr < len(out.code) {
 			out.frames[idx].code = out.code[addr]
 		}
-		out.frames[idx].upvals = append([]types.Boxed(nil), out.frames[idx].upvals...)
+		out.frames[idx].upvals = slices.Clone(out.frames[idx].upvals)
 	}
 	return out
 }
 
-func (r *Tracer) heap(heap []types.Value) []types.Value {
-	out := make([]types.Value, len(heap))
-	for idx, val := range heap {
-		switch v := val.(type) {
-		case *types.Closure:
-			clone := *v
-			clone.Upvals = append([]types.Boxed(nil), v.Upvals...)
-			out[idx] = &clone
-		default:
-			out[idx] = val
+// cloneTarget isolates the next mutation target and reports whether it is a
+// primitive typed array whose store may continue inside the trace.
+func cloneTarget(i *Interpreter, cloned map[int]bool) bool {
+	if i.sp < 3 || i.stack[i.sp-3].Kind() != types.KindRef {
+		return false
+	}
+	addr := i.stack[i.sp-3].Ref()
+	if addr <= 0 || addr >= len(i.heap) {
+		return false
+	}
+	value := i.heap[addr]
+	switch value := value.(type) {
+	case types.TypedArray[bool]:
+		if !cloned[addr] {
+			cloneAliases(i.heap, value, cloned)
+		}
+		return true
+	case types.TypedArray[int8]:
+		if !cloned[addr] {
+			cloneAliases(i.heap, value, cloned)
+		}
+		return true
+	case types.TypedArray[int32]:
+		if !cloned[addr] {
+			cloneAliases(i.heap, value, cloned)
+		}
+		return true
+	case types.TypedArray[int64]:
+		if !cloned[addr] {
+			cloneAliases(i.heap, value, cloned)
+		}
+		return true
+	case types.TypedArray[float32]:
+		if !cloned[addr] {
+			cloneAliases(i.heap, value, cloned)
+		}
+		return true
+	case types.TypedArray[float64]:
+		if !cloned[addr] {
+			cloneAliases(i.heap, value, cloned)
+		}
+		return true
+	case *types.Array:
+		if !cloned[addr] {
+			clone := *value
+			clone.Elems = slices.Clone(value.Elems)
+			i.heap[addr] = &clone
+			cloned[addr] = true
+		}
+	case *types.Struct:
+		if !cloned[addr] {
+			clone := *value
+			clone.Data = slices.Clone(value.Data)
+			i.heap[addr] = &clone
+			cloned[addr] = true
 		}
 	}
-	return out
+	return false
 }
 
-func (r *Tracer) codes(i *Interpreter) [][]func(*Interpreter) {
+// cloneAliases copies the connected component of typed-array ranges that
+// overlap target. Address arithmetic only identifies overlap; each original
+// slice copies its own visible range into the replacement backing store.
+func cloneAliases[T bool | int8 | int32 | int64 | float32 | float64](heap []types.Value, target types.TypedArray[T], cloned map[int]bool) {
+	if len(target) == 0 {
+		return
+	}
+	var zero T
+	size := unsafe.Sizeof(zero)
+	start := uintptr(unsafe.Pointer(unsafe.SliceData(target)))
+	end := start + uintptr(len(target))*size
+	aliases := make([]struct {
+		addr  int
+		array types.TypedArray[T]
+		start uintptr
+		end   uintptr
+	}, 0, len(heap))
+	for addr, value := range heap {
+		array, ok := value.(types.TypedArray[T])
+		if !ok || len(array) == 0 {
+			continue
+		}
+		aliasStart := uintptr(unsafe.Pointer(unsafe.SliceData(array)))
+		aliases = append(aliases, struct {
+			addr  int
+			array types.TypedArray[T]
+			start uintptr
+			end   uintptr
+		}{
+			addr:  addr,
+			array: array,
+			start: aliasStart,
+			end:   aliasStart + uintptr(len(array))*size,
+		})
+	}
+	for {
+		previousStart, previousEnd := start, end
+		for _, alias := range aliases {
+			if alias.start >= end || start >= alias.end {
+				continue
+			}
+			start = min(start, alias.start)
+			end = max(end, alias.end)
+		}
+		if start == previousStart && end == previousEnd {
+			break
+		}
+	}
+	// Recorded array operations can observe only the current lengths. Copy the
+	// transitive union of overlapping visible ranges once, then rebuild each
+	// slice at its original offset so speculative writes preserve aliasing.
+	backing := make([]T, int((end-start)/size))
+	for _, alias := range aliases {
+		if alias.start >= end || start >= alias.end {
+			continue
+		}
+		offset := int((alias.start - start) / size)
+		copy(backing[offset:offset+len(alias.array)], alias.array)
+	}
+	for _, alias := range aliases {
+		if alias.start >= end || start >= alias.end {
+			continue
+		}
+		offset := int((alias.start - start) / size)
+		heap[alias.addr] = types.TypedArray[T](backing[offset : offset+len(alias.array)])
+		cloned[alias.addr] = true
+	}
+}
+
+func (r *Tracer) exactCodes(i *Interpreter) [][]func(*Interpreter) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if len(r.exact) == len(i.instrs) {
@@ -616,16 +754,6 @@ func (r *Tracer) headers(i *Interpreter, addr int) []int {
 	return hs
 }
 
-func (r *Tracer) exitIndex(tree *tree, target anchor) int {
-	if idx, ok := tree.exits[target]; ok {
-		return idx
-	}
-	idx := len(tree.hits)
-	tree.exits[target] = idx
-	tree.hits = append(tree.hits, 0)
-	return idx
-}
-
 func (r *Tracer) unrecordableReason(i *Interpreter, op instr.Opcode) prof.CaptureReason {
 	if (op == instr.CALL || op == instr.RETURN_CALL) && i.sp > 0 {
 		if i.stack[i.sp-1].Kind() != types.KindRef {
@@ -686,14 +814,10 @@ func (r *Tracer) unrecordableReason(i *Interpreter, op instr.Opcode) prof.Captur
 // lower a root without holding r.mu while the recorder keeps mutating the live
 // tree under lock — the concurrent map read/write that races a pooled Tracer.
 func (t *tree) snapshot() *tree {
-	branches := make(map[int]*trace, len(t.branches))
-	for id, tr := range t.branches {
-		branches[id] = tr
-	}
 	return &tree{
 		root:     t.root,
-		branches: branches,
-		hits:     append([]int64(nil), t.hits...),
+		branches: maps.Clone(t.branches),
+		hits:     slices.Clone(t.hits),
 	}
 }
 

@@ -17,11 +17,12 @@ import (
 )
 
 type Interpreter struct {
-	ctx       context.Context
-	done      <-chan struct{}
-	tracer    *Tracer
-	hook      func(*Interpreter) error
-	marshaler Marshaler
+	ctx         context.Context
+	done        <-chan struct{}
+	tracer      *Tracer
+	hook        func(*Interpreter) error
+	marshaler   Marshaler
+	speculative bool
 
 	compiler *compiler
 	cache    *Cache
@@ -30,7 +31,8 @@ type Interpreter struct {
 	exits    map[anchor]func(*Interpreter)
 	stubs    []func(*Interpreter)
 	natives  []unsafe.Pointer
-	tried    map[int]bool
+	tried    map[anchor]bool
+	loopHits map[anchor]uint8
 	journal  []uint64
 
 	types       []types.Type
@@ -39,6 +41,7 @@ type Interpreter struct {
 	globalKinds []types.Kind
 	instrs      [][]byte
 	code        [][]func(*Interpreter)
+	backedges   []bool
 	coros       []bool
 	handlers    [][]instr.Handler
 	module      *types.Function
@@ -63,6 +66,7 @@ type Interpreter struct {
 	gas int64
 
 	threshold int64
+	eager     bool
 	tick      int
 	fuel      int64
 	limit     int
@@ -103,6 +107,7 @@ type option struct {
 }
 
 const heapRunway = 64
+const loopWarmup = 8
 
 func WithHook(fn func(*Interpreter) error) func(*option) {
 	return func(o *option) { o.hook = fn }
@@ -237,17 +242,20 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		profiler:  opt.profiler,
 		samples:   samples,
 		threshold: threshold,
+		eager:     opt.threshold == 0,
 		types:     prog.Types,
 		constants: make([]types.Boxed, len(prog.Constants)),
 		globals:   make([]types.Boxed, len(prog.Globals)),
 		instrs:    make([][]byte, len(prog.Constants)+1),
 		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
+		backedges: make([]bool, len(prog.Constants)+1),
 		coros:     make([]bool, len(prog.Constants)+1),
 		handlers:  make([][]instr.Handler, len(prog.Constants)+1),
 		exits:     map[anchor]func(*Interpreter){},
 		stubs:     make([]func(*Interpreter), len(prog.Constants)+1),
 		natives:   make([]unsafe.Pointer, len(prog.Constants)+1),
-		tried:     map[int]bool{},
+		tried:     map[anchor]bool{},
+		loopHits:  map[anchor]uint8{},
 		dynamic:   map[int]bool{},
 		journal:   make([]uint64, journalHead+journalStride*opt.frame),
 		frames:    make([]frame, opt.frame),
@@ -339,14 +347,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		i.globals[j] = i.zero(kind)
 	}
 
-	c := &threader{
-		types:     i.types,
-		constants: i.constants,
-		heap:      i.heap,
-		coros:     i.coros,
-		globals:   i.globalKinds,
-		exact:     opt.tick == 1,
-	}
+	i.backedges[0] = nativeBackend && i.eager
+	c := i.newThreader(i.backedges[0])
 	i.code[0] = c.Compile(prog.Code, i.module.LocalKinds(), types.Kinds(i.module.Captures))
 
 	for j, v := range prog.Constants {
@@ -976,49 +978,67 @@ func (i *Interpreter) safepoint() error {
 // The caller guarantees the entry fallback is still nil, so the gates that the
 // threaded safepoint used to repeat on that lookup are already satisfied.
 func (i *Interpreter) observe(f *frame) error {
-	i.sample(f)
+	samples := i.sample(f)
 	if f.ip == 0 {
-		if _, err := i.tracer.capture(i, anchor{addr: f.addr, ip: 0}); err != nil {
-			return err
-		}
+		i.tracer.capture(i, anchor{addr: f.addr})
 	}
-	// A hot loop header sampled mid-function: f.ip is genuinely at the back-edge
-	// target, so the clone's operand stack matches the header and a one-iteration
-	// loop trace can be recorded from the live state. A loopy function's entry
-	// trace aborts on the unrolled body, so the one-shot entry threshold never
-	// installs anything; compile here, once the function is hot and the loop
-	// trace first appears, so the loop header gets its own native. The hotness
-	// gate keeps WithThreshold(-1) a pure interpreter.
-	samples := i.samples.Samples(f.addr)
-	if i.threshold >= 0 && f.ip > 0 &&
-		samples >= uint64(i.threshold) &&
-		i.exits[anchor{addr: f.addr, ip: f.ip}] == nil {
-		for _, h := range i.tracer.headers(i, f.addr) {
-			if h != f.ip {
+	if i.threshold >= 0 && f.ip > 0 && (i.eager || samples >= uint64(i.threshold)) {
+		for _, header := range i.tracer.headers(i, f.addr) {
+			if header != f.ip {
 				continue
 			}
-			result, err := i.tracer.capture(i, anchor{addr: f.addr, ip: f.ip})
-			if err != nil {
+			if err := i.traceLoop(f); err != nil {
 				return err
-			}
-			if result.trace != nil {
-				root := anchor{addr: f.addr, ip: f.ip}
-				if i.cache != nil {
-					i.cache.request(cacheRequest{root: root, trigger: prof.TriggerHot})
-				} else if err := i.compile(root); err != nil {
-					return err
-				}
 			}
 			break
 		}
 	}
-	if i.cache == nil && i.threshold >= 0 && samples >= uint64(i.threshold) && !i.tried[f.addr] {
-		i.tried[f.addr] = true
-		if err := i.compile(anchor{addr: f.addr}); err != nil {
+	root := anchor{addr: f.addr}
+	if i.cache == nil && i.threshold >= 0 && samples >= uint64(i.threshold) && !i.tried[root] {
+		i.tried[root] = true
+		if err := i.compile(root); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// backedge receives the exact target of an unconditional backward
+// branch. Eager functions install it immediately; sampled functions install it
+// once when periodic profiling reaches the threshold, so cold BR handlers stay
+// unchanged and no header scan is needed here.
+func (i *Interpreter) backedge(f *frame) error {
+	if f.ip <= 0 {
+		return nil
+	}
+	return i.traceLoop(f)
+}
+
+func (i *Interpreter) traceLoop(f *frame) error {
+	root := anchor{addr: f.addr, ip: f.ip}
+	if i.exits[root] != nil || i.tried[root] {
+		return nil
+	}
+	if i.eager {
+		if i.samples.Samples(f.addr) == 0 {
+			i.sample(f)
+		}
+		hits := i.loopHits[root] + 1
+		i.loopHits[root] = hits
+		if hits < loopWarmup {
+			return nil
+		}
+	}
+	i.tried[root] = true
+	result := i.tracer.capture(i, root)
+	if result.trace == nil {
+		return nil
+	}
+	if i.cache != nil {
+		i.cache.request(cacheRequest{root: root, trigger: prof.TriggerHot})
+		return nil
+	}
+	return i.compile(root)
 }
 
 // call wraps a native trace Entry Callable. The CALL handler has already
@@ -1148,10 +1168,7 @@ func (i *Interpreter) loop(callable asm.Callable, stats counters) func(*Interpre
 }
 
 func (i *Interpreter) exit(root anchor) {
-	hits, err := i.tracer.exit(i, root, anchor{addr: i.fr.addr, ip: i.fr.ip})
-	if err != nil {
-		panic(err)
-	}
+	hits := i.tracer.branch(i, root, anchor{addr: i.fr.addr, ip: i.fr.ip})
 	if i.cache != nil {
 		if hits < exitThreshold || hits%exitThreshold != 0 {
 			return
@@ -1278,9 +1295,50 @@ func (i *Interpreter) function(addr int) (*types.Function, bool) {
 	return fn, ok
 }
 
-// sample records one profile hit for the frame's current instruction.
-func (i *Interpreter) sample(f *frame) {
+// sample records one profile hit for the frame's current instruction and
+// returns the updated function count.
+func (i *Interpreter) sample(f *frame) uint64 {
 	i.samples.Add(f.addr, f.ip, i.instrs[f.addr][f.ip])
+	samples := i.samples.Samples(f.addr)
+	if nativeBackend && !i.eager && i.threshold >= 0 && samples >= uint64(i.threshold) {
+		i.enableBackedges(f.addr)
+	}
+	return samples
+}
+
+// enableBackedges rethreads one hot function with exact unconditional
+// back-edge observation. Cold functions keep the original zero-overhead BR
+// handler until periodic sampling reaches the configured threshold.
+func (i *Interpreter) enableBackedges(addr int) {
+	if addr < 0 || addr >= len(i.backedges) || i.backedges[addr] {
+		return
+	}
+	fn, ok := i.function(addr)
+	if !ok || fn == nil {
+		return
+	}
+	c := i.newThreader(true)
+	previous := i.code[addr]
+	compiled := c.Compile(fn.Code, fn.LocalKinds(), types.Kinds(fn.Captures))
+	// Rethreading replaces only interpreted handlers. Installed native entries
+	// stay live while their saved fallbacks advance to the exact-backedge table.
+	for root := range i.exits {
+		if root.addr != addr || root.ip < 0 || root.ip >= len(compiled) || root.ip >= len(previous) {
+			continue
+		}
+		i.exits[root] = compiled[root.ip]
+		if root.ip == 0 {
+			i.stubs[addr] = compiled[root.ip]
+		}
+		compiled[root.ip] = previous[root.ip]
+	}
+	i.code[addr] = compiled
+	i.backedges[addr] = true
+	for idx := 0; idx < i.fp; idx++ {
+		if i.frames[idx].addr == addr {
+			i.frames[idx].code = i.code[addr]
+		}
+	}
 }
 
 func (i *Interpreter) stub(addr int) func(*Interpreter) {
@@ -1705,6 +1763,9 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if addr >= len(i.code) {
 		i.code = append(i.code, make([][]func(*Interpreter), n-len(i.code))...)
 	}
+	if addr >= len(i.backedges) {
+		i.backedges = append(i.backedges, make([]bool, n-len(i.backedges))...)
+	}
 	if addr >= len(i.stubs) {
 		i.stubs = append(i.stubs, make([]func(*Interpreter), n-len(i.stubs))...)
 	}
@@ -1714,14 +1775,8 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if addr >= len(i.coros) {
 		i.coros = append(i.coros, make([]bool, n-len(i.coros))...)
 	}
-	c := &threader{
-		types:     i.types,
-		constants: i.constants,
-		heap:      i.heap,
-		coros:     i.coros,
-		globals:   i.globalKinds,
-		exact:     i.tick == 1,
-	}
+	i.backedges[addr] = nativeBackend && i.eager
+	c := i.newThreader(i.backedges[addr])
 	if dynamic {
 		i.coros[addr] = i.yields(fn.Code)
 	}
@@ -1731,6 +1786,24 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	if dynamic {
 		i.dynamic[addr] = true
 	}
+}
+
+// newThreader builds generated dispatch state. The backedge callback is injected at
+// runtime instead of referenced by the generated global handler table, avoiding
+// an initialization cycle through trace compilation.
+func (i *Interpreter) newThreader(backedge bool) *threader {
+	c := &threader{
+		types:     i.types,
+		constants: i.constants,
+		heap:      i.heap,
+		coros:     i.coros,
+		globals:   i.globalKinds,
+		exact:     i.tick == 1,
+	}
+	if backedge {
+		c.backedge = (*Interpreter).backedge
+	}
+	return c
 }
 
 // recount rebuilds baseline counts from constant roots and heap edges after
@@ -1960,8 +2033,12 @@ func (i *Interpreter) finalize(addr int, v types.Value) {
 	if s, ok := v.(types.String); ok && i.interned[string(s)] == types.Ref(addr) {
 		delete(i.interned, string(s))
 	}
-	if c, ok := v.(io.Closer); ok {
-		_ = c.Close()
+	// External finalizers belong to committed execution, never speculative
+	// trace capture.
+	if !i.speculative {
+		if c, ok := v.(io.Closer); ok {
+			_ = c.Close()
+		}
 	}
 }
 
@@ -1972,6 +2049,7 @@ func (i *Interpreter) remove(addr int) {
 	}
 	i.instrs[addr] = nil
 	i.code[addr] = nil
+	i.backedges[addr] = false
 	i.stubs[addr] = nil
 	i.handlers[addr] = nil
 	i.coros[addr] = false
@@ -1980,7 +2058,16 @@ func (i *Interpreter) remove(addr int) {
 			delete(i.exits, a)
 		}
 	}
-	delete(i.tried, addr)
+	for a := range i.tried {
+		if a.addr == addr {
+			delete(i.tried, a)
+		}
+	}
+	for a := range i.loopHits {
+		if a.addr == addr {
+			delete(i.loopHits, a)
+		}
+	}
 	if i.tracer != nil {
 		i.tracer.remove(addr)
 	}

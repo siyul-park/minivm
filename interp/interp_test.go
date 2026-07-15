@@ -1527,6 +1527,82 @@ func TestInterpreter_Run(t *testing.T) {
 		require.Empty(t, missing)
 	})
 
+	t.Run("keeps cold backedges on ordinary dispatch", func(t *testing.T) {
+		b := program.NewBuilder()
+		loop := b.Label()
+		done := b.Label()
+		b.Locals(types.TypeI32)
+		b.Emit(instr.I32_CONST, 0).
+			Emit(instr.LOCAL_SET, 0).
+			Bind(loop).
+			Emit(instr.LOCAL_GET, 0).
+			Emit(instr.I32_CONST, 64).
+			Emit(instr.I32_GE_S).
+			BrIf(done).
+			Emit(instr.LOCAL_GET, 0).
+			Emit(instr.I32_CONST, 1).
+			Emit(instr.I32_ADD).
+			Emit(instr.LOCAL_SET, 0).
+			Br(loop).
+			Bind(done).
+			Emit(instr.LOCAL_GET, 0)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		i := New(prog, WithTick(1<<20), WithThreshold(1<<30))
+		defer i.Close()
+		require.Empty(t, i.tracer.loops)
+
+		require.NoError(t, i.Run(context.Background()))
+		value, err := i.PopBoxed()
+		require.NoError(t, err)
+		require.Equal(t, types.BoxI32(64), value)
+		require.Empty(t, i.tracer.loops)
+		require.Empty(t, i.loopHits)
+		require.Empty(t, i.tried)
+	})
+
+	if runtime.GOARCH == "arm64" {
+		t.Run("preserves native handlers when enabling backedges", func(t *testing.T) {
+			b := program.NewBuilder()
+			loop := b.Label()
+			done := b.Label()
+			b.Locals(types.TypeI32)
+			b.Emit(instr.I32_CONST, 0).
+				Emit(instr.LOCAL_SET, 0).
+				Bind(loop).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 2).
+				Emit(instr.I32_GE_S).
+				BrIf(done).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.I32_ADD).
+				Emit(instr.LOCAL_SET, 0).
+				Br(loop).
+				Bind(done).
+				Emit(instr.LOCAL_GET, 0)
+			prog, err := b.Build()
+			require.NoError(t, err)
+
+			i := New(prog, WithThreshold(1))
+			defer i.Close()
+			headers := i.tracer.headers(i, 0)
+			require.NotEmpty(t, headers)
+			root := anchor{ip: headers[0]}
+			fallback := i.code[0][root.ip]
+			native := func(*Interpreter) {}
+			i.exits[root] = fallback
+			i.code[0][root.ip] = native
+
+			i.enableBackedges(0)
+
+			require.Equal(t, reflect.ValueOf(native).Pointer(), reflect.ValueOf(i.code[0][root.ip]).Pointer())
+			require.NotNil(t, i.exits[root])
+			require.True(t, i.backedges[0])
+		})
+	}
+
 	modes := []struct {
 		name string
 		opts []func(*option)
@@ -6934,6 +7010,40 @@ func BenchmarkNew(b *testing.B) {
 		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 		require.NoError(b, closeErr)
 	})
+}
+
+func BenchmarkInterpreter_ColdBackedge(b *testing.B) {
+	builder := program.NewBuilder()
+	loop := builder.Label()
+	done := builder.Label()
+	builder.Locals(types.TypeI32)
+	builder.Emit(instr.I32_CONST, 0).
+		Emit(instr.LOCAL_SET, 0).
+		Bind(loop).
+		Emit(instr.LOCAL_GET, 0).
+		Emit(instr.I32_CONST, 256).
+		Emit(instr.I32_GE_S).
+		BrIf(done).
+		Emit(instr.LOCAL_GET, 0).
+		Emit(instr.I32_CONST, 1).
+		Emit(instr.I32_ADD).
+		Emit(instr.LOCAL_SET, 0).
+		Br(loop).
+		Bind(done).
+		Emit(instr.LOCAL_GET, 0)
+	prog, err := builder.Build()
+	require.NoError(b, err)
+	vm := New(prog, WithTick(1<<20), WithThreshold(1<<30))
+	b.Cleanup(func() { require.NoError(b, vm.Close()) })
+	ctx := context.Background()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		require.NoError(b, vm.Run(ctx))
+		_, err := vm.PopBoxed()
+		require.NoError(b, err)
+		vm.Reset()
+	}
 }
 
 func BenchmarkInterpreter_Run(b *testing.B) {

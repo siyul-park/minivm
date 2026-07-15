@@ -260,7 +260,7 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Arrays | `ARRAY_NEW_DEFAULT` | `array.new_default` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Arrays | `ARRAY_LEN` | `array.len` | ✅ | 🔲 | native typed-array length fast path |
 | Arrays | `ARRAY_GET` | `array.get` | ✅ | 🔲 | native typed-array get fast path |
-| Arrays | `ARRAY_SET` | `array.set` | ◐ | 🔲 | terminal native mutation; scalar and ref-kind elements |
+| Arrays | `ARRAY_SET` | `array.set` | ◐ | 🔲 | primitive typed arrays may continue; boxed/ref writes stay terminal |
 | Arrays | `ARRAY_FILL` | `array.fill` | ⬜ | 🔲 | bulk mutation stays threaded |
 | Arrays | `ARRAY_COPY` | `array.copy` | ⬜ | 🔲 | bulk mutation stays threaded |
 | Arrays | `ARRAY_APPEND` | `array.append` | ⬜ | 🔲 | grow/mutation stays threaded |

@@ -117,6 +117,68 @@ func TestARM64_ArraySetAfterNestedCalls(t *testing.T) {
 	require.Equal(t, jitOut, out)
 }
 
+func TestARM64_Backedge(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	tests := []struct {
+		name      string
+		limit     int32
+		threshold int
+		attempted []bool
+		installed bool
+	}{
+		{name: "compiles module loop", limit: 64, threshold: 0, attempted: []bool{true}, installed: true},
+		{name: "warms eager loop", limit: 4, threshold: 0, attempted: []bool{false, true}},
+		{name: "keeps sample threshold", limit: 4, threshold: 1, attempted: []bool{false, false}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := program.NewBuilder()
+			loop := b.Label()
+			done := b.Label()
+			b.Locals(types.TypeI32)
+			b.Emit(instr.I32_CONST, 0).
+				Emit(instr.LOCAL_SET, 0).
+				Bind(loop).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, uint64(uint32(tt.limit))).
+				Emit(instr.I32_GE_S).
+				BrIf(done).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.I32_ADD).
+				Emit(instr.LOCAL_SET, 0).
+				Br(loop).
+				Bind(done).
+				Emit(instr.LOCAL_GET, 0)
+			prog, err := b.Build()
+			require.NoError(t, err)
+
+			i := New(prog, WithTick(1<<20), WithThreshold(tt.threshold))
+			defer i.Close()
+			headers := i.tracer.headers(i, 0)
+			require.NotEmpty(t, headers)
+			root := anchor{ip: headers[0]}
+
+			for run, attempted := range tt.attempted {
+				require.NoError(t, i.Run(context.Background()))
+				value, err := i.PopBoxed()
+				require.NoError(t, err)
+				require.Equal(t, types.BoxI32(tt.limit), value)
+				require.Equal(t, attempted, i.tried[root])
+				if run+1 < len(tt.attempted) {
+					i.Reset()
+				}
+			}
+			if tt.installed {
+				require.NotEmpty(t, i.exits)
+			}
+		})
+	}
+}
+
 // AbortedSideExitDoesNotComplete protects partial unsupported traces from
 // miscompile where a captured side-exit fragment that recorded a few
 // supported opcodes and then aborted on an unsupported one (MAP_NEW_DEFAULT
@@ -281,8 +343,7 @@ func TestCompiler_Compile(t *testing.T) {
 				require.NoError(t, i.SetGlobal(0, value))
 			}
 			root := anchor{}
-			capture, err := i.tracer.capture(i, root)
-			require.NoError(t, err)
+			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
 			i.stubs[root.addr] = i.code[root.addr][0]
 			compiler, err := newCompiler()
@@ -322,8 +383,7 @@ func TestCompiler_Compile(t *testing.T) {
 			}
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
 			root := anchor{}
-			capture, err := i.tracer.capture(i, root)
-			require.NoError(t, err)
+			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
 			i.stubs[root.addr] = i.code[root.addr][0]
 			compiler, err := newCompiler()
@@ -345,6 +405,138 @@ func TestCompiler_Compile(t *testing.T) {
 			require.Equal(t, uint64(id+1), encoded)
 		})
 
+		t.Run("primitive array set loop", func(t *testing.T) {
+			array := make(types.TypedArray[int32], 64)
+			b := program.NewBuilder()
+			loop := b.Label()
+			done := b.Label()
+			b.Locals(types.TypeI32)
+			b.Const(array)
+			b.Emit(instr.I32_CONST, 0).
+				Emit(instr.LOCAL_SET, 0).
+				Bind(loop).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 64).
+				Emit(instr.I32_GE_S).
+				BrIf(done).
+				ConstGet(array).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.ARRAY_SET).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.I32_ADD).
+				Emit(instr.LOCAL_SET, 0).
+				Br(loop).
+				Bind(done).
+				ConstGet(array).
+				Emit(instr.I32_CONST, 0).
+				Emit(instr.ARRAY_GET)
+			prog, err := b.Build()
+			require.NoError(t, err)
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+
+			compiled := compiler.Compile(i, anchor{})
+			require.NoError(t, compiled.err)
+			require.NotNil(t, compiled.module, "%+v", compiled)
+			i.install(compiled.module, false)
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(1), value)
+		})
+
+		t.Run("primitive array set branch", func(t *testing.T) {
+			array := make(types.TypedArray[int32], 16)
+			b := program.NewBuilder()
+			loop := b.Label()
+			skip := b.Label()
+			done := b.Label()
+			b.Locals(types.TypeI32)
+			b.Const(array)
+			b.Emit(instr.I32_CONST, 0).
+				Emit(instr.LOCAL_SET, 0).
+				Bind(loop).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 16).
+				Emit(instr.I32_GE_S).
+				BrIf(done).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.I32_AND).
+				BrIf(skip).
+				ConstGet(array).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.I32_ADD).
+				Emit(instr.ARRAY_SET).
+				Bind(skip).
+				Emit(instr.LOCAL_GET, 0).
+				Emit(instr.I32_CONST, 1).
+				Emit(instr.I32_ADD).
+				Emit(instr.LOCAL_SET, 0).
+				Br(loop).
+				Bind(done).
+				ConstGet(array).
+				Emit(instr.I32_CONST, 0).
+				Emit(instr.ARRAY_GET).
+				ConstGet(array).
+				Emit(instr.I32_CONST, 2).
+				Emit(instr.ARRAY_GET).
+				Emit(instr.I32_ADD)
+			prog, err := b.Build()
+			require.NoError(t, err)
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+
+			compiled := compiler.Compile(i, anchor{})
+			require.NoError(t, compiled.err)
+			require.NotNil(t, compiled.module, "%+v", compiled)
+			i.install(compiled.module, false)
+
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(4), value)
+		})
+
+		t.Run("primitive array set continues", func(t *testing.T) {
+			array := types.TypedArray[int32]{1}
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.ARRAY_SET),
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.ARRAY_GET),
+			}, program.WithConstants(array))
+			i := New(prog, WithThreshold(-1))
+			defer i.Close()
+			compiler, err := newCompiler()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, compiler.Close()) })
+
+			compiled := compiler.Compile(i, anchor{})
+			require.NoError(t, compiled.err)
+			require.NotNil(t, compiled.module, "%+v", compiled)
+			i.install(compiled.module, false)
+
+			require.NoError(t, i.Run(context.Background()))
+			value, err := i.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(2), value)
+			require.Equal(t, int32(2), array[0])
+		})
+
 		t.Run("array get value guard", func(t *testing.T) {
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 1), instr.New(instr.ARRAY_GET),
@@ -356,8 +548,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NoError(t, i.SetGlobal(0, value))
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
 			root := anchor{}
-			capture, err := i.tracer.capture(i, root)
-			require.NoError(t, err)
+			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
 			i.stubs[root.addr] = i.code[root.addr][0]
 			compiler, err := newCompiler()
@@ -392,8 +583,7 @@ func TestCompiler_Compile(t *testing.T) {
 			}
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(0)))
 			root := anchor{}
-			capture, err := i.tracer.capture(i, root)
-			require.NoError(t, err)
+			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
 			i.stubs[root.addr] = i.code[root.addr][0]
 			compiler, err := newCompiler()
@@ -434,8 +624,7 @@ func TestCompiler_Compile(t *testing.T) {
 			defer i.Close()
 			require.NoError(t, i.SetGlobal(0, types.BoxI32(0)))
 			root := anchor{}
-			capture, err := i.tracer.capture(i, root)
-			require.NoError(t, err)
+			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
 			i.stubs[root.addr] = i.code[root.addr][0]
 			compiler, err := newCompiler()
@@ -466,8 +655,7 @@ func TestCompiler_Compile(t *testing.T) {
 			i := New(program.New(instructions), WithThreshold(-1))
 			defer i.Close()
 			root := anchor{}
-			capture, err := i.tracer.capture(i, root)
-			require.NoError(t, err)
+			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
 			i.stubs[root.addr] = i.code[root.addr][0]
 			compiler, err := newCompiler()
@@ -557,8 +745,7 @@ func TestCompiler_Compile(t *testing.T) {
 			root := anchor{addr: addr, ip: header}
 			addrLabel := strconv.Itoa(addr)
 			headerLabel := strconv.Itoa(header)
-			capture, err := i.tracer.capture(i, root)
-			require.NoError(t, err)
+			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
 			i.stubs[root.addr] = i.code[root.addr][0]
 			compiler, err := newCompiler()
@@ -606,8 +793,7 @@ func TestCompiler_Compile(t *testing.T) {
 			i.fr.bp = 0
 			i.sp = 0
 			root := anchor{addr: addr}
-			capture, err := i.tracer.capture(i, root)
-			require.NoError(t, err)
+			capture := i.tracer.capture(i, root)
 			require.NotNil(t, capture.trace)
 			i.stubs[root.addr] = i.code[root.addr][0]
 			compiler, err := newCompiler()

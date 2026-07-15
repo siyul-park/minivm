@@ -26,13 +26,35 @@ func TestControl_IterativeFib(t *testing.T) {
 func TestControl_Sieve(t *testing.T) {
 	prog := sieve(256)
 	require.NoError(t, program.Verify(prog))
-	vm := interp.New(prog, interp.WithThreshold(-1))
-	defer vm.Close()
+	want := types.BoxI32(sieveReference(256))
+	tests := []struct {
+		name string
+		new  func(*program.Program) *interp.Interpreter
+	}{
+		{name: "default", new: func(prog *program.Program) *interp.Interpreter {
+			return interp.New(prog)
+		}},
+		{name: "threaded", new: func(prog *program.Program) *interp.Interpreter {
+			return interp.New(prog, interp.WithThreshold(-1))
+		}},
+		{name: "jit", new: func(prog *program.Program) *interp.Interpreter {
+			return interp.New(prog, interp.WithThreshold(0))
+		}},
+	}
 
-	require.NoError(t, vm.Run(context.Background()))
-	value, err := vm.Pop()
-	require.NoError(t, err)
-	require.Equal(t, types.I32(sieveReference(256)), value)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vm := tt.new(prog)
+			defer vm.Close()
+			for range 16 {
+				require.NoError(t, vm.Run(context.Background()))
+				value, err := vm.PopBoxed()
+				require.NoError(t, err)
+				require.Equal(t, want, value)
+				vm.Reset()
+			}
+		})
+	}
 }
 
 func BenchmarkControl_IterativeFib(b *testing.B) {
