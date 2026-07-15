@@ -13,11 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewAlgebraicSimplificationPass(t *testing.T) {
-	require.NotNil(t, NewAlgebraicSimplificationPass())
+func TestNewAlgebraicPass(t *testing.T) {
+	require.NotNil(t, NewAlgebraicPass())
 }
 
-func TestAlgebraicSimplificationPass_Run(t *testing.T) {
+func TestAlgebraicPass_Run(t *testing.T) {
 	tests := []struct {
 		program  *program.Program
 		expected *program.Program
@@ -136,11 +136,11 @@ func TestAlgebraicSimplificationPass_Run(t *testing.T) {
 
 	for _, tt := range tests {
 		m := pass.NewManager()
-		pass.Register[*types.Function, []*analysis.BasicBlock](m, analysis.NewBasicBlocksAnalysis())
+		pass.Register[*types.Function, []*analysis.BasicBlock](m, analysis.NewBlocksAnalysis())
 
 		t.Run(tt.program.String(), func(t *testing.T) {
 			actual := tt.program
-			_, err := NewAlgebraicSimplificationPass().Run(m, actual)
+			_, err := NewAlgebraicPass().Run(m, actual)
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, actual)
 		})
@@ -159,8 +159,8 @@ func TestAlgebraicSimplificationPass_Run(t *testing.T) {
 		require.NoError(t, err)
 
 		manager := pass.NewManager()
-		pass.Register(manager, analysis.NewBasicBlocksAnalysis())
-		_, err = NewAlgebraicSimplificationPass().Run(manager, prog)
+		pass.Register(manager, analysis.NewBlocksAnalysis())
+		_, err = NewAlgebraicPass().Run(manager, prog)
 		require.NoError(t, err)
 		after := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		defer after.Close()

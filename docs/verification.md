@@ -127,7 +127,7 @@ top-level fall-through. Function bodies must target an instruction and still
 terminate explicitly.
 
 Target offsets for `BR`, `BR_IF`, and `BR_TABLE` are computed by the shared
-`instr.Targets(code, ip)` helper, also used by `analysis.BasicBlocksAnalysis`,
+`instr.Targets(code, ip)` helper, also used by `analysis.BlocksAnalysis`,
 so the verifier and the optimizer/JIT CFG agree on how a target is derived
 from an instruction. `program.Verify` remains the only place that decides
 whether the past-the-end target is *legal* for a given slot.

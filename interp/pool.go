@@ -14,11 +14,10 @@ import (
 // per goroutine via Get/Put or Run. JIT code and aggregate profile data are
 // shared through the pool cache.
 type Pool struct {
-	prog   *program.Program
-	cache  *Cache
-	tracer *Tracer
-	opts   []func(*option)
-	size   int
+	prog  *program.Program
+	cache *Cache
+	opts  []func(*option)
+	size  int
 
 	idle chan *Interpreter
 	live atomic.Int64
@@ -43,12 +42,11 @@ func NewPool(prog *program.Program, size int, opts ...func(*option)) *Pool {
 	all = append(all, opts...)
 	all = append(all, WithCache(cache), WithTracer(tracer))
 	return &Pool{
-		prog:   prog,
-		cache:  cache,
-		tracer: tracer,
-		opts:   all,
-		size:   size,
-		idle:   make(chan *Interpreter, size),
+		prog:  prog,
+		cache: cache,
+		opts:  all,
+		size:  size,
+		idle:  make(chan *Interpreter, size),
 	}
 }
 
@@ -119,7 +117,6 @@ func (p *Pool) Close() error {
 
 	var errs []error
 	for i := range p.idle {
-		i.flush()
 		if err := i.Close(); err != nil {
 			errs = append(errs, err)
 		}
@@ -158,7 +155,6 @@ func (p *Pool) wait(ctx context.Context) (*Interpreter, error) {
 }
 
 func (p *Pool) drop(i *Interpreter) {
-	i.flush()
 	_ = i.Close()
 	p.live.Add(-1)
 }

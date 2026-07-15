@@ -43,7 +43,7 @@ func FuzzOptimizerParity(f *testing.F) {
 		}
 
 		want := run(prog)
-		optimized, err := NewOptimizer(O3).Optimize(prog)
+		optimized, err := New(O3).Optimize(prog)
 		require.NoError(t, err)
 		require.NoError(t, program.Verify(optimized))
 		require.Equal(t, want, run(optimized))

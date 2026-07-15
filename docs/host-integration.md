@@ -164,7 +164,7 @@ Dynamic functions follow normal heap ownership rules. When no stack, global, clo
 
 `WithHeap(n)` sets the initial heap capacity.
 
-`WithMaxHeap(n)` sets a hard heap-entry limit. Values `n <= 0` mean unlimited.
+`WithHeapLimit(n)` sets a hard heap-entry limit. Values `n <= 0` mean unlimited.
 
 Allocation order is described in `docs/memory-model.md`; this document only covers host-facing API behavior.
 
@@ -367,7 +367,7 @@ Converters apply wherever the registered type appears, including nested fields, 
 |---|---|
 | `RuntimeError` | guest execution failed; unwraps to the cause and carries frames |
 | `types.Error` | guest exception value with code, message, payload, and optional wrapped Go cause |
-| `ErrHeapExhausted` | heap allocation exceeded `WithMaxHeap` |
+| `ErrHeapExhausted` | heap allocation exceeded `WithHeapLimit` |
 | `ErrMarshalCycle` | pointer graph contains a cycle |
 | `ErrUnsupportedMarshalType` | Go type or conversion direction is unsupported |
 | `ErrInvalidUnmarshalTarget` | destination is not a non-nil pointer |

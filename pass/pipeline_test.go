@@ -12,10 +12,10 @@ func TestNewPipeline(t *testing.T) {
 	require.NotNil(t, NewPipeline[*program.Program]())
 }
 
-func TestPipeline_AddPass(t *testing.T) {
+func TestPipeline_Add(t *testing.T) {
 	var log []string
 	pipeline := NewPipeline[*program.Program]()
-	pipeline.AddPass(runner[*program.Program, Preserved](func(*Manager, *program.Program) (Preserved, error) {
+	pipeline.Add(runner[*program.Program, Preserved](func(*Manager, *program.Program) (Preserved, error) {
 		log = append(log, "added")
 		return PreserveAll(), nil
 	}))
@@ -28,11 +28,11 @@ func TestPipeline_Run(t *testing.T) {
 	t.Run("runs passes in order", func(t *testing.T) {
 		var log []string
 		pl := NewPipeline[*program.Program]()
-		pl.AddPass(runner[*program.Program, Preserved](func(*Manager, *program.Program) (Preserved, error) {
+		pl.Add(runner[*program.Program, Preserved](func(*Manager, *program.Program) (Preserved, error) {
 			log = append(log, "a")
 			return PreserveAll(), nil
 		}))
-		pl.AddPass(runner[*program.Program, Preserved](func(*Manager, *program.Program) (Preserved, error) {
+		pl.Add(runner[*program.Program, Preserved](func(*Manager, *program.Program) (Preserved, error) {
 			log = append(log, "b")
 			return PreserveAll(), nil
 		}))
@@ -48,11 +48,11 @@ func TestPipeline_Run(t *testing.T) {
 		want := errors.New("fail")
 		var log []string
 		pl := NewPipeline[*program.Program]()
-		pl.AddPass(runner[*program.Program, Preserved](func(*Manager, *program.Program) (Preserved, error) {
+		pl.Add(runner[*program.Program, Preserved](func(*Manager, *program.Program) (Preserved, error) {
 			log = append(log, "a")
 			return PreserveAll(), want
 		}))
-		pl.AddPass(runner[*program.Program, Preserved](func(*Manager, *program.Program) (Preserved, error) {
+		pl.Add(runner[*program.Program, Preserved](func(*Manager, *program.Program) (Preserved, error) {
 			log = append(log, "b")
 			return PreserveAll(), nil
 		}))

@@ -22,6 +22,7 @@ This directory uses a single-owner model. Each topic owns one area of behavior; 
 | Debugger API | `debugging.md` |
 | Current priorities | `roadmap.md` |
 | Code style | `coding-patterns.md` |
+| Applied symbol naming decisions | `symbol-naming-audit.md` |
 | Adding an opcode | `guides/add-opcode.md` |
 | Adding a JIT backend | `guides/add-architecture.md` |
 | REPL usage | `guides/repl.md` |

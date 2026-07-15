@@ -11,7 +11,7 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-// GlobalValueNumberingPass removes recomputations of a value already produced on
+// GVNPass removes recomputations of a value already produced on
 // every path that reaches them, across basic-block boundaries. It is a strict
 // superset of the block-local CSE pass: within-block recomputations are still
 // replaced by a load of a live local home or a freshly captured slot, and
@@ -20,17 +20,17 @@ import (
 // top-level body (slot 0) may read its declared Program.Locals but cannot
 // allocate fresh ones (the write-back persists only code and handlers), so only
 // the load-from-existing-home case applies there.
-type GlobalValueNumberingPass struct{}
+type GVNPass struct{}
 
-var _ pass.Pass[*program.Program] = (*GlobalValueNumberingPass)(nil)
+var _ pass.Pass[*program.Program] = (*GVNPass)(nil)
 
-func NewGlobalValueNumberingPass() *GlobalValueNumberingPass {
-	return &GlobalValueNumberingPass{}
+func NewGVNPass() *GVNPass {
+	return &GVNPass{}
 }
 
-func (p *GlobalValueNumberingPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
+func (p *GVNPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
 	for i, fn := range functions(prog) {
-		gvn, err := pass.GetResult[*analysis.GlobalValueNumbering](m, fn)
+		gvn, err := pass.GetResult[*analysis.GVN](m, fn)
 		if err != nil {
 			return pass.PreserveNone(), err
 		}
@@ -57,7 +57,7 @@ func (p *GlobalValueNumberingPass) Run(m *pass.Manager, prog *program.Program) (
 // one fresh local shared by all its uses, with a LOCAL_TEE inserted at every
 // definition so the slot holds the value on every path. It reports the new code
 // and handlers, or ok=false to leave fn unchanged.
-func (p *GlobalValueNumberingPass) eliminate(fn *types.Function, gvn *analysis.GlobalValueNumbering, allocate bool) ([]byte, []instr.Handler, bool) {
+func (p *GVNPass) eliminate(fn *types.Function, gvn *analysis.GVN, allocate bool) ([]byte, []instr.Handler, bool) {
 	reds := make([]analysis.Redundancy, 0, len(gvn.Redundant))
 	for _, r := range gvn.Redundant {
 		reds = append(reds, r)
@@ -118,7 +118,7 @@ func (p *GlobalValueNumberingPass) eliminate(fn *types.Function, gvn *analysis.G
 
 // choose selects a non-overlapping subset of the redundant ranges, lowest offset
 // first, so the rewriter never receives overlapping replacement edits.
-func (p *GlobalValueNumberingPass) choose(reds []analysis.Redundancy) []analysis.Redundancy {
+func (p *GVNPass) choose(reds []analysis.Redundancy) []analysis.Redundancy {
 	slices.SortFunc(reds, func(a, b analysis.Redundancy) int { return a.Start - b.Start })
 
 	chosen := reds[:0]
@@ -136,7 +136,7 @@ func (p *GlobalValueNumberingPass) choose(reds []analysis.Redundancy) []analysis
 // covered reports whether any of a value's definition offsets falls strictly
 // inside a chosen replacement range, in which case its capture would land in
 // code about to be replaced and the value cannot be captured safely.
-func (p *GlobalValueNumberingPass) covered(chosen []analysis.Redundancy, offs []int) bool {
+func (p *GVNPass) covered(chosen []analysis.Redundancy, offs []int) bool {
 	for _, o := range offs {
 		for _, c := range chosen {
 			if c.Start < o && o < c.End {
@@ -149,7 +149,7 @@ func (p *GlobalValueNumberingPass) covered(chosen []analysis.Redundancy, offs []
 
 // kindType maps a value kind to the primitive type used to declare a captured
 // local, or nil when the kind has no concrete slot type.
-func (p *GlobalValueNumberingPass) kindType(k instr.Kind) types.Type {
+func (p *GVNPass) kindType(k instr.Kind) types.Type {
 	switch k {
 	case instr.KindI32:
 		return types.TypeI32

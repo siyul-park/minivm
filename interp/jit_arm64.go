@@ -874,7 +874,7 @@ func (l arm64Lowerer) localGet(ctx *lowering, op step) bool {
 		return false
 	}
 	if f.kinds[idx] == types.KindRef {
-		f.loaded[idx] = false
+		f.state[idx] &^= localLoaded
 	}
 	if !l.loadLocal(ctx, f, idx, op.ip) {
 		return false
@@ -921,7 +921,7 @@ func (l arm64Lowerer) localSet(ctx *lowering, op step, pop bool) bool {
 		}
 		ctx.assembler.Emit(arm64.STR(boxed, addr, int16((f.base+idx)*8)))
 		f.locals[idx] = value{reg: boxed, kind: types.KindRef, raw: false}
-		f.loaded[idx] = true
+		f.state[idx] |= localLoaded
 		if pop {
 			ctx.pop()
 		}
@@ -931,8 +931,7 @@ func (l arm64Lowerer) localSet(ctx *lowering, op step, pop bool) bool {
 		return false
 	}
 	f.locals[idx] = v
-	f.loaded[idx] = true
-	f.dirty[idx] = true
+	f.state[idx] |= localLoaded | localDirty
 	if pop {
 		ctx.pop()
 	}
@@ -1008,7 +1007,7 @@ func (l arm64Lowerer) globalSet(ctx *lowering, op step, pop bool) bool {
 
 // global decodes the global index and returns its statically observed kind.
 // The lowering carries the global kinds (mirroring how Locals use declared
-// LocalKinds), so GLOBAL_GET/SET see a stable kind at lower time: a per-run
+// Slots), so GLOBAL_GET/SET see a stable kind at lower time: a per-run
 // input is seeded via SetGlobal before Run, so the entry trace already observes
 // it. Out-of-range indices and offsets past the 12-bit LDR/STR limit reject.
 func (l arm64Lowerer) global(ctx *lowering, op step) (int, types.Kind, bool) {
@@ -1092,8 +1091,8 @@ func (l arm64Lowerer) clean(ctx *lowering) bool {
 	}
 	for fi := range ctx.frames {
 		f := &ctx.frames[fi]
-		for idx := range f.dirty {
-			if f.dirty[idx] {
+		for idx := range f.state {
+			if f.state[idx]&localDirty != 0 {
 				return false
 			}
 		}
@@ -1198,8 +1197,7 @@ func (l arm64Lowerer) arrayGetKnown(ctx *lowering, op step) bool {
 	if !l.flush(ctx, false) {
 		return false
 	}
-	clear(ctx.frame().loaded)
-	clear(ctx.frame().dirty)
+	clear(ctx.frame().state)
 	fail := ctx.queueExit(nil, op.ip, constant, prof.ExitGuardValue, int(op.op))
 
 	a := ctx.assembler
@@ -1255,8 +1253,7 @@ func (l arm64Lowerer) enterBlock(ctx *lowering, state []slot) {
 		ctx.values = append(ctx.values, value{kind: slot.kind, ref: slot.ref, raw: slot.refKnown})
 	}
 	frame := ctx.frame()
-	clear(frame.loaded)
-	clear(frame.dirty)
+	clear(frame.state)
 	l.reload(ctx)
 }
 
@@ -1431,7 +1428,7 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 	a.Emit(arm64.SUBI(calleeBP, nextSP, uint16(params)))
 	a.Emit(arm64.MOV(ctx.pinTo(oldBP), calleeBP))
 
-	localKinds := target.LocalKinds()
+	localKinds := target.Slots()
 	if len(localKinds) > params {
 		stack := ctx.pin(scratchStack)
 		base := l.base(ctx, stack)
@@ -1483,8 +1480,7 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 	}
 	ctx.values = ctx.values[:len(ctx.values)-params]
 	for fi := range ctx.frames {
-		clear(ctx.frames[fi].loaded)
-		clear(ctx.frames[fi].dirty)
+		clear(ctx.frames[fi].state)
 	}
 	l.reload(ctx)
 	for idx, typ := range rets {
@@ -2314,8 +2310,7 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 				return false
 			}
 			frame.locals[k] = value{reg: zero, kind: frame.kinds[k], raw: true}
-			frame.loaded[k] = true
-			frame.dirty[k] = true
+			frame.state[k] |= localLoaded | localDirty
 		}
 	}
 	ctx.frames = append(ctx.frames, frame)
@@ -2369,7 +2364,7 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 	nBP := ctx.pinTo(oldBP)
 	a.Emit(arm64.MOV(nBP, calleeBP))
 	calleeSP := calleeBP
-	if n := len(target.LocalKinds()); n > 0 {
+	if n := len(target.Slots()); n > 0 {
 		calleeSP = a.Reg(asm.RegTypeInt, asm.Width64)
 		a.Emit(arm64.ADDI(calleeSP, calleeBP, uint16(n)))
 	}
@@ -2417,10 +2412,7 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 	ctx.values = ctx.values[:len(ctx.values)-params]
 	for fi := range ctx.frames {
 		f := &ctx.frames[fi]
-		for k := range f.loaded {
-			f.loaded[k] = false
-			f.dirty[k] = false
-		}
+		clear(f.state)
 	}
 	l.reload(ctx)
 	if len(rets) > len(arm64.IntRets) {
@@ -2551,7 +2543,7 @@ func (l arm64Lowerer) tailTarget(ctx *lowering, op step) (*types.Function, int, 
 // args verifies the top params operands match the callee's declared
 // parameter kinds.
 func (l arm64Lowerer) args(ctx *lowering, target *types.Function, params int) bool {
-	kinds := target.LocalKinds()
+	kinds := target.Slots()
 	if len(kinds) < params {
 		return false
 	}
@@ -2579,8 +2571,7 @@ func (l arm64Lowerer) args(ctx *lowering, target *types.Function, params int) bo
 func (l arm64Lowerer) locals(ctx *lowering, f *activation, args []value) bool {
 	for k := range args {
 		f.locals[k] = args[k]
-		f.loaded[k] = true
-		f.dirty[k] = true
+		f.state[k] |= localLoaded | localDirty
 	}
 	if len(f.kinds) > len(args) {
 		zero := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -2592,8 +2583,7 @@ func (l arm64Lowerer) locals(ctx *lowering, f *activation, args []value) bool {
 				return false
 			}
 			f.locals[k] = value{reg: zero, kind: f.kinds[k], raw: true}
-			f.loaded[k] = true
-			f.dirty[k] = true
+			f.state[k] |= localLoaded | localDirty
 		}
 	}
 	return true
@@ -2730,7 +2720,7 @@ func (l arm64Lowerer) reload(ctx *lowering) {
 // integer locals (i8, i1) share the i32 representation, so they load the same
 // way and keep their kind.
 func (l arm64Lowerer) loadLocal(ctx *lowering, f *activation, idx, ip int) bool {
-	if f.loaded[idx] {
+	if f.state[idx]&localLoaded != 0 {
 		return true
 	}
 	kind := f.kinds[idx]
@@ -2760,7 +2750,7 @@ func (l arm64Lowerer) loadLocal(ctx *lowering, f *activation, idx, ip int) bool 
 	}
 	raw := kind != types.KindRef
 	f.locals[idx] = value{reg: reg, kind: kind, raw: raw}
-	f.loaded[idx] = true
+	f.state[idx] |= localLoaded
 	return true
 }
 
@@ -3150,8 +3140,7 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 			return false
 		}
 		for idx := range ctx.frames {
-			clear(ctx.frames[idx].loaded)
-			clear(ctx.frames[idx].dirty)
+			clear(ctx.frames[idx].state)
 		}
 		ctx.reuseLocals = len(ctx.values) == 3
 		fail = ctx.queueExit(nil, op.ip, 0, prof.ExitGuardShape, int(op.op))
@@ -3736,13 +3725,6 @@ func (arm64Lowerer) guardIndex(ctx *lowering, idx, n asm.VReg, fail asm.Label) {
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBCS, fail))
 }
 
-func (arm64Lowerer) matchItab(ctx *lowering, got asm.VReg, want uintptr, hit asm.Label) {
-	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDI(v, uint64(want))...)
-	ctx.assembler.Emit(arm64.CMP(got, v))
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, hit))
-}
-
 func (l arm64Lowerer) guardItab(ctx *lowering, got asm.VReg, want uintptr, fail asm.Label) {
 	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	l.guardItabTo(ctx, got, v, want, fail)
@@ -3752,11 +3734,6 @@ func (arm64Lowerer) guardItabTo(ctx *lowering, got, scratch asm.VReg, want uintp
 	ctx.assembler.Emit(arm64.LDI(scratch, uint64(want))...)
 	ctx.assembler.Emit(arm64.CMP(got, scratch))
 	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
-}
-
-func (arm64Lowerer) matchKind(ctx *lowering, got asm.VReg, want types.Kind, hit asm.Label) {
-	ctx.assembler.Emit(arm64.CMPI(got, uint16(want)))
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, hit))
 }
 
 // unwind appends one journal frame record per live symbolic frame,
@@ -3899,7 +3876,7 @@ func (l arm64Lowerer) flush(ctx *lowering, commit bool) bool {
 	for fi := range ctx.frames {
 		f := &ctx.frames[fi]
 		for idx := range f.kinds {
-			if !f.dirty[idx] {
+			if f.state[idx]&localDirty == 0 {
 				continue
 			}
 			boxed, ok := l.boxHome(ctx, f.locals[idx])
@@ -3908,7 +3885,7 @@ func (l arm64Lowerer) flush(ctx *lowering, commit bool) bool {
 			}
 			a.Emit(arm64.STR(boxed, addr, int16((f.base+idx)*8)))
 			if commit {
-				f.dirty[idx] = false
+				f.state[idx] &^= localDirty
 			}
 		}
 	}
@@ -3965,7 +3942,7 @@ func (l arm64Lowerer) localReg(ctx *lowering, target *activation, idx int) (asm.
 	for fi := range ctx.frames {
 		frame := &ctx.frames[fi]
 		for li, value := range frame.locals {
-			if frame == target && li == idx || !frame.loaded[li] {
+			if frame == target && li == idx || frame.state[li]&localLoaded == 0 {
 				continue
 			}
 			if value.reg.Width() != asm.WidthUndefined && value.reg.ID() == reg.ID() {

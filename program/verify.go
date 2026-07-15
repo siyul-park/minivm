@@ -19,23 +19,17 @@ type VerifyError struct {
 	Err    error
 }
 
-// Option configures verification context not carried by the Program itself.
-type Option func(*config)
-
-type config struct{}
-
 // checker verifies one function slot: it proves structural integrity (decode,
 // operand bounds, control flow, termination) and then, where the bytecode is
 // statically determinable, that the operand stack stays balanced and
 // type-consistent.
 type checker struct {
 	prog *Program
-	cfg  *config
 
-	fn       *types.Function
 	code     []byte
 	locals   []types.Type
 	captures []types.Type
+	table    []instr.Handler
 
 	slot    int
 	returns int
@@ -56,7 +50,7 @@ type block struct {
 // bytecode carries no call type operand.
 type slot struct {
 	kind types.Kind
-	fn   *types.FunctionType
+	typ  types.Type
 }
 
 // stack is the abstract operand stack threaded through a basic block.
@@ -84,8 +78,8 @@ var (
 	ErrHandlerTarget   = errors.New("invalid exception handler target")
 )
 
-func newChecker(prog *Program, cfg *config, slot int, fn *types.Function) *checker {
-	c := &checker{prog: prog, cfg: cfg, fn: fn, code: fn.Code, captures: fn.Captures, slot: slot}
+func newChecker(prog *Program, slot int, fn *types.Function) *checker {
+	c := &checker{prog: prog, code: fn.Code, captures: fn.Captures, table: fn.Handlers, slot: slot}
 	if fn.Typ != nil {
 		c.locals = append(c.locals, fn.Typ.Params...)
 		c.returns = len(fn.Typ.Returns)
@@ -96,14 +90,9 @@ func newChecker(prog *Program, cfg *config, slot int, fn *types.Function) *check
 
 // Verify checks every function slot of prog and returns the first violation as
 // a *VerifyError, or nil when the program is well-formed.
-func Verify(prog *Program, opts ...Option) error {
-	cfg := &config{}
-	for _, opt := range opts {
-		opt(cfg)
-	}
-
+func Verify(prog *Program) error {
 	top := &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
-	if err := newChecker(prog, cfg, 0, top).run(); err != nil {
+	if err := newChecker(prog, 0, top).run(); err != nil {
 		return err
 	}
 	for j, c := range prog.Constants {
@@ -111,7 +100,7 @@ func Verify(prog *Program, opts ...Option) error {
 		if !ok {
 			continue
 		}
-		if err := newChecker(prog, cfg, j+1, fn).run(); err != nil {
+		if err := newChecker(prog, j+1, fn).run(); err != nil {
 			return err
 		}
 	}
@@ -153,11 +142,11 @@ func (c *checker) run() error {
 // It runs before the CFG is built so a malformed table cannot split blocks
 // mid-instruction.
 func (c *checker) handlers() error {
-	if len(c.fn.Handlers) == 0 {
+	if len(c.table) == 0 {
 		return nil
 	}
 	starts := c.starts()
-	for _, h := range c.fn.Handlers {
+	for _, h := range c.table {
 		if h.Start < 0 || h.End > len(c.code) || h.Start >= h.End || !starts[h.Start] || !starts[h.End] {
 			return c.fail(h.Start, instr.THROW, ErrHandlerRange)
 		}
@@ -262,7 +251,7 @@ func (c *checker) blocks() ([]*block, error) {
 		}
 		ip = next
 	}
-	for _, h := range c.fn.Handlers {
+	for _, h := range c.table {
 		for _, off := range []int{h.Start, h.End, h.Catch} {
 			if off > 0 && off < len(c.code) {
 				offsets = append(offsets, off)
@@ -380,7 +369,7 @@ func (c *checker) flow(blocks []*block) error {
 	// its own root: the operand stack restored to the protected region's entry
 	// depth (Handler.Depth is sp-bp, so subtract the fixed locals area) plus the
 	// delivered exception value on top.
-	for _, h := range c.fn.Handlers {
+	for _, h := range c.table {
 		operands := h.Depth - len(c.locals)
 		if operands < 0 {
 			operands = 0
@@ -466,22 +455,42 @@ func (c *checker) step(st *stack, inst instr.Instruction, op instr.Opcode, ip in
 	switch op {
 	case instr.NOP, instr.UNREACHABLE, instr.BR:
 		return false, nil
-	case instr.LOCAL_TEE, instr.GLOBAL_TEE:
+	case instr.LOCAL_TEE:
 		if st.len() == 0 {
 			return false, c.fail(ip, op, ErrStackUnderflow)
 		}
 		return false, nil
+	case instr.GLOBAL_TEE:
+		if st.len() == 0 {
+			return false, c.fail(ip, op, ErrStackUnderflow)
+		}
+		if !acceptsType(st.top(), c.prog.Globals[inst.Operand(0)]) {
+			return false, c.fail(ip, op, ErrTypeMismatch)
+		}
+		return false, nil
 	case instr.LOCAL_GET:
 		t := c.locals[inst.Operand(0)]
-		st.push(slot{kind: t.Kind(), fn: signatureOf(t)})
+		st.push(slot{kind: t.Kind(), typ: t})
 		return false, nil
 	case instr.UPVAL_GET:
 		t := c.captures[inst.Operand(0)]
-		st.push(slot{kind: t.Kind(), fn: signatureOf(t)})
+		st.push(slot{kind: t.Kind(), typ: t})
 		return false, nil
 	case instr.CONST_GET:
 		v := c.prog.Constants[inst.Operand(0)]
-		st.push(slot{kind: v.Kind(), fn: signatureOf(v.Type())})
+		st.push(slot{kind: v.Kind(), typ: v.Type()})
+		return false, nil
+	case instr.GLOBAL_GET:
+		t := c.prog.Globals[inst.Operand(0)]
+		st.push(slot{kind: t.Kind(), typ: t})
+		return false, nil
+	case instr.GLOBAL_SET:
+		if st.len() == 0 {
+			return false, c.fail(ip, op, ErrStackUnderflow)
+		}
+		if !acceptsType(st.pop(), c.prog.Globals[inst.Operand(0)]) {
+			return false, c.fail(ip, op, ErrTypeMismatch)
+		}
 		return false, nil
 	case instr.DUP:
 		if st.len() == 0 {
@@ -533,7 +542,7 @@ func (c *checker) step(st *stack, inst instr.Instruction, op instr.Opcode, ip in
 			return false, c.fail(ip, op, ErrStackUnderflow)
 		}
 		st.drop(len(t.Fields))
-		st.push(slot{kind: types.KindRef})
+		st.push(slot{kind: types.KindRef, typ: t})
 		return false, nil
 	case instr.MAP_NEW, instr.CLOSURE_NEW:
 		return true, nil
@@ -564,8 +573,8 @@ func (c *checker) call(st *stack, ip int, op instr.Opcode, tail bool) (bool, err
 	if st.len() == 0 {
 		return false, c.fail(ip, op, ErrStackUnderflow)
 	}
-	fn := st.pop().fn
-	if fn == nil {
+	fn, ok := st.pop().typ.(*types.FunctionType)
+	if !ok {
 		return true, nil
 	}
 	if st.len() < len(fn.Params) {
@@ -576,7 +585,7 @@ func (c *checker) call(st *stack, ip int, op instr.Opcode, tail bool) (bool, err
 		return false, nil
 	}
 	for _, r := range fn.Returns {
-		st.push(slot{kind: r.Kind()})
+		st.push(slot{kind: r.Kind(), typ: r})
 	}
 	return false, nil
 }
@@ -658,21 +667,12 @@ func (s *stack) merge(other *stack) (changed, balanced bool) {
 			s.slots[i].kind = k
 			changed = true
 		}
-		if s.slots[i].fn != nil && s.slots[i].fn != other.slots[i].fn {
-			s.slots[i].fn = nil
+		if s.slots[i].typ != nil && !s.slots[i].typ.Equals(other.slots[i].typ) {
+			s.slots[i].typ = nil
 			changed = true
 		}
 	}
 	return changed, true
-}
-
-// signatureOf returns t as a *FunctionType when t is one, so a slot carrying a
-// function/closure reference remembers its arity; otherwise nil.
-func signatureOf(t types.Type) *types.FunctionType {
-	if ft, ok := t.(*types.FunctionType); ok {
-		return ft
-	}
-	return nil
 }
 
 // accepts reports whether an actual stack slot of kind got satisfies a required
@@ -682,6 +682,16 @@ func signatureOf(t types.Type) *types.FunctionType {
 // satisfies an i32 operand — they share the i32 representation.
 func accepts(got, want types.Kind) bool {
 	return got == anyKind || want == anyKind || got.Repr() == want.Repr()
+}
+
+func acceptsType(got slot, want types.Type) bool {
+	if want == types.TypeRef {
+		return true
+	}
+	if got.typ != nil {
+		return want.Cast(got.typ)
+	}
+	return accepts(got.kind, want.Kind())
 }
 
 // unify folds two slot kinds at a control-flow join: equal kinds survive,

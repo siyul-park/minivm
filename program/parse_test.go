@@ -68,7 +68,7 @@ func TestParse(t *testing.T) {
 					Params:  []types.Type{types.TypeI32},
 					Returns: []types.Type{types.TypeI64},
 				}).
-					WithLocals(types.TypeI32).
+					Locals(types.TypeI32).
 					Emit(instr.New(instr.I32_CONST, 7), instr.New(instr.RETURN)).
 					MustBuild(),
 			),

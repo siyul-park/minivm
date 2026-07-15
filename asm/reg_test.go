@@ -127,7 +127,7 @@ func TestNewRegInfo(t *testing.T) {
 	require.Equal(t, uint8(8), info.NumInt)
 	require.Equal(t, uint8(4), info.NumFloat)
 	require.True(t, info.IntReserved.Contains(0))
-	require.True(t, info.FltReserved.Contains(2))
+	require.True(t, info.FloatReserved.Contains(2))
 	require.True(t, info.Scratch.Contains(7))
 }
 

@@ -59,11 +59,11 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 
 | Production file | Expected owner test | Ownership |
 |---|---|---|
-| `analysis/blocks.go` | `TestBasicBlocksAnalysis_Run` | ✅ |
+| `analysis/blocks.go` | `TestBlocksAnalysis_Run` | ✅ |
 | `analysis/blocks.go` | `TestBlocks` | ✅ |
-| `analysis/blocks.go` | `TestNewBasicBlocksAnalysis` | ✅ |
-| `analysis/gvn.go` | `TestGlobalValueNumberingAnalysis_Run` | ✅ |
-| `analysis/gvn.go` | `TestNewGlobalValueNumberingAnalysis` | ✅ |
+| `analysis/blocks.go` | `TestNewBlocksAnalysis` | ✅ |
+| `analysis/gvn.go` | `TestGVNAnalysis_Run` | ✅ |
+| `analysis/gvn.go` | `TestNewGVNAnalysis` | ✅ |
 | `asm/assembler.go` | `TestAssembler_Bind` | ✅ |
 | `asm/assembler.go` | `TestAssembler_Build` | ✅ |
 | `asm/assembler.go` | `TestAssembler_Emit` | ✅ |
@@ -381,7 +381,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `interp/interp.go` | `TestWithHeap` | ✅ |
 | `interp/interp.go` | `TestWithHook` | ✅ |
 | `interp/interp.go` | `TestWithMarshaler` | ✅ |
-| `interp/interp.go` | `TestWithMaxHeap` | ✅ |
+| `interp/interp.go` | `TestWithHeapLimit` | ✅ |
 | `interp/interp.go` | `TestWithProfiler` | ✅ |
 | `interp/interp.go` | `TestWithStack` | ✅ |
 | `interp/interp.go` | `TestWithThreshold` | ✅ |
@@ -392,8 +392,8 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `interp/pool.go` | `TestPool_Get` | ✅ |
 | `interp/pool.go` | `TestPool_Put` | ✅ |
 | `interp/trace.go` | `TestNewTracer` | ✅ |
-| `optimize/optimizer.go` | `TestNewOptimizer` | ✅ |
-| `optimize/optimizer.go` | `TestOptimizer_AddPass` | ✅ |
+| `optimize/optimizer.go` | `TestNew` | ✅ |
+| `optimize/optimizer.go` | `TestOptimizer_Add` | ✅ |
 | `optimize/optimizer.go` | `TestOptimizer_Level` | ✅ |
 | `optimize/optimizer.go` | `TestOptimizer_Optimize` | ✅ |
 | `pass/manager.go` | `TestGetResult` | ✅ |
@@ -403,7 +403,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `pass/pass.go` | `TestPreserveAll` | ✅ |
 | `pass/pass.go` | `TestPreserveNone` | ✅ |
 | `pass/pipeline.go` | `TestNewPipeline` | ✅ |
-| `pass/pipeline.go` | `TestPipeline_AddPass` | ✅ |
+| `pass/pipeline.go` | `TestPipeline_Add` | ✅ |
 | `pass/pipeline.go` | `TestPipeline_Run` | ✅ |
 | `prof/collector.go` | `TestCollector_Add` | ✅ |
 | `prof/collector.go` | `TestCollector_AddMetric` | ✅ |
@@ -452,16 +452,16 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `program/verify.go` | `TestVerify` | ✅ |
 | `program/verify.go` | `TestVerifyError_Error` | ✅ |
 | `program/verify.go` | `TestVerifyError_Unwrap` | ✅ |
-| `transform/as.go` | `TestAlgebraicSimplificationPass_Run` | ✅ |
-| `transform/as.go` | `TestNewAlgebraicSimplificationPass` | ✅ |
-| `transform/cd.go` | `TestConstantDeduplicationPass_Run` | ✅ |
-| `transform/cd.go` | `TestNewConstantDeduplicationPass` | ✅ |
-| `transform/cf.go` | `TestConstantFoldingPass_Run` | ✅ |
-| `transform/cf.go` | `TestNewConstantFoldingPass` | ✅ |
-| `transform/dce.go` | `TestDeadCodeEliminationPass_Run` | ✅ |
-| `transform/dce.go` | `TestNewDeadCodeEliminationPass` | ✅ |
-| `transform/gvn.go` | `TestGlobalValueNumberingPass_Run` | ✅ |
-| `transform/gvn.go` | `TestNewGlobalValueNumberingPass` | ✅ |
+| `transform/as.go` | `TestAlgebraicPass_Run` | ✅ |
+| `transform/as.go` | `TestNewAlgebraicPass` | ✅ |
+| `transform/cd.go` | `TestDedupPass_Run` | ✅ |
+| `transform/cd.go` | `TestNewDedupPass` | ✅ |
+| `transform/cf.go` | `TestFoldPass_Run` | ✅ |
+| `transform/cf.go` | `TestNewFoldPass` | ✅ |
+| `transform/dce.go` | `TestDCEPass_Run` | ✅ |
+| `transform/dce.go` | `TestNewDCEPass` | ✅ |
+| `transform/gvn.go` | `TestGVNPass_Run` | ✅ |
+| `transform/gvn.go` | `TestNewGVNPass` | ✅ |
 | `types/array.go` | `TestArrayType_Cast` | ✅ |
 | `types/array.go` | `TestArrayType_Equals` | ✅ |
 | `types/array.go` | `TestArrayType_Kind` | ✅ |
@@ -529,7 +529,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `types/function.go` | `TestFunctionType_Kind` | ✅ |
 | `types/function.go` | `TestFunctionType_String` | ✅ |
 | `types/function.go` | `TestFunction_Kind` | ✅ |
-| `types/function.go` | `TestFunction_LocalKinds` | ✅ |
+| `types/function.go` | `TestFunction_Slots` | ✅ |
 | `types/function.go` | `TestFunction_String` | ✅ |
 | `types/function.go` | `TestFunction_Type` | ✅ |
 | `types/function.go` | `TestNewFunction` | ✅ |

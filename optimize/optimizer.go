@@ -23,17 +23,17 @@ const (
 	O3
 )
 
-func NewOptimizer(level Level) *Optimizer {
+func New(level Level) *Optimizer {
 	o := &Optimizer{
 		pipeline: pass.NewPipeline[*program.Program](),
 		manager:  pass.NewManager(),
 		level:    level,
 	}
 
-	pass.Register(o.manager, analysis.NewBasicBlocksAnalysis())
-	pass.Register(o.manager, analysis.NewGlobalValueNumberingAnalysis())
+	pass.Register(o.manager, analysis.NewBlocksAnalysis())
+	pass.Register(o.manager, analysis.NewGVNAnalysis())
 	for _, p := range o.transforms() {
-		o.pipeline.AddPass(p)
+		o.pipeline.Add(p)
 	}
 
 	return o
@@ -47,9 +47,9 @@ func (o *Optimizer) Level() Level {
 	return o.level
 }
 
-// AddPass appends a custom transform to the optimizer pipeline.
-func (o *Optimizer) AddPass(p pass.Pass[*program.Program]) {
-	o.pipeline.AddPass(p)
+// Add appends a custom transform to the optimizer pipeline.
+func (o *Optimizer) Add(p pass.Pass[*program.Program]) {
+	o.pipeline.Add(p)
 }
 
 // transforms returns the cumulative transform pipeline for the optimizer level:
@@ -59,23 +59,23 @@ func (o *Optimizer) transforms() []pass.Pass[*program.Program] {
 	switch o.level {
 	case O1:
 		return []pass.Pass[*program.Program]{
-			transform.NewConstantFoldingPass(),
-			transform.NewConstantDeduplicationPass(),
+			transform.NewFoldPass(),
+			transform.NewDedupPass(),
 		}
 	case O2:
 		return []pass.Pass[*program.Program]{
-			transform.NewConstantFoldingPass(),
-			transform.NewAlgebraicSimplificationPass(),
-			transform.NewConstantDeduplicationPass(),
-			transform.NewDeadCodeEliminationPass(),
+			transform.NewFoldPass(),
+			transform.NewAlgebraicPass(),
+			transform.NewDedupPass(),
+			transform.NewDCEPass(),
 		}
 	case O3:
 		return []pass.Pass[*program.Program]{
-			transform.NewConstantFoldingPass(),
-			transform.NewAlgebraicSimplificationPass(),
-			transform.NewGlobalValueNumberingPass(),
-			transform.NewConstantDeduplicationPass(),
-			transform.NewDeadCodeEliminationPass(),
+			transform.NewFoldPass(),
+			transform.NewAlgebraicPass(),
+			transform.NewGVNPass(),
+			transform.NewDedupPass(),
+			transform.NewDCEPass(),
 		}
 	default:
 		return nil

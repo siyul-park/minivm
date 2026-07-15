@@ -37,7 +37,7 @@ func Link(buf *Buffer, arch Arch, codes []*Code, resolve Resolver) ([]Linked, er
 	}
 
 	bases, err := buf.writeBatch(chunks, func(bases []unsafe.Pointer) error {
-		return patchExternalRelocs(buf, arch, codes, bases, resolve)
+		return patch(buf, arch, codes, bases, resolve)
 	})
 	if err != nil {
 		return nil, err
@@ -70,11 +70,11 @@ func Link(buf *Buffer, arch Arch, codes []*Code, resolve Resolver) ([]Linked, er
 	return linked, nil
 }
 
-// patchExternalRelocs re-encodes every Relocation whose target lives
+// patch re-encodes every Relocation whose target lives
 // outside the corresponding Code and overwrites the placeholder bytes in
 // the buffer. Targets resolve in this priority order: (1) a label bound in
 // any of the freshly linked Codes, (2) the provided resolve callback.
-func patchExternalRelocs(buf *Buffer, arch Arch, codes []*Code, bases []unsafe.Pointer, resolve Resolver) error {
+func patch(buf *Buffer, arch Arch, codes []*Code, bases []unsafe.Pointer, resolve Resolver) error {
 	external := make(map[Label]unsafe.Pointer)
 	for i, c := range codes {
 		for id, off := range c.Labels {

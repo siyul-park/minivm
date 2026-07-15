@@ -174,25 +174,25 @@ func (r *REPL) command(ctx context.Context, scanner *bufio.Scanner, line string)
 			r.printErr(err)
 		}
 	case ".break", ".b":
-		if err := r.doBreak(arg); err != nil {
+		if err := r.breakpoint(arg); err != nil {
 			r.printErr(err)
 		}
 	case ".breaks":
-		r.printBreakpoints()
+		r.showBreakpoints()
 	case ".clear":
-		if err := r.doClear(arg); err != nil {
+		if err := r.clearBreakpoint(arg); err != nil {
 			r.printErr(err)
 		}
 	case ".enable":
-		if err := r.doEnable(arg, true); err != nil {
+		if err := r.enableBreakpoint(arg, true); err != nil {
 			r.printErr(err)
 		}
 	case ".disable":
-		if err := r.doEnable(arg, false); err != nil {
+		if err := r.enableBreakpoint(arg, false); err != nil {
 			r.printErr(err)
 		}
 	case ".debug":
-		if err := r.doDebug(ctx, scanner); err != nil {
+		if err := r.debug(ctx, scanner); err != nil {
 			r.printErr(err)
 		}
 	default:
@@ -367,12 +367,12 @@ func (r *REPL) profile(ctx context.Context) error {
 		return err
 	}
 
-	r.printProfile(p.Metrics())
+	r.showProfile(p.Metrics())
 	return nil
 }
 
-// printProfile renders normalized, ranked profiler metrics.
-func (r *REPL) printProfile(metrics []prof.Metric) {
+// showProfile renders normalized, ranked profiler metrics.
+func (r *REPL) showProfile(metrics []prof.Metric) {
 	p := collect(metrics).report()
 	out := r.out
 	fmt.Fprintf(out, "profile samples: %d\n", p.total)
@@ -449,7 +449,7 @@ func (r *REPL) printProfile(metrics []prof.Metric) {
 	}
 }
 
-func (r *REPL) doBreak(spec string) error {
+func (r *REPL) breakpoint(spec string) error {
 	if spec == "" {
 		return fmt.Errorf("usage: .break <ip> or .break <fn>:<ip>")
 	}
@@ -463,7 +463,7 @@ func (r *REPL) doBreak(spec string) error {
 	return nil
 }
 
-func (r *REPL) doClear(arg string) error {
+func (r *REPL) clearBreakpoint(arg string) error {
 	if arg == "" {
 		return fmt.Errorf("usage: .clear <id>")
 	}
@@ -479,7 +479,7 @@ func (r *REPL) doClear(arg string) error {
 	return nil
 }
 
-func (r *REPL) doEnable(arg string, on bool) error {
+func (r *REPL) enableBreakpoint(arg string, on bool) error {
 	if arg == "" {
 		verb := "enable"
 		if !on {
@@ -503,7 +503,7 @@ func (r *REPL) doEnable(arg string, on bool) error {
 	return nil
 }
 
-func (r *REPL) doDebug(ctx context.Context, scanner *bufio.Scanner) error {
+func (r *REPL) debug(ctx context.Context, scanner *bufio.Scanner) error {
 	if len(r.instrs) == 0 {
 		fmt.Fprintln(r.out, "(empty)")
 		return nil
@@ -525,7 +525,7 @@ func (r *REPL) doDebug(ctx context.Context, scanner *bufio.Scanner) error {
 	for {
 		err := vm.Run(ctx)
 		if errors.Is(err, debug.ErrStopped) {
-			r.printStop(dbg.Stop(), vm)
+			r.showStop(dbg.Stop(), vm)
 			done, loopErr := r.debugLoop(ctx, scanner, vm, dbg)
 			if loopErr != nil {
 				return loopErr
@@ -578,7 +578,7 @@ func (r *REPL) debugLoop(ctx context.Context, scanner *bufio.Scanner, vm *interp
 		case "frames":
 			printFrames(r.out, vm)
 		case "breaks":
-			r.printBreakpoints()
+			r.showBreakpoints()
 		case "break", "b":
 			if arg == "" {
 				r.printErr(fmt.Errorf("usage: break <ip> or break <fn>:<ip>"))
@@ -613,14 +613,14 @@ func (r *REPL) debugLoop(ctx context.Context, scanner *bufio.Scanner, vm *interp
 			return true, nil
 		case "":
 			// empty line: re-print current location
-			r.printStop(dbg.Stop(), vm)
+			r.showStop(dbg.Stop(), vm)
 		default:
 			fmt.Fprintf(r.out, "unknown debug command: %q (step/next/finish/continue/stack/locals/globals/frames/breaks/break/clear/quit)\n", line)
 		}
 	}
 }
 
-func (r *REPL) printBreakpoints() {
+func (r *REPL) showBreakpoints() {
 	if r.debugger == nil {
 		fmt.Fprintln(r.out, "no breakpoints")
 		return
@@ -639,7 +639,7 @@ func (r *REPL) printBreakpoints() {
 	}
 }
 
-func (r *REPL) printStop(stop debug.Stop, vm *interp.Interpreter) {
+func (r *REPL) showStop(stop debug.Stop, vm *interp.Interpreter) {
 	if stop.Breakpoint != 0 {
 		fmt.Fprintf(r.out, "breakpoint %d at func=%d ip=%04d", stop.Breakpoint, stop.Func, stop.IP)
 	} else {

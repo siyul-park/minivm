@@ -32,12 +32,12 @@ func Parse(r io.Reader) (*Program, error) {
 	firstLine = strings.TrimSpace(firstLine)
 
 	if strings.HasPrefix(firstLine, ".") {
-		return parseSectioned(text)
+		return sections(text)
 	}
-	return parseLegacy(text)
+	return legacy(text)
 }
 
-func parseSectioned(text string) (*Program, error) {
+func sections(text string) (*Program, error) {
 	lines := strings.Split(text, "\n")
 	prog := &Program{}
 	seen := map[string]int{}
@@ -56,7 +56,7 @@ func parseSectioned(text string) (*Program, error) {
 
 		if strings.HasPrefix(line, ".") {
 			if section != "" {
-				if err := processSection(prog, section, sectionLineStart, sectionLines); err != nil {
+				if err := parseSection(prog, section, sectionLineStart, sectionLines); err != nil {
 					return nil, err
 				}
 				sectionLines = nil
@@ -76,7 +76,7 @@ func parseSectioned(text string) (*Program, error) {
 	}
 
 	if section != "" {
-		if err := processSection(prog, section, sectionLineStart, sectionLines); err != nil {
+		if err := parseSection(prog, section, sectionLineStart, sectionLines); err != nil {
 			return nil, err
 		}
 	}
@@ -84,7 +84,7 @@ func parseSectioned(text string) (*Program, error) {
 	return prog, nil
 }
 
-func processSection(prog *Program, section string, lineStart int, lines []string) error {
+func parseSection(prog *Program, section string, lineStart int, lines []string) error {
 	var err error
 	switch section {
 	case ".code":
@@ -112,7 +112,7 @@ func processSection(prog *Program, section string, lineStart int, lines []string
 	return nil
 }
 
-func parseLegacy(text string) (*Program, error) {
+func legacy(text string) (*Program, error) {
 	scanner := bufio.NewScanner(strings.NewReader(text))
 	scanner.Buffer(make([]byte, 0, 64*1024), maxParseLineBytes)
 

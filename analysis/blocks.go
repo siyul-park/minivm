@@ -10,7 +10,7 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-type BasicBlocksAnalysis struct{}
+type BlocksAnalysis struct{}
 
 type BasicBlock struct {
 	Start int
@@ -21,10 +21,10 @@ type BasicBlock struct {
 
 var ErrInvalidJump = errors.New("invalid jump")
 
-var _ pass.Analysis[*types.Function, []*BasicBlock] = (*BasicBlocksAnalysis)(nil)
+var _ pass.Analysis[*types.Function, []*BasicBlock] = (*BlocksAnalysis)(nil)
 
-func NewBasicBlocksAnalysis() *BasicBlocksAnalysis {
-	return &BasicBlocksAnalysis{}
+func NewBlocksAnalysis() *BlocksAnalysis {
+	return &BlocksAnalysis{}
 }
 
 // Blocks builds the control-flow blocks for fn.
@@ -43,7 +43,7 @@ func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 		inst := instr.Instruction(fn.Code[ip:])
 		next := ip + inst.Width()
 		switch inst.Opcode() {
-		case instr.UNREACHABLE, instr.RETURN, instr.THROW:
+		case instr.UNREACHABLE, instr.RETURN, instr.RETURN_CALL, instr.THROW:
 			if next < len(fn.Code) {
 				offsets = append(offsets, next)
 			}
@@ -107,7 +107,7 @@ func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 
 		inst := instr.Instruction(fn.Code[ip:])
 		switch inst.Opcode() {
-		case instr.UNREACHABLE, instr.RETURN, instr.THROW:
+		case instr.UNREACHABLE, instr.RETURN, instr.RETURN_CALL, instr.THROW:
 		case instr.BR, instr.BR_IF, instr.BR_TABLE:
 			for _, offset := range instr.Targets(fn.Code, ip) {
 				if !link(blocks, indexByStart, j, offset) {
@@ -134,7 +134,7 @@ func Blocks(fn *types.Function) ([]*BasicBlock, error) {
 	return blocks, nil
 }
 
-func (p *BasicBlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*BasicBlock, error) {
+func (p *BlocksAnalysis) Run(m *pass.Manager, fn *types.Function) ([]*BasicBlock, error) {
 	return Blocks(fn)
 }
 

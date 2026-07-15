@@ -32,7 +32,7 @@ Product and engineering principles:
 ## Completed
 
 - Added static bytecode verification with `program.Verify`.
-- Added safer embedded execution controls such as `WithMaxHeap` and `ErrHeapExhausted`.
+- Added safer embedded execution controls such as `WithHeapLimit` and `ErrHeapExhausted`.
 - Added structured runtime failures with `RuntimeError`, VM call frames, and preserved `errors.Is` / `errors.As` cause checks.
 - Added shared execution infrastructure for pools, including shared JIT cache and aggregate profiling.
 - Expanded ARM64 JIT coverage for direct calls, selected indirect calls, ref-bearing slots, closure-body upvalues, and selected heap reads.

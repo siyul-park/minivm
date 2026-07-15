@@ -37,8 +37,8 @@ func TestARM64_ArraySetAfterNestedCalls(t *testing.T) {
 	outArr := types.TypedArray[float64](out)
 
 	fn := types.NewFunctionBuilder(nil).
-		WithParams(types.TypeF64Array).
-		WithReturns(types.TypeF64)
+		Params(types.TypeF64Array).
+		Returns(types.TypeF64)
 	left := fn.Label()
 	fn.Emit(instr.New(instr.LOCAL_GET, 0)).
 		Emit(instr.New(instr.I32_CONST, 0)).
@@ -320,7 +320,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.NotNil(t, compiled.module, "%+v", compiled)
 			entry, ok := compiled.module.entries[root]
 			require.True(t, ok)
-			require.NoError(t, entry.callable.Call(i.context()))
+			require.NoError(t, entry.callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
 			encoded := i.journal[journalExitID]
 			require.NotZero(t, encoded)
@@ -360,7 +360,7 @@ func TestCompiler_Compile(t *testing.T) {
 				require.NoError(t, i.SetGlobal(0, value))
 			}
 
-			require.NoError(t, entry.callable.Call(i.context()))
+			require.NoError(t, entry.callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
 			encoded := i.journal[journalExitID]
 			require.NotZero(t, encoded)
@@ -395,7 +395,7 @@ func TestCompiler_Compile(t *testing.T) {
 			entry, ok := compiled.module.entries[root]
 			require.True(t, ok)
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(2)))
-			require.NoError(t, entry.callable.Call(i.context()))
+			require.NoError(t, entry.callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
 			encoded := i.journal[journalExitID]
 			require.NotZero(t, encoded)
@@ -596,7 +596,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.True(t, ok)
 			require.NoError(t, i.SetGlobal(1, types.BoxI32(1)))
 
-			require.NoError(t, entry.callable.Call(i.context()))
+			require.NoError(t, entry.callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
 			encoded := i.journal[journalExitID]
 			require.NotZero(t, encoded)
@@ -637,7 +637,7 @@ func TestCompiler_Compile(t *testing.T) {
 			require.True(t, ok)
 			require.NoError(t, i.SetGlobal(0, types.BoxI32(1)))
 
-			require.NoError(t, entry.callable.Call(i.context()))
+			require.NoError(t, entry.callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
 			encoded := i.journal[journalExitID]
 			require.NotZero(t, encoded)
@@ -667,7 +667,7 @@ func TestCompiler_Compile(t *testing.T) {
 			entry, ok := compiled.module.entries[root]
 			require.True(t, ok)
 
-			require.NoError(t, entry.callable.Call(i.context()))
+			require.NoError(t, entry.callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
 			encoded := i.journal[journalExitID]
 			require.NotZero(t, encoded)
@@ -694,7 +694,7 @@ func TestCompiler_Compile(t *testing.T) {
 			entry, ok := compiled.module.entries[root]
 			require.True(t, ok)
 
-			require.NoError(t, entry.callable.Call(i.context()))
+			require.NoError(t, entry.callable.Call(i.journalPtr()))
 			require.Equal(t, uint64(trapFallback), i.journal[journalTrap])
 			encoded := i.journal[journalExitID]
 			require.NotZero(t, encoded)
@@ -705,7 +705,7 @@ func TestCompiler_Compile(t *testing.T) {
 		})
 
 		t.Run("loop exit", func(t *testing.T) {
-			b := types.NewFunctionBuilder(nil).WithLocals(types.TypeI32)
+			b := types.NewFunctionBuilder(nil).Locals(types.TypeI32)
 			loop := b.Label()
 			b.Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.LOCAL_SET, 0)).
 				Bind(loop).
@@ -928,7 +928,7 @@ func TestCompiler_Compile(t *testing.T) {
 		calleeBuilder := types.NewFunctionBuilder(&types.FunctionType{
 			Params:  []types.Type{types.TypeI32},
 			Returns: []types.Type{types.TypeI32},
-		}).WithLocals(types.TypeI32)
+		}).Locals(types.TypeI32)
 		loop := calleeBuilder.Label()
 		done := calleeBuilder.Label()
 		calleeBuilder.Emit(instr.New(instr.I32_CONST, 0)).

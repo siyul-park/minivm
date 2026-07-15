@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewGlobalValueNumberingAnalysis(t *testing.T) {
-	require.NotNil(t, NewGlobalValueNumberingAnalysis())
+func TestNewGVNAnalysis(t *testing.T) {
+	require.NotNil(t, NewGVNAnalysis())
 }
 
-func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
+func TestGVNAnalysis_Run(t *testing.T) {
 	i32t := &types.FunctionType{Params: []types.Type{types.TypeI32, types.TypeI32}, Returns: []types.Type{types.TypeI32}}
 
 	t.Run("within-block redundancy is captured like local CSE", func(t *testing.T) {
@@ -28,9 +28,9 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 		).MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBasicBlocksAnalysis())
-		pass.Register(m, NewGlobalValueNumberingAnalysis())
-		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		pass.Register(m, NewBlocksAnalysis())
+		pass.Register(m, NewGVNAnalysis())
+		gvn, err := pass.GetResult[*GVN](m, fn)
 		require.NoError(t, err)
 		require.Len(t, gvn.Redundant, 1)
 		r := gvn.Redundant[9]
@@ -55,9 +55,9 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 		fn := fb.MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBasicBlocksAnalysis())
-		pass.Register(m, NewGlobalValueNumberingAnalysis())
-		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		pass.Register(m, NewBlocksAnalysis())
+		pass.Register(m, NewGVNAnalysis())
+		gvn, err := pass.GetResult[*GVN](m, fn)
 		require.NoError(t, err)
 		require.Len(t, gvn.Redundant, 1)
 		var r Redundancy
@@ -80,9 +80,9 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 		fn := fb.MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBasicBlocksAnalysis())
-		pass.Register(m, NewGlobalValueNumberingAnalysis())
-		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		pass.Register(m, NewBlocksAnalysis())
+		pass.Register(m, NewGVNAnalysis())
+		gvn, err := pass.GetResult[*GVN](m, fn)
 		require.NoError(t, err)
 		require.Len(t, gvn.Redundant, 1)
 		var r Redundancy
@@ -107,15 +107,15 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 		fn := fb.MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBasicBlocksAnalysis())
-		pass.Register(m, NewGlobalValueNumberingAnalysis())
-		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		pass.Register(m, NewBlocksAnalysis())
+		pass.Register(m, NewGVNAnalysis())
+		gvn, err := pass.GetResult[*GVN](m, fn)
 		require.NoError(t, err)
 		require.Empty(t, gvn.Redundant)
 	})
 
 	t.Run("reassigned local is opaque across blocks", func(t *testing.T) {
-		fb := types.NewFunctionBuilder(i32t).WithLocals(types.TypeI32)
+		fb := types.NewFunctionBuilder(i32t).Locals(types.TypeI32)
 		merge := fb.Label()
 		fb.Emit(instr.New(instr.I32_CONST, 1), instr.New(instr.LOCAL_SET, 2))
 		fb.Emit(instr.New(instr.LOCAL_GET, 2), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.DROP))
@@ -125,15 +125,15 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 		fn := fb.MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBasicBlocksAnalysis())
-		pass.Register(m, NewGlobalValueNumberingAnalysis())
-		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		pass.Register(m, NewBlocksAnalysis())
+		pass.Register(m, NewGVNAnalysis())
+		gvn, err := pass.GetResult[*GVN](m, fn)
 		require.NoError(t, err)
 		require.Empty(t, gvn.Redundant, "slot 2 is reassigned, so its value has no stable cross-block identity")
 	})
 
 	t.Run("within-block redundancy reuses a live local home", func(t *testing.T) {
-		fn := types.NewFunctionBuilder(i32t).WithLocals(types.TypeI32).Emit(
+		fn := types.NewFunctionBuilder(i32t).Locals(types.TypeI32).Emit(
 			instr.New(instr.LOCAL_GET, 0),
 			instr.New(instr.LOCAL_GET, 1),
 			instr.New(instr.I32_ADD),
@@ -145,9 +145,9 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 		).MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBasicBlocksAnalysis())
-		pass.Register(m, NewGlobalValueNumberingAnalysis())
-		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		pass.Register(m, NewBlocksAnalysis())
+		pass.Register(m, NewGVNAnalysis())
+		gvn, err := pass.GetResult[*GVN](m, fn)
 		require.NoError(t, err)
 		require.Len(t, gvn.Redundant, 1)
 		for _, r := range gvn.Redundant {
@@ -167,9 +167,9 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 		).MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBasicBlocksAnalysis())
-		pass.Register(m, NewGlobalValueNumberingAnalysis())
-		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		pass.Register(m, NewBlocksAnalysis())
+		pass.Register(m, NewGVNAnalysis())
+		gvn, err := pass.GetResult[*GVN](m, fn)
 		require.NoError(t, err)
 		require.Len(t, gvn.Redundant, 1)
 	})
@@ -186,9 +186,9 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 		).MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBasicBlocksAnalysis())
-		pass.Register(m, NewGlobalValueNumberingAnalysis())
-		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		pass.Register(m, NewBlocksAnalysis())
+		pass.Register(m, NewGVNAnalysis())
+		gvn, err := pass.GetResult[*GVN](m, fn)
 		require.NoError(t, err)
 		require.Empty(t, gvn.Redundant)
 	})
@@ -208,9 +208,9 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 		).MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBasicBlocksAnalysis())
-		pass.Register(m, NewGlobalValueNumberingAnalysis())
-		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		pass.Register(m, NewBlocksAnalysis())
+		pass.Register(m, NewGVNAnalysis())
+		gvn, err := pass.GetResult[*GVN](m, fn)
 		require.NoError(t, err)
 		require.Empty(t, gvn.Redundant)
 	})
@@ -229,9 +229,9 @@ func TestGlobalValueNumberingAnalysis_Run(t *testing.T) {
 		).MustBuild()
 
 		m := pass.NewManager()
-		pass.Register(m, NewBasicBlocksAnalysis())
-		pass.Register(m, NewGlobalValueNumberingAnalysis())
-		gvn, err := pass.GetResult[*GlobalValueNumbering](m, fn)
+		pass.Register(m, NewBlocksAnalysis())
+		pass.Register(m, NewGVNAnalysis())
+		gvn, err := pass.GetResult[*GVN](m, fn)
 		require.NoError(t, err)
 		require.Empty(t, gvn.Redundant)
 	})

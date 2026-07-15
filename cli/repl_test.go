@@ -431,7 +431,7 @@ func TestREPL_Run(t *testing.T) {
 		}
 		var out bytes.Buffer
 		r := NewREPL(strings.NewReader(""), &out, nil)
-		r.printProfile(metrics)
+		r.showProfile(metrics)
 
 		require.Contains(t, out.String(), "0\t0000\tcapture\tunsupported-op\t3")
 		require.NotContains(t, out.String(), "capture\top-limit")
@@ -525,7 +525,7 @@ func TestREPL_Run(t *testing.T) {
 
 		var out bytes.Buffer
 		r := NewREPL(strings.NewReader(""), &out, nil)
-		r.printProfile(metrics)
+		r.showProfile(metrics)
 		output := out.String()
 		require.Contains(t, output, "4\t9\t0\t204\t8\t14\t99")
 

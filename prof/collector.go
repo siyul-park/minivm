@@ -9,13 +9,13 @@ import (
 // Collector records execution samples and named metrics.
 type Collector struct {
 	total   uint64
-	funcs   []function
+	funcs   []samples
 	ops     [256]uint64
 	metrics []Metric
 	jit     jitMetrics
 }
 
-type function struct {
+type samples struct {
 	count uint64
 	ips   []uint64
 }
@@ -172,7 +172,7 @@ func (c *Collector) grow(fn, ip int) {
 		if cap(c.funcs) >= need {
 			c.funcs = c.funcs[:need]
 		} else {
-			funcs := make([]function, need, max(need, 2*cap(c.funcs)))
+			funcs := make([]samples, need, max(need, 2*cap(c.funcs)))
 			copy(funcs, c.funcs)
 			c.funcs = funcs
 		}

@@ -10,13 +10,13 @@ import (
 	"github.com/siyul-park/minivm/program"
 )
 
-func ExampleNewOptimizer() {
+func ExampleNew() {
 	prog := program.New([]instr.Instruction{
 		instr.New(instr.I32_CONST, 1),
 		instr.New(instr.I32_CONST, 2),
 		instr.New(instr.I32_ADD),
 	})
-	optimized, err := optimize.NewOptimizer(optimize.O1).Optimize(prog)
+	optimized, err := optimize.New(optimize.O1).Optimize(prog)
 	if err != nil {
 		panic(err)
 	}

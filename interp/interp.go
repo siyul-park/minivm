@@ -38,7 +38,7 @@ type Interpreter struct {
 	types       []types.Type
 	constants   []types.Boxed
 	globals     []types.Boxed
-	globalKinds []types.Kind
+	globalTypes []types.Type
 	instrs      [][]byte
 	code        [][]func(*Interpreter)
 	backedges   []bool
@@ -52,7 +52,7 @@ type Interpreter struct {
 	stack    []types.Boxed
 	heap     []types.Value
 	base     int
-	goal     int
+	target   int
 	interned map[string]types.Ref
 	free     []int
 	rc       []int
@@ -96,7 +96,6 @@ type option struct {
 	tracer     *Tracer
 	profiler   *prof.Profiler
 	threshold  int
-	cutoff     int
 
 	frame   int
 	stack   int
@@ -162,7 +161,7 @@ func WithHeap(val int) func(*option) {
 	return func(o *option) { o.heap = val }
 }
 
-func WithMaxHeap(val int) func(*option) {
+func WithHeapLimit(val int) func(*option) {
 	return func(o *option) { o.maxHeap = val }
 }
 
@@ -235,39 +234,40 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	}
 
 	i := &Interpreter{
-		tracer:    tracer,
-		hook:      opt.hook,
-		marshaler: m,
-		cache:     opt.cache,
-		profiler:  opt.profiler,
-		samples:   samples,
-		threshold: threshold,
-		eager:     opt.threshold == 0,
-		types:     prog.Types,
-		constants: make([]types.Boxed, len(prog.Constants)),
-		globals:   make([]types.Boxed, len(prog.Globals)),
-		instrs:    make([][]byte, len(prog.Constants)+1),
-		code:      make([][]func(*Interpreter), len(prog.Constants)+1),
-		backedges: make([]bool, len(prog.Constants)+1),
-		coros:     make([]bool, len(prog.Constants)+1),
-		handlers:  make([][]instr.Handler, len(prog.Constants)+1),
-		exits:     map[anchor]func(*Interpreter){},
-		stubs:     make([]func(*Interpreter), len(prog.Constants)+1),
-		natives:   make([]unsafe.Pointer, len(prog.Constants)+1),
-		tried:     map[anchor]bool{},
-		loopHits:  map[anchor]uint8{},
-		dynamic:   map[int]bool{},
-		journal:   make([]uint64, journalHead+journalStride*opt.frame),
-		frames:    make([]frame, opt.frame),
-		stack:     make([]types.Boxed, opt.stack),
-		heap:      make([]types.Value, 0, opt.heap),
-		interned:  make(map[string]types.Ref),
-		free:      make([]int, 0, opt.heap),
-		rc:        make([]int, 0, opt.heap),
-		tick:      opt.tick,
-		fuel:      fuel,
-		gas:       fuel,
-		limit:     opt.maxHeap,
+		tracer:      tracer,
+		hook:        opt.hook,
+		marshaler:   m,
+		cache:       opt.cache,
+		profiler:    opt.profiler,
+		samples:     samples,
+		threshold:   threshold,
+		eager:       opt.threshold == 0,
+		types:       prog.Types,
+		constants:   make([]types.Boxed, len(prog.Constants)),
+		globals:     make([]types.Boxed, len(prog.Globals)),
+		globalTypes: prog.Globals,
+		instrs:      make([][]byte, len(prog.Constants)+1),
+		code:        make([][]func(*Interpreter), len(prog.Constants)+1),
+		backedges:   make([]bool, len(prog.Constants)+1),
+		coros:       make([]bool, len(prog.Constants)+1),
+		handlers:    make([][]instr.Handler, len(prog.Constants)+1),
+		exits:       map[anchor]func(*Interpreter){},
+		stubs:       make([]func(*Interpreter), len(prog.Constants)+1),
+		natives:     make([]unsafe.Pointer, len(prog.Constants)+1),
+		tried:       map[anchor]bool{},
+		loopHits:    map[anchor]uint8{},
+		dynamic:     map[int]bool{},
+		journal:     make([]uint64, journalHead+journalStride*opt.frame),
+		frames:      make([]frame, opt.frame),
+		stack:       make([]types.Boxed, opt.stack),
+		heap:        make([]types.Value, 0, opt.heap),
+		interned:    make(map[string]types.Ref),
+		free:        make([]int, 0, opt.heap),
+		rc:          make([]int, 0, opt.heap),
+		tick:        opt.tick,
+		fuel:        fuel,
+		gas:         fuel,
+		limit:       opt.maxHeap,
 	}
 	i.alloc(types.Null)
 
@@ -315,9 +315,9 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 
 	i.base = len(i.heap)
 	i.recount()
-	i.goal = max(cap(i.heap), i.base+heapRunway)
+	i.target = max(cap(i.heap), i.base+heapRunway)
 	if i.limit > 0 {
-		i.goal = max(min(i.goal, i.limit), i.base)
+		i.target = max(min(i.target, i.limit), i.base)
 	}
 
 	i.module = &types.Function{Typ: &types.FunctionType{}, Locals: prog.Locals, Code: prog.Code, Handlers: prog.Handlers}
@@ -333,23 +333,16 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		}
 	}
 
-	// Declared globals are pre-seeded to the zero Boxed of their declared kind
-	// (Program.Globals, like Locals): numeric slots get a typed zero, ref slots
-	// a retained null ref. A slot's runtime kind therefore always matches its
-	// declaration, so kind metadata for GLOBAL_GET/SET fusion and JIT lowering
-	// can be derived from the slot values at any time. Callers overwrite each
-	// run's input via Interpreter.SetGlobal before Run. This must precede bind:
-	// bind reads i.globals kinds to thread each constant's GLOBAL_* accesses, so
-	// an unseeded slot would misclassify a ref global as numeric and skip its
-	// retain/release, corrupting the refcount.
-	i.globalKinds = types.Kinds(prog.Globals)
-	for j, kind := range i.globalKinds {
-		i.globals[j] = i.zero(kind)
+	// Seed globals from their declarations. Execution specializes from the
+	// current values; globalTypes remains the boundary contract for SetGlobal and
+	// Reset.
+	for j, typ := range i.globalTypes {
+		i.globals[j] = i.zero(typ.Kind())
 	}
 
 	i.backedges[0] = nativeBackend && i.eager
-	c := i.newThreader(i.backedges[0])
-	i.code[0] = c.Compile(prog.Code, i.module.LocalKinds(), types.Kinds(i.module.Captures))
+	c := i.threader(i.backedges[0])
+	i.code[0] = c.Compile(prog.Code, i.module.Slots(), types.Kinds(i.module.Captures))
 
 	for j, v := range prog.Constants {
 		if fn, ok := v.(*types.Function); ok {
@@ -457,8 +450,15 @@ func (i *Interpreter) SetGlobal(idx int, val types.Boxed) error {
 	if idx < 0 || idx >= len(i.globals) {
 		return ErrSegmentationFault
 	}
-	if val.Kind() == types.KindRef && !i.alive(val.Ref()) {
-		return ErrSegmentationFault
+	actual := val.Type()
+	if val.Kind() == types.KindRef {
+		if !i.alive(val.Ref()) {
+			return ErrSegmentationFault
+		}
+		actual = i.heap[val.Ref()].Type()
+	}
+	if !i.globalTypes[idx].Cast(actual) {
+		return ErrTypeMismatch
 	}
 	old := i.globals[idx]
 	if old == val {
@@ -705,10 +705,9 @@ func (i *Interpreter) Reset() {
 	i.recount()
 	i.free = i.free[:0]
 
-	// Restore each global from its declaration rather than its previous runtime
-	// kind: a dynamic ref global may have held an inline scalar before reset.
-	for idx, kind := range i.globalKinds {
-		i.globals[idx] = i.zero(kind)
+	// Restore each global from its declaration rather than its previous value.
+	for idx, typ := range i.globalTypes {
+		i.globals[idx] = i.zero(typ.Kind())
 	}
 	i.pace()
 }
@@ -732,7 +731,7 @@ func (i *Interpreter) dispatch() (caught bool, err error) {
 				caught = true
 				return
 			}
-			err = i.runtimeError(r)
+			err = i.fault(r)
 		}
 	}()
 
@@ -987,7 +986,7 @@ func (i *Interpreter) observe(f *frame) error {
 			if header != f.ip {
 				continue
 			}
-			if err := i.traceLoop(f); err != nil {
+			if err := i.trace(f); err != nil {
 				return err
 			}
 			break
@@ -1011,10 +1010,10 @@ func (i *Interpreter) backedge(f *frame) error {
 	if f.ip <= 0 {
 		return nil
 	}
-	return i.traceLoop(f)
+	return i.trace(f)
 }
 
-func (i *Interpreter) traceLoop(f *frame) error {
+func (i *Interpreter) trace(f *frame) error {
 	root := anchor{addr: f.addr, ip: f.ip}
 	if i.exits[root] != nil || i.tried[root] {
 		return nil
@@ -1050,7 +1049,7 @@ func (i *Interpreter) traceLoop(f *frame) error {
 func (i *Interpreter) call(root anchor, callable asm.Callable, stats counters) func(*Interpreter) {
 	return func(i *Interpreter) {
 		stats.enter()
-		ctx := i.context()
+		ctx := i.journalPtr()
 		i.fr.code = nil
 		i.fr.upvals = nil
 		// Refresh the back-edge budget like loop does: an entry trace can carry a
@@ -1102,7 +1101,7 @@ func (i *Interpreter) call(root anchor, callable asm.Callable, stats counters) f
 func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters) func(*Interpreter) {
 	return func(i *Interpreter) {
 		stats.enter()
-		ctx := i.context()
+		ctx := i.journalPtr()
 		i.fr.code = nil
 		i.fr.upvals = nil
 		i.journal[journalBudget] = loopBudget
@@ -1142,7 +1141,7 @@ func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters) 
 func (i *Interpreter) loop(callable asm.Callable, stats counters) func(*Interpreter) {
 	return func(i *Interpreter) {
 		stats.enter()
-		ctx := i.context()
+		ctx := i.journalPtr()
 		// Decouple the loop's safepoint cadence from tick: a native iteration does
 		// the work of a whole loop body, so yielding every tick (1 under exact
 		// dispatch) would drown the loop in deopt/re-enter churn. Run many
@@ -1317,9 +1316,9 @@ func (i *Interpreter) enableBackedges(addr int) {
 	if !ok || fn == nil {
 		return
 	}
-	c := i.newThreader(true)
+	c := i.threader(true)
 	previous := i.code[addr]
-	compiled := c.Compile(fn.Code, fn.LocalKinds(), types.Kinds(fn.Captures))
+	compiled := c.Compile(fn.Code, fn.Slots(), types.Kinds(fn.Captures))
 	// Rethreading replaces only interpreted handlers. Installed native entries
 	// stay live while their saved fallbacks advance to the exact-backedge table.
 	for root := range i.exits {
@@ -1412,10 +1411,10 @@ func (i *Interpreter) restore(f *frame, addr int) {
 	f.upvals = nil
 }
 
-// context resets and fills the journal handed to native code: stack/global base
+// journalPtr resets and fills the journal handed to native code: stack/global base
 // pointers, current frame BP/SP, pointer cells for native fast paths, and the
 // per-call frame budget. It returns &journal[0], passed to native code in X0.
-func (i *Interpreter) context() unsafe.Pointer {
+func (i *Interpreter) journalPtr() unsafe.Pointer {
 	i.journal[journalStack] = 0
 	if len(i.stack) > 0 {
 		i.journal[journalStack] = uint64(uintptr(unsafe.Pointer(&i.stack[0])))
@@ -1453,10 +1452,10 @@ func (i *Interpreter) context() unsafe.Pointer {
 	return unsafe.Pointer(&i.journal[0])
 }
 
-func (i *Interpreter) runtimeError(r any) error {
+func (i *Interpreter) fault(r any) error {
 	return &RuntimeError{
 		Err:    i.cause(r),
-		Frames: i.framesInfo(),
+		Frames: i.stacktrace(),
 	}
 }
 
@@ -1585,7 +1584,7 @@ func (i *Interpreter) message(v types.Boxed) string {
 	return types.Unbox(v).String()
 }
 
-func (i *Interpreter) framesInfo() []FrameInfo {
+func (i *Interpreter) stacktrace() []FrameInfo {
 	if i.fp <= 0 {
 		return nil
 	}
@@ -1705,7 +1704,7 @@ func (i *Interpreter) keep(val types.Value) int {
 }
 
 func (i *Interpreter) alloc(val types.Value) int {
-	collected := i.goal > 0 && len(i.heap)-len(i.free) >= i.goal
+	collected := i.target > 0 && len(i.heap)-len(i.free) >= i.target
 	if collected {
 		i.gc()
 	}
@@ -1776,28 +1775,61 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 		i.coros = append(i.coros, make([]bool, n-len(i.coros))...)
 	}
 	i.backedges[addr] = nativeBackend && i.eager
-	c := i.newThreader(i.backedges[addr])
+	c := i.threader(i.backedges[addr])
 	if dynamic {
 		i.coros[addr] = i.yields(fn.Code)
 	}
 	i.instrs[addr] = fn.Code
 	i.handlers[addr] = fn.Handlers
-	i.code[addr] = c.Compile(fn.Code, fn.LocalKinds(), types.Kinds(fn.Captures))
+	i.code[addr] = c.Compile(fn.Code, fn.Slots(), types.Kinds(fn.Captures))
 	if dynamic {
 		i.dynamic[addr] = true
 	}
 }
 
-// newThreader builds generated dispatch state. The backedge callback is injected at
+// globalKinds returns the logical kinds of current global values for JIT
+// specialization. Heap-backed i64 values recover KindI64 from the heap object.
+// Dynamic scalar globals remain unknown so native lowering does not assume a
+// stable representation.
+func (i *Interpreter) globalKinds() []types.Kind {
+	kinds := make([]types.Kind, len(i.globals))
+	for idx, val := range i.globals {
+		kind := val.Kind()
+		if kind == types.KindRef && i.alive(val.Ref()) {
+			kind = i.heap[val.Ref()].Kind()
+		}
+		if i.globalTypes[idx] == types.TypeRef && kind != types.KindRef {
+			kind = instr.KindAny
+		}
+		kinds[idx] = kind
+	}
+	return kinds
+}
+
+// globalReprs returns stable representations for threaded handler selection.
+// Dynamic globals stay unknown so their handlers inspect each boxed value.
+func (i *Interpreter) globalReprs() []types.Kind {
+	kinds := make([]types.Kind, len(i.globalTypes))
+	for idx, typ := range i.globalTypes {
+		if typ == types.TypeRef {
+			kinds[idx] = instr.KindAny
+		} else {
+			kinds[idx] = typ.Kind()
+		}
+	}
+	return kinds
+}
+
+// threader builds generated dispatch state. The backedge callback is injected at
 // runtime instead of referenced by the generated global handler table, avoiding
 // an initialization cycle through trace compilation.
-func (i *Interpreter) newThreader(backedge bool) *threader {
+func (i *Interpreter) threader(backedge bool) *threader {
 	c := &threader{
 		types:     i.types,
 		constants: i.constants,
 		heap:      i.heap,
 		coros:     i.coros,
-		globals:   i.globalKinds,
+		globals:   i.globalReprs(),
 		exact:     i.tick == 1,
 	}
 	if backedge {
@@ -1880,11 +1912,11 @@ func (i *Interpreter) gc() {
 
 func (i *Interpreter) pace() {
 	live := len(i.heap) - len(i.free)
-	goal := live + max(live-i.base, heapRunway)
+	target := live + max(live-i.base, heapRunway)
 	if i.limit > 0 {
-		goal = min(goal, i.limit)
+		target = min(target, i.limit)
 	}
-	i.goal = max(goal, live)
+	i.target = max(target, live)
 }
 
 // scan derives each object's external incoming count. Exact rc includes both

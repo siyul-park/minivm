@@ -107,7 +107,7 @@ An allocation attempt runs GC at most once.
 `WithHeap(n)` sets initial heap capacity. Subject to the hard limit, the initial
 GC goal is at least that capacity and at least 64 slots beyond the baseline heap.
 
-`WithMaxHeap(n)` sets a hard heap entry limit. Values `n <= 0` mean
+`WithHeapLimit(n)` sets a hard heap entry limit. Values `n <= 0` mean
 unlimited. It also clamps the adaptive goal.
 
 The max limit is checked after GC and free-list reuse, so collectable objects

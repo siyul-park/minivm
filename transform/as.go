@@ -9,20 +9,20 @@ import (
 	"github.com/siyul-park/minivm/program"
 )
 
-// AlgebraicSimplificationPass rewrites integer peepholes whose right operand is
+// AlgebraicPass rewrites integer peepholes whose right operand is
 // a constant: identity operations are dropped and multiply/divide by a power of
 // two become shifts. It only touches I32/I64 — float identities are unsound
 // under IEEE-754 (NaN, signed zero) — and skips annihilators such as x*0 and
 // x&0, which would need to drop the live left operand.
-type AlgebraicSimplificationPass struct{}
+type AlgebraicPass struct{}
 
-var _ pass.Pass[*program.Program] = (*AlgebraicSimplificationPass)(nil)
+var _ pass.Pass[*program.Program] = (*AlgebraicPass)(nil)
 
-func NewAlgebraicSimplificationPass() *AlgebraicSimplificationPass {
-	return &AlgebraicSimplificationPass{}
+func NewAlgebraicPass() *AlgebraicPass {
+	return &AlgebraicPass{}
 }
 
-func (p *AlgebraicSimplificationPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
+func (p *AlgebraicPass) Run(m *pass.Manager, prog *program.Program) (pass.Preserved, error) {
 	for _, fn := range functions(prog) {
 		blocks, err := pass.GetResult[[]*analysis.BasicBlock](m, fn)
 		if err != nil {
@@ -53,7 +53,7 @@ func (p *AlgebraicSimplificationPass) Run(m *pass.Manager, prog *program.Program
 // simplify rewrites the window [konst][op] when konst is the operation's right
 // operand and the pair reduces to the left operand or a shift. It reports
 // whether a rewrite happened.
-func (p *AlgebraicSimplificationPass) simplify(code []byte, ip int, konst instr.Instruction) bool {
+func (p *AlgebraicPass) simplify(code []byte, ip int, konst instr.Instruction) bool {
 	op := instr.Instruction(code[ip+konst.Width():])
 
 	switch op.Opcode() {
@@ -118,7 +118,7 @@ func (p *AlgebraicSimplificationPass) simplify(code []byte, ip int, konst instr.
 }
 
 // drop replaces the [konst][op] window with NOPs, leaving the left operand.
-func (p *AlgebraicSimplificationPass) drop(code []byte, ip int, konst, op instr.Instruction) bool {
+func (p *AlgebraicPass) drop(code []byte, ip int, konst, op instr.Instruction) bool {
 	end := ip + konst.Width() + op.Width()
 	for i := ip; i < end; i++ {
 		code[i] = byte(instr.NOP)
@@ -128,14 +128,14 @@ func (p *AlgebraicSimplificationPass) drop(code []byte, ip int, konst, op instr.
 
 // shift rewrites [konst][mul|div] into [konst n][shift], turning a power-of-two
 // multiply or divide into a shift by n.
-func (p *AlgebraicSimplificationPass) shift(code []byte, ip int, konst, op instr.Instruction, n uint64, opcode instr.Opcode) bool {
+func (p *AlgebraicPass) shift(code []byte, ip int, konst, op instr.Instruction, n uint64, opcode instr.Opcode) bool {
 	konst.SetOperand(0, n)
 	code[ip+konst.Width()] = byte(opcode)
 	return true
 }
 
 // log2 returns the exponent of v when v is a power of two greater than one.
-func (p *AlgebraicSimplificationPass) log2(v uint64) (uint64, bool) {
+func (p *AlgebraicPass) log2(v uint64) (uint64, bool) {
 	if v < 2 || v&(v-1) != 0 {
 		return 0, false
 	}

@@ -97,7 +97,7 @@ A typical execution follows this path:
    └─ program.Verify(...)
 
 3. Optimize when requested
-   └─ optimize.NewOptimizer(level).Optimize(...)
+   └─ optimize.New(level).Optimize(...)
 
 4. Construct interpreter
    └─ interp.New(...)

@@ -12,11 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewConstantDeduplicationPass(t *testing.T) {
-	require.NotNil(t, NewConstantDeduplicationPass())
+func TestNewDedupPass(t *testing.T) {
+	require.NotNil(t, NewDedupPass())
 }
 
-func TestConstantDeduplicationPass_Run(t *testing.T) {
+func TestDedupPass_Run(t *testing.T) {
 	tests := []struct {
 		name     string
 		program  *program.Program
@@ -61,6 +61,25 @@ func TestConstantDeduplicationPass_Run(t *testing.T) {
 					}),
 				},
 				program.WithTypes(types.NewStructType(types.NewStructField(types.TypeF64))),
+			),
+		},
+		{
+			name: "all type operands",
+			program: program.New(
+				[]instr.Instruction{
+					instr.New(instr.REF_TEST, 0),
+					instr.New(instr.REF_CAST, 1),
+					instr.New(instr.MAP_NEW_DEFAULT, 2),
+				},
+				program.WithTypes(types.TypeString, types.TypeError, types.NewMapType(types.TypeI32, types.TypeI32)),
+			),
+			expected: program.New(
+				[]instr.Instruction{
+					instr.New(instr.REF_TEST, 0),
+					instr.New(instr.REF_CAST, 1),
+					instr.New(instr.MAP_NEW_DEFAULT, 2),
+				},
+				program.WithTypes(types.TypeString, types.TypeError, types.NewMapType(types.TypeI32, types.TypeI32)),
 			),
 		},
 		{
@@ -110,7 +129,7 @@ func TestConstantDeduplicationPass_Run(t *testing.T) {
 
 		t.Run(tt.name, func(t *testing.T) {
 			actual := tt.program
-			_, err := NewConstantDeduplicationPass().Run(m, actual)
+			_, err := NewDedupPass().Run(m, actual)
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, actual)
 		})
@@ -131,7 +150,7 @@ func TestConstantDeduplicationPass_Run(t *testing.T) {
 		want, err := before.Pop()
 		require.NoError(t, err)
 
-		_, err = NewConstantDeduplicationPass().Run(pass.NewManager(), prog)
+		_, err = NewDedupPass().Run(pass.NewManager(), prog)
 		require.NoError(t, err)
 		after := interp.New(prog, interp.WithTick(1), interp.WithThreshold(-1))
 		defer after.Close()

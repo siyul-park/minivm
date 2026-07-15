@@ -105,7 +105,7 @@ const (
 
 const noBlock = -1
 
-func newCompileInput(i *Interpreter, addr int) (*compileInput, bool) {
+func input(i *Interpreter, addr int) (*compileInput, bool) {
 	fn, ok := i.function(addr)
 	if !ok || fn == nil || len(fn.Code) == 0 {
 		return nil, false
@@ -116,7 +116,7 @@ func newCompileInput(i *Interpreter, addr int) (*compileInput, bool) {
 		function:  fn,
 		module:    i.module,
 		constants: i.constants,
-		globals:   i.globalKinds,
+		globals:   i.globalKinds(),
 		heap:      i.heap,
 		installed: i.stub(addr) != nil,
 	}, true
@@ -259,7 +259,7 @@ func staticPlan(input *compileInput) ([]plan, error) {
 			default:
 				target.steps = append(target.steps, step)
 			}
-			if !applyPlanStep(input.function, locals, constants, input.globals, heap, &flow, inst) {
+			if !applyStep(input.function, locals, constants, input.globals, heap, &flow, inst) {
 				return nil, nil
 			}
 			ip = next
@@ -566,7 +566,7 @@ func planStates(fn *types.Function, blocks []*analysis.BasicBlock, constants []t
 		idx := work[len(work)-1]
 		work = work[:len(work)-1]
 		state := append([]slot(nil), states[idx]...)
-		if !applyPlanBlock(fn, locals, constants, globals, heap, blocks[idx], &state) {
+		if !applyBlock(fn, locals, constants, globals, heap, blocks[idx], &state) {
 			return nil, false
 		}
 		for _, succ := range blocks[idx].Succs {
@@ -616,10 +616,10 @@ func mergeSlot(dst *slot, src slot) (bool, bool) {
 	return changed, true
 }
 
-func applyPlanBlock(fn *types.Function, locals []types.Type, constants []types.Boxed, globals []types.Kind, heap []types.Value, block *analysis.BasicBlock, state *[]slot) bool {
+func applyBlock(fn *types.Function, locals []types.Type, constants []types.Boxed, globals []types.Kind, heap []types.Value, block *analysis.BasicBlock, state *[]slot) bool {
 	for ip := block.Start; ip < block.End; {
 		inst := instr.Instruction(fn.Code[ip:])
-		if !applyPlanStep(fn, locals, constants, globals, heap, state, inst) {
+		if !applyStep(fn, locals, constants, globals, heap, state, inst) {
 			return false
 		}
 		ip += inst.Width()
@@ -627,7 +627,7 @@ func applyPlanBlock(fn *types.Function, locals []types.Type, constants []types.B
 	return true
 }
 
-func applyPlanStep(fn *types.Function, locals []types.Type, constants []types.Boxed, globals []types.Kind, heap []types.Value, state *[]slot, inst instr.Instruction) bool {
+func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed, globals []types.Kind, heap []types.Value, state *[]slot, inst instr.Instruction) bool {
 	push := func(value slot) { *state = append(*state, value) }
 	pop := func(count int) bool {
 		if len(*state) < count {

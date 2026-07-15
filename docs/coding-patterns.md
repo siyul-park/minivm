@@ -171,10 +171,10 @@ Constructors are standalone functions, never methods.
 
 ```go
 func newCompiler(...) *compiler
-func NewOptimizer(...) *Optimizer
+func New(...) *Optimizer
 ```
 
-Public concrete types use `NewType`; private concrete types use `newType`.
+A package-primary concrete type may use `New` when package context is unambiguous. Secondary public concrete types use `NewType`; private concrete types use `newType`.
 
 ### 1.7 Keep Methods with Their Type
 
@@ -249,7 +249,7 @@ Public APIs should make the common path obvious, keep advanced behavior explicit
 
 ### 3.1 Constructors
 
-Constructor names use `New<Type>` for public types and `new<Type>` for private types. Constructors establish invariants; if a value has no invariants, a struct literal may be clearer.
+A package-primary constructor may use `New`; other public constructors use `New<Type>`, and private constructors use `new<Type>`. Constructors establish invariants; if a value has no invariants, a struct literal may be clearer.
 
 ### 3.2 Parsers
 
@@ -285,8 +285,8 @@ Builders are mutable; built values are treated as immutable. Discard builders af
 
 ```go
 fn := types.NewFunctionBuilder(&types.FunctionType{}).
-    WithParams(types.TypeI32).
-    WithLocals(types.TypeI32).
+    Params(types.TypeI32).
+    Locals(types.TypeI32).
     Emit(instr.New(instr.LOCAL_GET, 0)).
     Build()
 ```
