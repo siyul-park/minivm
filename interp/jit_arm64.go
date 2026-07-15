@@ -193,7 +193,7 @@ func (l arm64Lowerer) conditional(ctx *lowering, block block, tail []int) bool {
 			return false
 		}
 		target := block.term.edges[cold]
-		label, ok := l.label(ctx, target, join(target.tail, tail), int(instr.BR_IF))
+		label, ok := l.label(ctx, target, appendTail(target.tail, tail), int(instr.BR_IF))
 		if !ok {
 			return false
 		}
@@ -218,7 +218,7 @@ func (l arm64Lowerer) conditional(ctx *lowering, block block, tail []int) bool {
 }
 
 func (l arm64Lowerer) next(ctx *lowering, from anchor, target edge, tail []int, opcode int) bool {
-	tail = join(target.tail, tail)
+	tail = appendTail(target.tail, tail)
 	target.tail = nil
 	if target.anchor.addr == from.addr && target.anchor.ip <= from.ip {
 		if !l.flush(ctx, false) {
@@ -1308,7 +1308,7 @@ func (l arm64Lowerer) follow(ctx *lowering, tail []int) bool {
 }
 
 func (l arm64Lowerer) path(ctx *lowering, from anchor, target edge, tail []int, opcode int) bool {
-	tail = join(target.tail, tail)
+	tail = appendTail(target.tail, tail)
 	target.tail = nil
 	label, ok := l.label(ctx, target, tail, opcode)
 	if !ok {
@@ -3170,7 +3170,7 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 		if ctx.leaf {
 			cell = ctx.pin(scratchSP)
 		}
-		addr, itab, data, scratch = l.heapRef(ctx, ref, work, cell)
+		addr, itab, data, scratch = l.loadHeap(ctx, ref, work, cell)
 	} else {
 		addr, itab, data = l.guardHeap(ctx, ref, fail)
 	}
@@ -3661,10 +3661,10 @@ func (l arm64Lowerer) trapFlushed(ctx *lowering, kind, resume, exitID int) {
 	)
 }
 
-// heapRef loads a heap cell for a value already proven to have ref kind by the
+// loadHeap loads a heap cell for a value already proven to have ref kind by the
 // symbolic stack. It reuses ref and off as outputs, so callers use it only after
 // a state barrier whose exits reload boxed operands from their stack homes.
-func (arm64Lowerer) heapRef(ctx *lowering, ref, off, cell asm.VReg) (asm.VReg, asm.VReg, asm.VReg, asm.VReg) {
+func (arm64Lowerer) loadHeap(ctx *lowering, ref, off, cell asm.VReg) (asm.VReg, asm.VReg, asm.VReg, asm.VReg) {
 	a := ctx.assembler
 	addr := a.Reg(asm.RegTypeInt, asm.Width64)
 	a.Emit(arm64.ANDI(addr, ref, maskI32))
@@ -3687,7 +3687,7 @@ func (arm64Lowerer) heapRef(ctx *lowering, ref, off, cell asm.VReg) (asm.VReg, a
 }
 
 // guardHeap loads a heap cell or branches to fail on a non-ref tag. Unlike
-// heapRef, it preserves ref because queued side exits may still need the boxed
+// loadHeap, it preserves ref because queued side exits may still need the boxed
 // operand.
 func (arm64Lowerer) guardHeap(ctx *lowering, ref asm.VReg, fail asm.Label) (asm.VReg, asm.VReg, asm.VReg) {
 	a := ctx.assembler
@@ -4184,7 +4184,7 @@ func lower(ctx *lowering, plan plan) bool {
 	return true
 }
 
-func join(steps, tail []int) []int {
+func appendTail(steps, tail []int) []int {
 	if len(steps) == 0 {
 		return tail
 	}

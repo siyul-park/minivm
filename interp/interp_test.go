@@ -1558,7 +1558,7 @@ func TestInterpreter_Run(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, types.BoxI32(64), value)
 		require.Empty(t, i.tracer.loops)
-		require.Empty(t, i.warmup)
+		require.Empty(t, i.loopHits)
 		require.Empty(t, i.tried)
 	})
 
@@ -7012,7 +7012,7 @@ func BenchmarkNew(b *testing.B) {
 	})
 }
 
-func BenchmarkInterpreter_PreHotBackedge(b *testing.B) {
+func BenchmarkInterpreter_ColdBackedge(b *testing.B) {
 	builder := program.NewBuilder()
 	loop := builder.Label()
 	done := builder.Label()

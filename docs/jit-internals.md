@@ -321,7 +321,7 @@ Before that fallback triggers, `asm.Assembler.encode` runs a branch relaxation f
 
 A loop root is anchored at a loop header: the target of a backward branch.
 
-The tracer discovers headers statically. Periodic samples still drive normal hotness, while JIT-enabled unconditional backward `BR` handlers also call `observeLoop` after moving the live frame to the exact target header. This prevents a deterministic tick phase from permanently missing those loops. Threshold-zero mode waits for eight exact hits on those headers before capture so the first iteration does not over-specialize the recorded branch path.
+The tracer discovers headers statically. Periodic samples still drive normal hotness, while JIT-enabled unconditional backward `BR` handlers also notify the interpreter after moving the live frame to the exact target header. This prevents a deterministic tick phase from permanently missing those loops. Threshold-zero mode waits for eight exact hits on those headers before capture so the first iteration does not over-specialize the recorded branch path.
 
 Loop lowering builds the normal native prologue, binds a back-edge label, lowers the loop body, commits loop-carried locals to VM stack homes, decrements `journalBudget`, and branches back while budget remains.
 

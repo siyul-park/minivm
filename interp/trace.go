@@ -186,7 +186,7 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 			if cloned == nil {
 				cloned = map[int]bool{}
 			}
-			primitive := cloneMutation(&clone, cloned)
+			primitive := cloneTarget(&clone, cloned)
 			terminalMutation = op == instr.STRUCT_SET || hasCall || !primitive
 		}
 		st.terminal = terminalMutation
@@ -322,7 +322,7 @@ func (r *Tracer) clone(i *Interpreter) Interpreter {
 	out.exits = map[anchor]func(*Interpreter){}
 	out.stubs = make([]func(*Interpreter), len(out.code))
 	out.tried = map[anchor]bool{}
-	out.warmup = map[anchor]uint8{}
+	out.loopHits = map[anchor]uint8{}
 	out.journal = slices.Clone(i.journal)
 	out.coros = slices.Clone(i.coros)
 	out.handlers = slices.Clone(i.handlers)
@@ -346,9 +346,9 @@ func (r *Tracer) clone(i *Interpreter) Interpreter {
 	return out
 }
 
-// cloneMutation isolates the next mutation target and reports whether it is a
+// cloneTarget isolates the next mutation target and reports whether it is a
 // primitive typed array whose store may continue inside the trace.
-func cloneMutation(i *Interpreter, cloned map[int]bool) bool {
+func cloneTarget(i *Interpreter, cloned map[int]bool) bool {
 	if i.sp < 3 || i.stack[i.sp-3].Kind() != types.KindRef {
 		return false
 	}
@@ -360,32 +360,32 @@ func cloneMutation(i *Interpreter, cloned map[int]bool) bool {
 	switch value := value.(type) {
 	case types.TypedArray[bool]:
 		if !cloned[addr] {
-			cloneTypedAliases(i.heap, value, cloned)
+			cloneAliases(i.heap, value, cloned)
 		}
 		return true
 	case types.TypedArray[int8]:
 		if !cloned[addr] {
-			cloneTypedAliases(i.heap, value, cloned)
+			cloneAliases(i.heap, value, cloned)
 		}
 		return true
 	case types.TypedArray[int32]:
 		if !cloned[addr] {
-			cloneTypedAliases(i.heap, value, cloned)
+			cloneAliases(i.heap, value, cloned)
 		}
 		return true
 	case types.TypedArray[int64]:
 		if !cloned[addr] {
-			cloneTypedAliases(i.heap, value, cloned)
+			cloneAliases(i.heap, value, cloned)
 		}
 		return true
 	case types.TypedArray[float32]:
 		if !cloned[addr] {
-			cloneTypedAliases(i.heap, value, cloned)
+			cloneAliases(i.heap, value, cloned)
 		}
 		return true
 	case types.TypedArray[float64]:
 		if !cloned[addr] {
-			cloneTypedAliases(i.heap, value, cloned)
+			cloneAliases(i.heap, value, cloned)
 		}
 		return true
 	case *types.Array:
@@ -406,10 +406,10 @@ func cloneMutation(i *Interpreter, cloned map[int]bool) bool {
 	return false
 }
 
-// cloneTypedAliases copies the connected component of typed-array ranges that
+// cloneAliases copies the connected component of typed-array ranges that
 // overlap target. Address arithmetic only identifies overlap; each original
 // slice copies its own visible range into the replacement backing store.
-func cloneTypedAliases[T bool | int8 | int32 | int64 | float32 | float64](heap []types.Value, target types.TypedArray[T], cloned map[int]bool) {
+func cloneAliases[T bool | int8 | int32 | int64 | float32 | float64](heap []types.Value, target types.TypedArray[T], cloned map[int]bool) {
 	if len(target) == 0 {
 		return
 	}
