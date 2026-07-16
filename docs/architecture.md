@@ -174,6 +174,7 @@ The interpreter requests native compilation through `compiler.Compile(i, root)` 
 - Guard failure materializes VM state and resumes threaded dispatch.
 - ARM64 label branches are range-checked and relaxed only to replacements that are already in range; an unreachable target falls back to threaded execution.
 - Spill frames use a stable base register, and every internal call resume point must restore the active spill-frame depth. Loop traces and plans containing heap mutation disable spilling when control flow cannot preserve that contract.
+- A ref operand may be compiled deferred, borrowing its retain from backing storage. Every path handing the flushed operand stack to the interpreter must own or redeem it first, and a committing loop-backedge flush rejects any live deferred ref.
 
 See `jit-internals.md` for trace recording, journal layout, calls, branches, loops, and fallback rules.
 

@@ -82,18 +82,35 @@ type lowering struct {
 // value is one typed operand: a register plus the runtime kind the trace
 // observed for it. raw scalars skip NaN-boxing between opcodes — an i32 keeps
 // its value in the low 32 bits, an f64 keeps its IEEE bits (identical to its
-// boxed form). A raw ref is a compile-time function or closure constant that
-// was never materialized; fn holds the target function and ref holds the
-// callable heap ref.
+// boxed form). For refs, backing records where the reference count lives: an
+// backingStack ref carries its own retain on the operand stack, while every
+// other backing defers the retain to its backing storage until the value
+// transfers to interpreter state. Field validity depends on backing:
+// backingStack uses reg; backingConst uses ref and may also use fn for a direct
+// call target; backingLocal, backingGlobal, and backingUpval use reg plus slot.
+// slot identifies the VM stack local, global, or upval that carries the retain.
 type value struct {
-	reg   asm.VReg
-	kind  types.Kind
-	raw   bool
-	known bool
-	imm   int64
-	fn    int
-	ref   int
+	reg     asm.VReg
+	kind    types.Kind
+	raw     bool
+	backing backing
+	slot    int
+	known   bool
+	imm     int64
+	fn      int
+	ref     int
 }
+
+// backing identifies where a ref value derives its reference count.
+type backing uint8
+
+const (
+	backingStack  backing = iota // retain lives on the operand stack copy
+	backingConst                 // compile-time constant, never retained
+	backingLocal                 // deferred to a VM stack local slot
+	backingGlobal                // deferred to a global slot
+	backingUpval                 // deferred to a closure upval slot
+)
 
 // activation mirrors one interpreter frame the trace inlined. Locals live in
 // registers; loaded marks which have been pulled from the VM stack and dirty
@@ -114,7 +131,7 @@ type activation struct {
 }
 
 // work is a deferred block whose branch point produced its symbolic state:
-// stack homes are current, so the block re-enters at label with
+// VM stack slots are current, so the block re-enters at label with
 // every local unloaded and every operand awaiting reload. If the branch
 // returned from an inlined callee, tail keeps the caller path that must run
 // after the deferred block stitches back into the caller frame.
@@ -138,7 +155,6 @@ type sideExit struct {
 	values []value
 	frames []activation
 	resume int
-	retain int
 	id     int
 }
 
@@ -418,13 +434,11 @@ func (ctx *lowering) frame() *activation {
 	return &ctx.frames[len(ctx.frames)-1]
 }
 
-// snapshot deep-copies operand and frame state for a deferred branch. Callers
-// must flush VM stack homes before snapshot; re-entry reloads locals on demand,
-// so stale register/local loaded state must stay dropped.
-// queueExit records a cold fallback after the caller has materialized VM stack state.
-// values may be nil to snapshot the current symbolic stack; retain is applied only
-// on the cold path before returning to threaded execution.
-func (ctx *lowering) queueExit(values []value, resume, retain int, reason prof.ExitReason, opcode int) asm.Label {
+// queueExit records a cold fallback after the caller has materialized VM stack
+// state. values may be nil to snapshot the current symbolic stack; retains for
+// deferred refs in the snapshot are applied only on the cold path before
+// returning to threaded execution.
+func (ctx *lowering) queueExit(values []value, resume int, reason prof.ExitReason, opcode int) asm.Label {
 	if values != nil {
 		ctx.values = append(ctx.values[:0], values...)
 	}
@@ -433,16 +447,19 @@ func (ctx *lowering) queueExit(values []value, resume, retain int, reason prof.E
 	id := len(ctx.descriptors)
 	ctx.descriptors = append(ctx.descriptors, exitDescriptor{reason: reason, opcode: opcode})
 	ctx.exits = append(ctx.exits, sideExit{
-		label: label, values: stack, frames: frames, resume: resume, retain: retain,
+		label: label, values: stack, frames: frames, resume: resume,
 		id: id,
 	})
 	return label
 }
 
+// snapshot deep-copies operand and frame state for a deferred branch. Callers
+// must flush VM stack slots first; re-entry reloads locals on demand, so stale
+// register and local-loaded state must stay dropped.
 func (ctx *lowering) snapshot() ([]value, []activation) {
 	values := make([]value, len(ctx.values))
 	for i, v := range ctx.values {
-		values[i] = value{kind: v.kind, raw: v.raw, known: v.known, imm: v.imm, fn: v.fn, ref: v.ref}
+		values[i] = value{kind: v.kind, raw: v.raw, backing: v.backing, slot: v.slot, known: v.known, imm: v.imm, fn: v.fn, ref: v.ref}
 	}
 	frames := make([]activation, len(ctx.frames))
 	for i, f := range ctx.frames {
