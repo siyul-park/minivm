@@ -1088,3 +1088,376 @@ func TestARM64_SelfCallWithRefArg(t *testing.T) {
 	}
 	require.Greater(t, entries, float64(0))
 }
+
+// DeferredRefElision protects Phase 3 of the JIT refcount-elision work:
+// LOCAL_GET/GLOBAL_GET/UPVAL_GET of a ref defers its retain to the backing
+// slot instead of taking one immediately, and ARRAY_GET/ARRAY_SET elide their
+// matching container release when the operand is still deferred. Every
+// sub-case asserts both the computed result and the exact heap refcount
+// survive repeated JIT warmup, so a missed retain (use-after-free) or a
+// missed release (leak) would show up as a wrong value or a wrong count.
+// Coverage of a deferred value staying live across a learned exit/continuation
+// boundary — the other half of materializeExits' retain-on-reload path — is
+// exercised separately by "jits learned br_if continuation over a live ref
+// value" in interp_test.go, which already keeps a LOCAL_GET-deferred array
+// live across a BR_IF and asserts both the result and stable exit counts.
+func TestARM64_DeferredRefElision(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	t.Run("sieve-shaped kernel keeps the local-backed array refcount exact", func(t *testing.T) {
+		const size = int32(24)
+		b := program.NewBuilder()
+		arrayTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32)
+		fill := b.Label()
+		scan := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(fill)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(scan)
+		// arr[i] = 1 — LOCAL_GET 0 pushes the array deferred (owner ownerLocal);
+		// ARRAY_SET must elide the container release to match.
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SET)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(fill)
+		b.Bind(scan)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		loop := b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		// sum += arr[i] — the same deferred array feeds ARRAY_GET.
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 2)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		var ref int
+		for n := 0; n < 32; n++ {
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(size), v)
+
+			l, err := i.Local(0)
+			require.NoError(t, err)
+			ref = l.Ref()
+			require.Equal(t, 1, i.rc[ref]) // the local slot's own retain, never doubled or dropped
+			i.Reset()
+		}
+	})
+
+	t.Run("global-backed variant elides the container release", func(t *testing.T) {
+		const size = int32(8)
+		b := program.NewBuilder()
+		arrayTyp := b.Type(types.TypeI32Array)
+		b.Globals(types.TypeI32Array)
+		b.Locals(types.TypeI32, types.TypeI32)
+		fill := b.Label()
+		scan := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.GLOBAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Bind(fill)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(scan)
+		// GLOBAL_GET pushes the array deferred (owner ownerGlobal).
+		b.Emit(instr.GLOBAL_GET, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_SET)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(fill)
+		b.Bind(scan)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		loop := b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.GLOBAL_GET, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 1)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		for n := 0; n < 32; n++ {
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(2*size), v)
+
+			g, err := i.Global(0)
+			require.NoError(t, err)
+			require.Equal(t, 1, i.rc[g.Ref()]) // the global slot's own retain, never doubled or dropped
+			i.Reset()
+		}
+	})
+
+	t.Run("upval-backed variant elides the container release", func(t *testing.T) {
+		const size = int32(8)
+		body := types.NewFunctionBuilder(nil).Captures(types.TypeI32Array).Returns(types.TypeI32)
+		body.Locals(types.TypeI32, types.TypeI32)
+		fill := body.Label()
+		scan := body.Label()
+		done := body.Label()
+		body.Emit(instr.New(instr.I32_CONST, 0)).Emit(instr.New(instr.LOCAL_SET, 0))
+		body.Bind(fill)
+		body.Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.I32_CONST, uint64(uint32(size)))).Emit(instr.New(instr.I32_GE_S)).BrIf(scan)
+		// UPVAL_GET pushes the captured array deferred (owner ownerUpval).
+		body.Emit(instr.New(instr.UPVAL_GET, 0)).Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.I32_CONST, 3)).Emit(instr.New(instr.ARRAY_SET))
+		body.Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.I32_CONST, 1)).Emit(instr.New(instr.I32_ADD)).Emit(instr.New(instr.LOCAL_SET, 0))
+		body.Br(fill)
+		body.Bind(scan)
+		body.Emit(instr.New(instr.I32_CONST, 0)).Emit(instr.New(instr.LOCAL_SET, 0))
+		body.Emit(instr.New(instr.I32_CONST, 0)).Emit(instr.New(instr.LOCAL_SET, 1))
+		loop := body.Label()
+		body.Bind(loop)
+		body.Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.I32_CONST, uint64(uint32(size)))).Emit(instr.New(instr.I32_GE_S)).BrIf(done)
+		body.Emit(instr.New(instr.LOCAL_GET, 1)).Emit(instr.New(instr.UPVAL_GET, 0)).Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.ARRAY_GET)).Emit(instr.New(instr.I32_ADD)).Emit(instr.New(instr.LOCAL_SET, 1))
+		body.Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.I32_CONST, 1)).Emit(instr.New(instr.I32_ADD)).Emit(instr.New(instr.LOCAL_SET, 0))
+		body.Br(loop)
+		body.Bind(done)
+		body.Emit(instr.New(instr.LOCAL_GET, 1)).Emit(instr.New(instr.RETURN))
+		fn, err := body.Build()
+		require.NoError(t, err)
+
+		arrayTyp := 0
+		b := program.NewBuilder()
+		arrayTyp = b.Type(types.TypeI32Array)
+		b.Const(fn)
+		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp))
+		b.ConstGet(fn).Emit(instr.CLOSURE_NEW).Emit(instr.CALL)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		for n := 0; n < 32; n++ {
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(3*size), v)
+			i.Reset()
+		}
+	})
+
+	t.Run("dup of a deferred ref consumed twice keeps both container releases elided", func(t *testing.T) {
+		const size = int32(4)
+		b := program.NewBuilder()
+		arrayTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array)
+		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
+		// Two deferred reads of the same slot, each duplicated and consumed by
+		// its own ARRAY_SET: dup of a deferred value must stay deferred (no
+		// retain), so every ARRAY_SET below still elides its release.
+		for idx := int32(0); idx < size; idx++ {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.DUP).
+				Emit(instr.I32_CONST, uint64(uint32(idx))).Emit(instr.I32_CONST, 5).Emit(instr.ARRAY_SET).
+				Emit(instr.I32_CONST, uint64(uint32(idx))).Emit(instr.I32_CONST, 7).Emit(instr.ARRAY_SET)
+		}
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		for n := 0; n < 32; n++ {
+			require.NoError(t, i.Run(context.Background()))
+			v, err := i.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, types.BoxI32(7), v) // second ARRAY_SET's value wins per index
+
+			l, err := i.Local(0)
+			require.NoError(t, err)
+			require.Equal(t, 1, i.rc[l.Ref()])
+			i.Reset()
+		}
+	})
+
+	t.Run("backer overwrite settles the deferred reader before LOCAL_SET replaces the slot", func(t *testing.T) {
+		b := program.NewBuilder()
+		arrayTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array)
+		// LOCAL_GET 0 pushes the first array deferred; overwriting local 0 via
+		// LOCAL_SET must settle() that deferred copy into an owned retain
+		// before the slot's content changes, or the first array would end up
+		// unretained once its only backer is gone.
+		b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0)
+		b.Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
+		// The stale LOCAL_GET 0 copy (now settled/owned) is still consumed here.
+		b.Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 9).Emit(instr.ARRAY_SET)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		i := New(prog, WithTick(1), WithThreshold(0))
+		defer i.Close()
+		for n := 0; n < 32; n++ {
+			require.NoError(t, i.Run(context.Background()))
+
+			l, err := i.Local(0)
+			require.NoError(t, err)
+			require.Equal(t, 1, i.rc[l.Ref()]) // second array, still owned by the local slot
+			i.Reset()
+		}
+	})
+
+	// balanced runs prog under the JIT and the pure interpreter in lockstep and
+	// asserts, on every iteration, that the popped result and every heap
+	// refcount agree with the threaded reference. A missed retain leaves an rc
+	// below threaded (and corrupts under -race via premature reuse); a missed
+	// release leaves one above threaded. It is path-agnostic: whichever cold path
+	// (terminal trap, direct call, module completion, or a threaded fallback)
+	// the trace takes, the interpreter's own bookkeeping is the oracle. Heap
+	// index 0 is the permanent Null cell whose count never gates a free, so its
+	// bookkeeping is excluded.
+	balanced := func(t *testing.T, prog *program.Program) {
+		t.Helper()
+		jit := New(prog, WithTick(1), WithThreshold(0))
+		defer jit.Close()
+		ref := New(prog, WithTick(1), WithThreshold(-1))
+		defer ref.Close()
+		for n := 0; n < 48; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, ref.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			want, err := ref.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, ref.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			ref.Reset()
+		}
+	}
+
+	t.Run("terminal-op trap redeems a deferred ref left live below it", func(t *testing.T) {
+		const size = int32(6)
+		// A ref-element ARRAY_SET lowers as an unconditional terminal trap. Put it
+		// in a compiled leaf function so the trap fires on every call, with an
+		// extra deferred copy of the array live below the store: trap() must
+		// redeem that copy's retain before the threaded resume (ARRAY_LEN) reads
+		// and then releases it. Without redeem the copy is flushed unretained and
+		// the interpreter frees the array one reference early.
+		store := types.NewFunctionBuilder(nil).Params(types.NewArrayType(types.TypeRef), types.TypeI32).Returns(types.TypeI32)
+		store.Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.REF_NULL), instr.New(instr.ARRAY_SET),
+			instr.New(instr.ARRAY_LEN),
+			instr.New(instr.RETURN),
+		)
+		fn, err := store.Build()
+		require.NoError(t, err)
+
+		b := program.NewBuilder()
+		refArrTyp := b.Type(types.NewArrayType(types.TypeRef))
+		b.Const(fn)
+		b.Locals(types.NewArrayType(types.TypeRef), types.TypeI32, types.TypeI32)
+		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(refArrTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		loop := b.Label()
+		done := b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).ConstGet(fn).Emit(instr.CALL) // store(arr, i) -> size
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 2)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		balanced(t, prog)
+	})
+
+	t.Run("deferred ref passed as a call argument stays balanced", func(t *testing.T) {
+		const size = int32(6)
+		sink := types.NewFunctionBuilder(nil).Params(types.TypeI32Array).Returns(types.TypeI32)
+		sink.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.ARRAY_LEN), instr.New(instr.RETURN))
+		fn, err := sink.Build()
+		require.NoError(t, err)
+
+		b := program.NewBuilder()
+		arrayTyp := b.Type(types.TypeI32Array)
+		b.Const(fn)
+		b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32)
+		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		loop := b.Label()
+		done := b.Label()
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		// Pass the array as a deferred (ownerLocal) ref argument: the call must
+		// own it before handing it to the callee, which releases it on RETURN.
+		b.Emit(instr.LOCAL_GET, 0).ConstGet(fn).Emit(instr.CALL)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2) // acc += sink(arr)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 2)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		balanced(t, prog)
+	})
+
+	t.Run("deferred ref forwarded through a self tail call stays balanced", func(t *testing.T) {
+		const size = int32(6)
+		// fill(arr, i, self): arr[i] = 7; i < 0 ? 0 : self(arr, i-1, self). Each
+		// LOCAL_GET of arr defers, and the tail call commits its frame; the tail
+		// dispatch must own every deferred ref before the committing flush (which
+		// now rejects any deferred it still sees).
+		fill := types.NewFunctionBuilder(nil).Params(types.TypeI32Array, types.TypeI32, types.TypeRef).Returns(types.TypeI32)
+		base := fill.Label()
+		fill.Emit(instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 0), instr.New(instr.I32_LT_S)).
+			BrIf(base).
+			Emit(
+				instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 7), instr.New(instr.ARRAY_SET),
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_SUB),
+				instr.New(instr.LOCAL_GET, 2),
+				instr.New(instr.LOCAL_GET, 2),
+				instr.New(instr.RETURN_CALL),
+			).
+			Bind(base).
+			Emit(instr.New(instr.I32_CONST, 0), instr.New(instr.RETURN))
+		fn, err := fill.Build()
+		require.NoError(t, err)
+
+		b := program.NewBuilder()
+		arrayTyp := b.Type(types.TypeI32Array)
+		b.Const(fn)
+		b.Locals(types.TypeI32Array)
+		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(size-1)))
+		b.ConstGet(fn).ConstGet(fn).Emit(instr.CALL) // fill(arr, size-1, fill)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		balanced(t, prog)
+	})
+
+	t.Run("module completion redeems a deferred ref left on the top-level stack", func(t *testing.T) {
+		tarr := types.TypedArray[int32]{3, 5, 7}
+		b := program.NewBuilder()
+		b.Const(tarr)
+		// A typed-array constant used as an ARRAY_GET container is a deferred
+		// (ownerConst) marker. Leave one live on the operand stack at module end:
+		// complete() flushes it to the top-level stack the wrapper preserves, so
+		// redeem must re-take its retain the way the threaded CONST_GET would.
+		b.ConstGet(tarr)
+		b.ConstGet(tarr).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_GET).Emit(instr.DROP)
+		// [A] is left live on the stack; the module returns it at completion.
+		prog, err := b.Build()
+		require.NoError(t, err)
+		balanced(t, prog)
+	})
+}

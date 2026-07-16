@@ -71,6 +71,15 @@ Counts include every ownership edge, whether it comes from another heap object,
 the VM stack and frames, a global or constant, temporary construction state, or
 the host. The cycle collector relies on this exactness.
 
+The ARM64 JIT may compile a stack copy of a ref as *deferred*: the operand
+borrows the retain already held by its backing storage (a local, global, upval,
+or constant) instead of taking its own, which removes the per-element
+retain/release pair from primitive container loops. The invariant is unchanged:
+every path that hands the value to interpreter-visible state — an ownership
+transfer, a guard exit stub, or a trap-fallback/module-completion redeem — takes
+exactly one retain first, so net counts stay exact and symmetric on every path,
+including deopts. See `docs/jit-internals.md` (Reference Ownership).
+
 ## Traceable Values
 
 Heap objects that can contain refs implement `types.Traceable`.

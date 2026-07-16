@@ -82,18 +82,36 @@ type lowering struct {
 // value is one typed operand: a register plus the runtime kind the trace
 // observed for it. raw scalars skip NaN-boxing between opcodes — an i32 keeps
 // its value in the low 32 bits, an f64 keeps its IEEE bits (identical to its
-// boxed form). A raw ref is a compile-time function or closure constant that
-// was never materialized; fn holds the target function and ref holds the
-// callable heap ref.
+// boxed form). For refs, owner records where the reference count lives: an
+// ownerStack ref carries its own retain on the operand stack, while every
+// other owner defers the retain to its backing storage until the value
+// transfers to interpreter state. An ownerConst ref is a compile-time function
+// or closure constant that was never materialized; fn holds the target
+// function and ref holds the callable heap ref. home locates a deferred ref's
+// backing storage: the VM stack home f.base+idx for ownerLocal, the global
+// slot index for ownerGlobal, or the upval index for ownerUpval.
 type value struct {
 	reg   asm.VReg
 	kind  types.Kind
 	raw   bool
+	owner owner
+	home  int
 	known bool
 	imm   int64
 	fn    int
 	ref   int
 }
+
+// owner is the reference-count backer of a ref value.
+type owner uint8
+
+const (
+	ownerStack  owner = iota // retain lives on the operand stack copy
+	ownerConst               // compile-time constant, never retained
+	ownerLocal               // deferred to a VM stack local slot (home)
+	ownerGlobal              // deferred to a global slot (home)
+	ownerUpval               // deferred to a closure upval slot (home)
+)
 
 // activation mirrors one interpreter frame the trace inlined. Locals live in
 // registers; loaded marks which have been pulled from the VM stack and dirty
@@ -138,7 +156,6 @@ type sideExit struct {
 	values []value
 	frames []activation
 	resume int
-	retain int
 	id     int
 }
 
@@ -421,10 +438,11 @@ func (ctx *lowering) frame() *activation {
 // snapshot deep-copies operand and frame state for a deferred branch. Callers
 // must flush VM stack homes before snapshot; re-entry reloads locals on demand,
 // so stale register/local loaded state must stay dropped.
-// queueExit records a cold fallback after the caller has materialized VM stack state.
-// values may be nil to snapshot the current symbolic stack; retain is applied only
-// on the cold path before returning to threaded execution.
-func (ctx *lowering) queueExit(values []value, resume, retain int, reason prof.ExitReason, opcode int) asm.Label {
+// queueExit records a cold fallback after the caller has materialized VM stack
+// state. values may be nil to snapshot the current symbolic stack; retains for
+// deferred refs in the snapshot are applied only on the cold path before
+// returning to threaded execution.
+func (ctx *lowering) queueExit(values []value, resume int, reason prof.ExitReason, opcode int) asm.Label {
 	if values != nil {
 		ctx.values = append(ctx.values[:0], values...)
 	}
@@ -433,7 +451,7 @@ func (ctx *lowering) queueExit(values []value, resume, retain int, reason prof.E
 	id := len(ctx.descriptors)
 	ctx.descriptors = append(ctx.descriptors, exitDescriptor{reason: reason, opcode: opcode})
 	ctx.exits = append(ctx.exits, sideExit{
-		label: label, values: stack, frames: frames, resume: resume, retain: retain,
+		label: label, values: stack, frames: frames, resume: resume,
 		id: id,
 	})
 	return label
@@ -442,7 +460,7 @@ func (ctx *lowering) queueExit(values []value, resume, retain int, reason prof.E
 func (ctx *lowering) snapshot() ([]value, []activation) {
 	values := make([]value, len(ctx.values))
 	for i, v := range ctx.values {
-		values[i] = value{kind: v.kind, raw: v.raw, known: v.known, imm: v.imm, fn: v.fn, ref: v.ref}
+		values[i] = value{kind: v.kind, raw: v.raw, owner: v.owner, home: v.home, known: v.known, imm: v.imm, fn: v.fn, ref: v.ref}
 	}
 	frames := make([]activation, len(ctx.frames))
 	for i, f := range ctx.frames {

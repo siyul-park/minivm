@@ -175,6 +175,7 @@ Violations cause silent corruption or invalid execution.
 - A JIT trace fragment's own `kind` (outcome), not the root trace's, decides whether `arm64Lowerer.walk` may lower it as a normal completion when its ops run out; only `aborted` must never fall through as completion.
 - `tree.branchIPs()` excludes `aborted` branches from continuation-inlining eligibility; a fragment that recorded a partial, unsupported prefix must never be inlined into a parent trace.
 - `interp/jit.go`'s `spillSafe` must scan the whole trace tree (root plus every branch it may inline), not just the root's last op, before deciding a trace is safe to spill.
+- A deferred (slot-backed or const) ref operand carries no retain of its own; it must be owned or redeemed before any path that hands the flushed operand stack to the interpreter (ownership transfer, guard exit stub, trap-fallback/module-completion redeem, or a real call), and a committing (loop back-edge) flush rejects any live deferred ref.
 
 ## Tests
 
