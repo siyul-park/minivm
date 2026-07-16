@@ -82,35 +82,34 @@ type lowering struct {
 // value is one typed operand: a register plus the runtime kind the trace
 // observed for it. raw scalars skip NaN-boxing between opcodes — an i32 keeps
 // its value in the low 32 bits, an f64 keeps its IEEE bits (identical to its
-// boxed form). For refs, owner records where the reference count lives: an
-// ownerStack ref carries its own retain on the operand stack, while every
-// other owner defers the retain to its backing storage until the value
-// transfers to interpreter state. An ownerConst ref is a compile-time function
-// or closure constant that was never materialized; fn holds the target
-// function and ref holds the callable heap ref. home locates a deferred ref's
-// backing storage: the VM stack home f.base+idx for ownerLocal, the global
-// slot index for ownerGlobal, or the upval index for ownerUpval.
+// boxed form). For refs, backing records where the reference count lives: an
+// backingStack ref carries its own retain on the operand stack, while every
+// other backing defers the retain to its backing storage until the value
+// transfers to interpreter state. Field validity depends on backing:
+// backingStack uses reg; backingConst uses ref and may also use fn for a direct
+// call target; backingLocal, backingGlobal, and backingUpval use reg plus slot.
+// slot identifies the VM stack local, global, or upval that carries the retain.
 type value struct {
-	reg   asm.VReg
-	kind  types.Kind
-	raw   bool
-	owner owner
-	home  int
-	known bool
-	imm   int64
-	fn    int
-	ref   int
+	reg     asm.VReg
+	kind    types.Kind
+	raw     bool
+	backing backing
+	slot    int
+	known   bool
+	imm     int64
+	fn      int
+	ref     int
 }
 
-// owner is the reference-count backer of a ref value.
-type owner uint8
+// backing identifies where a ref value derives its reference count.
+type backing uint8
 
 const (
-	ownerStack  owner = iota // retain lives on the operand stack copy
-	ownerConst               // compile-time constant, never retained
-	ownerLocal               // deferred to a VM stack local slot (home)
-	ownerGlobal              // deferred to a global slot (home)
-	ownerUpval               // deferred to a closure upval slot (home)
+	backingStack  backing = iota // retain lives on the operand stack copy
+	backingConst                 // compile-time constant, never retained
+	backingLocal                 // deferred to a VM stack local slot
+	backingGlobal                // deferred to a global slot
+	backingUpval                 // deferred to a closure upval slot
 )
 
 // activation mirrors one interpreter frame the trace inlined. Locals live in
@@ -132,7 +131,7 @@ type activation struct {
 }
 
 // work is a deferred block whose branch point produced its symbolic state:
-// stack homes are current, so the block re-enters at label with
+// VM stack slots are current, so the block re-enters at label with
 // every local unloaded and every operand awaiting reload. If the branch
 // returned from an inlined callee, tail keeps the caller path that must run
 // after the deferred block stitches back into the caller frame.
@@ -435,9 +434,6 @@ func (ctx *lowering) frame() *activation {
 	return &ctx.frames[len(ctx.frames)-1]
 }
 
-// snapshot deep-copies operand and frame state for a deferred branch. Callers
-// must flush VM stack homes before snapshot; re-entry reloads locals on demand,
-// so stale register/local loaded state must stay dropped.
 // queueExit records a cold fallback after the caller has materialized VM stack
 // state. values may be nil to snapshot the current symbolic stack; retains for
 // deferred refs in the snapshot are applied only on the cold path before
@@ -457,10 +453,13 @@ func (ctx *lowering) queueExit(values []value, resume int, reason prof.ExitReaso
 	return label
 }
 
+// snapshot deep-copies operand and frame state for a deferred branch. Callers
+// must flush VM stack slots first; re-entry reloads locals on demand, so stale
+// register and local-loaded state must stay dropped.
 func (ctx *lowering) snapshot() ([]value, []activation) {
 	values := make([]value, len(ctx.values))
 	for i, v := range ctx.values {
-		values[i] = value{kind: v.kind, raw: v.raw, owner: v.owner, home: v.home, known: v.known, imm: v.imm, fn: v.fn, ref: v.ref}
+		values[i] = value{kind: v.kind, raw: v.raw, backing: v.backing, slot: v.slot, known: v.known, imm: v.imm, fn: v.fn, ref: v.ref}
 	}
 	frames := make([]activation, len(ctx.frames))
 	for i, f := range ctx.frames {
@@ -491,15 +490,6 @@ func (ctx *lowering) pinTo(pr asm.PReg) asm.VReg {
 	v := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	_ = ctx.assembler.Pin(v, pr)
 	return v
-}
-
-// constant returns the heap ref an ownerConst marker names: ref when set,
-// otherwise fn for a direct-call marker.
-func (v value) constant() int {
-	if v.ref != 0 {
-		return v.ref
-	}
-	return v.fn
 }
 
 func reasonPriority(reason prof.CompileReason) int {

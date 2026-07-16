@@ -1097,7 +1097,7 @@ func TestARM64_SelfCallWithRefArg(t *testing.T) {
 // survive repeated JIT warmup, so a missed retain (use-after-free) or a
 // missed release (leak) would show up as a wrong value or a wrong count.
 // Coverage of a deferred value staying live across a learned exit/continuation
-// boundary — the other half of materializeExits' retain-on-reload path — is
+// boundary — the other half of emitExits' retain-on-reload path — is
 // exercised separately by "jits learned br_if continuation over a live ref
 // value" in interp_test.go, which already keeps a LOCAL_GET-deferred array
 // live across a BR_IF and asserts both the result and stable exit counts.
@@ -1118,7 +1118,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
 		b.Bind(fill)
 		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(scan)
-		// arr[i] = 1 — LOCAL_GET 0 pushes the array deferred (owner ownerLocal);
+		// arr[i] = 1 — LOCAL_GET 0 pushes the array deferred (backingLocal);
 		// ARRAY_SET must elide the container release to match.
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SET)
 		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
@@ -1184,7 +1184,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 0)
 		b.Bind(fill)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(scan)
-		// GLOBAL_GET pushes the array deferred (owner ownerGlobal).
+		// GLOBAL_GET pushes the array deferred (backingGlobal).
 		b.Emit(instr.GLOBAL_GET, 0).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_SET)
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 0)
 		b.Br(fill)
@@ -1243,7 +1243,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		body.Emit(instr.New(instr.I32_CONST, 0)).Emit(instr.New(instr.LOCAL_SET, 0))
 		body.Bind(fill)
 		body.Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.I32_CONST, uint64(uint32(size)))).Emit(instr.New(instr.I32_GE_S)).BrIf(scan)
-		// UPVAL_GET pushes the captured array deferred (owner ownerUpval).
+		// UPVAL_GET pushes the captured array deferred (backingUpval).
 		body.Emit(instr.New(instr.UPVAL_GET, 0)).Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.I32_CONST, 3)).Emit(instr.New(instr.ARRAY_SET))
 		body.Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.I32_CONST, 1)).Emit(instr.New(instr.I32_ADD)).Emit(instr.New(instr.LOCAL_SET, 0))
 		body.Br(fill)
@@ -1303,7 +1303,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			Params(types.TypeI32Array).
 			Returns(types.TypeI32)
 		// DUP of a deferred LOCAL_GET must stay deferred. Both ARRAY_LEN
-		// consumers borrow their copies without retain/release churn.
+		// consumers box their copies without retain/release churn.
 		fn, err := use.Emit(
 			instr.New(instr.LOCAL_GET, 0),
 			instr.New(instr.DUP),
@@ -1357,13 +1357,13 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		require.Greater(t, entries, float64(0))
 	})
 
-	t.Run("backer overwrite settles the deferred reader before LOCAL_SET replaces the slot", func(t *testing.T) {
+	t.Run("backing slot overwrite preserves a live deferred reader", func(t *testing.T) {
 		replace := types.NewFunctionBuilder(nil).
 			Params(types.TypeI32Array, types.TypeI32Array).
 			Returns(types.TypeI32)
 		// LOCAL_GET 0 pushes the first array deferred. LOCAL_SET 0 then replaces
-		// that backing slot with parameter 1, so settle must own the stale reader
-		// before its original home changes.
+		// that backing slot with parameter 1, so detach must own the stale reader
+		// before its original backing slot changes.
 		fn, err := replace.Emit(
 			instr.New(instr.LOCAL_GET, 0),
 			instr.New(instr.LOCAL_GET, 1),
@@ -1429,7 +1429,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 	// the trace takes, the interpreter's own bookkeeping is the oracle. Heap
 	// index 0 is the permanent Null cell whose count never gates a free, so its
 	// bookkeeping is excluded.
-	balanced := func(t *testing.T, prog *program.Program) {
+	requireRefParity := func(t *testing.T, prog *program.Program) {
 		t.Helper()
 		profile := prof.New()
 		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
@@ -1457,13 +1457,13 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		require.Greater(t, entries, float64(0))
 	}
 
-	t.Run("terminal-op trap redeems a deferred ref left live below it", func(t *testing.T) {
+	t.Run("terminal fallback preserves a live deferred ref", func(t *testing.T) {
 		const size = int32(6)
 		// A ref-element ARRAY_SET lowers as an unconditional terminal trap. Put it
 		// in a compiled leaf function so the trap fires on every call, with an
 		// extra deferred copy of the array live below the store: trap() must
-		// redeem that copy's retain before the threaded resume (ARRAY_LEN) reads
-		// and then releases it. Without redeem the copy is flushed unretained and
+		// retainDeferred that copy's retain before the threaded resume (ARRAY_LEN) reads
+		// and then releases it. Without retainDeferred the copy is flushed unretained and
 		// the interpreter frees the array one reference early.
 		store := types.NewFunctionBuilder(nil).Params(types.NewArrayType(types.TypeRef), types.TypeI32).Returns(types.TypeI32)
 		store.Emit(
@@ -1494,7 +1494,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		b.Emit(instr.LOCAL_GET, 2)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		balanced(t, prog)
+		requireRefParity(t, prog)
 	})
 
 	t.Run("ref array store owns a deferred element before transfer", func(t *testing.T) {
@@ -1523,7 +1523,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).ConstGet(fn).Emit(instr.CALL)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		balanced(t, prog)
+		requireRefParity(t, prog)
 	})
 
 	t.Run("ref struct store owns a deferred field before transfer", func(t *testing.T) {
@@ -1552,7 +1552,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).ConstGet(fn).Emit(instr.CALL)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		balanced(t, prog)
+		requireRefParity(t, prog)
 	})
 
 	t.Run("deferred ref passed as a call argument stays balanced", func(t *testing.T) {
@@ -1573,7 +1573,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		done := b.Label()
 		b.Bind(loop)
 		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
-		// Pass the array as a deferred (ownerLocal) ref argument: the call must
+		// Pass the array as a deferred (backingLocal) ref argument: the call must
 		// own it before handing it to the callee, which releases it on RETURN.
 		b.Emit(instr.LOCAL_GET, 0).ConstGet(fn).Emit(instr.CALL)
 		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2) // acc += sink(arr)
@@ -1583,7 +1583,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		b.Emit(instr.LOCAL_GET, 2)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		balanced(t, prog)
+		requireRefParity(t, prog)
 	})
 
 	t.Run("deferred ref forwarded through a self tail call stays balanced", func(t *testing.T) {
@@ -1618,22 +1618,22 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		b.ConstGet(fn).ConstGet(fn).Emit(instr.CALL) // fill(arr, size-1, fill)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		balanced(t, prog)
+		requireRefParity(t, prog)
 	})
 
-	t.Run("module completion redeems a deferred ref left on the top-level stack", func(t *testing.T) {
+	t.Run("module completion preserves a live deferred ref", func(t *testing.T) {
 		tarr := types.TypedArray[int32]{3, 5, 7}
 		b := program.NewBuilder()
 		b.Const(tarr)
 		// A typed-array constant used as an ARRAY_GET container is a deferred
-		// (ownerConst) marker. Leave one live on the operand stack at module end:
+		// (backingConst) marker. Leave one live on the operand stack at module end:
 		// complete() flushes it to the top-level stack the wrapper preserves, so
-		// redeem must re-take its retain the way the threaded CONST_GET would.
+		// retainDeferred must re-take its retain the way the threaded CONST_GET would.
 		b.ConstGet(tarr)
 		b.ConstGet(tarr).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_GET).Emit(instr.DROP)
 		// [A] is left live on the stack; the module returns it at completion.
 		prog, err := b.Build()
 		require.NoError(t, err)
-		balanced(t, prog)
+		requireRefParity(t, prog)
 	})
 }

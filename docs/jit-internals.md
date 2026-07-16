@@ -299,9 +299,9 @@ Recorded forward branches become guarded exits or learned branch continuations.
 
 When a side exit becomes hot, the tracer records that target. A later compile may fold it into the same native callable as a pending block. Loop roots are never folded as ordinary continuations: they deoptimize at the header and use their standalone loop entry, which preserves back-edge and safepoint semantics.
 
-Pending blocks reload from VM stack homes, run through a FIFO worklist, and stop at a bounded pending cap. The trace frontend orders learned roots once; the backend does not repeatedly sort pending work.
+Pending blocks reload from VM stack slots, run through a FIFO worklist, and stop at a bounded pending cap. The trace frontend orders learned roots once; the backend does not repeatedly sort pending work.
 
-A cold branch edge may carry caller-continuation block IDs. The side trace body lowers first; on callee `RETURN`, lowering stitches the result into the caller frame and follows those IDs. The continuation reloads from VM stack homes before continuing.
+A cold branch edge may carry caller-continuation block IDs. The side trace body lowers first; on callee `RETURN`, lowering stitches the result into the caller frame and follows those IDs. The continuation reloads from VM stack slots before continuing.
 
 Each deferred profiled edge gets its own label and symbolic snapshot. Static state-backed blocks share labels only through explicit block IDs, never through bytecode-anchor equality.
 
@@ -311,7 +311,7 @@ Targets still deoptimize when they are unknown or unsupported.
 
 Branch lowering may skip hot-path flushes only when the branch state is clean. If locals or operands are dirty, flush first. Learned continuations and side exits must see the same stack image as threaded dispatch.
 
-A committing flush (`selfCall`, `tailLoop`) transfers operand ownership to the VM stack, so it accepts a live `ownerStack` ref: that ref already carries the retain taken when it was pushed, and committing hands the same edge to the stack, exactly as the inlined call path does when it stores arguments and drops them from the operand stack. It rejects any live deferred ref (a const marker or a slot-backed operand): a deferred ref carries no retain of its own, and a loop back-edge has no cold stub to take one, so owning it each iteration would leak. A self-recursive function still forwards a ref parameter to itself because the argument is owned into the callee frame (through the call-argument path) before the commit. See Reference Ownership.
+A committing flush (`selfCall`, `tailLoop`) transfers operand ownership to the VM stack, so it accepts a live `backingStack` ref: that ref already carries the retain taken when it was pushed, and committing hands the same edge to the stack, exactly as the inlined call path does when it stores arguments and drops them from the operand stack. It rejects any live deferred ref (a const marker or a slot-backed operand): a deferred ref carries no retain of its own, and a loop back-edge has no cold stub to take one, so owning it each iteration would leak. A self-recursive function still forwards a ref parameter to itself because the argument is owned into the callee frame (through the call-argument path) before the commit. See Reference Ownership.
 
 ### Branch range validation
 
@@ -325,7 +325,7 @@ A loop root is anchored at a loop header: the target of a backward branch.
 
 The tracer discovers headers statically. Periodic samples still drive normal hotness, while JIT-enabled unconditional backward `BR` handlers also notify the interpreter after moving the live frame to the exact target header. This prevents a deterministic tick phase from permanently missing those loops. Threshold-zero mode waits for eight exact hits on those headers before capture so the first iteration does not over-specialize the recorded branch path.
 
-Loop lowering builds the normal native prologue, binds a back-edge label, lowers the loop body, commits loop-carried locals to VM stack homes, decrements `journalBudget`, and branches back while budget remains.
+Loop lowering builds the normal native prologue, binds a back-edge label, lowers the loop body, commits loop-carried locals to VM stack slots, decrements `journalBudget`, and branches back while budget remains.
 
 Loop-carried locals round-trip through the VM stack each iteration. This avoids a cross-back-edge register fixpoint.
 
@@ -388,24 +388,24 @@ If a release may free the object (`rc == 1`), native code deoptimizes before the
 
 ## Reference Ownership
 
-A ref `value` carries an `owner` that records where its reference count lives.
+A ref `value` carries an `backing` that records where its reference count lives.
 
-| Owner | Retain location |
+| Backing | Retain location |
 |---|---|
-| `ownerStack` | the operand-stack copy owns its own retain |
-| `ownerConst` | a compile-time constant marker; retain deferred |
-| `ownerLocal` / `ownerGlobal` / `ownerUpval` | deferred to the backing slot (`home`) |
+| `backingStack` | the operand-stack copy owns its own retain |
+| `backingConst` | a compile-time constant marker; retain deferred |
+| `backingLocal` / `backingGlobal` / `backingUpval` | deferred to the backing slot (`slot`) |
 
-Only an `ownerStack` ref carries a retain. Every other owner defers it to backing storage that already holds one, so the operand is a borrowed view until it transfers to interpreter-visible state.
+Only a `backingStack` ref carries a retain. Every other backing defers it to backing storage that already holds one, so the operand is a borrowed view until it transfers to interpreter-visible state.
 
-Producers push deferred. `LOCAL_GET`, `GLOBAL_GET`, and `UPVAL_GET` of a ref take no retain and record the slot as `home`; const markers push `ownerConst`; `DUP` of a deferred ref copies it deferred. Container consumers borrow the operand and elide their matching release when it is deferred: `ARRAY_GET`/`SET`, `STRUCT_GET`/`SET`, `ARRAY_LEN`, `REF_IS_NULL`, `DROP`, and the coroutine, error, and string reads all skip the container `guardRC`/release when the consumed operand is not `ownerStack`. A ref element or payload result is still retained; only the container's own release is elided. This removes the per-element retain/release pair from primitive container loops.
+Producers push deferred. `LOCAL_GET`, `GLOBAL_GET`, and `UPVAL_GET` of a ref take no retain and record its backing slot; const markers push `backingConst`; `DUP` of a deferred ref copies it deferred. Container consumers borrow the operand and elide their matching release when it is deferred: `ARRAY_GET`/`SET`, `STRUCT_GET`/`SET`, `ARRAY_LEN`, `REF_IS_NULL`, `DROP`, and the coroutine, error, and string reads all skip the container `guardRC`/release when the consumed operand is not `backingStack`. A ref element or payload result is still retained; only the container's own release is elided. This removes the per-element retain/release pair from primitive container loops.
 
 A retain materializes at every point that hands a deferred value to storage the interpreter can see:
 
 - `own` — storing into a local, global, or upval slot, transferring a ref into an array element or struct field, transferring a call argument through `locals()`, and boxing an entry-frame return in `ret`.
-- `settle` — before a backing slot is overwritten (`LOCAL_SET`/`GLOBAL_SET`/`UPVAL_SET`) or a frame dies (`stitch`, tail dispatch), every live operand deferred to that slot is owned first.
-- exit stubs — `materializeExits` reloads each deferred operand from its flushed VM stack home and retains it on the cold guard path.
-- `redeem` — a stub-less deopt that hands the flushed operand stack to the interpreter (a trap fallback, module completion) re-takes each deferred operand's retain from its home.
+- `detach` — before a backing slot is overwritten (`LOCAL_SET`/`GLOBAL_SET`/`UPVAL_SET`) or a frame dies (`stitch`, tail dispatch), every live operand deferred to that slot is owned first.
+- exit stubs — `emitExits` reloads each deferred operand from its flushed VM stack slot and retains it on the cold guard path.
+- `retainDeferred` — a stub-less deopt that hands the flushed operand stack to the interpreter (a trap fallback, module completion) re-takes each deferred operand's retain from its VM stack slot.
 - real calls — `directCall` and `selfCall` own every live deferred operand before the `BL`, because a callee trap adopts the caller's flushed stack.
 
 A committing (loop back-edge) flush rejects any live deferred ref: owning it would retain once per iteration with no matching release, so a loop-carried deferred ref keeps the whole trace threaded instead.
@@ -418,7 +418,7 @@ Native full-trace reads include observed shapes for scalar `REF_GET`, selected `
 
 Heap reads guard ref address, heap itab, array element kind, struct type pointer, struct field kind, index bounds, and release safety when needed.
 
-Ref reads retain the loaded element or payload. A container consumer releases its container handle only when that operand owns its retain, eliding the release for a deferred operand (see Reference Ownership): `CORO_VALUE` still retains the value and releases the handle when the handle is `ownerStack`. `CORO_DONE` keeps the handle.
+Ref reads retain the loaded element or payload. A container consumer releases its container handle only when that operand owns its retain, eliding the release for a deferred operand (see Reference Ownership): `CORO_VALUE` still retains the value and releases the handle when the handle is `backingStack`. `CORO_DONE` keeps the handle.
 
 Heap-promoted `i64` values fall back before boxing.
 

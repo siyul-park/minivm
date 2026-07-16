@@ -13,6 +13,13 @@ import (
 // arm64Lowerer is the AArch64 JIT lowerer.
 type arm64Lowerer struct{}
 
+type flushMode uint8
+
+const (
+	flushSnapshot flushMode = iota
+	flushCommit
+)
+
 // Boxing masks used by scalar lowering.
 const (
 	maskI32 = uint64(0xFFFFFFFF)
@@ -97,11 +104,11 @@ func (l arm64Lowerer) enter(ctx *lowering) {
 	a.Bind(ctx.head)
 }
 
-// materializeExits emits every queued cold stub. A deferred ref in the exit
-// snapshot was flushed to its VM stack home without a retain, and the
+// emitExits emits every queued cold stub. A deferred ref in the exit
+// snapshot was flushed to its VM stack slot without a retain, and the
 // interpreter resuming there releases each stack ref it pops, so the stub
 // takes the retain here — on the cold path only.
-func (l arm64Lowerer) materializeExits(ctx *lowering) {
+func (l arm64Lowerer) emitExits(ctx *lowering) {
 	// Every exit's cold stub is a mutually exclusive, straight-line block
 	// (each ends in trapFlushed, an unconditional trap/return), so the
 	// registers used to reload-and-retain a deferred value are safe to reuse
@@ -119,14 +126,14 @@ func (l arm64Lowerer) materializeExits(ctx *lowering) {
 		ctx.assembler.Bind(exit.label)
 		var addr asm.VReg
 		for j, v := range exit.values {
-			switch v.owner {
-			case ownerConst:
-				if ref := v.constant(); ref > 0 {
+			switch v.backing {
+			case backingConst:
+				if ref := v.ref; ref > 0 {
 					l.retain(ctx, ref)
 				}
-			case ownerLocal, ownerGlobal, ownerUpval:
+			case backingLocal, backingGlobal, backingUpval:
 				// The stub owns no live registers, but flush wrote every
-				// operand to its VM stack home before the guard, so the home
+				// operand to its VM stack slot before the guard, so the slot
 				// is authoritative: reload the boxed ref from there and take
 				// the retain the interpreter frame will release.
 				if addr.Width() == asm.WidthUndefined {
@@ -196,7 +203,7 @@ func (l arm64Lowerer) term(ctx *lowering, block block, tail []int) bool {
 		if block.term.hot == 0 {
 			return l.next(ctx, block.anchor, target, tail, int(instr.BR))
 		}
-		if !l.flush(ctx, false) {
+		if !l.flush(ctx, flushSnapshot) {
 			return false
 		}
 		return l.path(ctx, block.anchor, target, tail, int(instr.BR))
@@ -235,7 +242,7 @@ func (l arm64Lowerer) conditional(ctx *lowering, block block, tail []int) bool {
 	if block.term.hot >= 0 && block.term.hot < len(block.term.edges) {
 		cold := 1 - block.term.hot
 		clean := l.clean(ctx)
-		if !clean && !l.flush(ctx, false) {
+		if !clean && !l.flush(ctx, flushSnapshot) {
 			return false
 		}
 		target := block.term.edges[cold]
@@ -251,7 +258,7 @@ func (l arm64Lowerer) conditional(ctx *lowering, block block, tail []int) bool {
 		return l.next(ctx, block.anchor, block.term.edges[block.term.hot], tail, int(instr.BR_IF))
 	}
 
-	if !l.flush(ctx, false) {
+	if !l.flush(ctx, flushSnapshot) {
 		return false
 	}
 	taken := ctx.assembler.Label()
@@ -267,7 +274,7 @@ func (l arm64Lowerer) next(ctx *lowering, from anchor, target edge, tail []int, 
 	tail = appendTail(target.tail, tail)
 	target.tail = nil
 	if target.anchor.addr == from.addr && target.anchor.ip <= from.ip {
-		if !l.flush(ctx, false) {
+		if !l.flush(ctx, flushSnapshot) {
 			return false
 		}
 		return l.path(ctx, from, target, tail, opcode)
@@ -443,7 +450,7 @@ func (l arm64Lowerer) steps(ctx *lowering, ops []step) (bool, bool) {
 		case instr.F64_GE:
 			ok = l.f64Cmp(ctx, arm64.CondGE)
 		case instr.ARRAY_GET:
-			if ctx.count() >= 2 && ctx.values[len(ctx.values)-2].owner == ownerConst && ctx.values[len(ctx.values)-2].ref > 0 {
+			if ctx.count() >= 2 && ctx.values[len(ctx.values)-2].backing == backingConst && ctx.values[len(ctx.values)-2].ref > 0 {
 				ok = l.arrayGetKnown(ctx, op)
 			} else {
 				ok = l.arrayGet(ctx, op)
@@ -763,7 +770,7 @@ func (l arm64Lowerer) fuse(ctx *lowering, ops []step, idx int) int {
 	if callee != consumer.callee || resolve(ctx.module, ctx.heap, callee) == nil {
 		return 0
 	}
-	ctx.push(value{fn: callee, kind: types.KindRef, owner: ownerConst, ref: ref})
+	ctx.push(value{fn: callee, kind: types.KindRef, backing: backingConst, ref: ref})
 	return 1
 }
 
@@ -806,11 +813,11 @@ func (l arm64Lowerer) unreachable(ctx *lowering, op step) bool {
 	return l.exit(ctx, op.ip, prof.ExitTerminalOp, int(op.op))
 }
 
-// localGet loads local idx and, for a ref, pushes it deferred: owner ownerLocal
-// with home f.base+idx records that the slot itself still carries the retain,
+// localGet loads local idx and, for a ref, pushes it deferred: backingLocal
+// with slot f.base+idx records that the slot itself still carries the retain,
 // so no retain is taken here. A container consumer that later reads this
 // operand elides its matching release to balance the missing retain; a
-// LOCAL_SET/tail/RETURN that would invalidate the slot settles this deferral
+// LOCAL_SET/tail/RETURN that would invalidate the slot detaches this deferral
 // into a real retain first.
 func (l arm64Lowerer) localGet(ctx *lowering, op step) bool {
 	f := ctx.frame()
@@ -826,8 +833,8 @@ func (l arm64Lowerer) localGet(ctx *lowering, op step) bool {
 	}
 	v := f.locals[idx]
 	if v.kind == types.KindRef {
-		v.owner = ownerLocal
-		v.home = f.base + idx
+		v.backing = backingLocal
+		v.slot = f.base + idx
 	}
 	ctx.push(v)
 	return true
@@ -845,15 +852,15 @@ func (l arm64Lowerer) localSet(ctx *lowering, op step, pop bool) bool {
 	}
 	if vp.kind == types.KindRef {
 		// Own the incoming value before it is captured into a guard snapshot:
-		// pre() must observe ownerStack, or a deopt on this op would re-enter
+		// pre() must observe backingStack, or a deopt on this op would re-enter
 		// the interpreter expecting a retain the stub cannot see anymore.
-		// settle() then materializes every other deferred reader of the slot
+		// detach() then materializes every other deferred reader of the slot
 		// this SET is about to overwrite.
 		boxed, ok := l.own(ctx, vp)
 		if !ok {
 			return false
 		}
-		if !l.settle(ctx, ownerLocal, f.base+idx) {
+		if !l.detach(ctx, backingLocal, f.base+idx) {
 			return false
 		}
 		pre := ctx.pre()
@@ -890,7 +897,7 @@ func (l arm64Lowerer) localSet(ctx *lowering, op step, pop bool) bool {
 }
 
 // globalGet loads a global directly from the globals base. Scalars push
-// raw; a ref pushes deferred (owner ownerGlobal, home idx): the slot itself
+// raw; a ref pushes deferred (backingGlobal, slot idx): the slot itself
 // still carries the retain, so no retain is taken here (see localGet).
 func (l arm64Lowerer) globalGet(ctx *lowering, op step) bool {
 	idx, kind, ok := l.global(ctx, op)
@@ -907,7 +914,7 @@ func (l arm64Lowerer) globalGet(ctx *lowering, op step) bool {
 		dst = l.sign64(ctx, dst)
 	}
 	if kind == types.KindRef {
-		ctx.push(value{reg: dst, kind: kind, owner: ownerGlobal, home: idx})
+		ctx.push(value{reg: dst, kind: kind, backing: backingGlobal, slot: idx})
 		return true
 	}
 	ctx.push(value{reg: dst, kind: kind, raw: true})
@@ -933,17 +940,17 @@ func (l arm64Lowerer) globalSet(ctx *lowering, op step, pop bool) bool {
 	var boxed asm.VReg
 	if kind == types.KindRef {
 		// Own the incoming value before it can be captured by a guard
-		// snapshot, then settle every other deferred reader of the slot this
+		// snapshot, then detach every other deferred reader of the slot this
 		// SET is about to overwrite (see localSet).
 		boxed, ok = l.own(ctx, vp)
 		if !ok {
 			return false
 		}
-		if !l.settle(ctx, ownerGlobal, idx) {
+		if !l.detach(ctx, backingGlobal, idx) {
 			return false
 		}
 	} else {
-		boxed, ok = l.borrow(ctx, *vp)
+		boxed, ok = l.box(ctx, *vp)
 		if !ok {
 			return false
 		}
@@ -994,8 +1001,8 @@ func (l arm64Lowerer) drop(ctx *lowering, op step) bool {
 	}
 	pre := ctx.pre()
 	v := ctx.values[len(ctx.values)-1]
-	if v.kind == types.KindRef && v.owner == ownerStack {
-		boxed, ok := l.borrow(ctx, v)
+	if v.kind == types.KindRef && v.backing == backingStack {
+		boxed, ok := l.box(ctx, v)
 		if !ok {
 			return false
 		}
@@ -1005,16 +1012,16 @@ func (l arm64Lowerer) drop(ctx *lowering, op step) bool {
 	return true
 }
 
-// dup duplicates the top operand. A deferred ref (owner != ownerStack) is
+// dup duplicates the top operand. A deferred ref (backing != backingStack) is
 // still backed by its slot, so the duplicate stays deferred with the same
-// owner/home and no retain; an owned ref takes a fresh retain for the copy.
+// backing/slot and no retain; an owned ref takes a fresh retain for the copy.
 func (l arm64Lowerer) dup(ctx *lowering) bool {
 	if ctx.count() < 1 {
 		return false
 	}
 	v := ctx.values[len(ctx.values)-1]
-	if v.kind == types.KindRef && v.owner == ownerStack {
-		boxed, ok := l.borrow(ctx, v)
+	if v.kind == types.KindRef && v.backing == backingStack {
+		boxed, ok := l.box(ctx, v)
 		if !ok {
 			return false
 		}
@@ -1052,7 +1059,7 @@ func (l arm64Lowerer) selectOp(ctx *lowering) bool {
 }
 
 // clean reports whether a branch can skip the hot-path flush: no live operand
-// or dirty local will be reloaded from VM stack homes later in the trace.
+// or dirty local will be reloaded from VM stack slots later in the trace.
 func (l arm64Lowerer) clean(ctx *lowering) bool {
 	if ctx.count() != 0 {
 		return false
@@ -1084,7 +1091,7 @@ func (l arm64Lowerer) constGetKnown(ctx *lowering, op step) bool {
 	switch ctx.heap[ref].(type) {
 	case types.TypedArray[bool], types.TypedArray[int8], types.TypedArray[int32],
 		types.TypedArray[float32], types.TypedArray[float64]:
-		ctx.push(value{kind: types.KindRef, owner: ownerConst, ref: ref})
+		ctx.push(value{kind: types.KindRef, backing: backingConst, ref: ref})
 		return true
 	default:
 		return l.constGet(ctx, op)
@@ -1136,7 +1143,7 @@ func (l arm64Lowerer) arrayGetKnown(ctx *lowering, op step) bool {
 	}
 	marker := ctx.values[len(ctx.values)-2]
 	constant := marker.ref
-	if marker.owner != ownerConst || constant <= 0 || constant >= len(ctx.heap) {
+	if marker.backing != backingConst || constant <= 0 || constant >= len(ctx.heap) {
 		return false
 	}
 
@@ -1159,7 +1166,7 @@ func (l arm64Lowerer) arrayGetKnown(ctx *lowering, op step) bool {
 	}
 
 	pre := append([]value(nil), ctx.values...)
-	if !l.flush(ctx, false) {
+	if !l.flush(ctx, flushSnapshot) {
 		return false
 	}
 	clear(ctx.frame().state)
@@ -1215,11 +1222,11 @@ func (l arm64Lowerer) enterBlock(ctx *lowering, state []slot) {
 	ctx.spare = asm.VReg{}
 	ctx.values = ctx.values[:0]
 	for _, slot := range state {
-		o := ownerStack
+		o := backingStack
 		if slot.refKnown {
-			o = ownerConst
+			o = backingConst
 		}
-		ctx.values = append(ctx.values, value{kind: slot.kind, ref: slot.ref, owner: o})
+		ctx.values = append(ctx.values, value{kind: slot.kind, ref: slot.ref, backing: o})
 	}
 	frame := ctx.frame()
 	clear(frame.state)
@@ -1233,7 +1240,7 @@ func (l arm64Lowerer) table(ctx *lowering, block block, tail []int) bool {
 	cond := ctx.pop()
 	value := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 	ctx.assembler.Emit(arm64.ANDI(value, cond.reg, maskI32))
-	if !l.flush(ctx, false) {
+	if !l.flush(ctx, flushSnapshot) {
 		return false
 	}
 	labels := make([]asm.Label, len(block.term.edges))
@@ -1258,7 +1265,7 @@ func (l arm64Lowerer) follow(ctx *lowering, tail []int) bool {
 	if len(tail) == 0 {
 		return true
 	}
-	if !l.flush(ctx, false) {
+	if !l.flush(ctx, flushSnapshot) {
 		return false
 	}
 	id := tail[0]
@@ -1323,14 +1330,14 @@ func (l arm64Lowerer) label(ctx *lowering, target edge, tail []int, opcode int) 
 
 // marked reports whether a constant ref marker blocks deferred continuation
 // reload. reload() already reconstructs a slot-backed deferred value
-// correctly (flush wrote its boxed content to the operand's VM stack home
-// with no retain, and owner/home survive the round trip unchanged), so only
-// ownerConst — whose compile-time fn/ref identity a plain reload cannot
+// correctly (flush wrote its boxed content to the operand's VM stack slot
+// with no retain, and backing/slot survive the round trip unchanged), so only
+// backingConst — whose compile-time fn/ref identity a plain reload cannot
 // reconstruct — must force a branch to fall back to queueExit instead of a
 // learned continuation.
 func (l arm64Lowerer) marked(ctx *lowering) bool {
 	for _, v := range ctx.values {
-		if v.owner == ownerConst {
+		if v.backing == backingConst {
 			return true
 		}
 	}
@@ -1380,16 +1387,11 @@ func (l arm64Lowerer) directCall(ctx *lowering, op step) bool {
 	// Either way a deferred ref must own its retain before the flush, or the
 	// interpreter/callee would release a reference this trace never took.
 	// Post-call consumers are emitted after this mutation, so they observe
-	// ownerStack and release normally.
-	for i := range ctx.values {
-		v := &ctx.values[i]
-		if v.kind == types.KindRef && v.owner != ownerStack {
-			if _, ok := l.own(ctx, v); !ok {
-				return false
-			}
-		}
+	// backingStack and release normally.
+	if !l.ownRefs(ctx) {
+		return false
 	}
-	if !l.flush(ctx, false) {
+	if !l.flush(ctx, flushSnapshot) {
 		return false
 	}
 
@@ -2216,7 +2218,7 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 	}
 	closureRef := 0
 	params := len(target.Typ.Params)
-	if v.owner == ownerConst {
+	if v.backing == backingConst {
 		if v.fn != op.callee {
 			return false
 		}
@@ -2248,7 +2250,7 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 		ctx.assembler.Emit(arm64.LDI(want, uint64(types.BoxRef(wantRef)))...)
 		ctx.assembler.Emit(arm64.CMP(v.reg, want))
 		ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
-		if v.owner == ownerStack {
+		if v.backing == backingStack {
 			l.releaseBox(ctx, v.reg, pre, op.ip)
 		}
 	}
@@ -2281,7 +2283,7 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 	addr := l.base(ctx, vStack)
 	for k := 0; k < params; k++ {
 		// This inlines the callee's own activation directly onto the VM
-		// stack, so a deferred argument must own its retain here: its home
+		// stack, so a deferred argument must own its retain here: its backing slot
 		// slot is unrelated storage that may change independently of this
 		// new frame's local.
 		boxed, ok := l.own(ctx, &ctx.values[len(ctx.values)-params+k])
@@ -2336,15 +2338,10 @@ func (l arm64Lowerer) selfCall(ctx *lowering, op step, target *types.Function, p
 	// this trace cannot see. So every deferred ref must own its retain before
 	// the call. (The committing flush below also rejects any deferred it still
 	// sees, so this sweep is what keeps such traces compiling.)
-	for i := range ctx.values {
-		v := &ctx.values[i]
-		if v.kind == types.KindRef && v.owner != ownerStack {
-			if _, ok := l.own(ctx, v); !ok {
-				return false
-			}
-		}
+	if !l.ownRefs(ctx) {
+		return false
 	}
-	if !l.flush(ctx, true) {
+	if !l.flush(ctx, flushCommit) {
 		return false
 	}
 
@@ -2469,7 +2466,7 @@ func (l arm64Lowerer) tailLoop(ctx *lowering, op step) bool {
 		return false
 	}
 	ctx.frames = append(ctx.frames[:0], f)
-	if !l.flush(ctx, true) {
+	if !l.flush(ctx, flushCommit) {
 		return false
 	}
 	return l.iterate(ctx, 0)
@@ -2497,8 +2494,8 @@ func (l arm64Lowerer) tailMorph(ctx *lowering, op step) bool {
 	}
 	// Only the innermost frame is replaced in place. Its own operands are gone
 	// (count() == 0), and any surviving operand belongs to an outer frame below
-	// this base: an ownerLocal home there is < base by construction, and an
-	// ownerUpval names a closure that does not die in this morph, so no sweep is
+	// this base: a backingLocal slot there is < base by construction, and an
+	// backingUpval names a closure that does not die in this morph, so no sweep is
 	// needed. The arguments are owned into the new frame by locals() below.
 	f := newActivation(op.callee, target, base, len(ctx.values))
 	f.resume = op.ip + 1
@@ -2527,7 +2524,7 @@ func (l arm64Lowerer) tailTarget(ctx *lowering, op step) (*types.Function, int, 
 		return nil, 0, false
 	}
 	params := len(target.Typ.Params)
-	if v.owner == ownerConst {
+	if v.backing == backingConst {
 		if v.fn != op.callee || v.ref != op.callee {
 			return nil, 0, false
 		}
@@ -2552,7 +2549,7 @@ func (l arm64Lowerer) tailTarget(ctx *lowering, op step) (*types.Function, int, 
 		}
 		ctx.assembler.Bind(ok)
 		pre := ctx.pre()
-		if v.owner == ownerStack {
+		if v.backing == backingStack {
 			l.releaseBox(ctx, v.reg, pre, op.ip)
 		}
 	}
@@ -2576,7 +2573,7 @@ func (l arm64Lowerer) args(ctx *lowering, target *types.Function, params int) bo
 			return false
 		}
 		if v.kind == types.KindRef {
-			if v.owner == ownerConst {
+			if v.backing == backingConst {
 				return false
 			}
 			continue
@@ -2594,9 +2591,9 @@ func (l arm64Lowerer) args(ctx *lowering, target *types.Function, params int) bo
 func (l arm64Lowerer) locals(ctx *lowering, f *activation, args []value) bool {
 	for k := range args {
 		// This becomes a new frame's own tracked local, so a deferred ref
-		// argument must own its retain: the new home is unrelated storage
+		// argument must own its retain: the new backing slot is unrelated storage
 		// from the one it deferred to.
-		if args[k].kind == types.KindRef && args[k].owner != ownerStack {
+		if args[k].kind == types.KindRef && args[k].backing != backingStack {
 			if _, ok := l.own(ctx, &args[k]); !ok {
 				return false
 			}
@@ -2636,7 +2633,7 @@ func (l arm64Lowerer) stitch(ctx *lowering) bool {
 		if v.kind != types.KindRef {
 			continue
 		}
-		if (v.owner == ownerLocal && v.home >= f.base) || v.owner == ownerUpval {
+		if (v.backing == backingLocal && v.slot >= f.base) || v.backing == backingUpval {
 			if _, ok := l.own(ctx, v); !ok {
 				return false
 			}
@@ -2680,13 +2677,13 @@ func (l arm64Lowerer) ret(ctx *lowering) bool {
 // complete finishes top-level module code: live locals and operands are boxed
 // back to the VM stack, SP is published, and the wrapper marks the frame done.
 func (l arm64Lowerer) complete(ctx *lowering) bool {
-	if !l.flush(ctx, false) {
+	if !l.flush(ctx, flushSnapshot) {
 		return false
 	}
 	// The wrapper preserves this top-level operand stack on trapNone (see
 	// start()), and the interpreter adopts each stack ref as owned, so a
 	// deferred ref left on the stack at module end must re-take its retain.
-	l.redeem(ctx)
+	l.retainDeferred(ctx)
 	a := ctx.assembler
 	vCtrl := ctx.pin(scratchCtrl)
 	vBP := ctx.pin(scratchBP)
@@ -2740,7 +2737,7 @@ func (l arm64Lowerer) overflow(ctx *lowering, op step) {
 	)
 }
 
-// reload pulls operands back from VM stack homes after a call or continuation.
+// reload pulls operands back from VM stack slots after a call or continuation.
 func (l arm64Lowerer) reload(ctx *lowering) {
 	a := ctx.assembler
 	if len(ctx.values) == 0 {
@@ -2750,7 +2747,7 @@ func (l arm64Lowerer) reload(ctx *lowering) {
 	addr := l.base(ctx, vStack)
 	for j := range ctx.values {
 		v := &ctx.values[j]
-		if v.owner == ownerConst {
+		if v.backing == backingConst {
 			continue
 		}
 		reg := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -2822,7 +2819,7 @@ func (l arm64Lowerer) upvalGet(ctx *lowering, op step) bool {
 		dst = l.sign64(ctx, dst)
 	}
 	if kind == types.KindRef {
-		ctx.push(value{reg: dst, kind: kind, owner: ownerUpval, home: idx})
+		ctx.push(value{reg: dst, kind: kind, backing: backingUpval, slot: idx})
 		return true
 	}
 	ctx.push(value{reg: dst, kind: kind, raw: true})
@@ -2847,11 +2844,11 @@ func (l arm64Lowerer) upvalSet(ctx *lowering, op step) bool {
 		if !ok {
 			return false
 		}
-		if !l.settle(ctx, ownerUpval, idx) {
+		if !l.detach(ctx, backingUpval, idx) {
 			return false
 		}
 	} else {
-		boxed, ok = l.borrow(ctx, *vp)
+		boxed, ok = l.box(ctx, *vp)
 		if !ok {
 			return false
 		}
@@ -2901,9 +2898,9 @@ func (l arm64Lowerer) refIsNull(ctx *lowering, op step) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
 		return false
 	}
-	owned := ctx.values[len(ctx.values)-1].owner == ownerStack
+	owned := ctx.values[len(ctx.values)-1].backing == backingStack
 	pre := ctx.pre()
-	ref, ok := l.borrow(ctx, ctx.values[len(ctx.values)-1])
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
 	}
@@ -2944,9 +2941,9 @@ func (l arm64Lowerer) refGet(ctx *lowering, op step) bool {
 	default:
 		return false
 	}
-	owned := ctx.values[len(ctx.values)-1].owner == ownerStack
+	owned := ctx.values[len(ctx.values)-1].backing == backingStack
 	pre := ctx.pre()
-	ref, ok := l.borrow(ctx, ctx.values[len(ctx.values)-1])
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
 	}
@@ -2980,9 +2977,9 @@ func (l arm64Lowerer) stringLen(ctx *lowering, op step) bool {
 	if ctx.count() < 1 || ctx.values[len(ctx.values)-1].kind != types.KindRef {
 		return false
 	}
-	owned := ctx.values[len(ctx.values)-1].owner == ownerStack
+	owned := ctx.values[len(ctx.values)-1].backing == backingStack
 	pre := ctx.pre()
-	ref, ok := l.borrow(ctx, ctx.values[len(ctx.values)-1])
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
 	}
@@ -3016,9 +3013,9 @@ func (l arm64Lowerer) arrayLen(ctx *lowering, op step) bool {
 	default:
 		return false
 	}
-	owned := ctx.values[len(ctx.values)-1].owner == ownerStack
+	owned := ctx.values[len(ctx.values)-1].backing == backingStack
 	pre := ctx.pre()
-	ref, ok := l.borrow(ctx, ctx.values[len(ctx.values)-1])
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
 	}
@@ -3081,7 +3078,7 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 	if op.shape.itab != 0 && op.shape.itab != want {
 		return false
 	}
-	owned := ctx.values[len(ctx.values)-2].owner == ownerStack
+	owned := ctx.values[len(ctx.values)-2].backing == backingStack
 	pre := ctx.pre()
 	idx := l.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
 	a := ctx.assembler
@@ -3097,7 +3094,7 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 	if !ok {
 		return false
 	}
-	ref, ok := l.borrow(ctx, ctx.values[len(ctx.values)-2])
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-2])
 	if !ok {
 		return false
 	}
@@ -3190,17 +3187,17 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 		// The stored ref transfers into the element, so it must own its retain:
 		// threaded ARRAY_SET moves the popped operand's +1 into the container,
 		// and a deferred value has none. Own before pre() so the pre snapshot and
-		// every exit snapshot see ownerStack and no stub double-retains it
+		// every exit snapshot see backingStack and no stub double-retains it
 		// (mirrors localSet).
 		if _, ok := l.own(ctx, &ctx.values[len(ctx.values)-1]); !ok {
 			return false
 		}
 	}
-	owned := ctx.values[len(ctx.values)-3].owner == ownerStack
+	owned := ctx.values[len(ctx.values)-3].backing == backingStack
 	pre := ctx.pre()
 	val := ctx.values[len(ctx.values)-1]
 	idx := l.sign32(ctx, ctx.values[len(ctx.values)-2].reg)
-	ref, ok := l.borrow(ctx, ctx.values[len(ctx.values)-3])
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-3])
 	if !ok {
 		return false
 	}
@@ -3224,8 +3221,8 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 		// A continuable primitive store is a state barrier: materialize the
 		// pre-op frame once, then let all guards share that resumable snapshot.
 		// Clearing the local register cache bounds no-spill pressure and makes
-		// subsequent operations reload from the homes just written.
-		if !l.flush(ctx, false) {
+		// subsequent operations reload from the slots just written.
+		if !l.flush(ctx, flushSnapshot) {
 			return false
 		}
 		for idx := range ctx.frames {
@@ -3360,10 +3357,10 @@ func (l arm64Lowerer) structGet(ctx *lowering, op step) bool {
 	if op.shape.itab != 0 && op.shape.itab != heapStruct {
 		return false
 	}
-	owned := ctx.values[len(ctx.values)-2].owner == ownerStack
+	owned := ctx.values[len(ctx.values)-2].backing == backingStack
 	pre := ctx.pre()
 	idx := l.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
-	ref, ok := l.borrow(ctx, ctx.values[len(ctx.values)-2])
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-2])
 	if !ok {
 		return false
 	}
@@ -3453,17 +3450,17 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 		// The stored ref transfers into the field, so it must own its retain:
 		// threaded STRUCT_SET moves the popped operand's +1 into the container,
 		// and a deferred value has none. Own before pre() so the pre snapshot and
-		// every exit snapshot see ownerStack and no stub double-retains it
+		// every exit snapshot see backingStack and no stub double-retains it
 		// (mirrors localSet).
 		if _, ok := l.own(ctx, &ctx.values[len(ctx.values)-1]); !ok {
 			return false
 		}
 	}
-	owned := ctx.values[len(ctx.values)-3].owner == ownerStack
+	owned := ctx.values[len(ctx.values)-3].backing == backingStack
 	pre := ctx.pre()
 	val := ctx.values[len(ctx.values)-1]
 	idx := l.sign32(ctx, ctx.values[len(ctx.values)-2].reg)
-	ref, ok := l.borrow(ctx, ctx.values[len(ctx.values)-3])
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-3])
 	if !ok {
 		return false
 	}
@@ -3564,9 +3561,9 @@ func (l arm64Lowerer) errorGet(ctx *lowering, op step) bool {
 	if op.shape.itab != heapError {
 		return false
 	}
-	owned := ctx.values[len(ctx.values)-1].owner == ownerStack
+	owned := ctx.values[len(ctx.values)-1].backing == backingStack
 	pre := ctx.pre()
-	ref, ok := l.borrow(ctx, ctx.values[len(ctx.values)-1])
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
 	}
@@ -3637,11 +3634,11 @@ func (l arm64Lowerer) coroDone(ctx *lowering, op step) bool {
 		return false
 	}
 	v := ctx.values[len(ctx.values)-1]
-	if v.kind != types.KindRef || v.owner == ownerConst {
+	if v.kind != types.KindRef || v.backing == backingConst {
 		return false
 	}
 	pre := ctx.pre()
-	ref, ok := l.borrow(ctx, v)
+	ref, ok := l.box(ctx, v)
 	if !ok {
 		return false
 	}
@@ -3669,9 +3666,9 @@ func (l arm64Lowerer) coroValue(ctx *lowering, op step) bool {
 	if op.shape.itab != heapCoroutine {
 		return false
 	}
-	owned := ctx.values[len(ctx.values)-1].owner == ownerStack
+	owned := ctx.values[len(ctx.values)-1].backing == backingStack
 	pre := ctx.pre()
-	ref, ok := l.borrow(ctx, ctx.values[len(ctx.values)-1])
+	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
 	if !ok {
 		return false
 	}
@@ -3761,17 +3758,17 @@ func (l arm64Lowerer) exit(ctx *lowering, resume int, reason prof.ExitReason, op
 // is recorded resuming at resume, and the trap kind is reported. trapFallback
 // resumes threaded dispatch; trapYield re-enters native after a safepoint.
 func (l arm64Lowerer) trap(ctx *lowering, kind, resume int, reason prof.ExitReason, opcode int) bool {
-	if !l.flush(ctx, false) {
+	if !l.flush(ctx, flushSnapshot) {
 		return false
 	}
 	id := -1
 	if kind == trapFallback {
 		// trapFallback hands the flushed operand stack to the threaded
 		// interpreter, which releases each stack ref it pops. Re-take every
-		// deferred ref's retain from its home first. trapYield never reaches
+		// deferred ref's retain from its backing slot first. trapYield never reaches
 		// here with a deferred live: its only caller commits first, and a
 		// committing flush rejects deferred refs (see flush).
-		l.redeem(ctx)
+		l.retainDeferred(ctx)
 		id = len(ctx.descriptors)
 		ctx.descriptors = append(ctx.descriptors, exitDescriptor{reason: reason, opcode: opcode})
 	}
@@ -3796,24 +3793,24 @@ func (l arm64Lowerer) trapFlushed(ctx *lowering, kind, resume, exitID int) {
 	)
 }
 
-// redeem re-takes the deferred retain for every operand in the current
-// snapshot whose ref was flushed to its VM stack home without one. A cold path
+// retainDeferred re-takes the deferred retain for every operand in the current
+// snapshot whose ref was flushed to its VM stack slot without one. A cold path
 // that hands the flushed operand stack to the threaded interpreter (a
 // trapFallback terminal exit, module completion) needs this: the interpreter
 // adopts each stack ref as owned and later releases it, so a deferred ref
 // flushed without a retain would be freed once too often. The caller must have
-// flushed the operands first — the home is authoritative — and must NOT change
-// any owner, because the surviving hot path keeps emitting with the same
+// flushed the operands first — the slot is authoritative — and must NOT change
+// any backing, because the surviving hot path keeps emitting with the same
 // symbolic state. Each call allocates fresh registers; the guard-exit stubs
-// need a register-reusing variant instead (see materializeExits) because they
+// need a register-reusing variant instead (see emitExits) because they
 // emit this per exit rather than once per trace.
-func (l arm64Lowerer) redeem(ctx *lowering) {
+func (l arm64Lowerer) retainDeferred(ctx *lowering) {
 	var addr asm.VReg
 	for j, v := range ctx.values {
-		switch v.owner {
-		case ownerStack:
-		case ownerConst:
-			if ref := v.constant(); ref > 0 {
+		switch v.backing {
+		case backingStack:
+		case backingConst:
+			if ref := v.ref; ref > 0 {
 				l.retain(ctx, ref)
 			}
 		default:
@@ -3831,7 +3828,7 @@ func (l arm64Lowerer) redeem(ctx *lowering) {
 
 // loadHeap loads a heap cell for a value already proven to have ref kind by the
 // symbolic stack. It reuses ref and off as outputs, so callers use it only after
-// a state barrier whose exits reload boxed operands from their stack homes.
+// a state barrier whose exits reload boxed operands from their VM stack slots.
 func (arm64Lowerer) loadHeap(ctx *lowering, ref, off, cell asm.VReg) (asm.VReg, asm.VReg, asm.VReg, asm.VReg) {
 	a := ctx.assembler
 	addr := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -4022,7 +4019,7 @@ func (l arm64Lowerer) releaseRef(ctx *lowering, addr asm.VReg, pre []value, ip i
 // wrapper can rebuild the same threaded resume shape.
 func (l arm64Lowerer) sideExit(ctx *lowering, pre []value, resume int, reason prof.ExitReason, opcode int) (asm.Label, bool) {
 	ctx.values = append(ctx.values[:0], pre...)
-	if !l.flush(ctx, false) {
+	if !l.flush(ctx, flushSnapshot) {
 		return 0, false
 	}
 	label := ctx.queueExit(nil, resume, reason, opcode)
@@ -4030,19 +4027,19 @@ func (l arm64Lowerer) sideExit(ctx *lowering, pre []value, resume int, reason pr
 	return label, true
 }
 
-// flush writes every dirty local and live operand to its VM stack home
+// flush writes every dirty local and live operand to its VM stack slot
 // in boxed form. commit clears dirty marks — only the hot path may do that;
 // a guard's cold path flushes a copy of the state and must leave the symbolic
 // state of the surviving hot path untouched.
-func (l arm64Lowerer) flush(ctx *lowering, commit bool) bool {
-	// A committing flush transfers each ownerStack ref's retain to the VM
+func (l arm64Lowerer) flush(ctx *lowering, mode flushMode) bool {
+	// A committing flush transfers each backingStack ref's retain to the VM
 	// stack, but it has no cold stub to re-take a deferred ref's retain: the
 	// loop-backedge yield can reach the threaded interpreter directly. Reject
 	// any live deferred ref up front, before emitting or mutating anything, so
 	// a loop-carried deferred ref keeps the trace threaded.
-	if commit {
+	if mode == flushCommit {
 		for _, v := range ctx.values {
-			if v.owner != ownerStack {
+			if v.kind == types.KindRef && v.backing != backingStack {
 				return false
 			}
 		}
@@ -4061,28 +4058,28 @@ func (l arm64Lowerer) flush(ctx *lowering, commit bool) bool {
 				return false
 			}
 			a.Emit(arm64.STR(boxed, addr, int16((f.base+idx)*8)))
-			if commit {
+			if mode == flushCommit {
 				f.state[idx] &^= localDirty
 			}
 		}
 	}
-	// An ownerStack ref carries the retain taken when it was pushed, so
+	// A backingStack ref carries the retain taken when it was pushed, so
 	// committing it transfers that edge to the stack. A non-commit flush writes
-	// each deferred ref boxed WITHOUT a retain; a following redeem or exit stub
-	// re-takes it before the flushed copy reaches the interpreter (see redeem /
-	// materializeExits). The commit pre-scan above already rejected any deferred
-	// owner, so those cases only run on a non-commit flush.
+	// each deferred ref boxed WITHOUT a retain; a following retainDeferred or exit stub
+	// re-takes it before the flushed copy reaches the interpreter (see retainDeferred /
+	// emitExits). The commit pre-scan above already rejected any deferred
+	// backing, so those cases only run on a non-commit flush.
 	for j, v := range ctx.values {
-		switch v.owner {
-		case ownerStack:
+		switch v.backing {
+		case backingStack:
 			boxed, ok := l.boxHome(ctx, v)
 			if !ok {
 				return false
 			}
 			a.Emit(arm64.STR(boxed, addr, int16(ctx.slot(j)*8)))
-		case ownerConst:
+		case backingConst:
 			boxed := a.Reg(asm.RegTypeInt, asm.Width64)
-			a.Emit(arm64.LDI(boxed, uint64(types.BoxRef(v.constant())))...)
+			a.Emit(arm64.LDI(boxed, uint64(types.BoxRef(v.ref)))...)
 			a.Emit(arm64.STR(boxed, addr, int16(ctx.slot(j)*8)))
 		default:
 			a.Emit(arm64.STR(v.reg, addr, int16(ctx.slot(j)*8)))
@@ -4170,24 +4167,24 @@ func (l arm64Lowerer) boxHome(ctx *lowering, v value) (asm.VReg, bool) {
 		case types.KindI32:
 			tag = tagI32
 		default:
-			return l.borrow(ctx, v)
+			return l.box(ctx, v)
 		}
 		ctx.assembler.Emit(arm64.ANDI(ctx.spare, v.reg, maskI32))
 		ctx.assembler.Emit(arm64.MOVK(ctx.spare, uint16(tag>>48), 48))
 		return ctx.spare, true
 	}
-	return l.borrow(ctx, v)
+	return l.box(ctx, v)
 }
 
-// settle owns every operand backed by the slot identified by (o, home) before
+// detach owns every operand backed by the slot identified by (backing, slot) before
 // that slot's content changes underneath it — a LOCAL_SET/GLOBAL_SET/UPVAL_SET
 // write, or a frame dying at RETURN/tail dispatch. A deferred value left
-// unsettled would keep pointing at a home whose content (or existence) no
+// undetached would keep pointing at a slot whose content (or existence) no
 // longer matches what it observed.
-func (l arm64Lowerer) settle(ctx *lowering, o owner, home int) bool {
+func (l arm64Lowerer) detach(ctx *lowering, b backing, slot int) bool {
 	for i := range ctx.values {
 		v := &ctx.values[i]
-		if v.kind == types.KindRef && v.owner == o && v.home == home {
+		if v.kind == types.KindRef && v.backing == b && v.slot == slot {
 			if _, ok := l.own(ctx, v); !ok {
 				return false
 			}
@@ -4196,36 +4193,51 @@ func (l arm64Lowerer) settle(ctx *lowering, o owner, home int) bool {
 	return true
 }
 
-// own borrows v and, when its reference count is deferred to backing storage
-// (owner != ownerStack), takes the retain that transfers ownership onto the
+// ownRefs transfers every live deferred ref onto the operand stack. Calls use
+// this ownership barrier before handing flushed state to another execution
+// context that may release or mutate the backing storage.
+func (l arm64Lowerer) ownRefs(ctx *lowering) bool {
+	for i := range ctx.values {
+		v := &ctx.values[i]
+		if v.kind == types.KindRef && v.backing != backingStack {
+			if _, ok := l.own(ctx, v); !ok {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// own boxes v and, when its reference count is deferred to backing storage
+// (backing != backingStack), takes the retain that transfers ownership onto the
 // operand stack and marks v owned. Callers pass a pointer into ctx.values (or
 // other frame-owned storage) so a later exit snapshot never also stub-retains
 // the same transfer.
 func (l arm64Lowerer) own(ctx *lowering, v *value) (asm.VReg, bool) {
-	reg, ok := l.borrow(ctx, *v)
+	reg, ok := l.box(ctx, *v)
 	if !ok {
 		return asm.VReg{}, false
 	}
-	if v.kind != types.KindRef || v.owner == ownerStack {
+	if v.kind != types.KindRef || v.backing == backingStack {
 		return reg, true
 	}
-	if v.owner == ownerConst {
-		l.retain(ctx, v.constant())
+	if v.backing == backingConst {
+		l.retain(ctx, v.ref)
 		v.reg = reg
 	} else {
 		addr := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.ANDI(addr, reg, maskI32))
 		l.retainRef(ctx, addr)
 	}
-	v.owner = ownerStack
+	v.backing = backingStack
 	return reg, true
 }
 
-// borrow produces the boxed form of v in a fresh register for read-only use.
-// It takes no reference-count action: an ownerConst ref materializes its
-// compile-time constant with no retain, and every other ref (ownerStack or
+// box produces the boxed form of v in a fresh register for read-only use.
+// It takes no reference-count action: a backingConst ref materializes its
+// compile-time constant with no retain, and every other ref (backingStack or
 // deferred to slot-backed storage) is already boxed in v.reg.
-func (l arm64Lowerer) borrow(ctx *lowering, v value) (asm.VReg, bool) {
+func (l arm64Lowerer) box(ctx *lowering, v value) (asm.VReg, bool) {
 	a := ctx.assembler
 	switch v.kind {
 	case types.KindI32:
@@ -4271,11 +4283,11 @@ func (l arm64Lowerer) borrow(ctx *lowering, v value) (asm.VReg, bool) {
 	case types.KindF64:
 		return v.reg, true
 	case types.KindRef:
-		if v.owner != ownerConst {
+		if v.backing != backingConst {
 			return v.reg, true
 		}
 		boxed := a.Reg(asm.RegTypeInt, asm.Width64)
-		a.Emit(arm64.LDI(boxed, uint64(types.BoxRef(v.constant())))...)
+		a.Emit(arm64.LDI(boxed, uint64(types.BoxRef(v.ref)))...)
 		return boxed, true
 	}
 	return asm.VReg{}, false
@@ -4384,7 +4396,7 @@ func lower(ctx *lowering, plan plan) bool {
 			return false
 		}
 	}
-	l.materializeExits(ctx)
+	l.emitExits(ctx)
 	return true
 }
 
