@@ -65,6 +65,8 @@ type block struct {
 
 type slot struct {
 	kind        types.Kind
+	backing     backing
+	slot        int
 	ref         int
 	refKnown    bool
 	callee      int
@@ -296,7 +298,7 @@ func tracePlan(input *compileInput) ([]plan, error) {
 		if tree == nil || tree.root == nil || tree.root.kind == aborted {
 			continue
 		}
-		if (ip != 0) != (tree.root.kind == loop) {
+		if (ip != 0) != (tree.root.kind == loop) || ip != 0 && tree.root.carried {
 			continue
 		}
 		kind := entryFunction
@@ -605,6 +607,10 @@ func mergeSlot(dst *slot, src slot) (bool, bool) {
 		return false, false
 	}
 	changed := false
+	if dst.backing != src.backing || dst.slot != src.slot {
+		dst.backing, dst.slot = backingStack, 0
+		changed = true
+	}
 	if dst.refKnown && (!src.refKnown || dst.ref != src.ref) {
 		dst.ref, dst.refKnown = 0, false
 		changed = true
@@ -644,7 +650,7 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		if idx >= len(locals) {
 			return false
 		}
-		push(slot{kind: locals[idx].Kind()})
+		push(slot{kind: locals[idx].Kind(), backing: backingLocal, slot: idx})
 		return true
 	case instr.LOCAL_TEE:
 		return len(*state) > 0
@@ -653,14 +659,14 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		if idx >= len(fn.Captures) {
 			return false
 		}
-		push(slot{kind: fn.Captures[idx].Kind()})
+		push(slot{kind: fn.Captures[idx].Kind(), backing: backingUpval, slot: idx})
 		return true
 	case instr.GLOBAL_GET:
 		idx := int(inst.Operand(0))
 		if idx >= len(globals) {
 			return false
 		}
-		push(slot{kind: globals[idx]})
+		push(slot{kind: globals[idx], backing: backingGlobal, slot: idx})
 		return true
 	case instr.GLOBAL_TEE:
 		return len(*state) > 0
@@ -671,6 +677,7 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		}
 		value := slot{kind: constants[idx].Kind()}
 		if value.kind == types.KindRef {
+			value.backing = backingConst
 			value.ref, value.refKnown = constants[idx].Ref(), true
 			if value.ref > 0 && value.ref < len(heap) {
 				if _, ok := heap[value.ref].(*types.Function); ok {

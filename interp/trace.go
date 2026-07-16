@@ -41,9 +41,10 @@ type record struct {
 }
 
 type trace struct {
-	anchor anchor
-	ops    []record
-	kind   outcome
+	anchor  anchor
+	ops     []record
+	kind    outcome
+	carried bool
 }
 
 type captureResult struct {
@@ -161,7 +162,9 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 	clone.fr = &clone.frames[i.fp-1]
 	clone.fr.ip = a.ip
 
-	t := &trace{anchor: a}
+	fn, _ := clone.function(a.addr)
+	carried := fn != nil && clone.sp > clone.fr.bp+len(fn.Slots())
+	t := &trace{anchor: a, carried: carried}
 	startFP := clone.fp
 	hasCall := false
 	var cloned map[int]bool

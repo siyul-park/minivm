@@ -274,7 +274,7 @@ func (l arm64Lowerer) next(ctx *lowering, from anchor, target edge, tail []int, 
 	tail = appendTail(target.tail, tail)
 	target.tail = nil
 	if target.anchor.addr == from.addr && target.anchor.ip <= from.ip {
-		if !l.flush(ctx, flushSnapshot) {
+		if !l.flush(ctx, flushCommit) {
 			return false
 		}
 		return l.path(ctx, from, target, tail, opcode)
@@ -1222,11 +1222,7 @@ func (l arm64Lowerer) enterBlock(ctx *lowering, state []slot) {
 	ctx.spare = asm.VReg{}
 	ctx.values = ctx.values[:0]
 	for _, slot := range state {
-		o := backingStack
-		if slot.refKnown {
-			o = backingConst
-		}
-		ctx.values = append(ctx.values, value{kind: slot.kind, ref: slot.ref, backing: o})
+		ctx.values = append(ctx.values, value{kind: slot.kind, ref: slot.ref, backing: slot.backing, slot: slot.slot})
 	}
 	frame := ctx.frame()
 	clear(frame.state)

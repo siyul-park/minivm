@@ -408,7 +408,7 @@ A retain materializes at every point that hands a deferred value to storage the 
 - `retainDeferred` — a stub-less deopt that hands the flushed operand stack to the interpreter (a trap fallback, module completion) re-takes each deferred operand's retain from its VM stack slot.
 - real calls — `directCall` and `selfCall` own every live deferred operand before the `BL`, because a callee trap adopts the caller's flushed stack.
 
-A committing (loop back-edge) flush rejects any live deferred ref: owning it would retain once per iteration with no matching release, so a loop-carried deferred ref keeps the whole trace threaded instead.
+A committing (loop back-edge) flush rejects any live deferred ref: owning it would retain once per iteration with no matching release, so a loop-carried deferred ref keeps the whole trace threaded instead. Standalone loop traces also remain threaded when their entry already has live operands because trace plans do not reconstruct loop-entry operand state.
 
 ## Heap Reads and Mutations
 
