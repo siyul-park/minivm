@@ -1138,21 +1138,37 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		i := New(prog, WithTick(1), WithThreshold(0))
-		defer i.Close()
+		profile := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
 		var ref int
 		for n := 0; n < 32; n++ {
 			require.NoError(t, i.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
 			v, err := i.PopBoxed()
 			require.NoError(t, err)
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, v, "result diverged from threaded on iteration %d", n)
 			require.Equal(t, types.BoxI32(size), v)
 
 			l, err := i.Local(0)
 			require.NoError(t, err)
 			ref = l.Ref()
 			require.Equal(t, 1, i.rc[ref]) // the local slot's own retain, never doubled or dropped
+			require.Equal(t, threaded.rc[1:], i.rc[1:], "refcount diverged from threaded on iteration %d", n)
 			i.Reset()
+			threaded.Reset()
 		}
+		require.NoError(t, i.Close())
+		require.NoError(t, threaded.Close())
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0))
 	})
 
 	t.Run("global-backed variant elides the container release", func(t *testing.T) {
@@ -1186,19 +1202,35 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		i := New(prog, WithTick(1), WithThreshold(0))
-		defer i.Close()
+		profile := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
 		for n := 0; n < 32; n++ {
 			require.NoError(t, i.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
 			v, err := i.PopBoxed()
 			require.NoError(t, err)
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, v, "result diverged from threaded on iteration %d", n)
 			require.Equal(t, types.BoxI32(2*size), v)
 
 			g, err := i.Global(0)
 			require.NoError(t, err)
 			require.Equal(t, 1, i.rc[g.Ref()]) // the global slot's own retain, never doubled or dropped
+			require.Equal(t, threaded.rc[1:], i.rc[1:], "refcount diverged from threaded on iteration %d", n)
 			i.Reset()
+			threaded.Reset()
 		}
+		require.NoError(t, i.Close())
+		require.NoError(t, threaded.Close())
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0))
 	})
 
 	t.Run("upval-backed variant elides the container release", func(t *testing.T) {
@@ -1238,76 +1270,154 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		i := New(prog, WithTick(1), WithThreshold(0))
-		defer i.Close()
+		profile := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
 		for n := 0; n < 32; n++ {
 			require.NoError(t, i.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
 			v, err := i.PopBoxed()
 			require.NoError(t, err)
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, v, "result diverged from threaded on iteration %d", n)
 			require.Equal(t, types.BoxI32(3*size), v)
+			require.Equal(t, threaded.rc[1:], i.rc[1:], "refcount diverged from threaded on iteration %d", n)
 			i.Reset()
+			threaded.Reset()
 		}
+		require.NoError(t, i.Close())
+		require.NoError(t, threaded.Close())
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0))
 	})
 
 	t.Run("dup of a deferred ref consumed twice keeps both container releases elided", func(t *testing.T) {
 		const size = int32(4)
+		use := types.NewFunctionBuilder(nil).
+			Params(types.TypeI32Array).
+			Returns(types.TypeI32)
+		// DUP of a deferred LOCAL_GET must stay deferred. Both ARRAY_LEN
+		// consumers borrow their copies without retain/release churn.
+		fn, err := use.Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.DUP),
+			instr.New(instr.ARRAY_LEN),
+			instr.New(instr.SWAP),
+			instr.New(instr.ARRAY_LEN),
+			instr.New(instr.I32_ADD),
+			instr.New(instr.RETURN),
+		).Build()
+		require.NoError(t, err)
+
 		b := program.NewBuilder()
-		arrayTyp := b.Type(types.TypeI32Array)
+		arrayType := b.Type(types.TypeI32Array)
+		b.Const(fn)
 		b.Locals(types.TypeI32Array)
-		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
-		// Two deferred reads of the same slot, each duplicated and consumed by
-		// its own ARRAY_SET: dup of a deferred value must stay deferred (no
-		// retain), so every ARRAY_SET below still elides its release.
-		for idx := int32(0); idx < size; idx++ {
-			b.Emit(instr.LOCAL_GET, 0).Emit(instr.DUP).
-				Emit(instr.I32_CONST, uint64(uint32(idx))).Emit(instr.I32_CONST, 5).Emit(instr.ARRAY_SET).
-				Emit(instr.I32_CONST, uint64(uint32(idx))).Emit(instr.I32_CONST, 7).Emit(instr.ARRAY_SET)
-		}
-		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET)
+		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).ConstGet(fn).Emit(instr.CALL)
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		i := New(prog, WithTick(1), WithThreshold(0))
-		defer i.Close()
+		profile := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
 		for n := 0; n < 32; n++ {
 			require.NoError(t, i.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
 			v, err := i.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, types.BoxI32(7), v) // second ARRAY_SET's value wins per index
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, v, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, types.BoxI32(2*size), v)
 
 			l, err := i.Local(0)
 			require.NoError(t, err)
-			require.Equal(t, 1, i.rc[l.Ref()])
+			wantLocal, err := threaded.Local(0)
+			require.NoError(t, err)
+			require.Equal(t, threaded.rc[wantLocal.Ref()], i.rc[l.Ref()])
+			require.Equal(t, threaded.rc[1:], i.rc[1:], "refcount diverged from threaded on iteration %d", n)
 			i.Reset()
+			threaded.Reset()
 		}
+		require.NoError(t, i.Close())
+		require.NoError(t, threaded.Close())
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0))
 	})
 
 	t.Run("backer overwrite settles the deferred reader before LOCAL_SET replaces the slot", func(t *testing.T) {
+		replace := types.NewFunctionBuilder(nil).
+			Params(types.TypeI32Array, types.TypeI32Array).
+			Returns(types.TypeI32)
+		// LOCAL_GET 0 pushes the first array deferred. LOCAL_SET 0 then replaces
+		// that backing slot with parameter 1, so settle must own the stale reader
+		// before its original home changes.
+		fn, err := replace.Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.LOCAL_SET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_CONST, 9),
+			instr.New(instr.ARRAY_SET),
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.ARRAY_LEN),
+			instr.New(instr.RETURN),
+		).Build()
+		require.NoError(t, err)
+
 		b := program.NewBuilder()
-		arrayTyp := b.Type(types.TypeI32Array)
-		b.Locals(types.TypeI32Array)
-		// LOCAL_GET 0 pushes the first array deferred; overwriting local 0 via
-		// LOCAL_SET must settle() that deferred copy into an owned retain
-		// before the slot's content changes, or the first array would end up
-		// unretained once its only backer is gone.
-		b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
-		b.Emit(instr.LOCAL_GET, 0)
-		b.Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
-		// The stale LOCAL_GET 0 copy (now settled/owned) is still consumed here.
-		b.Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 9).Emit(instr.ARRAY_SET)
+		arrayType := b.Type(types.TypeI32Array)
+		b.Const(fn)
+		b.Locals(types.TypeI32Array, types.TypeI32Array)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayType)).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).ConstGet(fn).Emit(instr.CALL)
 		prog, err := b.Build()
 		require.NoError(t, err)
 
-		i := New(prog, WithTick(1), WithThreshold(0))
-		defer i.Close()
+		profile := prof.New()
+		i := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
 		for n := 0; n < 32; n++ {
 			require.NoError(t, i.Run(context.Background()))
-
-			l, err := i.Local(0)
+			require.NoError(t, threaded.Run(context.Background()))
+			v, err := i.PopBoxed()
 			require.NoError(t, err)
-			require.Equal(t, 1, i.rc[l.Ref()]) // second array, still owned by the local slot
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, v, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, types.BoxI32(2), v)
+
+			l, err := i.Local(1)
+			require.NoError(t, err)
+			wantLocal, err := threaded.Local(1)
+			require.NoError(t, err)
+			require.Equal(t, threaded.rc[wantLocal.Ref()], i.rc[l.Ref()])
+			require.Equal(t, threaded.rc[1:], i.rc[1:], "refcount diverged from threaded on iteration %d", n)
 			i.Reset()
+			threaded.Reset()
 		}
+		require.NoError(t, i.Close())
+		require.NoError(t, threaded.Close())
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0))
 	})
 
 	// balanced runs prog under the JIT and the pure interpreter in lockstep and
@@ -1321,10 +1431,9 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 	// bookkeeping is excluded.
 	balanced := func(t *testing.T, prog *program.Program) {
 		t.Helper()
-		jit := New(prog, WithTick(1), WithThreshold(0))
-		defer jit.Close()
+		profile := prof.New()
+		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
 		ref := New(prog, WithTick(1), WithThreshold(-1))
-		defer ref.Close()
 		for n := 0; n < 48; n++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, ref.Run(context.Background()))
@@ -1337,6 +1446,15 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 			jit.Reset()
 			ref.Reset()
 		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, ref.Close())
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0))
 	}
 
 	t.Run("terminal-op trap redeems a deferred ref left live below it", func(t *testing.T) {
@@ -1374,6 +1492,64 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		b.Br(loop)
 		b.Bind(done)
 		b.Emit(instr.LOCAL_GET, 2)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		balanced(t, prog)
+	})
+
+	t.Run("ref array store owns a deferred element before transfer", func(t *testing.T) {
+		refArray := types.NewArrayType(types.TypeRef)
+		store := types.NewFunctionBuilder(nil).
+			Params(refArray, types.TypeI32Array).
+			Returns(types.TypeI32)
+		store.Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.ARRAY_SET),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.RETURN),
+		)
+		fn, err := store.Build()
+		require.NoError(t, err)
+
+		b := program.NewBuilder()
+		refArrayType := b.Type(refArray)
+		valueArrayType := b.Type(types.TypeI32Array)
+		b.Const(fn)
+		b.Locals(refArray, types.TypeI32Array)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(refArrayType)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(valueArrayType)).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).ConstGet(fn).Emit(instr.CALL)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		balanced(t, prog)
+	})
+
+	t.Run("ref struct store owns a deferred field before transfer", func(t *testing.T) {
+		structure := types.NewStructType(types.NewStructField(types.TypeI32Array))
+		store := types.NewFunctionBuilder(nil).
+			Params(structure, types.TypeI32Array).
+			Returns(types.TypeI32)
+		store.Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.LOCAL_GET, 1),
+			instr.New(instr.STRUCT_SET),
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.RETURN),
+		)
+		fn, err := store.Build()
+		require.NoError(t, err)
+
+		b := program.NewBuilder()
+		structType := b.Type(structure)
+		valueArrayType := b.Type(types.TypeI32Array)
+		b.Const(fn)
+		b.Locals(structure, types.TypeI32Array)
+		b.Emit(instr.STRUCT_NEW_DEFAULT, uint64(structType)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(valueArrayType)).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).ConstGet(fn).Emit(instr.CALL)
 		prog, err := b.Build()
 		require.NoError(t, err)
 		balanced(t, prog)

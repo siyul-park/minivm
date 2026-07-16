@@ -402,7 +402,7 @@ Producers push deferred. `LOCAL_GET`, `GLOBAL_GET`, and `UPVAL_GET` of a ref tak
 
 A retain materializes at every point that hands a deferred value to storage the interpreter can see:
 
-- `own` — storing into a local, global, or upval slot, transferring a call argument through `locals()`, and boxing an entry-frame return in `ret`.
+- `own` — storing into a local, global, or upval slot, transferring a ref into an array element or struct field, transferring a call argument through `locals()`, and boxing an entry-frame return in `ret`.
 - `settle` — before a backing slot is overwritten (`LOCAL_SET`/`GLOBAL_SET`/`UPVAL_SET`) or a frame dies (`stitch`, tail dispatch), every live operand deferred to that slot is owned first.
 - exit stubs — `materializeExits` reloads each deferred operand from its flushed VM stack home and retains it on the cold guard path.
 - `redeem` — a stub-less deopt that hands the flushed operand stack to the interpreter (a trap fallback, module completion) re-takes each deferred operand's retain from its home.
@@ -424,7 +424,7 @@ Heap-promoted `i64` values fall back before boxing.
 
 A primitive typed-array `ARRAY_SET` may continue through native execution when it occurs in the anchor frame before any inlined call. Lowering first materializes one resumable pre-op snapshot, clears the local register cache, and lets shape, bounds, and release guards share that snapshot. Guard failure resumes at the original opcode; success performs the primitive store and continues to later operations or the loop back-edge.
 
-Ref-bearing `ARRAY_SET` and `STRUCT_SET` remain terminal mutations. Their hot path may perform the store and resume threaded execution at the next instruction, while recursive release or any failed guard remains interpreter-owned.
+Ref-bearing `ARRAY_SET` and `STRUCT_SET` remain terminal mutations. Before the store, lowering owns a deferred element or field value so the transferred container edge carries exactly one retain, matching threaded execution. Their hot path may perform the store and resume threaded execution at the next instruction, while recursive release or any failed guard remains interpreter-owned.
 
 Mutation plans are always no-spill. Leaf traces reuse pinned and dead registers for stack homes, heap cells, refcounts, and boxing scratch so primitive mutation loops fit the physical register bank. A mutation after inlined calls retains the terminal boundary; register exhaustion still rejects compilation cleanly instead of spilling across a back-edge (regression test: `interp.TestARM64_ArraySetAfterNestedCalls`).
 

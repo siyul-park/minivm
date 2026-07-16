@@ -493,6 +493,15 @@ func (ctx *lowering) pinTo(pr asm.PReg) asm.VReg {
 	return v
 }
 
+// constant returns the heap ref an ownerConst marker names: ref when set,
+// otherwise fn for a direct-call marker.
+func (v value) constant() int {
+	if v.ref != 0 {
+		return v.ref
+	}
+	return v.fn
+}
+
 func reasonPriority(reason prof.CompileReason) int {
 	switch reason {
 	case prof.CompileReasonInvalidPlan:
