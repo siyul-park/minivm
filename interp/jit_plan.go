@@ -50,7 +50,18 @@ type plan struct {
 	kind    entryKind
 	root    int
 	blocks  []block
+	hoist   *hoist
 	noSpill bool
+}
+
+// hoist marks one loop-invariant container: a ref local that every block
+// leaves untouched, so the backend may derive its heap cell, shape guard, and
+// slice header once per native entry instead of once per access. want is the
+// recorded primitive-array itab; the planner admits only backend-supported
+// accesses whose root-frame slot fits the ARM64 load immediate.
+type hoist struct {
+	local int
+	want  uintptr
 }
 
 type entryKind uint8
@@ -105,7 +116,10 @@ const (
 	terminateFallback
 )
 
-const noBlock = -1
+const (
+	noBlock      = -1
+	maxHoistSlot = 4095
+)
 
 func input(i *Interpreter, addr int) (*compileInput, bool) {
 	fn, ok := i.function(addr)
@@ -347,10 +361,158 @@ func tracePlan(input *compileInput) ([]plan, error) {
 			}
 		}
 		wire(&planned, roots)
+		if kind == entryLoop {
+			planned.hoist = hoistable(input.function, planned.blocks)
+		}
 		planned.noSpill = noSpill(planned.blocks)
 		plans = append(plans, planned)
 	}
 	return plans, nil
+}
+
+// hoistable picks the most-accessed loop-invariant container for a loop plan.
+// A local qualifies when it is a declared ref, no block writes it, and every
+// recorded ARRAY_GET/ARRAY_SET on it observed one itab. Any call disqualifies
+// the plan: a BL clobbers the hoisted registers and re-enters via ctx.back.
+// Container provenance is a per-block marker stack. Variable-effect stack
+// operators update markers explicitly; fixed-effect operators use instr.Type,
+// and anything else clears the markers conservatively. Underflow also clears
+// them — loop plans with carried entry operands are rejected before planning.
+func hoistable(fn *types.Function, blocks []block) *hoist {
+	locals := localTypes(fn)
+	banned := make([]bool, len(locals))
+	for _, block := range blocks {
+		for _, step := range block.steps {
+			switch step.op {
+			case instr.CALL, instr.RETURN_CALL:
+				return nil
+			case instr.LOCAL_SET, instr.LOCAL_TEE:
+				local := int(step.args[0])
+				if local < len(banned) {
+					banned[local] = true
+				}
+			}
+		}
+	}
+
+	type candidate struct {
+		want     uintptr
+		hits     int
+		conflict bool
+	}
+	candidates := make([]candidate, len(locals))
+	for _, block := range blocks {
+		var stack []int
+		for _, step := range block.steps {
+			record := func(depth int) {
+				if depth > len(stack) || step.op == instr.ARRAY_SET && step.terminal {
+					return
+				}
+				switch step.shape.itab {
+				case itab(types.TypedArray[bool](nil)),
+					itab(types.TypedArray[int8](nil)),
+					itab(types.TypedArray[int32](nil)),
+					itab(types.TypedArray[int64](nil)),
+					itab(types.TypedArray[float32](nil)),
+					itab(types.TypedArray[float64](nil)):
+				default:
+					return
+				}
+				local := stack[len(stack)-depth]
+				if local < 0 || local >= len(locals) || local > maxHoistSlot || banned[local] {
+					return
+				}
+				candidate := &candidates[local]
+				if candidate.want != 0 && candidate.want != step.shape.itab {
+					candidate.conflict = true
+					return
+				}
+				candidate.want = step.shape.itab
+				candidate.hits++
+			}
+
+			switch step.op {
+			case instr.LOCAL_GET:
+				stack = append(stack, int(step.args[0]))
+				continue
+			case instr.DUP:
+				if len(stack) == 0 {
+					stack = nil
+				} else {
+					stack = append(stack, stack[len(stack)-1])
+				}
+				continue
+			case instr.SWAP:
+				if len(stack) < 2 {
+					stack = nil
+				} else {
+					stack[len(stack)-1], stack[len(stack)-2] = stack[len(stack)-2], stack[len(stack)-1]
+				}
+				continue
+			case instr.SELECT:
+				if len(stack) < 3 {
+					stack = nil
+				} else {
+					a, b := stack[len(stack)-3], stack[len(stack)-2]
+					stack = stack[:len(stack)-3]
+					if a != b {
+						a = -1
+					}
+					stack = append(stack, a)
+				}
+				continue
+			case instr.LOCAL_TEE, instr.GLOBAL_TEE:
+				continue
+			case instr.CONST_GET, instr.GLOBAL_GET, instr.UPVAL_GET:
+				stack = append(stack, -1)
+				continue
+			case instr.ARRAY_GET:
+				record(2)
+				if len(stack) < 2 {
+					stack = nil
+				} else {
+					stack = append(stack[:len(stack)-2], -1)
+				}
+				continue
+			case instr.ARRAY_SET:
+				record(3)
+				if len(stack) < 3 {
+					stack = nil
+				} else {
+					stack = stack[:len(stack)-3]
+				}
+				continue
+			}
+
+			typ := instr.TypeOf(step.op)
+			if typ.Pop == nil && typ.Push == nil {
+				stack = nil
+				continue
+			}
+			if n := len(typ.Pop); n >= len(stack) {
+				stack = stack[:0]
+			} else {
+				stack = stack[:len(stack)-n]
+			}
+			for range typ.Push {
+				stack = append(stack, -1)
+			}
+		}
+	}
+
+	best := -1
+	for local, candidate := range candidates {
+		if candidate.hits == 0 || candidate.conflict || locals[local].Kind() != types.KindRef {
+			continue
+		}
+		if best < 0 || candidate.hits > candidates[best].hits {
+			best = local
+		}
+	}
+	if best < 0 {
+		return nil
+	}
+	return &hoist{local: best, want: candidates[best].want}
 }
 
 func split(p *plan, tr *trace, input *compileInput) []block {

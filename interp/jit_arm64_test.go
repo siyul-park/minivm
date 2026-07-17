@@ -761,7 +761,7 @@ func TestCompiler_Compile(t *testing.T) {
 
 			i.stack[i.fr.bp] = types.BoxI32(loopBudget + 2)
 			i.fr.ip = header
-			i.loop(entry.callable, metrics)(i)
+			i.loop(root, entry.callable, metrics)(i)
 			encoded := i.journal[journalExitID]
 			require.NotZero(t, encoded)
 			id := int(encoded - 1)
@@ -1672,5 +1672,283 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 		requireRefParity(t, prog)
+	})
+}
+
+// HoistedContainerLoop protects the loop-invariant container hoisting of
+// issue #153: an entryLoop plan whose body is call-free and never writes the
+// container local derives the heap cell, shape guard, and slice header once
+// per native entry, so accesses keep only the bounds check and element op.
+// Every sub-case diffs results and exact refcounts against a threaded twin.
+func TestARM64_HoistedContainerLoop(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	t.Run("sieve-shaped loops run native without per-access exits", func(t *testing.T) {
+		const size = int32(24)
+		b := program.NewBuilder()
+		arrayTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32)
+		fill := b.Label()
+		scan := b.Label()
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(fill)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(scan)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SET)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(fill)
+		b.Bind(scan)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 2)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		profile := prof.New()
+		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		for n := 0; n < 32; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, types.BoxI32(size), got)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+
+		// Hoisted loops must not pay per-access deopts: the only native exits
+		// are the loops' own cold branches.
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			switch metric.Name {
+			case "vm_jit_native_entries_total":
+				entries += metric.Value
+			case "vm_jit_native_exits_total":
+				for _, label := range metric.Labels {
+					if label.Key == "reason" {
+						require.Equal(t, "loop-exit", label.Value)
+					}
+				}
+			}
+		}
+		require.Greater(t, entries, float64(0))
+	})
+
+	t.Run("the prologue shape guard deopts to the header", func(t *testing.T) {
+		// The container local alternates between an i32 array and null across
+		// loop entries: entries with the array run native, entries with null
+		// fail the prologue tag guard and fall back to threaded execution
+		// with an empty operand stack and untouched refcounts.
+		b := program.NewBuilder()
+		arrayTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32, types.TypeI32)
+		outer := b.Label()
+		odd := b.Label()
+		enter := b.Label()
+		inner := b.Label()
+		next := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(outer)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 8).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_AND).BrIf(odd)
+		b.Emit(instr.I32_CONST, 8).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 8).Emit(instr.LOCAL_SET, 3)
+		b.Br(enter)
+		b.Bind(odd)
+		b.Emit(instr.REF_NULL).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
+		b.Bind(enter)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(inner)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 3).Emit(instr.I32_GE_S).BrIf(next)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SET)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Br(inner)
+		b.Bind(next)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(outer)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 1)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		profile := prof.New()
+		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		for n := 0; n < 32; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+
+		var shapes float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name != "vm_jit_native_exits_total" {
+				continue
+			}
+			for _, label := range metric.Labels {
+				if label.Key == "reason" && label.Value == "guard-shape" {
+					shapes += metric.Value
+				}
+			}
+		}
+		require.Greater(t, shapes, float64(0), "null entries must deopt through the prologue shape guard")
+	})
+
+	t.Run("a bounds deopt inside the loop matches threaded", func(t *testing.T) {
+		b := program.NewBuilder()
+		arrayTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 8).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 12).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SET)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 1)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		jit := New(prog, WithTick(1), WithThreshold(0))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		for n := 0; n < 32; n++ {
+			gotErr := jit.Run(context.Background())
+			wantErr := threaded.Run(context.Background())
+			require.Error(t, wantErr)
+			require.Error(t, gotErr)
+			require.Equal(t, wantErr.Error(), gotErr.Error(), "error diverged from threaded on iteration %d", n)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+	})
+
+	t.Run("a write to the container local keeps the slow path exact", func(t *testing.T) {
+		b := program.NewBuilder()
+		arrayTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array, types.TypeI32Array, types.TypeI32Array, types.TypeI32)
+		loop := b.Label()
+		odd := b.Label()
+		write := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 8).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 8).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 8).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_AND).BrIf(odd)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_SET, 0)
+		b.Br(write)
+		b.Bind(odd)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_SET, 0)
+		b.Bind(write)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SET)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 3)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		jit := New(prog, WithTick(1), WithThreshold(0))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		for n := 0; n < 32; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+	})
+
+	t.Run("a second container shares the loop via the slow path", func(t *testing.T) {
+		const size = int32(8)
+		b := program.NewBuilder()
+		arrayTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array, types.TypeI32Array, types.TypeI32, types.TypeI32)
+		fill := b.Label()
+		scan := b.Label()
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(fill)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(scan)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_SET)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_SET)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Br(fill)
+		b.Bind(scan)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 2).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 2).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 3)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		jit := New(prog, WithTick(1), WithThreshold(0))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		for n := 0; n < 32; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, types.BoxI32(3*size), got)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
 	})
 }

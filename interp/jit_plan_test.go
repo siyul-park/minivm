@@ -251,3 +251,111 @@ func TestTracePlan(t *testing.T) {
 	}
 	require.Equal(t, continuation.anchor, plans[0].blocks[len(plans[0].blocks)-1].anchor)
 }
+
+func TestHoistable(t *testing.T) {
+	i32 := itab(types.TypedArray[int32](nil))
+	fn := &types.Function{Locals: []types.Type{types.TypeI32Array, types.TypeI32}}
+	access := []step{
+		{op: instr.LOCAL_GET, args: [2]uint64{0}},
+		{op: instr.LOCAL_GET, args: [2]uint64{1}},
+		{op: instr.I32_CONST},
+		{op: instr.ARRAY_SET, shape: shape{itab: i32}},
+	}
+
+	t.Run("picks the loop-invariant container", func(t *testing.T) {
+		got := hoistable(fn, []block{{steps: access}})
+		require.Equal(t, &hoist{local: 0, want: i32}, got)
+	})
+
+	t.Run("preserves a selected local source", func(t *testing.T) {
+		steps := []step{
+			{op: instr.LOCAL_GET, args: [2]uint64{0}},
+			{op: instr.LOCAL_GET, args: [2]uint64{0}},
+			{op: instr.I32_CONST},
+			{op: instr.SELECT},
+			{op: instr.LOCAL_GET, args: [2]uint64{1}},
+			{op: instr.ARRAY_GET, shape: shape{itab: i32}},
+		}
+		require.Equal(t, &hoist{local: 0, want: i32}, hoistable(fn, []block{{steps: steps}}))
+	})
+
+	t.Run("a written container local is rejected", func(t *testing.T) {
+		steps := append(append([]step{}, access...), step{op: instr.LOCAL_SET, args: [2]uint64{0}})
+		require.Nil(t, hoistable(fn, []block{{steps: steps}}))
+	})
+
+	t.Run("a call rejects the plan", func(t *testing.T) {
+		steps := append(append([]step{}, access...), step{op: instr.CALL})
+		require.Nil(t, hoistable(fn, []block{{steps: steps}}))
+	})
+
+	t.Run("conflicting itabs are rejected", func(t *testing.T) {
+		other := append(append([]step{}, access...), []step{
+			{op: instr.LOCAL_GET, args: [2]uint64{0}},
+			{op: instr.LOCAL_GET, args: [2]uint64{1}},
+			{op: instr.ARRAY_GET, shape: shape{itab: itab(types.TypedArray[int64](nil))}},
+		}...)
+		require.Nil(t, hoistable(fn, []block{{steps: other}}))
+	})
+
+	t.Run("a scalar local is rejected", func(t *testing.T) {
+		steps := []step{
+			{op: instr.LOCAL_GET, args: [2]uint64{1}},
+			{op: instr.LOCAL_GET, args: [2]uint64{1}},
+			{op: instr.I32_CONST},
+			{op: instr.ARRAY_SET, shape: shape{itab: i32}},
+		}
+		require.Nil(t, hoistable(fn, []block{{steps: steps}}))
+	})
+
+	t.Run("an unsupported candidate cannot displace a primitive candidate", func(t *testing.T) {
+		ref := itab((*types.Array)(nil))
+		fn := &types.Function{Locals: []types.Type{types.TypeI32Array, types.TypeRef, types.TypeI32}}
+		steps := []step{
+			{op: instr.LOCAL_GET, args: [2]uint64{1}},
+			{op: instr.LOCAL_GET, args: [2]uint64{2}},
+			{op: instr.ARRAY_GET, shape: shape{itab: ref}},
+			{op: instr.LOCAL_GET, args: [2]uint64{1}},
+			{op: instr.LOCAL_GET, args: [2]uint64{2}},
+			{op: instr.ARRAY_GET, shape: shape{itab: ref}},
+			{op: instr.LOCAL_GET, args: [2]uint64{0}},
+			{op: instr.LOCAL_GET, args: [2]uint64{2}},
+			{op: instr.ARRAY_GET, shape: shape{itab: i32}},
+		}
+		require.Equal(t, &hoist{local: 0, want: i32}, hoistable(fn, []block{{steps: steps}}))
+	})
+
+	t.Run("a terminal store cannot displace a usable candidate", func(t *testing.T) {
+		fn := &types.Function{Locals: []types.Type{types.TypeI32Array, types.TypeI32Array, types.TypeI32}}
+		steps := []step{
+			{op: instr.LOCAL_GET, args: [2]uint64{1}},
+			{op: instr.LOCAL_GET, args: [2]uint64{2}},
+			{op: instr.I32_CONST},
+			{op: instr.ARRAY_SET, shape: shape{itab: i32}, terminal: true},
+			{op: instr.LOCAL_GET, args: [2]uint64{1}},
+			{op: instr.LOCAL_GET, args: [2]uint64{2}},
+			{op: instr.I32_CONST},
+			{op: instr.ARRAY_SET, shape: shape{itab: i32}, terminal: true},
+			{op: instr.LOCAL_GET, args: [2]uint64{0}},
+			{op: instr.LOCAL_GET, args: [2]uint64{2}},
+			{op: instr.ARRAY_GET, shape: shape{itab: i32}},
+		}
+		require.Equal(t, &hoist{local: 0, want: i32}, hoistable(fn, []block{{steps: steps}}))
+	})
+
+	t.Run("the local offset must fit the ARM64 immediate", func(t *testing.T) {
+		locals := make([]types.Type, 4097)
+		locals[4095] = types.TypeI32Array
+		locals[4096] = types.TypeI32Array
+		fn := &types.Function{Locals: locals}
+		steps := []step{
+			{op: instr.LOCAL_GET, args: [2]uint64{4095}},
+			{op: instr.I32_CONST},
+			{op: instr.ARRAY_GET, shape: shape{itab: i32}},
+		}
+		require.Equal(t, &hoist{local: 4095, want: i32}, hoistable(fn, []block{{steps: steps}}))
+
+		steps[0].args[0] = 4096
+		require.Nil(t, hoistable(fn, []block{{steps: steps}}))
+	})
+}
