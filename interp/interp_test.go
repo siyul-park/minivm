@@ -3986,13 +3986,22 @@ func TestInterpreter_Reset(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
-	i := New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5)}))
-	defer i.Close()
+	t.Run("runs a program", func(t *testing.T) {
+		i := New(program.New([]instr.Instruction{instr.New(instr.I32_CONST, 5)}))
+		defer i.Close()
 
-	require.NoError(t, i.Run(context.Background()))
-	v, err := i.Pop()
-	require.NoError(t, err)
-	require.Equal(t, types.I32(5), v)
+		require.NoError(t, i.Run(context.Background()))
+		v, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), v)
+	})
+
+	t.Run("interns duplicate string constants", func(t *testing.T) {
+		i := New(program.New(nil, program.WithConstants(types.String("same"), types.String("same"))))
+		defer i.Close()
+
+		require.Equal(t, i.constants[0], i.constants[1])
+	})
 }
 
 func TestWithHook(t *testing.T) {

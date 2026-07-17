@@ -303,13 +303,10 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 				i.retain(addr)
 			}
 		default:
-			val = types.BoxRef(i.keep(v))
-			// Register string constants as the canonical interned cell so
-			// runtime interning and compile-time constant embedding agree on
-			// one heap address. The pool cell outlives Reset, keeping every
-			// embedded constant ref valid for the life of the interpreter.
 			if s, ok := v.(types.String); ok {
-				i.interned[string(s)] = types.Ref(val.Ref())
+				val = types.BoxRef(int(i.intern(string(s))))
+			} else {
+				val = types.BoxRef(i.keep(v))
 			}
 			for _, ref := range i.refs(v) {
 				if addr := int(ref); addr >= 0 && addr < len(i.rc) && i.rc[addr] > 0 {
