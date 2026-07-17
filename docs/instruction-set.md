@@ -108,8 +108,8 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | References | `REF_TEST` | `ref.test` | ⬜ | 🔲 | runtime type test stays threaded |
 | References | `REF_CAST` | `ref.cast` | ⬜ | 🔲 | runtime cast stays threaded |
 | References | `REF_IS_NULL` | `ref.is_null` | ✅ | 🔲 | — |
-| References | `REF_EQ` | `ref.eq` | ⬜ | 🔲 | two-ref release semantics stay threaded |
-| References | `REF_NE` | `ref.ne` | ⬜ | 🔲 | two-ref release semantics stay threaded |
+| References | `REF_EQ` | `ref.eq` | ◐ | 🔲 | native boxed compare; two owned operands fall back |
+| References | `REF_NE` | `ref.ne` | ◐ | 🔲 | native boxed compare; two owned operands fall back |
 | Integers | `I32_CONST` | `i32.const` | ✅ | 🔲 | — |
 | Integers | `I32_ADD` | `i32.add` | ✅ | 🔲 | — |
 | Integers | `I32_SUB` | `i32.sub` | ✅ | 🔲 | — |
@@ -249,8 +249,8 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Strings | `STRING_NEW_UTF32` | `string.new_utf32` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Strings | `STRING_LEN` | `string.len` | ✅ | 🔲 | native typed-array-length-style length read |
 | Strings | `STRING_CONCAT` | `string.concat` | ⬜ | 🔲 | allocation stays interpreter-owned |
-| Strings | `STRING_EQ` | `string.eq` | ⬜ | 🔲 | string comparisons stay threaded |
-| Strings | `STRING_NE` | `string.ne` | ⬜ | 🔲 | string comparisons stay threaded |
+| Strings | `STRING_EQ` | `string.eq` | ◐ | 🔲 | native boxed compare; two owned operands fall back |
+| Strings | `STRING_NE` | `string.ne` | ◐ | 🔲 | native boxed compare; two owned operands fall back |
 | Strings | `STRING_LT` | `string.lt` | ⬜ | 🔲 | string comparisons stay threaded |
 | Strings | `STRING_GT` | `string.gt` | ⬜ | 🔲 | string comparisons stay threaded |
 | Strings | `STRING_LE` | `string.le` | ⬜ | 🔲 | string comparisons stay threaded |
@@ -261,21 +261,21 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Arrays | `ARRAY_LEN` | `array.len` | ✅ | 🔲 | native typed-array length fast path |
 | Arrays | `ARRAY_GET` | `array.get` | ✅ | 🔲 | native typed-array get fast path |
 | Arrays | `ARRAY_SET` | `array.set` | ◐ | 🔲 | primitive typed arrays may continue; boxed/ref writes stay terminal |
-| Arrays | `ARRAY_FILL` | `array.fill` | ⬜ | 🔲 | bulk mutation stays threaded |
-| Arrays | `ARRAY_COPY` | `array.copy` | ⬜ | 🔲 | bulk mutation stays threaded |
-| Arrays | `ARRAY_APPEND` | `array.append` | ⬜ | 🔲 | grow/mutation stays threaded |
+| Arrays | `ARRAY_FILL` | `array.fill` | ◐ | 🔲 | terminal deopt boundary; trace prefix stays native |
+| Arrays | `ARRAY_COPY` | `array.copy` | ◐ | 🔲 | terminal deopt boundary; trace prefix stays native |
+| Arrays | `ARRAY_APPEND` | `array.append` | ◐ | 🔲 | terminal deopt boundary; trace prefix stays native |
 | Arrays | `ARRAY_DELETE` | `array.delete` | ⬜ | 🔲 | mutation and removed-value ownership stay threaded |
 | Arrays | `ARRAY_SLICE` | `array.slice` | ⬜ | 🔲 | allocation and ownership stay threaded |
 | Structs | `STRUCT_NEW` | `struct.new` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Structs | `STRUCT_NEW_DEFAULT` | `struct.new_default` | ⬜ | 🔲 | allocation stays interpreter-owned |
-| Structs | `STRUCT_GET` | `struct.get` | ✅ | 🔲 | native field get fast path |
-| Structs | `STRUCT_SET` | `struct.set` | ◐ | 🔲 | terminal native mutation; scalar and ref-kind fields |
+| Structs | `STRUCT_GET` | `struct.get` | ✅ | 🔲 | native field get fast path; static plans resolve constant field indexes |
+| Structs | `STRUCT_SET` | `struct.set` | ◐ | 🔲 | scalar fields may continue; ref-field writes stay terminal |
 | Maps | `MAP_NEW` | `map.new` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Maps | `MAP_NEW_DEFAULT` | `map.new_default` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Maps | `MAP_LEN` | `map.len` | ◐ | 🔲 | terminal fallback |
 | Maps | `MAP_GET` | `map.get` | ◐ | 🔲 | terminal fallback |
 | Maps | `MAP_LOOKUP` | `map.lookup` | ◐ | 🔲 | terminal fallback |
-| Maps | `MAP_SET` | `map.set` | ⬜ | 🔲 | mutation stays threaded |
+| Maps | `MAP_SET` | `map.set` | ◐ | 🔲 | terminal deopt boundary; trace prefix stays native |
 | Maps | `MAP_DELETE` | `map.delete` | ⬜ | 🔲 | mutation stays threaded |
 | Maps | `MAP_CLEAR` | `map.clear` | ⬜ | 🔲 | mutation stays threaded |
 | Maps | `MAP_KEYS` | `map.keys` | ◐ | 🔲 | terminal fallback |

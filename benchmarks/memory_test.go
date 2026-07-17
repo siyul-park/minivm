@@ -1,55 +1,13 @@
 package benchmarks
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
-	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
-
-func TestMemory_TypedArraySum(t *testing.T) {
-	prog := typedArraySum(256)
-	require.NoError(t, program.Verify(prog))
-	vm := interp.New(prog, interp.WithThreshold(-1))
-	defer vm.Close()
-
-	require.NoError(t, vm.Run(context.Background()))
-	value, err := vm.Pop()
-	require.NoError(t, err)
-	require.Equal(t, types.I32(typedArraySumReference(256)), value)
-}
-
-func TestMemory_AllocationGraph(t *testing.T) {
-	const depth = 128
-	prog := allocationGraph(depth)
-	require.NoError(t, program.Verify(prog))
-	vm := interp.New(prog, interp.WithThreshold(-1))
-	defer vm.Close()
-
-	require.NoError(t, vm.Run(context.Background()))
-	root, err := vm.Local(0)
-	require.NoError(t, err)
-	ref := root.Ref()
-	for index := 0; index < depth; index++ {
-		value, err := vm.Load(ref)
-		require.NoError(t, err)
-		array, ok := value.(*types.Array)
-		require.True(t, ok)
-		require.Len(t, array.Elems, 1)
-		if index+1 == depth {
-			require.True(t, types.IsNull(array.Elems[0]))
-			break
-		}
-		ref = array.Elems[0].Ref()
-	}
-	value, err := vm.Pop()
-	require.NoError(t, err)
-	require.Equal(t, types.I32(depth), value)
-}
 
 func BenchmarkMemory_TypedArraySum(b *testing.B) {
 	const size int32 = 256

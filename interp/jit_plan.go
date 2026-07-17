@@ -82,6 +82,9 @@ type slot struct {
 	refKnown    bool
 	callee      int
 	calleeKnown bool
+	styp        *types.StructType
+	val         int32
+	valKnown    bool
 }
 
 type edge struct {
@@ -263,6 +266,17 @@ func staticPlan(input *compileInput) ([]plan, error) {
 					step.known = true
 				}
 			}
+			// Static steps carry no recorded observation, but structGet reads
+			// op.seen.Kind() for the result kind; synthesize the zero boxed
+			// value of the statically resolved field kind. Runtime itab, type,
+			// and per-field kind guards keep the lowering sound regardless.
+			if inst.Opcode() == instr.STRUCT_GET && len(flow) >= 2 {
+				if kind, ok := structFieldKind(heap, flow[len(flow)-2], flow[len(flow)-1]); ok {
+					if seen, ok := zeroBoxed(kind); ok {
+						step.seen = seen
+					}
+				}
+			}
 			switch inst.Opcode() {
 			case instr.BR:
 				target.term = terminator{kind: terminateBranch, ip: ip, hot: -1, edges: jumps(input.address, instr.Targets(input.function.Code, ip))}
@@ -312,7 +326,15 @@ func tracePlan(input *compileInput) ([]plan, error) {
 		if tree == nil || tree.root == nil || tree.root.kind == aborted {
 			continue
 		}
-		if (ip != 0) != (tree.root.kind == loop) || ip != 0 && tree.root.carried {
+		// A loop anchor accepts a looping root or a returned straight-line
+		// fragment: a body whose terminal boundary (bulk mutation, yield,
+		// throw) deopts before the back-edge still compiles as a per-entry
+		// prefix that re-enters at the header next iteration. Carried entry
+		// operands stay rejected either way.
+		if ip != 0 && (tree.root.kind != loop && tree.root.kind != returned || tree.root.carried) {
+			continue
+		}
+		if ip == 0 && tree.root.kind == loop {
 			continue
 		}
 		kind := entryFunction
@@ -781,6 +803,14 @@ func mergeSlot(dst *slot, src slot) (bool, bool) {
 		dst.callee, dst.calleeKnown = 0, false
 		changed = true
 	}
+	if dst.styp != nil && dst.styp != src.styp {
+		dst.styp = nil
+		changed = true
+	}
+	if dst.valKnown && (!src.valKnown || dst.val != src.val) {
+		dst.val, dst.valKnown = 0, false
+		changed = true
+	}
 	return changed, true
 }
 
@@ -812,7 +842,8 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		if idx >= len(locals) {
 			return false
 		}
-		push(slot{kind: locals[idx].Kind(), backing: backingLocal, slot: idx})
+		styp, _ := locals[idx].(*types.StructType)
+		push(slot{kind: locals[idx].Kind(), backing: backingLocal, slot: idx, styp: styp})
 		return true
 	case instr.LOCAL_TEE:
 		return len(*state) > 0
@@ -821,7 +852,8 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		if idx >= len(fn.Captures) {
 			return false
 		}
-		push(slot{kind: fn.Captures[idx].Kind(), backing: backingUpval, slot: idx})
+		styp, _ := fn.Captures[idx].(*types.StructType)
+		push(slot{kind: fn.Captures[idx].Kind(), backing: backingUpval, slot: idx, styp: styp})
 		return true
 	case instr.GLOBAL_GET:
 		idx := int(inst.Operand(0))
@@ -874,12 +906,25 @@ func applyStep(fn *types.Function, locals []types.Type, constants []types.Boxed,
 		*state = (*state)[:n-3]
 		push(slot{kind: a.kind})
 		return true
+	case instr.I32_CONST:
+		push(slot{kind: types.KindI32, val: int32(inst.Operand(0)), valKnown: true})
+		return true
 	case instr.ARRAY_GET:
 		if len(*state) < 2 {
 			return false
 		}
 		array := (*state)[len(*state)-2]
 		kind, ok := arrayKind(heap, array)
+		if !ok || !pop(2) {
+			return false
+		}
+		push(slot{kind: kind})
+		return true
+	case instr.STRUCT_GET:
+		if len(*state) < 2 {
+			return false
+		}
+		kind, ok := structFieldKind(heap, (*state)[len(*state)-2], (*state)[len(*state)-1])
 		if !ok || !pop(2) {
 			return false
 		}
@@ -942,6 +987,46 @@ func arrayKind(heap []types.Value, array slot) (types.Kind, bool) {
 		return types.KindF32, true
 	case types.TypedArray[float64]:
 		return types.KindF64, true
+	default:
+		return 0, false
+	}
+}
+
+// structFieldKind resolves a STRUCT_GET result kind statically: the container
+// must carry a declared struct type (or reference a known heap struct) and the
+// field index must be a known in-bounds constant.
+func structFieldKind(heap []types.Value, container, index slot) (types.Kind, bool) {
+	typ := container.styp
+	if typ == nil && container.refKnown && container.ref > 0 && container.ref < len(heap) {
+		if s, ok := heap[container.ref].(*types.Struct); ok {
+			typ = s.Typ
+		}
+	}
+	if typ == nil || !index.valKnown || index.val < 0 || int(index.val) >= len(typ.Fields) {
+		return 0, false
+	}
+	return typ.Fields[index.val].Kind, true
+}
+
+// zeroBoxed builds the zero boxed value whose Kind() reports exactly kind; the
+// static frontend uses it to synthesize step.seen for lowerers that read the
+// observed result kind.
+func zeroBoxed(kind types.Kind) (types.Boxed, bool) {
+	switch kind {
+	case types.KindI1:
+		return types.BoxI1(false), true
+	case types.KindI8:
+		return types.BoxI8(0), true
+	case types.KindI32:
+		return types.BoxI32(0), true
+	case types.KindI64:
+		return types.BoxI64(0), true
+	case types.KindF32:
+		return types.BoxF32(0), true
+	case types.KindF64:
+		return types.BoxF64(0), true
+	case types.KindRef:
+		return types.BoxedNull, true
 	default:
 		return 0, false
 	}

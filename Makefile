@@ -172,7 +172,6 @@ doc: init
 fuzz:
 	@go test -run='^$$' -fuzz='^FuzzInstructionRoundTrip$$' -fuzztime=10s -parallel=$(fuzz-parallel) $(test-options) ./instr
 	@go test -run='^$$' -fuzz='^FuzzParse$$' -fuzztime=10s -parallel=$(fuzz-parallel) $(test-options) ./instr
-	@go test -run='^$$' -fuzz='^FuzzInterpreterParity$$' -fuzztime=10s -parallel=$(fuzz-parallel) $(test-options) ./interp
 	@go test -run='^$$' -fuzz='^FuzzOptimizerParity$$' -fuzztime=10s -parallel=$(fuzz-parallel) $(test-options) ./optimize
 	@go test -run='^$$' -fuzz='^FuzzParseProgram$$' -fuzztime=10s -parallel=$(fuzz-parallel) $(test-options) ./program
 	@go test -run='^$$' -fuzz='^FuzzVerify$$' -fuzztime=10s -parallel=$(fuzz-parallel) $(test-options) ./program

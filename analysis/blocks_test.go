@@ -288,7 +288,7 @@ func TestBlocksAnalysis_Run(t *testing.T) {
 	}
 }
 
-func BenchmarkBasicBlocksAnalysis_Run(b *testing.B) {
+func BenchmarkBlocksAnalysis_Run(b *testing.B) {
 	b.Run("many_blocks", func(b *testing.B) {
 		const n = 10000
 		emit := make([]instr.Instruction, 0, n)
@@ -300,11 +300,14 @@ func BenchmarkBasicBlocksAnalysis_Run(b *testing.B) {
 		m := pass.NewManager()
 		analysis := NewBlocksAnalysis()
 
+		var err error
 		b.ResetTimer()
 		for b.Loop() {
-			if _, err := analysis.Run(m, fn); err != nil {
-				b.Fatal(err)
+			_, err = analysis.Run(m, fn)
+			if err != nil {
+				break
 			}
 		}
+		require.NoError(b, err)
 	})
 }

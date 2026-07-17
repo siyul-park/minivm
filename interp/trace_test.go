@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -90,77 +91,152 @@ func TestTracer_Capture(t *testing.T) {
 		require.Equal(t, instr.I32_CONST, result.trace.ops[len(result.trace.ops)-1].op)
 	})
 
-	t.Run("isolates captured mutations", func(t *testing.T) {
-		primitive := types.TypedArray[int32]{1}
-		array := types.NewArray(types.TypeI32Array, types.BoxI32(1))
+	t.Run("continues after scalar struct set", func(t *testing.T) {
 		structure := types.NewStruct(
 			types.NewStructType(types.NewStructField(types.TypeI32)),
 			types.BoxI32(1),
 		)
-		tests := []struct {
-			name  string
-			value types.Value
-			op    instr.Opcode
-			read  func() types.Boxed
-		}{
-			{name: "primitive array", value: primitive, op: instr.ARRAY_SET, read: func() types.Boxed { return types.BoxI32(primitive[0]) }},
-			{name: "boxed array", value: array, op: instr.ARRAY_SET, read: func() types.Boxed { return array.Elems[0] }},
-			{name: "struct", value: structure, op: instr.STRUCT_SET, read: func() types.Boxed { return structure.Field(0) }},
-		}
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				tracer := NewTracer()
-				prog := program.New([]instr.Instruction{
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.I32_CONST, 0),
-					instr.New(instr.I32_CONST, 2),
-					instr.New(tt.op),
-				}, program.WithConstants(tt.value))
-				i := New(prog, WithTracer(tracer), WithThreshold(-1))
-				defer i.Close()
+		tracer := NewTracer()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.STRUCT_SET),
+			instr.New(instr.I32_CONST, 7),
+		}, program.WithConstants(structure))
+		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		defer i.Close()
 
-				tracer.capture(i, anchor{})
-				require.Equal(t, types.BoxI32(1), tt.read())
-			})
-		}
+		result := tracer.capture(i, anchor{})
+		require.NotNil(t, result.trace)
+		require.Equal(t, completed, result.trace.kind)
+		require.Equal(t, instr.I32_CONST, result.trace.ops[len(result.trace.ops)-1].op)
 	})
 
-	t.Run("preserves typed array aliases", func(t *testing.T) {
-		shared := types.TypedArray[int32]{0}
-		backing := types.TypedArray[int32]{0, 0, 0}
-		tests := []struct {
-			name      string
-			first     types.TypedArray[int32]
-			second    types.TypedArray[int32]
-			setIndex  uint64
-			readIndex uint64
-			original  func() int32
-		}{
-			{name: "same slice", first: shared, second: shared, original: func() int32 { return shared[0] }},
-			{name: "overlapping subslices", first: backing[:2:2], second: backing[1:3], setIndex: 1, original: func() int32 { return backing[1] }},
-		}
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				tracer := NewTracer()
-				prog := program.New([]instr.Instruction{
-					instr.New(instr.CONST_GET, 0),
-					instr.New(instr.I32_CONST, tt.setIndex),
-					instr.New(instr.I32_CONST, 1),
-					instr.New(instr.ARRAY_SET),
-					instr.New(instr.CONST_GET, 1),
-					instr.New(instr.I32_CONST, tt.readIndex),
-					instr.New(instr.ARRAY_GET),
-				}, program.WithConstants(tt.first, tt.second))
-				i := New(prog, WithTracer(tracer), WithThreshold(-1))
-				defer i.Close()
+	t.Run("ends at a ref-field struct set", func(t *testing.T) {
+		structure := types.NewStruct(
+			types.NewStructType(types.NewStructField(types.TypeI32Array)),
+			types.BoxedNull,
+		)
+		tracer := NewTracer()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.REF_NULL),
+			instr.New(instr.STRUCT_SET),
+			instr.New(instr.I32_CONST, 7),
+		}, program.WithConstants(structure))
+		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		defer i.Close()
 
-				result := tracer.capture(i, anchor{})
-				require.NotNil(t, result.trace)
-				require.Equal(t, types.BoxI32(1), result.trace.ops[len(result.trace.ops)-1].seen)
-				require.Zero(t, tt.original())
-			})
-		}
+		result := tracer.capture(i, anchor{})
+		require.NotNil(t, result.trace)
+		require.Equal(t, returned, result.trace.kind)
+		last := result.trace.ops[len(result.trace.ops)-1]
+		require.Equal(t, instr.STRUCT_SET, last.op)
+		require.True(t, last.terminal)
 	})
+
+	t.Run("records bulk mutation as a terminal deopt boundary", func(t *testing.T) {
+		array := types.TypedArray[int32]{1, 2}
+		tracer := NewTracer()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.ARRAY_FILL),
+			instr.New(instr.I32_CONST, 7),
+		}, program.WithConstants(array))
+		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		defer i.Close()
+
+		result := tracer.capture(i, anchor{})
+		require.NotNil(t, result.trace)
+		require.Equal(t, returned, result.trace.kind)
+		require.Equal(t, instr.ARRAY_FILL, result.trace.ops[len(result.trace.ops)-1].op)
+	})
+
+	t.Run("still aborts at allocation", func(t *testing.T) {
+		tracer := NewTracer()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+		}, program.WithTypes(types.TypeI32Array))
+		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		defer i.Close()
+
+		result := tracer.capture(i, anchor{})
+		require.Equal(t, prof.CaptureReasonUnsupportedOp, result.reason)
+	})
+
+	primitive := types.TypedArray[int32]{1}
+	array := types.NewArray(types.TypeI32Array, types.BoxI32(1))
+	structure := types.NewStruct(
+		types.NewStructType(types.NewStructField(types.TypeI32)),
+		types.BoxI32(1),
+	)
+	mutationTests := []struct {
+		name  string
+		value types.Value
+		op    instr.Opcode
+		read  func() types.Boxed
+	}{
+		{name: "primitive array", value: primitive, op: instr.ARRAY_SET, read: func() types.Boxed { return types.BoxI32(primitive[0]) }},
+		{name: "boxed array", value: array, op: instr.ARRAY_SET, read: func() types.Boxed { return array.Elems[0] }},
+		{name: "struct", value: structure, op: instr.STRUCT_SET, read: func() types.Boxed { return structure.Field(0) }},
+	}
+	for _, tt := range mutationTests {
+		t.Run("isolates captured mutation for "+tt.name, func(t *testing.T) {
+			tracer := NewTracer()
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(tt.op),
+			}, program.WithConstants(tt.value))
+			i := New(prog, WithTracer(tracer), WithThreshold(-1))
+			defer i.Close()
+
+			tracer.capture(i, anchor{})
+			require.Equal(t, types.BoxI32(1), tt.read())
+		})
+	}
+
+	shared := types.TypedArray[int32]{0}
+	backing := types.TypedArray[int32]{0, 0, 0}
+	aliasTests := []struct {
+		name      string
+		first     types.TypedArray[int32]
+		second    types.TypedArray[int32]
+		setIndex  uint64
+		readIndex uint64
+		original  func() int32
+	}{
+		{name: "same slice", first: shared, second: shared, original: func() int32 { return shared[0] }},
+		{name: "overlapping subslices", first: backing[:2:2], second: backing[1:3], setIndex: 1, original: func() int32 { return backing[1] }},
+	}
+	for _, tt := range aliasTests {
+		t.Run("preserves typed array aliases for "+tt.name, func(t *testing.T) {
+			tracer := NewTracer()
+			prog := program.New([]instr.Instruction{
+				instr.New(instr.CONST_GET, 0),
+				instr.New(instr.I32_CONST, tt.setIndex),
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.ARRAY_SET),
+				instr.New(instr.CONST_GET, 1),
+				instr.New(instr.I32_CONST, tt.readIndex),
+				instr.New(instr.ARRAY_GET),
+			}, program.WithConstants(tt.first, tt.second))
+			i := New(prog, WithTracer(tracer), WithThreshold(-1))
+			defer i.Close()
+
+			result := tracer.capture(i, anchor{})
+			require.NotNil(t, result.trace)
+			require.Equal(t, types.BoxI32(1), result.trace.ops[len(result.trace.ops)-1].seen)
+			require.Zero(t, tt.original())
+		})
+	}
 
 	t.Run("cuts an oversized trace at a resumable boundary", func(t *testing.T) {
 		code := make([]instr.Instruction, opLimit+1)
@@ -309,7 +385,7 @@ func TestTracer_Capture(t *testing.T) {
 		select {
 		case <-done:
 		case <-time.After(time.Second):
-			t.Fatal("capture deadlocked while reclaiming a function")
+			require.Fail(t, "capture deadlocked while reclaiming a function")
 		}
 		require.NotNil(t, tracer.rootAt(anchor{}))
 		require.NotNil(t, tracer.rootAt(root))

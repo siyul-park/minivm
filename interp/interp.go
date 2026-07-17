@@ -303,7 +303,11 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 				i.retain(addr)
 			}
 		default:
-			val = types.BoxRef(i.keep(v))
+			if s, ok := v.(types.String); ok {
+				val = types.BoxRef(int(i.intern(string(s))))
+			} else {
+				val = types.BoxRef(i.keep(v))
+			}
 			for _, ref := range i.refs(v) {
 				if addr := int(ref); addr >= 0 && addr < len(i.rc) && i.rc[addr] > 0 {
 					i.retain(addr)

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPlan(t *testing.T) {
+func TestPlan_Valid(t *testing.T) {
 	tests := []struct {
 		name string
 		plan plan
@@ -127,43 +127,43 @@ func TestPlan(t *testing.T) {
 		require.Nil(t, observed.blocks[0].state)
 	})
 
-	t.Run("slot merge", func(t *testing.T) {
-		dst := slot{kind: types.KindRef, ref: 7, refKnown: true, callee: 7, calleeKnown: true}
-		changed, ok := mergeSlot(&dst, slot{kind: types.KindRef, ref: 8, refKnown: true, callee: 8, calleeKnown: true})
-		require.True(t, ok)
-		require.True(t, changed)
-		require.False(t, dst.refKnown)
-		require.False(t, dst.calleeKnown)
+}
 
-		_, ok = mergeSlot(&dst, slot{kind: types.KindI32})
-		require.False(t, ok)
-	})
+func TestMergeSlot(t *testing.T) {
+	dst := slot{kind: types.KindRef, ref: 7, refKnown: true, callee: 7, calleeKnown: true}
+	changed, ok := mergeSlot(&dst, slot{kind: types.KindRef, ref: 8, refKnown: true, callee: 8, calleeKnown: true})
+	require.True(t, ok)
+	require.True(t, changed)
+	require.False(t, dst.refKnown)
+	require.False(t, dst.calleeKnown)
 
-	t.Run("local edges", func(t *testing.T) {
-		same := anchor{addr: 1, ip: 4}
-		planned := plan{}
-		ids := store(&planned, []block{
-			{anchor: anchor{addr: 1}, term: terminator{kind: terminateBranch, edges: []edge{{anchor: same, block: local(1)}}}},
-			{anchor: same, term: terminator{kind: terminateBranch, edges: []edge{{anchor: same, block: local(2)}}}},
-			{anchor: same, term: terminator{kind: terminateReturn}},
-		}, false)
+	_, ok = mergeSlot(&dst, slot{kind: types.KindI32})
+	require.False(t, ok)
+}
 
-		require.Equal(t, ids[1], planned.blocks[ids[0]].term.edges[0].block)
-		require.Equal(t, ids[2], planned.blocks[ids[1]].term.edges[0].block)
-	})
+func TestStore(t *testing.T) {
+	same := anchor{addr: 1, ip: 4}
+	planned := plan{}
+	ids := store(&planned, []block{
+		{anchor: anchor{addr: 1}, term: terminator{kind: terminateBranch, edges: []edge{{anchor: same, block: local(1)}}}},
+		{anchor: same, term: terminator{kind: terminateBranch, edges: []edge{{anchor: same, block: local(2)}}}},
+		{anchor: same, term: terminator{kind: terminateReturn}},
+	}, false)
 
-	t.Run("spill policy", func(t *testing.T) {
-		require.False(t, noSpill([]block{{steps: []step{{op: instr.I32_ADD}}}}))
-		require.True(t, noSpill([]block{
-			{steps: []step{{op: instr.I32_ADD}}},
-			{steps: []step{{op: instr.I32_CONST}, {op: instr.STRUCT_SET}}},
-		}))
-		require.True(t, noSpill([]block{{steps: []step{
-			{op: instr.ARRAY_SET},
-			{op: instr.I32_ADD},
-		}}}))
-	})
+	require.Equal(t, ids[1], planned.blocks[ids[0]].term.edges[0].block)
+	require.Equal(t, ids[2], planned.blocks[ids[1]].term.edges[0].block)
+}
 
+func TestNoSpill(t *testing.T) {
+	require.False(t, noSpill([]block{{steps: []step{{op: instr.I32_ADD}}}}))
+	require.True(t, noSpill([]block{
+		{steps: []step{{op: instr.I32_ADD}}},
+		{steps: []step{{op: instr.I32_CONST}, {op: instr.STRUCT_SET}}},
+	}))
+	require.True(t, noSpill([]block{{steps: []step{
+		{op: instr.ARRAY_SET},
+		{op: instr.I32_ADD},
+	}}}))
 }
 
 func TestStaticPlan(t *testing.T) {
@@ -208,6 +208,39 @@ func TestStaticPlan(t *testing.T) {
 		require.Len(t, plans, 1)
 		require.Equal(t, uint64(0), plans[0].blocks[0].steps[0].args[0])
 		require.Equal(t, 2, plans[0].blocks[0].steps[1].callee)
+	})
+
+	t.Run("struct get resolves the field kind", func(t *testing.T) {
+		structTyp := types.NewStructType(types.NewStructField(types.TypeF64))
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{structTyp}, Returns: []types.Type{types.TypeF64}},
+			Code: instr.Marshal([]instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.STRUCT_GET),
+				instr.New(instr.RETURN),
+			}),
+		}
+		plans, err := staticPlan(&compileInput{address: 1, function: fn})
+		require.NoError(t, err)
+		require.Len(t, plans, 1)
+		require.Equal(t, types.KindF64, plans[0].blocks[0].steps[2].seen.Kind())
+	})
+
+	t.Run("struct get with an unknown index rejects the plan", func(t *testing.T) {
+		structTyp := types.NewStructType(types.NewStructField(types.TypeF64))
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{structTyp, types.TypeI32}, Returns: []types.Type{types.TypeF64}},
+			Code: instr.Marshal([]instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.STRUCT_GET),
+				instr.New(instr.RETURN),
+			}),
+		}
+		plans, err := staticPlan(&compileInput{address: 1, function: fn})
+		require.NoError(t, err)
+		require.Empty(t, plans)
 	})
 }
 

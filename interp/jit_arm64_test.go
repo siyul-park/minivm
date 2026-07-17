@@ -196,35 +196,28 @@ func TestARM64_AbortedSideExitDoesNotComplete(t *testing.T) {
 		t.Skip("native JIT is only available on arm64")
 	}
 
-	build := func() *program.Program {
-		b := program.NewBuilder()
-		b.Globals(types.TypeI32, types.TypeI32) // 0: x (in), 1: result (out)
-		mapIdx := b.Type(types.NewMapType(types.TypeI32, types.TypeI32))
-		pathA := b.Label()
-		done := b.Label()
-		b.Emit(instr.GLOBAL_GET, 0).
-			Emit(instr.I32_CONST, 0).
-			Emit(instr.I32_GT_S).
-			BrIf(pathA).
-			Emit(instr.I32_CONST, 4).
-			Emit(instr.MAP_NEW_DEFAULT, uint64(mapIdx)).
-			Emit(instr.MAP_LEN).
-			// MAP_LEN of a fresh map is always 0, which coincides with the
-			// zero-seed Reset() gives global 1; add a nonzero sentinel so a
-			// miscompile that silently skips this path (leaving global 1 at
-			// its stale zero-seed) is observably wrong, not accidentally right.
-			Emit(instr.I32_CONST, 77).
-			Emit(instr.I32_ADD).
-			Emit(instr.GLOBAL_SET, 1).
-			Br(done).
-			Bind(pathA).
-			Emit(instr.I32_CONST, 1).
-			Emit(instr.GLOBAL_SET, 1).
-			Bind(done)
-		prog, err := b.Build()
-		require.NoError(t, err)
-		return prog
-	}
+	b := program.NewBuilder()
+	b.Globals(types.TypeI32, types.TypeI32) // 0: x (in), 1: result (out)
+	mapIdx := b.Type(types.NewMapType(types.TypeI32, types.TypeI32))
+	pathA := b.Label()
+	done := b.Label()
+	b.Emit(instr.GLOBAL_GET, 0).
+		Emit(instr.I32_CONST, 0).
+		Emit(instr.I32_GT_S).
+		BrIf(pathA).
+		Emit(instr.I32_CONST, 4).
+		Emit(instr.MAP_NEW_DEFAULT, uint64(mapIdx)).
+		Emit(instr.MAP_LEN).
+		Emit(instr.I32_CONST, 77).
+		Emit(instr.I32_ADD).
+		Emit(instr.GLOBAL_SET, 1).
+		Br(done).
+		Bind(pathA).
+		Emit(instr.I32_CONST, 1).
+		Emit(instr.GLOBAL_SET, 1).
+		Bind(done)
+	prog, err := b.Build()
+	require.NoError(t, err)
 
 	// Mostly positive inputs (compile and exercise the JIT-native path A),
 	// with a non-positive input every 4th call starting after warm-up (path
@@ -240,24 +233,23 @@ func TestARM64_AbortedSideExitDoesNotComplete(t *testing.T) {
 		}
 	}
 
-	run := func(threshold int) []int32 {
-		i := New(build(), WithTick(1), WithThreshold(threshold))
-		defer i.Close()
-		results := make([]int32, len(inputs))
-		for n, x := range inputs {
-			require.NoError(t, i.SetGlobal(0, types.BoxI32(x)))
-			require.NoError(t, i.Run(context.Background()))
-			v, err := i.Global(1)
-			require.NoError(t, err)
-			results[n] = v.I32()
-			i.Reset()
-		}
-		return results
+	jit := New(prog, WithTick(1), WithThreshold(1))
+	defer jit.Close()
+	threaded := New(prog, WithTick(1), WithThreshold(-1))
+	defer threaded.Close()
+	for _, input := range inputs {
+		require.NoError(t, jit.SetGlobal(0, types.BoxI32(input)))
+		require.NoError(t, threaded.SetGlobal(0, types.BoxI32(input)))
+		require.NoError(t, jit.Run(context.Background()))
+		require.NoError(t, threaded.Run(context.Background()))
+		got, err := jit.Global(1)
+		require.NoError(t, err)
+		want, err := threaded.Global(1)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		jit.Reset()
+		threaded.Reset()
 	}
-
-	jit := run(1)
-	ref := run(-1)
-	require.Equal(t, ref, jit)
 }
 
 // TestNativeStackReserve verifies the arithmetic invariant tying three
@@ -267,7 +259,7 @@ func TestARM64_AbortedSideExitDoesNotComplete(t *testing.T) {
 // is edited without the others, this test fails instead of the mismatch
 // surfacing as a corrupted native stack at runtime. See docs/jit-internals.md
 // for the full explanation.
-func TestNativeStackReserve(t *testing.T) {
+func TestARM64_StackReserve(t *testing.T) {
 	const (
 		spillSlotBytes  = 8 // one 64-bit value per spill slot
 		frameRecordSize = journalStride * 8
@@ -565,7 +557,7 @@ func TestCompiler_Compile(t *testing.T) {
 					return
 				}
 			}
-			t.Fatal("missing array.get guard-value exit")
+			require.Fail(t, "missing array.get guard-value exit")
 		})
 
 		t.Run("guard kind", func(t *testing.T) {
@@ -842,7 +834,7 @@ func TestCompiler_Compile(t *testing.T) {
 				return
 			}
 		}
-		t.Fatal("missing guard-value exit")
+		require.Fail(t, "missing guard-value exit")
 	})
 
 	if runtime.GOARCH != "arm64" {
@@ -1010,7 +1002,7 @@ func TestCompiler_Compile(t *testing.T) {
 	})
 }
 
-func TestArm64Lowerer_QueuesEachState(t *testing.T) {
+func TestARM64Lowerer_QueuesEachState(t *testing.T) {
 	target := edge{anchor: anchor{addr: 1, ip: 2}, block: 0}
 	ctx := &lowering{
 		assembler: asm.New(arm64.New()),
@@ -1950,5 +1942,652 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 		}
 		require.NoError(t, jit.Close())
 		require.NoError(t, threaded.Close())
+	})
+}
+
+// StructSetLoop protects the continuable scalar STRUCT_SET path: a loop whose
+// body stores a scalar field keeps executing natively past the store instead
+// of deopting at a terminal boundary every iteration. Every sub-case diffs
+// results and exact refcounts against a threaded twin.
+func TestARM64_StructSetLoop(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	runParity := func(t *testing.T, prog *program.Program, want types.Boxed) *prof.Profiler {
+		t.Helper()
+		profile := prof.New()
+		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		closed := false
+		t.Cleanup(func() {
+			if !closed {
+				require.NoError(t, jit.Close())
+				require.NoError(t, threaded.Close())
+			}
+		})
+		for n := 0; n < 32; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			ref, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, want, got)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+		closed = true
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0))
+		return profile
+	}
+
+	storeTests := []struct {
+		name       string
+		typ        *types.StructType
+		field      uint64
+		steps      []instr.Instruction
+		want       types.Boxed
+		checkExits bool
+	}{
+		{
+			name:  "i32 field store loop stays native",
+			typ:   types.NewStructType(types.NewStructField(types.TypeI32)),
+			steps: []instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD)},
+			want:  types.BoxI32(24), checkExits: true,
+		},
+		{
+			name:  "i64 field store loop",
+			typ:   types.NewStructType(types.NewStructField(types.TypeI64)),
+			steps: []instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET), instr.New(instr.I64_CONST, 1), instr.New(instr.I64_ADD)},
+			want:  types.BoxI64(24),
+		},
+		{
+			name:  "f32 field store loop masks the stored lane",
+			typ:   types.NewStructType(types.NewStructField(types.TypeF32)),
+			steps: []instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET), instr.New(instr.F32_CONST, uint64(math.Float32bits(1))), instr.New(instr.F32_ADD)},
+			want:  types.BoxF32(24),
+		},
+		{
+			name:  "f64 field store loop",
+			typ:   types.NewStructType(types.NewStructField(types.TypeF64)),
+			steps: []instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET), instr.New(instr.F64_CONST, math.Float64bits(1)), instr.New(instr.F64_ADD)},
+			want:  types.BoxF64(24),
+		},
+		{
+			name:  "i1 field store loop",
+			typ:   types.NewStructType(types.NewStructField(types.TypeI1)),
+			steps: []instr.Instruction{instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_EQZ)},
+			want:  types.BoxI1(false),
+		},
+		{
+			name: "heap-backed data past the inline fields",
+			typ: types.NewStructType(
+				types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI32),
+				types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI32),
+			),
+			field: 4,
+			steps: []instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 4), instr.New(instr.STRUCT_GET), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD)},
+			want:  types.BoxI32(24),
+		},
+	}
+	for _, tt := range storeTests {
+		t.Run(tt.name, func(t *testing.T) {
+			const size = int32(24)
+			b := program.NewBuilder()
+			typ := b.Type(tt.typ)
+			b.Locals(tt.typ, types.TypeI32)
+			loop := b.Label()
+			done := b.Label()
+			b.Emit(instr.STRUCT_NEW_DEFAULT, uint64(typ)).Emit(instr.LOCAL_SET, 0)
+			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+			b.Bind(loop)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, tt.field)
+			for _, step := range tt.steps {
+				b.Emit(step.Opcode(), step.Operands()...)
+			}
+			b.Emit(instr.STRUCT_SET)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+			b.Br(loop)
+			b.Bind(done)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, tt.field).Emit(instr.STRUCT_GET)
+			prog, err := b.Build()
+			require.NoError(t, err)
+			profile := runParity(t, prog, tt.want)
+			if tt.checkExits {
+				found := false
+				for _, metric := range profile.Metrics() {
+					if metric.Name != "vm_jit_native_exits_total" {
+						continue
+					}
+					for _, label := range metric.Labels {
+						if label.Key == "reason" && label.Value == "loop-exit" {
+							found = true
+						}
+					}
+				}
+				require.True(t, found, "missing native loop-exit metric")
+			}
+		})
+	}
+
+	t.Run("owned container from a nested struct get", func(t *testing.T) {
+		const size = int32(24)
+		inner := types.NewStructType(types.NewStructField(types.TypeI32))
+		outer := types.NewStructType(types.NewStructField(inner))
+		b := program.NewBuilder()
+		innerTyp := b.Type(inner)
+		outerTyp := b.Type(outer)
+		b.Locals(outer, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.STRUCT_NEW_DEFAULT, uint64(outerTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_NEW_DEFAULT, uint64(innerTyp)).Emit(instr.STRUCT_SET)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		// The container operand is the owned (retained) result of STRUCT_GET,
+		// so the native store must take the rc guard and release it in place.
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
+		b.Emit(instr.I32_CONST, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
+		b.Emit(instr.STRUCT_SET)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog, types.BoxI32(size))
+	})
+
+	t.Run("polymorphic struct types deopt and stay balanced", func(t *testing.T) {
+		// The container local alternates between two struct types whose field 0
+		// is i32: iterations against the type the trace recorded run native,
+		// the other type deopts on the shape or kind guard and falls back to
+		// the threaded handler with identical results and refcounts.
+		narrow := types.NewStructType(types.NewStructField(types.TypeI32))
+		wide := types.NewStructType(types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI64))
+		b := program.NewBuilder()
+		narrowTyp := b.Type(narrow)
+		wideTyp := b.Type(wide)
+		b.Locals(types.TypeRef, types.TypeI32, types.TypeI32, types.TypeI32)
+		outer := b.Label()
+		odd := b.Label()
+		enter := b.Label()
+		inner := b.Label()
+		next := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
+		b.Bind(outer)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 8).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_AND).BrIf(odd)
+		b.Emit(instr.STRUCT_NEW_DEFAULT, uint64(narrowTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Br(enter)
+		b.Bind(odd)
+		b.Emit(instr.STRUCT_NEW_DEFAULT, uint64(wideTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Bind(enter)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(inner)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 6).Emit(instr.I32_GE_S).BrIf(next)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
+		b.Emit(instr.STRUCT_SET)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Br(inner)
+		b.Bind(next)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(outer)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 3)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog, types.BoxI32(48))
+	})
+
+	t.Run("store after an inlined call stays terminal and balanced", func(t *testing.T) {
+		const size = int32(8)
+		id := types.NewFunctionBuilder(nil).Params(types.TypeI32).Returns(types.TypeI32)
+		id.Emit(instr.New(instr.LOCAL_GET, 0), instr.New(instr.RETURN))
+		fn, err := id.Build()
+		require.NoError(t, err)
+
+		structTyp := types.NewStructType(types.NewStructField(types.TypeI32))
+		b := program.NewBuilder()
+		typ := b.Type(structTyp)
+		b.Const(fn)
+		b.Locals(structTyp, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.STRUCT_NEW_DEFAULT, uint64(typ)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0)
+		b.Emit(instr.LOCAL_GET, 1).ConstGet(fn).Emit(instr.CALL)
+		b.Emit(instr.STRUCT_SET)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog, types.BoxI32(size-1))
+	})
+}
+
+// RefEqLoop protects the native boxed-word equality for REF_EQ/REF_NE and
+// STRING_EQ/STRING_NE: with at most one owned operand the compare stays
+// native, and with two owned operands it falls back terminally. Every
+// sub-case diffs results and exact refcounts against a threaded twin.
+func TestARM64_RefEqLoop(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	runParity := func(t *testing.T, prog *program.Program, want types.Boxed) {
+		t.Helper()
+		profile := prof.New()
+		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		closed := false
+		t.Cleanup(func() {
+			if !closed {
+				require.NoError(t, jit.Close())
+				require.NoError(t, threaded.Close())
+			}
+		})
+		for n := 0; n < 32; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			ref, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, want, got)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+		closed = true
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0))
+	}
+
+	// eqLoop counts, over size iterations, how often the two operands the
+	// build callback pushes compare equal under op.
+	eqLoop := func(setup func(b *program.Builder), operands func(b *program.Builder), op instr.Opcode) *program.Program {
+		const size = int32(24)
+		b := program.NewBuilder()
+		setup(b)
+		loop := b.Label()
+		hit := b.Label()
+		skip := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		operands(b)
+		b.Emit(op).BrIf(hit)
+		b.Br(skip)
+		b.Bind(hit)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Bind(skip)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 2)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		return prog
+	}
+
+	t.Run("deferred string equality stays native", func(t *testing.T) {
+		prog := eqLoop(func(b *program.Builder) {
+			b.Locals(types.TypeString, types.TypeI32, types.TypeI32)
+			b.ConstGet(types.String("hot")).Emit(instr.LOCAL_SET, 0)
+		}, func(b *program.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).ConstGet(types.String("hot"))
+		}, instr.STRING_EQ)
+		runParity(t, prog, types.BoxI32(24))
+	})
+
+	t.Run("deferred string inequality with distinct literals", func(t *testing.T) {
+		prog := eqLoop(func(b *program.Builder) {
+			b.Locals(types.TypeString, types.TypeI32, types.TypeI32)
+			b.ConstGet(types.String("hot")).Emit(instr.LOCAL_SET, 0)
+		}, func(b *program.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).ConstGet(types.String("cold"))
+		}, instr.STRING_NE)
+		runParity(t, prog, types.BoxI32(24))
+	})
+
+	t.Run("one owned operand releases in place", func(t *testing.T) {
+		stringArray := types.NewArrayType(types.TypeString)
+		prog := eqLoop(func(b *program.Builder) {
+			arrTyp := b.Type(stringArray)
+			b.Locals(stringArray, types.TypeI32, types.TypeI32)
+			b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 0)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).ConstGet(types.String("hot")).Emit(instr.ARRAY_SET)
+		}, func(b *program.Builder) {
+			// The array element load retains its result, so the compare's left
+			// operand owns a retain the native path must release in place.
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET)
+			b.ConstGet(types.String("hot"))
+		}, instr.STRING_EQ)
+		runParity(t, prog, types.BoxI32(24))
+	})
+
+	t.Run("two owned operands fall back terminally", func(t *testing.T) {
+		stringArray := types.NewArrayType(types.TypeString)
+		prog := eqLoop(func(b *program.Builder) {
+			arrTyp := b.Type(stringArray)
+			b.Locals(stringArray, types.TypeI32, types.TypeI32)
+			b.Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 0)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).ConstGet(types.String("hot")).Emit(instr.ARRAY_SET)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).ConstGet(types.String("hot")).Emit(instr.ARRAY_SET)
+		}, func(b *program.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_GET)
+		}, instr.STRING_EQ)
+		runParity(t, prog, types.BoxI32(24))
+	})
+
+	t.Run("deferred ref equality stays native", func(t *testing.T) {
+		prog := eqLoop(func(b *program.Builder) {
+			arrTyp := b.Type(types.TypeI32Array)
+			b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32, types.TypeI32Array)
+			b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 0)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_SET, 3)
+		}, func(b *program.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 3)
+		}, instr.REF_EQ)
+		runParity(t, prog, types.BoxI32(24))
+	})
+
+	t.Run("deferred ref inequality stays native", func(t *testing.T) {
+		prog := eqLoop(func(b *program.Builder) {
+			arrTyp := b.Type(types.TypeI32Array)
+			b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32, types.TypeI32Array)
+			b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 0)
+			b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 3)
+		}, func(b *program.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 3)
+		}, instr.REF_NE)
+		runParity(t, prog, types.BoxI32(24))
+	})
+}
+
+// TerminalMutationLoop protects the abort-to-terminal reclassification of bulk
+// mutations: a loop containing ARRAY_FILL or MAP_SET compiles its prefix
+// natively and deopts at the boundary instead of rejecting the whole trace.
+// Every sub-case diffs results and exact refcounts against a threaded twin.
+func TestARM64_TerminalMutationLoop(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	runParity := func(t *testing.T, prog *program.Program, want types.Boxed) {
+		t.Helper()
+		profile := prof.New()
+		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		closed := false
+		t.Cleanup(func() {
+			if !closed {
+				require.NoError(t, jit.Close())
+				require.NoError(t, threaded.Close())
+			}
+		})
+		for n := 0; n < 32; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			ref, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, want, got)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+		closed = true
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0))
+	}
+
+	t.Run("array fill loop keeps its prefix native", func(t *testing.T) {
+		const size = int32(24)
+		b := program.NewBuilder()
+		arrTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_FILL)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog, types.BoxI32(size*(size-1)/2+1))
+	})
+
+	t.Run("array copy loop keeps its prefix native", func(t *testing.T) {
+		const size = int32(24)
+		b := program.NewBuilder()
+		arrTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array, types.TypeI32Array, types.TypeI32, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 7).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW, uint64(arrTyp)).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_COPY)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog, types.BoxI32(size*(size-1)/2+7))
+	})
+
+	t.Run("array append loop keeps its prefix native", func(t *testing.T) {
+		const size = int32(24)
+		b := program.NewBuilder()
+		arrTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_APPEND).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_LEN).Emit(instr.I32_ADD)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog, types.BoxI32(size*(size-1)/2+size))
+	})
+
+	t.Run("map set loop keeps its prefix native", func(t *testing.T) {
+		const size = int32(24)
+		b := program.NewBuilder()
+		mapTyp := b.Type(types.NewMapType(types.TypeI32, types.TypeI32))
+		b.Locals(types.TypeRef, types.TypeI32, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 4).Emit(instr.MAP_NEW_DEFAULT, uint64(mapTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.MAP_SET)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 5).Emit(instr.MAP_GET).Emit(instr.I32_ADD)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog, types.BoxI32(size*(size-1)/2+5))
+	})
+}
+
+// StructGetStaticPlan protects the static frontend's STRUCT_GET support: a
+// function whose struct-typed parameter is read with a constant field index
+// compiles through the static planner without trace warmup, for scalar and
+// ref fields alike, and matches the threaded twin including refcounts.
+func TestARM64_StructGetStaticPlan(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	runStatic := func(t *testing.T, prog *program.Program, want types.Boxed) {
+		t.Helper()
+		profile := prof.New()
+		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		closed := false
+		t.Cleanup(func() {
+			if !closed {
+				require.NoError(t, jit.Close())
+				require.NoError(t, threaded.Close())
+			}
+		})
+		for n := 0; n < 8; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			ref, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, want, got)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+		closed = true
+		static := false
+		for _, metric := range profile.Metrics() {
+			if metric.Name != "vm_jit_compiles_total" {
+				continue
+			}
+			frontend, outcome := "", ""
+			for _, label := range metric.Labels {
+				switch label.Key {
+				case "frontend":
+					frontend = label.Value
+				case "outcome":
+					outcome = label.Value
+				}
+			}
+			if frontend == "static" && outcome == "emitted" && metric.Value > 0 {
+				static = true
+			}
+		}
+		require.True(t, static, "expected a static-frontend compile")
+	}
+
+	t.Run("scalar field", func(t *testing.T) {
+		structTyp := types.NewStructType(types.NewStructField(types.TypeI32))
+		get := types.NewFunctionBuilder(nil).Params(structTyp).Returns(types.TypeI32)
+		get.Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.STRUCT_GET),
+			instr.New(instr.RETURN),
+		)
+		fn, err := get.Build()
+		require.NoError(t, err)
+
+		b := program.NewBuilder()
+		typ := b.Type(structTyp)
+		b.Const(fn)
+		b.Locals(structTyp)
+		b.Emit(instr.STRUCT_NEW_DEFAULT, uint64(typ)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 9).Emit(instr.STRUCT_SET)
+		b.Emit(instr.LOCAL_GET, 0).ConstGet(fn).Emit(instr.CALL)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runStatic(t, prog, types.BoxI32(9))
+	})
+
+	t.Run("ref field retains its result", func(t *testing.T) {
+		structTyp := types.NewStructType(types.NewStructField(types.TypeI32Array))
+		get := types.NewFunctionBuilder(nil).Params(structTyp).Returns(types.TypeI32Array)
+		get.Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.STRUCT_GET),
+			instr.New(instr.RETURN),
+		)
+		fn, err := get.Build()
+		require.NoError(t, err)
+
+		b := program.NewBuilder()
+		typ := b.Type(structTyp)
+		arrTyp := b.Type(types.TypeI32Array)
+		b.Const(fn)
+		b.Locals(structTyp)
+		b.Emit(instr.STRUCT_NEW_DEFAULT, uint64(typ)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 6).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.STRUCT_SET)
+		b.Emit(instr.LOCAL_GET, 0).ConstGet(fn).Emit(instr.CALL).Emit(instr.ARRAY_LEN)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runStatic(t, prog, types.BoxI32(6))
 	})
 }

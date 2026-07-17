@@ -99,6 +99,12 @@ func (r *rewriter) run(insts []Instruction, labels map[Label]int, entries []Labe
 				r.release(v)
 			}
 		}
+		// A def that is never read again is dead after this instruction;
+		// without this release its register would stay bound forever, since
+		// the use loop above only frees operands that appear as reads.
+		if dst, ok := inst.Def(); ok && r.last[dst.ID()] == i {
+			r.release(dst)
+		}
 	}
 	newIdx[len(insts)] = len(r.out)
 	return r.inject(labels, entries, newIdx)
