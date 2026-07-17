@@ -209,6 +209,39 @@ func TestStaticPlan(t *testing.T) {
 		require.Equal(t, uint64(0), plans[0].blocks[0].steps[0].args[0])
 		require.Equal(t, 2, plans[0].blocks[0].steps[1].callee)
 	})
+
+	t.Run("struct get resolves the field kind", func(t *testing.T) {
+		structTyp := types.NewStructType(types.NewStructField(types.TypeF64))
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{structTyp}, Returns: []types.Type{types.TypeF64}},
+			Code: instr.Marshal([]instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.I32_CONST, 0),
+				instr.New(instr.STRUCT_GET),
+				instr.New(instr.RETURN),
+			}),
+		}
+		plans, err := staticPlan(&compileInput{address: 1, function: fn})
+		require.NoError(t, err)
+		require.Len(t, plans, 1)
+		require.Equal(t, types.KindF64, plans[0].blocks[0].steps[2].seen.Kind())
+	})
+
+	t.Run("struct get with an unknown index rejects the plan", func(t *testing.T) {
+		structTyp := types.NewStructType(types.NewStructField(types.TypeF64))
+		fn := &types.Function{
+			Typ: &types.FunctionType{Params: []types.Type{structTyp, types.TypeI32}, Returns: []types.Type{types.TypeF64}},
+			Code: instr.Marshal([]instr.Instruction{
+				instr.New(instr.LOCAL_GET, 0),
+				instr.New(instr.LOCAL_GET, 1),
+				instr.New(instr.STRUCT_GET),
+				instr.New(instr.RETURN),
+			}),
+		}
+		plans, err := staticPlan(&compileInput{address: 1, function: fn})
+		require.NoError(t, err)
+		require.Empty(t, plans)
+	})
 }
 
 func TestTracePlan(t *testing.T) {

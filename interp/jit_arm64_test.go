@@ -2409,3 +2409,103 @@ func TestARM64_TerminalMutationLoop(t *testing.T) {
 		runParity(t, prog, types.BoxI32(size*(size-1)/2+5))
 	})
 }
+
+// StructGetStaticPlan protects the static frontend's STRUCT_GET support: a
+// function whose struct-typed parameter is read with a constant field index
+// compiles through the static planner without trace warmup, for scalar and
+// ref fields alike, and matches the threaded twin including refcounts.
+func TestARM64_StructGetStaticPlan(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	runStatic := func(t *testing.T, prog *program.Program, want types.Boxed) {
+		t.Helper()
+		profile := prof.New()
+		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		for n := 0; n < 8; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			ref, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, want, got)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+		static := false
+		for _, metric := range profile.Metrics() {
+			if metric.Name != "vm_jit_compiles_total" {
+				continue
+			}
+			frontend, outcome := "", ""
+			for _, label := range metric.Labels {
+				switch label.Key {
+				case "frontend":
+					frontend = label.Value
+				case "outcome":
+					outcome = label.Value
+				}
+			}
+			if frontend == "static" && outcome == "emitted" && metric.Value > 0 {
+				static = true
+			}
+		}
+		require.True(t, static, "expected a static-frontend compile")
+	}
+
+	t.Run("scalar field", func(t *testing.T) {
+		structTyp := types.NewStructType(types.NewStructField(types.TypeI32))
+		get := types.NewFunctionBuilder(nil).Params(structTyp).Returns(types.TypeI32)
+		get.Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.STRUCT_GET),
+			instr.New(instr.RETURN),
+		)
+		fn, err := get.Build()
+		require.NoError(t, err)
+
+		b := program.NewBuilder()
+		typ := b.Type(structTyp)
+		b.Const(fn)
+		b.Locals(structTyp)
+		b.Emit(instr.STRUCT_NEW_DEFAULT, uint64(typ)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 9).Emit(instr.STRUCT_SET)
+		b.Emit(instr.LOCAL_GET, 0).ConstGet(fn).Emit(instr.CALL)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runStatic(t, prog, types.BoxI32(9))
+	})
+
+	t.Run("ref field retains its result", func(t *testing.T) {
+		structTyp := types.NewStructType(types.NewStructField(types.TypeI32Array))
+		get := types.NewFunctionBuilder(nil).Params(structTyp).Returns(types.TypeI32Array)
+		get.Emit(
+			instr.New(instr.LOCAL_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.STRUCT_GET),
+			instr.New(instr.RETURN),
+		)
+		fn, err := get.Build()
+		require.NoError(t, err)
+
+		b := program.NewBuilder()
+		typ := b.Type(structTyp)
+		arrTyp := b.Type(types.TypeI32Array)
+		b.Const(fn)
+		b.Locals(structTyp)
+		b.Emit(instr.STRUCT_NEW_DEFAULT, uint64(typ)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 6).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.STRUCT_SET)
+		b.Emit(instr.LOCAL_GET, 0).ConstGet(fn).Emit(instr.CALL).Emit(instr.ARRAY_LEN)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runStatic(t, prog, types.BoxI32(6))
+	})
+}

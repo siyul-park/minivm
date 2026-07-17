@@ -105,7 +105,7 @@ Both frontends return the same private `plan` model: ABI kind, a root block ID, 
 
 ## Static Frontend
 
-The static frontend analyzes basic blocks with one forward fixpoint that tracks stack kind, constant-ref provenance, and direct-call targets. It emits plan blocks with explicit entry state, decoded operands, and block-ID edges. Unsupported instructions become exact-IP fallback boundaries when the surrounding function remains structurally valid.
+The static frontend analyzes basic blocks with one forward fixpoint that tracks stack kind, constant-ref provenance, direct-call targets, declared struct types, and known i32 constants. A `STRUCT_GET` whose container carries a declared struct type (or references a known heap struct) and whose field index is a known in-bounds constant resolves its result kind statically; the planner synthesizes `step.seen` as the zero boxed value of that kind, and the lowering's runtime itab, type, and per-field kind guards keep it sound. It emits plan blocks with explicit entry state, decoded operands, and block-ID edges. Unsupported instructions become exact-IP fallback boundaries when the surrounding function remains structurally valid.
 
 Top-level modules containing `CALL` or `RETURN_CALL` are rejected because module entry does not implement the framed native-call ABI. Primitive typed-array constants remain ownership-neutral markers until `ARRAY_GET`; native code reloads the current heap cell, guards its shape and index, and retains the marker only on a cold fallback.
 
