@@ -51,7 +51,14 @@ func TestError_Kind(t *testing.T) {
 }
 
 func TestError_Type(t *testing.T) {
-	require.Equal(t, TypeError, NewError(ErrorCodeNone, "", BoxedNull).Type())
+	typ := NewError(ErrorCodeNone, "", BoxedNull).Type()
+	require.Equal(t, TypeError, typ)
+	require.Equal(t, KindRef, typ.Kind())
+	require.Equal(t, "error", typ.String())
+	require.True(t, typ.Cast(TypeError))
+	require.False(t, typ.Cast(TypeI32))
+	require.True(t, typ.Equals(TypeError))
+	require.False(t, typ.Equals(TypeString))
 }
 
 func TestError_String(t *testing.T) {
@@ -61,22 +68,4 @@ func TestError_String(t *testing.T) {
 func TestError_Refs(t *testing.T) {
 	require.Equal(t, []Ref{9}, NewError(ErrorCodeNone, "", BoxI32(7)).Refs([]Ref{9}))
 	require.Equal(t, []Ref{Ref(9), Ref(3)}, NewError(ErrorCodeNone, "", BoxRef(3)).Refs([]Ref{9}))
-}
-
-func TestErrorType_Kind(t *testing.T) {
-	require.Equal(t, KindRef, TypeError.Kind())
-}
-
-func TestErrorType_String(t *testing.T) {
-	require.Equal(t, "error", TypeError.String())
-}
-
-func TestErrorType_Cast(t *testing.T) {
-	require.True(t, TypeError.Cast(TypeError))
-	require.False(t, TypeError.Cast(TypeI32))
-}
-
-func TestErrorType_Equals(t *testing.T) {
-	require.True(t, TypeError.Equals(TypeError))
-	require.False(t, TypeError.Equals(TypeString))
 }

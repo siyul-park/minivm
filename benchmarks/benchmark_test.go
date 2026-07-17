@@ -33,83 +33,81 @@ var benchmarkCompare = func(*testing.B, benchmarkComparison, int32) {}
 
 func benchmarkVM(b *testing.B, prog *program.Program, want types.Boxed) {
 	b.Helper()
-	run := func(name string, threshold ...int) {
-		b.Run(name, func(b *testing.B) {
+	modes := []struct {
+		name      string
+		threshold []int
+	}{
+		{name: "default"},
+		{name: "threaded", threshold: []int{-1}},
+		{name: "jit", threshold: []int{0}},
+	}
+	for _, mode := range modes {
+		b.Run(mode.name, func(b *testing.B) {
 			var vm *interp.Interpreter
-			if len(threshold) == 0 {
+			if len(mode.threshold) == 0 {
 				vm = interp.New(prog)
 			} else {
-				vm = interp.New(prog, interp.WithThreshold(threshold[0]))
+				vm = interp.New(prog, interp.WithThreshold(mode.threshold[0]))
 			}
 			defer vm.Close()
-			require.NoError(b, vm.Run(context.Background()))
+			ctx := context.Background()
+
+			require.NoError(b, vm.Run(ctx))
 			value, err := vm.PopBoxed()
 			require.NoError(b, err)
 			require.Equal(b, want, value)
 			vm.Reset()
 
-			benchmarkRun(b, vm, want)
+			const warmups = 4
+			const allocations = 32
+			byteSamples := make([]uint64, 0, allocations)
+			allocSamples := make([]uint64, 0, allocations)
+			for index := range warmups + allocations {
+				var before, after runtime.MemStats
+				runtime.ReadMemStats(&before)
+				runErr := vm.Run(ctx)
+				runtime.ReadMemStats(&after)
+				require.NoError(b, runErr)
+				value, popErr := vm.PopBoxed()
+				require.NoError(b, popErr)
+				require.Equal(b, want, value)
+				vm.Reset()
+				if index >= warmups {
+					byteSamples = append(byteSamples, after.TotalAlloc-before.TotalAlloc)
+					allocSamples = append(allocSamples, after.Mallocs-before.Mallocs)
+				}
+			}
+			slices.Sort(byteSamples)
+			slices.Sort(allocSamples)
+			bytes := byteSamples[len(byteSamples)/2]
+			allocs := allocSamples[len(allocSamples)/2]
+
+			const samples = 4096
+			var overhead time.Duration
+			for range samples {
+				start := time.Now()
+				overhead += time.Since(start)
+			}
+			overhead /= samples
+
+			var runErr, popErr error
+			var elapsed time.Duration
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				start := time.Now()
+				runErr = vm.Run(ctx)
+				elapsed += time.Since(start)
+				value, popErr = vm.PopBoxed()
+				vm.Reset()
+			}
+			elapsed -= min(elapsed, overhead*time.Duration(b.N))
+			b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+			b.ReportMetric(float64(bytes), "B/op")
+			b.ReportMetric(float64(allocs), "allocs/op")
+			require.NoError(b, runErr)
+			require.NoError(b, popErr)
+			require.Equal(b, want, value)
 		})
 	}
-
-	run("default")
-	run("threaded", -1)
-	run("jit", 0)
-}
-
-func benchmarkRun(b *testing.B, vm *interp.Interpreter, want types.Boxed) {
-	b.Helper()
-	ctx := context.Background()
-
-	const warmups = 4
-	const allocations = 32
-	byteSamples := make([]uint64, 0, allocations)
-	allocSamples := make([]uint64, 0, allocations)
-	for index := range warmups + allocations {
-		var before, after runtime.MemStats
-		runtime.ReadMemStats(&before)
-		runErr := vm.Run(ctx)
-		runtime.ReadMemStats(&after)
-		require.NoError(b, runErr)
-		value, popErr := vm.PopBoxed()
-		require.NoError(b, popErr)
-		require.Equal(b, want, value)
-		vm.Reset()
-		if index >= warmups {
-			byteSamples = append(byteSamples, after.TotalAlloc-before.TotalAlloc)
-			allocSamples = append(allocSamples, after.Mallocs-before.Mallocs)
-		}
-	}
-	slices.Sort(byteSamples)
-	slices.Sort(allocSamples)
-	bytes := byteSamples[len(byteSamples)/2]
-	allocs := allocSamples[len(allocSamples)/2]
-
-	const samples = 4096
-	var overhead time.Duration
-	for range samples {
-		start := time.Now()
-		overhead += time.Since(start)
-	}
-	overhead /= samples
-
-	var runErr, popErr error
-	var value types.Boxed
-	var elapsed time.Duration
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		start := time.Now()
-		runErr = vm.Run(ctx)
-		elapsed += time.Since(start)
-		value, popErr = vm.PopBoxed()
-		vm.Reset()
-	}
-	elapsed -= min(elapsed, overhead*time.Duration(b.N))
-	b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
-	b.ReportMetric(float64(bytes), "B/op")
-	b.ReportMetric(float64(allocs), "allocs/op")
-	require.NoError(b, runErr)
-	require.NoError(b, popErr)
-	require.Equal(b, want, value)
 }

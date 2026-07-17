@@ -19,8 +19,14 @@ func TestString_Kind(t *testing.T) {
 }
 
 func TestString_Type(t *testing.T) {
-	val := String("")
-	require.Equal(t, TypeString, val.Type())
+	typ := String("").Type()
+	require.Equal(t, TypeString, typ)
+	require.Equal(t, KindRef, typ.Kind())
+	require.Equal(t, "string", typ.String())
+	require.True(t, typ.Cast(TypeString))
+	require.False(t, typ.Cast(TypeI32))
+	require.True(t, typ.Equals(TypeString))
+	require.False(t, typ.Equals(TypeI32))
 }
 
 func TestString_String(t *testing.T) {
@@ -94,22 +100,4 @@ func TestStringIterator_Done(t *testing.T) {
 func TestStringIterator_Refs(t *testing.T) {
 	it := NewStringIterator(3, "a")
 	require.Equal(t, []Ref{5, 3}, it.Refs([]Ref{5}))
-}
-
-func TestStringType_Kind(t *testing.T) {
-	require.Equal(t, KindRef, TypeString.Kind())
-}
-
-func TestStringType_String(t *testing.T) {
-	require.Equal(t, "string", TypeString.String())
-}
-
-func TestStringType_Cast(t *testing.T) {
-	require.True(t, TypeString.Cast(TypeString))
-	require.False(t, TypeString.Cast(TypeI32))
-}
-
-func TestStringType_Equals(t *testing.T) {
-	require.True(t, TypeString.Equals(TypeString))
-	require.False(t, TypeString.Equals(TypeI32))
 }

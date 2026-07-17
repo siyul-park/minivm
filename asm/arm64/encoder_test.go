@@ -15,7 +15,7 @@ func TestNewEncoder(t *testing.T) {
 func TestEncoder_Encode(t *testing.T) {
 	encoder := NewEncoder()
 
-	t.Run("golden words", func(t *testing.T) {
+	{
 		tests := []struct {
 			name string
 			inst asm.Instruction
@@ -118,13 +118,13 @@ func TestEncoder_Encode(t *testing.T) {
 			{"FCVTZU X1,D2", FCVTZU(X1, D2), 0x9E790041},
 		}
 		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
+			t.Run("golden word "+tt.name, func(t *testing.T) {
 				got, err := encoder.Encode(tt.inst)
 				require.NoError(t, err)
 				require.Equal(t, tt.want, binary.LittleEndian.Uint32(got))
 			})
 		}
-	})
+	}
 
 	t.Run("register offset load store scales slot index", func(t *testing.T) {
 		got, err := encoder.Encode(LDRR(X3, X4, X5))
@@ -136,7 +136,7 @@ func TestEncoder_Encode(t *testing.T) {
 		require.Equal(t, []byte{0x83, 0x78, 0x25, 0xF8}, got)
 	})
 
-	t.Run("errors", func(t *testing.T) {
+	{
 		tests := []struct {
 			name string
 			inst asm.Instruction
@@ -155,10 +155,10 @@ func TestEncoder_Encode(t *testing.T) {
 			{"TBZ offset exceeds imm14", TBZ(X1, 3, 1<<17), asm.ErrBranchOutOfRange},
 		}
 		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
+			t.Run("error "+tt.name, func(t *testing.T) {
 				_, err := encoder.Encode(tt.inst)
 				require.ErrorIs(t, err, tt.want)
 			})
 		}
-	})
+	}
 }
