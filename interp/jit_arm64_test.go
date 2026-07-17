@@ -267,7 +267,7 @@ func TestARM64_AbortedSideExitDoesNotComplete(t *testing.T) {
 // is edited without the others, this test fails instead of the mismatch
 // surfacing as a corrupted native stack at runtime. See docs/jit-internals.md
 // for the full explanation.
-func TestNativeStackReserve(t *testing.T) {
+func TestARM64_StackReserve(t *testing.T) {
 	const (
 		spillSlotBytes  = 8 // one 64-bit value per spill slot
 		frameRecordSize = journalStride * 8
@@ -1010,7 +1010,7 @@ func TestCompiler_Compile(t *testing.T) {
 	})
 }
 
-func TestArm64Lowerer_QueuesEachState(t *testing.T) {
+func TestARM64Lowerer_QueuesEachState(t *testing.T) {
 	target := edge{anchor: anchor{addr: 1, ip: 2}, block: 0}
 	ctx := &lowering{
 		assembler: asm.New(arm64.New()),
