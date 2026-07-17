@@ -251,3 +251,47 @@ func TestTracePlan(t *testing.T) {
 	}
 	require.Equal(t, continuation.anchor, plans[0].blocks[len(plans[0].blocks)-1].anchor)
 }
+
+func TestHoistable(t *testing.T) {
+	fn := &types.Function{Locals: []types.Type{types.TypeI32Array, types.TypeI32}}
+	access := []step{
+		{op: instr.LOCAL_GET, args: [2]uint64{0}},
+		{op: instr.LOCAL_GET, args: [2]uint64{1}},
+		{op: instr.I32_CONST},
+		{op: instr.ARRAY_SET, shape: shape{itab: 42}},
+	}
+
+	t.Run("picks the loop-invariant container", func(t *testing.T) {
+		got := hoistable(fn, []block{{steps: access}})
+		require.Equal(t, &hoist{local: 0, want: 42}, got)
+	})
+
+	t.Run("a written container local is rejected", func(t *testing.T) {
+		steps := append(append([]step{}, access...), step{op: instr.LOCAL_SET, args: [2]uint64{0}})
+		require.Nil(t, hoistable(fn, []block{{steps: steps}}))
+	})
+
+	t.Run("a call rejects the plan", func(t *testing.T) {
+		steps := append(append([]step{}, access...), step{op: instr.CALL})
+		require.Nil(t, hoistable(fn, []block{{steps: steps}}))
+	})
+
+	t.Run("conflicting itabs are rejected", func(t *testing.T) {
+		other := append(append([]step{}, access...), []step{
+			{op: instr.LOCAL_GET, args: [2]uint64{0}},
+			{op: instr.LOCAL_GET, args: [2]uint64{1}},
+			{op: instr.ARRAY_GET, shape: shape{itab: 7}},
+		}...)
+		require.Nil(t, hoistable(fn, []block{{steps: other}}))
+	})
+
+	t.Run("a scalar local is rejected", func(t *testing.T) {
+		steps := []step{
+			{op: instr.LOCAL_GET, args: [2]uint64{1}},
+			{op: instr.LOCAL_GET, args: [2]uint64{1}},
+			{op: instr.I32_CONST},
+			{op: instr.ARRAY_SET, shape: shape{itab: 42}},
+		}
+		require.Nil(t, hoistable(fn, []block{{steps: steps}}))
+	})
+}

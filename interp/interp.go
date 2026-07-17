@@ -892,7 +892,7 @@ func (i *Interpreter) install(mod *module, account bool) {
 		}
 		stats := i.counters(a, entry)
 		if entry.kind == entryLoop {
-			i.code[a.addr][a.ip] = i.loop(entry.callable, stats)
+			i.code[a.addr][a.ip] = i.loop(a, entry.callable, stats)
 		} else if entry.kind == entryModule {
 			i.code[a.addr][a.ip] = i.start(a, entry.callable, stats)
 		} else {
@@ -1138,7 +1138,7 @@ func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters) 
 // through a trap. A spent budget yields to the safepoint and the Run loop
 // re-enters native at the header; a guarded side exit or the loop-exit edge
 // leaves deopt with i.fr at the resume IP for threaded dispatch to continue.
-func (i *Interpreter) loop(callable asm.Callable, stats counters) func(*Interpreter) {
+func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters) func(*Interpreter) {
 	return func(i *Interpreter) {
 		stats.enter()
 		ctx := i.journalPtr()
@@ -1162,6 +1162,15 @@ func (i *Interpreter) loop(callable asm.Callable, stats counters) func(*Interpre
 			}
 		case trapFallback:
 			stats.exit(i.journal[journalExitID])
+			// An exit that resumes at the header itself made no progress — the
+			// header slot holds this native stub, so dispatching it again would
+			// livelock (the hoist prologue's shape guard exits here). Run the
+			// shadowed threaded handler once so the interpreter advances.
+			if i.fr.addr == root.addr && i.fr.ip == root.ip {
+				if fn := i.exits[root]; fn != nil {
+					fn(i)
+				}
+			}
 		}
 	}
 }

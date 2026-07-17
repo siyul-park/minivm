@@ -3074,30 +3074,40 @@ func (l arm64Lowerer) arrayGet(ctx *lowering, op step) bool {
 	if op.shape.itab != 0 && op.shape.itab != want {
 		return false
 	}
-	owned := ctx.values[len(ctx.values)-2].backing == backingStack
+	container := ctx.values[len(ctx.values)-2]
+	owned := container.backing == backingStack
+	hoisted := ctx.hoist.live && container.backing == backingLocal && container.slot == ctx.hoist.slot && want == ctx.hoist.want
 	pre := ctx.pre()
 	idx := l.sign32(ctx, ctx.values[len(ctx.values)-1].reg)
 	a := ctx.assembler
-	fail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardShape, int(op.op))
-	if !ok {
-		return false
-	}
 	bounds, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardBounds, int(op.op))
 	if !ok {
 		return false
 	}
-	valueFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardValue, int(op.op))
-	if !ok {
-		return false
+	var fail, valueFail asm.Label
+	if !hoisted || kind == types.KindI64 {
+		valueFail, ok = l.sideExit(ctx, pre, op.ip, prof.ExitGuardValue, int(op.op))
+		if !ok {
+			return false
+		}
 	}
-	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-2])
-	if !ok {
-		return false
+	var addr, dataPtr, n asm.VReg
+	if hoisted {
+		dataPtr, n = ctx.hoist.dataPtr, ctx.hoist.n
+	} else {
+		fail, ok = l.sideExit(ctx, pre, op.ip, prof.ExitGuardShape, int(op.op))
+		if !ok {
+			return false
+		}
+		ref, ok := l.box(ctx, container)
+		if !ok {
+			return false
+		}
+		var itab, data asm.VReg
+		addr, itab, data = l.guardHeap(ctx, ref, fail)
+		l.guardItab(ctx, itab, want, fail)
+		dataPtr, n = l.sliceHeader(ctx, data, base)
 	}
-	addr, itab, data := l.guardHeap(ctx, ref, fail)
-	l.guardItab(ctx, itab, want, fail)
-
-	dataPtr, n := l.sliceHeader(ctx, data, base)
 	l.guardIndex(ctx, idx, n, bounds)
 
 	result := a.Reg(asm.RegTypeInt, asm.Width64)
@@ -3189,15 +3199,44 @@ func (l arm64Lowerer) arraySet(ctx *lowering, op step) bool {
 			return false
 		}
 	}
-	owned := ctx.values[len(ctx.values)-3].backing == backingStack
+	container := ctx.values[len(ctx.values)-3]
+	owned := container.backing == backingStack
 	pre := ctx.pre()
 	val := ctx.values[len(ctx.values)-1]
 	idx := l.sign32(ctx, ctx.values[len(ctx.values)-2].reg)
-	ref, ok := l.box(ctx, ctx.values[len(ctx.values)-3])
+	a := ctx.assembler
+	if ctx.hoist.live && kind != types.KindRef && !op.terminal &&
+		container.backing == backingLocal && container.slot == ctx.hoist.slot && want == ctx.hoist.want {
+		// The hoisted store needs no shape or refcount guard and is not a
+		// state barrier: the prologue proved the container, the local slot
+		// keeps its retain, and locals stay register-cached across it. The
+		// element address lands in a fresh register so the hoisted slice
+		// header stays intact for the rest of the body.
+		bounds, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardBounds, int(op.op))
+		if !ok {
+			return false
+		}
+		l.guardIndex(ctx, idx, ctx.hoist.n, bounds)
+		switch kind {
+		case types.KindI1, types.KindI8:
+			target := a.Reg(asm.RegTypeInt, asm.Width64)
+			a.Emit(arm64.ADD(target, ctx.hoist.dataPtr, idx))
+			a.Emit(arm64.STRB(val.reg, target, 0))
+		case types.KindI32, types.KindF32:
+			target := a.Reg(asm.RegTypeInt, asm.Width64)
+			a.Emit(arm64.LSLI(target, idx, scale))
+			a.Emit(arm64.ADD(target, ctx.hoist.dataPtr, target))
+			a.Emit(arm64.STRW(val.reg, target, 0))
+		case types.KindI64, types.KindF64:
+			a.Emit(arm64.STRR(val.reg, ctx.hoist.dataPtr, idx))
+		}
+		ctx.values = ctx.values[: len(ctx.values)-3 : len(ctx.values)-3]
+		return true
+	}
+	ref, ok := l.box(ctx, container)
 	if !ok {
 		return false
 	}
-	a := ctx.assembler
 	continuable := kind != types.KindRef && !op.terminal
 	var fail, bounds, valueFail asm.Label
 	if !continuable {
@@ -4367,6 +4406,9 @@ func lower(ctx *lowering, plan plan) bool {
 		ctx.labels[root] = ctx.assembler.Label()
 	}
 	ctx.back = ctx.labels[root]
+	if plan.kind == entryLoop && plan.hoist != nil {
+		l.hoist(ctx, *plan.hoist, plan.anchor.ip)
+	}
 	ctx.assembler.Bind(ctx.back)
 	if !l.emitBlock(ctx, root, nil) {
 		return false
@@ -4394,6 +4436,37 @@ func lower(ctx *lowering, plan plan) bool {
 	}
 	l.emitExits(ctx)
 	return true
+}
+
+// hoist derives the plan's loop-invariant container once per native entry:
+// the container local is loaded, tag- and itab-guarded against an empty-stack
+// exit resuming at the loop header, and its slice header lands in registers
+// that stay live for the whole body — hoistable rejected every call, so all
+// flow is forward and nothing clobbers them or re-enters ctx.back. The
+// prologue takes no retain: the local slot keeps carrying the container's
+// refcount, and the exit snapshot is empty. Unsupported layouts decline
+// silently and every access keeps its per-op derivation.
+func (l arm64Lowerer) hoist(ctx *lowering, h hoist, resume int) {
+	switch h.want {
+	case heapArrayI1, heapArrayI8, heapArrayI32, heapArrayI64, heapArrayF32, heapArrayF64:
+	default:
+		return
+	}
+	f := ctx.frame()
+	if h.local >= len(f.kinds) || f.kinds[h.local] != types.KindRef {
+		return
+	}
+	fail, ok := l.sideExit(ctx, ctx.values, resume, prof.ExitGuardShape, ctx.opcode(resume))
+	if !ok {
+		return
+	}
+	addr := l.base(ctx, ctx.pin(scratchStack))
+	ref := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDR(ref, addr, int16((f.base+h.local)*8)))
+	_, itab, data := l.guardHeap(ctx, ref, fail)
+	l.guardItab(ctx, itab, h.want, fail)
+	ctx.hoist.dataPtr, ctx.hoist.n = l.sliceHeader(ctx, data, 0)
+	ctx.hoist.slot, ctx.hoist.want, ctx.hoist.live = f.base+h.local, h.want, true
 }
 
 func appendTail(steps, tail []int) []int {

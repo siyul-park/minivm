@@ -50,7 +50,17 @@ type plan struct {
 	kind    entryKind
 	root    int
 	blocks  []block
+	hoist   *hoist
 	noSpill bool
+}
+
+// hoist marks one loop-invariant container: a ref local that every block
+// leaves untouched, so the backend may derive its heap cell, shape guard, and
+// slice header once per native entry instead of once per access. want is the
+// recorded itab; the backend validates it and declines unsupported layouts.
+type hoist struct {
+	local int
+	want  uintptr
 }
 
 type entryKind uint8
@@ -347,10 +357,96 @@ func tracePlan(input *compileInput) ([]plan, error) {
 			}
 		}
 		wire(&planned, roots)
+		if kind == entryLoop {
+			planned.hoist = hoistable(input.function, planned.blocks)
+		}
 		planned.noSpill = noSpill(planned.blocks)
 		plans = append(plans, planned)
 	}
 	return plans, nil
+}
+
+// hoistable picks the most-accessed loop-invariant container for a loop plan.
+// A local qualifies when it is a declared ref, no block writes it, and every
+// recorded ARRAY_GET/ARRAY_SET on it observed one itab. Any call disqualifies
+// the plan: a BL clobbers the hoisted registers and re-enters via ctx.back.
+// Container provenance is a per-block marker stack: LOCAL_GET pushes its
+// index, every other modeled op pushes unknowns by its declared arity, and an
+// unmodeled op clears the markers. Underflow pops clamp — loop plans with
+// carried entry operands are already rejected before planning.
+func hoistable(fn *types.Function, blocks []block) *hoist {
+	locals := localTypes(fn)
+	banned := map[int]bool{}
+	for _, block := range blocks {
+		for _, step := range block.steps {
+			switch step.op {
+			case instr.CALL, instr.RETURN_CALL:
+				return nil
+			case instr.LOCAL_SET, instr.LOCAL_TEE:
+				banned[int(step.args[0])] = true
+			}
+		}
+	}
+	hits := map[hoist]int{}
+	for _, block := range blocks {
+		var stack []int
+		for _, step := range block.steps {
+			if step.op == instr.LOCAL_GET {
+				stack = append(stack, int(step.args[0]))
+				continue
+			}
+			at := func(depth int) int {
+				if depth > len(stack) {
+					return -1
+				}
+				return stack[len(stack)-depth]
+			}
+			switch step.op {
+			case instr.ARRAY_GET:
+				if k := at(2); k >= 0 && !banned[k] && step.shape.itab != 0 {
+					hits[hoist{local: k, want: step.shape.itab}]++
+				}
+			case instr.ARRAY_SET:
+				if k := at(3); k >= 0 && !banned[k] && step.shape.itab != 0 {
+					hits[hoist{local: k, want: step.shape.itab}]++
+				}
+			}
+			typ := instr.TypeOf(step.op)
+			if typ.Mnemonic == "" {
+				stack = nil
+				continue
+			}
+			if n := len(typ.Pop); n >= len(stack) {
+				stack = stack[:0]
+			} else {
+				stack = stack[:len(stack)-n]
+			}
+			for range typ.Push {
+				stack = append(stack, -1)
+			}
+		}
+	}
+	itabs := map[int]uintptr{}
+	for h := range hits {
+		if want, ok := itabs[h.local]; ok && want != h.want {
+			itabs[h.local] = 0
+			continue
+		}
+		itabs[h.local] = h.want
+	}
+	var best *hoist
+	bestHits := 0
+	for h, n := range hits {
+		if h.local >= len(locals) || locals[h.local].Kind() != types.KindRef || itabs[h.local] != h.want {
+			continue
+		}
+		if best != nil && (n < bestHits || n == bestHits && h.local >= best.local) {
+			continue
+		}
+		h := h
+		best, bestHits = &h, n
+	}
+	return best
 }
 
 func split(p *plan, tr *trace, input *compileInput) []block {

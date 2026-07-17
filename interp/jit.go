@@ -77,6 +77,18 @@ type lowering struct {
 
 	reuseLocals bool
 	spare       asm.VReg
+
+	// hoist caches one loop-invariant container's slice header, derived by a
+	// per-entry prologue (see arm64Lowerer.hoist). The registers are pure
+	// derived state: flush, snapshots, and reload never see them, and an
+	// access uses them only when its operand matches slot and want.
+	hoist struct {
+		slot    int
+		want    uintptr
+		dataPtr asm.VReg
+		n       asm.VReg
+		live    bool
+	}
 }
 
 // value is one typed operand: a register plus the runtime kind the trace

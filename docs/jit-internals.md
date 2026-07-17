@@ -339,7 +339,13 @@ i.code[addr][header]
 
 The loop wrapper does not tear down the frame. It runs with the current frame live.
 
-On yield trap, the wrapper deoptimizes to the header and runs one safepoint before redispatch. On fallback trap, it deoptimizes to the reported resume IP.
+On yield trap, the wrapper deoptimizes to the header and runs one safepoint before redispatch. On fallback trap, it deoptimizes to the reported resume IP. A fallback that resumes at the header itself made no progress — the header slot holds the native stub — so the wrapper runs the shadowed threaded handler once before normal dispatch continues.
+
+### Loop-invariant container hoisting
+
+A trace loop plan may hoist one container: `hoistable` (`interp/jit_plan.go`) picks the most-accessed ref local whose recorded `ARRAY_GET`/`ARRAY_SET` steps agree on one primitive typed-array itab, provided no block writes that local and the plan contains no `CALL`/`RETURN_CALL` (a `BL` would clobber the hoisted registers). The backend prologue (`arm64Lowerer.hoist`) then derives the heap cell, guards the tag and itab, and loads the slice header once per native entry, before the header label; every matching access keeps only its bounds side exit, `guardIndex`, and the element load/store, and a hoisted primitive `ARRAY_SET` is no longer a state barrier (no snapshot flush plus local-cache clear).
+
+The hoisted registers are pure derived state: flush, snapshots, and reload never see them, and they stay valid for the whole entry because all flow inside a call-free loop callable is forward. The prologue takes no retain — the local slot keeps carrying the container's refcount — and its shape-guard exit resumes at the header with an empty operand stack. Accesses whose operand does not match the hoisted slot and itab use the per-access derivation unchanged.
 
 ## Coroutine Suspension
 
