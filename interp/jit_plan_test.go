@@ -266,6 +266,18 @@ func TestHoistable(t *testing.T) {
 		require.Equal(t, &hoist{local: 0, want: 42}, got)
 	})
 
+	t.Run("preserves a selected local source", func(t *testing.T) {
+		steps := []step{
+			{op: instr.LOCAL_GET, args: [2]uint64{0}},
+			{op: instr.LOCAL_GET, args: [2]uint64{0}},
+			{op: instr.I32_CONST},
+			{op: instr.SELECT},
+			{op: instr.LOCAL_GET, args: [2]uint64{1}},
+			{op: instr.ARRAY_GET, shape: shape{itab: 42}},
+		}
+		require.Equal(t, &hoist{local: 0, want: 42}, hoistable(fn, []block{{steps: steps}}))
+	})
+
 	t.Run("a written container local is rejected", func(t *testing.T) {
 		steps := append(append([]step{}, access...), step{op: instr.LOCAL_SET, args: [2]uint64{0}})
 		require.Nil(t, hoistable(fn, []block{{steps: steps}}))

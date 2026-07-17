@@ -4406,8 +4406,8 @@ func lower(ctx *lowering, plan plan) bool {
 		ctx.labels[root] = ctx.assembler.Label()
 	}
 	ctx.back = ctx.labels[root]
-	if plan.kind == entryLoop && plan.hoist != nil {
-		l.hoist(ctx, *plan.hoist, plan.anchor.ip)
+	if plan.kind == entryLoop && plan.hoist != nil && !l.hoist(ctx, *plan.hoist, plan.anchor.ip) {
+		return false
 	}
 	ctx.assembler.Bind(ctx.back)
 	if !l.emitBlock(ctx, root, nil) {
@@ -4446,19 +4446,19 @@ func lower(ctx *lowering, plan plan) bool {
 // prologue takes no retain: the local slot keeps carrying the container's
 // refcount, and the exit snapshot is empty. Unsupported layouts decline
 // silently and every access keeps its per-op derivation.
-func (l arm64Lowerer) hoist(ctx *lowering, h hoist, resume int) {
+func (l arm64Lowerer) hoist(ctx *lowering, h hoist, resume int) bool {
 	switch h.want {
 	case heapArrayI1, heapArrayI8, heapArrayI32, heapArrayI64, heapArrayF32, heapArrayF64:
 	default:
-		return
+		return true
 	}
 	f := ctx.frame()
 	if h.local >= len(f.kinds) || f.kinds[h.local] != types.KindRef {
-		return
+		return true
 	}
 	fail, ok := l.sideExit(ctx, ctx.values, resume, prof.ExitGuardShape, ctx.opcode(resume))
 	if !ok {
-		return
+		return false
 	}
 	addr := l.base(ctx, ctx.pin(scratchStack))
 	ref := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -4467,6 +4467,7 @@ func (l arm64Lowerer) hoist(ctx *lowering, h hoist, resume int) {
 	l.guardItab(ctx, itab, h.want, fail)
 	ctx.hoist.dataPtr, ctx.hoist.n = l.sliceHeader(ctx, data, 0)
 	ctx.hoist.slot, ctx.hoist.want, ctx.hoist.live = f.base+h.local, h.want, true
+	return true
 }
 
 func appendTail(steps, tail []int) []int {
