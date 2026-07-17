@@ -15,10 +15,10 @@ func TestNewEncoder(t *testing.T) {
 func TestEncoder_Encode(t *testing.T) {
 	encoder := NewEncoder()
 
-	tests := []struct {
+	encodings := []struct {
 		name string
 		inst asm.Instruction
-		want any
+		want uint32
 	}{
 		{"ADD X1,X2,X3", ADD(X1, X2, X3), 0x8B030041},
 		{"ADD W1,W2,W3", ADD(W1, W2, W3), 0x0B030041},
@@ -115,28 +115,12 @@ func TestEncoder_Encode(t *testing.T) {
 		{"FCVTZU W1,D2", FCVTZU(W1, D2), 0x1E790041},
 		{"FCVTZU X1,S2", FCVTZU(X1, S2), 0x9E390041},
 		{"FCVTZU X1,D2", FCVTZU(X1, D2), 0x9E790041},
-		{"unsupported opcode", newReg3(Op(0xFFFF), X1, X2, X3), ErrUnsupportedOpcode},
-		{"mixed widths", ADD(X1, X2, W3), asm.ErrInvalidOperand},
-		{"missing immediate", newReg2(OpADDI, X1, X2), ErrMissingImmediate},
-		{"unencodable logical immediate", ANDI(X1, X2, 0), ErrMissingImmediate},
-		{"int destination for SCVTF", SCVTF(X1, X2), asm.ErrInvalidOperand},
-		{"float source for CLZ", CLZ(X1, D2), asm.ErrInvalidOperand},
-		{"B offset unaligned", B(2), asm.ErrBranchOutOfRange},
-		{"B offset exceeds imm26", B(1 << 27), asm.ErrBranchOutOfRange},
-		{"BEQ offset exceeds imm19", BEQ(1 << 21), asm.ErrBranchOutOfRange},
-		{"CBZ offset exceeds imm19", CBZ(X1, 1<<21), asm.ErrBranchOutOfRange},
-		{"TBZ offset exceeds imm14", TBZ(X1, 3, 1<<17), asm.ErrBranchOutOfRange},
 	}
-	for _, tt := range tests {
+	for _, tt := range encodings {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := encoder.Encode(tt.inst)
-			switch want := tt.want.(type) {
-			case error:
-				require.ErrorIs(t, err, want)
-			case uint32:
-				require.NoError(t, err)
-				require.Equal(t, want, binary.LittleEndian.Uint32(got))
-			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, binary.LittleEndian.Uint32(got))
 		})
 	}
 
@@ -149,4 +133,28 @@ func TestEncoder_Encode(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []byte{0x83, 0x78, 0x25, 0xF8}, got)
 	})
+
+	failures := []struct {
+		name string
+		inst asm.Instruction
+		want error
+	}{
+		{"unsupported opcode", newReg3(Op(0xFFFF), X1, X2, X3), ErrUnsupportedOpcode},
+		{"mixed widths", ADD(X1, X2, W3), asm.ErrInvalidOperand},
+		{"missing immediate", newReg2(OpADDI, X1, X2), ErrMissingImmediate},
+		{"unencodable logical immediate", ANDI(X1, X2, 0), ErrMissingImmediate},
+		{"int destination for SCVTF", SCVTF(X1, X2), asm.ErrInvalidOperand},
+		{"float source for CLZ", CLZ(X1, D2), asm.ErrInvalidOperand},
+		{"B offset unaligned", B(2), asm.ErrBranchOutOfRange},
+		{"B offset exceeds imm26", B(1 << 27), asm.ErrBranchOutOfRange},
+		{"BEQ offset exceeds imm19", BEQ(1 << 21), asm.ErrBranchOutOfRange},
+		{"CBZ offset exceeds imm19", CBZ(X1, 1<<21), asm.ErrBranchOutOfRange},
+		{"TBZ offset exceeds imm14", TBZ(X1, 3, 1<<17), asm.ErrBranchOutOfRange},
+	}
+	for _, tt := range failures {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := encoder.Encode(tt.inst)
+			require.ErrorIs(t, err, tt.want)
+		})
+	}
 }
