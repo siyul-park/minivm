@@ -90,6 +90,52 @@ func TestTracer_Capture(t *testing.T) {
 		require.Equal(t, instr.I32_CONST, result.trace.ops[len(result.trace.ops)-1].op)
 	})
 
+	t.Run("continues after scalar struct set", func(t *testing.T) {
+		structure := types.NewStruct(
+			types.NewStructType(types.NewStructField(types.TypeI32)),
+			types.BoxI32(1),
+		)
+		tracer := NewTracer()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.STRUCT_SET),
+			instr.New(instr.I32_CONST, 7),
+		}, program.WithConstants(structure))
+		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		defer i.Close()
+
+		result := tracer.capture(i, anchor{})
+		require.NotNil(t, result.trace)
+		require.Equal(t, completed, result.trace.kind)
+		require.Equal(t, instr.I32_CONST, result.trace.ops[len(result.trace.ops)-1].op)
+	})
+
+	t.Run("ends at a ref-field struct set", func(t *testing.T) {
+		structure := types.NewStruct(
+			types.NewStructType(types.NewStructField(types.TypeI32Array)),
+			types.BoxedNull,
+		)
+		tracer := NewTracer()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.REF_NULL),
+			instr.New(instr.STRUCT_SET),
+			instr.New(instr.I32_CONST, 7),
+		}, program.WithConstants(structure))
+		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		defer i.Close()
+
+		result := tracer.capture(i, anchor{})
+		require.NotNil(t, result.trace)
+		require.Equal(t, returned, result.trace.kind)
+		last := result.trace.ops[len(result.trace.ops)-1]
+		require.Equal(t, instr.STRUCT_SET, last.op)
+		require.True(t, last.terminal)
+	})
+
 	t.Run("isolates captured mutations", func(t *testing.T) {
 		primitive := types.TypedArray[int32]{1}
 		array := types.NewArray(types.TypeI32Array, types.BoxI32(1))

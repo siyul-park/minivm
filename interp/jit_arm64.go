@@ -647,10 +647,14 @@ func (l arm64Lowerer) steps(ctx *lowering, ops []step) (bool, bool) {
 			}
 			ok = true
 		case instr.STRUCT_SET:
+			terminal := op.terminal || ctx.count() > 0 && ctx.values[len(ctx.values)-1].kind == types.KindRef
 			if !l.structSet(ctx, op) {
 				return false, false
 			}
-			return true, idx == len(ops)-1
+			if terminal {
+				return true, idx == len(ops)-1
+			}
+			ok = true
 		case instr.ERROR_GET:
 			ok = l.errorGet(ctx, op)
 		case instr.CORO_DONE:
@@ -3500,53 +3504,123 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 		return false
 	}
 	a := ctx.assembler
-	fail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardShape, int(op.op))
-	if !ok {
-		return false
+	continuable := kind != types.KindRef && !op.terminal
+	var fail, bounds, valueFail, kindFail asm.Label
+	if !continuable {
+		fail, ok = l.sideExit(ctx, pre, op.ip, prof.ExitGuardShape, int(op.op))
+		if !ok {
+			return false
+		}
+		bounds, ok = l.sideExit(ctx, pre, op.ip, prof.ExitGuardBounds, int(op.op))
+		if !ok {
+			return false
+		}
+		valueFail, ok = l.sideExit(ctx, pre, op.ip, prof.ExitGuardValue, int(op.op))
+		if !ok {
+			return false
+		}
+		kindFail, ok = l.sideExit(ctx, pre, op.ip, prof.ExitGuardKind, int(op.op))
+		if !ok {
+			return false
+		}
+	} else {
+		// A continuable scalar-field store is a state barrier: materialize the
+		// pre-op frame once, then let all guards share that resumable snapshot.
+		// Clearing the local register cache bounds no-spill pressure and makes
+		// subsequent operations reload from the slots just written.
+		if !l.flush(ctx, flushSnapshot) {
+			return false
+		}
+		for idx := range ctx.frames {
+			clear(ctx.frames[idx].state)
+		}
+		ctx.reuseLocals = len(ctx.values) == 3
+		fail = ctx.queueExit(nil, op.ip, prof.ExitGuardShape, int(op.op))
+		bounds = ctx.queueExit(nil, op.ip, prof.ExitGuardBounds, int(op.op))
+		valueFail = ctx.queueExit(nil, op.ip, prof.ExitGuardValue, int(op.op))
+		kindFail = ctx.queueExit(nil, op.ip, prof.ExitGuardKind, int(op.op))
 	}
-	bounds, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardBounds, int(op.op))
-	if !ok {
-		return false
+	var addr, itab, data, scratch asm.VReg
+	if continuable {
+		work := l.localScratch(ctx)
+		cell := asm.VReg{}
+		if ctx.leaf {
+			cell = ctx.pin(scratchSP)
+		}
+		addr, itab, data, scratch = l.loadHeap(ctx, ref, work, cell)
+		l.guardItabTo(ctx, itab, scratch, heapStruct, fail)
+	} else {
+		addr, itab, data = l.guardHeap(ctx, ref, fail)
+		l.guardItab(ctx, itab, heapStruct, fail)
 	}
-	valueFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardValue, int(op.op))
-	if !ok {
-		return false
-	}
-	kindFail, ok := l.sideExit(ctx, pre, op.ip, prof.ExitGuardKind, int(op.op))
-	if !ok {
-		return false
-	}
-	addr, itab, data := l.guardHeap(ctx, ref, fail)
-	l.guardItab(ctx, itab, heapStruct, fail)
 
-	typ := a.Reg(asm.RegTypeInt, asm.Width64)
+	// The continuable path recycles the guard registers as their live ranges
+	// end: typ takes itab, the fields header takes scratch, the field cursor
+	// walks typ/n, and the rc pair takes the dead kind-check registers. This
+	// keeps scalar struct stores within the no-spill register budget.
+	typ := itab
+	if !continuable {
+		typ = a.Reg(asm.RegTypeInt, asm.Width64)
+	}
 	a.Emit(arm64.LDR(typ, data, int16(structTyp)))
 	if op.shape.typ != 0 {
-		want := a.Reg(asm.RegTypeInt, asm.Width64)
+		want := scratch
+		if !continuable {
+			want = a.Reg(asm.RegTypeInt, asm.Width64)
+		}
 		a.Emit(arm64.LDI(want, uint64(op.shape.typ))...)
 		a.Emit(arm64.CMP(typ, want))
 		a.Emit(arm64.BCondLabel(arm64.OpBNE, fail))
 	}
-	fields, n := l.sliceHeader(ctx, typ, int16(fieldsSlice))
+	var fields, n asm.VReg
+	if continuable {
+		fields = scratch
+		n = a.Reg(asm.RegTypeInt, asm.Width64)
+		l.sliceHeaderTo(ctx, typ, fields, n, int16(fieldsSlice))
+	} else {
+		fields, n = l.sliceHeader(ctx, typ, int16(fieldsSlice))
+	}
 	l.guardIndex(ctx, idx, n, bounds)
 
-	fieldOff := a.Reg(asm.RegTypeInt, asm.Width64)
+	fieldOff := n
+	if !continuable {
+		fieldOff = a.Reg(asm.RegTypeInt, asm.Width64)
+	}
 	a.Emit(arm64.LDI(fieldOff, uint64(fieldSize))...)
 	a.Emit(arm64.MUL(fieldOff, idx, fieldOff))
-	field := a.Reg(asm.RegTypeInt, asm.Width64)
+	field := typ
+	if !continuable {
+		field = a.Reg(asm.RegTypeInt, asm.Width64)
+	}
 	a.Emit(arm64.ADD(field, fields, fieldOff))
-	fieldKindReg := a.Reg(asm.RegTypeInt, asm.Width64)
+	fieldKindReg := fields
+	if !continuable {
+		fieldKindReg = a.Reg(asm.RegTypeInt, asm.Width64)
+	}
 	a.Emit(arm64.LDRB(fieldKindReg, field, int16(fieldKind)))
 	a.Emit(arm64.CMPI(fieldKindReg, uint16(kind)))
 	a.Emit(arm64.BCondLabel(arm64.OpBNE, kindFail))
 
 	var rcBase, rc asm.VReg
 	if owned {
-		rcBase = l.rcBase(ctx)
-		rc = l.guardRC(ctx, addr, rcBase, valueFail)
+		if continuable {
+			rcBase = fieldKindReg
+			l.rcBaseTo(ctx, rcBase)
+			rc = fieldOff
+			l.guardRCTo(ctx, rc, addr, rcBase, valueFail)
+		} else {
+			rcBase = l.rcBase(ctx)
+			rc = l.guardRC(ctx, addr, rcBase, valueFail)
+		}
 	}
 
-	dataPtr, _ := l.sliceHeader(ctx, data, int16(structData))
+	var dataPtr asm.VReg
+	if continuable {
+		dataPtr = field
+		a.Emit(arm64.LDR(dataPtr, data, int16(structData)+sliceData))
+	} else {
+		dataPtr, _ = l.sliceHeader(ctx, data, int16(structData))
+	}
 	if kind == types.KindRef {
 		// Mirrors arraySet's ref-element handling: the container's guardRC
 		// above is the deopt point for the container's own refcount, and the
@@ -3556,27 +3630,38 @@ func (l arm64Lowerer) structSet(ctx *lowering, op step) bool {
 		old := a.Reg(asm.RegTypeInt, asm.Width64)
 		a.Emit(arm64.LDRR(old, dataPtr, idx))
 		l.releaseBoxUnlessEqual(ctx, old, val.reg, pre, op.ip)
+		if owned {
+			a.Emit(arm64.SUBI(rc, rc, 1))
+			a.Emit(arm64.STRR(rc, rcBase, addr))
+		}
+		a.Emit(arm64.STRR(val.reg, dataPtr, idx))
 	} else {
+		// All scalar-store guards have passed, so release the consumed struct
+		// operand before the store. This shortens addr/rc liveness and keeps
+		// mutation loops within the no-spill register budget.
+		if owned {
+			a.Emit(arm64.SUBI(rc, rc, 1))
+			a.Emit(arm64.STRR(rc, rcBase, addr))
+		}
 		var stored asm.VReg
 		switch kind {
 		case types.KindI1, types.KindI8, types.KindI32, types.KindF32:
-			stored = a.Reg(asm.RegTypeInt, asm.Width64)
+			stored = data
+			if !continuable {
+				stored = a.Reg(asm.RegTypeInt, asm.Width64)
+			}
 			a.Emit(arm64.ANDI(stored, val.reg, maskI32))
 		case types.KindI64, types.KindF64:
 			stored = val.reg
 		}
 		a.Emit(arm64.STRR(stored, dataPtr, idx))
 	}
-	if owned {
-		a.Emit(arm64.SUBI(rc, rc, 1))
-		a.Emit(arm64.STRR(rc, rcBase, addr))
-	}
-	if kind == types.KindRef {
-		a.Emit(arm64.STRR(val.reg, dataPtr, idx))
-	}
 
-	ctx.values = pre[: len(pre)-3 : len(pre)-3]
-	return l.exit(ctx, op.ip+1, prof.ExitTerminalOp, int(op.op))
+	ctx.values = ctx.values[: len(ctx.values)-3 : len(ctx.values)-3]
+	if !continuable {
+		return l.exit(ctx, op.ip+1, prof.ExitTerminalOp, int(op.op))
+	}
+	return true
 }
 
 // sign32 sign-extends a raw i32's low lane for signed division and

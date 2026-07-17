@@ -269,7 +269,7 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Structs | `STRUCT_NEW` | `struct.new` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Structs | `STRUCT_NEW_DEFAULT` | `struct.new_default` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Structs | `STRUCT_GET` | `struct.get` | ✅ | 🔲 | native field get fast path |
-| Structs | `STRUCT_SET` | `struct.set` | ◐ | 🔲 | terminal native mutation; scalar and ref-kind fields |
+| Structs | `STRUCT_SET` | `struct.set` | ◐ | 🔲 | scalar fields may continue; ref-field writes stay terminal |
 | Maps | `MAP_NEW` | `map.new` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Maps | `MAP_NEW_DEFAULT` | `map.new_default` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Maps | `MAP_LEN` | `map.len` | ◐ | 🔲 | terminal fallback |

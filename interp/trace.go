@@ -189,8 +189,8 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 			if cloned == nil {
 				cloned = map[int]bool{}
 			}
-			primitive := cloneTarget(&clone, cloned)
-			terminalMutation = op == instr.STRUCT_SET || hasCall || !primitive
+			continuable := cloneTarget(&clone, cloned)
+			terminalMutation = hasCall || !continuable
 		}
 		st.terminal = terminalMutation
 		if op == instr.CALL && r.callsAnchor(&clone, a) {
@@ -255,9 +255,10 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 			r.publish(a, tree, t)
 			return captureResult{trace: t, outcome: prof.CaptureOutcomePartial}
 		}
-		// Ref-bearing array writes and struct writes remain terminal native fast
-		// paths. Primitive array writes can continue because their guarded store
-		// has no recursive release or post-store deopt point.
+		// Boxed-array writes and ref-field struct writes remain terminal native
+		// fast paths. Primitive array writes and scalar struct-field writes can
+		// continue because their guarded store has no recursive release or
+		// post-store deopt point.
 		if terminalMutation {
 			if clone.fp != startFP {
 				t.kind = aborted
@@ -349,8 +350,10 @@ func (r *Tracer) clone(i *Interpreter) Interpreter {
 	return out
 }
 
-// cloneTarget isolates the next mutation target and reports whether it is a
-// primitive typed array whose store may continue inside the trace.
+// cloneTarget isolates the next mutation target and reports whether the store
+// may continue inside the trace: a primitive typed-array element or a scalar
+// struct field. Boxed-array stores and ref-field struct stores stay terminal
+// because releasing the overwritten element may recurse.
 func cloneTarget(i *Interpreter, cloned map[int]bool) bool {
 	if i.sp < 3 || i.stack[i.sp-3].Kind() != types.KindRef {
 		return false
@@ -405,6 +408,7 @@ func cloneTarget(i *Interpreter, cloned map[int]bool) bool {
 			i.heap[addr] = &clone
 			cloned[addr] = true
 		}
+		return i.stack[i.sp-1].Kind() != types.KindRef
 	}
 	return false
 }
