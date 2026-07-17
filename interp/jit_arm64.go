@@ -4453,7 +4453,8 @@ func (l arm64Lowerer) hoist(ctx *lowering, h hoist, resume int) bool {
 		return true
 	}
 	f := ctx.frame()
-	if h.local >= len(f.kinds) || f.kinds[h.local] != types.KindRef {
+	slot := f.base + h.local
+	if h.local >= len(f.kinds) || f.kinds[h.local] != types.KindRef || slot > maxHoistSlot {
 		return true
 	}
 	fail, ok := l.sideExit(ctx, ctx.values, resume, prof.ExitGuardShape, ctx.opcode(resume))
@@ -4462,11 +4463,11 @@ func (l arm64Lowerer) hoist(ctx *lowering, h hoist, resume int) bool {
 	}
 	addr := l.base(ctx, ctx.pin(scratchStack))
 	ref := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDR(ref, addr, int16((f.base+h.local)*8)))
+	ctx.assembler.Emit(arm64.LDR(ref, addr, int16(slot*8)))
 	_, itab, data := l.guardHeap(ctx, ref, fail)
 	l.guardItab(ctx, itab, h.want, fail)
 	ctx.hoist.dataPtr, ctx.hoist.n = l.sliceHeader(ctx, data, 0)
-	ctx.hoist.slot, ctx.hoist.want, ctx.hoist.live = f.base+h.local, h.want, true
+	ctx.hoist.slot, ctx.hoist.want, ctx.hoist.live = slot, h.want, true
 	return true
 }
 

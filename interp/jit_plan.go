@@ -57,7 +57,8 @@ type plan struct {
 // hoist marks one loop-invariant container: a ref local that every block
 // leaves untouched, so the backend may derive its heap cell, shape guard, and
 // slice header once per native entry instead of once per access. want is the
-// recorded itab; the backend validates it and declines unsupported layouts.
+// recorded primitive-array itab; the planner admits only backend-supported
+// accesses whose root-frame slot fits the ARM64 load immediate.
 type hoist struct {
 	local int
 	want  uintptr
@@ -115,7 +116,10 @@ const (
 	terminateFallback
 )
 
-const noBlock = -1
+const (
+	noBlock      = -1
+	maxHoistSlot = 4095
+)
 
 func input(i *Interpreter, addr int) (*compileInput, bool) {
 	fn, ok := i.function(addr)
@@ -401,11 +405,21 @@ func hoistable(fn *types.Function, blocks []block) *hoist {
 		var stack []int
 		for _, step := range block.steps {
 			record := func(depth int) {
-				if depth > len(stack) {
+				if depth > len(stack) || step.op == instr.ARRAY_SET && step.terminal {
+					return
+				}
+				switch step.shape.itab {
+				case itab(types.TypedArray[bool](nil)),
+					itab(types.TypedArray[int8](nil)),
+					itab(types.TypedArray[int32](nil)),
+					itab(types.TypedArray[int64](nil)),
+					itab(types.TypedArray[float32](nil)),
+					itab(types.TypedArray[float64](nil)):
+				default:
 					return
 				}
 				local := stack[len(stack)-depth]
-				if local < 0 || local >= len(locals) || banned[local] || step.shape.itab == 0 {
+				if local < 0 || local >= len(locals) || local > maxHoistSlot || banned[local] {
 					return
 				}
 				candidate := &candidates[local]
