@@ -61,6 +61,7 @@ type lowering struct {
 	entry     asm.Label
 	head      asm.Label
 	back      asm.Label
+	budget    asm.VReg
 
 	values      []value
 	frames      []activation
@@ -70,10 +71,12 @@ type lowering struct {
 	descriptors []exitDescriptor
 	saved       []value
 
-	addr    int
-	returns int
-	kind    entryKind
-	leaf    bool
+	addr     int
+	root     int
+	returns  int
+	kind     entryKind
+	leaf     bool
+	backEdge bool
 
 	reuseLocals bool
 	spare       asm.VReg
@@ -111,6 +114,7 @@ type value struct {
 	imm     int64
 	fn      int
 	ref     int
+	flushed bool
 }
 
 // backing identifies where a ref value derives its reference count.
@@ -152,6 +156,7 @@ type localState uint8
 const (
 	localLoaded localState = 1 << iota
 	localDirty
+	localFlushed
 )
 
 type work struct {
@@ -322,12 +327,24 @@ func (c *compiler) compile(input *compileInput, plan plan, mod *module, frontend
 	if plan.noSpill {
 		arch = noSpillArch{c.arch}
 	}
-	ctx := c.newLowering(input, arch)
-	if !lower(ctx, plan) {
-		return prof.CompileReasonLoweringRejected, nil
+	attempts := []bool{false}
+	if plan.kind == entryLoop {
+		attempts = []bool{true, false}
 	}
-	exits := append([]exitDescriptor(nil), ctx.descriptors...)
-	return c.publish(mod, plan.anchor, ctx, c.arch, native{kind: plan.kind, frontend: frontend, exits: exits})
+	for _, backEdge := range attempts {
+		ctx := c.newLowering(input, arch)
+		ctx.backEdge = backEdge
+		if !lower(ctx, plan) {
+			return prof.CompileReasonLoweringRejected, nil
+		}
+		exits := append([]exitDescriptor(nil), ctx.descriptors...)
+		reason, err := c.publish(mod, plan.anchor, ctx, c.arch, native{kind: plan.kind, frontend: frontend, exits: exits})
+		if reason == prof.CompileReasonRegisterPressure && backEdge {
+			continue
+		}
+		return reason, err
+	}
+	return prof.CompileReasonRegisterPressure, nil
 }
 
 func (c *compiler) newLowering(input *compileInput, arch asm.Arch) *lowering {
@@ -471,7 +488,7 @@ func (ctx *lowering) queueExit(values []value, resume int, reason prof.ExitReaso
 func (ctx *lowering) snapshot() ([]value, []activation) {
 	values := make([]value, len(ctx.values))
 	for i, v := range ctx.values {
-		values[i] = value{kind: v.kind, raw: v.raw, backing: v.backing, slot: v.slot, known: v.known, imm: v.imm, fn: v.fn, ref: v.ref}
+		values[i] = value{kind: v.kind, raw: v.raw, backing: v.backing, slot: v.slot, known: v.known, imm: v.imm, fn: v.fn, ref: v.ref, flushed: v.flushed}
 	}
 	frames := make([]activation, len(ctx.frames))
 	for i, f := range ctx.frames {

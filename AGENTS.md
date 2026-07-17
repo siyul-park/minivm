@@ -176,7 +176,7 @@ Violations cause silent corruption or invalid execution.
 - `tree.branchIPs()` excludes `aborted` branches from continuation-inlining eligibility; a fragment that recorded a partial, unsupported prefix must never be inlined into a parent trace.
 - `interp/jit.go`'s `spillSafe` must scan the whole trace tree (root plus every branch it may inline), not just the root's last op, before deciding a trace is safe to spill.
 - A deferred (slot-backed or const) ref operand carries no retain of its own; it must be owned or redeemed before any path that hands the flushed operand stack to the interpreter (ownership transfer, guard exit stub, trap-fallback/module-completion redeem, or a real call), and a committing (loop back-edge) flush rejects any live deferred ref.
-- Hoisted container registers are valid only within one native loop entry: the prologue re-guards tag and itab on every entry, hoist eligibility requires a call-free loop plan with no store to the container local, and a loop fallback that resumes at the header must run the shadowed threaded handler once (the header slot holds the native stub, so redispatching it would livelock).
+- Hoisted container registers are valid only within one native loop entry: the prologue re-guards tag and itab on every entry, hoist eligibility requires a call-free loop plan with no store to the container local, `asm.OpPseudoUse` keeps the derived registers live across the native back-edge, and a loop fallback that resumes at the header must run the shadowed threaded handler once (the header slot holds the native stub, so redispatching it would livelock).
 
 ## Tests
 

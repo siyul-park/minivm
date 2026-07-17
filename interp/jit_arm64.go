@@ -124,6 +124,9 @@ func (l arm64Lowerer) emitExits(ctx *lowering) {
 		ctx.values = exit.values
 		ctx.frames = exit.frames
 		ctx.assembler.Bind(exit.label)
+		if ctx.budget.Width() != asm.WidthUndefined {
+			ctx.assembler.Emit(arm64.STR(ctx.budget, ctx.pin(scratchCtrl), int16(journalBudget*8)))
+		}
 		var addr asm.VReg
 		for j, v := range exit.values {
 			switch v.backing {
@@ -276,6 +279,26 @@ func (l arm64Lowerer) next(ctx *lowering, from anchor, target edge, tail []int, 
 	if target.anchor.addr == from.addr && target.anchor.ip <= from.ip {
 		if !l.flush(ctx, flushCommit) {
 			return false
+		}
+		if ctx.backEdge && ctx.kind == entryLoop && target.block == ctx.root && len(ctx.frames) == 1 && ctx.count() == 0 {
+			a := ctx.assembler
+			if ctx.hoist.live {
+				a.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.V(ctx.hoist.dataPtr), Src2: asm.V(ctx.hoist.n)})
+			}
+			vCtrl := ctx.pin(scratchCtrl)
+			if ctx.budget.Width() != asm.WidthUndefined {
+				a.Emit(arm64.SUBI(ctx.budget, ctx.budget, 1))
+				a.Emit(arm64.CBNZLabel(ctx.budget, ctx.back))
+				a.Emit(arm64.STR(ctx.budget, vCtrl, int16(journalBudget*8)))
+			} else {
+				budget := a.Reg(asm.RegTypeInt, asm.Width64)
+				a.Emit(arm64.LDR(budget, vCtrl, int16(journalBudget*8)))
+				a.Emit(arm64.SUBI(budget, budget, 1))
+				a.Emit(arm64.STR(budget, vCtrl, int16(journalBudget*8)))
+				a.Emit(arm64.CBNZLabel(budget, ctx.back))
+			}
+			l.trapFlushed(ctx, trapYield, target.anchor.ip, -1)
+			return true
 		}
 		return l.path(ctx, from, target, tail, opcode)
 	}
@@ -909,7 +932,7 @@ func (l arm64Lowerer) localSet(ctx *lowering, op step, pop bool) bool {
 		return false
 	}
 	f.locals[idx] = *vp
-	f.state[idx] |= localLoaded | localDirty
+	f.state[idx] = f.state[idx]&^localFlushed | localLoaded | localDirty
 	if pop {
 		ctx.pop()
 	}
@@ -2324,7 +2347,7 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 				return false
 			}
 			frame.locals[k] = value{reg: zero, kind: frame.kinds[k], raw: true}
-			frame.state[k] |= localLoaded | localDirty
+			frame.state[k] = frame.state[k]&^localFlushed | localLoaded | localDirty
 		}
 	}
 	ctx.frames = append(ctx.frames, frame)
@@ -2615,7 +2638,7 @@ func (l arm64Lowerer) locals(ctx *lowering, f *activation, args []value) bool {
 			}
 		}
 		f.locals[k] = args[k]
-		f.state[k] |= localLoaded | localDirty
+		f.state[k] = f.state[k]&^localFlushed | localLoaded | localDirty
 	}
 	if len(f.kinds) > len(args) {
 		zero := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -2627,7 +2650,7 @@ func (l arm64Lowerer) locals(ctx *lowering, f *activation, args []value) bool {
 				return false
 			}
 			f.locals[k] = value{reg: zero, kind: f.kinds[k], raw: true}
-			f.state[k] |= localLoaded | localDirty
+			f.state[k] = f.state[k]&^localFlushed | localLoaded | localDirty
 		}
 	}
 	return true
@@ -4206,10 +4229,10 @@ func (l arm64Lowerer) sideExit(ctx *lowering, pre []value, resume int, reason pr
 	return label, true
 }
 
-// flush writes every dirty local and live operand to its VM stack slot
-// in boxed form. commit clears dirty marks — only the hot path may do that;
-// a guard's cold path flushes a copy of the state and must leave the symbolic
-// state of the surviving hot path untouched.
+// flush writes dirty locals and live operands to their VM stack slots in
+// boxed form. Snapshot flushes memoize materialized homes so later guards do
+// not repeat unchanged stores; definitions clear that memo. A commit clears
+// both dirty and memoized marks after transferring state to the VM stack.
 func (l arm64Lowerer) flush(ctx *lowering, mode flushMode) bool {
 	// A committing flush transfers each backingStack ref's retain to the VM
 	// stack, but it has no cold stub to re-take a deferred ref's retain: the
@@ -4232,13 +4255,16 @@ func (l arm64Lowerer) flush(ctx *lowering, mode flushMode) bool {
 			if f.state[idx]&localDirty == 0 {
 				continue
 			}
-			boxed, ok := l.boxHome(ctx, f.locals[idx])
-			if !ok {
-				return false
+			if f.state[idx]&localFlushed == 0 {
+				boxed, ok := l.boxHome(ctx, f.locals[idx])
+				if !ok {
+					return false
+				}
+				a.Emit(arm64.STR(boxed, addr, int16((f.base+idx)*8)))
+				f.state[idx] |= localFlushed
 			}
-			a.Emit(arm64.STR(boxed, addr, int16((f.base+idx)*8)))
 			if mode == flushCommit {
-				f.state[idx] &^= localDirty
+				f.state[idx] &^= localDirty | localFlushed
 			}
 		}
 	}
@@ -4248,10 +4274,14 @@ func (l arm64Lowerer) flush(ctx *lowering, mode flushMode) bool {
 	// re-takes it before the flushed copy reaches the interpreter (see retainDeferred /
 	// emitExits). The commit pre-scan above already rejected any deferred
 	// backing, so those cases only run on a non-commit flush.
-	for j, v := range ctx.values {
+	for j := range ctx.values {
+		v := &ctx.values[j]
+		if v.flushed {
+			continue
+		}
 		switch v.backing {
 		case backingStack:
-			boxed, ok := l.boxHome(ctx, v)
+			boxed, ok := l.boxHome(ctx, *v)
 			if !ok {
 				return false
 			}
@@ -4263,6 +4293,7 @@ func (l arm64Lowerer) flush(ctx *lowering, mode flushMode) bool {
 		default:
 			a.Emit(arm64.STR(v.reg, addr, int16(ctx.slot(j)*8)))
 		}
+		v.flushed = true
 	}
 	return true
 }
@@ -4546,10 +4577,15 @@ func lower(ctx *lowering, plan plan) bool {
 		}
 	}
 	root := plan.root
+	ctx.root = root
 	if _, ok := ctx.labels[root]; !ok {
 		ctx.labels[root] = ctx.assembler.Label()
 	}
 	ctx.back = ctx.labels[root]
+	if ctx.backEdge && plan.kind == entryLoop && ctx.leaf {
+		ctx.budget = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+		ctx.assembler.Emit(arm64.LDR(ctx.budget, ctx.pin(scratchCtrl), int16(journalBudget*8)))
+	}
 	if plan.kind == entryLoop && plan.hoist != nil && !l.hoist(ctx, *plan.hoist, plan.anchor.ip) {
 		return false
 	}
@@ -4585,8 +4621,8 @@ func lower(ctx *lowering, plan plan) bool {
 // hoist derives the plan's loop-invariant container once per native entry:
 // the container local is loaded, tag- and itab-guarded against an empty-stack
 // exit resuming at the loop header, and its slice header lands in registers
-// that stay live for the whole body — hoistable rejected every call, so all
-// flow is forward and nothing clobbers them or re-enters ctx.back. The
+// that stay live across the loop back-edge. hoistable rejects every call, and
+// OpPseudoUse extends both live ranges through the backward branch. The
 // prologue takes no retain: the local slot keeps carrying the container's
 // refcount, and the exit snapshot is empty. Unsupported layouts decline
 // silently and every access keeps its per-op derivation.

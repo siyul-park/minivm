@@ -31,6 +31,7 @@ func TestInstruction_Uses(t *testing.T) {
 	}
 
 	require.Equal(t, []VReg{a, b, c}, inst.Uses())
+	require.Equal(t, []VReg{a, b}, (Instruction{Op: OpPseudoUse, Src1: V(a), Src2: V(b)}).Uses())
 }
 
 func TestInstruction_String(t *testing.T) {

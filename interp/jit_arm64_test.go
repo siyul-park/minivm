@@ -1136,7 +1136,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 	})
 
 	t.Run("sieve-shaped kernel keeps the local-backed array refcount exact", func(t *testing.T) {
-		const size = int32(24)
+		const size = int32(10_000)
 		b := program.NewBuilder()
 		arrayTyp := b.Type(types.TypeI32Array)
 		b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32)
@@ -1732,6 +1732,12 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 			switch metric.Name {
 			case "vm_jit_native_entries_total":
 				entries += metric.Value
+			case "vm_jit_entry_bytes_total":
+				for _, label := range metric.Labels {
+					if label.Key == "kind" && label.Value == "loop" {
+						require.Less(t, metric.Value, float64(16<<10), "loop body was duplicated instead of using a back-edge")
+					}
+				}
 			case "vm_jit_native_exits_total":
 				for _, label := range metric.Labels {
 					if label.Key == "reason" {

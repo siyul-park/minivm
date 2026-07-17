@@ -54,6 +54,25 @@ func TestAssembler_Emit(t *testing.T) {
 	require.NotEmpty(t, code.Bytes)
 }
 
+func TestAssembler_PseudoUse(t *testing.T) {
+	assembler := asm.New(arm64.New())
+	v := assembler.Reg(asm.RegTypeInt, asm.Width64)
+	assembler.Emit(arm64.LDI(v, 1)...)
+	assembler.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.V(v)})
+	assembler.Emit(arm64.RET())
+
+	code, err := assembler.Build()
+	require.NoError(t, err)
+
+	without := asm.New(arm64.New())
+	v = without.Reg(asm.RegTypeInt, asm.Width64)
+	without.Emit(arm64.LDI(v, 1)...)
+	without.Emit(arm64.RET())
+	want, err := without.Build()
+	require.NoError(t, err)
+	require.Equal(t, want.Bytes, code.Bytes)
+}
+
 func TestAssembler_Pin(t *testing.T) {
 	arch := arm64.New()
 

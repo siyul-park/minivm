@@ -325,9 +325,9 @@ A loop root is anchored at a loop header: the target of a backward branch.
 
 The tracer discovers headers statically. Periodic samples still drive normal hotness, while JIT-enabled unconditional backward `BR` handlers also notify the interpreter after moving the live frame to the exact target header. This prevents a deterministic tick phase from permanently missing those loops. Threshold-zero mode waits for eight exact hits on those headers before capture so the first iteration does not over-specialize the recorded branch path.
 
-Loop lowering builds the normal native prologue, binds a back-edge label, lowers the loop body, commits loop-carried locals to VM stack slots, decrements `journalBudget`, and branches back while budget remains.
+Loop lowering builds the normal native prologue, binds a back-edge label, emits the loop body once, commits loop-carried locals to VM stack slots, decrements the safepoint budget, and branches back while budget remains. Eligible trace loops use a true backward branch; when the allocator cannot satisfy the resulting no-spill live ranges, compilation retries with bounded forward chaining.
 
-Loop-carried locals round-trip through the VM stack each iteration. This avoids a cross-back-edge register fixpoint.
+Loop-carried locals round-trip through the VM stack each iteration. This avoids a cross-back-edge register fixpoint. Call-free backward loops cache `journalBudget` in a register and write it back only on yield or another cold exit; other loops retain the memory-backed check.
 
 Module loops at `addr == 0` are valid when their header IP is positive. Only loops whose header is the module or function entry (`ip == 0`) remain threaded.
 
@@ -345,7 +345,7 @@ On yield trap, the wrapper deoptimizes to the header and runs one safepoint befo
 
 A trace loop plan may hoist one container: `hoistable` (`interp/jit_plan.go`) picks the most-accessed ref local whose recorded `ARRAY_GET`/non-terminal `ARRAY_SET` steps agree on one primitive typed-array itab, provided its root-frame slot fits the ARM64 load immediate, no block writes that local, and the plan contains no `CALL`/`RETURN_CALL` (a `BL` would clobber the hoisted registers). The backend prologue (`arm64Lowerer.hoist`) then derives the heap cell, guards the tag and itab, and loads the slice header once per native entry, before the header label. Matching accesses keep only their bounds side exit, `guardIndex`, and element load/store; I64 loads also retain their value/boxability side exit. A non-terminal hoisted primitive `ARRAY_SET` is no longer a state barrier (no snapshot flush plus local-cache clear), while terminal stores continue through the existing path.
 
-The hoisted registers are pure derived state: flush, snapshots, and reload never see them, and they stay valid for the whole entry because all flow inside a call-free loop callable is forward. The prologue takes no retain — the local slot keeps carrying the container's refcount — and its shape-guard exit resumes at the header with an empty operand stack. Accesses whose operand does not match the hoisted slot and itab use the per-access derivation unchanged.
+The hoisted registers are pure derived state: flush, snapshots, and reload never see them. A zero-byte `asm.OpPseudoUse` keeps them allocated through the backward branch, so the prologue-derived values remain valid across every native iteration. The prologue takes no retain — the local slot keeps carrying the container's refcount — and its shape-guard exit resumes at the header with an empty operand stack. Accesses whose operand does not match the hoisted slot and itab use the per-access derivation unchanged.
 
 ## Coroutine Suspension
 
