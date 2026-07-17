@@ -2193,3 +2193,134 @@ func TestARM64_StructSetLoop(t *testing.T) {
 		runParity(t, prog, types.BoxI32(size-1))
 	})
 }
+
+// RefEqLoop protects the native boxed-word equality for REF_EQ/REF_NE and
+// STRING_EQ/STRING_NE: with at most one owned operand the compare stays
+// native, and with two owned operands it falls back terminally. Every
+// sub-case diffs results and exact refcounts against a threaded twin.
+func TestARM64_RefEqLoop(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	runParity := func(t *testing.T, prog *program.Program, want types.Boxed) {
+		t.Helper()
+		profile := prof.New()
+		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		for n := 0; n < 32; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			ref, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, ref, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, want, got)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0))
+	}
+
+	// eqLoop counts, over size iterations, how often the two operands the
+	// build callback pushes compare equal under op.
+	eqLoop := func(setup func(b *program.Builder), operands func(b *program.Builder), op instr.Opcode) *program.Program {
+		const size = int32(24)
+		b := program.NewBuilder()
+		setup(b)
+		loop := b.Label()
+		hit := b.Label()
+		skip := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		operands(b)
+		b.Emit(op).BrIf(hit)
+		b.Br(skip)
+		b.Bind(hit)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Bind(skip)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 2)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		return prog
+	}
+
+	t.Run("deferred string equality stays native", func(t *testing.T) {
+		prog := eqLoop(func(b *program.Builder) {
+			b.Locals(types.TypeString, types.TypeI32, types.TypeI32)
+			b.ConstGet(types.String("hot")).Emit(instr.LOCAL_SET, 0)
+		}, func(b *program.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).ConstGet(types.String("hot"))
+		}, instr.STRING_EQ)
+		runParity(t, prog, types.BoxI32(24))
+	})
+
+	t.Run("deferred string inequality with distinct literals", func(t *testing.T) {
+		prog := eqLoop(func(b *program.Builder) {
+			b.Locals(types.TypeString, types.TypeI32, types.TypeI32)
+			b.ConstGet(types.String("hot")).Emit(instr.LOCAL_SET, 0)
+		}, func(b *program.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).ConstGet(types.String("cold"))
+		}, instr.STRING_NE)
+		runParity(t, prog, types.BoxI32(24))
+	})
+
+	t.Run("one owned operand releases in place", func(t *testing.T) {
+		stringArray := types.NewArrayType(types.TypeString)
+		prog := eqLoop(func(b *program.Builder) {
+			arrTyp := b.Type(stringArray)
+			b.Locals(stringArray, types.TypeI32, types.TypeI32)
+			b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 0)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).ConstGet(types.String("hot")).Emit(instr.ARRAY_SET)
+		}, func(b *program.Builder) {
+			// The array element load retains its result, so the compare's left
+			// operand owns a retain the native path must release in place.
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET)
+			b.ConstGet(types.String("hot"))
+		}, instr.STRING_EQ)
+		runParity(t, prog, types.BoxI32(24))
+	})
+
+	t.Run("two owned operands fall back terminally", func(t *testing.T) {
+		stringArray := types.NewArrayType(types.TypeString)
+		prog := eqLoop(func(b *program.Builder) {
+			arrTyp := b.Type(stringArray)
+			b.Locals(stringArray, types.TypeI32, types.TypeI32)
+			b.Emit(instr.I32_CONST, 2).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 0)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).ConstGet(types.String("hot")).Emit(instr.ARRAY_SET)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).ConstGet(types.String("hot")).Emit(instr.ARRAY_SET)
+		}, func(b *program.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_GET)
+		}, instr.STRING_EQ)
+		runParity(t, prog, types.BoxI32(24))
+	})
+
+	t.Run("deferred ref equality stays native", func(t *testing.T) {
+		prog := eqLoop(func(b *program.Builder) {
+			arrTyp := b.Type(types.TypeI32Array)
+			b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32, types.TypeI32Array)
+			b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 0)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_SET, 3)
+		}, func(b *program.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 3)
+		}, instr.REF_EQ)
+		runParity(t, prog, types.BoxI32(24))
+	})
+}

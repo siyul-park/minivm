@@ -623,11 +623,20 @@ func (l arm64Lowerer) steps(ctx *lowering, ops []step) (bool, bool) {
 			ok = l.refNull(ctx)
 		case instr.REF_IS_NULL:
 			ok = l.refIsNull(ctx, op)
-		case instr.REF_EQ, instr.REF_NE:
-			// REF_EQ/REF_NE consume two refs. Releasing both natively risks a
-			// double release if the second release deopts after the first already
-			// decremented a refcount inline; the interpreter releases both safely.
-			ok = false
+		case instr.REF_EQ, instr.REF_NE, instr.STRING_EQ, instr.STRING_NE:
+			// Ref and interned-string equality are boxed-word compares. With at
+			// most one owned operand the compare stays native; two owned
+			// operands fall back terminally because releasing both natively
+			// risks a double release when the second release deopts after the
+			// first already decremented a refcount inline.
+			terminal, okEq := l.refEq(ctx, op, op.op == instr.REF_NE || op.op == instr.STRING_NE)
+			if !okEq {
+				return false, false
+			}
+			if terminal {
+				return true, idx == len(ops)-1
+			}
+			ok = true
 		case instr.REF_GET:
 			ok = l.refGet(ctx, op)
 		case instr.ARRAY_LEN:
@@ -663,9 +672,7 @@ func (l arm64Lowerer) steps(ctx *lowering, ops []step) (bool, bool) {
 			ok = l.coroValue(ctx, op)
 		case instr.STRING_LEN:
 			ok = l.stringLen(ctx, op)
-		// STRING_EQ/STRING_NE stay threaded like REF_EQ/REF_NE above: they
-		// release two refs, and a deopt after the first inline decrement would
-		// double-release. REF_SET stays threaded because it needs a fresh
+		// REF_SET stays threaded because it needs a fresh
 		// interface box (an allocation); storing in place is unsound against
 		// shared static boxes. REF_TEST/REF_CAST stay threaded because they
 		// need structural type equality that an itab guard cannot express.
@@ -2918,6 +2925,49 @@ func (l arm64Lowerer) refIsNull(ctx *lowering, op step) bool {
 	ctx.pop()
 	ctx.push(value{reg: flag, kind: types.KindI1, raw: true})
 	return true
+}
+
+// refEq lowers REF_EQ/REF_NE and STRING_EQ/STRING_NE as a boxed-word compare
+// (strings are interned, so string equality is ref equality). At most one
+// operand may own its retain: a single owned operand releases like refIsNull,
+// while two owned operands report a terminal fallback because the second
+// release could deopt after the first already decremented a refcount inline.
+func (l arm64Lowerer) refEq(ctx *lowering, op step, negate bool) (bool, bool) {
+	if ctx.count() < 2 || ctx.values[len(ctx.values)-1].kind != types.KindRef || ctx.values[len(ctx.values)-2].kind != types.KindRef {
+		return false, false
+	}
+	owned1 := ctx.values[len(ctx.values)-1].backing == backingStack
+	owned2 := ctx.values[len(ctx.values)-2].backing == backingStack
+	if owned1 && owned2 {
+		return true, l.exit(ctx, op.ip, prof.ExitTerminalOp, int(op.op))
+	}
+	pre := ctx.pre()
+	v1, ok := l.box(ctx, ctx.values[len(ctx.values)-1])
+	if !ok {
+		return false, false
+	}
+	v2, ok := l.box(ctx, ctx.values[len(ctx.values)-2])
+	if !ok {
+		return false, false
+	}
+	ctx.assembler.Emit(arm64.CMP(v2, v1))
+	// Capture the flags before release clobbers them, then release the one
+	// consumed ref that carries its own retain; deferred operands have none.
+	cond := arm64.CondEQ
+	if negate {
+		cond = arm64.CondNE
+	}
+	flag := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.CSET(flag, cond))
+	if owned1 {
+		l.releaseBox(ctx, v1, pre, op.ip)
+	} else if owned2 {
+		l.releaseBox(ctx, v2, pre, op.ip)
+	}
+	ctx.pop()
+	ctx.pop()
+	ctx.push(value{reg: flag, kind: types.KindI1, raw: true})
+	return false, true
 }
 
 func (l arm64Lowerer) refGet(ctx *lowering, op step) bool {

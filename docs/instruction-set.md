@@ -108,8 +108,8 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | References | `REF_TEST` | `ref.test` | ⬜ | 🔲 | runtime type test stays threaded |
 | References | `REF_CAST` | `ref.cast` | ⬜ | 🔲 | runtime cast stays threaded |
 | References | `REF_IS_NULL` | `ref.is_null` | ✅ | 🔲 | — |
-| References | `REF_EQ` | `ref.eq` | ⬜ | 🔲 | two-ref release semantics stay threaded |
-| References | `REF_NE` | `ref.ne` | ⬜ | 🔲 | two-ref release semantics stay threaded |
+| References | `REF_EQ` | `ref.eq` | ◐ | 🔲 | native boxed compare; two owned operands fall back |
+| References | `REF_NE` | `ref.ne` | ◐ | 🔲 | native boxed compare; two owned operands fall back |
 | Integers | `I32_CONST` | `i32.const` | ✅ | 🔲 | — |
 | Integers | `I32_ADD` | `i32.add` | ✅ | 🔲 | — |
 | Integers | `I32_SUB` | `i32.sub` | ✅ | 🔲 | — |
@@ -249,8 +249,8 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Strings | `STRING_NEW_UTF32` | `string.new_utf32` | ⬜ | 🔲 | allocation stays interpreter-owned |
 | Strings | `STRING_LEN` | `string.len` | ✅ | 🔲 | native typed-array-length-style length read |
 | Strings | `STRING_CONCAT` | `string.concat` | ⬜ | 🔲 | allocation stays interpreter-owned |
-| Strings | `STRING_EQ` | `string.eq` | ⬜ | 🔲 | string comparisons stay threaded |
-| Strings | `STRING_NE` | `string.ne` | ⬜ | 🔲 | string comparisons stay threaded |
+| Strings | `STRING_EQ` | `string.eq` | ◐ | 🔲 | native boxed compare; two owned operands fall back |
+| Strings | `STRING_NE` | `string.ne` | ◐ | 🔲 | native boxed compare; two owned operands fall back |
 | Strings | `STRING_LT` | `string.lt` | ⬜ | 🔲 | string comparisons stay threaded |
 | Strings | `STRING_GT` | `string.gt` | ⬜ | 🔲 | string comparisons stay threaded |
 | Strings | `STRING_LE` | `string.le` | ⬜ | 🔲 | string comparisons stay threaded |
