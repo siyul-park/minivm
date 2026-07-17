@@ -15,7 +15,7 @@ func TestNewEncoder(t *testing.T) {
 func TestEncoder_Encode(t *testing.T) {
 	encoder := NewEncoder()
 
-	encodings := []struct {
+	goldens := []struct {
 		name string
 		inst asm.Instruction
 		want uint32
@@ -116,7 +116,7 @@ func TestEncoder_Encode(t *testing.T) {
 		{"FCVTZU X1,S2", FCVTZU(X1, S2), 0x9E390041},
 		{"FCVTZU X1,D2", FCVTZU(X1, D2), 0x9E790041},
 	}
-	for _, tt := range encodings {
+	for _, tt := range goldens {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := encoder.Encode(tt.inst)
 			require.NoError(t, err)
@@ -134,7 +134,7 @@ func TestEncoder_Encode(t *testing.T) {
 		require.Equal(t, []byte{0x83, 0x78, 0x25, 0xF8}, got)
 	})
 
-	failures := []struct {
+	invalid := []struct {
 		name string
 		inst asm.Instruction
 		want error
@@ -151,7 +151,7 @@ func TestEncoder_Encode(t *testing.T) {
 		{"CBZ offset exceeds imm19", CBZ(X1, 1<<21), asm.ErrBranchOutOfRange},
 		{"TBZ offset exceeds imm14", TBZ(X1, 3, 1<<17), asm.ErrBranchOutOfRange},
 	}
-	for _, tt := range failures {
+	for _, tt := range invalid {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := encoder.Encode(tt.inst)
 			require.ErrorIs(t, err, tt.want)

@@ -2491,7 +2491,7 @@ func TestInterpreter_Run(t *testing.T) {
 
 	huge := int64(1) << 50
 	fn := types.NewFunctionBuilder(nil).Emit(instr.New(instr.RETURN)).MustBuild()
-	parityCases := []struct {
+	parity := []struct {
 		name string
 		prog *program.Program
 		err  error
@@ -2578,7 +2578,7 @@ func TestInterpreter_Run(t *testing.T) {
 			err: ErrDivideByZero,
 		},
 	}
-	for _, tt := range parityCases {
+	for _, tt := range parity {
 		t.Run(tt.name, func(t *testing.T) {
 			states := make([]parityState, 0, 2)
 			for _, opts := range [][]func(*option){
@@ -2653,7 +2653,7 @@ func TestInterpreter_Run(t *testing.T) {
 		Captures(types.TypeI32, types.TypeI32).Emit(
 		instr.New(instr.UPVAL_GET, 0), instr.New(instr.UPVAL_GET, 1), instr.New(instr.I32_ADD), instr.New(instr.RETURN),
 	).MustBuild()
-	fusionCases := []struct {
+	fusions := []struct {
 		name string
 		prog *program.Program
 		want types.Value
@@ -2754,7 +2754,7 @@ func TestInterpreter_Run(t *testing.T) {
 			want: types.I32(8),
 		},
 	}
-	for _, tt := range fusionCases {
+	for _, tt := range fusions {
 		t.Run("fuses "+tt.name, func(t *testing.T) {
 			i := New(tt.prog, WithThreshold(-1))
 			defer i.Close()
@@ -2766,11 +2766,11 @@ func TestInterpreter_Run(t *testing.T) {
 		})
 	}
 
-	ownershipCases := []struct {
-		name     string
-		prog     *program.Program
-		want     types.Value
-		wantRefs int
+	refs := []struct {
+		name string
+		prog *program.Program
+		want types.Value
+		refs int
 	}{
 		{
 			name: "repeated local reads keep the local reference",
@@ -2779,8 +2779,8 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
 				instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_ADD),
 			}, program.WithLocals(types.TypeI64)),
-			want:     types.I64(huge + 1),
-			wantRefs: 1,
+			want: types.I64(huge + 1),
+			refs: 1,
 		},
 		{
 			name: "mixed local reads keep the local reference",
@@ -2789,8 +2789,8 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.I64_ADD), instr.New(instr.DROP),
 				instr.New(instr.LOCAL_GET, 0), instr.New(instr.LOCAL_GET, 0), instr.New(instr.I64_ADD),
 			}, program.WithLocals(types.TypeI64)),
-			want:     types.I64(2 * huge),
-			wantRefs: 1,
+			want: types.I64(2 * huge),
+			refs: 1,
 		},
 		{
 			name: "repeated global reads keep the global reference",
@@ -2799,8 +2799,8 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
 				instr.New(instr.I64_CONST, i64operand(1)), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I64_ADD),
 			}, program.WithGlobals(types.TypeI64)),
-			want:     types.I64(huge + 1),
-			wantRefs: 1,
+			want: types.I64(huge + 1),
+			refs: 1,
 		},
 		{
 			name: "repeated upval reads preserve the captured value",
@@ -2808,8 +2808,8 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.I64_CONST, i64operand(huge)),
 				instr.New(instr.CONST_GET, 0), instr.New(instr.CLOSURE_NEW), instr.New(instr.CALL),
 			}, program.WithConstants(upval)),
-			want:     types.I64(huge + 1),
-			wantRefs: 1,
+			want: types.I64(huge + 1),
+			refs: 1,
 		},
 		{
 			name: "paired global reads preserve the global reference",
@@ -2818,11 +2818,11 @@ func TestInterpreter_Run(t *testing.T) {
 				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I64_ADD), instr.New(instr.DROP),
 				instr.New(instr.GLOBAL_GET, 0), instr.New(instr.GLOBAL_GET, 0), instr.New(instr.I64_ADD),
 			}, program.WithGlobals(types.TypeI64)),
-			want:     types.I64(2 * huge),
-			wantRefs: 1,
+			want: types.I64(2 * huge),
+			refs: 1,
 		},
 	}
-	for _, tt := range ownershipCases {
+	for _, tt := range refs {
 		t.Run(tt.name, func(t *testing.T) {
 			i := New(tt.prog, WithThreshold(-1))
 			defer i.Close()
@@ -2831,11 +2831,11 @@ func TestInterpreter_Run(t *testing.T) {
 			got, err := i.Pop()
 			require.NoError(t, err)
 			require.Equal(t, tt.want, got)
-			gotRefs := 0
+			live := 0
 			for _, count := range i.rc[1:] {
-				gotRefs += count
+				live += count
 			}
-			require.Equal(t, tt.wantRefs, gotRefs)
+			require.Equal(t, tt.refs, live)
 		})
 	}
 
@@ -4917,23 +4917,23 @@ func TestWithThreshold(t *testing.T) {
 		rowsI64 := make([]int64, 8)
 		rowsF32 := make([]float32, 8)
 		rowsF64 := make([]float64, 8)
-		arrayGetCases := []struct {
-			name   string
-			param  types.Type
-			result types.Type
-			zero   instr.Instruction
-			add    instr.Opcode
-			array  types.Value
-			fill   func(int) float64
-			delta  float64
+		arrays := []struct {
+			name  string
+			typ   types.Type
+			ret   types.Type
+			zero  instr.Instruction
+			add   instr.Opcode
+			array types.Value
+			fill  func(int) float64
+			delta float64
 		}{
 			{
-				name:   "i1 array",
-				param:  types.TypeI1Array,
-				result: types.TypeI32,
-				zero:   instr.New(instr.I32_CONST, 0),
-				add:    instr.I32_ADD,
-				array:  types.TypedArray[bool](rowsI1),
+				name:  "i1 array",
+				typ:   types.TypeI1Array,
+				ret:   types.TypeI32,
+				zero:  instr.New(instr.I32_CONST, 0),
+				add:   instr.I32_ADD,
+				array: types.TypedArray[bool](rowsI1),
 				fill: func(n int) float64 {
 					var sum int32
 					for idx := range rowsI1 {
@@ -4946,12 +4946,12 @@ func TestWithThreshold(t *testing.T) {
 				},
 			},
 			{
-				name:   "i8 array",
-				param:  types.TypeI8Array,
-				result: types.TypeI32,
-				zero:   instr.New(instr.I32_CONST, 0),
-				add:    instr.I32_ADD,
-				array:  types.TypedArray[int8](rowsI8),
+				name:  "i8 array",
+				typ:   types.TypeI8Array,
+				ret:   types.TypeI32,
+				zero:  instr.New(instr.I32_CONST, 0),
+				add:   instr.I32_ADD,
+				array: types.TypedArray[int8](rowsI8),
 				fill: func(n int) float64 {
 					var sum int32
 					for idx := range rowsI8 {
@@ -4962,12 +4962,12 @@ func TestWithThreshold(t *testing.T) {
 				},
 			},
 			{
-				name:   "i32 array",
-				param:  types.TypeI32Array,
-				result: types.TypeI32,
-				zero:   instr.New(instr.I32_CONST, 0),
-				add:    instr.I32_ADD,
-				array:  types.TypedArray[int32](rowsI32),
+				name:  "i32 array",
+				typ:   types.TypeI32Array,
+				ret:   types.TypeI32,
+				zero:  instr.New(instr.I32_CONST, 0),
+				add:   instr.I32_ADD,
+				array: types.TypedArray[int32](rowsI32),
 				fill: func(n int) float64 {
 					var sum int32
 					for idx := range rowsI32 {
@@ -4978,12 +4978,12 @@ func TestWithThreshold(t *testing.T) {
 				},
 			},
 			{
-				name:   "i64 array",
-				param:  types.TypeI64Array,
-				result: types.TypeI64,
-				zero:   instr.New(instr.I64_CONST, 0),
-				add:    instr.I64_ADD,
-				array:  types.TypedArray[int64](rowsI64),
+				name:  "i64 array",
+				typ:   types.TypeI64Array,
+				ret:   types.TypeI64,
+				zero:  instr.New(instr.I64_CONST, 0),
+				add:   instr.I64_ADD,
+				array: types.TypedArray[int64](rowsI64),
 				fill: func(n int) float64 {
 					var sum int64
 					for idx := range rowsI64 {
@@ -4994,12 +4994,12 @@ func TestWithThreshold(t *testing.T) {
 				},
 			},
 			{
-				name:   "f32 array",
-				param:  types.TypeF32Array,
-				result: types.TypeF32,
-				zero:   instr.New(instr.F32_CONST, uint64(math.Float32bits(0))),
-				add:    instr.F32_ADD,
-				array:  types.TypedArray[float32](rowsF32),
+				name:  "f32 array",
+				typ:   types.TypeF32Array,
+				ret:   types.TypeF32,
+				zero:  instr.New(instr.F32_CONST, uint64(math.Float32bits(0))),
+				add:   instr.F32_ADD,
+				array: types.TypedArray[float32](rowsF32),
 				fill: func(n int) float64 {
 					var sum float64
 					for idx := range rowsF32 {
@@ -5011,12 +5011,12 @@ func TestWithThreshold(t *testing.T) {
 				delta: 1e-5,
 			},
 			{
-				name:   "f64 array",
-				param:  types.TypeF64Array,
-				result: types.TypeF64,
-				zero:   instr.New(instr.F64_CONST, math.Float64bits(0)),
-				add:    instr.F64_ADD,
-				array:  types.TypedArray[float64](rowsF64),
+				name:  "f64 array",
+				typ:   types.TypeF64Array,
+				ret:   types.TypeF64,
+				zero:  instr.New(instr.F64_CONST, math.Float64bits(0)),
+				add:   instr.F64_ADD,
+				array: types.TypedArray[float64](rowsF64),
 				fill: func(n int) float64 {
 					var sum float64
 					for idx := range rowsF64 {
@@ -5028,9 +5028,9 @@ func TestWithThreshold(t *testing.T) {
 				delta: 1e-9,
 			},
 		}
-		for _, tt := range arrayGetCases {
+		for _, tt := range arrays {
 			t.Run("jits array get from host-pushed "+tt.name, func(t *testing.T) {
-				eval := types.NewFunctionBuilder(nil).Params(tt.param).Returns(tt.result)
+				eval := types.NewFunctionBuilder(nil).Params(tt.typ).Returns(tt.ret)
 				eval.Emit(tt.zero)
 				for idx := range 64 {
 					eval.Emit(instr.New(instr.LOCAL_GET, 0)).
