@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
 	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
@@ -134,6 +135,39 @@ func TestTracer_Capture(t *testing.T) {
 		last := result.trace.ops[len(result.trace.ops)-1]
 		require.Equal(t, instr.STRUCT_SET, last.op)
 		require.True(t, last.terminal)
+	})
+
+	t.Run("records bulk mutation as a terminal deopt boundary", func(t *testing.T) {
+		array := types.TypedArray[int32]{1, 2}
+		tracer := NewTracer()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0),
+			instr.New(instr.I32_CONST, 0),
+			instr.New(instr.I32_CONST, 7),
+			instr.New(instr.I32_CONST, 2),
+			instr.New(instr.ARRAY_FILL),
+			instr.New(instr.I32_CONST, 7),
+		}, program.WithConstants(array))
+		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		defer i.Close()
+
+		result := tracer.capture(i, anchor{})
+		require.NotNil(t, result.trace)
+		require.Equal(t, returned, result.trace.kind)
+		require.Equal(t, instr.ARRAY_FILL, result.trace.ops[len(result.trace.ops)-1].op)
+	})
+
+	t.Run("still aborts at allocation", func(t *testing.T) {
+		tracer := NewTracer()
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.I32_CONST, 1),
+			instr.New(instr.ARRAY_NEW_DEFAULT, 0),
+		}, program.WithTypes(types.TypeI32Array))
+		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		defer i.Close()
+
+		result := tracer.capture(i, anchor{})
+		require.Equal(t, prof.CaptureReasonUnsupportedOp, result.reason)
 	})
 
 	t.Run("isolates captured mutations", func(t *testing.T) {

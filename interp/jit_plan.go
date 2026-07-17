@@ -312,7 +312,15 @@ func tracePlan(input *compileInput) ([]plan, error) {
 		if tree == nil || tree.root == nil || tree.root.kind == aborted {
 			continue
 		}
-		if (ip != 0) != (tree.root.kind == loop) || ip != 0 && tree.root.carried {
+		// A loop anchor accepts a looping root or a returned straight-line
+		// fragment: a body whose terminal boundary (bulk mutation, yield,
+		// throw) deopts before the back-edge still compiles as a per-entry
+		// prefix that re-enters at the header next iteration. Carried entry
+		// operands stay rejected either way.
+		if ip != 0 && (tree.root.kind != loop && tree.root.kind != returned || tree.root.carried) {
+			continue
+		}
+		if ip == 0 && tree.root.kind == loop {
 			continue
 		}
 		kind := entryFunction

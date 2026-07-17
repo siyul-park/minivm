@@ -261,9 +261,9 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Arrays | `ARRAY_LEN` | `array.len` | ✅ | 🔲 | native typed-array length fast path |
 | Arrays | `ARRAY_GET` | `array.get` | ✅ | 🔲 | native typed-array get fast path |
 | Arrays | `ARRAY_SET` | `array.set` | ◐ | 🔲 | primitive typed arrays may continue; boxed/ref writes stay terminal |
-| Arrays | `ARRAY_FILL` | `array.fill` | ⬜ | 🔲 | bulk mutation stays threaded |
-| Arrays | `ARRAY_COPY` | `array.copy` | ⬜ | 🔲 | bulk mutation stays threaded |
-| Arrays | `ARRAY_APPEND` | `array.append` | ⬜ | 🔲 | grow/mutation stays threaded |
+| Arrays | `ARRAY_FILL` | `array.fill` | ◐ | 🔲 | terminal deopt boundary; trace prefix stays native |
+| Arrays | `ARRAY_COPY` | `array.copy` | ◐ | 🔲 | terminal deopt boundary; trace prefix stays native |
+| Arrays | `ARRAY_APPEND` | `array.append` | ◐ | 🔲 | terminal deopt boundary; trace prefix stays native |
 | Arrays | `ARRAY_DELETE` | `array.delete` | ⬜ | 🔲 | mutation and removed-value ownership stay threaded |
 | Arrays | `ARRAY_SLICE` | `array.slice` | ⬜ | 🔲 | allocation and ownership stay threaded |
 | Structs | `STRUCT_NEW` | `struct.new` | ⬜ | 🔲 | allocation stays interpreter-owned |
@@ -275,7 +275,7 @@ Do not group multiple opcodes in one row. Keep this table in opcode-value order 
 | Maps | `MAP_LEN` | `map.len` | ◐ | 🔲 | terminal fallback |
 | Maps | `MAP_GET` | `map.get` | ◐ | 🔲 | terminal fallback |
 | Maps | `MAP_LOOKUP` | `map.lookup` | ◐ | 🔲 | terminal fallback |
-| Maps | `MAP_SET` | `map.set` | ⬜ | 🔲 | mutation stays threaded |
+| Maps | `MAP_SET` | `map.set` | ◐ | 🔲 | terminal deopt boundary; trace prefix stays native |
 | Maps | `MAP_DELETE` | `map.delete` | ⬜ | 🔲 | mutation stays threaded |
 | Maps | `MAP_CLEAR` | `map.clear` | ⬜ | 🔲 | mutation stays threaded |
 | Maps | `MAP_KEYS` | `map.keys` | ◐ | 🔲 | terminal fallback |

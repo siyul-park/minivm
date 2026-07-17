@@ -689,6 +689,15 @@ func (l arm64Lowerer) steps(ctx *lowering, ops []step) (bool, bool) {
 				return false, false
 			}
 			return true, idx == len(ops)-1
+		case instr.ARRAY_FILL, instr.ARRAY_COPY, instr.ARRAY_APPEND, instr.MAP_SET:
+			// Bulk mutations stay interpreter-owned: the trace records them as
+			// terminal boundaries, so the compiled prefix runs native and this
+			// unconditional deopt hands the op to the threaded handler, which
+			// performs its own IP advance.
+			if !l.exit(ctx, op.ip, prof.ExitTerminalOp, int(op.op)) {
+				return false, false
+			}
+			return true, idx == len(ops)-1
 		case instr.ERROR_NEW, instr.ERROR_CODE, instr.THROW:
 			// Allocation and handler landing stay interpreter-owned. Resume at
 			// op.ip because each threaded handler performs its own IP update or

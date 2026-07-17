@@ -211,13 +211,15 @@ func (r *Tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 			r.publish(a, tree, t)
 			return captureResult{trace: t, outcome: prof.CaptureOutcomePublished}
 		}
-		// YIELD/RESUME and exception-producing ops have side effects a trace
-		// cannot represent. In the anchor frame, record the op as the
-		// terminal and store kind=returned WITHOUT stepping the clone; the JIT
-		// lowers this to an unconditional deopt so the threaded handler performs
-		// the real work. Abort rather than miscompile when the op sits in an
-		// inlined frame whose runtime-only state may not survive journal deopt.
-		if op == instr.YIELD || op == instr.RESUME || op == instr.ERROR_NEW || op == instr.ERROR_CODE || op == instr.THROW {
+		// YIELD/RESUME, exception-producing ops, and bulk mutations have side
+		// effects a trace cannot represent. In the anchor frame, record the op
+		// as the terminal and store kind=returned WITHOUT stepping the clone;
+		// the JIT lowers this to an unconditional deopt so the threaded handler
+		// performs the real work, and the compiled prefix still runs native.
+		// Abort rather than miscompile when the op sits in an inlined frame
+		// whose runtime-only state may not survive journal deopt.
+		if op == instr.YIELD || op == instr.RESUME || op == instr.ERROR_NEW || op == instr.ERROR_CODE || op == instr.THROW ||
+			op == instr.ARRAY_FILL || op == instr.ARRAY_COPY || op == instr.ARRAY_APPEND || op == instr.MAP_SET {
 			if clone.fp != startFP {
 				t.kind = aborted
 				result.reason = prof.CaptureReasonNestedTerminal
@@ -789,16 +791,12 @@ func (r *Tracer) unrecordableReason(i *Interpreter, op instr.Opcode) prof.Captur
 	case instr.STRING_NEW_UTF32,
 		instr.ARRAY_NEW,
 		instr.ARRAY_NEW_DEFAULT,
-		instr.ARRAY_FILL,
-		instr.ARRAY_COPY,
-		instr.ARRAY_APPEND,
 		instr.ARRAY_DELETE,
 		instr.ARRAY_SLICE,
 		instr.STRUCT_NEW,
 		instr.STRUCT_NEW_DEFAULT,
 		instr.MAP_NEW,
 		instr.MAP_NEW_DEFAULT,
-		instr.MAP_SET,
 		instr.MAP_DELETE,
 		instr.MAP_CLEAR,
 		instr.REF_NEW,
