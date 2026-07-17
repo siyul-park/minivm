@@ -1959,6 +1959,13 @@ func TestARM64_StructSetLoop(t *testing.T) {
 		profile := prof.New()
 		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
 		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		closed := false
+		t.Cleanup(func() {
+			if !closed {
+				require.NoError(t, jit.Close())
+				require.NoError(t, threaded.Close())
+			}
+		})
 		for n := 0; n < 32; n++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -1974,6 +1981,7 @@ func TestARM64_StructSetLoop(t *testing.T) {
 		}
 		require.NoError(t, jit.Close())
 		require.NoError(t, threaded.Close())
+		closed = true
 		var entries float64
 		for _, metric := range profile.Metrics() {
 			if metric.Name == "vm_jit_native_entries_total" {
@@ -2058,15 +2066,18 @@ func TestARM64_StructSetLoop(t *testing.T) {
 			require.NoError(t, err)
 			profile := runParity(t, prog, tt.want)
 			if tt.checkExits {
+				found := false
 				for _, metric := range profile.Metrics() {
-					if metric.Name == "vm_jit_native_exits_total" {
-						for _, label := range metric.Labels {
-							if label.Key == "reason" {
-								require.Equal(t, "loop-exit", label.Value)
-							}
+					if metric.Name != "vm_jit_native_exits_total" {
+						continue
+					}
+					for _, label := range metric.Labels {
+						if label.Key == "reason" && label.Value == "loop-exit" {
+							found = true
 						}
 					}
 				}
+				require.True(t, found, "missing native loop-exit metric")
 			}
 		})
 	}
@@ -2196,6 +2207,13 @@ func TestARM64_RefEqLoop(t *testing.T) {
 		profile := prof.New()
 		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
 		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		closed := false
+		t.Cleanup(func() {
+			if !closed {
+				require.NoError(t, jit.Close())
+				require.NoError(t, threaded.Close())
+			}
+		})
 		for n := 0; n < 32; n++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -2211,6 +2229,7 @@ func TestARM64_RefEqLoop(t *testing.T) {
 		}
 		require.NoError(t, jit.Close())
 		require.NoError(t, threaded.Close())
+		closed = true
 		var entries float64
 		for _, metric := range profile.Metrics() {
 			if metric.Name == "vm_jit_native_entries_total" {
@@ -2311,6 +2330,18 @@ func TestARM64_RefEqLoop(t *testing.T) {
 		}, instr.REF_EQ)
 		runParity(t, prog, types.BoxI32(24))
 	})
+
+	t.Run("deferred ref inequality stays native", func(t *testing.T) {
+		prog := eqLoop(func(b *program.Builder) {
+			arrTyp := b.Type(types.TypeI32Array)
+			b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32, types.TypeI32Array)
+			b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 0)
+			b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 3)
+		}, func(b *program.Builder) {
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 3)
+		}, instr.REF_NE)
+		runParity(t, prog, types.BoxI32(24))
+	})
 }
 
 // TerminalMutationLoop protects the abort-to-terminal reclassification of bulk
@@ -2327,6 +2358,13 @@ func TestARM64_TerminalMutationLoop(t *testing.T) {
 		profile := prof.New()
 		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
 		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		closed := false
+		t.Cleanup(func() {
+			if !closed {
+				require.NoError(t, jit.Close())
+				require.NoError(t, threaded.Close())
+			}
+		})
 		for n := 0; n < 32; n++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -2342,6 +2380,7 @@ func TestARM64_TerminalMutationLoop(t *testing.T) {
 		}
 		require.NoError(t, jit.Close())
 		require.NoError(t, threaded.Close())
+		closed = true
 		var entries float64
 		for _, metric := range profile.Metrics() {
 			if metric.Name == "vm_jit_native_entries_total" {
@@ -2372,6 +2411,53 @@ func TestARM64_TerminalMutationLoop(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 		runParity(t, prog, types.BoxI32(size*(size-1)/2+1))
+	})
+
+	t.Run("array copy loop keeps its prefix native", func(t *testing.T) {
+		const size = int32(24)
+		b := program.NewBuilder()
+		arrTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array, types.TypeI32Array, types.TypeI32, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 7).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_NEW, uint64(arrTyp)).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 3)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 2).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 3)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 0).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_COPY)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 3).Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog, types.BoxI32(size*(size-1)/2+7))
+	})
+
+	t.Run("array append loop keeps its prefix native", func(t *testing.T) {
+		const size = int32(24)
+		b := program.NewBuilder()
+		arrTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, 0).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.ARRAY_APPEND).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.ARRAY_LEN).Emit(instr.I32_ADD)
+		prog, err := b.Build()
+		require.NoError(t, err)
+		runParity(t, prog, types.BoxI32(size*(size-1)/2+size))
 	})
 
 	t.Run("map set loop keeps its prefix native", func(t *testing.T) {
@@ -2412,6 +2498,13 @@ func TestARM64_StructGetStaticPlan(t *testing.T) {
 		profile := prof.New()
 		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
 		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		closed := false
+		t.Cleanup(func() {
+			if !closed {
+				require.NoError(t, jit.Close())
+				require.NoError(t, threaded.Close())
+			}
+		})
 		for n := 0; n < 8; n++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -2427,6 +2520,7 @@ func TestARM64_StructGetStaticPlan(t *testing.T) {
 		}
 		require.NoError(t, jit.Close())
 		require.NoError(t, threaded.Close())
+		closed = true
 		static := false
 		for _, metric := range profile.Metrics() {
 			if metric.Name != "vm_jit_compiles_total" {

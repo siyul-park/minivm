@@ -2485,7 +2485,7 @@ func TestInterpreter_Run(t *testing.T) {
 		sp       int
 		stack    []types.Boxed
 		globals  []types.Boxed
-		live     int
+		rc       map[int]int
 		interned int
 	}
 
@@ -2600,11 +2600,12 @@ func TestInterpreter_Run(t *testing.T) {
 					sp:       i.sp,
 					stack:    append([]types.Boxed(nil), i.stack[:i.sp]...),
 					globals:  append([]types.Boxed(nil), i.globals...),
+					rc:       make(map[int]int),
 					interned: len(i.interned),
 				}
-				for _, rc := range i.rc[1:] {
-					if rc > 0 {
-						state.live += rc
+				for ref, count := range i.rc[1:] {
+					if count != 0 {
+						state.rc[ref+1] = count
 					}
 				}
 				states = append(states, state)
@@ -3828,10 +3829,19 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("interns duplicate string constants", func(t *testing.T) {
-		i := New(program.New(nil, program.WithConstants(types.String("same"), types.String("same"))))
+		prog := program.New([]instr.Instruction{
+			instr.New(instr.CONST_GET, 0), instr.New(instr.CONST_GET, 1), instr.New(instr.STRING_EQ),
+		}, program.WithConstants(types.String("same"), types.String("same")))
+		i := New(prog)
 		defer i.Close()
 
-		require.Equal(t, i.constants[0], i.constants[1])
+		require.Equal(t, types.KindRef, i.constants[0].Kind())
+		require.Equal(t, types.KindRef, i.constants[1].Kind())
+		require.Equal(t, i.constants[0].Ref(), i.constants[1].Ref())
+		require.NoError(t, i.Run(context.Background()))
+		got, err := i.Pop()
+		require.NoError(t, err)
+		require.Equal(t, types.I1(true), got)
 	})
 }
 

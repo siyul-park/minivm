@@ -492,7 +492,7 @@ func BenchmarkPool_Get(b *testing.B) {
 
 	b.Run("Miss", func(b *testing.B) {
 		var vm *Interpreter
-		var err, closeErr error
+		var err error
 		var elapsed time.Duration
 		var bytes, allocs uint64
 		var sampled bool
@@ -514,16 +514,13 @@ func BenchmarkPool_Get(b *testing.B) {
 				allocs = after.Mallocs - before.Mallocs
 				sampled = true
 			}
-			if vm != nil {
-				pool.Put(vm)
-			}
-			closeErr = pool.Close()
+			require.NoError(b, err)
+			pool.Put(vm)
+			require.NoError(b, pool.Close())
 		}
 		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 		b.ReportMetric(float64(bytes), "B/op")
 		b.ReportMetric(float64(allocs), "allocs/op")
-		require.NoError(b, err)
-		require.NoError(b, closeErr)
 	})
 
 	b.Run("SharedJITMiss", func(b *testing.B) {
@@ -542,7 +539,7 @@ func BenchmarkPool_Get(b *testing.B) {
 		code = append(code, instr.New(instr.I32_CONST, 42))
 		prog := program.New(code)
 		var second *Interpreter
-		var getErr, closeErr error
+		var getErr error
 		var elapsed time.Duration
 		var bytes, allocs uint64
 		var sampled bool
@@ -581,12 +578,11 @@ func BenchmarkPool_Get(b *testing.B) {
 			require.NotNil(b, second.stub(0))
 			pool.Put(first)
 			pool.Put(second)
-			closeErr = pool.Close()
+			require.NoError(b, pool.Close())
 		}
 		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 		b.ReportMetric(float64(bytes), "B/op")
 		b.ReportMetric(float64(allocs), "allocs/op")
-		require.NoError(b, closeErr)
 	})
 
 	b.Run("ParallelRoundTrip", func(b *testing.B) {

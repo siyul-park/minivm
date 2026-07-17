@@ -98,7 +98,13 @@ func benchmarkVM(b *testing.B, prog *program.Program, want types.Boxed) {
 				start := time.Now()
 				runErr = vm.Run(ctx)
 				elapsed += time.Since(start)
+				if runErr != nil {
+					break
+				}
 				value, popErr = vm.PopBoxed()
+				if popErr != nil {
+					break
+				}
 				vm.Reset()
 			}
 			elapsed -= min(elapsed, overhead*time.Duration(b.N))
