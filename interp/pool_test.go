@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/prof"
@@ -464,5 +466,166 @@ func TestPool_Close(t *testing.T) {
 		require.NoError(t, p.Close())
 		p.Put(i)
 		require.Equal(t, int64(0), p.live.Load())
+	})
+}
+
+func BenchmarkPool_Get(b *testing.B) {
+	b.Run("Uncontended", func(b *testing.B) {
+		pool := NewPool(program.New(nil), 1)
+		defer pool.Close()
+		vm, err := pool.Get(context.Background())
+		require.NoError(b, err)
+		pool.Put(vm)
+
+		var elapsed time.Duration
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			start := time.Now()
+			vm, err = pool.Get(context.Background())
+			elapsed += time.Since(start)
+			require.NoError(b, err)
+			pool.Put(vm)
+		}
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+	})
+
+	b.Run("Miss", func(b *testing.B) {
+		var vm *Interpreter
+		var err, closeErr error
+		var elapsed time.Duration
+		var bytes, allocs uint64
+		var sampled bool
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			pool := NewPool(program.New(nil), 1)
+			var before runtime.MemStats
+			if !sampled {
+				runtime.ReadMemStats(&before)
+			}
+			start := time.Now()
+			vm, err = pool.Get(context.Background())
+			elapsed += time.Since(start)
+			if !sampled {
+				var after runtime.MemStats
+				runtime.ReadMemStats(&after)
+				bytes = after.TotalAlloc - before.TotalAlloc
+				allocs = after.Mallocs - before.Mallocs
+				sampled = true
+			}
+			if vm != nil {
+				pool.Put(vm)
+			}
+			closeErr = pool.Close()
+		}
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+		b.ReportMetric(float64(bytes), "B/op")
+		b.ReportMetric(float64(allocs), "allocs/op")
+		require.NoError(b, err)
+		require.NoError(b, closeErr)
+	})
+
+	b.Run("SharedJITMiss", func(b *testing.B) {
+		if runtime.GOARCH != "arm64" {
+			b.Skip("native JIT requires arm64")
+		}
+		var code []instr.Instruction
+		for range 64 {
+			code = append(code,
+				instr.New(instr.I32_CONST, 1),
+				instr.New(instr.I32_CONST, 2),
+				instr.New(instr.I32_ADD),
+				instr.New(instr.DROP),
+			)
+		}
+		code = append(code, instr.New(instr.I32_CONST, 42))
+		prog := program.New(code)
+		var second *Interpreter
+		var getErr, closeErr error
+		var elapsed time.Duration
+		var bytes, allocs uint64
+		var sampled bool
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			pool := NewPool(prog, 2, WithThreshold(0))
+			first, err := pool.Get(context.Background())
+			require.NoError(b, err)
+			for range 16 {
+				first.Reset()
+				require.NoError(b, first.Run(context.Background()))
+				_, err := first.Pop()
+				require.NoError(b, err)
+				if first.stub(0) != nil {
+					break
+				}
+			}
+			require.NotNil(b, first.stub(0))
+			var before runtime.MemStats
+			if !sampled {
+				runtime.ReadMemStats(&before)
+			}
+			start := time.Now()
+			second, getErr = pool.Get(context.Background())
+			elapsed += time.Since(start)
+			if !sampled {
+				var after runtime.MemStats
+				runtime.ReadMemStats(&after)
+				bytes = after.TotalAlloc - before.TotalAlloc
+				allocs = after.Mallocs - before.Mallocs
+				sampled = true
+			}
+			require.NoError(b, getErr)
+			second.sync()
+			require.NotNil(b, second.stub(0))
+			pool.Put(first)
+			pool.Put(second)
+			closeErr = pool.Close()
+		}
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+		b.ReportMetric(float64(bytes), "B/op")
+		b.ReportMetric(float64(allocs), "allocs/op")
+		require.NoError(b, closeErr)
+	})
+
+	b.Run("ParallelRoundTrip", func(b *testing.B) {
+		pool := NewPool(program.New(nil), runtime.GOMAXPROCS(0))
+		defer pool.Close()
+		var failed atomic.Bool
+		b.ReportAllocs()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				vm, err := pool.Get(context.Background())
+				if err != nil {
+					failed.Store(true)
+					continue
+				}
+				pool.Put(vm)
+			}
+		})
+		require.False(b, failed.Load())
+	})
+}
+
+func BenchmarkPool_Put(b *testing.B) {
+	b.Run("Uncontended", func(b *testing.B) {
+		pool := NewPool(program.New(nil), 1)
+		defer pool.Close()
+		vm, err := pool.Get(context.Background())
+		require.NoError(b, err)
+
+		var elapsed time.Duration
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			start := time.Now()
+			pool.Put(vm)
+			elapsed += time.Since(start)
+			vm, err = pool.Get(context.Background())
+			require.NoError(b, err)
+		}
+		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
+		pool.Put(vm)
 	})
 }

@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1611,27 +1610,25 @@ func TestInterpreter_Run(t *testing.T) {
 		{name: "fused", opts: []func(*option){WithThreshold(-1)}},
 	}
 	for _, tt := range runTests {
-		t.Run(tt.name, func(t *testing.T) {
-			for _, mode := range modes {
-				t.Run(mode.name, func(t *testing.T) {
-					i := New(tt.program, mode.opts...)
-					defer i.Close()
+		for _, mode := range modes {
+			t.Run(tt.name+"/"+mode.name, func(t *testing.T) {
+				i := New(tt.program, mode.opts...)
+				defer i.Close()
 
-					err := i.Run(context.Background())
-					if tt.err != nil {
-						require.ErrorIs(t, err, tt.err)
-						return
-					}
+				err := i.Run(context.Background())
+				if tt.err != nil {
+					require.ErrorIs(t, err, tt.err)
+					return
+				}
+				require.NoError(t, err)
+				for _, want := range tt.values {
+					got, err := i.Pop()
 					require.NoError(t, err)
-					for _, want := range tt.values {
-						got, err := i.Pop()
-						require.NoError(t, err)
-						require.Equal(t, want, got)
-					}
-					require.Equal(t, len(tt.program.Locals), i.Len(), "unexpected values remain on the operand stack")
-				})
-			}
-		})
+					require.Equal(t, want, got)
+				}
+				require.Equal(t, len(tt.program.Locals), i.Len(), "unexpected values remain on the operand stack")
+			})
+		}
 	}
 
 	var benchmarkNumeric []instr.Instruction
@@ -4277,7 +4274,7 @@ func TestWithFrame(t *testing.T) {
 			case "vm_jit_native_entries_total":
 				hasEntry = true
 			case "vm_jit_native_exits_total", "vm_jit_native_yields_total":
-				t.Fatalf("native overflow must not increment %s", metric.Name)
+				require.Failf(t, "unexpected native overflow metric", "metric=%s", metric.Name)
 			}
 		}
 		require.True(t, hasEntry)
@@ -7435,165 +7432,4 @@ func BenchmarkInterpreter_Release(b *testing.B) {
 	}
 	b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
 	require.NoError(b, vm.Release(addr))
-}
-
-func BenchmarkPool_Get(b *testing.B) {
-	b.Run("Uncontended", func(b *testing.B) {
-		pool := NewPool(program.New(nil), 1)
-		defer pool.Close()
-		vm, err := pool.Get(context.Background())
-		require.NoError(b, err)
-		pool.Put(vm)
-
-		var elapsed time.Duration
-		b.ReportAllocs()
-		b.ResetTimer()
-		for b.Loop() {
-			start := time.Now()
-			vm, err = pool.Get(context.Background())
-			elapsed += time.Since(start)
-			require.NoError(b, err)
-			pool.Put(vm)
-		}
-		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
-	})
-
-	b.Run("Miss", func(b *testing.B) {
-		var vm *Interpreter
-		var err, closeErr error
-		var elapsed time.Duration
-		var bytes, allocs uint64
-		var sampled bool
-		b.ReportAllocs()
-		b.ResetTimer()
-		for b.Loop() {
-			pool := NewPool(program.New(nil), 1)
-			var before runtime.MemStats
-			if !sampled {
-				runtime.ReadMemStats(&before)
-			}
-			start := time.Now()
-			vm, err = pool.Get(context.Background())
-			elapsed += time.Since(start)
-			if !sampled {
-				var after runtime.MemStats
-				runtime.ReadMemStats(&after)
-				bytes = after.TotalAlloc - before.TotalAlloc
-				allocs = after.Mallocs - before.Mallocs
-				sampled = true
-			}
-			if vm != nil {
-				pool.Put(vm)
-			}
-			closeErr = pool.Close()
-		}
-		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
-		b.ReportMetric(float64(bytes), "B/op")
-		b.ReportMetric(float64(allocs), "allocs/op")
-		require.NoError(b, err)
-		require.NoError(b, closeErr)
-	})
-
-	b.Run("SharedJITMiss", func(b *testing.B) {
-		if runtime.GOARCH != "arm64" {
-			b.Skip("native JIT requires arm64")
-		}
-		var code []instr.Instruction
-		for range 64 {
-			code = append(code,
-				instr.New(instr.I32_CONST, 1),
-				instr.New(instr.I32_CONST, 2),
-				instr.New(instr.I32_ADD),
-				instr.New(instr.DROP),
-			)
-		}
-		code = append(code, instr.New(instr.I32_CONST, 42))
-		prog := program.New(code)
-		var second *Interpreter
-		var getErr, closeErr error
-		var elapsed time.Duration
-		var bytes, allocs uint64
-		var sampled bool
-		b.ReportAllocs()
-		b.ResetTimer()
-		for b.Loop() {
-			pool := NewPool(prog, 2, WithThreshold(0))
-			first, err := pool.Get(context.Background())
-			require.NoError(b, err)
-			for range 16 {
-				first.Reset()
-				require.NoError(b, first.Run(context.Background()))
-				_, err := first.Pop()
-				require.NoError(b, err)
-				if first.stub(0) != nil {
-					break
-				}
-			}
-			require.NotNil(b, first.stub(0))
-			var before runtime.MemStats
-			if !sampled {
-				runtime.ReadMemStats(&before)
-			}
-			start := time.Now()
-			second, getErr = pool.Get(context.Background())
-			elapsed += time.Since(start)
-			if !sampled {
-				var after runtime.MemStats
-				runtime.ReadMemStats(&after)
-				bytes = after.TotalAlloc - before.TotalAlloc
-				allocs = after.Mallocs - before.Mallocs
-				sampled = true
-			}
-			require.NoError(b, getErr)
-			second.sync()
-			require.NotNil(b, second.stub(0))
-			pool.Put(first)
-			pool.Put(second)
-			closeErr = pool.Close()
-		}
-		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
-		b.ReportMetric(float64(bytes), "B/op")
-		b.ReportMetric(float64(allocs), "allocs/op")
-		require.NoError(b, closeErr)
-	})
-
-	b.Run("ParallelRoundTrip", func(b *testing.B) {
-		pool := NewPool(program.New(nil), runtime.GOMAXPROCS(0))
-		defer pool.Close()
-		var failed atomic.Bool
-		b.ReportAllocs()
-		b.RunParallel(func(pb *testing.PB) {
-			for pb.Next() {
-				vm, err := pool.Get(context.Background())
-				if err != nil {
-					failed.Store(true)
-					continue
-				}
-				pool.Put(vm)
-			}
-		})
-		require.False(b, failed.Load())
-	})
-}
-
-func BenchmarkPool_Put(b *testing.B) {
-	b.Run("Uncontended", func(b *testing.B) {
-		pool := NewPool(program.New(nil), 1)
-		defer pool.Close()
-		vm, err := pool.Get(context.Background())
-		require.NoError(b, err)
-
-		var elapsed time.Duration
-		b.ReportAllocs()
-		b.ResetTimer()
-		for b.Loop() {
-			start := time.Now()
-			pool.Put(vm)
-			elapsed += time.Since(start)
-			vm, err = pool.Get(context.Background())
-			require.NoError(b, err)
-		}
-		b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N), "ns/op")
-		pool.Put(vm)
-	})
 }

@@ -196,35 +196,28 @@ func TestARM64_AbortedSideExitDoesNotComplete(t *testing.T) {
 		t.Skip("native JIT is only available on arm64")
 	}
 
-	build := func() *program.Program {
-		b := program.NewBuilder()
-		b.Globals(types.TypeI32, types.TypeI32) // 0: x (in), 1: result (out)
-		mapIdx := b.Type(types.NewMapType(types.TypeI32, types.TypeI32))
-		pathA := b.Label()
-		done := b.Label()
-		b.Emit(instr.GLOBAL_GET, 0).
-			Emit(instr.I32_CONST, 0).
-			Emit(instr.I32_GT_S).
-			BrIf(pathA).
-			Emit(instr.I32_CONST, 4).
-			Emit(instr.MAP_NEW_DEFAULT, uint64(mapIdx)).
-			Emit(instr.MAP_LEN).
-			// MAP_LEN of a fresh map is always 0, which coincides with the
-			// zero-seed Reset() gives global 1; add a nonzero sentinel so a
-			// miscompile that silently skips this path (leaving global 1 at
-			// its stale zero-seed) is observably wrong, not accidentally right.
-			Emit(instr.I32_CONST, 77).
-			Emit(instr.I32_ADD).
-			Emit(instr.GLOBAL_SET, 1).
-			Br(done).
-			Bind(pathA).
-			Emit(instr.I32_CONST, 1).
-			Emit(instr.GLOBAL_SET, 1).
-			Bind(done)
-		prog, err := b.Build()
-		require.NoError(t, err)
-		return prog
-	}
+	b := program.NewBuilder()
+	b.Globals(types.TypeI32, types.TypeI32) // 0: x (in), 1: result (out)
+	mapIdx := b.Type(types.NewMapType(types.TypeI32, types.TypeI32))
+	pathA := b.Label()
+	done := b.Label()
+	b.Emit(instr.GLOBAL_GET, 0).
+		Emit(instr.I32_CONST, 0).
+		Emit(instr.I32_GT_S).
+		BrIf(pathA).
+		Emit(instr.I32_CONST, 4).
+		Emit(instr.MAP_NEW_DEFAULT, uint64(mapIdx)).
+		Emit(instr.MAP_LEN).
+		Emit(instr.I32_CONST, 77).
+		Emit(instr.I32_ADD).
+		Emit(instr.GLOBAL_SET, 1).
+		Br(done).
+		Bind(pathA).
+		Emit(instr.I32_CONST, 1).
+		Emit(instr.GLOBAL_SET, 1).
+		Bind(done)
+	prog, err := b.Build()
+	require.NoError(t, err)
 
 	// Mostly positive inputs (compile and exercise the JIT-native path A),
 	// with a non-positive input every 4th call starting after warm-up (path
@@ -240,24 +233,23 @@ func TestARM64_AbortedSideExitDoesNotComplete(t *testing.T) {
 		}
 	}
 
-	run := func(threshold int) []int32 {
-		i := New(build(), WithTick(1), WithThreshold(threshold))
-		defer i.Close()
-		results := make([]int32, len(inputs))
-		for n, x := range inputs {
-			require.NoError(t, i.SetGlobal(0, types.BoxI32(x)))
-			require.NoError(t, i.Run(context.Background()))
-			v, err := i.Global(1)
-			require.NoError(t, err)
-			results[n] = v.I32()
-			i.Reset()
-		}
-		return results
+	jit := New(prog, WithTick(1), WithThreshold(1))
+	defer jit.Close()
+	threaded := New(prog, WithTick(1), WithThreshold(-1))
+	defer threaded.Close()
+	for _, input := range inputs {
+		require.NoError(t, jit.SetGlobal(0, types.BoxI32(input)))
+		require.NoError(t, threaded.SetGlobal(0, types.BoxI32(input)))
+		require.NoError(t, jit.Run(context.Background()))
+		require.NoError(t, threaded.Run(context.Background()))
+		got, err := jit.Global(1)
+		require.NoError(t, err)
+		want, err := threaded.Global(1)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+		jit.Reset()
+		threaded.Reset()
 	}
-
-	jit := run(1)
-	ref := run(-1)
-	require.Equal(t, ref, jit)
 }
 
 // TestNativeStackReserve verifies the arithmetic invariant tying three
@@ -565,7 +557,7 @@ func TestCompiler_Compile(t *testing.T) {
 					return
 				}
 			}
-			t.Fatal("missing array.get guard-value exit")
+			require.Fail(t, "missing array.get guard-value exit")
 		})
 
 		t.Run("guard kind", func(t *testing.T) {
@@ -842,7 +834,7 @@ func TestCompiler_Compile(t *testing.T) {
 				return
 			}
 		}
-		t.Fatal("missing guard-value exit")
+		require.Fail(t, "missing guard-value exit")
 	})
 
 	if runtime.GOARCH != "arm64" {
@@ -1962,32 +1954,6 @@ func TestARM64_StructSetLoop(t *testing.T) {
 		t.Skip("native JIT is only available on arm64")
 	}
 
-	// counterLoop builds a module that allocates one struct, then loops
-	// size times storing accumulate(previous field value) back into field
-	// idx, and finally pushes the field value.
-	counterLoop := func(structTyp *types.StructType, field uint64, accumulate func(b *program.Builder)) *program.Program {
-		const size = int32(24)
-		b := program.NewBuilder()
-		typ := b.Type(structTyp)
-		b.Locals(structTyp, types.TypeI32)
-		loop := b.Label()
-		done := b.Label()
-		b.Emit(instr.STRUCT_NEW_DEFAULT, uint64(typ)).Emit(instr.LOCAL_SET, 0)
-		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
-		b.Bind(loop)
-		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
-		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, field)
-		accumulate(b)
-		b.Emit(instr.STRUCT_SET)
-		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
-		b.Br(loop)
-		b.Bind(done)
-		b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, field).Emit(instr.STRUCT_GET)
-		prog, err := b.Build()
-		require.NoError(t, err)
-		return prog
-	}
-
 	runParity := func(t *testing.T, prog *program.Program, want types.Boxed) *prof.Profiler {
 		t.Helper()
 		profile := prof.New()
@@ -2018,70 +1984,92 @@ func TestARM64_StructSetLoop(t *testing.T) {
 		return profile
 	}
 
-	t.Run("i32 field store loop stays native", func(t *testing.T) {
-		prog := counterLoop(types.NewStructType(types.NewStructField(types.TypeI32)), 0, func(b *program.Builder) {
-			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
-			b.Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
-		})
-		profile := runParity(t, prog, types.BoxI32(24))
-		// The continuable store must not pay a per-iteration deopt: the only
-		// native exits are the loop's own cold branches.
-		for _, metric := range profile.Metrics() {
-			if metric.Name == "vm_jit_native_exits_total" {
-				for _, label := range metric.Labels {
-					if label.Key == "reason" {
-						require.Equal(t, "loop-exit", label.Value)
+	storeTests := []struct {
+		name       string
+		typ        *types.StructType
+		field      uint64
+		steps      []instr.Instruction
+		want       types.Boxed
+		checkExits bool
+	}{
+		{
+			name:  "i32 field store loop stays native",
+			typ:   types.NewStructType(types.NewStructField(types.TypeI32)),
+			steps: []instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD)},
+			want:  types.BoxI32(24), checkExits: true,
+		},
+		{
+			name:  "i64 field store loop",
+			typ:   types.NewStructType(types.NewStructField(types.TypeI64)),
+			steps: []instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET), instr.New(instr.I64_CONST, 1), instr.New(instr.I64_ADD)},
+			want:  types.BoxI64(24),
+		},
+		{
+			name:  "f32 field store loop masks the stored lane",
+			typ:   types.NewStructType(types.NewStructField(types.TypeF32)),
+			steps: []instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET), instr.New(instr.F32_CONST, uint64(math.Float32bits(1))), instr.New(instr.F32_ADD)},
+			want:  types.BoxF32(24),
+		},
+		{
+			name:  "f64 field store loop",
+			typ:   types.NewStructType(types.NewStructField(types.TypeF64)),
+			steps: []instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 0), instr.New(instr.STRUCT_GET), instr.New(instr.F64_CONST, math.Float64bits(1)), instr.New(instr.F64_ADD)},
+			want:  types.BoxF64(24),
+		},
+		{
+			name:  "i1 field store loop",
+			typ:   types.NewStructType(types.NewStructField(types.TypeI1)),
+			steps: []instr.Instruction{instr.New(instr.LOCAL_GET, 1), instr.New(instr.I32_EQZ)},
+			want:  types.BoxI1(false),
+		},
+		{
+			name: "heap-backed data past the inline fields",
+			typ: types.NewStructType(
+				types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI32),
+				types.NewStructField(types.TypeI32), types.NewStructField(types.TypeI32),
+			),
+			field: 4,
+			steps: []instr.Instruction{instr.New(instr.LOCAL_GET, 0), instr.New(instr.I32_CONST, 4), instr.New(instr.STRUCT_GET), instr.New(instr.I32_CONST, 1), instr.New(instr.I32_ADD)},
+			want:  types.BoxI32(24),
+		},
+	}
+	for _, tt := range storeTests {
+		t.Run(tt.name, func(t *testing.T) {
+			const size = int32(24)
+			b := program.NewBuilder()
+			typ := b.Type(tt.typ)
+			b.Locals(tt.typ, types.TypeI32)
+			loop := b.Label()
+			done := b.Label()
+			b.Emit(instr.STRUCT_NEW_DEFAULT, uint64(typ)).Emit(instr.LOCAL_SET, 0)
+			b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+			b.Bind(loop)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, tt.field)
+			for _, step := range tt.steps {
+				b.Emit(step.Opcode(), step.Operands()...)
+			}
+			b.Emit(instr.STRUCT_SET)
+			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+			b.Br(loop)
+			b.Bind(done)
+			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, tt.field).Emit(instr.STRUCT_GET)
+			prog, err := b.Build()
+			require.NoError(t, err)
+			profile := runParity(t, prog, tt.want)
+			if tt.checkExits {
+				for _, metric := range profile.Metrics() {
+					if metric.Name == "vm_jit_native_exits_total" {
+						for _, label := range metric.Labels {
+							if label.Key == "reason" {
+								require.Equal(t, "loop-exit", label.Value)
+							}
+						}
 					}
 				}
 			}
-		}
-	})
-
-	t.Run("i64 field store loop", func(t *testing.T) {
-		prog := counterLoop(types.NewStructType(types.NewStructField(types.TypeI64)), 0, func(b *program.Builder) {
-			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
-			b.Emit(instr.I64_CONST, 1).Emit(instr.I64_ADD)
 		})
-		runParity(t, prog, types.BoxI64(24))
-	})
-
-	t.Run("f32 field store loop masks the stored lane", func(t *testing.T) {
-		prog := counterLoop(types.NewStructType(types.NewStructField(types.TypeF32)), 0, func(b *program.Builder) {
-			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
-			b.Emit(instr.F32_CONST, uint64(math.Float32bits(1))).Emit(instr.F32_ADD)
-		})
-		runParity(t, prog, types.BoxF32(24))
-	})
-
-	t.Run("f64 field store loop", func(t *testing.T) {
-		prog := counterLoop(types.NewStructType(types.NewStructField(types.TypeF64)), 0, func(b *program.Builder) {
-			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 0).Emit(instr.STRUCT_GET)
-			b.Emit(instr.F64_CONST, math.Float64bits(1)).Emit(instr.F64_ADD)
-		})
-		runParity(t, prog, types.BoxF64(24))
-	})
-
-	t.Run("i1 field store loop", func(t *testing.T) {
-		prog := counterLoop(types.NewStructType(types.NewStructField(types.TypeI1)), 0, func(b *program.Builder) {
-			b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_EQZ)
-		})
-		runParity(t, prog, types.BoxI1(false))
-	})
-
-	t.Run("heap-backed data past the inline fields", func(t *testing.T) {
-		structTyp := types.NewStructType(
-			types.NewStructField(types.TypeI32),
-			types.NewStructField(types.TypeI32),
-			types.NewStructField(types.TypeI32),
-			types.NewStructField(types.TypeI32),
-			types.NewStructField(types.TypeI32),
-		)
-		prog := counterLoop(structTyp, 4, func(b *program.Builder) {
-			b.Emit(instr.LOCAL_GET, 0).Emit(instr.I32_CONST, 4).Emit(instr.STRUCT_GET)
-			b.Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD)
-		})
-		runParity(t, prog, types.BoxI32(24))
-	})
+	}
 
 	t.Run("owned container from a nested struct get", func(t *testing.T) {
 		const size = int32(24)
