@@ -144,7 +144,9 @@ Non-eager functions initially keep the ordinary generated `BR` handler. When per
 
 A pool shares one `Tracer`. Tree mutations are locked. `rootAt` returns a stable snapshot containing immutable trace pointers plus copied branch and hit containers.
 
-`tracePlan` converts that snapshot into flat plan blocks. It excludes aborted fragments and standalone loop roots from learned continuations, sorts continuation roots deterministically, connects internal paths by block ID, and derives spill policy from the final plan rather than exposing the trace tree to lowering.
+`tracePlan` converts that snapshot into flat plan blocks. It excludes aborted fragments and loop-kind legs (a loop-kind leg is a loop root of its own: anchored at this header it is the root itself and its edge already wires to the root block, anchored elsewhere it is a different loop with its own native entry), sorts continuation roots deterministically, connects internal paths by block ID, and derives spill policy from the final plan rather than exposing the trace tree to lowering.
+
+In a loop plan, a partial leg whose cut lands on the plan's own header (same function, depth 0) folds into the loop back-edge: `split` emits a real branch terminator instead of a fallback, `wire` resolves it onto the root block, and lowering takes the committing-flush native back-edge, so an in-loop branch that rejoins the header no longer exits native code (issue #155). A cut record that directly follows an explicit branch with the same target ends the split without materializing a spurious block, leaving the branch edge for `wire` to resolve. Cuts inside an inlined frame or to any other location keep the deopt fallback.
 
 ## Backend
 
@@ -154,7 +156,7 @@ A pool shares one `Tracer`. Tree mutations are locked. `rootAt` returns a stable
 
 Every plan block passes through one `emitBlock` path and every edge carries an explicit block ID or an unresolved threaded-fallback anchor. Bytecode locations describe source positions only; block IDs preserve distinct inlined contexts even when they share the same `(function, IP)`. A state-backed block reloads VM homes, while a profiled successor may continue with the current symbolic state.
 
-Caller continuations are ordinary blocks in the same flat block pool. A cold edge carries the continuation block IDs that must run after an inlined callee returns. Deferred edges always receive an independent label and symbolic snapshot; the backend does not merge states by bytecode anchor.
+Caller continuations are ordinary blocks in the same flat block pool. A cold edge carries the continuation block IDs that must run after an inlined callee returns. A deferred edge receives a label and a canonical symbolic snapshot (register-free values, reset locals); `label` shares the label of a previously scheduled continuation only when block, tail, and canonical snapshot are identical, and its ledger keeps consumed work items so folded legs that branch into one another (a loop nest) converge instead of exhausting the continuation limit. States are never merged by bytecode anchor alone.
 
 ## Trace ABI
 
@@ -297,13 +299,15 @@ Recorded forward branches become guarded exits or learned branch continuations.
 
 `BR_IF` and `BR_TABLE` emit the recorded path. Unrecorded targets deoptimize.
 
-When a side exit becomes hot, the tracer records that target. A later compile may fold it into the same native callable as a pending block. Loop roots are never folded as ordinary continuations: they deoptimize at the header and use their standalone loop entry, which preserves back-edge and safepoint semantics.
+When a side exit becomes hot, the tracer records that target. A later compile may fold it into the same native callable as a pending block. The loop wrapper records every fallback exit as a branch, so loop anchors recompile through the same side-exit machinery as entries. Loop roots are never folded as ordinary continuations: a leg that rejoins this plan's header folds into the native back-edge (see Trace Snapshots), while a leg that is another loop's root deoptimizes and uses that loop's standalone entry, which preserves back-edge and safepoint semantics.
+
+A loop callable normally exits through a trap, but a folded depth-0 `RETURN` leg emits `ret()` and a folded completed leg emits `complete()`, both returning with `trapNone`. The loop wrapper handles this like the entry wrappers: a function loop performs the threaded `RETURN` frame teardown, and a module loop marks the frame exhausted.
 
 Pending blocks reload from VM stack slots, run through a FIFO worklist, and stop at a bounded pending cap. The trace frontend orders learned roots once; the backend does not repeatedly sort pending work.
 
 A cold branch edge may carry caller-continuation block IDs. The side trace body lowers first; on callee `RETURN`, lowering stitches the result into the caller frame and follows those IDs. The continuation reloads from VM stack slots before continuing.
 
-Each deferred profiled edge gets its own label and symbolic snapshot. Static state-backed blocks share labels only through explicit block IDs, never through bytecode-anchor equality.
+A deferred profiled edge gets a label and canonical snapshot, shared only with an identical scheduled continuation (same block, tail, and snapshot). Static state-backed blocks share labels only through explicit block IDs, never through bytecode-anchor equality.
 
 Solo interpreters recompile a side exit when its hit count first reaches the hot-exit threshold. Pooled interpreters also rearm on later threshold multiples so a peer can recover a missed shared-cache publication.
 

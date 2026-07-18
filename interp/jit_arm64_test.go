@@ -2600,3 +2600,176 @@ func TestARM64_StructGetStaticPlan(t *testing.T) {
 		runStatic(t, prog, types.BoxI32(6))
 	})
 }
+
+// LoopLegFold protects the branch-leg folding of issue #155: an in-loop
+// branch whose leg rejoins the loop header compiles into the native loop as a
+// real back-edge, a folded return leg tears down the frame the way the
+// threaded RETURN would, and a folded completed leg finishes top-level code.
+// Every sub-case diffs results and exact refcounts against a threaded twin.
+func TestARM64_LoopLegFold(t *testing.T) {
+	if runtime.GOARCH != "arm64" {
+		t.Skip("native JIT is only available on arm64")
+	}
+
+	t.Run("an in-loop branch rejoins the header natively", func(t *testing.T) {
+		const size = int32(64)
+		b := program.NewBuilder()
+		arrayTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32)
+		fill := b.Label()
+		scan := b.Label()
+		loop := b.Label()
+		odd := b.Label()
+		advance := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Bind(fill)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(scan)
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_SET)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(fill)
+		b.Bind(scan)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		// The rare arm rejoins the header: odd elements bump the counter.
+		b.Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET)
+		b.Emit(instr.I32_CONST, 1).Emit(instr.I32_AND).BrIf(odd)
+		b.Br(advance)
+		b.Bind(odd)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Bind(advance)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 2)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		profile := prof.New()
+		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		const runs = 32
+		for n := 0; n < runs; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, types.BoxI32(size/2), got)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+
+		// Once the leg folds, the odd arm no longer exits native code: entries
+		// settle near one per run instead of one per odd element.
+		var entries float64
+		for _, metric := range profile.Metrics() {
+			if metric.Name == "vm_jit_native_entries_total" {
+				entries += metric.Value
+			}
+		}
+		require.Greater(t, entries, float64(0))
+		require.Less(t, entries/runs, float64(8), "in-loop branch still exits the native loop")
+	})
+
+	t.Run("a folded return leg tears down the loop frame", func(t *testing.T) {
+		const size = int32(8)
+		body := types.NewFunctionBuilder(nil).Captures(types.TypeI32Array).Returns(types.TypeI32)
+		body.Locals(types.TypeI32, types.TypeI32)
+		fill := body.Label()
+		scan := body.Label()
+		done := body.Label()
+		body.Emit(instr.New(instr.I32_CONST, 0)).Emit(instr.New(instr.LOCAL_SET, 0))
+		body.Bind(fill)
+		body.Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.I32_CONST, uint64(uint32(size)))).Emit(instr.New(instr.I32_GE_S)).BrIf(scan)
+		body.Emit(instr.New(instr.UPVAL_GET, 0)).Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.I32_CONST, 3)).Emit(instr.New(instr.ARRAY_SET))
+		body.Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.I32_CONST, 1)).Emit(instr.New(instr.I32_ADD)).Emit(instr.New(instr.LOCAL_SET, 0))
+		body.Br(fill)
+		body.Bind(scan)
+		body.Emit(instr.New(instr.I32_CONST, 0)).Emit(instr.New(instr.LOCAL_SET, 0))
+		body.Emit(instr.New(instr.I32_CONST, 0)).Emit(instr.New(instr.LOCAL_SET, 1))
+		loop := body.Label()
+		body.Bind(loop)
+		body.Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.I32_CONST, uint64(uint32(size)))).Emit(instr.New(instr.I32_GE_S)).BrIf(done)
+		body.Emit(instr.New(instr.LOCAL_GET, 1)).Emit(instr.New(instr.UPVAL_GET, 0)).Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.ARRAY_GET)).Emit(instr.New(instr.I32_ADD)).Emit(instr.New(instr.LOCAL_SET, 1))
+		body.Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.I32_CONST, 1)).Emit(instr.New(instr.I32_ADD)).Emit(instr.New(instr.LOCAL_SET, 0))
+		body.Br(loop)
+		body.Bind(done)
+		body.Emit(instr.New(instr.LOCAL_GET, 1)).Emit(instr.New(instr.RETURN))
+		fn, err := body.Build()
+		require.NoError(t, err)
+
+		b := program.NewBuilder()
+		arrayTyp := b.Type(types.TypeI32Array)
+		b.Const(fn)
+		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp))
+		b.ConstGet(fn).Emit(instr.CLOSURE_NEW).Emit(instr.CALL)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		jit := New(prog, WithTick(1), WithThreshold(0))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		for n := 0; n < 32; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, types.BoxI32(3*size), got)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+	})
+
+	t.Run("a folded completed leg finishes top-level code", func(t *testing.T) {
+		const size = int32(16)
+		b := program.NewBuilder()
+		arrayTyp := b.Type(types.TypeI32Array)
+		b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32)
+		loop := b.Label()
+		done := b.Label()
+		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
+		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
+		b.Bind(loop)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.I32_GE_S).BrIf(done)
+		b.Emit(instr.LOCAL_GET, 2).Emit(instr.LOCAL_GET, 0).Emit(instr.LOCAL_GET, 1).Emit(instr.ARRAY_GET).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 2)
+		b.Emit(instr.LOCAL_GET, 1).Emit(instr.I32_CONST, 1).Emit(instr.I32_ADD).Emit(instr.LOCAL_SET, 1)
+		b.Br(loop)
+		b.Bind(done)
+		b.Emit(instr.LOCAL_GET, 2)
+		prog, err := b.Build()
+		require.NoError(t, err)
+
+		jit := New(prog, WithTick(1), WithThreshold(0))
+		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		for n := 0; n < 32; n++ {
+			require.NoError(t, jit.Run(context.Background()))
+			require.NoError(t, threaded.Run(context.Background()))
+			got, err := jit.PopBoxed()
+			require.NoError(t, err)
+			want, err := threaded.PopBoxed()
+			require.NoError(t, err)
+			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
+			require.Equal(t, types.BoxI32(0), got)
+			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
+			jit.Reset()
+			threaded.Reset()
+		}
+		require.NoError(t, jit.Close())
+		require.NoError(t, threaded.Close())
+	})
+}

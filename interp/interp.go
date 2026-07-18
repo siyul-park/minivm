@@ -1138,10 +1138,11 @@ func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters) 
 
 // loop wraps a native loop Callable installed at a loop header. Unlike entry,
 // the header is reached mid-function with the frame already live, so loop never
-// pushes or tears down a frame and never returns normally — it always exits
-// through a trap. A spent budget yields to the safepoint and the Run loop
-// re-enters native at the header; a guarded side exit or the loop-exit edge
-// leaves deopt with i.fr at the resume IP for threaded dispatch to continue.
+// pushes or tears down a frame. It returns normally only when a folded
+// completed leg ran top-level code to its end; every other exit is a trap.
+// A spent budget yields to the safepoint and the Run loop re-enters native at
+// the header; a guarded side exit or the loop-exit edge leaves deopt with
+// i.fr at the resume IP for threaded dispatch to continue.
 func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters) func(*Interpreter) {
 	return func(i *Interpreter) {
 		stats.enter()
@@ -1155,6 +1156,27 @@ func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters) f
 			panic(err)
 		}
 		i.sp = int(i.journal[journalSP])
+		if i.journal[journalTrap] == trapNone {
+			if root.addr == 0 {
+				// complete() finished the top-level module natively; mark the
+				// frame exhausted exactly like start() so Run returns.
+				i.fr.ip = len(i.code[i.fr.addr])
+				i.fr.code = i.code[i.fr.addr]
+				return
+			}
+			// ret() left the function's return values in the frame's base
+			// slots; perform the teardown the threaded RETURN handler would,
+			// exactly like call().
+			f := i.fr
+			i.sp = f.bp + f.returns
+			if f.release {
+				i.release(f.ref)
+			}
+			f.code = nil
+			i.fp--
+			i.fr = &i.frames[i.fp-1]
+			return
+		}
 		i.deopt()
 		switch i.journal[journalTrap] {
 		case trapOverflow:
@@ -1166,6 +1188,9 @@ func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters) f
 			}
 		case trapFallback:
 			stats.exit(i.journal[journalExitID])
+			// Record the exit as a branch so the tracer captures the leg and a
+			// hot in-loop branch recompiles the tree with the leg folded in.
+			i.exit(root)
 			// An exit that resumes at the header itself made no progress — the
 			// header slot holds this native stub, so dispatching it again would
 			// livelock (the hoist prologue's shape guard exits here). Run the

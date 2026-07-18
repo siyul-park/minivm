@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"slices"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/asm"
@@ -1357,15 +1358,46 @@ func (l arm64Lowerer) label(ctx *lowering, target edge, tail []int, opcode int) 
 	if block.state != nil {
 		return ctx.labels[target.block], true
 	}
-	if l.marked(ctx) || ctx.scheduled >= continuationLimit {
+	if l.marked(ctx) {
+		return ctx.queueExit(nil, target.anchor.ip, prof.ExitColdBranch, opcode), true
+	}
+	values, frames := ctx.snapshot()
+	// Folded legs can branch into one another (a loop nest folds legs whose
+	// edges cycle through the headers), so an identical continuation must be
+	// shared instead of re-scheduled: a snapshot is canonical (register-free
+	// values, reset locals), making equal state at the same block the same
+	// generated code. The ledger keeps consumed work items so cycles converge.
+	for _, prior := range ctx.sched {
+		if prior.block == target.block && slices.Equal(prior.tail, tail) &&
+			slices.Equal(prior.values, values) && framesEqual(prior.frames, frames) {
+			return prior.label, true
+		}
+	}
+	if ctx.scheduled >= continuationLimit {
 		return ctx.queueExit(nil, target.anchor.ip, prof.ExitColdBranch, opcode), true
 	}
 	label := ctx.assembler.Label()
-	work := work{label: label, block: target.block, tail: tail}
-	work.values, work.frames = ctx.snapshot()
+	work := work{label: label, block: target.block, tail: tail, values: values, frames: frames}
 	ctx.work = append(ctx.work, work)
+	ctx.sched = append(ctx.sched, work)
 	ctx.scheduled++
 	return label, true
+}
+
+// framesEqual compares canonical snapshot frames: locals and state are reset
+// by snapshot(), so the activation shape is what decides equivalence.
+func framesEqual(a, b []activation) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].addr != b[i].addr || a[i].base != b[i].base || a[i].opBase != b[i].opBase ||
+			a[i].end != b[i].end || a[i].returns != b[i].returns ||
+			len(a[i].locals) != len(b[i].locals) || len(a[i].upvals) != len(b[i].upvals) {
+			return false
+		}
+	}
+	return true
 }
 
 // marked reports whether a constant ref marker blocks deferred continuation

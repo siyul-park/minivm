@@ -358,7 +358,15 @@ func tracePlan(input *compileInput) ([]plan, error) {
 		}
 		var legs []leg
 		for id, tr := range tree.branches {
-			if tr == nil || tr.kind == loop || tr.kind == aborted {
+			if tr == nil || tr.kind == aborted {
+				continue
+			}
+			// A loop-kind leg is a loop root of its own: anchored at this
+			// header it is the root trace itself (capture returns the existing
+			// root, and its edge already wires to the root block); anchored
+			// elsewhere it is a different loop, and splitting it here would
+			// inline that whole loop body instead of using its native entry.
+			if tr.kind == loop {
 				continue
 			}
 			hits := int64(0)
@@ -548,7 +556,16 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 	}
 	for idx, op := range tr.ops {
 		if op.cut {
-			current.term = terminator{kind: terminateFallback, ip: op.target, hot: -1}
+			// A leg cut at the loop plan's own header is the loop back-edge:
+			// wire a real branch so wire() folds it onto the root block and
+			// the lowering takes the committing-flush native back-edge instead
+			// of a deopt round trip. Cuts inside an inlined frame keep the
+			// fallback — the root block expects the anchor frame only.
+			if p.kind == entryLoop && op.depth == 0 && op.fn == p.anchor.addr && op.target == p.anchor.ip {
+				current.term = terminator{kind: terminateBranch, ip: op.target, hot: 0, edges: []edge{jump(op.fn, op.target)}}
+			} else {
+				current.term = terminator{kind: terminateFallback, ip: op.target, hot: -1}
+			}
 			commit()
 			return blocks
 		}
@@ -606,10 +623,18 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 		if idx+1 >= len(tr.ops) {
 			return blocks
 		}
-		if path >= 0 {
-			blocks[len(blocks)-1].term.edges[path].block = local(len(blocks))
-		}
 		next := tr.ops[idx+1]
+		if path >= 0 {
+			// A cut straight after the branch carries no new ops: the trace
+			// took the branch and stopped. End the split with the hot edge
+			// unresolved so wire() can fold it onto a known root block (the
+			// loop back-edge) instead of chaining a spurious empty block.
+			hot := &blocks[len(blocks)-1].term.edges[path]
+			if next.cut && next.fn == hot.anchor.addr && next.target == hot.anchor.ip {
+				return blocks
+			}
+			hot.block = local(len(blocks))
+		}
 		current = block{anchor: anchor{addr: next.fn, ip: next.ip}}
 	}
 	if len(blocks) > 0 && len(current.steps) == 0 && current.term.kind == terminateFallthrough {

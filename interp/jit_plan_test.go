@@ -245,44 +245,189 @@ func TestStaticPlan(t *testing.T) {
 }
 
 func TestTracePlan(t *testing.T) {
-	root := &trace{
-		anchor: anchor{addr: 1},
-		ops: []record{
-			{step: step{op: instr.I32_CONST, fn: 1, ip: 0}},
-			{step: step{op: instr.BR_IF, fn: 1, ip: 5}, target: 12, taken: true},
-		},
-		kind: returned,
-	}
-	continuation := &trace{
-		anchor: anchor{addr: 1, ip: 12},
-		ops:    []record{{step: step{op: instr.RETURN, fn: 1, ip: 12}}},
-		kind:   returned,
-	}
-	tracer := NewTracer()
-	tracer.trees[anchor{addr: 1}] = &tree{
-		root:     root,
-		branches: map[int]*trace{0: continuation},
-		hits:     []int64{9},
-		exits:    map[anchor]int{{addr: 1, ip: 12}: 0},
-	}
-	input := &compileInput{
-		tracer:   tracer,
-		address:  1,
-		function: &types.Function{Code: []byte{byte(instr.NOP)}},
-	}
+	t.Run("folds a hot returned leg", func(t *testing.T) {
+		root := &trace{
+			anchor: anchor{addr: 1},
+			ops: []record{
+				{step: step{op: instr.I32_CONST, fn: 1, ip: 0}},
+				{step: step{op: instr.BR_IF, fn: 1, ip: 5}, target: 12, taken: true},
+			},
+			kind: returned,
+		}
+		continuation := &trace{
+			anchor: anchor{addr: 1, ip: 12},
+			ops:    []record{{step: step{op: instr.RETURN, fn: 1, ip: 12}}},
+			kind:   returned,
+		}
+		tracer := NewTracer()
+		tracer.trees[anchor{addr: 1}] = &tree{
+			root:     root,
+			branches: map[int]*trace{0: continuation},
+			hits:     []int64{9},
+			exits:    map[anchor]int{{addr: 1, ip: 12}: 0},
+		}
+		input := &compileInput{
+			tracer:   tracer,
+			address:  1,
+			function: &types.Function{Code: []byte{byte(instr.NOP)}},
+		}
 
-	plans, err := tracePlan(input)
-	require.NoError(t, err)
-	require.Len(t, plans, 1)
-	require.True(t, plans[0].valid())
-	require.GreaterOrEqual(t, len(plans[0].blocks), 2)
-	entry := plans[0].blocks[plans[0].root]
-	require.Equal(t, terminateBranchIf, entry.term.kind)
-	require.Equal(t, uint64(0), entry.steps[0].args[0])
-	for _, op := range entry.steps {
-		require.NotEqual(t, instr.BR_IF, op.op)
-	}
-	require.Equal(t, continuation.anchor, plans[0].blocks[len(plans[0].blocks)-1].anchor)
+		plans, err := tracePlan(input)
+		require.NoError(t, err)
+		require.Len(t, plans, 1)
+		require.True(t, plans[0].valid())
+		require.GreaterOrEqual(t, len(plans[0].blocks), 2)
+		entry := plans[0].blocks[plans[0].root]
+		require.Equal(t, terminateBranchIf, entry.term.kind)
+		require.Equal(t, uint64(0), entry.steps[0].args[0])
+		for _, op := range entry.steps {
+			require.NotEqual(t, instr.BR_IF, op.op)
+		}
+		require.Equal(t, continuation.anchor, plans[0].blocks[len(plans[0].blocks)-1].anchor)
+	})
+
+	t.Run("a leg cut at the loop header folds into the back-edge", func(t *testing.T) {
+		root := &trace{
+			anchor: anchor{addr: 1, ip: 2},
+			ops:    []record{{step: step{op: instr.I32_CONST, fn: 1, ip: 2}}},
+			kind:   loop,
+		}
+		leg := &trace{
+			anchor: anchor{addr: 1, ip: 20},
+			ops: []record{
+				{step: step{op: instr.I32_CONST, fn: 1, ip: 20}},
+				{step: step{fn: 1}, target: 2, cut: true},
+			},
+			kind: partial,
+		}
+		tracer := NewTracer()
+		tracer.trees[anchor{addr: 1, ip: 2}] = &tree{
+			root:     root,
+			branches: map[int]*trace{0: leg},
+			hits:     []int64{9},
+			exits:    map[anchor]int{{addr: 1, ip: 20}: 0},
+		}
+		input := &compileInput{
+			tracer:   tracer,
+			address:  1,
+			function: &types.Function{Code: []byte{byte(instr.NOP)}},
+		}
+
+		plans, err := tracePlan(input)
+		require.NoError(t, err)
+		require.Len(t, plans, 1)
+		require.True(t, plans[0].valid())
+		last := plans[0].blocks[len(plans[0].blocks)-1]
+		require.Equal(t, anchor{addr: 1, ip: 20}, last.anchor)
+		require.Equal(t, terminateBranch, last.term.kind)
+		require.Equal(t, plans[0].root, last.term.edges[0].block)
+	})
+
+	t.Run("an explicit back-edge branch before the cut leaves no spurious block", func(t *testing.T) {
+		root := &trace{
+			anchor: anchor{addr: 1, ip: 2},
+			ops:    []record{{step: step{op: instr.I32_CONST, fn: 1, ip: 2}}},
+			kind:   loop,
+		}
+		leg := &trace{
+			anchor: anchor{addr: 1, ip: 20},
+			ops: []record{
+				{step: step{op: instr.I32_CONST, fn: 1, ip: 20}},
+				{step: step{op: instr.BR, fn: 1, ip: 25}, target: 2},
+				{step: step{fn: 1}, target: 2, cut: true},
+			},
+			kind: partial,
+		}
+		tracer := NewTracer()
+		tracer.trees[anchor{addr: 1, ip: 2}] = &tree{
+			root:     root,
+			branches: map[int]*trace{0: leg},
+			hits:     []int64{9},
+			exits:    map[anchor]int{{addr: 1, ip: 20}: 0},
+		}
+		input := &compileInput{
+			tracer:   tracer,
+			address:  1,
+			function: &types.Function{Code: []byte{byte(instr.NOP)}},
+		}
+
+		plans, err := tracePlan(input)
+		require.NoError(t, err)
+		require.Len(t, plans, 1)
+		require.True(t, plans[0].valid())
+		require.Len(t, plans[0].blocks, 2)
+		last := plans[0].blocks[1]
+		require.Equal(t, anchor{addr: 1, ip: 20}, last.anchor)
+		require.Equal(t, terminateBranch, last.term.kind)
+		require.Equal(t, plans[0].root, last.term.edges[0].block)
+	})
+
+	t.Run("a cut elsewhere stays a fallback", func(t *testing.T) {
+		root := &trace{
+			anchor: anchor{addr: 1, ip: 2},
+			ops:    []record{{step: step{op: instr.I32_CONST, fn: 1, ip: 2}}},
+			kind:   loop,
+		}
+		leg := &trace{
+			anchor: anchor{addr: 1, ip: 20},
+			ops: []record{
+				{step: step{op: instr.I32_CONST, fn: 1, ip: 20}},
+				{step: step{fn: 1}, target: 50, cut: true},
+			},
+			kind: partial,
+		}
+		tracer := NewTracer()
+		tracer.trees[anchor{addr: 1, ip: 2}] = &tree{
+			root:     root,
+			branches: map[int]*trace{0: leg},
+			hits:     []int64{9},
+			exits:    map[anchor]int{{addr: 1, ip: 20}: 0},
+		}
+		input := &compileInput{
+			tracer:   tracer,
+			address:  1,
+			function: &types.Function{Code: []byte{byte(instr.NOP)}},
+		}
+
+		plans, err := tracePlan(input)
+		require.NoError(t, err)
+		require.Len(t, plans, 1)
+		require.True(t, plans[0].valid())
+		last := plans[0].blocks[len(plans[0].blocks)-1]
+		require.Equal(t, terminateFallback, last.term.kind)
+		require.Equal(t, 50, last.term.ip)
+	})
+
+	t.Run("a loop-kind leg is not split", func(t *testing.T) {
+		root := &trace{
+			anchor: anchor{addr: 1, ip: 2},
+			ops:    []record{{step: step{op: instr.I32_CONST, fn: 1, ip: 2}}},
+			kind:   loop,
+		}
+		other := &trace{
+			anchor: anchor{addr: 1, ip: 40},
+			ops:    []record{{step: step{op: instr.I32_CONST, fn: 1, ip: 40}}},
+			kind:   loop,
+		}
+		tracer := NewTracer()
+		tracer.trees[anchor{addr: 1, ip: 2}] = &tree{
+			root:     root,
+			branches: map[int]*trace{0: root, 1: other},
+			hits:     []int64{9, 9},
+			exits:    map[anchor]int{{addr: 1, ip: 2}: 0, {addr: 1, ip: 40}: 1},
+		}
+		input := &compileInput{
+			tracer:   tracer,
+			address:  1,
+			function: &types.Function{Code: []byte{byte(instr.NOP)}},
+		}
+
+		plans, err := tracePlan(input)
+		require.NoError(t, err)
+		require.Len(t, plans, 1)
+		require.True(t, plans[0].valid())
+		require.Len(t, plans[0].blocks, 1)
+	})
 }
 
 func TestHoistable(t *testing.T) {
