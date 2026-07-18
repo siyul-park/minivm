@@ -280,24 +280,11 @@ func (l arm64Lowerer) next(ctx *lowering, from anchor, target edge, tail []int, 
 		if !l.flush(ctx, flushCommit) {
 			return false
 		}
-		if ctx.nativeLoop && ctx.kind == entryLoop && target.block == ctx.loopRoot && len(ctx.frames) == 1 && ctx.count() == 0 {
-			a := ctx.assembler
+		if ctx.nativeLoop && target.block == ctx.loopRoot && len(ctx.frames) == 1 && ctx.count() == 0 {
 			if ctx.hoist.live {
-				a.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.V(ctx.hoist.dataPtr), Src2: asm.V(ctx.hoist.n)})
+				ctx.assembler.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.V(ctx.hoist.dataPtr), Src2: asm.V(ctx.hoist.n)})
 			}
-			vCtrl := ctx.pin(scratchCtrl)
-			if ctx.budget.Width() != asm.WidthUndefined {
-				a.Emit(arm64.SUBI(ctx.budget, ctx.budget, 1))
-				a.Emit(arm64.CBNZLabel(ctx.budget, ctx.back))
-				a.Emit(arm64.STR(ctx.budget, vCtrl, int16(journalBudget*8)))
-			} else {
-				budget := a.Reg(asm.RegTypeInt, asm.Width64)
-				a.Emit(arm64.LDR(budget, vCtrl, int16(journalBudget*8)))
-				a.Emit(arm64.SUBI(budget, budget, 1))
-				a.Emit(arm64.STR(budget, vCtrl, int16(journalBudget*8)))
-				a.Emit(arm64.CBNZLabel(budget, ctx.back))
-			}
-			l.trapFlushed(ctx, trapYield, target.anchor.ip, -1)
+			l.back(ctx, ctx.back, target.anchor.ip)
 			return true
 		}
 		return l.path(ctx, from, target, tail, opcode)
@@ -1327,18 +1314,32 @@ func (l arm64Lowerer) path(ctx *lowering, from anchor, target edge, tail []int, 
 		return false
 	}
 	if target.anchor.addr == from.addr && target.anchor.ip <= from.ip {
-		a := ctx.assembler
-		vCtrl := ctx.pin(scratchCtrl)
-		budget := a.Reg(asm.RegTypeInt, asm.Width64)
-		a.Emit(arm64.LDR(budget, vCtrl, int16(journalBudget*8)))
-		a.Emit(arm64.SUBI(budget, budget, 1))
-		a.Emit(arm64.STR(budget, vCtrl, int16(journalBudget*8)))
-		a.Emit(arm64.CBNZLabel(budget, label))
-		l.trapFlushed(ctx, trapYield, target.anchor.ip, -1)
+		l.back(ctx, label, target.anchor.ip)
 		return true
 	}
 	ctx.assembler.Emit(arm64.BLabel(label))
 	return true
+}
+
+// back decrements the safepoint budget and continues at label while work remains.
+// Native loops keep the budget in a register; chained loops update its VM slot.
+func (l arm64Lowerer) back(ctx *lowering, label asm.Label, resume int) {
+	a := ctx.assembler
+	vCtrl := ctx.pin(scratchCtrl)
+	budget := ctx.budget
+	if budget.Width() == asm.WidthUndefined {
+		budget = a.Reg(asm.RegTypeInt, asm.Width64)
+		a.Emit(arm64.LDR(budget, vCtrl, int16(journalBudget*8)))
+	}
+	a.Emit(arm64.SUBI(budget, budget, 1))
+	if ctx.budget.Width() == asm.WidthUndefined {
+		a.Emit(arm64.STR(budget, vCtrl, int16(journalBudget*8)))
+	}
+	a.Emit(arm64.CBNZLabel(budget, label))
+	if ctx.budget.Width() != asm.WidthUndefined {
+		a.Emit(arm64.STR(budget, vCtrl, int16(journalBudget*8)))
+	}
+	l.trapFlushed(ctx, trapYield, resume, -1)
 }
 
 func (l arm64Lowerer) label(ctx *lowering, target edge, tail []int, opcode int) (asm.Label, bool) {
@@ -4582,7 +4583,7 @@ func lower(ctx *lowering, plan plan) bool {
 		ctx.labels[root] = ctx.assembler.Label()
 	}
 	ctx.back = ctx.labels[root]
-	if ctx.nativeLoop && plan.kind == entryLoop && ctx.leaf {
+	if ctx.nativeLoop && ctx.leaf {
 		ctx.budget = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(ctx.budget, ctx.pin(scratchCtrl), int16(journalBudget*8)))
 	}

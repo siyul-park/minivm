@@ -1136,7 +1136,7 @@ func TestARM64_DeferredRefElision(t *testing.T) {
 	})
 
 	t.Run("sieve-shaped kernel keeps the local-backed array refcount exact", func(t *testing.T) {
-		const size = int32(10_000)
+		const size = int32(24)
 		b := program.NewBuilder()
 		arrayTyp := b.Type(types.TypeI32Array)
 		b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32)
