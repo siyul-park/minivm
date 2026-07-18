@@ -280,7 +280,7 @@ func (l arm64Lowerer) next(ctx *lowering, from anchor, target edge, tail []int, 
 		if !l.flush(ctx, flushCommit) {
 			return false
 		}
-		if ctx.backEdge && ctx.kind == entryLoop && target.block == ctx.root && len(ctx.frames) == 1 && ctx.count() == 0 {
+		if ctx.nativeLoop && ctx.kind == entryLoop && target.block == ctx.loopRoot && len(ctx.frames) == 1 && ctx.count() == 0 {
 			a := ctx.assembler
 			if ctx.hoist.live {
 				a.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.V(ctx.hoist.dataPtr), Src2: asm.V(ctx.hoist.n)})
@@ -932,7 +932,7 @@ func (l arm64Lowerer) localSet(ctx *lowering, op step, pop bool) bool {
 		return false
 	}
 	f.locals[idx] = *vp
-	f.state[idx] = f.state[idx]&^localFlushed | localLoaded | localDirty
+	f.state[idx] = f.state[idx]&^localStored | localLoaded | localDirty
 	if pop {
 		ctx.pop()
 	}
@@ -2347,7 +2347,7 @@ func (l arm64Lowerer) call(ctx *lowering, op step) bool {
 				return false
 			}
 			frame.locals[k] = value{reg: zero, kind: frame.kinds[k], raw: true}
-			frame.state[k] = frame.state[k]&^localFlushed | localLoaded | localDirty
+			frame.state[k] = frame.state[k]&^localStored | localLoaded | localDirty
 		}
 	}
 	ctx.frames = append(ctx.frames, frame)
@@ -2638,7 +2638,7 @@ func (l arm64Lowerer) locals(ctx *lowering, f *activation, args []value) bool {
 			}
 		}
 		f.locals[k] = args[k]
-		f.state[k] = f.state[k]&^localFlushed | localLoaded | localDirty
+		f.state[k] = f.state[k]&^localStored | localLoaded | localDirty
 	}
 	if len(f.kinds) > len(args) {
 		zero := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
@@ -2650,7 +2650,7 @@ func (l arm64Lowerer) locals(ctx *lowering, f *activation, args []value) bool {
 				return false
 			}
 			f.locals[k] = value{reg: zero, kind: f.kinds[k], raw: true}
-			f.state[k] = f.state[k]&^localFlushed | localLoaded | localDirty
+			f.state[k] = f.state[k]&^localStored | localLoaded | localDirty
 		}
 	}
 	return true
@@ -4230,9 +4230,9 @@ func (l arm64Lowerer) sideExit(ctx *lowering, pre []value, resume int, reason pr
 }
 
 // flush writes dirty locals and live operands to their VM stack slots in
-// boxed form. Snapshot flushes memoize materialized homes so later guards do
-// not repeat unchanged stores; definitions clear that memo. A commit clears
-// both dirty and memoized marks after transferring state to the VM stack.
+// boxed form. Snapshot flushes remember stored homes so later guards do
+// not repeat unchanged stores; definitions clear that mark. A commit clears
+// both dirty and stored marks after transferring state to the VM stack.
 func (l arm64Lowerer) flush(ctx *lowering, mode flushMode) bool {
 	// A committing flush transfers each backingStack ref's retain to the VM
 	// stack, but it has no cold stub to re-take a deferred ref's retain: the
@@ -4255,16 +4255,16 @@ func (l arm64Lowerer) flush(ctx *lowering, mode flushMode) bool {
 			if f.state[idx]&localDirty == 0 {
 				continue
 			}
-			if f.state[idx]&localFlushed == 0 {
+			if f.state[idx]&localStored == 0 {
 				boxed, ok := l.boxHome(ctx, f.locals[idx])
 				if !ok {
 					return false
 				}
 				a.Emit(arm64.STR(boxed, addr, int16((f.base+idx)*8)))
-				f.state[idx] |= localFlushed
+				f.state[idx] |= localStored
 			}
 			if mode == flushCommit {
-				f.state[idx] &^= localDirty | localFlushed
+				f.state[idx] &^= localDirty | localStored
 			}
 		}
 	}
@@ -4276,7 +4276,7 @@ func (l arm64Lowerer) flush(ctx *lowering, mode flushMode) bool {
 	// backing, so those cases only run on a non-commit flush.
 	for j := range ctx.values {
 		v := &ctx.values[j]
-		if v.flushed {
+		if v.stored {
 			continue
 		}
 		switch v.backing {
@@ -4293,7 +4293,7 @@ func (l arm64Lowerer) flush(ctx *lowering, mode flushMode) bool {
 		default:
 			a.Emit(arm64.STR(v.reg, addr, int16(ctx.slot(j)*8)))
 		}
-		v.flushed = true
+		v.stored = true
 	}
 	return true
 }
@@ -4577,12 +4577,12 @@ func lower(ctx *lowering, plan plan) bool {
 		}
 	}
 	root := plan.root
-	ctx.root = root
+	ctx.loopRoot = root
 	if _, ok := ctx.labels[root]; !ok {
 		ctx.labels[root] = ctx.assembler.Label()
 	}
 	ctx.back = ctx.labels[root]
-	if ctx.backEdge && plan.kind == entryLoop && ctx.leaf {
+	if ctx.nativeLoop && plan.kind == entryLoop && ctx.leaf {
 		ctx.budget = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
 		ctx.assembler.Emit(arm64.LDR(ctx.budget, ctx.pin(scratchCtrl), int16(journalBudget*8)))
 	}

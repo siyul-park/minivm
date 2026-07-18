@@ -71,12 +71,12 @@ type lowering struct {
 	descriptors []exitDescriptor
 	saved       []value
 
-	addr     int
-	root     int
-	returns  int
-	kind     entryKind
-	leaf     bool
-	backEdge bool
+	addr       int
+	loopRoot   int
+	returns    int
+	kind       entryKind
+	leaf       bool
+	nativeLoop bool
 
 	reuseLocals bool
 	spare       asm.VReg
@@ -114,7 +114,7 @@ type value struct {
 	imm     int64
 	fn      int
 	ref     int
-	flushed bool
+	stored  bool
 }
 
 // backing identifies where a ref value derives its reference count.
@@ -156,7 +156,7 @@ type localState uint8
 const (
 	localLoaded localState = 1 << iota
 	localDirty
-	localFlushed
+	localStored
 )
 
 type work struct {
@@ -327,24 +327,22 @@ func (c *compiler) compile(input *compileInput, plan plan, mod *module, frontend
 	if plan.noSpill {
 		arch = noSpillArch{c.arch}
 	}
-	attempts := []bool{false}
-	if plan.kind == entryLoop {
-		attempts = []bool{true, false}
-	}
-	for _, backEdge := range attempts {
-		ctx := c.newLowering(input, arch)
-		ctx.backEdge = backEdge
-		if !lower(ctx, plan) {
-			return prof.CompileReasonLoweringRejected, nil
-		}
-		exits := append([]exitDescriptor(nil), ctx.descriptors...)
-		reason, err := c.publish(mod, plan.anchor, ctx, c.arch, native{kind: plan.kind, frontend: frontend, exits: exits})
-		if reason == prof.CompileReasonRegisterPressure && backEdge {
-			continue
-		}
+	nativeLoop := plan.kind == entryLoop
+	reason, err := c.emit(input, plan, mod, frontend, arch, nativeLoop)
+	if reason != prof.CompileReasonRegisterPressure || !nativeLoop {
 		return reason, err
 	}
-	return prof.CompileReasonRegisterPressure, nil
+	return c.emit(input, plan, mod, frontend, arch, false)
+}
+
+func (c *compiler) emit(input *compileInput, plan plan, mod *module, frontend prof.Frontend, arch asm.Arch, nativeLoop bool) (prof.CompileReason, error) {
+	ctx := c.newLowering(input, arch)
+	ctx.nativeLoop = nativeLoop
+	if !lower(ctx, plan) {
+		return prof.CompileReasonLoweringRejected, nil
+	}
+	exits := append([]exitDescriptor(nil), ctx.descriptors...)
+	return c.publish(mod, plan.anchor, ctx, c.arch, native{kind: plan.kind, frontend: frontend, exits: exits})
 }
 
 func (c *compiler) newLowering(input *compileInput, arch asm.Arch) *lowering {
@@ -488,7 +486,7 @@ func (ctx *lowering) queueExit(values []value, resume int, reason prof.ExitReaso
 func (ctx *lowering) snapshot() ([]value, []activation) {
 	values := make([]value, len(ctx.values))
 	for i, v := range ctx.values {
-		values[i] = value{kind: v.kind, raw: v.raw, backing: v.backing, slot: v.slot, known: v.known, imm: v.imm, fn: v.fn, ref: v.ref, flushed: v.flushed}
+		values[i] = value{kind: v.kind, raw: v.raw, backing: v.backing, slot: v.slot, known: v.known, imm: v.imm, fn: v.fn, ref: v.ref, stored: v.stored}
 	}
 	frames := make([]activation, len(ctx.frames))
 	for i, f := range ctx.frames {
