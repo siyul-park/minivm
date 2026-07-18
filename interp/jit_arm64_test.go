@@ -1728,10 +1728,18 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 		// Hoisted loops must not pay per-access deopts: the only native exits
 		// are the loops' own cold branches.
 		var entries float64
+		var loopBytes bool
 		for _, metric := range profile.Metrics() {
 			switch metric.Name {
 			case "vm_jit_native_entries_total":
 				entries += metric.Value
+			case "vm_jit_entry_bytes_total":
+				for _, label := range metric.Labels {
+					if label.Key == "kind" && label.Value == "loop" {
+						loopBytes = true
+						require.Less(t, metric.Value, float64(16<<10), "loop body was duplicated instead of using a back-edge")
+					}
+				}
 			case "vm_jit_native_exits_total":
 				for _, label := range metric.Labels {
 					if label.Key == "reason" {
@@ -1741,6 +1749,7 @@ func TestARM64_HoistedContainerLoop(t *testing.T) {
 			}
 		}
 		require.Greater(t, entries, float64(0))
+		require.True(t, loopBytes, "expected a loop entry byte metric")
 	})
 
 	t.Run("the prologue shape guard deopts to the header", func(t *testing.T) {

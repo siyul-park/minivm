@@ -61,6 +61,7 @@ type lowering struct {
 	entry     asm.Label
 	head      asm.Label
 	back      asm.Label
+	budget    asm.VReg
 
 	values      []value
 	frames      []activation
@@ -70,10 +71,12 @@ type lowering struct {
 	descriptors []exitDescriptor
 	saved       []value
 
-	addr    int
-	returns int
-	kind    entryKind
-	leaf    bool
+	addr       int
+	loopRoot   int
+	returns    int
+	kind       entryKind
+	leaf       bool
+	nativeLoop bool
 
 	reuseLocals bool
 	spare       asm.VReg
@@ -152,6 +155,7 @@ type localState uint8
 const (
 	localLoaded localState = 1 << iota
 	localDirty
+	localStored
 )
 
 type work struct {
@@ -322,7 +326,17 @@ func (c *compiler) compile(input *compileInput, plan plan, mod *module, frontend
 	if plan.noSpill {
 		arch = noSpillArch{c.arch}
 	}
+	nativeLoop := plan.kind == entryLoop
+	reason, err := c.emit(input, plan, mod, frontend, arch, nativeLoop)
+	if reason != prof.CompileReasonRegisterPressure || !nativeLoop {
+		return reason, err
+	}
+	return c.emit(input, plan, mod, frontend, arch, false)
+}
+
+func (c *compiler) emit(input *compileInput, plan plan, mod *module, frontend prof.Frontend, arch asm.Arch, nativeLoop bool) (prof.CompileReason, error) {
 	ctx := c.newLowering(input, arch)
+	ctx.nativeLoop = nativeLoop
 	if !lower(ctx, plan) {
 		return prof.CompileReasonLoweringRejected, nil
 	}

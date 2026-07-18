@@ -54,6 +54,53 @@ func TestAssembler_Emit(t *testing.T) {
 	require.NotEmpty(t, code.Bytes)
 }
 
+func TestAssembler_PseudoUse(t *testing.T) {
+	t.Run("emits no bytes", func(t *testing.T) {
+		assembler := asm.New(arm64.New())
+		v := assembler.Reg(asm.RegTypeInt, asm.Width64)
+		assembler.Emit(arm64.LDI(v, 1)...)
+		assembler.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.V(v)})
+		assembler.Emit(arm64.RET())
+
+		code, err := assembler.Build()
+		require.NoError(t, err)
+
+		without := asm.New(arm64.New())
+		v = without.Reg(asm.RegTypeInt, asm.Width64)
+		without.Emit(arm64.LDI(v, 1)...)
+		without.Emit(arm64.RET())
+		want, err := without.Build()
+		require.NoError(t, err)
+		require.Equal(t, want.Bytes, code.Bytes)
+	})
+
+	t.Run("extends live ranges", func(t *testing.T) {
+		const n = 64
+		without := asm.New(noFrameArch{arm64.New()})
+		for i := 0; i < n; i++ {
+			v := without.Reg(asm.RegTypeInt, asm.Width64)
+			without.Emit(arm64.LDI(v, uint64(i))...)
+		}
+		without.Emit(arm64.RET())
+		_, err := without.Build()
+		require.NoError(t, err)
+
+		assembler := asm.New(noFrameArch{arm64.New()})
+		values := make([]asm.VReg, n)
+		for i := range values {
+			values[i] = assembler.Reg(asm.RegTypeInt, asm.Width64)
+			assembler.Emit(arm64.LDI(values[i], uint64(i))...)
+		}
+		for _, v := range values {
+			assembler.Emit(asm.Instruction{Op: asm.OpPseudoUse, Src1: asm.V(v)})
+		}
+		assembler.Emit(arm64.RET())
+
+		_, err = assembler.Build()
+		require.ErrorIs(t, err, asm.ErrNoRegistersAvailable)
+	})
+}
+
 func TestAssembler_Pin(t *testing.T) {
 	arch := arm64.New()
 

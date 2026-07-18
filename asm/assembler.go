@@ -217,7 +217,7 @@ func (a *Assembler) draft(insts []Instruction) ([][]byte, []int, error) {
 	offsets := make([]int, len(insts)+1)
 
 	for i, inst := range insts {
-		if inst.Op == OpPseudoLabel {
+		if inst.Op == OpPseudoLabel || inst.Op == OpPseudoUse {
 			offsets[i+1] = offsets[i]
 			continue
 		}
@@ -247,7 +247,7 @@ func (a *Assembler) final(
 	out := make([]byte, 0, offsets[len(insts)])
 	var relocs []Relocation
 	for i, inst := range insts {
-		if inst.Op == OpPseudoLabel {
+		if inst.Op == OpPseudoLabel || inst.Op == OpPseudoUse {
 			continue
 		}
 		lbl, isLabel := inst.Src2.(LabelOperand)
