@@ -4231,9 +4231,9 @@ func (l arm64Lowerer) sideExit(ctx *lowering, pre []value, resume int, reason pr
 }
 
 // flush writes dirty locals and live operands to their VM stack slots in
-// boxed form. Snapshot flushes remember stored homes so later guards do
-// not repeat unchanged stores; definitions clear that mark. A commit clears
-// both dirty and stored marks after transferring state to the VM stack.
+// boxed form. Snapshot flushes remember fixed local homes so later guards do
+// not repeat unchanged local stores; definitions clear that mark. Operands are
+// always stored because stack operations may move them to a different home.
 func (l arm64Lowerer) flush(ctx *lowering, mode flushMode) bool {
 	// A committing flush transfers each backingStack ref's retain to the VM
 	// stack, but it has no cold stub to re-take a deferred ref's retain: the
@@ -4275,14 +4275,10 @@ func (l arm64Lowerer) flush(ctx *lowering, mode flushMode) bool {
 	// re-takes it before the flushed copy reaches the interpreter (see retainDeferred /
 	// emitExits). The commit pre-scan above already rejected any deferred
 	// backing, so those cases only run on a non-commit flush.
-	for j := range ctx.values {
-		v := &ctx.values[j]
-		if v.stored {
-			continue
-		}
+	for j, v := range ctx.values {
 		switch v.backing {
 		case backingStack:
-			boxed, ok := l.boxHome(ctx, *v)
+			boxed, ok := l.boxHome(ctx, v)
 			if !ok {
 				return false
 			}
@@ -4294,7 +4290,6 @@ func (l arm64Lowerer) flush(ctx *lowering, mode flushMode) bool {
 		default:
 			a.Emit(arm64.STR(v.reg, addr, int16(ctx.slot(j)*8)))
 		}
-		v.stored = true
 	}
 	return true
 }

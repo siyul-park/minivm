@@ -114,7 +114,6 @@ type value struct {
 	imm     int64
 	fn      int
 	ref     int
-	stored  bool
 }
 
 // backing identifies where a ref value derives its reference count.
@@ -486,7 +485,7 @@ func (ctx *lowering) queueExit(values []value, resume int, reason prof.ExitReaso
 func (ctx *lowering) snapshot() ([]value, []activation) {
 	values := make([]value, len(ctx.values))
 	for i, v := range ctx.values {
-		values[i] = value{kind: v.kind, raw: v.raw, backing: v.backing, slot: v.slot, known: v.known, imm: v.imm, fn: v.fn, ref: v.ref, stored: v.stored}
+		values[i] = value{kind: v.kind, raw: v.raw, backing: v.backing, slot: v.slot, known: v.known, imm: v.imm, fn: v.fn, ref: v.ref}
 	}
 	frames := make([]activation, len(ctx.frames))
 	for i, f := range ctx.frames {
