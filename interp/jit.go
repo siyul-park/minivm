@@ -66,8 +66,7 @@ type lowering struct {
 	values      []value
 	frames      []activation
 	work        []work
-	sched       []work
-	scheduled   int
+	ledger      []work
 	exits       []sideExit
 	descriptors []exitDescriptor
 	saved       []value

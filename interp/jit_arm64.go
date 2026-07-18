@@ -1367,26 +1367,24 @@ func (l arm64Lowerer) label(ctx *lowering, target edge, tail []int, opcode int) 
 	// shared instead of re-scheduled: a snapshot is canonical (register-free
 	// values, reset locals), making equal state at the same block the same
 	// generated code. The ledger keeps consumed work items so cycles converge.
-	for _, prior := range ctx.sched {
+	for _, prior := range ctx.ledger {
 		if prior.block == target.block && slices.Equal(prior.tail, tail) &&
-			slices.Equal(prior.values, values) && framesEqual(prior.frames, frames) {
+			slices.Equal(prior.values, values) && l.sameFrames(prior.frames, frames) {
 			return prior.label, true
 		}
 	}
-	if ctx.scheduled >= continuationLimit {
+	if len(ctx.ledger) >= continuationLimit {
 		return ctx.queueExit(nil, target.anchor.ip, prof.ExitColdBranch, opcode), true
 	}
 	label := ctx.assembler.Label()
 	work := work{label: label, block: target.block, tail: tail, values: values, frames: frames}
 	ctx.work = append(ctx.work, work)
-	ctx.sched = append(ctx.sched, work)
-	ctx.scheduled++
+	ctx.ledger = append(ctx.ledger, work)
 	return label, true
 }
 
-// framesEqual compares canonical snapshot frames: locals and state are reset
-// by snapshot(), so the activation shape is what decides equivalence.
-func framesEqual(a, b []activation) bool {
+// sameFrames reports whether canonical snapshots have the same activation shape.
+func (arm64Lowerer) sameFrames(a, b []activation) bool {
 	if len(a) != len(b) {
 		return false
 	}

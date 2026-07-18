@@ -1065,15 +1065,7 @@ func (i *Interpreter) call(root anchor, callable asm.Callable, stats counters) f
 		}
 
 		if i.journal[journalTrap] == trapNone {
-			// Frame teardown the threaded RETURN handler does.
-			f := i.fr
-			i.sp = f.bp + f.returns
-			if f.release {
-				i.release(f.ref)
-			}
-			f.code = nil
-			i.fp--
-			i.fr = &i.frames[i.fp-1]
+			i.returnFrame()
 			return
 		}
 
@@ -1115,8 +1107,7 @@ func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters) 
 
 		i.sp = int(i.journal[journalSP])
 		if i.journal[journalTrap] == trapNone {
-			i.fr.ip = len(i.code[i.fr.addr])
-			i.fr.code = i.code[i.fr.addr]
+			i.completeModule()
 			return
 		}
 
@@ -1158,23 +1149,10 @@ func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters) f
 		i.sp = int(i.journal[journalSP])
 		if i.journal[journalTrap] == trapNone {
 			if root.addr == 0 {
-				// complete() finished the top-level module natively; mark the
-				// frame exhausted exactly like start() so Run returns.
-				i.fr.ip = len(i.code[i.fr.addr])
-				i.fr.code = i.code[i.fr.addr]
-				return
+				i.completeModule()
+			} else {
+				i.returnFrame()
 			}
-			// ret() left the function's return values in the frame's base
-			// slots; perform the teardown the threaded RETURN handler would,
-			// exactly like call().
-			f := i.fr
-			i.sp = f.bp + f.returns
-			if f.release {
-				i.release(f.ref)
-			}
-			f.code = nil
-			i.fp--
-			i.fr = &i.frames[i.fp-1]
 			return
 		}
 		i.deopt()
@@ -1202,6 +1180,22 @@ func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters) f
 			}
 		}
 	}
+}
+
+func (i *Interpreter) returnFrame() {
+	f := i.fr
+	i.sp = f.bp + f.returns
+	if f.release {
+		i.release(f.ref)
+	}
+	f.code = nil
+	i.fp--
+	i.fr = &i.frames[i.fp-1]
+}
+
+func (i *Interpreter) completeModule() {
+	i.fr.ip = len(i.code[i.fr.addr])
+	i.fr.code = i.code[i.fr.addr]
 }
 
 func (i *Interpreter) exit(root anchor) {
