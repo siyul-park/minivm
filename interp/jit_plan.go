@@ -358,7 +358,15 @@ func tracePlan(input *compileInput) ([]plan, error) {
 		}
 		var legs []leg
 		for id, tr := range tree.branches {
-			if tr == nil || tr.kind == loop || tr.kind == aborted {
+			if tr == nil || tr.kind == aborted {
+				continue
+			}
+			// A loop-kind leg is a loop root of its own: anchored at this
+			// header it is the root trace itself (capture returns the existing
+			// root, and its edge already wires to the root block); anchored
+			// elsewhere it is a different loop, and splitting it here would
+			// inline that whole loop body instead of using its native entry.
+			if tr.kind == loop {
 				continue
 			}
 			hits := int64(0)
@@ -543,13 +551,23 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 	}
 	current := block{anchor: tr.anchor}
 	var blocks []block
-	commit := func() {
-		blocks = append(blocks, current)
+	rejoins := func(op record) bool {
+		return tr.kind == partial && p.kind == entryLoop && op.cut && op.depth == 0 &&
+			op.fn == p.anchor.addr && op.target == p.anchor.ip
 	}
 	for idx, op := range tr.ops {
 		if op.cut {
-			current.term = terminator{kind: terminateFallback, ip: op.target, hot: -1}
-			commit()
+			// A leg cut at the loop plan's own header is the loop back-edge:
+			// wire a real branch so wire() folds it onto the root block and
+			// the lowering takes the committing-flush native back-edge instead
+			// of a deopt round trip. Cuts inside an inlined frame keep the
+			// fallback — the root block expects the anchor frame only.
+			if rejoins(op) {
+				current.term = terminator{kind: terminateBranch, ip: op.target, hot: 0, edges: []edge{jump(op.fn, op.target)}}
+			} else {
+				current.term = terminator{kind: terminateFallback, ip: op.target, hot: -1}
+			}
+			blocks = append(blocks, current)
 			return blocks
 		}
 		path := -1
@@ -557,7 +575,7 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 		case instr.BR:
 			current.term = terminator{kind: terminateBranch, ip: op.ip, hot: 0, edges: []edge{jump(op.fn, op.target)}}
 			path = 0
-			commit()
+			blocks = append(blocks, current)
 		case instr.BR_IF:
 			next := op.ip + 3
 			hot := 1
@@ -568,7 +586,7 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 			edges[1-hot].tail = suffix(p, tr, idx, input)
 			current.term = terminator{kind: terminateBranchIf, ip: op.ip, hot: hot, edges: edges}
 			path = hot
-			commit()
+			blocks = append(blocks, current)
 		case instr.BR_TABLE:
 			var targets []int
 			if fn := resolve(input.module, input.heap, op.fn); fn != nil {
@@ -590,11 +608,11 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 			}
 			current.term = terminator{kind: terminateBranchTable, ip: op.ip, hot: hot, edges: edges}
 			path = hot
-			commit()
+			blocks = append(blocks, current)
 		case instr.RETURN:
 			if op.depth == 0 {
 				current.term = terminator{kind: terminateReturn, ip: op.ip, hot: -1}
-				commit()
+				blocks = append(blocks, current)
 				return blocks
 			}
 			current.steps = append(current.steps, op.step)
@@ -606,10 +624,18 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 		if idx+1 >= len(tr.ops) {
 			return blocks
 		}
-		if path >= 0 {
-			blocks[len(blocks)-1].term.edges[path].block = local(len(blocks))
-		}
 		next := tr.ops[idx+1]
+		if path >= 0 {
+			// A cut straight after the branch carries no new ops: the trace
+			// took the branch and stopped. End the split with the hot edge
+			// unresolved so wire() can fold it onto a known root block (the
+			// loop back-edge) instead of chaining a spurious empty block.
+			hot := &blocks[len(blocks)-1].term.edges[path]
+			if rejoins(next) && hot.anchor == p.anchor {
+				return blocks
+			}
+			hot.block = local(len(blocks))
+		}
 		current = block{anchor: anchor{addr: next.fn, ip: next.ip}}
 	}
 	if len(blocks) > 0 && len(current.steps) == 0 && current.term.kind == terminateFallthrough {
@@ -631,7 +657,7 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 	default:
 		current.term = terminator{kind: terminateFallback, ip: tr.anchor.ip, hot: -1}
 	}
-	commit()
+	blocks = append(blocks, current)
 	return blocks
 }
 

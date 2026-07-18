@@ -1065,15 +1065,7 @@ func (i *Interpreter) call(root anchor, callable asm.Callable, stats counters) f
 		}
 
 		if i.journal[journalTrap] == trapNone {
-			// Frame teardown the threaded RETURN handler does.
-			f := i.fr
-			i.sp = f.bp + f.returns
-			if f.release {
-				i.release(f.ref)
-			}
-			f.code = nil
-			i.fp--
-			i.fr = &i.frames[i.fp-1]
+			i.popFrame()
 			return
 		}
 
@@ -1115,8 +1107,7 @@ func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters) 
 
 		i.sp = int(i.journal[journalSP])
 		if i.journal[journalTrap] == trapNone {
-			i.fr.ip = len(i.code[i.fr.addr])
-			i.fr.code = i.code[i.fr.addr]
+			i.complete()
 			return
 		}
 
@@ -1138,10 +1129,11 @@ func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters) 
 
 // loop wraps a native loop Callable installed at a loop header. Unlike entry,
 // the header is reached mid-function with the frame already live, so loop never
-// pushes or tears down a frame and never returns normally — it always exits
-// through a trap. A spent budget yields to the safepoint and the Run loop
-// re-enters native at the header; a guarded side exit or the loop-exit edge
-// leaves deopt with i.fr at the resume IP for threaded dispatch to continue.
+// pushes a frame. It returns normally when a folded return or completion leg
+// finishes native execution; every other exit is a trap.
+// A spent budget yields to the safepoint and the Run loop re-enters native at
+// the header; a guarded side exit or the loop-exit edge leaves deopt with
+// i.fr at the resume IP for threaded dispatch to continue.
 func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters) func(*Interpreter) {
 	return func(i *Interpreter) {
 		stats.enter()
@@ -1155,6 +1147,14 @@ func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters) f
 			panic(err)
 		}
 		i.sp = int(i.journal[journalSP])
+		if i.journal[journalTrap] == trapNone {
+			if root.addr == 0 {
+				i.complete()
+			} else {
+				i.popFrame()
+			}
+			return
+		}
 		i.deopt()
 		switch i.journal[journalTrap] {
 		case trapOverflow:
@@ -1166,6 +1166,9 @@ func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters) f
 			}
 		case trapFallback:
 			stats.exit(i.journal[journalExitID])
+			// Record the exit as a branch so the tracer captures the leg and a
+			// hot in-loop branch recompiles the tree with the leg folded in.
+			i.exit(root)
 			// An exit that resumes at the header itself made no progress — the
 			// header slot holds this native stub, so dispatching it again would
 			// livelock (the hoist prologue's shape guard exits here). Run the
@@ -1177,6 +1180,22 @@ func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters) f
 			}
 		}
 	}
+}
+
+func (i *Interpreter) popFrame() {
+	f := i.fr
+	i.sp = f.bp + f.returns
+	if f.release {
+		i.release(f.ref)
+	}
+	f.code = nil
+	i.fp--
+	i.fr = &i.frames[i.fp-1]
+}
+
+func (i *Interpreter) complete() {
+	i.fr.ip = len(i.code[i.fr.addr])
+	i.fr.code = i.code[i.fr.addr]
 }
 
 func (i *Interpreter) exit(root anchor) {

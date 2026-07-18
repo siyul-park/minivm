@@ -21,7 +21,7 @@ For implementation details, see `docs/jit-internals.md`. For profiling counters,
 
 ## Measurement Environment
 
-All numbers in this document were measured on July 16, 2026:
+All numbers in this document were measured on July 16, 2026 (the `Sieve(256)` minivm rows were re-measured on July 18, 2026 after issue #155):
 
 - Apple M4 Pro, 12 cores
 - `darwin/arm64`
@@ -59,8 +59,9 @@ go test -run='^$' -bench='^Benchmark(Array|Struct|TypedMap|Map)_Refs$' \
 
 - `RecursiveFib(35)` places `minivm/default` at **46.30 ms**, within about **2.6%** of wazero's **45.11 ms**, while remaining allocation-free after warmup.
 - Adaptive native traces reduce `IterativeFib(30)` from **738.6 ns** threaded to **76.14 ns**, `TypedArraySum(256)` from **6.299 us** to **669.0 ns**, and `BranchTree(96)` from **981.8 ns** to **235.1 ns**.
-- Primitive array mutation stays on the native loop path in `Sieve(256)`: deferred-ownership elision drops the per-element retain/release pair, so a runtime-allocated array reaches the same cheap native path a typed-array constant already used. `default` is **4.722 us** and eager `jit` is **4.719 us**, versus **16.172 us** threaded. All three modes allocate `1,048 B` in `2` allocations.
-- Loop-invariant container hoisting (issue #153) removes the per-access heap-cell derivation, itab guard, and slice-header reload from hoisted loop bodies. It shrinks Sieve's two loop callables about **40%** (`vm_jit_entry_bytes_total` 179,992 → 107,168 and 209,804 → 124,644) but leaves `Sieve(256)` wall time unchanged within run-to-run noise (interleaved A/B on M4 Pro: ~1-2%): the removed loads sat off the out-of-order critical path. The dominant remaining costs are native entry/exit round trips (the scan loop exits once per prime because loop-kind branch legs are never folded) and the per-iteration operand flush, both follow-up work.
+- Primitive array mutation stays on the native loop path in `Sieve(256)`: deferred-ownership elision drops the per-element retain/release pair, so a runtime-allocated array reaches the same cheap native path a typed-array constant already used. All three modes allocate `1,048 B` in `2` allocations.
+- Loop-invariant container hoisting (issue #153) removes the per-access heap-cell derivation, itab guard, and slice-header reload from hoisted loop bodies. It shrinks the loop callables but leaves wall time unchanged: the removed loads sat off the out-of-order critical path.
+- Branch-leg folding (issue #155) records native loop exits as branches and folds hot legs that rejoin the header back into the native loop as real back-edges. On `Sieve(256)` this removes the per-prime entry/exit round trips (scan-loop native entries drop from ~55 to ~1 per run) and cuts `default` from **4.72 us** to **1.61 us** and eager `jit` to **1.57 us**, versus **15.9 us** threaded (interleaved A/B on M4 Pro). The remaining gap to wazero (~0.66 us) is dominated by the per-iteration operand flush.
 - Threshold-zero `jit` is not a warmed-JIT guarantee. It matches `default` on Sieve and BranchTree, but is slower on IterativeFib, TypedArraySum, and recursive Fibonacci because it can compile before representative traces are learned.
 - Allocation-heavy workloads remain interpreter-bound. `AllocationGraph(128)` is fastest in minivm's threaded mode at **7.617 us**; adaptive and eager modes add profiling cost without native coverage.
 - Indirect recursion reaches the native self-call path in adaptive mode: `IndirectRecursiveFib(20)` is **54.94 us** in `default`, versus **568 us** threaded and **42.3 us** in wazero. Eager `jit` stays at **589 us**, consistent with the threshold-zero note above.
@@ -95,9 +96,9 @@ Each minivm kernel times `Interpreter.Run` only. Result extraction, reset, fixtu
 | IterativeFib(30) | Goja | 2,218 | 368 | 20 |
 | IterativeFib(30) | gpython | 2,590 | 2,448 | 88 |
 | IterativeFib(30) | Yaegi | 2,801 | 2,036 | 101 |
-| Sieve(256) | minivm/default | 4,722 | 1,048 | 2 |
-| Sieve(256) | minivm/threaded | 16,172 | 1,048 | 2 |
-| Sieve(256) | minivm/jit | 4,719 | 1,048 | 2 |
+| Sieve(256) | minivm/default | 1,610 | 1,048 | 2 |
+| Sieve(256) | minivm/threaded | 15,933 | 1,048 | 2 |
+| Sieve(256) | minivm/jit | 1,572 | 1,048 | 2 |
 | Sieve(256) | native Go | 238.3 | 0 | 0 |
 | Sieve(256) | wazero | 662.8 | 8 | 1 |
 | Sieve(256) | Tengo | 53,437 | 122,504 | 1,611 |

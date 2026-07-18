@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/siyul-park/minivm/asm"
-	"github.com/siyul-park/minivm/asm/arm64"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
@@ -1000,27 +999,6 @@ func TestCompiler_Compile(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, plans)
 	})
-}
-
-func TestARM64Lowerer_QueuesEachState(t *testing.T) {
-	target := edge{anchor: anchor{addr: 1, ip: 2}, block: 0}
-	ctx := &lowering{
-		assembler: asm.New(arm64.New()),
-		blocks:    []block{{anchor: target.anchor}},
-		labels:    map[int]asm.Label{},
-	}
-	lowerer := arm64Lowerer{}
-
-	ctx.values = []value{{kind: types.KindI32, raw: true, known: true, imm: 1}}
-	first, ok := lowerer.label(ctx, target, nil, prof.OpcodeNone)
-	require.True(t, ok)
-
-	ctx.values = []value{{kind: types.KindI32, raw: true, known: true, imm: 2}}
-	second, ok := lowerer.label(ctx, target, nil, prof.OpcodeNone)
-	require.True(t, ok)
-
-	require.NotEqual(t, first, second)
-	require.Len(t, ctx.work, 2)
 }
 
 // SelfCallWithRefArg protects a self-recursive function that forwards its own

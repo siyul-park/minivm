@@ -66,7 +66,6 @@ type lowering struct {
 	values      []value
 	frames      []activation
 	work        []work
-	scheduled   int
 	exits       []sideExit
 	descriptors []exitDescriptor
 	saved       []value
@@ -145,11 +144,6 @@ type activation struct {
 	returns  int
 }
 
-// work is a deferred block whose branch point produced its symbolic state:
-// VM stack slots are current, so the block re-enters at label with
-// every local unloaded and every operand awaiting reload. If the branch
-// returned from an inlined callee, tail keeps the caller path that must run
-// after the deferred block stitches back into the caller frame.
 type localState uint8
 
 const (
@@ -158,6 +152,11 @@ const (
 	localStored
 )
 
+// work is a deferred block whose branch point produced its symbolic state:
+// VM stack slots are current, so the block re-enters at label with
+// every local unloaded and every operand awaiting reload. If the branch
+// returned from an inlined callee, tail keeps the caller path that must run
+// after the deferred block stitches back into the caller frame.
 type work struct {
 	label  asm.Label
 	block  int
@@ -180,10 +179,6 @@ type sideExit struct {
 // dedicated asm-level API — it is purely an interp-side JIT policy decision
 // (see noSpill), not a generic assembler concern.
 type noSpillArch struct{ asm.Arch }
-
-// continuationLimit caps deferred learned continuations in one native
-// callable; beyond this the guard keeps the old deopt fallback.
-const continuationLimit = 256
 
 const (
 	scratchStack = iota
