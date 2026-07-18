@@ -182,20 +182,6 @@ func (w work) sameState(other work) bool {
 	return true
 }
 
-func (l *lowering) reserve(next work, limit int) (asm.Label, bool) {
-	for _, prior := range l.work {
-		if prior.sameState(next) {
-			return prior.label, true
-		}
-	}
-	if limit > 0 && len(l.work) >= limit {
-		return 0, false
-	}
-	next.label = l.assembler.Label()
-	l.work = append(l.work, next)
-	return next.label, true
-}
-
 type sideExit struct {
 	label  asm.Label
 	values []value
@@ -211,8 +197,8 @@ type sideExit struct {
 // (see noSpill), not a generic assembler concern.
 type noSpillArch struct{ asm.Arch }
 
-// continuationLimit caps deferred learned continuations in one native
-// callable; beyond this the guard keeps the old deopt fallback.
+// continuationLimit bounds work growth from learned continuations; existing
+// work still reuses its native label, while new states keep the deopt fallback.
 const continuationLimit = 256
 
 const (

@@ -1299,7 +1299,7 @@ func (l arm64Lowerer) follow(ctx *lowering, tail []int) bool {
 		return false
 	}
 	values, frames := ctx.snapshot()
-	label, _ := ctx.reserve(work{block: id, tail: tail[1:], values: values, frames: frames}, 0)
+	label, _ := l.reserve(ctx, work{block: id, tail: tail[1:], values: values, frames: frames}, 0)
 	ctx.assembler.Emit(arm64.BLabel(label))
 	return true
 }
@@ -1359,11 +1359,25 @@ func (l arm64Lowerer) label(ctx *lowering, target edge, tail []int, opcode int) 
 		return ctx.queueExit(nil, target.anchor.ip, prof.ExitColdBranch, opcode), true
 	}
 	values, frames := ctx.snapshot()
-	label, ok := ctx.reserve(work{block: target.block, tail: tail, values: values, frames: frames}, continuationLimit)
+	label, ok := l.reserve(ctx, work{block: target.block, tail: tail, values: values, frames: frames}, continuationLimit)
 	if !ok {
 		return ctx.queueExit(nil, target.anchor.ip, prof.ExitColdBranch, opcode), true
 	}
 	return label, true
+}
+
+func (l arm64Lowerer) reserve(ctx *lowering, next work, limit int) (asm.Label, bool) {
+	for _, prior := range ctx.work {
+		if prior.sameState(next) {
+			return prior.label, true
+		}
+	}
+	if limit > 0 && len(ctx.work) >= limit {
+		return 0, false
+	}
+	next.label = ctx.assembler.Label()
+	ctx.work = append(ctx.work, next)
+	return next.label, true
 }
 
 // marked reports whether a constant ref marker blocks deferred continuation

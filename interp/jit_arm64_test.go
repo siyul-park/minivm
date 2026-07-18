@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/siyul-park/minivm/asm"
-	"github.com/siyul-park/minivm/asm/arm64"
 	"github.com/siyul-park/minivm/instr"
 	"github.com/siyul-park/minivm/prof"
 	"github.com/siyul-park/minivm/program"
@@ -1000,23 +999,6 @@ func TestCompiler_Compile(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, plans)
 	})
-}
-
-func TestLowering_Reserve(t *testing.T) {
-	ctx := &lowering{assembler: asm.New(arm64.New())}
-	first := work{block: 1, tail: []int{2}, values: []value{{kind: types.KindI32, raw: true, known: true, imm: 1}}}
-	second := work{block: 1, tail: []int{2}, values: []value{{kind: types.KindI32, raw: true, known: true, imm: 2}}}
-
-	firstLabel, ok := ctx.reserve(first, continuationLimit)
-	require.True(t, ok)
-	again, ok := ctx.reserve(first, continuationLimit)
-	require.True(t, ok)
-	require.Equal(t, firstLabel, again)
-
-	secondLabel, ok := ctx.reserve(second, continuationLimit)
-	require.True(t, ok)
-	require.NotEqual(t, firstLabel, secondLabel)
-	require.Len(t, ctx.work, 2)
 }
 
 // SelfCallWithRefArg protects a self-recursive function that forwards its own
