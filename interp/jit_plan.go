@@ -551,11 +551,8 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 	}
 	current := block{anchor: tr.anchor}
 	var blocks []block
-	commit := func() {
-		blocks = append(blocks, current)
-	}
-	folds := func(op record) bool {
-		return p.kind == entryLoop && op.cut && op.depth == 0 &&
+	rejoins := func(op record) bool {
+		return tr.kind == partial && p.kind == entryLoop && op.cut && op.depth == 0 &&
 			op.fn == p.anchor.addr && op.target == p.anchor.ip
 	}
 	for idx, op := range tr.ops {
@@ -565,12 +562,12 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 			// the lowering takes the committing-flush native back-edge instead
 			// of a deopt round trip. Cuts inside an inlined frame keep the
 			// fallback — the root block expects the anchor frame only.
-			if folds(op) {
+			if rejoins(op) {
 				current.term = terminator{kind: terminateBranch, ip: op.target, hot: 0, edges: []edge{jump(op.fn, op.target)}}
 			} else {
 				current.term = terminator{kind: terminateFallback, ip: op.target, hot: -1}
 			}
-			commit()
+			blocks = append(blocks, current)
 			return blocks
 		}
 		path := -1
@@ -578,7 +575,7 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 		case instr.BR:
 			current.term = terminator{kind: terminateBranch, ip: op.ip, hot: 0, edges: []edge{jump(op.fn, op.target)}}
 			path = 0
-			commit()
+			blocks = append(blocks, current)
 		case instr.BR_IF:
 			next := op.ip + 3
 			hot := 1
@@ -589,7 +586,7 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 			edges[1-hot].tail = suffix(p, tr, idx, input)
 			current.term = terminator{kind: terminateBranchIf, ip: op.ip, hot: hot, edges: edges}
 			path = hot
-			commit()
+			blocks = append(blocks, current)
 		case instr.BR_TABLE:
 			var targets []int
 			if fn := resolve(input.module, input.heap, op.fn); fn != nil {
@@ -611,11 +608,11 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 			}
 			current.term = terminator{kind: terminateBranchTable, ip: op.ip, hot: hot, edges: edges}
 			path = hot
-			commit()
+			blocks = append(blocks, current)
 		case instr.RETURN:
 			if op.depth == 0 {
 				current.term = terminator{kind: terminateReturn, ip: op.ip, hot: -1}
-				commit()
+				blocks = append(blocks, current)
 				return blocks
 			}
 			current.steps = append(current.steps, op.step)
@@ -634,7 +631,7 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 			// unresolved so wire() can fold it onto a known root block (the
 			// loop back-edge) instead of chaining a spurious empty block.
 			hot := &blocks[len(blocks)-1].term.edges[path]
-			if tr.kind == partial && folds(next) && hot.anchor == p.anchor {
+			if rejoins(next) && hot.anchor == p.anchor {
 				return blocks
 			}
 			hot.block = local(len(blocks))
@@ -660,7 +657,7 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 	default:
 		current.term = terminator{kind: terminateFallback, ip: tr.anchor.ip, hot: -1}
 	}
-	commit()
+	blocks = append(blocks, current)
 	return blocks
 }
 

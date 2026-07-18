@@ -1298,10 +1298,8 @@ func (l arm64Lowerer) follow(ctx *lowering, tail []int) bool {
 	if id < 0 || id >= len(ctx.blocks) || !ctx.blocks[id].tail {
 		return false
 	}
-	label := ctx.assembler.Label()
-	work := work{label: label, block: id, tail: tail[1:]}
-	work.values, work.frames = ctx.snapshot()
-	ctx.work = append(ctx.work, work)
+	values, frames := ctx.snapshot()
+	label, _ := ctx.reserve(work{block: id, tail: tail[1:], values: values, frames: frames}, 0)
 	ctx.assembler.Emit(arm64.BLabel(label))
 	return true
 }
@@ -1361,23 +1359,10 @@ func (l arm64Lowerer) label(ctx *lowering, target edge, tail []int, opcode int) 
 		return ctx.queueExit(nil, target.anchor.ip, prof.ExitColdBranch, opcode), true
 	}
 	values, frames := ctx.snapshot()
-	shared := 0
-	for _, prior := range ctx.work {
-		if !prior.shared {
-			continue
-		}
-		shared++
-		if prior.matches(target.block, tail, values, frames) {
-			return prior.label, true
-		}
-	}
-	if shared >= continuationLimit {
+	label, ok := ctx.reserve(work{block: target.block, tail: tail, values: values, frames: frames}, continuationLimit)
+	if !ok {
 		return ctx.queueExit(nil, target.anchor.ip, prof.ExitColdBranch, opcode), true
 	}
-	label := ctx.assembler.Label()
-	ctx.work = append(ctx.work, work{
-		label: label, block: target.block, tail: tail, values: values, frames: frames, shared: true,
-	})
 	return label, true
 }
 

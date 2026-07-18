@@ -145,11 +145,6 @@ type activation struct {
 	returns  int
 }
 
-// work is a deferred block whose branch point produced its symbolic state:
-// VM stack slots are current, so the block re-enters at label with
-// every local unloaded and every operand awaiting reload. If the branch
-// returned from an inlined callee, tail keeps the caller path that must run
-// after the deferred block stitches back into the caller frame.
 type localState uint8
 
 const (
@@ -158,27 +153,47 @@ const (
 	localStored
 )
 
+// work is a deferred block whose branch point produced its symbolic state:
+// VM stack slots are current, so the block re-enters at label with
+// every local unloaded and every operand awaiting reload. If the branch
+// returned from an inlined callee, tail keeps the caller path that must run
+// after the deferred block stitches back into the caller frame.
 type work struct {
 	label  asm.Label
 	block  int
 	tail   []int
 	values []value
 	frames []activation
-	shared bool
 }
 
-func (w work) matches(block int, tail []int, values []value, frames []activation) bool {
-	if w.block != block || !slices.Equal(w.tail, tail) || !slices.Equal(w.values, values) || len(w.frames) != len(frames) {
+// sameState compares canonical snapshots; reservation resets register
+// allocation and transient local flags.
+func (w work) sameState(other work) bool {
+	if w.block != other.block || !slices.Equal(w.tail, other.tail) || !slices.Equal(w.values, other.values) || len(w.frames) != len(other.frames) {
 		return false
 	}
-	for i := range frames {
-		a, b := w.frames[i], frames[i]
+	for i := range w.frames {
+		a, b := w.frames[i], other.frames[i]
 		if a.addr != b.addr || a.base != b.base || a.opBase != b.opBase || a.end != b.end || a.returns != b.returns ||
 			len(a.locals) != len(b.locals) || len(a.upvals) != len(b.upvals) {
 			return false
 		}
 	}
 	return true
+}
+
+func (l *lowering) reserve(next work, limit int) (asm.Label, bool) {
+	for _, prior := range l.work {
+		if prior.sameState(next) {
+			return prior.label, true
+		}
+	}
+	if limit > 0 && len(l.work) >= limit {
+		return 0, false
+	}
+	next.label = l.assembler.Label()
+	l.work = append(l.work, next)
+	return next.label, true
 }
 
 type sideExit struct {
