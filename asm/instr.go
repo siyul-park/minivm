@@ -18,8 +18,8 @@ type Instruction struct {
 // of virtual-register source operands through its position.
 const OpPseudoUse uint16 = 0xFFFE
 
-// OpPseudoLabel is a pseudo-instruction that marks a label position. It
-// emits zero bytes and is stripped before register allocation.
+// OpPseudoLabel is a pseudo-instruction that marks a label position and
+// emits zero bytes during encoding.
 const OpPseudoLabel uint16 = 0xFFFF
 
 // Def returns the destination vreg if Dst is a virtual-register operand.
