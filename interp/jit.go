@@ -2,7 +2,6 @@ package interp
 
 import (
 	"errors"
-	"slices"
 
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/prof"
@@ -166,22 +165,6 @@ type work struct {
 	frames []activation
 }
 
-// sameState compares canonical snapshots; reservation resets register
-// allocation and transient local flags.
-func (w work) sameState(other work) bool {
-	if w.block != other.block || !slices.Equal(w.tail, other.tail) || !slices.Equal(w.values, other.values) || len(w.frames) != len(other.frames) {
-		return false
-	}
-	for i := range w.frames {
-		a, b := w.frames[i], other.frames[i]
-		if a.addr != b.addr || a.base != b.base || a.opBase != b.opBase || a.end != b.end || a.returns != b.returns ||
-			len(a.locals) != len(b.locals) || len(a.upvals) != len(b.upvals) {
-			return false
-		}
-	}
-	return true
-}
-
 type sideExit struct {
 	label  asm.Label
 	values []value
@@ -196,10 +179,6 @@ type sideExit struct {
 // dedicated asm-level API — it is purely an interp-side JIT policy decision
 // (see noSpill), not a generic assembler concern.
 type noSpillArch struct{ asm.Arch }
-
-// continuationLimit bounds work growth from learned continuations; existing
-// work still reuses its native label, while new states keep the deopt fallback.
-const continuationLimit = 256
 
 const (
 	scratchStack = iota

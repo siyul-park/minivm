@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"slices"
 	"unsafe"
 
 	"github.com/siyul-park/minivm/asm"
@@ -44,6 +45,11 @@ const (
 )
 
 const branchTableLimit = 32
+
+// workLimit bounds work growth from learned continuations; existing work
+// reuses its native label, while new states keep the deopt fallback.
+const workLimit = 256
+
 const nativeBackend = true
 
 // Boxing tags used by scalar lowering, derived from the Kind
@@ -1299,7 +1305,7 @@ func (l arm64Lowerer) follow(ctx *lowering, tail []int) bool {
 		return false
 	}
 	values, frames := ctx.snapshot()
-	label, _ := l.reserve(ctx, work{block: id, tail: tail[1:], values: values, frames: frames}, 0)
+	label, _ := l.schedule(ctx, work{block: id, tail: tail[1:], values: values, frames: frames}, 0)
 	ctx.assembler.Emit(arm64.BLabel(label))
 	return true
 }
@@ -1359,16 +1365,16 @@ func (l arm64Lowerer) label(ctx *lowering, target edge, tail []int, opcode int) 
 		return ctx.queueExit(nil, target.anchor.ip, prof.ExitColdBranch, opcode), true
 	}
 	values, frames := ctx.snapshot()
-	label, ok := l.reserve(ctx, work{block: target.block, tail: tail, values: values, frames: frames}, continuationLimit)
+	label, ok := l.schedule(ctx, work{block: target.block, tail: tail, values: values, frames: frames}, workLimit)
 	if !ok {
 		return ctx.queueExit(nil, target.anchor.ip, prof.ExitColdBranch, opcode), true
 	}
 	return label, true
 }
 
-func (l arm64Lowerer) reserve(ctx *lowering, next work, limit int) (asm.Label, bool) {
+func (l arm64Lowerer) schedule(ctx *lowering, next work, limit int) (asm.Label, bool) {
 	for _, prior := range ctx.work {
-		if prior.sameState(next) {
+		if l.same(prior, next) {
 			return prior.label, true
 		}
 	}
@@ -1378,6 +1384,22 @@ func (l arm64Lowerer) reserve(ctx *lowering, next work, limit int) (asm.Label, b
 	next.label = ctx.assembler.Label()
 	ctx.work = append(ctx.work, next)
 	return next.label, true
+}
+
+// same reports whether two work items resume the same canonical state.
+// Scheduling resets register allocation and transient local flags.
+func (l arm64Lowerer) same(a, b work) bool {
+	if a.block != b.block || !slices.Equal(a.tail, b.tail) || !slices.Equal(a.values, b.values) || len(a.frames) != len(b.frames) {
+		return false
+	}
+	for i := range a.frames {
+		x, y := a.frames[i], b.frames[i]
+		if x.addr != y.addr || x.base != y.base || x.opBase != y.opBase || x.end != y.end || x.returns != y.returns ||
+			len(x.locals) != len(y.locals) || len(x.upvals) != len(y.upvals) {
+			return false
+		}
+	}
+	return true
 }
 
 // marked reports whether a constant ref marker blocks deferred continuation

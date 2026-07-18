@@ -1065,7 +1065,7 @@ func (i *Interpreter) call(root anchor, callable asm.Callable, stats counters) f
 		}
 
 		if i.journal[journalTrap] == trapNone {
-			i.returnFrame()
+			i.popFrame()
 			return
 		}
 
@@ -1107,7 +1107,7 @@ func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters) 
 
 		i.sp = int(i.journal[journalSP])
 		if i.journal[journalTrap] == trapNone {
-			i.completeModule()
+			i.complete()
 			return
 		}
 
@@ -1149,9 +1149,9 @@ func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters) f
 		i.sp = int(i.journal[journalSP])
 		if i.journal[journalTrap] == trapNone {
 			if root.addr == 0 {
-				i.completeModule()
+				i.complete()
 			} else {
-				i.returnFrame()
+				i.popFrame()
 			}
 			return
 		}
@@ -1182,7 +1182,7 @@ func (i *Interpreter) loop(root anchor, callable asm.Callable, stats counters) f
 	}
 }
 
-func (i *Interpreter) returnFrame() {
+func (i *Interpreter) popFrame() {
 	f := i.fr
 	i.sp = f.bp + f.returns
 	if f.release {
@@ -1193,7 +1193,7 @@ func (i *Interpreter) returnFrame() {
 	i.fr = &i.frames[i.fp-1]
 }
 
-func (i *Interpreter) completeModule() {
+func (i *Interpreter) complete() {
 	i.fr.ip = len(i.code[i.fr.addr])
 	i.fr.code = i.code[i.fr.addr]
 }
