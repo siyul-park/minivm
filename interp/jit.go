@@ -2,6 +2,7 @@ package interp
 
 import (
 	"errors"
+	"slices"
 
 	"github.com/siyul-park/minivm/asm"
 	"github.com/siyul-park/minivm/prof"
@@ -66,7 +67,6 @@ type lowering struct {
 	values      []value
 	frames      []activation
 	work        []work
-	ledger      []work
 	exits       []sideExit
 	descriptors []exitDescriptor
 	saved       []value
@@ -164,6 +164,21 @@ type work struct {
 	tail   []int
 	values []value
 	frames []activation
+	shared bool
+}
+
+func (w work) matches(block int, tail []int, values []value, frames []activation) bool {
+	if w.block != block || !slices.Equal(w.tail, tail) || !slices.Equal(w.values, values) || len(w.frames) != len(frames) {
+		return false
+	}
+	for i := range frames {
+		a, b := w.frames[i], frames[i]
+		if a.addr != b.addr || a.base != b.base || a.opBase != b.opBase || a.end != b.end || a.returns != b.returns ||
+			len(a.locals) != len(b.locals) || len(a.upvals) != len(b.upvals) {
+			return false
+		}
+	}
+	return true
 }
 
 type sideExit struct {

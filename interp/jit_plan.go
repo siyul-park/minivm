@@ -554,6 +554,10 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 	commit := func() {
 		blocks = append(blocks, current)
 	}
+	folds := func(op record) bool {
+		return p.kind == entryLoop && op.cut && op.depth == 0 &&
+			op.fn == p.anchor.addr && op.target == p.anchor.ip
+	}
 	for idx, op := range tr.ops {
 		if op.cut {
 			// A leg cut at the loop plan's own header is the loop back-edge:
@@ -561,7 +565,7 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 			// the lowering takes the committing-flush native back-edge instead
 			// of a deopt round trip. Cuts inside an inlined frame keep the
 			// fallback — the root block expects the anchor frame only.
-			if p.kind == entryLoop && op.depth == 0 && op.fn == p.anchor.addr && op.target == p.anchor.ip {
+			if folds(op) {
 				current.term = terminator{kind: terminateBranch, ip: op.target, hot: 0, edges: []edge{jump(op.fn, op.target)}}
 			} else {
 				current.term = terminator{kind: terminateFallback, ip: op.target, hot: -1}
@@ -630,10 +634,7 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 			// unresolved so wire() can fold it onto a known root block (the
 			// loop back-edge) instead of chaining a spurious empty block.
 			hot := &blocks[len(blocks)-1].term.edges[path]
-			if p.kind == entryLoop && tr.kind == partial &&
-				next.cut && next.depth == 0 &&
-				next.fn == p.anchor.addr && next.target == p.anchor.ip &&
-				hot.anchor == p.anchor {
+			if tr.kind == partial && folds(next) && hot.anchor == p.anchor {
 				return blocks
 			}
 			hot.block = local(len(blocks))

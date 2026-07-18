@@ -1020,6 +1020,11 @@ func TestARM64Lowerer_QueuesEachState(t *testing.T) {
 	require.True(t, ok)
 
 	require.NotEqual(t, first, second)
+
+	ctx.values = []value{{kind: types.KindI32, raw: true, known: true, imm: 1}}
+	again, ok := lowerer.label(ctx, target, nil, prof.OpcodeNone)
+	require.True(t, ok)
+	require.Equal(t, first, again)
 	require.Len(t, ctx.work, 2)
 }
 
@@ -2601,7 +2606,7 @@ func TestARM64_StructGetStaticPlan(t *testing.T) {
 	})
 }
 
-func TestARM64_LoopLegFold(t *testing.T) {
+func TestInterpreter_RunARM64LoopLegFold(t *testing.T) {
 	if runtime.GOARCH != "arm64" {
 		t.Skip("native JIT is only available on arm64")
 	}
@@ -2635,6 +2640,13 @@ func TestARM64_LoopLegFold(t *testing.T) {
 		profile := prof.New()
 		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
 		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		closed := false
+		t.Cleanup(func() {
+			if !closed {
+				require.NoError(t, threaded.Close())
+				require.NoError(t, jit.Close())
+			}
+		})
 		const runs = 32
 		for n := 0; n < runs; n++ {
 			require.NoError(t, jit.Run(context.Background()))
@@ -2649,8 +2661,9 @@ func TestARM64_LoopLegFold(t *testing.T) {
 			jit.Reset()
 			threaded.Reset()
 		}
-		require.NoError(t, jit.Close())
 		require.NoError(t, threaded.Close())
+		require.NoError(t, jit.Close())
+		closed = true
 
 		entries := float64(0)
 		for _, metric := range profile.Metrics() {
@@ -2673,16 +2686,7 @@ func TestARM64_LoopLegFold(t *testing.T) {
 		const size = int32(8)
 		body := types.NewFunctionBuilder(nil).Captures(types.TypeI32Array).Returns(types.TypeI32)
 		body.Locals(types.TypeI32, types.TypeI32)
-		fill := body.Label()
-		scan := body.Label()
 		done := body.Label()
-		body.Emit(instr.New(instr.I32_CONST, 0)).Emit(instr.New(instr.LOCAL_SET, 0))
-		body.Bind(fill)
-		body.Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.I32_CONST, uint64(uint32(size)))).Emit(instr.New(instr.I32_GE_S)).BrIf(scan)
-		body.Emit(instr.New(instr.UPVAL_GET, 0)).Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.I32_CONST, 3)).Emit(instr.New(instr.ARRAY_SET))
-		body.Emit(instr.New(instr.LOCAL_GET, 0)).Emit(instr.New(instr.I32_CONST, 1)).Emit(instr.New(instr.I32_ADD)).Emit(instr.New(instr.LOCAL_SET, 0))
-		body.Br(fill)
-		body.Bind(scan)
 		body.Emit(instr.New(instr.I32_CONST, 0)).Emit(instr.New(instr.LOCAL_SET, 0))
 		body.Emit(instr.New(instr.I32_CONST, 0)).Emit(instr.New(instr.LOCAL_SET, 1))
 		loop := body.Label()
@@ -2697,15 +2701,16 @@ func TestARM64_LoopLegFold(t *testing.T) {
 		require.NoError(t, err)
 
 		b := program.NewBuilder()
-		arrayTyp := b.Type(types.TypeI32Array)
 		b.Const(fn)
-		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp))
+		b.ConstGet(types.TypedArray[int32]{3, 3, 3, 3, 3, 3, 3, 3})
 		b.ConstGet(fn).Emit(instr.CLOSURE_NEW).Emit(instr.CALL)
 		prog, err := b.Build()
 		require.NoError(t, err)
 
 		jit := New(prog, WithTick(1), WithThreshold(0))
 		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		t.Cleanup(func() { require.NoError(t, threaded.Close()) })
+		t.Cleanup(func() { require.NoError(t, jit.Close()) })
 		for n := 0; n < 32; n++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -2719,18 +2724,15 @@ func TestARM64_LoopLegFold(t *testing.T) {
 			jit.Reset()
 			threaded.Reset()
 		}
-		require.NoError(t, jit.Close())
-		require.NoError(t, threaded.Close())
 	})
 
 	t.Run("a folded completed leg finishes top-level code", func(t *testing.T) {
-		const size = int32(16)
+		const size = int32(8)
 		b := program.NewBuilder()
-		arrayTyp := b.Type(types.TypeI32Array)
 		b.Locals(types.TypeI32Array, types.TypeI32, types.TypeI32)
 		loop := b.Label()
 		done := b.Label()
-		b.Emit(instr.I32_CONST, uint64(uint32(size))).Emit(instr.ARRAY_NEW_DEFAULT, uint64(arrayTyp)).Emit(instr.LOCAL_SET, 0)
+		b.ConstGet(types.TypedArray[int32]{1, 2, 3, 4, 5, 6, 7, 8}).Emit(instr.LOCAL_SET, 0)
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 1)
 		b.Emit(instr.I32_CONST, 0).Emit(instr.LOCAL_SET, 2)
 		b.Bind(loop)
@@ -2745,6 +2747,8 @@ func TestARM64_LoopLegFold(t *testing.T) {
 
 		jit := New(prog, WithTick(1), WithThreshold(0))
 		threaded := New(prog, WithTick(1), WithThreshold(-1))
+		t.Cleanup(func() { require.NoError(t, threaded.Close()) })
+		t.Cleanup(func() { require.NoError(t, jit.Close()) })
 		for n := 0; n < 32; n++ {
 			require.NoError(t, jit.Run(context.Background()))
 			require.NoError(t, threaded.Run(context.Background()))
@@ -2753,12 +2757,10 @@ func TestARM64_LoopLegFold(t *testing.T) {
 			want, err := threaded.PopBoxed()
 			require.NoError(t, err)
 			require.Equal(t, want, got, "result diverged from threaded on iteration %d", n)
-			require.Equal(t, types.BoxI32(0), got)
+			require.Equal(t, types.BoxI32(36), got)
 			require.Equal(t, threaded.rc[1:], jit.rc[1:], "refcount diverged from threaded on iteration %d", n)
 			jit.Reset()
 			threaded.Reset()
 		}
-		require.NoError(t, jit.Close())
-		require.NoError(t, threaded.Close())
 	})
 }

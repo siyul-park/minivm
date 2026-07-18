@@ -1129,8 +1129,8 @@ func (i *Interpreter) start(root anchor, callable asm.Callable, stats counters) 
 
 // loop wraps a native loop Callable installed at a loop header. Unlike entry,
 // the header is reached mid-function with the frame already live, so loop never
-// pushes or tears down a frame. It returns normally only when a folded
-// completed leg ran top-level code to its end; every other exit is a trap.
+// pushes a frame. It returns normally when a folded return or completion leg
+// finishes native execution; every other exit is a trap.
 // A spent budget yields to the safepoint and the Run loop re-enters native at
 // the header; a guarded side exit or the loop-exit edge leaves deopt with
 // i.fr at the resume IP for threaded dispatch to continue.
