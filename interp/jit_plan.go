@@ -630,7 +630,10 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 			// unresolved so wire() can fold it onto a known root block (the
 			// loop back-edge) instead of chaining a spurious empty block.
 			hot := &blocks[len(blocks)-1].term.edges[path]
-			if next.cut && next.fn == hot.anchor.addr && next.target == hot.anchor.ip {
+			if p.kind == entryLoop && tr.kind == partial &&
+				next.cut && next.depth == 0 &&
+				next.fn == p.anchor.addr && next.target == p.anchor.ip &&
+				hot.anchor == p.anchor {
 				return blocks
 			}
 			hot.block = local(len(blocks))

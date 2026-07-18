@@ -2648,6 +2648,19 @@ func TestARM64_LoopLegFold(t *testing.T) {
 		prog, err := b.Build()
 		require.NoError(t, err)
 
+		loopIP := -1
+		for ip := 0; ip < len(prog.Code); {
+			inst := instr.Instruction(prog.Code[ip:])
+			if inst.Opcode() == instr.BR {
+				target := instr.Targets(prog.Code, ip)[0]
+				if target < ip && target > loopIP {
+					loopIP = target
+				}
+			}
+			ip += inst.Width()
+		}
+		require.GreaterOrEqual(t, loopIP, 0)
+
 		profile := prof.New()
 		jit := New(prog, WithTick(1), WithThreshold(0), WithProfiler(profile))
 		threaded := New(prog, WithTick(1), WithThreshold(-1))
@@ -2670,12 +2683,14 @@ func TestARM64_LoopLegFold(t *testing.T) {
 
 		// Once the leg folds, the odd arm no longer exits native code: entries
 		// settle near one per run instead of one per odd element.
-		var entries float64
-		for _, metric := range profile.Metrics() {
-			if metric.Name == "vm_jit_native_entries_total" {
-				entries += metric.Value
-			}
-		}
+		entries, ok := profile.Metric(
+			"vm_jit_native_entries_total",
+			prof.Label{Key: "func", Value: "0"},
+			prof.Label{Key: "ip", Value: strconv.Itoa(loopIP)},
+			prof.Label{Key: "kind", Value: "loop"},
+			prof.Label{Key: "frontend", Value: "trace"},
+		)
+		require.True(t, ok, "expected a scan-loop native entry metric")
 		require.Greater(t, entries, float64(0))
 		require.Less(t, entries/runs, float64(8), "in-loop branch still exits the native loop")
 	})

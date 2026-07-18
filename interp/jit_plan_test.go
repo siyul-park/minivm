@@ -362,6 +362,48 @@ func TestTracePlan(t *testing.T) {
 		require.Equal(t, plans[0].root, last.term.edges[0].block)
 	})
 
+	t.Run("an inlined-frame branch before a matching cut stays a fallback", func(t *testing.T) {
+		root := &trace{
+			anchor: anchor{addr: 1, ip: 2},
+			ops:    []record{{step: step{op: instr.I32_CONST, fn: 1, ip: 2}}},
+			kind:   loop,
+		}
+		leg := &trace{
+			anchor: anchor{addr: 1, ip: 20},
+			ops: []record{
+				{step: step{op: instr.I32_CONST, fn: 1, ip: 20}},
+				{step: step{op: instr.BR, fn: 1, ip: 25, depth: 1}, target: 2},
+				{step: step{fn: 1, ip: 2, depth: 1}, target: 2, cut: true},
+			},
+			kind: partial,
+		}
+		tracer := NewTracer()
+		tracer.trees[anchor{addr: 1, ip: 2}] = &tree{
+			root:     root,
+			branches: map[int]*trace{0: leg},
+			hits:     []int64{9},
+			exits:    map[anchor]int{{addr: 1, ip: 20}: 0},
+		}
+		input := &compileInput{
+			tracer:   tracer,
+			address:  1,
+			function: &types.Function{Code: []byte{byte(instr.NOP)}},
+		}
+
+		plans, err := tracePlan(input)
+		require.NoError(t, err)
+		require.Len(t, plans, 1)
+		require.True(t, plans[0].valid())
+		require.Len(t, plans[0].blocks, 3)
+		branch := plans[0].blocks[1]
+		fallback := plans[0].blocks[2]
+		require.Equal(t, terminateBranch, branch.term.kind)
+		require.Equal(t, 2, branch.term.edges[0].block)
+		require.Equal(t, anchor{addr: 1, ip: 2}, fallback.anchor)
+		require.Equal(t, terminateFallback, fallback.term.kind)
+		require.Equal(t, 2, fallback.term.ip)
+	})
+
 	t.Run("a cut elsewhere stays a fallback", func(t *testing.T) {
 		root := &trace{
 			anchor: anchor{addr: 1, ip: 2},
