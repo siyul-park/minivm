@@ -626,17 +626,8 @@ func (t *Tracer) skipCall(i *Interpreter, addr int) {
 	fn := i.heap[addr].(*types.Function)
 	i.sp -= len(fn.Typ.Params) + 1
 	for _, typ := range fn.Typ.Returns {
-		var val types.Boxed
-		switch typ.Kind() {
-		case types.KindI32:
-			val = types.BoxI32(0)
-		case types.KindI64:
-			val = types.BoxI64(0)
-		case types.KindF32:
-			val = types.BoxF32(0)
-		case types.KindF64:
-			val = types.BoxF64(0)
-		default:
+		val, ok := zeroBoxed(typ.Kind())
+		if !ok {
 			val = types.BoxedNull
 		}
 		i.stack[i.sp] = val

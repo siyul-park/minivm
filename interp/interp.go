@@ -280,8 +280,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		case types.Boxed:
 			val = v
 			if val.Kind() == types.KindRef {
-				addr := val.Ref()
-				if addr >= 0 && addr < len(i.rc) && i.rc[addr] > 0 {
+				if addr := val.Ref(); i.alive(addr) {
 					i.retain(addr)
 				}
 			}
@@ -299,7 +298,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 			val = types.BoxF64(float64(v))
 		case types.Ref:
 			val = types.BoxRef(int(v))
-			if addr := int(v); addr >= 0 && addr < len(i.rc) && i.rc[addr] > 0 {
+			if addr := int(v); i.alive(addr) {
 				i.retain(addr)
 			}
 		default:
@@ -309,12 +308,18 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 				val = types.BoxRef(i.alloc(v))
 			}
 			for _, ref := range i.refs(v) {
-				if addr := int(ref); addr >= 0 && addr < len(i.rc) && i.rc[addr] > 0 {
+				if addr := int(ref); i.alive(addr) {
 					i.retain(addr)
 				}
 			}
 		}
 		i.constants[j] = val
+		if fn, ok := v.(*types.Function); ok {
+			addr := val.Ref()
+			i.instrs[addr] = fn.Code
+			i.handlers[addr] = fn.Handlers
+			i.coros[addr] = i.yields(fn.Code)
+		}
 	}
 
 	i.base = len(i.heap)
@@ -328,21 +333,10 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	i.instrs[0] = prog.Code
 	i.handlers[0] = prog.Handlers
 	i.coros[0] = i.yields(prog.Code)
-	for j, v := range prog.Constants {
-		if fn, ok := v.(*types.Function); ok {
-			addr := i.constants[j].Ref()
-			i.instrs[addr] = fn.Code
-			i.handlers[addr] = fn.Handlers
-			i.coros[addr] = i.yields(fn.Code)
-		}
-	}
 
-	// Seed globals from their declarations. Execution specializes from the
-	// current values; globalTypes remains the boundary contract for SetGlobal and
-	// Reset.
-	for j, typ := range i.globalTypes {
-		i.globals[j] = i.zero(typ.Kind())
-	}
+	// Execution specializes from the current global values; globalTypes remains
+	// the boundary contract for SetGlobal and Reset.
+	i.seed()
 
 	i.backedges[0] = nativeBackend && i.eager
 	c := i.threader(i.backedges[0])
@@ -709,11 +703,15 @@ func (i *Interpreter) Reset() {
 	i.recount()
 	i.free = i.free[:0]
 
-	// Restore each global from its declaration rather than its previous value.
+	i.seed()
+	i.pace()
+}
+
+// seed restores each global from its declaration rather than its previous value.
+func (i *Interpreter) seed() {
 	for idx, typ := range i.globalTypes {
 		i.globals[idx] = i.zero(typ.Kind())
 	}
-	i.pace()
 }
 
 // compile lowers traces already recorded for addr and installs the resulting
