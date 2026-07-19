@@ -626,11 +626,7 @@ func (t *Tracer) skipCall(i *Interpreter, addr int) {
 	fn := i.heap[addr].(*types.Function)
 	i.sp -= len(fn.Typ.Params) + 1
 	for _, typ := range fn.Typ.Returns {
-		val, ok := zeroBoxed(typ.Kind())
-		if !ok {
-			val = types.BoxedNull
-		}
-		i.stack[i.sp] = val
+		i.stack[i.sp] = types.Zero(typ.Kind())
 		i.sp++
 	}
 	i.fr.ip++

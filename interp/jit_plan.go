@@ -272,9 +272,7 @@ func staticPlan(input *compileInput) ([]plan, error) {
 			// and per-field kind guards keep the lowering sound regardless.
 			if inst.Opcode() == instr.STRUCT_GET && len(flow) >= 2 {
 				if kind, ok := structFieldKind(heap, flow[len(flow)-2], flow[len(flow)-1]); ok {
-					if seen, ok := zeroBoxed(kind); ok {
-						step.seen = seen
-					}
+					step.seen = types.Zero(kind)
 				}
 			}
 			switch inst.Opcode() {
@@ -1032,30 +1030,6 @@ func structFieldKind(heap []types.Value, container, index slot) (types.Kind, boo
 		return 0, false
 	}
 	return typ.Fields[index.val].Kind, true
-}
-
-// zeroBoxed builds the zero boxed value whose Kind() reports exactly kind; the
-// static frontend uses it to synthesize step.seen for lowerers that read the
-// observed result kind.
-func zeroBoxed(kind types.Kind) (types.Boxed, bool) {
-	switch kind {
-	case types.KindI1:
-		return types.BoxI1(false), true
-	case types.KindI8:
-		return types.BoxI8(0), true
-	case types.KindI32:
-		return types.BoxI32(0), true
-	case types.KindI64:
-		return types.BoxI64(0), true
-	case types.KindF32:
-		return types.BoxF32(0), true
-	case types.KindF64:
-		return types.BoxF64(0), true
-	case types.KindRef:
-		return types.BoxedNull, true
-	default:
-		return 0, false
-	}
 }
 
 func args(inst instr.Instruction) [2]uint64 {
