@@ -40,8 +40,8 @@ const (
 	fieldKind   = int(unsafe.Offsetof(types.StructField{}.Kind))
 	fieldSize   = int(unsafe.Sizeof(types.StructField{}))
 	errorValue  = types.ErrorValueOffset
-	coroValue   = int(unsafe.Offsetof(Coroutine{}.value))
-	coroDone    = int(unsafe.Offsetof(Coroutine{}.done))
+	coroValue   = int(unsafe.Offsetof(coroutine{}.value))
+	coroDone    = int(unsafe.Offsetof(coroutine{}.done))
 )
 
 const branchTableLimit = 32
@@ -78,7 +78,7 @@ var (
 	heapString    = itab(types.String(""))
 	heapStruct    = itab((*types.Struct)(nil))
 	heapError     = itab((*types.Error)(nil))
-	heapCoroutine = itab((*Coroutine)(nil))
+	heapCoroutine = itab((*coroutine)(nil))
 )
 
 func newCompiler() (*compiler, error) {

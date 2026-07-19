@@ -47,7 +47,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `cli` | 6 | 6 | 0 | 0 |
 | `debug` | 12 | 12 | 0 | 0 |
 | `instr` | 44 | 44 | 0 | 0 |
-| `interp` | 66 | 66 | 0 | 0 |
+| `interp` | 58 | 58 | 0 | 0 |
 | `optimize` | 4 | 4 | 0 | 0 |
 | `pass` | 9 | 9 | 0 | 0 |
 | `prof` | 22 | 22 | 0 | 0 |
@@ -326,12 +326,6 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `instr/parse.go` | `TestReadU8` | ✅ |
 | `instr/type.go` | `TestTypeOf` | ✅ |
 | `instr/type.go` | `TestValid` | ✅ |
-| `interp/cache.go` | `TestCache_Close` | ✅ |
-| `interp/cache.go` | `TestNewCache` | ✅ |
-| `interp/coroutine.go` | `TestCoroutine_Kind` | ✅ |
-| `interp/coroutine.go` | `TestCoroutine_Refs` | ✅ |
-| `interp/coroutine.go` | `TestCoroutine_String` | ✅ |
-| `interp/coroutine.go` | `TestCoroutine_Type` | ✅ |
 | `interp/error.go` | `TestErrorCode` | ✅ |
 | `interp/error.go` | `TestRuntimeError_Error` | ✅ |
 | `interp/error.go` | `TestRuntimeError_Unwrap` | ✅ |
@@ -347,6 +341,7 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `interp/host.go` | `TestHostObject_String` | ✅ |
 | `interp/host.go` | `TestHostObject_Type` | ✅ |
 | `interp/host.go` | `TestNewHostFunction` | ✅ |
+| `interp/host.go` | `TestNewHostObject` | ✅ |
 | `interp/interp.go` | `TestInterpreter_Alloc` | ✅ |
 | `interp/interp.go` | `TestInterpreter_Close` | ✅ |
 | `interp/interp.go` | `TestInterpreter_Const` | ✅ |
@@ -374,24 +369,21 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 | `interp/interp.go` | `TestInterpreter_Store` | ✅ |
 | `interp/interp.go` | `TestInterpreter_Unmarshal` | ✅ |
 | `interp/interp.go` | `TestNew` | ✅ |
-| `interp/interp.go` | `TestWithCache` | ✅ |
+| `interp/interp.go` | `TestWithCodec` | ✅ |
 | `interp/interp.go` | `TestWithConverter` | ✅ |
 | `interp/interp.go` | `TestWithFrame` | ✅ |
 | `interp/interp.go` | `TestWithFuel` | ✅ |
 | `interp/interp.go` | `TestWithHeap` | ✅ |
-| `interp/interp.go` | `TestWithHook` | ✅ |
-| `interp/interp.go` | `TestWithMarshaler` | ✅ |
 | `interp/interp.go` | `TestWithHeapLimit` | ✅ |
+| `interp/interp.go` | `TestWithHook` | ✅ |
 | `interp/interp.go` | `TestWithProfiler` | ✅ |
 | `interp/interp.go` | `TestWithStack` | ✅ |
 | `interp/interp.go` | `TestWithThreshold` | ✅ |
 | `interp/interp.go` | `TestWithTick` | ✅ |
-| `interp/interp.go` | `TestWithTracer` | ✅ |
 | `interp/pool.go` | `TestNewPool` | ✅ |
 | `interp/pool.go` | `TestPool_Close` | ✅ |
 | `interp/pool.go` | `TestPool_Get` | ✅ |
 | `interp/pool.go` | `TestPool_Put` | ✅ |
-| `interp/trace.go` | `TestNewTracer` | ✅ |
 | `optimize/optimizer.go` | `TestNew` | ✅ |
 | `optimize/optimizer.go` | `TestOptimizer_Add` | ✅ |
 | `optimize/optimizer.go` | `TestOptimizer_Level` | ✅ |
@@ -855,6 +847,13 @@ ARM64 instruction factories are the sole shared-family exception. `TestEncoder_E
 ## Intentional White-Box Coverage
 
 White-box tests remain only when exported behavior cannot directly protect the invariant: reference counts and free-list reuse, generated handler completeness, verifier dataflow policies, trace/cache state transitions, journal materialization, register allocation, relocation encoding, executable-buffer W^X and pointer stability, and architecture ABI encoding.
+
+Within `interp`, `TestCache` protects request coalescing, side-exit priority,
+and shared attach/detach/close lifetime; `TestTracer_*` protects capture outcomes,
+root reuse, publication, snapshots, and concurrent recording; and
+`TestCoroutine_Refs` protects suspended ref-edge discovery. These are private
+GC/JIT invariants with no complete public observation point. Pool sharing and
+lifecycle remain covered through `TestNewPool` and `TestPool_*`.
 
 ## Automated Gates
 

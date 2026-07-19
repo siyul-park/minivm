@@ -35,7 +35,7 @@ type step struct {
 }
 
 type compileInput struct {
-	tracer    *Tracer
+	tracer    *tracer
 	address   int
 	function  *types.Function
 	module    *types.Function
@@ -321,7 +321,7 @@ func tracePlan(input *compileInput) ([]plan, error) {
 	for _, ip := range input.tracer.anchors(input.address) {
 		a := anchor{addr: input.address, ip: ip}
 		tree := input.tracer.rootAt(a)
-		if tree == nil || tree.root == nil || tree.root.status == aborted {
+		if tree == nil || tree.root == nil {
 			continue
 		}
 		// A loop anchor accepts a looping root or a returned straight-line
@@ -329,10 +329,22 @@ func tracePlan(input *compileInput) ([]plan, error) {
 		// throw) deopts before the back-edge still compiles as a per-entry
 		// prefix that re-enters at the header next iteration. Carried entry
 		// operands stay rejected either way.
-		if ip != 0 && (tree.root.status != loop && tree.root.status != returned || tree.root.carried) {
+		switch tree.root.status {
+		case fallback, completed, partial:
+			if ip != 0 {
+				continue
+			}
+		case returned:
+			if ip != 0 && tree.root.carried {
+				continue
+			}
+		case loop:
+			if ip == 0 || tree.root.carried {
+				continue
+			}
+		case aborted:
 			continue
-		}
-		if ip == 0 && tree.root.status == loop {
+		default:
 			continue
 		}
 		kind := entryFunction
@@ -356,7 +368,7 @@ func tracePlan(input *compileInput) ([]plan, error) {
 		}
 		var legs []leg
 		for id, tr := range tree.branches {
-			if tr == nil || tr.status == aborted {
+			if tr == nil {
 				continue
 			}
 			// A loop-kind leg is a loop root of its own: anchored at this
@@ -364,7 +376,11 @@ func tracePlan(input *compileInput) ([]plan, error) {
 			// root, and its edge already wires to the root block); anchored
 			// elsewhere it is a different loop, and splitting it here would
 			// inline that whole loop body instead of using its native entry.
-			if tr.status == loop {
+			switch tr.status {
+			case aborted, loop:
+				continue
+			case fallback, returned, completed, partial:
+			default:
 				continue
 			}
 			hits := int64(0)
@@ -640,6 +656,8 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 		return blocks
 	}
 	switch tr.status {
+	case fallback:
+		current.term = terminator{kind: terminateFallback, ip: tr.anchor.ip, hot: -1}
 	case returned:
 		current.term = terminator{kind: terminateFallthrough, hot: -1}
 	case completed:
@@ -652,8 +670,10 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 		current.term = terminator{kind: terminateFallback, ip: resume, hot: -1}
 	case loop:
 		current.term = terminator{kind: terminateBranch, ip: tr.anchor.ip, hot: 0, edges: []edge{{anchor: tr.anchor, block: local(0)}}}
+	case aborted:
+		return nil
 	default:
-		current.term = terminator{kind: terminateFallback, ip: tr.anchor.ip, hot: -1}
+		return nil
 	}
 	blocks = append(blocks, current)
 	return blocks

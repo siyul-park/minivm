@@ -30,23 +30,22 @@ func (i *blockingIterator) Current() types.Value {
 	return types.I32(0)
 }
 
-func TestNewTracer(t *testing.T) {
-	tracer := NewTracer()
-	require.NotNil(t, tracer)
-	require.NotNil(t, tracer.trees)
-}
-
 func TestTracer_Capture(t *testing.T) {
 	t.Run("records top-level fallthrough as completed", func(t *testing.T) {
-		tracer := NewTracer()
+		tracer := newTracer()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
 		})
-		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
 		result := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
 		require.NotNil(t, result.trace)
+		require.Equal(t, prof.CaptureOutcomePublished, result.outcome)
+		require.Equal(t, prof.CaptureReasonNone, result.reason)
+		published := tracer.rootAt(anchor{addr: i.fr.addr, ip: 0})
+		require.NotNil(t, published)
+		require.Same(t, result.trace, published.root)
 		tr := result.trace
 		require.Equal(t, completed, tr.status)
 		require.NotEmpty(t, tr.ops)
@@ -56,16 +55,21 @@ func TestTracer_Capture(t *testing.T) {
 	t.Run("records yield as a terminal deopt boundary", func(t *testing.T) {
 		// YIELD is a suspension point: capture records it as the trace's terminal
 		// (status=returned) instead of aborting, so the JIT can lower it to a deopt.
-		tracer := NewTracer()
+		tracer := newTracer()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),
 			instr.New(instr.YIELD),
 		})
-		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
 		result := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
 		require.NotNil(t, result.trace)
+		require.Equal(t, prof.CaptureOutcomePublished, result.outcome)
+		require.Equal(t, prof.CaptureReasonNone, result.reason)
+		published := tracer.rootAt(anchor{addr: i.fr.addr, ip: 0})
+		require.NotNil(t, published)
+		require.Same(t, result.trace, published.root)
 		tr := result.trace
 		require.Equal(t, returned, tr.status)
 		require.NotEmpty(t, tr.ops)
@@ -74,7 +78,7 @@ func TestTracer_Capture(t *testing.T) {
 
 	t.Run("continues after primitive array set", func(t *testing.T) {
 		array := types.TypedArray[int32]{1}
-		tracer := NewTracer()
+		tracer := newTracer()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.I32_CONST, 0),
@@ -82,7 +86,7 @@ func TestTracer_Capture(t *testing.T) {
 			instr.New(instr.ARRAY_SET),
 			instr.New(instr.I32_CONST, 7),
 		}, program.WithConstants(array))
-		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
 		result := tracer.capture(i, anchor{})
@@ -96,7 +100,7 @@ func TestTracer_Capture(t *testing.T) {
 			types.NewStructType(types.NewStructField(types.TypeI32)),
 			types.BoxI32(1),
 		)
-		tracer := NewTracer()
+		tracer := newTracer()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.I32_CONST, 0),
@@ -104,7 +108,7 @@ func TestTracer_Capture(t *testing.T) {
 			instr.New(instr.STRUCT_SET),
 			instr.New(instr.I32_CONST, 7),
 		}, program.WithConstants(structure))
-		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
 		result := tracer.capture(i, anchor{})
@@ -118,7 +122,7 @@ func TestTracer_Capture(t *testing.T) {
 			types.NewStructType(types.NewStructField(types.TypeI32Array)),
 			types.BoxedNull,
 		)
-		tracer := NewTracer()
+		tracer := newTracer()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.I32_CONST, 0),
@@ -126,7 +130,7 @@ func TestTracer_Capture(t *testing.T) {
 			instr.New(instr.STRUCT_SET),
 			instr.New(instr.I32_CONST, 7),
 		}, program.WithConstants(structure))
-		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
 		result := tracer.capture(i, anchor{})
@@ -139,7 +143,7 @@ func TestTracer_Capture(t *testing.T) {
 
 	t.Run("records bulk mutation as a terminal deopt boundary", func(t *testing.T) {
 		array := types.TypedArray[int32]{1, 2}
-		tracer := NewTracer()
+		tracer := newTracer()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.CONST_GET, 0),
 			instr.New(instr.I32_CONST, 0),
@@ -148,7 +152,7 @@ func TestTracer_Capture(t *testing.T) {
 			instr.New(instr.ARRAY_FILL),
 			instr.New(instr.I32_CONST, 7),
 		}, program.WithConstants(array))
-		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
 		result := tracer.capture(i, anchor{})
@@ -158,16 +162,44 @@ func TestTracer_Capture(t *testing.T) {
 	})
 
 	t.Run("still aborts at allocation", func(t *testing.T) {
-		tracer := NewTracer()
+		tracer := newTracer()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.ARRAY_NEW_DEFAULT, 0),
 		}, program.WithTypes(types.TypeI32Array))
-		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
 		result := tracer.capture(i, anchor{})
+		require.Nil(t, result.trace)
+		require.Equal(t, prof.CaptureOutcomeRejected, result.outcome)
 		require.Equal(t, prof.CaptureReasonUnsupportedOp, result.reason)
+		require.Nil(t, tracer.rootAt(anchor{}))
+	})
+
+	t.Run("publishes fallback and loop statuses", func(t *testing.T) {
+		for _, tt := range []struct {
+			name   string
+			status status
+		}{
+			{name: "fallback", status: fallback},
+			{name: "loop", status: loop},
+		} {
+			tracer := newTracer()
+			root := anchor{addr: 1, ip: 4}
+			tree := tracer.tree(root)
+			tr := &trace{anchor: root}
+
+			result := tracer.publish(root, tree, tr, tt.status, prof.CaptureReasonNone)
+
+			require.Same(t, tr, result.trace, tt.name)
+			require.Equal(t, tt.status, tr.status, tt.name)
+			require.Equal(t, prof.CaptureOutcomePublished, result.outcome, tt.name)
+			require.Equal(t, prof.CaptureReasonNone, result.reason, tt.name)
+			published := tracer.rootAt(root)
+			require.NotNil(t, published, tt.name)
+			require.Same(t, tr, published.root, tt.name)
+		}
 	})
 
 	primitive := types.TypedArray[int32]{1}
@@ -188,14 +220,14 @@ func TestTracer_Capture(t *testing.T) {
 	}
 	for _, tt := range mutationTests {
 		t.Run("isolates captured mutation for "+tt.name, func(t *testing.T) {
-			tracer := NewTracer()
+			tracer := newTracer()
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.I32_CONST, 0),
 				instr.New(instr.I32_CONST, 2),
 				instr.New(tt.op),
 			}, program.WithConstants(tt.value))
-			i := New(prog, WithTracer(tracer), WithThreshold(-1))
+			i := New(prog, withTracer(tracer), WithThreshold(-1))
 			defer i.Close()
 
 			tracer.capture(i, anchor{})
@@ -218,7 +250,7 @@ func TestTracer_Capture(t *testing.T) {
 	}
 	for _, tt := range aliasTests {
 		t.Run("preserves typed array aliases for "+tt.name, func(t *testing.T) {
-			tracer := NewTracer()
+			tracer := newTracer()
 			prog := program.New([]instr.Instruction{
 				instr.New(instr.CONST_GET, 0),
 				instr.New(instr.I32_CONST, tt.setIndex),
@@ -228,7 +260,7 @@ func TestTracer_Capture(t *testing.T) {
 				instr.New(instr.I32_CONST, tt.readIndex),
 				instr.New(instr.ARRAY_GET),
 			}, program.WithConstants(tt.first, tt.second))
-			i := New(prog, WithTracer(tracer), WithThreshold(-1))
+			i := New(prog, withTracer(tracer), WithThreshold(-1))
 			defer i.Close()
 
 			result := tracer.capture(i, anchor{})
@@ -243,12 +275,17 @@ func TestTracer_Capture(t *testing.T) {
 		for j := range code {
 			code[j] = instr.New(instr.NOP)
 		}
-		tracer := NewTracer()
-		i := New(program.New(code), WithTracer(tracer), WithThreshold(-1))
+		tracer := newTracer()
+		i := New(program.New(code), withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
 		result := tracer.capture(i, anchor{addr: 0, ip: 0})
 		require.NotNil(t, result.trace)
+		require.Equal(t, prof.CaptureOutcomePartial, result.outcome)
+		require.Equal(t, prof.CaptureReasonOpLimit, result.reason)
+		published := tracer.rootAt(anchor{})
+		require.NotNil(t, published)
+		require.Same(t, result.trace, published.root)
 		tr := result.trace
 		require.Equal(t, partial, tr.status)
 		require.Len(t, tr.ops, opLimit+1)
@@ -266,8 +303,8 @@ func TestTracer_Capture(t *testing.T) {
 			Br(loop)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		tracer := NewTracer()
-		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		tracer := newTracer()
+		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
 		result := tracer.capture(i, anchor{addr: 0, ip: 0})
@@ -281,7 +318,7 @@ func TestTracer_Capture(t *testing.T) {
 	})
 
 	t.Run("records one entry concurrently", func(t *testing.T) {
-		tracer := NewTracer()
+		tracer := newTracer()
 		release := make(chan struct{})
 		iter := &blockingIterator{entered: make(chan struct{}), release: release}
 		prog := program.New(
@@ -292,7 +329,7 @@ func TestTracer_Capture(t *testing.T) {
 		const workers = attemptLimit + 1
 		interpreters := make([]*Interpreter, workers)
 		done := make(chan struct{}, workers)
-		interpreters[0] = New(prog, WithTracer(tracer), WithThreshold(-1))
+		interpreters[0] = New(prog, withTracer(tracer), WithThreshold(-1))
 		go func() {
 			tracer.capture(interpreters[0], anchor{})
 			done <- struct{}{}
@@ -301,7 +338,7 @@ func TestTracer_Capture(t *testing.T) {
 
 		started := make(chan struct{})
 		for idx := 1; idx < workers; idx++ {
-			i := New(prog, WithTracer(tracer), WithThreshold(-1))
+			i := New(prog, withTracer(tracer), WithThreshold(-1))
 			interpreters[idx] = i
 			go func() {
 				started <- struct{}{}
@@ -327,14 +364,14 @@ func TestTracer_Capture(t *testing.T) {
 	})
 
 	t.Run("does not publish a side exit to a removed tree", func(t *testing.T) {
-		tracer := NewTracer()
+		tracer := newTracer()
 		release := make(chan struct{})
 		iter := &blockingIterator{entered: make(chan struct{}), release: release}
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.NOP),
 			instr.New(instr.CORO_VALUE),
 		})
-		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
 		addr := i.alloc(iter)
@@ -359,10 +396,10 @@ func TestTracer_Capture(t *testing.T) {
 	})
 
 	t.Run("isolates function reclamation", func(t *testing.T) {
-		tracer := NewTracer()
+		tracer := newTracer()
 		i := New(
 			program.New([]instr.Instruction{instr.New(instr.DROP)}),
-			WithTracer(tracer),
+			withTracer(tracer),
 			WithThreshold(-1),
 		)
 		defer i.Close()
@@ -395,10 +432,10 @@ func TestTracer_Capture(t *testing.T) {
 	})
 
 	t.Run("does not finalize live values while recording", func(t *testing.T) {
-		tracer := NewTracer()
+		tracer := newTracer()
 		i := New(
 			program.New([]instr.Instruction{instr.New(instr.DROP)}),
-			WithTracer(tracer),
+			withTracer(tracer),
 			WithThreshold(-1),
 		)
 		defer i.Close()
@@ -413,12 +450,12 @@ func TestTracer_Capture(t *testing.T) {
 	})
 
 	t.Run("does not publish aborted traces", func(t *testing.T) {
-		tracer := NewTracer()
+		tracer := newTracer()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 1),
 			instr.New(instr.REF_NEW),
 		})
-		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
 		for range attemptLimit + 1 {
@@ -437,7 +474,7 @@ func TestTracer_Capture(t *testing.T) {
 
 func TestTracer_OrdersAnchors(t *testing.T) {
 	t.Run("returns anchors in instruction order", func(t *testing.T) {
-		tracer := NewTracer()
+		tracer := newTracer()
 		const count = 64
 		for ip := count - 1; ip >= 0; ip-- {
 			tracer.trees[anchor{addr: 1, ip: ip}] = &tree{root: &trace{anchor: anchor{addr: 1, ip: ip}, status: completed}}
@@ -469,8 +506,8 @@ func TestTracer_Headers(t *testing.T) {
 			Emit(instr.LOCAL_GET, 0)
 		prog, err := b.Build()
 		require.NoError(t, err)
-		tracer := NewTracer()
-		i := New(prog, WithTracer(tracer), WithThreshold(-1))
+		tracer := newTracer()
+		i := New(prog, withTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
 		const workers = 16
@@ -494,15 +531,15 @@ func TestTracer_Headers(t *testing.T) {
 }
 
 func TestTracer_IsolatesPrograms(t *testing.T) {
-	tracer := NewTracer()
+	tracer := newTracer()
 	first := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 1)})
 	second := program.New([]instr.Instruction{instr.New(instr.I32_CONST, 2)})
 
-	left := New(first, WithTracer(tracer), WithThreshold(-1))
+	left := New(first, withTracer(tracer), WithThreshold(-1))
 	defer left.Close()
 	before := tracer.exactCodes(left)
 
-	right := New(second, WithTracer(tracer), WithThreshold(-1))
+	right := New(second, withTracer(tracer), WithThreshold(-1))
 	defer right.Close()
 	after := right.tracer.exactCodes(right)
 
@@ -512,12 +549,12 @@ func TestTracer_IsolatesPrograms(t *testing.T) {
 }
 
 func TestTracer_Remove(t *testing.T) {
-	tracer := NewTracer()
+	tracer := newTracer()
 	first := program.New([]instr.Instruction{
 		instr.New(instr.I32_CONST, 1),
 	}, program.WithConstants(types.NewFunctionBuilder(&types.FunctionType{Returns: []types.Type{types.TypeI32}}).
 		Emit(instr.New(instr.I32_CONST, 2), instr.New(instr.RETURN)).MustBuild()))
-	i := New(first, WithTracer(tracer), WithThreshold(-1))
+	i := New(first, withTracer(tracer), WithThreshold(-1))
 	defer i.Close()
 
 	exact := tracer.exactCodes(i)

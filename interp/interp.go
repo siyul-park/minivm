@@ -19,13 +19,14 @@ import (
 type Interpreter struct {
 	ctx         context.Context
 	done        <-chan struct{}
-	tracer      *Tracer
+	tracer      *tracer
 	hook        func(*Interpreter) error
-	marshaler   Marshaler
+	codec       Codec
+	planner     *codec
 	speculative bool
 
 	compiler *compiler
-	cache    *Cache
+	cache    *cache
 	profiler *prof.Profiler
 	samples  *prof.Collector
 	exits    map[anchor]func(*Interpreter)
@@ -90,10 +91,10 @@ type frame struct {
 
 type option struct {
 	hook       func(*Interpreter) error
-	marshaler  Marshaler
+	codec      Codec
 	converters map[reflect.Type]Converter
-	cache      *Cache
-	tracer     *Tracer
+	cache      *cache
+	tracer     *tracer
 	profiler   *prof.Profiler
 	threshold  int
 
@@ -112,14 +113,14 @@ func WithHook(fn func(*Interpreter) error) func(*option) {
 	return func(o *option) { o.hook = fn }
 }
 
-func WithMarshaler(m Marshaler) func(*option) {
-	return func(o *option) { o.marshaler = m }
+func WithCodec(c Codec) func(*option) {
+	return func(o *option) { o.codec = c }
 }
 
 // WithConverter registers VM conversion for an external Go type t that cannot
-// implement ValueMarshaler / ValueUnmarshaler. It layers onto the default
-// marshaler and applies wherever t appears, including nested values. It has no
-// effect when WithMarshaler supplies a non-default Marshaler.
+// implement ValueMarshaler / ValueUnmarshaler. It layers onto the built-in
+// reflection codec and applies wherever t appears, including nested values. It
+// has no effect when WithCodec supplies a custom Codec.
 func WithConverter(t reflect.Type, c Converter) func(*option) {
 	return func(o *option) {
 		if o.converters == nil {
@@ -129,13 +130,13 @@ func WithConverter(t reflect.Type, c Converter) func(*option) {
 	}
 }
 
-func WithCache(c *Cache) func(*option) {
+func withCache(c *cache) func(*option) {
 	return func(o *option) { o.cache = c }
 }
 
-// WithTracer shares tracing state with interpreters for the same program.
+// withTracer shares tracing state with interpreters for the same program.
 // A tracer already bound to another program is isolated automatically.
-func WithTracer(t *Tracer) func(*option) {
+func withTracer(t *tracer) func(*option) {
 	return func(o *option) { o.tracer = t }
 }
 
@@ -206,18 +207,14 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 
 	tracer := opt.tracer
 	if tracer == nil || !tracer.bind(prog) {
-		tracer = NewTracer()
+		tracer = newTracer()
 		tracer.bind(prog)
 	}
 	samples := prof.NewCollector()
-	m := opt.marshaler
-	if m == nil {
-		m = DefaultMarshaler
-	}
-	if len(opt.converters) > 0 {
-		if _, ok := m.(*codec); ok {
-			m = &codec{converters: opt.converters}
-		}
+	planner := &codec{converters: opt.converters}
+	activeCodec := Codec(planner)
+	if opt.codec != nil {
+		activeCodec = opt.codec
 	}
 
 	var fuel int64 = -1
@@ -236,7 +233,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	i := &Interpreter{
 		tracer:      tracer,
 		hook:        opt.hook,
-		marshaler:   m,
+		codec:       activeCodec,
+		planner:     planner,
 		cache:       opt.cache,
 		profiler:    opt.profiler,
 		samples:     samples,
@@ -385,11 +383,11 @@ func (i *Interpreter) Run(ctx context.Context) error {
 
 func (i *Interpreter) Marshal(v any) (val types.Value, err error) {
 	defer i.guard(&err)
-	return i.marshaler.Marshal(i, v)
+	return i.codec.Marshal(i, v)
 }
 
 func (i *Interpreter) Unmarshal(v types.Value, dst any) error {
-	return i.marshaler.Unmarshal(i, v, dst)
+	return i.codec.Unmarshal(i, v, dst)
 }
 
 func (i *Interpreter) Context() context.Context {
@@ -1048,7 +1046,7 @@ func (i *Interpreter) trace(f *frame) error {
 		return nil
 	}
 	if i.cache != nil {
-		i.cache.request(cacheRequest{root: root, trigger: prof.TriggerHot})
+		i.cache.request(request{root: root, trigger: prof.TriggerHot})
 		return nil
 	}
 	return i.compile(root)
@@ -1215,7 +1213,7 @@ func (i *Interpreter) exit(root anchor) {
 			return
 		}
 		// Queue a side-exit build request without disturbing an active owner.
-		i.cache.request(cacheRequest{root: root, trigger: prof.TriggerSideExit})
+		i.cache.request(request{root: root, trigger: prof.TriggerSideExit})
 		return
 	}
 	if hits != exitThreshold {

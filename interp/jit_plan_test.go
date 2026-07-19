@@ -245,6 +245,19 @@ func TestStaticPlan(t *testing.T) {
 }
 
 func TestTracePlan(t *testing.T) {
+	t.Run("ends an explicit fallback trace at its anchor", func(t *testing.T) {
+		tr := &trace{
+			anchor: anchor{addr: 1, ip: 4},
+			ops:    []record{{step: step{op: instr.I32_CONST, fn: 1, ip: 4}}},
+			status: fallback,
+		}
+
+		blocks := split(&plan{anchor: tr.anchor}, tr, nil)
+		require.Len(t, blocks, 1)
+		require.Equal(t, terminateFallback, blocks[0].term.kind)
+		require.Equal(t, tr.anchor.ip, blocks[0].term.ip)
+	})
+
 	t.Run("folds a hot returned leg", func(t *testing.T) {
 		root := &trace{
 			anchor: anchor{addr: 1},
@@ -259,7 +272,7 @@ func TestTracePlan(t *testing.T) {
 			ops:    []record{{step: step{op: instr.RETURN, fn: 1, ip: 12}}},
 			status: returned,
 		}
-		tracer := NewTracer()
+		tracer := newTracer()
 		tracer.trees[anchor{addr: 1}] = &tree{
 			root:     root,
 			branches: map[int]*trace{0: continuation},
@@ -300,7 +313,7 @@ func TestTracePlan(t *testing.T) {
 			},
 			status: partial,
 		}
-		tracer := NewTracer()
+		tracer := newTracer()
 		tracer.trees[anchor{addr: 1, ip: 2}] = &tree{
 			root:     root,
 			branches: map[int]*trace{0: leg},
@@ -338,7 +351,7 @@ func TestTracePlan(t *testing.T) {
 			},
 			status: partial,
 		}
-		tracer := NewTracer()
+		tracer := newTracer()
 		tracer.trees[anchor{addr: 1, ip: 2}] = &tree{
 			root:     root,
 			branches: map[int]*trace{0: leg},
@@ -377,7 +390,7 @@ func TestTracePlan(t *testing.T) {
 			},
 			status: partial,
 		}
-		tracer := NewTracer()
+		tracer := newTracer()
 		tracer.trees[anchor{addr: 1, ip: 2}] = &tree{
 			root:     root,
 			branches: map[int]*trace{0: leg},
@@ -418,7 +431,7 @@ func TestTracePlan(t *testing.T) {
 			},
 			status: partial,
 		}
-		tracer := NewTracer()
+		tracer := newTracer()
 		tracer.trees[anchor{addr: 1, ip: 2}] = &tree{
 			root:     root,
 			branches: map[int]*trace{0: leg},
@@ -451,7 +464,7 @@ func TestTracePlan(t *testing.T) {
 			ops:    []record{{step: step{op: instr.I32_CONST, fn: 1, ip: 40}}},
 			status: loop,
 		}
-		tracer := NewTracer()
+		tracer := newTracer()
 		tracer.trees[anchor{addr: 1, ip: 2}] = &tree{
 			root:     root,
 			branches: map[int]*trace{0: root, 1: other},

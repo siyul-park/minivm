@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	"github.com/siyul-park/minivm/instr"
+	"github.com/siyul-park/minivm/interp"
 	"github.com/siyul-park/minivm/prof"
+	"github.com/siyul-park/minivm/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -607,6 +609,27 @@ func TestREPL_Run(t *testing.T) {
 		require.Contains(t, out2.String(), "loaded "+path)
 		require.Contains(t, out2.String(), "i32.add")
 		require.Equal(t, 3, len(r2.instrs))
+	})
+
+	t.Run("save rejects host-only constants", func(t *testing.T) {
+		values := []struct {
+			value types.Value
+			name  string
+		}{
+			{value: interp.NewHostFunction(&types.FunctionType{}, nil), name: "host function"},
+			{value: &interp.HostObject{}, name: "host object"},
+		}
+		for _, tt := range values {
+			path := filepath.Join(t.TempDir(), "host.mvm")
+			var out bytes.Buffer
+			r := NewREPL(strings.NewReader(".save "+path+"\n.quit\n"), &out, OS())
+			r.constants = []types.Value{tt.value}
+
+			require.NoError(t, r.Run(context.Background()))
+			require.Contains(t, out.String(), "error: cannot save: constant 0 is a "+tt.name)
+			_, err := os.Stat(path)
+			require.ErrorIs(t, err, os.ErrNotExist)
+		}
 	})
 
 	t.Run("load replaces current state", func(t *testing.T) {

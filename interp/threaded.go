@@ -192,7 +192,7 @@ var (
 					f.release = true
 					f.coro = 0
 					if addr < len(i.coros) && i.coros[addr] {
-						f.coro = i.alloc(&Coroutine{typ: fn.Typ})
+						f.coro = i.alloc(&coroutine{typ: fn.Typ})
 					}
 					i.sp = f.bp + params + locals
 					i.fr.ip += 1
@@ -229,7 +229,7 @@ var (
 					f.release = true
 					f.coro = 0
 					if int(fn.Fn) < len(i.coros) && i.coros[int(fn.Fn)] {
-						f.coro = i.alloc(&Coroutine{typ: fn.Typ})
+						f.coro = i.alloc(&coroutine{typ: fn.Typ})
 					}
 					i.sp = f.bp + params + locals
 					i.fr.ip += 1
@@ -300,7 +300,7 @@ var (
 					{
 						f := i.fr
 						coAddr := f.coro
-						co, ok := i.heap[coAddr].(*Coroutine)
+						co, ok := i.heap[coAddr].(*coroutine)
 						if !ok {
 							panic(ErrTypeMismatch)
 						}
@@ -577,7 +577,7 @@ var (
 				{
 					f := i.fr
 					coAddr := f.coro
-					co, ok := i.heap[coAddr].(*Coroutine)
+					co, ok := i.heap[coAddr].(*coroutine)
 					if !ok {
 						panic(ErrTypeMismatch)
 					}
@@ -619,7 +619,7 @@ var (
 					}
 					coAddr := box.Ref()
 					switch co := i.heap[coAddr].(type) {
-					case *Coroutine:
+					case *coroutine:
 						{
 							coAddr := coAddr
 							co := co
@@ -720,7 +720,7 @@ var (
 				}
 				done := int32(0)
 				switch co := i.heap[ref.Ref()].(type) {
-				case *Coroutine:
+				case *coroutine:
 					if co.done {
 						done = 1
 					}
@@ -747,7 +747,7 @@ var (
 				}
 				var val types.Boxed
 				switch co := i.heap[box.Ref()].(type) {
-				case *Coroutine:
+				case *coroutine:
 					val = co.value
 					i.retainBox(val)
 				case types.Iterator:
@@ -4380,17 +4380,21 @@ var (
 						panic(ErrTypeMismatch)
 					}
 				case *HostObject:
-					if index < 0 || index >= len(value.Typ.Fields) {
+					kind, ok := value.kind(index)
+					if !ok {
 						panic(ErrSegmentationFault)
 					}
-					switch value.Typ.Fields[index].Kind {
+					switch kind {
 					case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-						result = value.Field(index)
+						result, _, _ = value.read(index)
 					case types.KindI64:
 						result = i.boxI64(int64(value.Raw(index)))
 					case types.KindRef:
-						result = types.Boxed(value.Raw(index))
-						i.retainBox(result)
+						boxed, owned, _ := value.read(index)
+						result = boxed
+						if !owned {
+							i.retainBox(result)
+						}
 					default:
 						panic(ErrTypeMismatch)
 					}
@@ -4449,19 +4453,16 @@ var (
 						panic(ErrTypeMismatch)
 					}
 				case *HostObject:
-					typ := s.Typ
-					if idx < 0 || idx >= len(typ.Fields) {
+					kind, ok := s.writeKind(idx)
+					if !ok {
 						panic(ErrSegmentationFault)
 					}
-					field := typ.Fields[idx]
-					switch field.Kind {
+					switch kind {
 					case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
 						s.SetField(idx, val)
 					case types.KindI64:
 						s.SetRaw(idx, uint64(i.unboxI64(val)))
 					case types.KindRef:
-						old := types.Boxed(s.Raw(idx))
-						i.releaseBox(old)
 						s.SetRaw(idx, uint64(val))
 					default:
 						panic(ErrTypeMismatch)
@@ -39450,17 +39451,21 @@ var (
 							panic(ErrTypeMismatch)
 						}
 					case *HostObject:
-						if int(v0) < 0 || int(v0) >= len(value.Typ.Fields) {
+						kind, ok := value.kind(int(v0))
+						if !ok {
 							panic(ErrSegmentationFault)
 						}
-						switch value.Typ.Fields[int(v0)].Kind {
+						switch kind {
 						case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-							result = value.Field(int(v0))
+							result, _, _ = value.read(int(v0))
 						case types.KindI64:
 							result = i.boxI64(int64(value.Raw(int(v0))))
 						case types.KindRef:
-							result = types.Boxed(value.Raw(int(v0)))
-							i.retainBox(result)
+							boxed, owned, _ := value.read(int(v0))
+							result = boxed
+							if !owned {
+								i.retainBox(result)
+							}
 						default:
 							panic(ErrTypeMismatch)
 						}
@@ -61276,17 +61281,21 @@ var (
 							panic(ErrTypeMismatch)
 						}
 					case *HostObject:
-						if int(v0) < 0 || int(v0) >= len(value.Typ.Fields) {
+						kind, ok := value.kind(int(v0))
+						if !ok {
 							panic(ErrSegmentationFault)
 						}
-						switch value.Typ.Fields[int(v0)].Kind {
+						switch kind {
 						case types.KindI32, types.KindI8, types.KindI1, types.KindF32, types.KindF64:
-							result = value.Field(int(v0))
+							result, _, _ = value.read(int(v0))
 						case types.KindI64:
 							result = i.boxI64(int64(value.Raw(int(v0))))
 						case types.KindRef:
-							result = types.Boxed(value.Raw(int(v0)))
-							i.retainBox(result)
+							boxed, owned, _ := value.read(int(v0))
+							result = boxed
+							if !owned {
+								i.retainBox(result)
+							}
 						default:
 							panic(ErrTypeMismatch)
 						}
