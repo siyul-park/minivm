@@ -13,7 +13,7 @@ import (
 	"github.com/siyul-park/minivm/types"
 )
 
-type Marshaler interface {
+type Codec interface {
 	Marshal(*Interpreter, any) (types.Value, error)
 	Unmarshal(*Interpreter, types.Value, any) error
 }
@@ -35,7 +35,7 @@ type ValueUnmarshaler interface {
 
 // Converter registers VM conversion for a Go type that cannot implement
 // ValueMarshaler / ValueUnmarshaler (an external type). Register it with
-// WithConverter; the default marshaler then applies it wherever that type
+// WithConverter; the built-in codec then applies it wherever that type
 // appears, including nested in structs, slices, and maps. Marshal or Unmarshal
 // may be nil to leave that direction unsupported. Unmarshal receives a pointer
 // to the destination.
@@ -50,9 +50,9 @@ type codec struct {
 	converters map[reflect.Type]Converter
 }
 
-type marshalPlan struct {
-	VMType    types.Type
-	Type      reflect.Type
+type conversion struct {
+	vm        types.Type
+	typ       reflect.Type
 	marshal   marshaler
 	unmarshal unmarshaler
 }
@@ -62,21 +62,21 @@ type marshaler func(*marshalState, reflect.Value) (types.Value, error)
 type unmarshaler func(*unmarshalState, types.Value, reflect.Value) error
 
 type fieldPlan struct {
-	Index  int
-	Offset uintptr
-	Kind   reflect.Kind
-	Plan   *marshalPlan
+	index      int
+	offset     uintptr
+	kind       reflect.Kind
+	conversion *conversion
 }
 
 type marshalState struct {
-	m    *codec
-	i    *Interpreter
-	seen map[uintptr]bool
+	codec  *codec
+	interp *Interpreter
+	seen   map[uintptr]bool
 }
 
 type unmarshalState struct {
-	m *codec
-	i *Interpreter
+	codec  *codec
+	interp *Interpreter
 }
 
 var (
@@ -86,10 +86,8 @@ var (
 	ErrValueOverflow          = errors.New("value overflow")
 )
 
-var DefaultMarshaler Marshaler = &codec{}
-
 var (
-	_ Marshaler = (*codec)(nil)
+	_ Codec = (*codec)(nil)
 
 	typeError   = reflect.TypeOf((*error)(nil)).Elem()
 	typeContext = reflect.TypeOf((*context.Context)(nil)).Elem()
@@ -160,12 +158,12 @@ var (
 )
 
 func (m *codec) Marshal(i *Interpreter, v any) (types.Value, error) {
-	state := &marshalState{m: m, i: i, seen: make(map[uintptr]bool)}
+	state := &marshalState{codec: m, interp: i, seen: make(map[uintptr]bool)}
 	return state.value(reflect.ValueOf(v))
 }
 
 func (m *codec) Unmarshal(i *Interpreter, v types.Value, dst any) error {
-	state := &unmarshalState{m: m, i: i}
+	state := &unmarshalState{codec: m, interp: i}
 	out := reflect.ValueOf(dst)
 	if !out.IsValid() || out.Kind() != reflect.Pointer || out.IsNil() {
 		return fmt.Errorf("%w: destination must be non-nil pointer", ErrInvalidUnmarshalTarget)
@@ -177,24 +175,24 @@ func (m *codec) Unmarshal(i *Interpreter, v types.Value, dst any) error {
 	return nil
 }
 
-func (m *codec) plan(t reflect.Type) (*marshalPlan, error) {
+func (m *codec) plan(t reflect.Type) (*conversion, error) {
 	if p, ok := m.plans.Load(t); ok {
-		return p.(*marshalPlan), nil
+		return p.(*conversion), nil
 	}
 	p, err := m.compile(t, make(map[reflect.Type]bool))
 	if err != nil {
 		return nil, err
 	}
 	actual, _ := m.plans.LoadOrStore(t, p)
-	return actual.(*marshalPlan), nil
+	return actual.(*conversion), nil
 }
 
-func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*marshalPlan, error) {
+func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*conversion, error) {
 	if vmType, ok := runtimeTypes[t]; ok {
-		return &marshalPlan{VMType: vmType, Type: t, marshal: (*marshalState).marshalRuntime, unmarshal: (*unmarshalState).unmarshalInterface}, nil
+		return &conversion{vm: vmType, typ: t, marshal: (*marshalState).marshalRuntime, unmarshal: (*unmarshalState).unmarshalInterface}, nil
 	}
 	if seen[t] {
-		return &marshalPlan{VMType: types.TypeRef, Type: t, marshal: (*marshalState).marshalCycle, unmarshal: (*unmarshalState).unmarshalCycle}, nil
+		return &conversion{vm: types.TypeRef, typ: t, marshal: (*marshalState).marshalCycle, unmarshal: (*unmarshalState).unmarshalCycle}, nil
 	}
 	seen[t] = true
 	defer delete(seen, t)
@@ -222,23 +220,23 @@ func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*marshalPla
 			if err != nil {
 				return nil, err
 			}
-			return &marshalPlan{
-				VMType:    vmStruct,
-				Type:      t,
+			return &conversion{
+				vm:        vmStruct,
+				typ:       t,
 				marshal:   m.marshalHostPointer(slots, vmStruct),
 				unmarshal: m.unmarshalPointer(elemPlan),
 			}, nil
 		}
 		if seen[elem] {
-			return &marshalPlan{VMType: types.TypeRef, Type: t, marshal: (*marshalState).marshalRuntime, unmarshal: (*unmarshalState).unmarshalInterface}, nil
+			return &conversion{vm: types.TypeRef, typ: t, marshal: (*marshalState).marshalRuntime, unmarshal: (*unmarshalState).unmarshalInterface}, nil
 		}
 		elemPlan, err := m.compile(elem, seen)
 		if err != nil {
 			return nil, err
 		}
-		return &marshalPlan{
-			VMType:    elemPlan.VMType,
-			Type:      t,
+		return &conversion{
+			vm:        elemPlan.vm,
+			typ:       t,
 			marshal:   m.marshalPointer(elemPlan),
 			unmarshal: m.unmarshalPointer(elemPlan),
 		}, nil
@@ -263,46 +261,46 @@ func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*marshalPla
 			if err != nil {
 				return nil, err
 			}
-			return &marshalPlan{
-				VMType:    vmStruct,
-				Type:      t,
+			return &conversion{
+				vm:        vmStruct,
+				typ:       t,
 				marshal:   m.marshalHost(slots, vmStruct),
 				unmarshal: m.unmarshalStruct(data),
 			}, nil
 		}
 	}
 	if t.Implements(typeValue) {
-		return &marshalPlan{VMType: types.TypeRef, Type: t, marshal: (*marshalState).marshalRuntime, unmarshal: (*unmarshalState).unmarshalInterface}, nil
+		return &conversion{vm: types.TypeRef, typ: t, marshal: (*marshalState).marshalRuntime, unmarshal: (*unmarshalState).unmarshalInterface}, nil
 	}
 	switch t.Kind() {
 	case reflect.Bool:
-		return &marshalPlan{VMType: types.TypeI1, Type: t, marshal: (*marshalState).marshalBool, unmarshal: (*unmarshalState).unmarshalBool}, nil
+		return &conversion{vm: types.TypeI1, typ: t, marshal: (*marshalState).marshalBool, unmarshal: (*unmarshalState).unmarshalBool}, nil
 	case reflect.Int8:
-		return &marshalPlan{VMType: types.TypeI8, Type: t, marshal: (*marshalState).marshalI32, unmarshal: (*unmarshalState).unmarshalInt}, nil
+		return &conversion{vm: types.TypeI8, typ: t, marshal: (*marshalState).marshalI32, unmarshal: (*unmarshalState).unmarshalInt}, nil
 	case reflect.Int16, reflect.Int32:
-		return &marshalPlan{VMType: types.TypeI32, Type: t, marshal: (*marshalState).marshalI32, unmarshal: (*unmarshalState).unmarshalInt}, nil
+		return &conversion{vm: types.TypeI32, typ: t, marshal: (*marshalState).marshalI32, unmarshal: (*unmarshalState).unmarshalInt}, nil
 	case reflect.Int, reflect.Int64:
-		return &marshalPlan{VMType: types.TypeI64, Type: t, marshal: (*marshalState).marshalI64, unmarshal: (*unmarshalState).unmarshalInt}, nil
+		return &conversion{vm: types.TypeI64, typ: t, marshal: (*marshalState).marshalI64, unmarshal: (*unmarshalState).unmarshalInt}, nil
 	case reflect.Uint8, reflect.Uint16, reflect.Uint32:
-		return &marshalPlan{VMType: types.TypeI32, Type: t, marshal: (*marshalState).marshalU32, unmarshal: (*unmarshalState).unmarshalUint}, nil
+		return &conversion{vm: types.TypeI32, typ: t, marshal: (*marshalState).marshalU32, unmarshal: (*unmarshalState).unmarshalUint}, nil
 	case reflect.Uint, reflect.Uint64, reflect.Uintptr:
-		return &marshalPlan{VMType: types.TypeI64, Type: t, marshal: (*marshalState).marshalU64, unmarshal: (*unmarshalState).unmarshalUint}, nil
+		return &conversion{vm: types.TypeI64, typ: t, marshal: (*marshalState).marshalU64, unmarshal: (*unmarshalState).unmarshalUint}, nil
 	case reflect.Float32:
-		return &marshalPlan{VMType: types.TypeF32, Type: t, marshal: (*marshalState).marshalF32, unmarshal: (*unmarshalState).unmarshalFloat}, nil
+		return &conversion{vm: types.TypeF32, typ: t, marshal: (*marshalState).marshalF32, unmarshal: (*unmarshalState).unmarshalFloat}, nil
 	case reflect.Float64:
-		return &marshalPlan{VMType: types.TypeF64, Type: t, marshal: (*marshalState).marshalF64, unmarshal: (*unmarshalState).unmarshalFloat}, nil
+		return &conversion{vm: types.TypeF64, typ: t, marshal: (*marshalState).marshalF64, unmarshal: (*unmarshalState).unmarshalFloat}, nil
 	case reflect.String:
-		return &marshalPlan{VMType: types.TypeString, Type: t, marshal: (*marshalState).marshalString, unmarshal: (*unmarshalState).unmarshalString}, nil
+		return &conversion{vm: types.TypeString, typ: t, marshal: (*marshalState).marshalString, unmarshal: (*unmarshalState).unmarshalString}, nil
 	case reflect.Interface:
-		return &marshalPlan{VMType: types.TypeRef, Type: t, marshal: (*marshalState).marshalAny, unmarshal: (*unmarshalState).unmarshalInterface}, nil
+		return &conversion{vm: types.TypeRef, typ: t, marshal: (*marshalState).marshalAny, unmarshal: (*unmarshalState).unmarshalInterface}, nil
 	case reflect.Func:
 		fnType, err := m.compileFunctionType(t, 0, seen)
 		if err != nil {
 			return nil, err
 		}
-		return &marshalPlan{
-			VMType:    fnType,
-			Type:      t,
+		return &conversion{
+			vm:        fnType,
+			typ:       t,
 			marshal:   m.marshalFunc(fnType),
 			unmarshal: m.unmarshalFunc(fnType),
 		}, nil
@@ -311,9 +309,9 @@ func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*marshalPla
 		if err != nil {
 			return nil, err
 		}
-		return &marshalPlan{
-			VMType:    types.NewArrayType(elemPlan.VMType),
-			Type:      t,
+		return &conversion{
+			vm:        types.NewArrayType(elemPlan.vm),
+			typ:       t,
 			marshal:   m.marshalArray(elemPlan),
 			unmarshal: m.unmarshalArray(elemPlan),
 		}, nil
@@ -322,9 +320,9 @@ func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*marshalPla
 		if err != nil {
 			return nil, err
 		}
-		return &marshalPlan{
-			VMType:    types.NewArrayType(elemPlan.VMType),
-			Type:      t,
+		return &conversion{
+			vm:        types.NewArrayType(elemPlan.vm),
+			typ:       t,
 			marshal:   m.marshalArray(elemPlan),
 			unmarshal: m.unmarshalSlice(elemPlan),
 		}, nil
@@ -337,10 +335,10 @@ func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*marshalPla
 		if err != nil {
 			return nil, fmt.Errorf("map value type: %w", err)
 		}
-		mt := types.NewMapType(keyPlan.VMType, valPlan.VMType)
-		return &marshalPlan{
-			VMType:    mt,
-			Type:      t,
+		mt := types.NewMapType(keyPlan.vm, valPlan.vm)
+		return &conversion{
+			vm:        mt,
+			typ:       t,
 			marshal:   m.marshalMap(mt),
 			unmarshal: m.unmarshalMap(keyPlan, valPlan),
 		}, nil
@@ -349,9 +347,9 @@ func (m *codec) compile(t reflect.Type, seen map[reflect.Type]bool) (*marshalPla
 		if err != nil {
 			return nil, err
 		}
-		return &marshalPlan{
-			VMType:    vmStruct,
-			Type:      t,
+		return &conversion{
+			vm:        vmStruct,
+			typ:       t,
 			marshal:   m.marshalStruct(fields, vmStruct),
 			unmarshal: m.unmarshalStruct(fields),
 		}, nil
@@ -371,12 +369,12 @@ func (m *codec) compileStructType(t reflect.Type, seen map[reflect.Type]bool) (*
 		if err != nil {
 			return nil, nil, fmt.Errorf("struct field %s: %w", field.Name, err)
 		}
-		fields = append(fields, types.NewStructField(p.VMType, types.FieldWithName(field.Name)))
+		fields = append(fields, types.NewStructField(p.vm, types.FieldWithName(field.Name)))
 		plans = append(plans, fieldPlan{
-			Index:  idx,
-			Offset: field.Offset,
-			Kind:   field.Type.Kind(),
-			Plan:   p,
+			index:      idx,
+			offset:     field.Offset,
+			kind:       field.Type.Kind(),
+			conversion: p,
 		})
 	}
 	return types.NewStructType(fields...), plans, nil
@@ -397,26 +395,52 @@ func (m *codec) compileHostObject(t reflect.Type, seen map[reflect.Type]bool) (*
 			if kind == reflect.Interface && !f.Type.Implements(typeValue) {
 				continue
 			}
+			p, backed := m.conversionBacked(f.Type)
 			typ := m.typeOf(kind)
-			if typ == nil {
+			if typ == nil && !backed {
 				continue
 			}
-			p, err := m.compile(f.Type, seen)
-			if err != nil {
-				return nil, nil, nil, fmt.Errorf("host field %s: %w", f.Name, err)
+			if !backed {
+				var err error
+				p, err = m.compile(f.Type, seen)
+				if err != nil {
+					return nil, nil, nil, fmt.Errorf("host field %s: %w", f.Name, err)
+				}
+			}
+			if backed {
+				typ = p.vm
 			}
 			fields = append(fields, types.NewStructField(typ, types.FieldWithName(f.Name)))
-			slots = append(slots, hostSlot{index: idx, offset: f.Offset, kind: kind})
-			data = append(data, fieldPlan{Index: idx, Offset: f.Offset, Kind: kind, Plan: p})
+			slot := hostSlot{index: idx, offset: f.Offset, kind: kind}
+			if backed {
+				slot.conversion = p
+			}
+			slots = append(slots, slot)
+			data = append(data, fieldPlan{index: idx, offset: f.Offset, kind: kind, conversion: p})
 			names[f.Name] = true
 		}
 	} else if t.Kind() != reflect.Interface {
+		p, backed := m.conversionBacked(t)
 		typ := m.typeOf(t.Kind())
-		if typ == nil {
+		if typ == nil && !backed {
 			return nil, nil, nil, fmt.Errorf("%w: host value type=%s", ErrUnsupportedMarshalType, t)
 		}
+		if !backed {
+			var err error
+			p, err = m.compile(t, seen)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+		}
+		if backed {
+			typ = p.vm
+		}
 		fields = append(fields, types.NewStructField(typ, types.FieldWithName("Value")))
-		slots = append(slots, hostSlot{kind: t.Kind()})
+		slot := hostSlot{kind: t.Kind()}
+		if backed {
+			slot.conversion = p
+		}
+		slots = append(slots, slot)
 		names["Value"] = true
 	}
 	methodType := reflect.PointerTo(t)
@@ -446,7 +470,7 @@ func (m *codec) compileFunctionType(t reflect.Type, skip int, seen map[reflect.T
 		if err != nil {
 			return nil, fmt.Errorf("function param %d: %w", idx, err)
 		}
-		params[idx] = p.VMType
+		params[idx] = p.vm
 	}
 	outs := t.NumOut()
 	if outs > 0 && t.Out(outs-1).Implements(typeError) {
@@ -458,22 +482,29 @@ func (m *codec) compileFunctionType(t reflect.Type, skip int, seen map[reflect.T
 		if err != nil {
 			return nil, fmt.Errorf("function return %d: %w", idx, err)
 		}
-		returns[idx] = p.VMType
+		returns[idx] = p.vm
 	}
 	return &types.FunctionType{Params: params, Returns: returns}, nil
+}
+
+func (m *codec) conversionBacked(t reflect.Type) (*conversion, bool) {
+	if p, ok := m.customPlan(t); ok {
+		return p, true
+	}
+	return m.converterPlan(t)
 }
 
 // customPlan returns a plan for a Go type that opts into its own conversion via
 // ValueMarshaler / ValueUnmarshaler. A direction the type does not implement
 // surfaces ErrUnsupportedMarshalType, so round-trip use should implement both.
-func (m *codec) customPlan(t reflect.Type) (*marshalPlan, bool) {
+func (m *codec) customPlan(t reflect.Type) (*conversion, bool) {
 	ptr := reflect.PointerTo(t)
 	marshalable := t.Implements(valueMarshalerType) || ptr.Implements(valueMarshalerType)
 	unmarshalable := t.Implements(valueUnmarshalerType) || ptr.Implements(valueUnmarshalerType)
 	if !marshalable && !unmarshalable {
 		return nil, false
 	}
-	plan := &marshalPlan{VMType: types.TypeRef, Type: t, marshal: (*marshalState).marshalUnsupported, unmarshal: (*unmarshalState).unmarshalUnsupported}
+	plan := &conversion{vm: types.TypeRef, typ: t, marshal: (*marshalState).marshalUnsupported, unmarshal: (*unmarshalState).unmarshalUnsupported}
 	if marshalable {
 		plan.marshal = m.marshalCustom(t)
 	}
@@ -487,7 +518,7 @@ func (m *codec) customPlan(t reflect.Type) (*marshalPlan, bool) {
 // registered via WithConverter or built in (time.Time, complex). A user
 // registration overrides the built-in for the same type. A nil direction stays
 // unsupported.
-func (m *codec) converterPlan(t reflect.Type) (*marshalPlan, bool) {
+func (m *codec) converterPlan(t reflect.Type) (*conversion, bool) {
 	c, ok := m.converters[t]
 	if !ok {
 		c, ok = builtinConverters[t]
@@ -499,7 +530,7 @@ func (m *codec) converterPlan(t reflect.Type) (*marshalPlan, bool) {
 	if vmType == nil {
 		vmType = types.TypeRef
 	}
-	plan := &marshalPlan{VMType: vmType, Type: t, marshal: (*marshalState).marshalUnsupported, unmarshal: (*unmarshalState).unmarshalUnsupported}
+	plan := &conversion{vm: vmType, typ: t, marshal: (*marshalState).marshalUnsupported, unmarshal: (*unmarshalState).unmarshalUnsupported}
 	if c.Marshal != nil {
 		plan.marshal = m.marshalConverter(c)
 	}
@@ -523,7 +554,7 @@ func (m *codec) marshalCustom(t reflect.Type) marshaler {
 		} else {
 			vm = v.Addr().Interface().(ValueMarshaler)
 		}
-		return vm.MarshalVM(s.i)
+		return vm.MarshalVM(s.interp)
 	}
 }
 
@@ -534,17 +565,17 @@ func (m *codec) marshalConverter(c Converter) marshaler {
 			p.Elem().Set(v)
 			v = p.Elem()
 		}
-		return c.Marshal(s.i, v.Interface())
+		return c.Marshal(s.interp, v.Interface())
 	}
 }
 
 func (m *codec) unmarshalConverter(c Converter) unmarshaler {
 	return func(s *unmarshalState, val types.Value, dst reflect.Value) error {
-		return c.Unmarshal(s.i, val, dst.Addr().Interface())
+		return c.Unmarshal(s.interp, val, dst.Addr().Interface())
 	}
 }
 
-func (s *marshalState) hostObject(ptr reflect.Value, slots []hostSlot, vm *types.StructType) *HostObject {
+func (s *marshalState) hostObject(ptr reflect.Value, slots []hostSlot, vm *types.StructType) (*HostObject, error) {
 	bound := make([]hostSlot, len(slots))
 	copy(bound, slots)
 	for idx := range bound {
@@ -552,26 +583,38 @@ func (s *marshalState) hostObject(ptr reflect.Value, slots []hostSlot, vm *types
 			continue
 		}
 		fn := s.wrapFunc(ptr.Method(bound[idx].method()), bound[idx].fnType)
-		bound[idx].addr = s.alloc(fn)
+		addr, err := s.interp.Alloc(fn)
+		if err != nil {
+			for prior := range idx {
+				if bound[prior].isMethod() {
+					s.interp.release(bound[prior].addr)
+				}
+			}
+			return nil, fmt.Errorf("bind host method: %w", err)
+		}
+		bound[idx].addr = addr
 	}
 	return &HostObject{
 		Typ:      vm,
 		Receiver: ptr,
+		codec:    s.codec,
+		interp:   s.interp,
+		layout:   vm,
+		receiver: ptr.Type(),
 		data:     unsafe.Pointer(ptr.Pointer()),
 		slots:    bound,
-		interp:   s.i,
-	}
+	}, nil
 }
 
 func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *HostFunction {
-	m := s.m
+	m := s.codec
 	fnType := fn.Type()
 	hasContext := fnType.NumIn() > 0 && fnType.In(0) == typeContext
 	// in and seen are allocated fresh inside the returned closure on every
 	// call: the returned HostFunction is a types.Value that can be placed in
 	// program.WithConstants, so pooled Interpreters built from the same
 	// program share this exact *HostFunction (New keeps the constant's Go
-	// value directly - see interp.go's BoxRef(i.keep(v)) path) and may call
+	// value directly - see interp.go's BoxRef(i.alloc(v)) path) and may call
 	// it concurrently from separate goroutines. Call-scoped scratch would
 	// race across such concurrent calls.
 	return NewHostFunction(typ, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
@@ -588,7 +631,7 @@ func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *Host
 			in[0] = reflect.ValueOf(ctx)
 			offset = 1
 		}
-		unmarshal := &unmarshalState{m: m, i: i}
+		unmarshal := &unmarshalState{codec: m, interp: i}
 		for idx := range params {
 			in[idx+offset] = reflect.New(fnType.In(idx + offset)).Elem()
 			if err := unmarshal.value(params[idx], in[idx+offset]); err != nil {
@@ -611,7 +654,7 @@ func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *Host
 		}
 
 		returns := make([]types.Boxed, len(out))
-		marshal := &marshalState{m: m, i: i, seen: make(map[uintptr]bool)}
+		marshal := &marshalState{codec: m, interp: i, seen: make(map[uintptr]bool)}
 		for idx := range out {
 			boxed, err := marshal.boxAs(out[idx], typ.Returns[idx])
 			if err != nil {
@@ -624,12 +667,12 @@ func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *Host
 }
 
 func (s *marshalState) boxFieldAt(base unsafe.Pointer, pf fieldPlan, typ types.Type) (types.Boxed, error) {
-	fp := unsafe.Add(base, pf.Offset)
-	if pf.Plan.Type.Implements(typeValue) {
-		rv := reflect.NewAt(pf.Plan.Type, fp).Elem()
+	fp := unsafe.Add(base, pf.offset)
+	if pf.conversion.typ.Implements(typeValue) {
+		rv := reflect.NewAt(pf.conversion.typ, fp).Elem()
 		return s.boxAs(rv, typ)
 	}
-	switch pf.Kind {
+	switch pf.kind {
 	case reflect.Bool:
 		return s.boxed(types.Bool(*(*bool)(fp)), typ)
 	case reflect.Int8:
@@ -661,7 +704,7 @@ func (s *marshalState) boxFieldAt(base unsafe.Pointer, pf fieldPlan, typ types.T
 	case reflect.String:
 		return s.boxed(types.String(*(*string)(fp)), typ)
 	default:
-		rv := reflect.NewAt(pf.Plan.Type, fp).Elem()
+		rv := reflect.NewAt(pf.conversion.typ, fp).Elem()
 		return s.boxAs(rv, typ)
 	}
 }
@@ -753,14 +796,14 @@ func (s *marshalState) boxRef(val types.Value) types.Boxed {
 	case types.Ref:
 		return types.BoxRef(int(v))
 	case types.String:
-		return types.BoxRef(int(s.i.intern(string(v))))
+		return types.BoxRef(int(s.interp.intern(string(v))))
 	default:
 		return types.BoxRef(s.alloc(val))
 	}
 }
 
 func (s *marshalState) alloc(val types.Value) int {
-	addr, err := s.i.Alloc(val)
+	addr, err := s.interp.Alloc(val)
 	if err != nil {
 		panic(err)
 	}
@@ -771,7 +814,7 @@ func (s *unmarshalState) value(val types.Value, dst reflect.Value) error {
 	if !dst.CanSet() {
 		return fmt.Errorf("%w: destination is not settable", ErrInvalidUnmarshalTarget)
 	}
-	p, err := s.m.plan(dst.Type())
+	p, err := s.codec.plan(dst.Type())
 	if err != nil {
 		return err
 	}
@@ -819,7 +862,7 @@ func (s *unmarshalState) elems(value types.Value) ([]types.Value, error) {
 	case *types.Array:
 		out := make([]types.Value, len(v.Elems))
 		for idx, elem := range v.Elems {
-			val, err := s.m.resolve(s.i, elem)
+			val, err := s.codec.resolve(s.interp, elem)
 			if err != nil {
 				return nil, fmt.Errorf("array element %d: %w", idx, err)
 			}
@@ -871,7 +914,7 @@ func (s *marshalState) marshalRuntime(v reflect.Value) (types.Value, error) {
 	if !ok || val == nil {
 		return types.Null, nil
 	}
-	return s.m.resolve(s.i, val)
+	return s.codec.resolve(s.interp, val)
 }
 
 func (s *marshalState) marshalAny(v reflect.Value) (types.Value, error) {
@@ -885,7 +928,7 @@ func (s *marshalState) value(v reflect.Value) (types.Value, error) {
 	if !v.IsValid() {
 		return types.Null, nil
 	}
-	p, err := s.m.plan(v.Type())
+	p, err := s.codec.plan(v.Type())
 	if err != nil {
 		return nil, err
 	}
@@ -900,7 +943,7 @@ func (s *marshalState) marshalUnsupported(v reflect.Value) (types.Value, error) 
 	return nil, fmt.Errorf("%w: type=%s", ErrUnsupportedMarshalType, v.Type())
 }
 
-func (m *codec) marshalPointer(elem *marshalPlan) marshaler {
+func (m *codec) marshalPointer(elem *conversion) marshaler {
 	return func(s *marshalState, v reflect.Value) (types.Value, error) {
 		if v.IsNil() {
 			return types.Null, nil
@@ -933,7 +976,7 @@ func (m *codec) marshalStruct(fields []fieldPlan, vm *types.StructType) marshale
 				return nil, fmt.Errorf("struct field %s: %w", field.Name, err)
 			}
 			if field.Kind == types.KindI64 {
-				out.SetRaw(slot, uint64(s.i.unboxI64(boxed)))
+				out.SetRaw(slot, uint64(s.interp.unboxI64(boxed)))
 			} else {
 				out.SetField(slot, boxed)
 			}
@@ -942,9 +985,9 @@ func (m *codec) marshalStruct(fields []fieldPlan, vm *types.StructType) marshale
 	}
 }
 
-func (m *codec) marshalArray(elem *marshalPlan) marshaler {
-	elemVM := elem.VMType
-	elemKind := elem.Type.Kind()
+func (m *codec) marshalArray(elem *conversion) marshaler {
+	elemVM := elem.vm
+	elemKind := elem.typ.Kind()
 	arrayType := types.NewArrayType(elemVM)
 	return func(s *marshalState, v reflect.Value) (types.Value, error) {
 		switch elemKind {
@@ -1137,7 +1180,7 @@ func (m *codec) marshalMap(mt *types.MapType) marshaler {
 
 func (m *codec) unmarshalFunc(fnType *types.FunctionType) unmarshaler {
 	return func(s *unmarshalState, val types.Value, dst reflect.Value) error {
-		target, ok := s.i.callable(val)
+		target, ok := s.interp.callable(val)
 		if !ok || target.Type() == nil || !target.Type().Equals(fnType) {
 			return fmt.Errorf("%w: source=%T target=%s", ErrTypeMismatch, val, dst.Type())
 		}
@@ -1168,7 +1211,7 @@ func (m *codec) unmarshalFunc(fnType *types.FunctionType) unmarshaler {
 				offset = 1
 			}
 			boxed := make([]types.Boxed, len(in)-offset)
-			marshal := &marshalState{m: m, i: s.i, seen: make(map[uintptr]bool)}
+			marshal := &marshalState{codec: m, interp: s.interp, seen: make(map[uintptr]bool)}
 			for idx := range boxed {
 				v, err := marshal.boxAs(in[idx+offset], fnType.Params[idx])
 				if err != nil {
@@ -1177,18 +1220,18 @@ func (m *codec) unmarshalFunc(fnType *types.FunctionType) unmarshaler {
 				boxed[idx] = v
 			}
 
-			returns, err := s.i.invoke(ctx, val, boxed)
+			returns, err := s.interp.invoke(ctx, val, boxed)
 			if err != nil {
 				return fail(err)
 			}
 			defer func() {
 				for _, value := range returns {
-					s.i.releaseBox(value)
+					s.interp.releaseBox(value)
 				}
 			}()
 			for idx := range returns {
 				value := reflect.New(typ.Out(idx))
-				if err := m.Unmarshal(s.i, returns[idx], value.Interface()); err != nil {
+				if err := m.Unmarshal(s.interp, returns[idx], value.Interface()); err != nil {
 					return fail(fmt.Errorf("function return %d: %w", idx, err))
 				}
 				out[idx] = value.Elem()
@@ -1209,7 +1252,7 @@ func (m *codec) marshalHost(slots []hostSlot, vm *types.StructType) marshaler {
 	return func(s *marshalState, v reflect.Value) (types.Value, error) {
 		ptr := reflect.New(v.Type())
 		ptr.Elem().Set(v)
-		return s.hostObject(ptr, slots, vm), nil
+		return s.hostObject(ptr, slots, vm)
 	}
 }
 
@@ -1220,7 +1263,7 @@ func (m *codec) marshalHostPointer(slots []hostSlot, vm *types.StructType) marsh
 		}
 		ptr := reflect.New(v.Type().Elem())
 		ptr.Elem().Set(v.Elem())
-		return s.hostObject(ptr, slots, vm), nil
+		return s.hostObject(ptr, slots, vm)
 	}
 }
 
@@ -1279,7 +1322,7 @@ func (s *unmarshalState) unmarshalString(val types.Value, dst reflect.Value) err
 }
 
 func (s *unmarshalState) unmarshalInterface(val types.Value, dst reflect.Value) error {
-	value, err := s.m.resolve(s.i, val)
+	value, err := s.codec.resolve(s.interp, val)
 	if err != nil {
 		return err
 	}
@@ -1308,16 +1351,16 @@ func (s *unmarshalState) unmarshalUnsupported(_ types.Value, dst reflect.Value) 
 }
 
 func (s *unmarshalState) unmarshalCustom(val types.Value, dst reflect.Value) error {
-	return dst.Addr().Interface().(ValueUnmarshaler).UnmarshalVM(s.i, val)
+	return dst.Addr().Interface().(ValueUnmarshaler).UnmarshalVM(s.interp, val)
 }
 
-func (m *codec) unmarshalPointer(elem *marshalPlan) unmarshaler {
+func (m *codec) unmarshalPointer(elem *conversion) unmarshaler {
 	return func(s *unmarshalState, val types.Value, dst reflect.Value) error {
 		if types.IsNull(val) {
 			dst.SetZero()
 			return nil
 		}
-		if value, err := s.m.resolve(s.i, val); err == nil {
+		if value, err := s.codec.resolve(s.interp, val); err == nil {
 			if ho, ok := value.(*HostObject); ok && ho.Receiver.IsValid() {
 				if ho.Receiver.Type() == dst.Type() {
 					dst.Set(ho.Receiver)
@@ -1336,7 +1379,7 @@ func (m *codec) unmarshalPointer(elem *marshalPlan) unmarshaler {
 
 func (m *codec) unmarshalStruct(fields []fieldPlan) unmarshaler {
 	return func(s *unmarshalState, val types.Value, dst reflect.Value) error {
-		value, err := s.m.resolve(s.i, val)
+		value, err := s.codec.resolve(s.interp, val)
 		if err != nil {
 			return err
 		}
@@ -1360,7 +1403,7 @@ func (m *codec) unmarshalStruct(fields []fieldPlan) unmarshaler {
 		}
 		used := make([]bool, len(typ.Fields))
 		for _, pf := range fields {
-			name := dst.Type().Field(pf.Index).Name
+			name := dst.Type().Field(pf.index).Name
 			src, ok := 0, false
 			for i, vmField := range typ.Fields {
 				if vmField.Name == name {
@@ -1384,12 +1427,12 @@ func (m *codec) unmarshalStruct(fields []fieldPlan) unmarshaler {
 			if typ.Fields[src].Kind == types.KindI64 {
 				fv = types.I64(int64(rawBits(src)))
 			} else {
-				fv, err = s.m.resolve(s.i, fieldBox(src))
+				fv, err = s.codec.resolve(s.interp, fieldBox(src))
 				if err != nil {
 					return fmt.Errorf("struct field %s: %w", name, err)
 				}
 			}
-			if err := pf.Plan.unmarshal(s, fv, dst.Field(pf.Index)); err != nil {
+			if err := pf.conversion.unmarshal(s, fv, dst.Field(pf.index)); err != nil {
 				return fmt.Errorf("struct field %s: %w", name, err)
 			}
 		}
@@ -1397,7 +1440,7 @@ func (m *codec) unmarshalStruct(fields []fieldPlan) unmarshaler {
 	}
 }
 
-func (m *codec) unmarshalSlice(elem *marshalPlan) unmarshaler {
+func (m *codec) unmarshalSlice(elem *conversion) unmarshaler {
 	return func(s *unmarshalState, val types.Value, dst reflect.Value) error {
 		if src, ok := val.(types.TypedArray[int8]); ok {
 			if k := dst.Type().Elem().Kind(); k == reflect.Int8 || k == reflect.Uint8 {
@@ -1428,7 +1471,7 @@ func (m *codec) unmarshalSlice(elem *marshalPlan) unmarshaler {
 	}
 }
 
-func (m *codec) unmarshalArray(elem *marshalPlan) unmarshaler {
+func (m *codec) unmarshalArray(elem *conversion) unmarshaler {
 	return func(s *unmarshalState, val types.Value, dst reflect.Value) error {
 		if src, ok := val.(types.TypedArray[int8]); ok {
 			if k := dst.Type().Elem().Kind(); k == reflect.Int8 || k == reflect.Uint8 {
@@ -1461,7 +1504,7 @@ func (m *codec) unmarshalArray(elem *marshalPlan) unmarshaler {
 	}
 }
 
-func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
+func (m *codec) unmarshalMap(keyPlan, valPlan *conversion) unmarshaler {
 	return func(s *unmarshalState, src types.Value, dst reflect.Value) error {
 		size := 0
 		switch m := src.(type) {
@@ -1503,7 +1546,7 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 		switch m := src.(type) {
 		case *types.TypedMap[int8]:
 			m.Range(func(key int8, value types.Boxed) {
-				elemValue, err := s.m.resolve(s.i, value)
+				elemValue, err := s.codec.resolve(s.interp, value)
 				if err != nil {
 					mapErr = fmt.Errorf("map value: %w", err)
 					return
@@ -1512,7 +1555,7 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 			})
 		case *types.TypedMap[bool]:
 			m.Range(func(key bool, value types.Boxed) {
-				elemValue, err := s.m.resolve(s.i, value)
+				elemValue, err := s.codec.resolve(s.interp, value)
 				if err != nil {
 					mapErr = fmt.Errorf("map value: %w", err)
 					return
@@ -1521,7 +1564,7 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 			})
 		case *types.TypedMap[int32]:
 			m.Range(func(key int32, value types.Boxed) {
-				elemValue, err := s.m.resolve(s.i, value)
+				elemValue, err := s.codec.resolve(s.interp, value)
 				if err != nil {
 					mapErr = fmt.Errorf("map value: %w", err)
 					return
@@ -1530,7 +1573,7 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 			})
 		case *types.TypedMap[int64]:
 			m.Range(func(key int64, value types.Boxed) {
-				elemValue, err := s.m.resolve(s.i, value)
+				elemValue, err := s.codec.resolve(s.interp, value)
 				if err != nil {
 					mapErr = fmt.Errorf("map value: %w", err)
 					return
@@ -1539,7 +1582,7 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 			})
 		case *types.TypedMap[float32]:
 			m.Range(func(key float32, value types.Boxed) {
-				elemValue, err := s.m.resolve(s.i, value)
+				elemValue, err := s.codec.resolve(s.interp, value)
 				if err != nil {
 					mapErr = fmt.Errorf("map value: %w", err)
 					return
@@ -1548,7 +1591,7 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 			})
 		case *types.TypedMap[float64]:
 			m.Range(func(key float64, value types.Boxed) {
-				elemValue, err := s.m.resolve(s.i, value)
+				elemValue, err := s.codec.resolve(s.interp, value)
 				if err != nil {
 					mapErr = fmt.Errorf("map value: %w", err)
 					return
@@ -1569,13 +1612,13 @@ func (m *codec) unmarshalMap(keyPlan, valPlan *marshalPlan) unmarshaler {
 				case types.KindF64:
 					keyValue = types.F64(math.Float64frombits(mapKey.Bits))
 				default:
-					keyValue, err = s.m.resolve(s.i, entry.Key)
+					keyValue, err = s.codec.resolve(s.interp, entry.Key)
 				}
 				if err != nil {
 					mapErr = fmt.Errorf("map key: %w", err)
 					return
 				}
-				elemValue, err := s.m.resolve(s.i, entry.Value)
+				elemValue, err := s.codec.resolve(s.interp, entry.Value)
 				if err != nil {
 					mapErr = fmt.Errorf("map value: %w", err)
 					return

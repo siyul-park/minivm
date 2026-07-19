@@ -292,37 +292,37 @@ func newLoader(op instr.Opcode, slot, offset int, label string, standalone bool)
 }
 
 func (l loader) decode(result *value, op instr.Opcode) {
+	if !l.standalone {
+		return
+	}
 	switch op {
 	case instr.LOCAL_GET, instr.UPVAL_GET:
 		result.compile = append(result.compile,
 			jen.Id(l.index).Op(":=").Int().Call(jen.Id("c").Dot("code").Index(jen.Add(l.pos).Op("+").Lit(1))),
 		)
 	case instr.GLOBAL_GET, instr.CONST_GET:
-		if l.standalone {
-			result.compile = append(result.compile,
-				jen.Id(l.index).Op(":=").Int().Call(
-					jen.Op("*").Parens(jen.Op("*").Uint16()).Call(
-						jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Add(l.pos).Op("+").Lit(1)))),
-					),
+		result.compile = append(result.compile,
+			jen.Id(l.index).Op(":=").Int().Call(
+				jen.Op("*").Parens(jen.Op("*").Uint16()).Call(
+					jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Add(l.pos).Op("+").Lit(1)))),
 				),
-			)
-		} else {
-			result.compile = append(result.compile,
-				jen.Id(l.index).Op(":=").Qual("github.com/siyul-park/minivm/instr", "ParseU16").Call(jen.Id("c").Dot("code"), jen.Add(l.pos).Op("+").Lit(1)),
-			)
-		}
+			),
+		)
 	}
 }
 
-func (l loader) read(result *value, current step, field string) error {
+func (l loader) read(result *value, current step) error {
+	field, _, ok := slotInfo(current.op)
+	if !ok {
+		return fmt.Errorf("unsupported slot opcode %s", instr.TypeOf(current.op).Mnemonic)
+	}
 	if current.op == instr.LOCAL_GET || !l.standalone {
 		guard, err := l.bounds(current, field)
 		if err != nil {
 			return err
 		}
-		result.compile = append(result.compile, guard)
+		result.compile = append(result.compile, guard...)
 	}
-
 	switch current.op {
 	case instr.LOCAL_GET:
 		if l.standalone {
@@ -351,65 +351,59 @@ func (l loader) read(result *value, current step, field string) error {
 	return nil
 }
 
-func (l loader) bounds(current step, field string) (jen.Code, error) {
-	condition := jen.Id(l.index).Op(">=").Len(jen.Id("c").Dot(field))
-	if current.kind == instr.KindAny {
-		body := []jen.Code{}
-		if !l.standalone {
-			body = append(body, jen.Id("c").Dot("ip").Op("+=").Lit(l.width))
-		}
-		body = append(body,
-			jen.Return(jen.Func().Params(jen.Op("*").Id("Interpreter")).Block(jen.Panic(jen.Id("ErrSegmentationFault")))),
-		)
-		return jen.If(condition).Block(body...), nil
+func (l loader) bounds(current step, field string) ([]jen.Code, error) {
+	if !l.standalone {
+		return l.slotGuard(current)
 	}
+	condition := jen.Id(l.index).Op(">=").Len(jen.Id("c").Dot(field))
+	body := []jen.Code{
+		jen.Return(jen.Func().Params(jen.Op("*").Id("Interpreter")).Block(jen.Panic(jen.Id("ErrSegmentationFault")))),
+	}
+	return []jen.Code{jen.If(condition).Block(body...)}, nil
+}
+
+func (l loader) slotGuard(current step) ([]jen.Code, error) {
 	name, ok := kindName(current.kind)
 	if !ok {
 		return nil, fmt.Errorf("unsupported source kind %s", current.kind)
 	}
+	_, method, ok := slotInfo(current.op)
+	if !ok {
+		return nil, fmt.Errorf("unsupported slot opcode %s", instr.TypeOf(current.op).Mnemonic)
+	}
 	expected := jen.Qual("github.com/siyul-park/minivm/types", "Kind"+name)
-	return guard(field, l.index, expected, l.label), nil
+	okName := fmt.Sprintf("ok%d", l.slot)
+	return []jen.Code{
+		jen.List(jen.Id(l.index), jen.Id(okName)).Op(":=").Id("c").Dot(method).Call(jen.Add(l.pos).Op("+").Lit(1), expected),
+		jen.If(jen.Op("!").Id(okName)).Block(reject(l.label)),
+	}, nil
 }
 
 func (l loader) constant(result *value, current step) error {
+	if !l.standalone {
+		return l.constantGuard(result, current)
+	}
 	condition := jen.Id(l.index).Op(">=").Len(jen.Id("c").Dot("constants"))
-	if current.kind == instr.KindAny {
-		result.compile = append(result.compile,
-			jen.If(condition).Block(
-				jen.Return(jen.Func().Params(jen.Op("*").Id("Interpreter")).Block(jen.Panic(jen.Id("ErrSegmentationFault")))),
-			),
-		)
-	} else {
-		result.compile = append(result.compile, jen.If(condition).Block(reject(l.label)))
-	}
-	result.compile = append(result.compile, jen.Id(l.boxed).Op(":=").Id("c").Dot("constants").Index(jen.Id(l.index)))
-	if current.kind == instr.KindAny {
-		return nil
-	}
+	result.compile = append(result.compile,
+		jen.If(condition).Block(
+			jen.Return(jen.Func().Params(jen.Op("*").Id("Interpreter")).Block(jen.Panic(jen.Id("ErrSegmentationFault")))),
+		),
+		jen.Id(l.boxed).Op(":=").Id("c").Dot("constants").Index(jen.Id(l.index)),
+	)
+	return nil
+}
 
+func (l loader) constantGuard(result *value, current step) error {
 	name, ok := kindName(current.kind)
 	if !ok {
 		return fmt.Errorf("unsupported source kind %s", current.kind)
 	}
 	expected := jen.Qual("github.com/siyul-park/minivm/types", "Kind"+name)
-	if name == "I64" {
-		result.compile = append(result.compile,
-			jen.Switch(jen.Id(l.boxed).Dot("Kind").Call()).Block(
-				jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI64")),
-				jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(
-					jen.Id("constantRef").Op(":=").Id(l.boxed).Dot("Ref").Call(),
-					jen.If(jen.Id("constantRef").Op("<").Lit(0).Op("||").Id("constantRef").Op(">=").Len(jen.Id("c").Dot("heap"))).Block(reject(l.label)),
-					jen.List(jen.Id("_"), jen.Id("ok")).Op(":=").Id("c").Dot("heap").Index(jen.Id("constantRef")).Assert(jen.Qual("github.com/siyul-park/minivm/types", "I64")),
-					jen.If(jen.Op("!").Id("ok")).Block(reject(l.label)),
-				),
-				jen.Default().Block(reject(l.label)),
-			),
-		)
-	} else {
-		result.compile = append(result.compile,
-			jen.If(jen.Id(l.boxed).Dot("Kind").Call().Op("!=").Add(expected)).Block(reject(l.label)),
-		)
-	}
+	okName := fmt.Sprintf("ok%d", l.slot)
+	result.compile = append(result.compile,
+		jen.List(jen.Id(l.boxed), jen.Id(okName)).Op(":=").Id("c").Dot("constant").Call(jen.Add(l.pos).Op("+").Lit(1), expected),
+		jen.If(jen.Op("!").Id(okName)).Block(reject(l.label)),
+	)
 	if name != "Ref" || current.typ == nil {
 		return nil
 	}
@@ -508,9 +502,15 @@ func lower(op instr.Opcode) jen.Code {
 	if len(result.compile) == 0 {
 		panic(fmt.Sprintf("no standalone lowering for %s", instr.TypeOf(op).Mnemonic))
 	}
+	return threaderFunc(result.compile...)
+}
+
+// threaderFunc wraps body as the `func(c *threader) func(*Interpreter)`
+// shape shared by every lowering entry point.
+func threaderFunc(body ...jen.Code) jen.Code {
 	return jen.Func().Params(jen.Id("c").Op("*").Id("threader")).Params(
 		jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")),
-	).Block(result.compile...)
+	).Block(body...)
 }
 
 func compose(pattern pattern, size int, label string) ([]jen.Code, error) {
@@ -624,7 +624,7 @@ func source(state *state, current step) (value, error) {
 	if state.standalone {
 		if current.op == instr.CONST_GET {
 			result.handler = constHandler(current, result)
-		} else if field, ok := slotField(current.op); ok {
+		} else if field, _, ok := slotInfo(current.op); ok {
 			result.handler = slotHandler(current, result, field)
 		} else {
 			result.handler = handler(current.op, result.compile, result.push)
@@ -656,9 +656,7 @@ func slotHandler(current step, input value, field string) jen.Code {
 	compile = append(compile,
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(owned...)),
 	)
-	return jen.Func().Params(jen.Id("c").Op("*").Id("threader")).Params(
-		jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")),
-	).Block(compile...)
+	return threaderFunc(compile...)
 }
 
 func constHandler(current step, input value) jen.Code {
@@ -694,9 +692,7 @@ func constHandler(current step, input value) jen.Code {
 		),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(scalar...)),
 	)
-	return jen.Func().Params(jen.Id("c").Op("*").Id("threader")).Params(
-		jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")),
-	).Block(compile...)
+	return threaderFunc(compile...)
 }
 
 func materialize(input value, retain bool, advance int) []jen.Code {
@@ -1045,9 +1041,7 @@ func handler(op instr.Opcode, compile, body []jen.Code) jen.Code {
 		jen.Id("c").Dot("ip").Op("+=").Lit(width(op)),
 		jen.Return(jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")).Block(body...)),
 	)
-	return jen.Func().Params(jen.Id("c").Op("*").Id("threader")).Params(
-		jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")),
-	).Block(code...)
+	return threaderFunc(code...)
 }
 
 func dispatch(tail bool, label string, advance int) jen.Code {
@@ -1126,7 +1120,7 @@ func frame(callee target, targetSlots int, releaseTarget bool, advance int, coro
 	)
 	if coroutine != nil {
 		body = append(body, jen.If(jen.Add(coroutine).Op("<").Len(jen.Id("i").Dot("coros")).Op("&&").Id("i").Dot("coros").Index(jen.Add(coroutine))).Block(
-			jen.Id("f").Dot("coro").Op("=").Id("i").Dot("alloc").Call(jen.Op("&").Id("Coroutine").Values(jen.Dict{jen.Id("typ"): jen.Id("fn").Dot("Typ")})),
+			jen.Id("f").Dot("coro").Op("=").Id("i").Dot("alloc").Call(jen.Op("&").Id("coroutine").Values(jen.Dict{jen.Id("typ"): jen.Id("fn").Dot("Typ")})),
 		))
 	}
 	body = append(body,
@@ -1314,7 +1308,7 @@ func create(targetSlots int, borrowed bool, advance int) []jen.Code {
 	body = append(body,
 		jen.Id("closure").Op(":=").Qual("github.com/siyul-park/minivm/types", "NewClosure").Call(jen.Id("fn").Dot("Typ"), jen.Qual("github.com/siyul-park/minivm/types", "Ref").Parens(jen.Id("addr")), jen.Id("upvals")),
 		jen.Id("i").Dot("sp").Op("=").Id("base"),
-		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Qual("github.com/siyul-park/minivm/types", "BoxRef").Call(jen.Id("i").Dot("keep").Call(jen.Id("closure"))),
+		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Qual("github.com/siyul-park/minivm/types", "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("closure"))),
 		jen.Id("i").Dot("sp").Op("++"),
 		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 	)
@@ -1432,13 +1426,15 @@ func lookup(op instr.Opcode, index jen.Code, advance int) []jen.Code {
 				),
 			),
 			jen.Case(jen.Op("*").Id("HostObject")).Block(
-				jen.If(jen.Add(index).Op("<").Lit(0).Op("||").Add(index).Op(">=").Len(jen.Id("value").Dot("Typ").Dot("Fields"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
-				jen.Switch(jen.Id("value").Dot("Typ").Dot("Fields").Index(index).Dot("Kind")).Block(
-					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI32"), jen.Qual("github.com/siyul-park/minivm/types", "KindI8"), jen.Qual("github.com/siyul-park/minivm/types", "KindI1"), jen.Qual("github.com/siyul-park/minivm/types", "KindF32"), jen.Qual("github.com/siyul-park/minivm/types", "KindF64")).Block(jen.Id("result").Op("=").Id("value").Dot("Field").Call(index)),
+				jen.List(jen.Id("kind"), jen.Id("ok")).Op(":=").Id("value").Dot("kind").Call(index),
+				jen.If(jen.Op("!").Id("ok")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+				jen.Switch(jen.Id("kind")).Block(
+					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI32"), jen.Qual("github.com/siyul-park/minivm/types", "KindI8"), jen.Qual("github.com/siyul-park/minivm/types", "KindI1"), jen.Qual("github.com/siyul-park/minivm/types", "KindF32"), jen.Qual("github.com/siyul-park/minivm/types", "KindF64")).Block(jen.List(jen.Id("result"), jen.Id("_"), jen.Id("_")).Op("=").Id("value").Dot("read").Call(index)),
 					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI64")).Block(jen.Id("result").Op("=").Id("i").Dot("boxI64").Call(jen.Int64().Call(jen.Id("value").Dot("Raw").Call(index)))),
 					jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(
-						jen.Id("result").Op("=").Qual("github.com/siyul-park/minivm/types", "Boxed").Call(jen.Id("value").Dot("Raw").Call(index)),
-						jen.Id("i").Dot("retainBox").Call(jen.Id("result")),
+						jen.List(jen.Id("boxed"), jen.Id("owned"), jen.Id("_")).Op(":=").Id("value").Dot("read").Call(index),
+						jen.Id("result").Op("=").Id("boxed"),
+						jen.If(jen.Op("!").Id("owned")).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("result"))),
 					),
 					jen.Default().Block(jen.Panic(jen.Id("ErrTypeMismatch"))),
 				),
@@ -1811,7 +1807,7 @@ func load(current step, slot, offset int, label string, standalone bool) (value,
 	result := value{op: current.op, head: current.op, boxed: jen.Id(loader.boxed)}
 	result.check = append(result.check, overflow())
 
-	field, indexed := slotField(current.op)
+	_, _, indexed := slotInfo(current.op)
 	loader.decode(&result, current.op)
 	if standalone && (indexed || current.op == instr.CONST_GET) {
 		result.compile = append(result.compile, jen.Id("c").Dot("ip").Op("+=").Lit(loader.width))
@@ -1820,7 +1816,7 @@ func load(current step, slot, offset int, label string, standalone bool) (value,
 	var err error
 	switch current.op {
 	case instr.LOCAL_GET, instr.GLOBAL_GET, instr.UPVAL_GET:
-		err = loader.read(&result, current, field)
+		err = loader.read(&result, current)
 	case instr.CONST_GET:
 		err = loader.constant(&result, current)
 	case instr.I32_CONST, instr.I64_CONST, instr.F32_CONST, instr.F64_CONST:
@@ -1834,16 +1830,16 @@ func load(current step, slot, offset int, label string, standalone bool) (value,
 	return loader.finish(result, current, indexed)
 }
 
-func slotField(op instr.Opcode) (string, bool) {
+func slotInfo(op instr.Opcode) (field, method string, ok bool) {
 	switch op {
 	case instr.LOCAL_GET:
-		return "locals", true
+		return "locals", "local", true
 	case instr.GLOBAL_GET:
-		return "globals", true
+		return "globals", "global", true
 	case instr.UPVAL_GET:
-		return "captures", true
+		return "captures", "upval", true
 	default:
-		return "", false
+		return "", "", false
 	}
 }
 
@@ -1857,10 +1853,6 @@ func temp(index int) string {
 
 func boxed(raw string) string {
 	return "r" + strings.TrimPrefix(raw, "v")
-}
-
-func guard(field, idx string, expected jen.Code, label string) jen.Code {
-	return jen.If(jen.Id(idx).Op(">=").Len(jen.Id("c").Dot(field)).Op("||").Id("c").Dot(field).Index(jen.Id(idx)).Dot("Repr").Call().Op("!=").Add(expected)).Block(reject(label))
 }
 
 func reject(label string) jen.Code {
@@ -2440,9 +2432,7 @@ func br() jen.Code {
 			jen.Panic(jen.Id("err")),
 		),
 	)
-	return jen.Func().Params(jen.Id("c").Op("*").Id("threader")).Params(
-		jen.Func().Params(jen.Id("i").Op("*").Id("Interpreter")),
-	).Block(
+	return threaderFunc(
 		jen.Id("offset").Op(":=").Id("instr").Dot("ParseI16").Call(jen.Id("c").Dot("code"), jen.Id("c").Dot("ip").Op("+").Lit(1)),
 		jen.Id("c").Dot("ip").Op("+=").Lit(3),
 		jen.If(jen.Id("c").Dot("backedge").Op("==").Nil().Op("||").Id("offset").Op(">").Lit(-3)).Block(
@@ -2471,7 +2461,7 @@ func coroDone() jen.Code {
 			jen.List(jen.Id("ref")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
 			jen.If(jen.Id("ref").Dot("Kind").Call().Op("!=").Add(jen.Id("types").Dot("KindRef"))).Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))),
 			jen.List(jen.Id("done")).Op(":=").List(jen.Id("int32").Call(jen.Lit(0))),
-			jen.Switch(jen.List(jen.Id("co")).Op(":=").List(jen.Id("i").Dot("heap").Index(jen.Id("ref").Dot("Ref").Call()).Assert(jen.Type()))).Block(jen.Case(jen.Op("*").Add(jen.Id("Coroutine"))).Block(jen.If(jen.Id("co").Dot("done")).Block(jen.List(jen.Id("done")).Op("=").List(jen.Lit(1)))),
+			jen.Switch(jen.List(jen.Id("co")).Op(":=").List(jen.Id("i").Dot("heap").Index(jen.Id("ref").Dot("Ref").Call()).Assert(jen.Type()))).Block(jen.Case(jen.Op("*").Add(jen.Id("coroutine"))).Block(jen.If(jen.Id("co").Dot("done")).Block(jen.List(jen.Id("done")).Op("=").List(jen.Lit(1)))),
 				jen.Case(jen.Id("types").Dot("Iterator")).Block(jen.If(jen.Id("co").Dot("Done").Call()).Block(jen.List(jen.Id("done")).Op("=").List(jen.Lit(1)))),
 				jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch")))),
 			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxI1").Call(jen.Id("done").Op("!=").Add(jen.Lit(0)))),
@@ -2484,7 +2474,7 @@ func coroValue() jen.Code {
 			jen.List(jen.Id("box")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
 			jen.If(jen.Id("box").Dot("Kind").Call().Op("!=").Add(jen.Id("types").Dot("KindRef"))).Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))),
 			jen.Var().Add(jen.List(jen.Id("val"))).Add(jen.Id("types").Dot("Boxed")),
-			jen.Switch(jen.List(jen.Id("co")).Op(":=").List(jen.Id("i").Dot("heap").Index(jen.Id("box").Dot("Ref").Call()).Assert(jen.Type()))).Block(jen.Case(jen.Op("*").Add(jen.Id("Coroutine"))).Block(jen.List(jen.Id("val")).Op("=").List(jen.Id("co").Dot("value")),
+			jen.Switch(jen.List(jen.Id("co")).Op(":=").List(jen.Id("i").Dot("heap").Index(jen.Id("box").Dot("Ref").Call()).Assert(jen.Type()))).Block(jen.Case(jen.Op("*").Add(jen.Id("coroutine"))).Block(jen.List(jen.Id("val")).Op("=").List(jen.Id("co").Dot("value")),
 				jen.Id("i").Dot("retainBox").Call(jen.Id("val"))),
 				jen.Case(jen.Id("types").Dot("Iterator")).Block(jen.List(jen.Id("current")).Op(":=").List(jen.Id("co").Dot("Current").Call()),
 					jen.If(jen.Id("current").Op("==").Add(jen.Id("nil"))).Block(jen.Id("i").Dot("retain").Call(jen.Lit(0)),
@@ -2530,7 +2520,7 @@ func errorNew() jen.Code {
 			jen.List(jen.Id("code")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
 			jen.If(jen.Id("code").Dot("Kind").Call().Op("!=").Add(jen.Id("types").Dot("KindI32"))).Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))),
 			jen.List(jen.Id("payload")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(2)))),
-			jen.List(jen.Id("addr")).Op(":=").List(jen.Id("i").Dot("keep").Call(jen.Id("types").Dot("NewError").Call(jen.Id("types").Dot("ErrorCode").Call(jen.Id("code").Dot("I32").Call()), jen.Id("i").Dot("message").Call(jen.Id("payload")), jen.Id("payload")))),
+			jen.List(jen.Id("addr")).Op(":=").List(jen.Id("i").Dot("alloc").Call(jen.Id("types").Dot("NewError").Call(jen.Id("types").Dot("ErrorCode").Call(jen.Id("code").Dot("I32").Call()), jen.Id("i").Dot("message").Call(jen.Id("payload")), jen.Id("payload")))),
 			jen.Id("i").Dot("sp").Op("--"),
 			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("addr"))),
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
@@ -3215,7 +3205,7 @@ func mapIter() jen.Code {
 			jen.If(jen.Op("!").Add(jen.Id("iter").Dot("Done").Call())).Block(jen.List(jen.Id("current")).Op(":=").List(jen.Id("iter").Dot("Current").Call()),
 				jen.Switch(jen.List(jen.Id("current")).Op(":=").List(jen.Id("current").Assert(jen.Type()))).Block(jen.Case(jen.Id("types").Dot("Boxed")).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("current"))),
 					jen.Case(jen.Id("types").Dot("Ref")).Block(jen.Id("i").Dot("retain").Call(jen.Id("int").Call(jen.Id("current")))))),
-			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("i").Dot("keep").Call(jen.Id("iter")))),
+			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("iter")))),
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
@@ -3377,7 +3367,7 @@ func mapNew() jen.Code {
 							jen.Id("i").Dot("releaseBox").Call(jen.Id("old").Dot("Value")))),
 					jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))))),
 			jen.Var().Add(jen.List(jen.Id("addr"))).Add(jen.Id("int")),
-			jen.If(jen.Id("typ").Dot("TraceKeys").Op("||").Add(jen.Id("typ").Dot("TraceValues"))).Block(jen.List(jen.Id("addr")).Op("=").List(jen.Id("i").Dot("keep").Call(jen.Id("m")))).Else().Block(jen.List(jen.Id("addr")).Op("=").List(jen.Id("i").Dot("alloc").Call(jen.Id("m")))),
+			jen.If(jen.Id("typ").Dot("TraceKeys").Op("||").Add(jen.Id("typ").Dot("TraceValues"))).Block(jen.List(jen.Id("addr")).Op("=").List(jen.Id("i").Dot("alloc").Call(jen.Id("m")))).Else().Block(jen.List(jen.Id("addr")).Op("=").List(jen.Id("i").Dot("alloc").Call(jen.Id("m")))),
 			jen.List(jen.Id("i").Dot("sp")).Op("=").List(jen.Id("base").Op("+").Add(jen.Lit(1))),
 			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("base"))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("addr"))),
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))
@@ -3556,7 +3546,7 @@ func resume() jen.Code {
 			jen.List(jen.Id("box")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(2)))),
 			jen.If(jen.Id("box").Dot("Kind").Call().Op("!=").Add(jen.Id("types").Dot("KindRef"))).Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))),
 			jen.List(jen.Id("coAddr")).Op(":=").List(jen.Id("box").Dot("Ref").Call()),
-			jen.Switch(jen.List(jen.Id("co")).Op(":=").List(jen.Id("i").Dot("heap").Index(jen.Id("coAddr")).Assert(jen.Type()))).Block(jen.Case(jen.Op("*").Add(jen.Id("Coroutine"))).Block(jen.Block(jen.List(jen.Id("coAddr")).Op(":=").List(jen.Id("coAddr")),
+			jen.Switch(jen.List(jen.Id("co")).Op(":=").List(jen.Id("i").Dot("heap").Index(jen.Id("coAddr")).Assert(jen.Type()))).Block(jen.Case(jen.Op("*").Add(jen.Id("coroutine"))).Block(jen.Block(jen.List(jen.Id("coAddr")).Op(":=").List(jen.Id("coAddr")),
 				jen.List(jen.Id("co")).Op(":=").List(jen.Id("co")),
 				jen.List(jen.Id("in")).Op(":=").List(jen.Id("in")),
 				jen.If(jen.Id("co").Dot("done")).Block(jen.Id("panic").Call(jen.Id("ErrCoroutineDone"))),
@@ -3611,7 +3601,7 @@ func returnOp() jen.Code {
 		jen.Return(jen.Func().Params(jen.Id("i").Add(jen.Op("*").Add(jen.Id("Interpreter")))).Block(jen.If(jen.Id("i").Dot("fp").Op("==").Add(jen.Lit(1))).Block(jen.Id("panic").Call(jen.Id("ErrFrameUnderflow"))),
 			jen.If(jen.Id("i").Dot("fr").Dot("coro").Op("!=").Add(jen.Lit(0))).Block(jen.Block(jen.List(jen.Id("f")).Op(":=").List(jen.Id("i").Dot("fr")),
 				jen.List(jen.Id("coAddr")).Op(":=").List(jen.Id("f").Dot("coro")),
-				jen.List(jen.Id("co"), jen.Id("ok")).Op(":=").List(jen.Id("i").Dot("heap").Index(jen.Id("coAddr")).Assert(jen.Op("*").Add(jen.Id("Coroutine")))),
+				jen.List(jen.Id("co"), jen.Id("ok")).Op(":=").List(jen.Id("i").Dot("heap").Index(jen.Id("coAddr")).Assert(jen.Op("*").Add(jen.Id("coroutine")))),
 				jen.If(jen.Op("!").Add(jen.Id("ok"))).Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))),
 				jen.If(jen.Id("i").Dot("sp").Op("<").Add(jen.Id("f").Dot("returns"))).Block(jen.Id("panic").Call(jen.Id("ErrStackUnderflow"))),
 				jen.If(jen.Id("f").Dot("returns").Op(">").Add(jen.Lit(0))).Block(jen.List(jen.Id("co").Dot("value")).Op("=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1))))).Else().Block(jen.List(jen.Id("co").Dot("value")).Op("=").List(jen.Id("types").Dot("BoxedNull"))),
@@ -3718,7 +3708,7 @@ func stringIter() jen.Code {
 			jen.If(jen.Op("!").Add(jen.Id("ok"))).Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))),
 			jen.List(jen.Id("iter")).Op(":=").List(jen.Id("types").Dot("NewStringIterator").Call(jen.Id("types").Dot("Ref").Call(jen.Id("addr")), jen.Id("val"))),
 			jen.Id("iter").Dot("Next").Call(),
-			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("i").Dot("keep").Call(jen.Id("iter")))),
+			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("iter")))),
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
@@ -3822,14 +3812,11 @@ func structSet() jen.Code {
 						jen.Id("i").Dot("releaseBox").Call(jen.Id("old")),
 						jen.List(jen.Id("s").Dot("Data").Index(jen.Id("idx"))).Op("=").List(jen.Id("uint64").Call(jen.Id("val")))),
 					jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))))),
-				jen.Case(jen.Op("*").Add(jen.Id("HostObject"))).Block(jen.List(jen.Id("typ")).Op(":=").List(jen.Id("s").Dot("Typ")),
-					jen.If(jen.Id("idx").Op("<").Add(jen.Lit(0)).Op("||").Add(jen.Id("idx").Op(">=").Add(jen.Id("len").Call(jen.Id("typ").Dot("Fields"))))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))),
-					jen.List(jen.Id("field")).Op(":=").List(jen.Id("typ").Dot("Fields").Index(jen.Id("idx"))),
-					jen.Switch(jen.Id("field").Dot("Kind")).Block(jen.Case(jen.Id("types").Dot("KindI32"), jen.Id("types").Dot("KindI8"), jen.Id("types").Dot("KindI1"), jen.Id("types").Dot("KindF32"), jen.Id("types").Dot("KindF64")).Block(jen.Id("s").Dot("SetField").Call(jen.Id("idx"), jen.Id("val"))),
+				jen.Case(jen.Op("*").Add(jen.Id("HostObject"))).Block(jen.List(jen.Id("kind"), jen.Id("ok")).Op(":=").List(jen.Id("s").Dot("writeKind").Call(jen.Id("idx"))),
+					jen.If(jen.Op("!").Add(jen.Id("ok"))).Block(jen.Id("panic").Call(jen.Id("ErrSegmentationFault"))),
+					jen.Switch(jen.Id("kind")).Block(jen.Case(jen.Id("types").Dot("KindI32"), jen.Id("types").Dot("KindI8"), jen.Id("types").Dot("KindI1"), jen.Id("types").Dot("KindF32"), jen.Id("types").Dot("KindF64")).Block(jen.Id("s").Dot("SetField").Call(jen.Id("idx"), jen.Id("val"))),
 						jen.Case(jen.Id("types").Dot("KindI64")).Block(jen.Id("s").Dot("SetRaw").Call(jen.Id("idx"), jen.Id("uint64").Call(jen.Id("i").Dot("unboxI64").Call(jen.Id("val"))))),
-						jen.Case(jen.Id("types").Dot("KindRef")).Block(jen.List(jen.Id("old")).Op(":=").List(jen.Id("types").Dot("Boxed").Call(jen.Id("s").Dot("Raw").Call(jen.Id("idx")))),
-							jen.Id("i").Dot("releaseBox").Call(jen.Id("old")),
-							jen.Id("s").Dot("SetRaw").Call(jen.Id("idx"), jen.Id("uint64").Call(jen.Id("val")))),
+						jen.Case(jen.Id("types").Dot("KindRef")).Block(jen.Id("s").Dot("SetRaw").Call(jen.Id("idx"), jen.Id("uint64").Call(jen.Id("val")))),
 						jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))))),
 				jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch")))),
 			jen.Id("i").Dot("release").Call(jen.Id("addr")),
@@ -3885,7 +3872,7 @@ func yield() jen.Code {
 			jen.If(jen.Id("i").Dot("fp").Op("==").Add(jen.Lit(1))).Block(jen.Id("panic").Call(jen.Id("errYield"))),
 			jen.Block(jen.List(jen.Id("f")).Op(":=").List(jen.Id("i").Dot("fr")),
 				jen.List(jen.Id("coAddr")).Op(":=").List(jen.Id("f").Dot("coro")),
-				jen.List(jen.Id("co"), jen.Id("ok")).Op(":=").List(jen.Id("i").Dot("heap").Index(jen.Id("coAddr")).Assert(jen.Op("*").Add(jen.Id("Coroutine")))),
+				jen.List(jen.Id("co"), jen.Id("ok")).Op(":=").List(jen.Id("i").Dot("heap").Index(jen.Id("coAddr")).Assert(jen.Op("*").Add(jen.Id("coroutine")))),
 				jen.If(jen.Op("!").Add(jen.Id("ok"))).Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))),
 				jen.Id("i").Dot("sp").Op("--"),
 				jen.List(jen.Id("co").Dot("value")).Op("=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp"))),

@@ -40,8 +40,8 @@ const (
 	fieldKind   = int(unsafe.Offsetof(types.StructField{}.Kind))
 	fieldSize   = int(unsafe.Sizeof(types.StructField{}))
 	errorValue  = types.ErrorValueOffset
-	coroValue   = int(unsafe.Offsetof(Coroutine{}.value))
-	coroDone    = int(unsafe.Offsetof(Coroutine{}.done))
+	coroValue   = int(unsafe.Offsetof(coroutine{}.value))
+	coroDone    = int(unsafe.Offsetof(coroutine{}.done))
 )
 
 const branchTableLimit = 32
@@ -78,7 +78,7 @@ var (
 	heapString    = itab(types.String(""))
 	heapStruct    = itab((*types.Struct)(nil))
 	heapError     = itab((*types.Error)(nil))
-	heapCoroutine = itab((*Coroutine)(nil))
+	heapCoroutine = itab((*coroutine)(nil))
 )
 
 func newCompiler() (*compiler, error) {
@@ -185,7 +185,14 @@ func (l arm64Lowerer) emitBlock(ctx *lowering, id int, tail []int) bool {
 	}
 	block := ctx.blocks[id]
 	if block.state != nil {
-		l.enterBlock(ctx, block.state)
+		ctx.reuseLocals = false
+		ctx.spare = asm.VReg{}
+		ctx.values = ctx.values[:0]
+		for _, slot := range block.state {
+			ctx.values = append(ctx.values, value{kind: slot.kind, ref: slot.ref, backing: slot.backing, slot: slot.slot})
+		}
+		clear(ctx.frame().state)
+		l.reload(ctx)
 	}
 	done, ok := l.steps(ctx, block.steps)
 	if !ok {
@@ -323,14 +330,8 @@ func (l arm64Lowerer) steps(ctx *lowering, ops []step) (bool, bool) {
 		switch op.op {
 		case instr.NOP:
 			ok = true
-		case instr.I32_CONST:
-			ok = l.i32Const(ctx, op)
-		case instr.I64_CONST:
-			ok = l.i64Const(ctx, op)
-		case instr.F32_CONST:
-			ok = l.f32Const(ctx, op)
-		case instr.F64_CONST:
-			ok = l.f64Const(ctx, op)
+		case instr.I32_CONST, instr.I64_CONST, instr.F32_CONST, instr.F64_CONST:
+			ok = l.constant(ctx, op)
 		case instr.CONST_GET:
 			if op.known {
 				ok = l.constGetKnown(ctx, op)
@@ -810,38 +811,30 @@ func (l arm64Lowerer) fuse(ctx *lowering, ops []step, idx int) int {
 	return 1
 }
 
-func (l arm64Lowerer) i32Const(ctx *lowering, op step) bool {
-	val := uint32(op.args[0])
-	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDI(dst, uint64(val))...)
-	ctx.push(value{reg: dst, kind: types.KindI32, raw: true, known: true, imm: int64(int32(val))})
-	return true
-}
-
-func (l arm64Lowerer) i64Const(ctx *lowering, op step) bool {
-	val := int64(op.args[0])
-	if !types.IsBoxable(val) {
-		return false
-	}
-	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDI(dst, uint64(val))...)
-	ctx.push(value{reg: dst, kind: types.KindI64, raw: true, known: true, imm: val})
-	return true
-}
-
-func (l arm64Lowerer) f32Const(ctx *lowering, op step) bool {
-	bits := uint32(op.args[0])
-	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDI(dst, uint64(bits))...)
-	ctx.push(value{reg: dst, kind: types.KindF32, raw: true})
-	return true
-}
-
-func (l arm64Lowerer) f64Const(ctx *lowering, op step) bool {
+// constant pushes an immediate operand. Integer constants keep their known
+// compile-time value for downstream folding; floats stay raw bits only.
+func (l arm64Lowerer) constant(ctx *lowering, op step) bool {
+	out := value{kind: types.KindI32, raw: true}
 	bits := op.args[0]
-	dst := ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
-	ctx.assembler.Emit(arm64.LDI(dst, bits)...)
-	ctx.push(value{reg: dst, kind: types.KindF64, raw: true})
+	switch op.op {
+	case instr.I32_CONST:
+		bits = uint64(uint32(bits))
+		out.known, out.imm = true, int64(int32(bits))
+	case instr.I64_CONST:
+		if !types.IsBoxable(int64(bits)) {
+			return false
+		}
+		out.kind = types.KindI64
+		out.known, out.imm = true, int64(bits)
+	case instr.F32_CONST:
+		out.kind = types.KindF32
+		bits = uint64(uint32(bits))
+	case instr.F64_CONST:
+		out.kind = types.KindF64
+	}
+	out.reg = ctx.assembler.Reg(asm.RegTypeInt, asm.Width64)
+	ctx.assembler.Emit(arm64.LDI(out.reg, bits)...)
+	ctx.push(out)
 	return true
 }
 
@@ -1251,18 +1244,6 @@ func (l arm64Lowerer) arrayGetKnown(ctx *lowering, op step) bool {
 	}
 	ctx.values = append(pre[:len(pre)-2:len(pre)-2], value{reg: result, kind: kind, raw: true})
 	return true
-}
-
-func (l arm64Lowerer) enterBlock(ctx *lowering, state []slot) {
-	ctx.reuseLocals = false
-	ctx.spare = asm.VReg{}
-	ctx.values = ctx.values[:0]
-	for _, slot := range state {
-		ctx.values = append(ctx.values, value{kind: slot.kind, ref: slot.ref, backing: slot.backing, slot: slot.slot})
-	}
-	frame := ctx.frame()
-	clear(frame.state)
-	l.reload(ctx)
 }
 
 func (l arm64Lowerer) table(ctx *lowering, block block, tail []int) bool {
@@ -4203,12 +4184,17 @@ func (l arm64Lowerer) report(ctx *lowering, vCtrl asm.VReg, trap, nextIP int) {
 }
 
 func (l arm64Lowerer) releaseBoxUnlessEqual(ctx *lowering, old, val asm.VReg, pre []value, ip int) {
-	done := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.CMP(old, val))
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, done))
-	l.releaseBox(ctx, old, pre, ip)
-	ctx.assembler.Bind(done)
+	l.unlessEqual(ctx, old, val, func() { l.releaseBox(ctx, old, pre, ip) })
 	ctx.values = append(ctx.values[:0], pre...)
+}
+
+// unlessEqual emits body guarded by a CMP+BEQ skip over equal registers.
+func (l arm64Lowerer) unlessEqual(ctx *lowering, a, b asm.VReg, body func()) {
+	done := ctx.assembler.Label()
+	ctx.assembler.Emit(arm64.CMP(a, b))
+	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, done))
+	body()
+	ctx.assembler.Bind(done)
 }
 
 func (l arm64Lowerer) releaseBox(ctx *lowering, v asm.VReg, pre []value, ip int) {
@@ -4218,11 +4204,7 @@ func (l arm64Lowerer) releaseBox(ctx *lowering, v asm.VReg, pre []value, ip int)
 }
 
 func (l arm64Lowerer) retainBoxUnlessEqual(ctx *lowering, old, val asm.VReg) {
-	done := ctx.assembler.Label()
-	ctx.assembler.Emit(arm64.CMP(old, val))
-	ctx.assembler.Emit(arm64.BCondLabel(arm64.OpBEQ, done))
-	l.retainBox(ctx, val)
-	ctx.assembler.Bind(done)
+	l.unlessEqual(ctx, old, val, func() { l.retainBox(ctx, val) })
 }
 
 func (l arm64Lowerer) retainBox(ctx *lowering, v asm.VReg) {

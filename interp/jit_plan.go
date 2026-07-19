@@ -35,7 +35,7 @@ type step struct {
 }
 
 type compileInput struct {
-	tracer    *Tracer
+	tracer    *tracer
 	address   int
 	function  *types.Function
 	module    *types.Function
@@ -272,9 +272,7 @@ func staticPlan(input *compileInput) ([]plan, error) {
 			// and per-field kind guards keep the lowering sound regardless.
 			if inst.Opcode() == instr.STRUCT_GET && len(flow) >= 2 {
 				if kind, ok := structFieldKind(heap, flow[len(flow)-2], flow[len(flow)-1]); ok {
-					if seen, ok := zeroBoxed(kind); ok {
-						step.seen = seen
-					}
+					step.seen = types.Zero(kind)
 				}
 			}
 			switch inst.Opcode() {
@@ -323,7 +321,7 @@ func tracePlan(input *compileInput) ([]plan, error) {
 	for _, ip := range input.tracer.anchors(input.address) {
 		a := anchor{addr: input.address, ip: ip}
 		tree := input.tracer.rootAt(a)
-		if tree == nil || tree.root == nil || tree.root.kind == aborted {
+		if tree == nil || tree.root == nil {
 			continue
 		}
 		// A loop anchor accepts a looping root or a returned straight-line
@@ -331,10 +329,22 @@ func tracePlan(input *compileInput) ([]plan, error) {
 		// throw) deopts before the back-edge still compiles as a per-entry
 		// prefix that re-enters at the header next iteration. Carried entry
 		// operands stay rejected either way.
-		if ip != 0 && (tree.root.kind != loop && tree.root.kind != returned || tree.root.carried) {
+		switch tree.root.status {
+		case fallback, completed, partial:
+			if ip != 0 {
+				continue
+			}
+		case returned:
+			if ip != 0 && tree.root.carried {
+				continue
+			}
+		case loop:
+			if ip == 0 || tree.root.carried {
+				continue
+			}
+		case aborted:
 			continue
-		}
-		if ip == 0 && tree.root.kind == loop {
+		default:
 			continue
 		}
 		kind := entryFunction
@@ -358,7 +368,7 @@ func tracePlan(input *compileInput) ([]plan, error) {
 		}
 		var legs []leg
 		for id, tr := range tree.branches {
-			if tr == nil || tr.kind == aborted {
+			if tr == nil {
 				continue
 			}
 			// A loop-kind leg is a loop root of its own: anchored at this
@@ -366,7 +376,11 @@ func tracePlan(input *compileInput) ([]plan, error) {
 			// root, and its edge already wires to the root block); anchored
 			// elsewhere it is a different loop, and splitting it here would
 			// inline that whole loop body instead of using its native entry.
-			if tr.kind == loop {
+			switch tr.status {
+			case aborted, loop:
+				continue
+			case fallback, returned, completed, partial:
+			default:
 				continue
 			}
 			hits := int64(0)
@@ -552,7 +566,7 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 	current := block{anchor: tr.anchor}
 	var blocks []block
 	rejoins := func(op record) bool {
-		return tr.kind == partial && p.kind == entryLoop && op.cut && op.depth == 0 &&
+		return tr.status == partial && p.kind == entryLoop && op.cut && op.depth == 0 &&
 			op.fn == p.anchor.addr && op.target == p.anchor.ip
 	}
 	for idx, op := range tr.ops {
@@ -641,7 +655,9 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 	if len(blocks) > 0 && len(current.steps) == 0 && current.term.kind == terminateFallthrough {
 		return blocks
 	}
-	switch tr.kind {
+	switch tr.status {
+	case fallback:
+		current.term = terminator{kind: terminateFallback, ip: tr.anchor.ip, hot: -1}
 	case returned:
 		current.term = terminator{kind: terminateFallthrough, hot: -1}
 	case completed:
@@ -654,8 +670,10 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 		current.term = terminator{kind: terminateFallback, ip: resume, hot: -1}
 	case loop:
 		current.term = terminator{kind: terminateBranch, ip: tr.anchor.ip, hot: 0, edges: []edge{{anchor: tr.anchor, block: local(0)}}}
+	case aborted:
+		return nil
 	default:
-		current.term = terminator{kind: terminateFallback, ip: tr.anchor.ip, hot: -1}
+		return nil
 	}
 	blocks = append(blocks, current)
 	return blocks
@@ -670,7 +688,7 @@ func suffix(p *plan, tr *trace, idx int, input *compileInput) []int {
 		tail := &trace{
 			anchor: anchor{addr: tr.ops[at].fn, ip: tr.ops[at].ip},
 			ops:    tr.ops[at:],
-			kind:   tr.kind,
+			status: tr.status,
 		}
 		return store(p, split(p, tail, input), true)
 	}
@@ -1032,30 +1050,6 @@ func structFieldKind(heap []types.Value, container, index slot) (types.Kind, boo
 		return 0, false
 	}
 	return typ.Fields[index.val].Kind, true
-}
-
-// zeroBoxed builds the zero boxed value whose Kind() reports exactly kind; the
-// static frontend uses it to synthesize step.seen for lowerers that read the
-// observed result kind.
-func zeroBoxed(kind types.Kind) (types.Boxed, bool) {
-	switch kind {
-	case types.KindI1:
-		return types.BoxI1(false), true
-	case types.KindI8:
-		return types.BoxI8(0), true
-	case types.KindI32:
-		return types.BoxI32(0), true
-	case types.KindI64:
-		return types.BoxI64(0), true
-	case types.KindF32:
-		return types.BoxF32(0), true
-	case types.KindF64:
-		return types.BoxF64(0), true
-	case types.KindRef:
-		return types.BoxedNull, true
-	default:
-		return 0, false
-	}
 }
 
 func args(inst instr.Instruction) [2]uint64 {

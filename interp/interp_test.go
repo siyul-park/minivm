@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type upperMarshaler byte
+type upperCodec byte
 
 type contextKey byte
 
@@ -39,7 +39,7 @@ func (v *trackedValue) Close() error {
 	return nil
 }
 
-func (upperMarshaler) Marshal(_ *Interpreter, v any) (types.Value, error) {
+func (upperCodec) Marshal(_ *Interpreter, v any) (types.Value, error) {
 	s, ok := v.(string)
 	if !ok {
 		return nil, ErrUnsupportedMarshalType
@@ -47,7 +47,7 @@ func (upperMarshaler) Marshal(_ *Interpreter, v any) (types.Value, error) {
 	return types.String(strings.ToUpper(s)), nil
 }
 
-func (upperMarshaler) Unmarshal(_ *Interpreter, v types.Value, dst any) error {
+func (upperCodec) Unmarshal(_ *Interpreter, v types.Value, dst any) error {
 	s, ok := v.(types.String)
 	if !ok {
 		return ErrInvalidUnmarshalTarget
@@ -4010,8 +4010,8 @@ func TestWithHook(t *testing.T) {
 	require.Equal(t, 3, calls)
 }
 
-func TestWithMarshaler(t *testing.T) {
-	i := New(program.New(nil), WithMarshaler(upperMarshaler(0)))
+func TestWithCodec(t *testing.T) {
+	i := New(program.New(nil), WithCodec(upperCodec(0)))
 	defer i.Close()
 
 	v, err := i.Marshal("go")
@@ -4024,43 +4024,51 @@ func TestWithMarshaler(t *testing.T) {
 }
 
 func TestWithConverter(t *testing.T) {
-	conv := Converter{
-		VMType: types.TypeI64,
-		Marshal: func(_ *Interpreter, v any) (types.Value, error) {
-			return types.I64(v.(time.Duration)), nil
-		},
-		Unmarshal: func(_ *Interpreter, v types.Value, dst any) error {
-			*(dst.(*time.Duration)) = time.Duration(v.(types.I64))
-			return nil
-		},
-	}
-	i := New(program.New(nil), WithConverter(reflect.TypeOf(time.Duration(0)), conv))
-	defer i.Close()
+	t.Run("external type", func(t *testing.T) {
+		conv := Converter{
+			VMType: types.TypeI64,
+			Marshal: func(_ *Interpreter, v any) (types.Value, error) {
+				return types.I64(v.(time.Duration)), nil
+			},
+			Unmarshal: func(_ *Interpreter, v types.Value, dst any) error {
+				*(dst.(*time.Duration)) = time.Duration(v.(types.I64))
+				return nil
+			},
+		}
+		i := New(program.New(nil), WithConverter(reflect.TypeOf(time.Duration(0)), conv))
+		defer i.Close()
 
-	v, err := i.Marshal(5 * time.Second)
-	require.NoError(t, err)
-	require.Equal(t, types.I64(5*time.Second), v)
+		v, err := i.Marshal(5 * time.Second)
+		require.NoError(t, err)
+		require.Equal(t, types.I64(5*time.Second), v)
 
-	var dst time.Duration
-	require.NoError(t, i.Unmarshal(v, &dst))
-	require.Equal(t, 5*time.Second, dst)
-}
+		var dst time.Duration
+		require.NoError(t, i.Unmarshal(v, &dst))
+		require.Equal(t, 5*time.Second, dst)
+	})
 
-func TestWithCache(t *testing.T) {
-	prog := program.New([]instr.Instruction{instr.New(instr.NOP)})
-	cache := NewCache(prog)
-	defer cache.Close()
+	t.Run("value interfaces take priority", func(t *testing.T) {
+		conv := Converter{
+			VMType: types.TypeI64,
+			Marshal: func(*Interpreter, any) (types.Value, error) {
+				return types.I64(99), nil
+			},
+			Unmarshal: func(_ *Interpreter, _ types.Value, dst any) error {
+				*dst.(*marshalCustom) = 99
+				return nil
+			},
+		}
+		i := New(program.New(nil), WithConverter(reflect.TypeOf(marshalCustom(0)), conv))
+		defer i.Close()
 
-	i := New(prog, WithCache(cache))
-	defer i.Close()
-	require.Same(t, cache, i.cache)
-}
+		v, err := i.Marshal(marshalCustom(5))
+		require.NoError(t, err)
+		require.Equal(t, types.I32(5), v)
 
-func TestWithTracer(t *testing.T) {
-	tracer := NewTracer()
-	i := New(program.New(nil), WithTracer(tracer))
-	defer i.Close()
-	require.Same(t, tracer, i.tracer)
+		var dst marshalCustom
+		require.NoError(t, i.Unmarshal(types.I32(7), &dst))
+		require.Equal(t, marshalCustom(7), dst)
+	})
 }
 
 func TestWithProfiler(t *testing.T) {

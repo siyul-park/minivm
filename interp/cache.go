@@ -10,24 +10,24 @@ import (
 	"github.com/siyul-park/minivm/program"
 )
 
-// Cache is the shared store of compiled native modules for a pool. It owns the
+// cache is the shared store of compiled native modules for a pool. It owns the
 // per-function compile state machine (cold → build → ready), the executable
 // buffers, and the append-only module list members install from. Profiling and
 // trace recording live in the tracer, not here.
-type Cache struct {
+type cache struct {
 	modules atomic.Pointer[[]*module]
 	buffers []*asm.Buffer
 	hits    []atomic.Int64
 	state   []atomic.Int32
-	active  []cacheRequest
-	pending [][]cacheRequest
+	active  []request
+	pending [][]request
 	refs    atomic.Int64
 	closed  bool
 
 	mu sync.Mutex
 }
 
-type cacheRequest struct {
+type request struct {
 	root    anchor
 	trigger prof.Trigger
 }
@@ -38,21 +38,21 @@ const (
 	cacheReady
 )
 
-func NewCache(prog *program.Program) *Cache {
+func newCache(prog *program.Program) *cache {
 	size := len(prog.Constants) + 1
 	mods := []*module{}
-	c := &Cache{
+	c := &cache{
 		hits:    make([]atomic.Int64, size),
 		state:   make([]atomic.Int32, size),
-		active:  make([]cacheRequest, size),
-		pending: make([][]cacheRequest, size),
+		active:  make([]request, size),
+		pending: make([][]request, size),
 	}
 	c.refs.Store(1)
 	c.modules.Store(&mods)
 	return c
 }
 
-func (c *Cache) Close() error {
+func (c *cache) close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -62,7 +62,7 @@ func (c *Cache) Close() error {
 	return c.release()
 }
 
-func (c *Cache) attach() bool {
+func (c *cache) attach() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -72,43 +72,38 @@ func (c *Cache) attach() bool {
 	return true
 }
 
-func (c *Cache) detach() error {
+func (c *cache) detach() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.release()
 }
 
-func (c *Cache) claim(addr int, threshold int64) (cacheRequest, bool) {
+func (c *cache) claim(addr int, threshold int64) (request, bool) {
 	if threshold < 0 || addr < 0 || addr >= len(c.hits) {
-		return cacheRequest{}, false
+		return request{}, false
 	}
 	if c.state[addr].Load() != cacheCold {
-		return cacheRequest{}, false
+		return request{}, false
 	}
 	if c.hits[addr].Add(1) < threshold {
-		return cacheRequest{}, false
+		return request{}, false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.state[addr].Load() != cacheCold {
-		return cacheRequest{}, false
+		return request{}, false
 	}
-	request := cacheRequest{root: anchor{addr: addr}, trigger: prof.TriggerHot}
+	next := request{root: anchor{addr: addr}, trigger: prof.TriggerHot}
 	if len(c.pending[addr]) > 0 {
-		request = c.pending[addr][0]
+		next = c.pending[addr][0]
 		c.pending[addr] = c.pending[addr][1:]
 	}
-	c.active[addr] = request
+	c.active[addr] = next
 	c.state[addr].Store(cacheBuild)
-	return request, true
+	return next, true
 }
 
-// rearm queues a side-exit build request without disturbing an active owner.
-func (c *Cache) rearm(root anchor) {
-	c.request(cacheRequest{root: root, trigger: prof.TriggerSideExit})
-}
-
-func (c *Cache) request(next cacheRequest) {
+func (c *cache) request(next request) {
 	addr := next.root.addr
 	if addr < 0 || addr >= len(c.state) {
 		return
@@ -116,20 +111,18 @@ func (c *Cache) request(next cacheRequest) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	active := c.active[addr]
-	sameRoot := active.trigger != prof.TriggerNone && active.root == next.root
-	if sameRoot && (active.trigger == prof.TriggerSideExit || next.trigger == prof.TriggerHot) {
+	if active.covers(next) {
 		return
 	}
 	pending := c.pending[addr]
-	for idx := range pending {
-		if pending[idx].root != next.root {
-			continue
-		}
-		if pending[idx].trigger == prof.TriggerSideExit || next.trigger == prof.TriggerHot {
+	for idx, prior := range pending {
+		if prior.covers(next) {
 			return
 		}
-		copy(pending[idx:], pending[idx+1:])
-		pending = pending[:len(pending)-1]
+		if prior.root != next.root {
+			continue
+		}
+		pending = slices.Delete(pending, idx, idx+1)
 		break
 	}
 	if next.trigger == prof.TriggerSideExit {
@@ -147,13 +140,21 @@ func (c *Cache) request(next cacheRequest) {
 	}
 }
 
-func (c *Cache) fail(addr int) {
+// covers reports whether prior already requests the same root with equal or
+// higher priority than next. Side exits replace queued hot roots but never the
+// reverse, so a hot request cannot displace either an active or pending exit.
+func (r request) covers(next request) bool {
+	return r.trigger != prof.TriggerNone && r.root == next.root &&
+		(r.trigger == prof.TriggerSideExit || next.trigger == prof.TriggerHot)
+}
+
+func (c *cache) fail(addr int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.finishLocked(addr)
 }
 
-func (c *Cache) publish(addr int, mod *module, buf *asm.Buffer) {
+func (c *cache) publish(addr int, mod *module, buf *asm.Buffer) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if buf != nil {
@@ -175,7 +176,7 @@ func (c *Cache) publish(addr int, mod *module, buf *asm.Buffer) {
 	c.finishLocked(addr)
 }
 
-func (c *Cache) release() error {
+func (c *cache) release() error {
 	if c.refs.Add(-1) > 0 {
 		return nil
 	}
@@ -189,9 +190,9 @@ func (c *Cache) release() error {
 	return err
 }
 
-func (c *Cache) finishLocked(addr int) {
+func (c *cache) finishLocked(addr int) {
 	if addr >= 0 && addr < len(c.state) {
-		c.active[addr] = cacheRequest{}
+		c.active[addr] = request{}
 		if len(c.pending[addr]) == 0 {
 			c.state[addr].Store(cacheReady)
 		} else {

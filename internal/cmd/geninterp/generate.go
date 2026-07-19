@@ -48,6 +48,8 @@ func render(patterns []pattern) ([]byte, error) {
 	)
 	initialize(file)
 	compile(file)
+	file.Line()
+	threaderMethods(file)
 	return []byte(file.GoString()), nil
 }
 
@@ -64,6 +66,70 @@ func declare(file *jen.File) {
 		jen.Id("ip").Int(),
 		jen.Id("exact").Bool(),
 		jen.Id("backedge").Func().Params(jen.Op("*").Id("Interpreter"), jen.Op("*").Id("frame")).Error(),
+	)
+}
+
+func threaderMethods(file *jen.File) {
+	for _, op := range []instr.Opcode{instr.LOCAL_GET, instr.GLOBAL_GET, instr.UPVAL_GET} {
+		slotMethod(file, op)
+		file.Line()
+	}
+	constantMethod(file)
+	file.Line()
+}
+
+func slotMethod(file *jen.File, op instr.Opcode) {
+	field, method, _ := slotInfo(op)
+	at := jen.Int().Call(jen.Id("c").Dot("code").Index(jen.Id("at")))
+	if op == instr.GLOBAL_GET {
+		at = jen.Qual("github.com/siyul-park/minivm/instr", "ParseU16").Call(jen.Id("c").Dot("code"), jen.Id("at"))
+	}
+	file.Func().Params(jen.Id("c").Op("*").Id("threader")).Id(method).Params(
+		jen.Id("at").Int(),
+		jen.Id("kind").Qual("github.com/siyul-park/minivm/types", "Kind"),
+	).Params(jen.Int(), jen.Bool()).Block(
+		jen.Id("idx").Op(":=").Add(at),
+		jen.If(
+			jen.Id("idx").Op(">=").Len(jen.Id("c").Dot(field)).Op("||").
+				Id("c").Dot(field).Index(jen.Id("idx")).Dot("Repr").Call().Op("!=").Id("kind"),
+		).Block(jen.Return(jen.Lit(0), jen.False())),
+		jen.Return(jen.Id("idx"), jen.True()),
+	)
+}
+
+func constantMethod(file *jen.File) {
+	file.Func().Params(jen.Id("c").Op("*").Id("threader")).Id("constant").Params(
+		jen.Id("at").Int(),
+		jen.Id("kind").Qual("github.com/siyul-park/minivm/types", "Kind"),
+	).Params(
+		jen.Qual("github.com/siyul-park/minivm/types", "Boxed"),
+		jen.Bool(),
+	).Block(
+		jen.Id("idx").Op(":=").Qual("github.com/siyul-park/minivm/instr", "ParseU16").Call(jen.Id("c").Dot("code"), jen.Id("at")),
+		jen.If(jen.Id("idx").Op(">=").Len(jen.Id("c").Dot("constants"))).Block(
+			jen.Return(jen.Qual("github.com/siyul-park/minivm/types", "Boxed").Call(jen.Lit(0)), jen.False()),
+		),
+		jen.Id("boxed").Op(":=").Id("c").Dot("constants").Index(jen.Id("idx")),
+		jen.If(jen.Id("kind").Op("==").Qual("github.com/siyul-park/minivm/types", "KindI64")).Block(
+			jen.Switch(jen.Id("boxed").Dot("Kind").Call()).Block(
+				jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindI64")),
+				jen.Case(jen.Qual("github.com/siyul-park/minivm/types", "KindRef")).Block(
+					jen.Id("ref").Op(":=").Id("boxed").Dot("Ref").Call(),
+					jen.If(jen.Id("ref").Op("<").Lit(0).Op("||").Id("ref").Op(">=").Len(jen.Id("c").Dot("heap"))).Block(
+						jen.Return(jen.Qual("github.com/siyul-park/minivm/types", "Boxed").Call(jen.Lit(0)), jen.False()),
+					),
+					jen.If(jen.List(jen.Id("_"), jen.Id("ok")).Op(":=").Id("c").Dot("heap").Index(jen.Id("ref")).Assert(jen.Qual("github.com/siyul-park/minivm/types", "I64")), jen.Op("!").Id("ok")).Block(
+						jen.Return(jen.Qual("github.com/siyul-park/minivm/types", "Boxed").Call(jen.Lit(0)), jen.False()),
+					),
+				),
+				jen.Default().Block(
+					jen.Return(jen.Qual("github.com/siyul-park/minivm/types", "Boxed").Call(jen.Lit(0)), jen.False()),
+				),
+			),
+		).Else().If(jen.Id("boxed").Dot("Kind").Call().Op("!=").Id("kind")).Block(
+			jen.Return(jen.Qual("github.com/siyul-park/minivm/types", "Boxed").Call(jen.Lit(0)), jen.False()),
+		),
+		jen.Return(jen.Id("boxed"), jen.True()),
 	)
 }
 

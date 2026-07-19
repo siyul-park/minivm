@@ -29,7 +29,7 @@ minivm always compiles bytecode to threaded closures first. The JIT is a lazy AR
 ```text
 program.Program
   -> threader -> []func(*Interpreter)   always available
-  -> Tracer           -> trace snapshots        lazy runtime recording
+  -> tracer           -> trace snapshots        lazy runtime recording
   -> compiler         -> *module                lazy ARM64 backend
 ```
 
@@ -72,9 +72,14 @@ Function entry callables tear down their frame on return. Module entry callables
 
 ## Solo and Pool JIT
 
-Solo interpreters own a private `compiler` and `asm.Buffer`.
+Solo interpreters own a private `tracer` and lazily own a private `compiler`
+and `asm.Buffer`.
 
-Pool interpreters use a shared `Cache`:
+`Pool` is the only public shared-JIT seam. It owns one private `cache` and one
+private `tracer`; borrowed interpreters attach to that state and keep their
+runtime stacks, heaps, dispatch tables, and installed wrappers local.
+
+The shared cache provides:
 
 - trigger counts are atomic
 - one winning interpreter compiles
@@ -109,7 +114,7 @@ The static frontend analyzes basic blocks with one forward fixpoint that tracks 
 
 Top-level modules containing `CALL` or `RETURN_CALL` are rejected because module entry does not implement the framed native-call ABI. Primitive typed-array constants remain ownership-neutral markers until `ARRAY_GET`; native code reloads the current heap cell, guards its shape and index, and retains the marker only on a cold fallback.
 
-## Tracer
+## Trace Recording
 
 Trace recording lives in `interp/trace.go`.
 
@@ -132,17 +137,35 @@ Each recorded step stores the data needed for speculative lowering:
 
 The tracer aborts before host calls and allocation. It records boxed-array writes, ref-field struct writes, and bulk mutations (`ARRAY_FILL`, `ARRAY_COPY`, `ARRAY_APPEND`, `MAP_SET`) only as terminal fallback boundaries. A primitive typed-array write or a scalar struct-field write may remain inside the trace when it occurs in the anchor frame before any inlined call. Capture clones every overlapping visible range of aliased primitive typed arrays into one replacement backing store, preserving slice offsets while leaving the live heap unchanged. Boxed arrays and structs are copied before their terminal mutation. The clone also owns mutable dispatch metadata and suppresses external finalizers, so speculative reference reclamation cannot alter live functions, trace trees, or host resources.
 
-Every recorded `trace` has one outcome: `loop`, `returned`, `completed`, `partial`, or `aborted`. The trace frontend maps usable outcomes to plan terminators and excludes aborted fragments from learned continuations. A loop anchor accepts a `loop` root or a `returned` straight-line root: a body that hits a terminal boundary before its back-edge compiles as a per-entry prefix that deopts at the boundary and re-enters at the header next iteration. When an observed block runs out of steps, lowering decides completion from that block's terminator, never from the root trace. This prevents an unsupported side fragment from being mistaken for normal completion.
+Every recorded `trace` has one status: `fallback`, `loop`, `returned`,
+`completed`, `partial`, or `aborted`. `fallback` is an explicit usable linear
+prefix that ends in threaded fallback. The trace frontend maps usable statuses
+to plan terminators and excludes aborted fragments from learned continuations.
+A loop anchor accepts a `loop` root or a `returned` straight-line root: a body
+that hits a terminal boundary before its back-edge compiles as a per-entry
+prefix that deopts at the boundary and re-enters at the header next iteration.
+When an observed block runs out of steps, lowering decides completion from that
+block's terminator, never from the root trace. This prevents an unsupported side
+fragment from being mistaken for normal completion.
 
-`Tracer.capture` serializes recording and returns an already-published root when one exists, so sampling and compilation cannot record the same entry concurrently. A tracer is bound to one `program.Program`; binding it to a different program clears exact bytecode, tree, and loop caches before reuse.
+`tracer.publish` assigns the status and returns the capture result. It publishes
+accepted and partial roots under the tree lock. `fallback`, `loop`, `returned`,
+and `completed` map to `CaptureOutcomePublished`; `partial` maps to
+`CaptureOutcomePartial`; and `aborted` maps to `CaptureOutcomeRejected` without
+publishing the trace.
 
-`Tracer.headers` (the static loop-header scan) uses `instr.Targets(code, ip)` rather than switching on `BR`/`BR_IF` directly, so a loop formed only through a backward `BR_TABLE` case target is recognized as a header too.
+`tracer.capture` serializes recording and returns an already-published root when
+one exists, so sampling and compilation cannot record the same entry
+concurrently. A tracer is bound to one `program.Program`; `New` isolates it with
+a fresh tracer instead of reusing one bound to another program.
+
+`tracer.headers` (the static loop-header scan) uses `instr.Targets(code, ip)` rather than switching on `BR`/`BR_IF` directly, so a loop formed only through a backward `BR_TABLE` case target is recognized as a header too.
 
 Non-eager functions initially keep the ordinary generated `BR` handler. When periodic sampling first reaches the rounded threshold, the interpreter rethreads that function once with an exact unconditional-backedge callback, preserving installed native handlers and replacing only their threaded fallbacks. Eager mode enables the callback from construction. Cold loops therefore pay no callback, mutex, or header-scan cost.
 
 ## Trace Snapshots
 
-A pool shares one `Tracer`. Tree mutations are locked. `rootAt` returns a stable snapshot containing immutable trace pointers plus copied branch and hit containers.
+A pool shares one private `tracer`. Tree mutations are locked. `rootAt` returns a stable snapshot containing immutable trace pointers plus copied branch and hit containers.
 
 `tracePlan` converts that snapshot into flat plan blocks. It excludes aborted fragments and loop-kind legs (a loop-kind leg is a loop root of its own: anchored at this header it is the root itself and its edge already wires to the root block, anchored elsewhere it is a different loop with its own native entry), sorts continuation roots deterministically, connects internal paths by block ID, and derives spill policy from the final plan rather than exposing the trace tree to lowering.
 
@@ -351,9 +374,12 @@ A trace loop plan may hoist one container: `hoistable` (`interp/jit_plan.go`) pi
 
 The hoisted registers are pure derived state: flush, snapshots, and reload never see them. A zero-byte `asm.OpPseudoUse` keeps them allocated through the backward branch, so the prologue-derived values remain valid across every native iteration. The prologue takes no retain — the local slot keeps carrying the container's refcount — and its shape-guard exit resumes at the header with an empty operand stack. Accesses whose operand does not match the hoisted slot and itab use the per-access derivation unchanged.
 
-## Coroutine Suspension
+## Suspension
 
 `YIELD` and `RESUME` are suspension points. They cannot execute as normal linear native trace operations.
+
+Suspended state is held by the private `coroutine` value; it is not a host
+extension seam.
 
 For anchor-frame suspension:
 
@@ -492,6 +518,7 @@ When changing JIT internals:
 - keep ARM64 lowering in `interp/jit_arm64.go`
 - keep journal layout explicit and stable
 - preserve interpreter/JIT stack and ref ownership symmetry
+- keep shared cache, tracer, and coroutine state private behind `Pool` and `Interpreter`
 - use short, standard names such as `trace`, `root`, `entry`, `loop`, `module`, `lowering`, `guard`, `exit`, `frame`, and `value`
 - avoid adding an abstraction unless it removes real duplication or isolates real complexity
 

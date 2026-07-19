@@ -84,7 +84,7 @@ These candidates were re-reviewed and intentionally retained:
   exposes the initialization side effect.
 - `interp.recordCompile`: `record` is ambiguous among trace, profile, and
   compilation events.
-- `interp.globalKinds` and `interp.globalReprs`: `global` distinguishes these
+- `interp.globalKinds` and `interp.globalDecls`: `global` distinguishes these
   facts from local, capture, stack, and result kinds; removing it weakens call
   sites in the large `Interpreter` receiver.
 - `internal/cmd/geninterp.slotHandler`, `dynamicCall`, `clearRange`,

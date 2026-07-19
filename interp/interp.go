@@ -19,13 +19,14 @@ import (
 type Interpreter struct {
 	ctx         context.Context
 	done        <-chan struct{}
-	tracer      *Tracer
+	tracer      *tracer
 	hook        func(*Interpreter) error
-	marshaler   Marshaler
+	codec       Codec
+	planner     *codec
 	speculative bool
 
 	compiler *compiler
-	cache    *Cache
+	cache    *cache
 	profiler *prof.Profiler
 	samples  *prof.Collector
 	exits    map[anchor]func(*Interpreter)
@@ -90,10 +91,10 @@ type frame struct {
 
 type option struct {
 	hook       func(*Interpreter) error
-	marshaler  Marshaler
+	codec      Codec
 	converters map[reflect.Type]Converter
-	cache      *Cache
-	tracer     *Tracer
+	cache      *cache
+	tracer     *tracer
 	profiler   *prof.Profiler
 	threshold  int
 
@@ -112,14 +113,14 @@ func WithHook(fn func(*Interpreter) error) func(*option) {
 	return func(o *option) { o.hook = fn }
 }
 
-func WithMarshaler(m Marshaler) func(*option) {
-	return func(o *option) { o.marshaler = m }
+func WithCodec(c Codec) func(*option) {
+	return func(o *option) { o.codec = c }
 }
 
 // WithConverter registers VM conversion for an external Go type t that cannot
-// implement ValueMarshaler / ValueUnmarshaler. It layers onto the default
-// marshaler and applies wherever t appears, including nested values. It has no
-// effect when WithMarshaler supplies a non-default Marshaler.
+// implement ValueMarshaler / ValueUnmarshaler. It layers onto the built-in
+// reflection codec and applies wherever t appears, including nested values. It
+// has no effect when WithCodec supplies a custom Codec.
 func WithConverter(t reflect.Type, c Converter) func(*option) {
 	return func(o *option) {
 		if o.converters == nil {
@@ -127,16 +128,6 @@ func WithConverter(t reflect.Type, c Converter) func(*option) {
 		}
 		o.converters[t] = c
 	}
-}
-
-func WithCache(c *Cache) func(*option) {
-	return func(o *option) { o.cache = c }
-}
-
-// WithTracer shares tracing state with interpreters for the same program.
-// A tracer already bound to another program is isolated automatically.
-func WithTracer(t *Tracer) func(*option) {
-	return func(o *option) { o.tracer = t }
 }
 
 // WithProfiler attaches a profiler that aggregates this interpreter's execution
@@ -177,6 +168,16 @@ func WithFuel(val uint64) func(*option) {
 	return func(o *option) { o.fuel = val }
 }
 
+func withCache(c *cache) func(*option) {
+	return func(o *option) { o.cache = c }
+}
+
+// withTracer shares tracing state with interpreters for the same program.
+// A tracer already bound to another program is isolated automatically.
+func withTracer(t *tracer) func(*option) {
+	return func(o *option) { o.tracer = t }
+}
+
 // New builds an interpreter for prog. It trusts prog to be well-formed; run
 // program.Verify(prog) beforehand to reject malformed or untrusted bytecode.
 func New(prog *program.Program, opts ...func(*option)) *Interpreter {
@@ -206,18 +207,14 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 
 	tracer := opt.tracer
 	if tracer == nil || !tracer.bind(prog) {
-		tracer = NewTracer()
+		tracer = newTracer()
 		tracer.bind(prog)
 	}
 	samples := prof.NewCollector()
-	m := opt.marshaler
-	if m == nil {
-		m = DefaultMarshaler
-	}
-	if len(opt.converters) > 0 {
-		if _, ok := m.(*codec); ok {
-			m = &codec{converters: opt.converters}
-		}
+	planner := &codec{converters: opt.converters}
+	activeCodec := Codec(planner)
+	if opt.codec != nil {
+		activeCodec = opt.codec
 	}
 
 	var fuel int64 = -1
@@ -236,7 +233,8 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	i := &Interpreter{
 		tracer:      tracer,
 		hook:        opt.hook,
-		marshaler:   m,
+		codec:       activeCodec,
+		planner:     planner,
 		cache:       opt.cache,
 		profiler:    opt.profiler,
 		samples:     samples,
@@ -280,8 +278,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 		case types.Boxed:
 			val = v
 			if val.Kind() == types.KindRef {
-				addr := val.Ref()
-				if addr >= 0 && addr < len(i.rc) && i.rc[addr] > 0 {
+				if addr := val.Ref(); i.alive(addr) {
 					i.retain(addr)
 				}
 			}
@@ -299,22 +296,28 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 			val = types.BoxF64(float64(v))
 		case types.Ref:
 			val = types.BoxRef(int(v))
-			if addr := int(v); addr >= 0 && addr < len(i.rc) && i.rc[addr] > 0 {
+			if addr := int(v); i.alive(addr) {
 				i.retain(addr)
 			}
 		default:
 			if s, ok := v.(types.String); ok {
 				val = types.BoxRef(int(i.intern(string(s))))
 			} else {
-				val = types.BoxRef(i.keep(v))
+				val = types.BoxRef(i.alloc(v))
 			}
 			for _, ref := range i.refs(v) {
-				if addr := int(ref); addr >= 0 && addr < len(i.rc) && i.rc[addr] > 0 {
+				if addr := int(ref); i.alive(addr) {
 					i.retain(addr)
 				}
 			}
 		}
 		i.constants[j] = val
+		if fn, ok := v.(*types.Function); ok {
+			addr := val.Ref()
+			i.instrs[addr] = fn.Code
+			i.handlers[addr] = fn.Handlers
+			i.coros[addr] = i.yields(fn.Code)
+		}
 	}
 
 	i.base = len(i.heap)
@@ -328,21 +331,10 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 	i.instrs[0] = prog.Code
 	i.handlers[0] = prog.Handlers
 	i.coros[0] = i.yields(prog.Code)
-	for j, v := range prog.Constants {
-		if fn, ok := v.(*types.Function); ok {
-			addr := i.constants[j].Ref()
-			i.instrs[addr] = fn.Code
-			i.handlers[addr] = fn.Handlers
-			i.coros[addr] = i.yields(fn.Code)
-		}
-	}
 
-	// Seed globals from their declarations. Execution specializes from the
-	// current values; globalTypes remains the boundary contract for SetGlobal and
-	// Reset.
-	for j, typ := range i.globalTypes {
-		i.globals[j] = i.zero(typ.Kind())
-	}
+	// Execution specializes from the current global values; globalTypes remains
+	// the boundary contract for SetGlobal and Reset.
+	i.seed()
 
 	i.backedges[0] = nativeBackend && i.eager
 	c := i.threader(i.backedges[0])
@@ -391,11 +383,11 @@ func (i *Interpreter) Run(ctx context.Context) error {
 
 func (i *Interpreter) Marshal(v any) (val types.Value, err error) {
 	defer i.guard(&err)
-	return i.marshaler.Marshal(i, v)
+	return i.codec.Marshal(i, v)
 }
 
 func (i *Interpreter) Unmarshal(v types.Value, dst any) error {
-	return i.marshaler.Unmarshal(i, v, dst)
+	return i.codec.Unmarshal(i, v, dst)
 }
 
 func (i *Interpreter) Context() context.Context {
@@ -585,7 +577,7 @@ func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 	if s, ok := val.(types.String); ok {
 		return int(i.intern(string(s))), nil
 	}
-	addr = i.keep(val)
+	addr = i.alloc(val)
 	if fn, ok := val.(*types.Function); ok {
 		i.bind(addr, fn, true)
 	}
@@ -703,17 +695,21 @@ func (i *Interpreter) Reset() {
 	heap := i.heap[:cap(i.heap)]
 	clear(heap[i.base:])
 	i.heap = heap[:i.base]
-	hits := i.rc[:cap(i.rc)]
-	clear(hits[i.base:])
-	i.rc = hits[:i.base]
+	rc := i.rc[:cap(i.rc)]
+	clear(rc[i.base:])
+	i.rc = rc[:i.base]
 	i.recount()
 	i.free = i.free[:0]
 
-	// Restore each global from its declaration rather than its previous value.
+	i.seed()
+	i.pace()
+}
+
+// seed restores each global from its declaration rather than its previous value.
+func (i *Interpreter) seed() {
 	for idx, typ := range i.globalTypes {
 		i.globals[idx] = i.zero(typ.Kind())
 	}
-	i.pace()
 }
 
 // compile lowers traces already recorded for addr and installs the resulting
@@ -855,10 +851,8 @@ func (i *Interpreter) compile(root anchor) error {
 		i.recordCompile(prof.TriggerHot, compileResult{anchor: root, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonBackendUnavailable})
 		return nil
 	}
-	result := i.compiler.Compile(i, root)
-	i.recordCompile(prof.TriggerHot, result)
+	result := i.attempt(i.compiler, root, prof.TriggerHot)
 	if result.err != nil {
-		i.samples.AddMetric("vm_jit_errors_total", 1)
 		return result.err
 	}
 	if result.module == nil {
@@ -866,6 +860,17 @@ func (i *Interpreter) compile(root anchor) error {
 	}
 	i.install(result.module, true)
 	return nil
+}
+
+// attempt runs one Compile, records the outcome under trigger, and counts any
+// compile error. Acquisition and delivery of the result stay with the caller.
+func (i *Interpreter) attempt(c *compiler, root anchor, trigger prof.Trigger) compileResult {
+	result := c.Compile(i, root)
+	i.recordCompile(trigger, result)
+	if result.err != nil {
+		i.samples.AddMetric("vm_jit_errors_total", 1)
+	}
+	return result
 }
 
 // install accounts a successful Compile and rewires the dispatch table: a
@@ -891,7 +896,10 @@ func (i *Interpreter) install(mod *module, account bool) {
 				i.stubs[a.addr] = i.exits[a]
 			}
 		}
-		if entry.kind == entryFunction {
+		// natives keeps its New-time size: growing it in bind could dangle the
+		// journal base cached by a native frame suspended across a trap
+		// fallback, so dynamically bound functions never get a natives slot.
+		if entry.kind == entryFunction && a.addr < len(i.natives) {
 			atomic.StorePointer(&i.natives[a.addr], entry.callable.Addr())
 		}
 		stats := i.counters(a, entry)
@@ -1038,7 +1046,7 @@ func (i *Interpreter) trace(f *frame) error {
 		return nil
 	}
 	if i.cache != nil {
-		i.cache.request(cacheRequest{root: root, trigger: prof.TriggerHot})
+		i.cache.request(request{root: root, trigger: prof.TriggerHot})
 		return nil
 	}
 	return i.compile(root)
@@ -1204,7 +1212,8 @@ func (i *Interpreter) exit(root anchor) {
 		if hits < exitThreshold || hits%exitThreshold != 0 {
 			return
 		}
-		i.cache.rearm(root)
+		// Queue a side-exit build request without disturbing an active owner.
+		i.cache.request(request{root: root, trigger: prof.TriggerSideExit})
 		return
 	}
 	if hits != exitThreshold {
@@ -1214,10 +1223,8 @@ func (i *Interpreter) exit(root anchor) {
 		return
 	}
 	i.samples.AddMetric("vm_jit_attempts_total", 1)
-	result := i.compiler.Compile(i, root)
-	i.recordCompile(prof.TriggerSideExit, result)
+	result := i.attempt(i.compiler, root, prof.TriggerSideExit)
 	if result.err != nil {
-		i.samples.AddMetric("vm_jit_errors_total", 1)
 		panic(result.err)
 	}
 	if result.module != nil {
@@ -1249,10 +1256,8 @@ func (i *Interpreter) shared(root anchor, trigger prof.Trigger) error {
 		i.cache.fail(addr)
 		return nil
 	}
-	result := compiler.Compile(i, root)
-	i.recordCompile(trigger, result)
+	result := i.attempt(compiler, root, trigger)
 	if result.err != nil {
-		i.samples.AddMetric("vm_jit_errors_total", 1)
 		_ = compiler.Close()
 		i.cache.fail(addr)
 		return result.err
@@ -1587,7 +1592,7 @@ func (i *Interpreter) discard(f *frame) {
 // wrap allocates a heap Error wrapping a Go failure so a recovered trap or
 // host error becomes a catchable guest value while staying errors.Is/As aware.
 func (i *Interpreter) wrap(err error) types.Boxed {
-	return types.BoxRef(i.keep(types.WrapError(ErrorCode(err), err)))
+	return types.BoxRef(i.alloc(types.WrapError(ErrorCode(err), err)))
 }
 
 // uncaught renders an escaped throw as a Go error. A thrown Error surfaces
@@ -1696,7 +1701,7 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 	case types.String:
 		return types.BoxRef(int(i.intern(string(v))))
 	default:
-		addr := i.keep(v)
+		addr := i.alloc(v)
 		return types.BoxRef(addr)
 	}
 }
@@ -1731,10 +1736,6 @@ func (i *Interpreter) unbox(val types.Boxed) types.Value {
 	return v
 }
 
-func (i *Interpreter) keep(val types.Value) int {
-	return i.alloc(val)
-}
-
 func (i *Interpreter) alloc(val types.Value) int {
 	collected := i.target > 0 && len(i.heap)-len(i.free) >= i.target
 	if collected {
@@ -1765,9 +1766,9 @@ func (i *Interpreter) alloc(val types.Value) int {
 		copy(heap, i.heap)
 		i.heap = heap
 
-		hits := make([]int, len(i.rc), c)
-		copy(hits, i.rc)
-		i.rc = hits
+		rc := make([]int, len(i.rc), c)
+		copy(rc, i.rc)
+		i.rc = rc
 	}
 
 	i.heap = append(i.heap, val)
@@ -1838,9 +1839,10 @@ func (i *Interpreter) globalKinds() []types.Kind {
 	return kinds
 }
 
-// globalReprs returns stable representations for threaded handler selection.
-// Dynamic globals stay unknown so their handlers inspect each boxed value.
-func (i *Interpreter) globalReprs() []types.Kind {
+// globalDecls returns the declared kinds for threaded handler selection,
+// unlike globalKinds which observes current values. Dynamic globals stay
+// unknown so their handlers inspect each boxed value.
+func (i *Interpreter) globalDecls() []types.Kind {
 	kinds := make([]types.Kind, len(i.globalTypes))
 	for idx, typ := range i.globalTypes {
 		if typ == types.TypeRef {
@@ -1861,7 +1863,7 @@ func (i *Interpreter) threader(backedge bool) *threader {
 		constants: i.constants,
 		heap:      i.heap,
 		coros:     i.coros,
-		globals:   i.globalReprs(),
+		globals:   i.globalDecls(),
 		exact:     i.tick == 1,
 	}
 	if backedge {

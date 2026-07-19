@@ -15,7 +15,7 @@ import (
 // shared through the pool cache.
 type Pool struct {
 	prog  *program.Program
-	cache *Cache
+	cache *cache
 	opts  []func(*option)
 	size  int
 
@@ -35,12 +35,11 @@ func NewPool(prog *program.Program, size int, opts ...func(*option)) *Pool {
 	if size <= 0 {
 		size = 1
 	}
-	cache := NewCache(prog)
-	tracer := NewTracer()
-	all := make([]func(*option), 0, len(opts)+3)
-	all = append(all, WithMarshaler(&codec{}))
+	cache := newCache(prog)
+	tracer := newTracer()
+	all := make([]func(*option), 0, len(opts)+2)
 	all = append(all, opts...)
-	all = append(all, WithCache(cache), WithTracer(tracer))
+	all = append(all, withCache(cache), withTracer(tracer))
 	return &Pool{
 		prog:  prog,
 		cache: cache,
@@ -122,7 +121,7 @@ func (p *Pool) Close() error {
 		}
 		p.live.Add(-1)
 	}
-	if err := p.cache.Close(); err != nil {
+	if err := p.cache.close(); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
