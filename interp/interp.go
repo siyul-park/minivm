@@ -853,10 +853,8 @@ func (i *Interpreter) compile(root anchor) error {
 		i.recordCompile(prof.TriggerHot, compileResult{anchor: root, outcome: prof.CompileOutcomeRejected, reason: prof.CompileReasonBackendUnavailable})
 		return nil
 	}
-	result := i.compiler.Compile(i, root)
-	i.recordCompile(prof.TriggerHot, result)
+	result := i.attempt(i.compiler, root, prof.TriggerHot)
 	if result.err != nil {
-		i.samples.AddMetric("vm_jit_errors_total", 1)
 		return result.err
 	}
 	if result.module == nil {
@@ -864,6 +862,17 @@ func (i *Interpreter) compile(root anchor) error {
 	}
 	i.install(result.module, true)
 	return nil
+}
+
+// attempt runs one Compile, records the outcome under trigger, and counts any
+// compile error. Acquisition and delivery of the result stay with the caller.
+func (i *Interpreter) attempt(c *compiler, root anchor, trigger prof.Trigger) compileResult {
+	result := c.Compile(i, root)
+	i.recordCompile(trigger, result)
+	if result.err != nil {
+		i.samples.AddMetric("vm_jit_errors_total", 1)
+	}
+	return result
 }
 
 // install accounts a successful Compile and rewires the dispatch table: a
@@ -1213,10 +1222,8 @@ func (i *Interpreter) exit(root anchor) {
 		return
 	}
 	i.samples.AddMetric("vm_jit_attempts_total", 1)
-	result := i.compiler.Compile(i, root)
-	i.recordCompile(prof.TriggerSideExit, result)
+	result := i.attempt(i.compiler, root, prof.TriggerSideExit)
 	if result.err != nil {
-		i.samples.AddMetric("vm_jit_errors_total", 1)
 		panic(result.err)
 	}
 	if result.module != nil {
@@ -1248,10 +1255,8 @@ func (i *Interpreter) shared(root anchor, trigger prof.Trigger) error {
 		i.cache.fail(addr)
 		return nil
 	}
-	result := compiler.Compile(i, root)
-	i.recordCompile(trigger, result)
+	result := i.attempt(compiler, root, trigger)
 	if result.err != nil {
-		i.samples.AddMetric("vm_jit_errors_total", 1)
 		_ = compiler.Close()
 		i.cache.fail(addr)
 		return result.err
