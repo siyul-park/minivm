@@ -323,7 +323,7 @@ func tracePlan(input *compileInput) ([]plan, error) {
 	for _, ip := range input.tracer.anchors(input.address) {
 		a := anchor{addr: input.address, ip: ip}
 		tree := input.tracer.rootAt(a)
-		if tree == nil || tree.root == nil || tree.root.kind == aborted {
+		if tree == nil || tree.root == nil || tree.root.status == aborted {
 			continue
 		}
 		// A loop anchor accepts a looping root or a returned straight-line
@@ -331,10 +331,10 @@ func tracePlan(input *compileInput) ([]plan, error) {
 		// throw) deopts before the back-edge still compiles as a per-entry
 		// prefix that re-enters at the header next iteration. Carried entry
 		// operands stay rejected either way.
-		if ip != 0 && (tree.root.kind != loop && tree.root.kind != returned || tree.root.carried) {
+		if ip != 0 && (tree.root.status != loop && tree.root.status != returned || tree.root.carried) {
 			continue
 		}
-		if ip == 0 && tree.root.kind == loop {
+		if ip == 0 && tree.root.status == loop {
 			continue
 		}
 		kind := entryFunction
@@ -358,7 +358,7 @@ func tracePlan(input *compileInput) ([]plan, error) {
 		}
 		var legs []leg
 		for id, tr := range tree.branches {
-			if tr == nil || tr.kind == aborted {
+			if tr == nil || tr.status == aborted {
 				continue
 			}
 			// A loop-kind leg is a loop root of its own: anchored at this
@@ -366,7 +366,7 @@ func tracePlan(input *compileInput) ([]plan, error) {
 			// root, and its edge already wires to the root block); anchored
 			// elsewhere it is a different loop, and splitting it here would
 			// inline that whole loop body instead of using its native entry.
-			if tr.kind == loop {
+			if tr.status == loop {
 				continue
 			}
 			hits := int64(0)
@@ -552,7 +552,7 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 	current := block{anchor: tr.anchor}
 	var blocks []block
 	rejoins := func(op record) bool {
-		return tr.kind == partial && p.kind == entryLoop && op.cut && op.depth == 0 &&
+		return tr.status == partial && p.kind == entryLoop && op.cut && op.depth == 0 &&
 			op.fn == p.anchor.addr && op.target == p.anchor.ip
 	}
 	for idx, op := range tr.ops {
@@ -641,7 +641,7 @@ func split(p *plan, tr *trace, input *compileInput) []block {
 	if len(blocks) > 0 && len(current.steps) == 0 && current.term.kind == terminateFallthrough {
 		return blocks
 	}
-	switch tr.kind {
+	switch tr.status {
 	case returned:
 		current.term = terminator{kind: terminateFallthrough, hot: -1}
 	case completed:
@@ -670,7 +670,7 @@ func suffix(p *plan, tr *trace, idx int, input *compileInput) []int {
 		tail := &trace{
 			anchor: anchor{addr: tr.ops[at].fn, ip: tr.ops[at].ip},
 			ops:    tr.ops[at:],
-			kind:   tr.kind,
+			status: tr.status,
 		}
 		return store(p, split(p, tail, input), true)
 	}

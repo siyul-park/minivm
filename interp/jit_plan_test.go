@@ -252,12 +252,12 @@ func TestTracePlan(t *testing.T) {
 				{step: step{op: instr.I32_CONST, fn: 1, ip: 0}},
 				{step: step{op: instr.BR_IF, fn: 1, ip: 5}, target: 12, taken: true},
 			},
-			kind: returned,
+			status: returned,
 		}
 		continuation := &trace{
 			anchor: anchor{addr: 1, ip: 12},
 			ops:    []record{{step: step{op: instr.RETURN, fn: 1, ip: 12}}},
-			kind:   returned,
+			status: returned,
 		}
 		tracer := NewTracer()
 		tracer.trees[anchor{addr: 1}] = &tree{
@@ -290,7 +290,7 @@ func TestTracePlan(t *testing.T) {
 		root := &trace{
 			anchor: anchor{addr: 1, ip: 2},
 			ops:    []record{{step: step{op: instr.I32_CONST, fn: 1, ip: 2}}},
-			kind:   loop,
+			status: loop,
 		}
 		leg := &trace{
 			anchor: anchor{addr: 1, ip: 20},
@@ -298,7 +298,7 @@ func TestTracePlan(t *testing.T) {
 				{step: step{op: instr.I32_CONST, fn: 1, ip: 20}},
 				{step: step{fn: 1}, target: 2, cut: true},
 			},
-			kind: partial,
+			status: partial,
 		}
 		tracer := NewTracer()
 		tracer.trees[anchor{addr: 1, ip: 2}] = &tree{
@@ -327,7 +327,7 @@ func TestTracePlan(t *testing.T) {
 		root := &trace{
 			anchor: anchor{addr: 1, ip: 2},
 			ops:    []record{{step: step{op: instr.I32_CONST, fn: 1, ip: 2}}},
-			kind:   loop,
+			status: loop,
 		}
 		leg := &trace{
 			anchor: anchor{addr: 1, ip: 20},
@@ -336,7 +336,7 @@ func TestTracePlan(t *testing.T) {
 				{step: step{op: instr.BR, fn: 1, ip: 25}, target: 2},
 				{step: step{fn: 1}, target: 2, cut: true},
 			},
-			kind: partial,
+			status: partial,
 		}
 		tracer := NewTracer()
 		tracer.trees[anchor{addr: 1, ip: 2}] = &tree{
@@ -366,7 +366,7 @@ func TestTracePlan(t *testing.T) {
 		root := &trace{
 			anchor: anchor{addr: 1, ip: 2},
 			ops:    []record{{step: step{op: instr.I32_CONST, fn: 1, ip: 2}}},
-			kind:   loop,
+			status: loop,
 		}
 		leg := &trace{
 			anchor: anchor{addr: 1, ip: 20},
@@ -375,7 +375,7 @@ func TestTracePlan(t *testing.T) {
 				{step: step{op: instr.BR, fn: 1, ip: 25, depth: 1}, target: 2},
 				{step: step{fn: 1, ip: 2, depth: 1}, target: 2, cut: true},
 			},
-			kind: partial,
+			status: partial,
 		}
 		tracer := NewTracer()
 		tracer.trees[anchor{addr: 1, ip: 2}] = &tree{
@@ -408,7 +408,7 @@ func TestTracePlan(t *testing.T) {
 		root := &trace{
 			anchor: anchor{addr: 1, ip: 2},
 			ops:    []record{{step: step{op: instr.I32_CONST, fn: 1, ip: 2}}},
-			kind:   loop,
+			status: loop,
 		}
 		leg := &trace{
 			anchor: anchor{addr: 1, ip: 20},
@@ -416,7 +416,7 @@ func TestTracePlan(t *testing.T) {
 				{step: step{op: instr.I32_CONST, fn: 1, ip: 20}},
 				{step: step{fn: 1}, target: 50, cut: true},
 			},
-			kind: partial,
+			status: partial,
 		}
 		tracer := NewTracer()
 		tracer.trees[anchor{addr: 1, ip: 2}] = &tree{
@@ -444,12 +444,12 @@ func TestTracePlan(t *testing.T) {
 		root := &trace{
 			anchor: anchor{addr: 1, ip: 2},
 			ops:    []record{{step: step{op: instr.I32_CONST, fn: 1, ip: 2}}},
-			kind:   loop,
+			status: loop,
 		}
 		other := &trace{
 			anchor: anchor{addr: 1, ip: 40},
 			ops:    []record{{step: step{op: instr.I32_CONST, fn: 1, ip: 40}}},
-			kind:   loop,
+			status: loop,
 		}
 		tracer := NewTracer()
 		tracer.trees[anchor{addr: 1, ip: 2}] = &tree{

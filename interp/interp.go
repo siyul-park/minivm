@@ -306,7 +306,7 @@ func New(prog *program.Program, opts ...func(*option)) *Interpreter {
 			if s, ok := v.(types.String); ok {
 				val = types.BoxRef(int(i.intern(string(s))))
 			} else {
-				val = types.BoxRef(i.keep(v))
+				val = types.BoxRef(i.alloc(v))
 			}
 			for _, ref := range i.refs(v) {
 				if addr := int(ref); addr >= 0 && addr < len(i.rc) && i.rc[addr] > 0 {
@@ -585,7 +585,7 @@ func (i *Interpreter) Alloc(val types.Value) (addr int, err error) {
 	if s, ok := val.(types.String); ok {
 		return int(i.intern(string(s))), nil
 	}
-	addr = i.keep(val)
+	addr = i.alloc(val)
 	if fn, ok := val.(*types.Function); ok {
 		i.bind(addr, fn, true)
 	}
@@ -703,9 +703,9 @@ func (i *Interpreter) Reset() {
 	heap := i.heap[:cap(i.heap)]
 	clear(heap[i.base:])
 	i.heap = heap[:i.base]
-	hits := i.rc[:cap(i.rc)]
-	clear(hits[i.base:])
-	i.rc = hits[:i.base]
+	rc := i.rc[:cap(i.rc)]
+	clear(rc[i.base:])
+	i.rc = rc[:i.base]
 	i.recount()
 	i.free = i.free[:0]
 
@@ -1204,7 +1204,8 @@ func (i *Interpreter) exit(root anchor) {
 		if hits < exitThreshold || hits%exitThreshold != 0 {
 			return
 		}
-		i.cache.rearm(root)
+		// Queue a side-exit build request without disturbing an active owner.
+		i.cache.request(cacheRequest{root: root, trigger: prof.TriggerSideExit})
 		return
 	}
 	if hits != exitThreshold {
@@ -1587,7 +1588,7 @@ func (i *Interpreter) discard(f *frame) {
 // wrap allocates a heap Error wrapping a Go failure so a recovered trap or
 // host error becomes a catchable guest value while staying errors.Is/As aware.
 func (i *Interpreter) wrap(err error) types.Boxed {
-	return types.BoxRef(i.keep(types.WrapError(ErrorCode(err), err)))
+	return types.BoxRef(i.alloc(types.WrapError(ErrorCode(err), err)))
 }
 
 // uncaught renders an escaped throw as a Go error. A thrown Error surfaces
@@ -1696,7 +1697,7 @@ func (i *Interpreter) box(val types.Value) types.Boxed {
 	case types.String:
 		return types.BoxRef(int(i.intern(string(v))))
 	default:
-		addr := i.keep(v)
+		addr := i.alloc(v)
 		return types.BoxRef(addr)
 	}
 }
@@ -1731,10 +1732,6 @@ func (i *Interpreter) unbox(val types.Boxed) types.Value {
 	return v
 }
 
-func (i *Interpreter) keep(val types.Value) int {
-	return i.alloc(val)
-}
-
 func (i *Interpreter) alloc(val types.Value) int {
 	collected := i.target > 0 && len(i.heap)-len(i.free) >= i.target
 	if collected {
@@ -1765,9 +1762,9 @@ func (i *Interpreter) alloc(val types.Value) int {
 		copy(heap, i.heap)
 		i.heap = heap
 
-		hits := make([]int, len(i.rc), c)
-		copy(hits, i.rc)
-		i.rc = hits
+		rc := make([]int, len(i.rc), c)
+		copy(rc, i.rc)
+		i.rc = rc
 	}
 
 	i.heap = append(i.heap, val)
@@ -1838,9 +1835,10 @@ func (i *Interpreter) globalKinds() []types.Kind {
 	return kinds
 }
 
-// globalReprs returns stable representations for threaded handler selection.
-// Dynamic globals stay unknown so their handlers inspect each boxed value.
-func (i *Interpreter) globalReprs() []types.Kind {
+// globalDecls returns the declared kinds for threaded handler selection,
+// unlike globalKinds which observes current values. Dynamic globals stay
+// unknown so their handlers inspect each boxed value.
+func (i *Interpreter) globalDecls() []types.Kind {
 	kinds := make([]types.Kind, len(i.globalTypes))
 	for idx, typ := range i.globalTypes {
 		if typ == types.TypeRef {
@@ -1861,7 +1859,7 @@ func (i *Interpreter) threader(backedge bool) *threader {
 		constants: i.constants,
 		heap:      i.heap,
 		coros:     i.coros,
-		globals:   i.globalReprs(),
+		globals:   i.globalDecls(),
 		exact:     i.tick == 1,
 	}
 	if backedge {

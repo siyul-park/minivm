@@ -1314,7 +1314,7 @@ func create(targetSlots int, borrowed bool, advance int) []jen.Code {
 	body = append(body,
 		jen.Id("closure").Op(":=").Qual("github.com/siyul-park/minivm/types", "NewClosure").Call(jen.Id("fn").Dot("Typ"), jen.Qual("github.com/siyul-park/minivm/types", "Ref").Parens(jen.Id("addr")), jen.Id("upvals")),
 		jen.Id("i").Dot("sp").Op("=").Id("base"),
-		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Qual("github.com/siyul-park/minivm/types", "BoxRef").Call(jen.Id("i").Dot("keep").Call(jen.Id("closure"))),
+		jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp")).Op("=").Qual("github.com/siyul-park/minivm/types", "BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("closure"))),
 		jen.Id("i").Dot("sp").Op("++"),
 		jen.Id("i").Dot("fr").Dot("ip").Op("+=").Lit(advance),
 	)
@@ -2530,7 +2530,7 @@ func errorNew() jen.Code {
 			jen.List(jen.Id("code")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))),
 			jen.If(jen.Id("code").Dot("Kind").Call().Op("!=").Add(jen.Id("types").Dot("KindI32"))).Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))),
 			jen.List(jen.Id("payload")).Op(":=").List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(2)))),
-			jen.List(jen.Id("addr")).Op(":=").List(jen.Id("i").Dot("keep").Call(jen.Id("types").Dot("NewError").Call(jen.Id("types").Dot("ErrorCode").Call(jen.Id("code").Dot("I32").Call()), jen.Id("i").Dot("message").Call(jen.Id("payload")), jen.Id("payload")))),
+			jen.List(jen.Id("addr")).Op(":=").List(jen.Id("i").Dot("alloc").Call(jen.Id("types").Dot("NewError").Call(jen.Id("types").Dot("ErrorCode").Call(jen.Id("code").Dot("I32").Call()), jen.Id("i").Dot("message").Call(jen.Id("payload")), jen.Id("payload")))),
 			jen.Id("i").Dot("sp").Op("--"),
 			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("addr"))),
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
@@ -3215,7 +3215,7 @@ func mapIter() jen.Code {
 			jen.If(jen.Op("!").Add(jen.Id("iter").Dot("Done").Call())).Block(jen.List(jen.Id("current")).Op(":=").List(jen.Id("iter").Dot("Current").Call()),
 				jen.Switch(jen.List(jen.Id("current")).Op(":=").List(jen.Id("current").Assert(jen.Type()))).Block(jen.Case(jen.Id("types").Dot("Boxed")).Block(jen.Id("i").Dot("retainBox").Call(jen.Id("current"))),
 					jen.Case(jen.Id("types").Dot("Ref")).Block(jen.Id("i").Dot("retain").Call(jen.Id("int").Call(jen.Id("current")))))),
-			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("i").Dot("keep").Call(jen.Id("iter")))),
+			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("iter")))),
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 
@@ -3377,7 +3377,7 @@ func mapNew() jen.Code {
 							jen.Id("i").Dot("releaseBox").Call(jen.Id("old").Dot("Value")))),
 					jen.Default().Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))))),
 			jen.Var().Add(jen.List(jen.Id("addr"))).Add(jen.Id("int")),
-			jen.If(jen.Id("typ").Dot("TraceKeys").Op("||").Add(jen.Id("typ").Dot("TraceValues"))).Block(jen.List(jen.Id("addr")).Op("=").List(jen.Id("i").Dot("keep").Call(jen.Id("m")))).Else().Block(jen.List(jen.Id("addr")).Op("=").List(jen.Id("i").Dot("alloc").Call(jen.Id("m")))),
+			jen.If(jen.Id("typ").Dot("TraceKeys").Op("||").Add(jen.Id("typ").Dot("TraceValues"))).Block(jen.List(jen.Id("addr")).Op("=").List(jen.Id("i").Dot("alloc").Call(jen.Id("m")))).Else().Block(jen.List(jen.Id("addr")).Op("=").List(jen.Id("i").Dot("alloc").Call(jen.Id("m")))),
 			jen.List(jen.Id("i").Dot("sp")).Op("=").List(jen.Id("base").Op("+").Add(jen.Lit(1))),
 			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("base"))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("addr"))),
 			jen.List(jen.Id("i").Dot("fr").Dot("ip")).Op("+=").List(jen.Lit(3)))))
@@ -3718,7 +3718,7 @@ func stringIter() jen.Code {
 			jen.If(jen.Op("!").Add(jen.Id("ok"))).Block(jen.Id("panic").Call(jen.Id("ErrTypeMismatch"))),
 			jen.List(jen.Id("iter")).Op(":=").List(jen.Id("types").Dot("NewStringIterator").Call(jen.Id("types").Dot("Ref").Call(jen.Id("addr")), jen.Id("val"))),
 			jen.Id("iter").Dot("Next").Call(),
-			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("i").Dot("keep").Call(jen.Id("iter")))),
+			jen.List(jen.Id("i").Dot("stack").Index(jen.Id("i").Dot("sp").Op("-").Add(jen.Lit(1)))).Op("=").List(jen.Id("types").Dot("BoxRef").Call(jen.Id("i").Dot("alloc").Call(jen.Id("iter")))),
 			jen.Id("i").Dot("fr").Dot("ip").Op("++"))))
 }
 

@@ -103,11 +103,6 @@ func (c *Cache) claim(addr int, threshold int64) (cacheRequest, bool) {
 	return request, true
 }
 
-// rearm queues a side-exit build request without disturbing an active owner.
-func (c *Cache) rearm(root anchor) {
-	c.request(cacheRequest{root: root, trigger: prof.TriggerSideExit})
-}
-
 func (c *Cache) request(next cacheRequest) {
 	addr := next.root.addr
 	if addr < 0 || addr >= len(c.state) {

@@ -4604,7 +4604,7 @@ var (
 				}
 				var addr int
 				if typ.TraceKeys || typ.TraceValues {
-					addr = i.keep(m)
+					addr = i.alloc(m)
 				} else {
 					addr = i.alloc(m)
 				}
@@ -5276,7 +5276,7 @@ var (
 				upvals := append([]types.Boxed{}, i.stack[base:base+captures]...)
 				closure := types.NewClosure(fn.Typ, types.Ref(addr), upvals)
 				i.sp = base
-				i.stack[i.sp] = types.BoxRef(i.keep(closure))
+				i.stack[i.sp] = types.BoxRef(i.alloc(closure))
 				i.sp++
 				i.fr.ip += 1
 			}
@@ -5308,7 +5308,7 @@ var (
 						i.retain(int(current))
 					}
 				}
-				i.stack[i.sp-1] = types.BoxRef(i.keep(iter))
+				i.stack[i.sp-1] = types.BoxRef(i.alloc(iter))
 				i.fr.ip++
 			}
 		},
@@ -5338,7 +5338,7 @@ var (
 					panic(ErrTypeMismatch)
 				}
 				payload := i.stack[i.sp-2]
-				addr := i.keep(types.NewError(types.ErrorCode(code.I32()), i.message(payload), payload))
+				addr := i.alloc(types.NewError(types.ErrorCode(code.I32()), i.message(payload), payload))
 				i.sp--
 				i.stack[i.sp-1] = types.BoxRef(addr)
 				i.fr.ip++
@@ -5402,7 +5402,7 @@ var (
 				}
 				iter := types.NewStringIterator(types.Ref(addr), val)
 				iter.Next()
-				i.stack[i.sp-1] = types.BoxRef(i.keep(iter))
+				i.stack[i.sp-1] = types.BoxRef(i.alloc(iter))
 				i.fr.ip++
 			}
 		}}
@@ -38678,7 +38678,7 @@ var (
 						i.retain(addr)
 						closure := types.NewClosure(fn.Typ, types.Ref(addr), upvals)
 						i.sp = base
-						i.stack[i.sp] = types.BoxRef(i.keep(closure))
+						i.stack[i.sp] = types.BoxRef(i.alloc(closure))
 						i.sp++
 						i.fr.ip += 4
 					}

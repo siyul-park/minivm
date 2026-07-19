@@ -48,7 +48,7 @@ func TestTracer_Capture(t *testing.T) {
 		result := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
 		require.NotNil(t, result.trace)
 		tr := result.trace
-		require.Equal(t, completed, tr.kind)
+		require.Equal(t, completed, tr.status)
 		require.NotEmpty(t, tr.ops)
 		require.Equal(t, instr.I32_CONST, tr.ops[len(tr.ops)-1].op)
 	})
@@ -67,7 +67,7 @@ func TestTracer_Capture(t *testing.T) {
 		result := tracer.capture(i, anchor{addr: i.fr.addr, ip: 0})
 		require.NotNil(t, result.trace)
 		tr := result.trace
-		require.Equal(t, returned, tr.kind)
+		require.Equal(t, returned, tr.status)
 		require.NotEmpty(t, tr.ops)
 		require.Equal(t, instr.YIELD, tr.ops[len(tr.ops)-1].op)
 	})
@@ -87,7 +87,7 @@ func TestTracer_Capture(t *testing.T) {
 
 		result := tracer.capture(i, anchor{})
 		require.NotNil(t, result.trace)
-		require.Equal(t, completed, result.trace.kind)
+		require.Equal(t, completed, result.trace.status)
 		require.Equal(t, instr.I32_CONST, result.trace.ops[len(result.trace.ops)-1].op)
 	})
 
@@ -109,7 +109,7 @@ func TestTracer_Capture(t *testing.T) {
 
 		result := tracer.capture(i, anchor{})
 		require.NotNil(t, result.trace)
-		require.Equal(t, completed, result.trace.kind)
+		require.Equal(t, completed, result.trace.status)
 		require.Equal(t, instr.I32_CONST, result.trace.ops[len(result.trace.ops)-1].op)
 	})
 
@@ -131,7 +131,7 @@ func TestTracer_Capture(t *testing.T) {
 
 		result := tracer.capture(i, anchor{})
 		require.NotNil(t, result.trace)
-		require.Equal(t, returned, result.trace.kind)
+		require.Equal(t, returned, result.trace.status)
 		last := result.trace.ops[len(result.trace.ops)-1]
 		require.Equal(t, instr.STRUCT_SET, last.op)
 		require.True(t, last.terminal)
@@ -153,7 +153,7 @@ func TestTracer_Capture(t *testing.T) {
 
 		result := tracer.capture(i, anchor{})
 		require.NotNil(t, result.trace)
-		require.Equal(t, returned, result.trace.kind)
+		require.Equal(t, returned, result.trace.status)
 		require.Equal(t, instr.ARRAY_FILL, result.trace.ops[len(result.trace.ops)-1].op)
 	})
 
@@ -250,7 +250,7 @@ func TestTracer_Capture(t *testing.T) {
 		result := tracer.capture(i, anchor{addr: 0, ip: 0})
 		require.NotNil(t, result.trace)
 		tr := result.trace
-		require.Equal(t, partial, tr.kind)
+		require.Equal(t, partial, tr.status)
 		require.Len(t, tr.ops, opLimit+1)
 		require.True(t, tr.ops[len(tr.ops)-1].cut)
 		require.Equal(t, opLimit, tr.ops[len(tr.ops)-1].target)
@@ -273,7 +273,7 @@ func TestTracer_Capture(t *testing.T) {
 		result := tracer.capture(i, anchor{addr: 0, ip: 0})
 		require.NotNil(t, result.trace)
 		tr := result.trace
-		require.Equal(t, partial, tr.kind)
+		require.Equal(t, partial, tr.status)
 		require.Len(t, tr.ops, 5)
 		require.Equal(t, instr.BR, tr.ops[len(tr.ops)-2].op)
 		require.True(t, tr.ops[len(tr.ops)-1].cut)
@@ -337,12 +337,12 @@ func TestTracer_Capture(t *testing.T) {
 		i := New(prog, WithTracer(tracer), WithThreshold(-1))
 		defer i.Close()
 
-		addr := i.keep(iter)
+		addr := i.alloc(iter)
 		i.stack[0] = types.BoxRef(addr)
 		i.sp = 1
 		root := anchor{}
 		tree := tracer.tree(root)
-		tree.root = &trace{anchor: root, kind: completed}
+		tree.root = &trace{anchor: root, status: completed}
 
 		done := make(chan struct{}, 1)
 		go func() {
@@ -368,10 +368,10 @@ func TestTracer_Capture(t *testing.T) {
 		defer i.Close()
 
 		fn := &types.Function{Code: []byte{byte(instr.NOP)}}
-		addr := i.keep(fn)
+		addr := i.alloc(fn)
 		i.bind(addr, fn, true)
 		root := anchor{addr: addr}
-		tracer.trees[root] = &tree{root: &trace{anchor: root, kind: completed}}
+		tracer.trees[root] = &tree{root: &trace{anchor: root, status: completed}}
 		require.NotEmpty(t, tracer.exactCodes(i)[addr])
 		i.stack[0] = types.BoxRef(addr)
 		i.sp = 1
@@ -404,7 +404,7 @@ func TestTracer_Capture(t *testing.T) {
 		defer i.Close()
 
 		value := &trackedValue{}
-		addr := i.keep(value)
+		addr := i.alloc(value)
 		i.stack[0] = types.BoxRef(addr)
 		i.sp = 1
 
@@ -440,7 +440,7 @@ func TestTracer_OrdersAnchors(t *testing.T) {
 		tracer := NewTracer()
 		const count = 64
 		for ip := count - 1; ip >= 0; ip-- {
-			tracer.trees[anchor{addr: 1, ip: ip}] = &tree{root: &trace{anchor: anchor{addr: 1, ip: ip}, kind: completed}}
+			tracer.trees[anchor{addr: 1, ip: ip}] = &tree{root: &trace{anchor: anchor{addr: 1, ip: ip}, status: completed}}
 		}
 
 		want := make([]int, count)

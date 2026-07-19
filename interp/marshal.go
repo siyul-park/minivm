@@ -571,7 +571,7 @@ func (s *marshalState) wrapFunc(fn reflect.Value, typ *types.FunctionType) *Host
 	// call: the returned HostFunction is a types.Value that can be placed in
 	// program.WithConstants, so pooled Interpreters built from the same
 	// program share this exact *HostFunction (New keeps the constant's Go
-	// value directly - see interp.go's BoxRef(i.keep(v)) path) and may call
+	// value directly - see interp.go's BoxRef(i.alloc(v)) path) and may call
 	// it concurrently from separate goroutines. Call-scoped scratch would
 	// race across such concurrent calls.
 	return NewHostFunction(typ, func(i *Interpreter, params []types.Boxed) ([]types.Boxed, error) {
