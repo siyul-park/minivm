@@ -203,7 +203,7 @@ func (t *Tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 		// A tail call back to the entry anchor closes the trace as a native loop
 		// back-edge: record it as the entry trace's terminal op without stepping
 		// into the reused frame, so it compiles like a loop without tripping the
-		// ip-0 loop ban (the trace stays kind=returned).
+		// ip-0 loop ban (the trace stays status=returned).
 		if op == instr.RETURN_CALL && a.ip == 0 && t.callsAnchor(&clone, a) {
 			st.callee = a.addr
 			tr.ops = append(tr.ops, st)
@@ -213,7 +213,7 @@ func (t *Tracer) capture(i *Interpreter, a anchor) (result captureResult) {
 		}
 		// YIELD/RESUME, exception-producing ops, and bulk mutations have side
 		// effects a trace cannot represent. In the anchor frame, record the op
-		// as the terminal and store kind=returned WITHOUT stepping the clone;
+		// as the terminal and store status=returned WITHOUT stepping the clone;
 		// the JIT lowers this to an unconditional deopt so the threaded handler
 		// performs the real work, and the compiled prefix still runs native.
 		// Abort rather than miscompile when the op sits in an inlined frame

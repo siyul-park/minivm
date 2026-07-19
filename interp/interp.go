@@ -1790,7 +1790,25 @@ func (i *Interpreter) reuse(val types.Value) (int, bool) {
 }
 
 func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
-	i.grow(addr)
+	n := addr + 1
+	if addr >= len(i.instrs) {
+		i.instrs = append(i.instrs, make([][]byte, n-len(i.instrs))...)
+	}
+	if addr >= len(i.code) {
+		i.code = append(i.code, make([][]func(*Interpreter), n-len(i.code))...)
+	}
+	if addr >= len(i.backedges) {
+		i.backedges = append(i.backedges, make([]bool, n-len(i.backedges))...)
+	}
+	if addr >= len(i.stubs) {
+		i.stubs = append(i.stubs, make([]func(*Interpreter), n-len(i.stubs))...)
+	}
+	if addr >= len(i.handlers) {
+		i.handlers = append(i.handlers, make([][]instr.Handler, n-len(i.handlers))...)
+	}
+	if addr >= len(i.coros) {
+		i.coros = append(i.coros, make([]bool, n-len(i.coros))...)
+	}
 	i.backedges[addr] = nativeBackend && i.eager
 	c := i.threader(i.backedges[addr])
 	if dynamic {
@@ -1801,29 +1819,6 @@ func (i *Interpreter) bind(addr int, fn *types.Function, dynamic bool) {
 	i.code[addr] = c.Compile(fn.Code, fn.Slots(), types.Kinds(fn.Captures))
 	if dynamic {
 		i.dynamic[addr] = true
-	}
-}
-
-// grow extends every per-function table to cover addr. natives stays fixed at
-// its New-time size; see install. remove clears the same fields.
-func (i *Interpreter) grow(addr int) {
-	for len(i.instrs) <= addr {
-		i.instrs = append(i.instrs, nil)
-	}
-	for len(i.code) <= addr {
-		i.code = append(i.code, nil)
-	}
-	for len(i.backedges) <= addr {
-		i.backedges = append(i.backedges, false)
-	}
-	for len(i.stubs) <= addr {
-		i.stubs = append(i.stubs, nil)
-	}
-	for len(i.handlers) <= addr {
-		i.handlers = append(i.handlers, nil)
-	}
-	for len(i.coros) <= addr {
-		i.coros = append(i.coros, false)
 	}
 }
 

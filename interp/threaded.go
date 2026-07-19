@@ -64321,3 +64321,53 @@ func (c *threader) Compile(code []byte, locals []types.Kind, captures []types.Ki
 	}
 	return compiled
 }
+
+func (c *threader) local(at int, kind types.Kind) (int, bool) {
+	idx := int(c.code[at])
+	if idx >= len(c.locals) || c.locals[idx].Repr() != kind {
+		return 0, false
+	}
+	return idx, true
+}
+
+func (c *threader) global(at int, kind types.Kind) (int, bool) {
+	idx := instr.ParseU16(c.code, at)
+	if idx >= len(c.globals) || c.globals[idx].Repr() != kind {
+		return 0, false
+	}
+	return idx, true
+}
+
+func (c *threader) upval(at int, kind types.Kind) (int, bool) {
+	idx := int(c.code[at])
+	if idx >= len(c.captures) || c.captures[idx].Repr() != kind {
+		return 0, false
+	}
+	return idx, true
+}
+
+func (c *threader) constant(at int, kind types.Kind) (types.Boxed, bool) {
+	idx := instr.ParseU16(c.code, at)
+	if idx >= len(c.constants) {
+		return types.Boxed(0), false
+	}
+	boxed := c.constants[idx]
+	if kind == types.KindI64 {
+		switch boxed.Kind() {
+		case types.KindI64:
+		case types.KindRef:
+			ref := boxed.Ref()
+			if ref < 0 || ref >= len(c.heap) {
+				return types.Boxed(0), false
+			}
+			if _, ok := c.heap[ref].(types.I64); !ok {
+				return types.Boxed(0), false
+			}
+		default:
+			return types.Boxed(0), false
+		}
+	} else if boxed.Kind() != kind {
+		return types.Boxed(0), false
+	}
+	return boxed, true
+}

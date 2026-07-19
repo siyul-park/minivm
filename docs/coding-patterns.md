@@ -219,13 +219,14 @@ Use this order in every `.go` file:
 4. private constants
 5. public variables
 6. private variables
-7. constructors
-8. public functions
-9. public methods
-10. private methods
-11. private functions
+7. `init` functions
+8. constructors
+9. public functions
+10. public methods
+11. private methods
+12. private functions
 
-Within each group, keep callers before callees. When a package function becomes a method, move it into method territory; constructors stay in the constructor section.
+Within each group, keep callers before callees. Keep `init` after package variables and before every constructor, function, and method. When a package function becomes a method, move it into method territory; constructors stay in the constructor section.
 
 ### 2.5 Order Struct Fields by Meaning
 

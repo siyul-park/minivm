@@ -55,7 +55,7 @@ func TestTracer_Capture(t *testing.T) {
 
 	t.Run("records yield as a terminal deopt boundary", func(t *testing.T) {
 		// YIELD is a suspension point: capture records it as the trace's terminal
-		// (kind=returned) instead of aborting, so the JIT can lower it to a deopt.
+		// (status=returned) instead of aborting, so the JIT can lower it to a deopt.
 		tracer := NewTracer()
 		prog := program.New([]instr.Instruction{
 			instr.New(instr.I32_CONST, 7),

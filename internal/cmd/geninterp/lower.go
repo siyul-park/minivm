@@ -291,57 +291,31 @@ func newLoader(op instr.Opcode, slot, offset int, label string, standalone bool)
 	}
 }
 
-// accessor describes one indexed source opcode: the threader field its
-// static kind check reads (bounds/kind guard, see loader.bounds), the
-// threader method a fused variant calls to decode+guard it in one step
-// (see loader.slotGuard, interp/threader.go), whether its operand is a
-// wide (u16) or narrow (byte) immediate, and how to read the runtime
-// value once the index is known. method and read are empty/nil for
-// CONST_GET, which has its own decode+guard method (threader.constant)
-// and no interpreter-side slice read: its runtime value is a compile-time
-// constant baked into the closure (see loader.constant).
-type accessor struct {
-	field  string
-	method string
-	wide   bool
-	read   func(l loader, result *value)
-}
-
-var accessors = map[instr.Opcode]accessor{
-	instr.LOCAL_GET:  {field: "locals", method: "local", read: readLocal},
-	instr.GLOBAL_GET: {field: "globals", method: "global", wide: true, read: readSlot(func() jen.Code { return jen.Id("i").Dot("globals") })},
-	instr.UPVAL_GET:  {field: "captures", method: "upval", read: readSlot(func() jen.Code { return jen.Id("i").Dot("fr").Dot("upvals") })},
-	instr.CONST_GET:  {field: "constants", wide: true},
-}
-
-// decode emits the compile-time operand decode for standalone (per-opcode
-// table) dispatch. Fused variants skip this: loader.slotGuard and
-// loader.constantGuard call an interp/threader.go helper that decodes and
-// bounds/kind-checks the operand in one step instead.
 func (l loader) decode(result *value, op instr.Opcode) {
 	if !l.standalone {
 		return
 	}
-	a, ok := accessors[op]
-	if !ok {
-		return
-	}
-	if !a.wide {
+	switch op {
+	case instr.LOCAL_GET, instr.UPVAL_GET:
 		result.compile = append(result.compile,
 			jen.Id(l.index).Op(":=").Int().Call(jen.Id("c").Dot("code").Index(jen.Add(l.pos).Op("+").Lit(1))),
 		)
-		return
-	}
-	result.compile = append(result.compile,
-		jen.Id(l.index).Op(":=").Int().Call(
-			jen.Op("*").Parens(jen.Op("*").Uint16()).Call(
-				jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Add(l.pos).Op("+").Lit(1)))),
+	case instr.GLOBAL_GET, instr.CONST_GET:
+		result.compile = append(result.compile,
+			jen.Id(l.index).Op(":=").Int().Call(
+				jen.Op("*").Parens(jen.Op("*").Uint16()).Call(
+					jen.Qual("unsafe", "Pointer").Call(jen.Op("&").Add(jen.Id("c").Dot("code").Index(jen.Add(l.pos).Op("+").Lit(1)))),
+				),
 			),
-		),
-	)
+		)
+	}
 }
 
-func (l loader) read(result *value, current step, field string) error {
+func (l loader) read(result *value, current step) error {
+	field, _, ok := slotInfo(current.op)
+	if !ok {
+		return fmt.Errorf("unsupported slot opcode %s", instr.TypeOf(current.op).Mnemonic)
+	}
 	if current.op == instr.LOCAL_GET || !l.standalone {
 		guard, err := l.bounds(current, field)
 		if err != nil {
@@ -349,47 +323,34 @@ func (l loader) read(result *value, current step, field string) error {
 		}
 		result.compile = append(result.compile, guard...)
 	}
-	if a, ok := accessors[current.op]; ok && a.read != nil {
-		a.read(l, result)
+	switch current.op {
+	case instr.LOCAL_GET:
+		if l.standalone {
+			result.check = append(result.check,
+				jen.Id(l.addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(l.index),
+				jen.If(jen.Id(l.addr).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+			)
+		} else {
+			result.check = append(result.check,
+				jen.If(jen.Id("i").Dot("fr").Dot("bp").Op("+").Id(l.index).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+			)
+			result.body = append(result.body, jen.Id(l.addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(l.index))
+		}
+		result.body = append(result.body, jen.Id(l.boxed).Op(":=").Id("i").Dot("stack").Index(jen.Id(l.addr)))
+	case instr.GLOBAL_GET:
+		result.check = append(result.check,
+			jen.If(jen.Id(l.index).Op(">=").Len(jen.Id("i").Dot("globals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+		)
+		result.body = append(result.body, jen.Id(l.boxed).Op(":=").Id("i").Dot("globals").Index(jen.Id(l.index)))
+	case instr.UPVAL_GET:
+		result.check = append(result.check,
+			jen.If(jen.Id(l.index).Op(">=").Len(jen.Id("i").Dot("fr").Dot("upvals"))).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
+		)
+		result.body = append(result.body, jen.Id(l.boxed).Op(":=").Id("i").Dot("fr").Dot("upvals").Index(jen.Id(l.index)))
 	}
 	return nil
 }
 
-// readLocal reads a local slot. Standalone dispatch (kind unknown at
-// compile time) computes the stack address up front and bounds-checks it
-// directly; fused dispatch (kind already confirmed by loader.bounds) folds
-// the address into the body so it executes only once the guard passed.
-func readLocal(l loader, result *value) {
-	if l.standalone {
-		result.check = append(result.check,
-			jen.Id(l.addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(l.index),
-			jen.If(jen.Id(l.addr).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
-		)
-	} else {
-		result.check = append(result.check,
-			jen.If(jen.Id("i").Dot("fr").Dot("bp").Op("+").Id(l.index).Op(">=").Id("i").Dot("sp")).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
-		)
-		result.body = append(result.body, jen.Id(l.addr).Op(":=").Id("i").Dot("fr").Dot("bp").Op("+").Id(l.index))
-	}
-	result.body = append(result.body, jen.Id(l.boxed).Op(":=").Id("i").Dot("stack").Index(jen.Id(l.addr)))
-}
-
-// readSlot builds a read for a flat interpreter slice indexed directly by
-// the decoded index (GLOBAL_GET's i.globals, UPVAL_GET's i.fr.upvals).
-func readSlot(access func() jen.Code) func(loader, *value) {
-	return func(l loader, result *value) {
-		result.check = append(result.check,
-			jen.If(jen.Id(l.index).Op(">=").Len(access())).Block(jen.Panic(jen.Id("ErrSegmentationFault"))),
-		)
-		result.body = append(result.body, jen.Id(l.boxed).Op(":=").Add(access()).Index(jen.Id(l.index)))
-	}
-}
-
-// bounds emits the compile-time bounds/kind guard for standalone (per-op
-// table) dispatch, where current.kind is always instr.KindAny (the local's
-// static kind is unknown at compile time; slotHandler branches on it at
-// runtime instead). Fused dispatch routes through slotGuard, which folds
-// decode and this guard into one interp/threader.go helper call.
 func (l loader) bounds(current step, field string) ([]jen.Code, error) {
 	if !l.standalone {
 		return l.slotGuard(current)
@@ -401,30 +362,23 @@ func (l loader) bounds(current step, field string) ([]jen.Code, error) {
 	return []jen.Code{jen.If(condition).Block(body...)}, nil
 }
 
-// slotGuard emits a call to the threader accessor for a fused
-// LOCAL_GET/GLOBAL_GET/UPVAL_GET source, replacing the decode+bounds+kind
-// boilerplate with one helper call. Only reachable in fusion mode, where
-// current.kind is always concrete (resolve rejects the pattern otherwise).
 func (l loader) slotGuard(current step) ([]jen.Code, error) {
 	name, ok := kindName(current.kind)
 	if !ok {
 		return nil, fmt.Errorf("unsupported source kind %s", current.kind)
 	}
-	a, ok := accessors[current.op]
-	if !ok || a.method == "" {
+	_, method, ok := slotInfo(current.op)
+	if !ok {
 		return nil, fmt.Errorf("unsupported slot opcode %s", instr.TypeOf(current.op).Mnemonic)
 	}
 	expected := jen.Qual("github.com/siyul-park/minivm/types", "Kind"+name)
 	okName := fmt.Sprintf("ok%d", l.slot)
 	return []jen.Code{
-		jen.List(jen.Id(l.index), jen.Id(okName)).Op(":=").Id("c").Dot(a.method).Call(jen.Add(l.pos).Op("+").Lit(1), expected),
+		jen.List(jen.Id(l.index), jen.Id(okName)).Op(":=").Id("c").Dot(method).Call(jen.Add(l.pos).Op("+").Lit(1), expected),
 		jen.If(jen.Op("!").Id(okName)).Block(reject(l.label)),
 	}, nil
 }
 
-// constant emits the compile-time constant lookup for standalone (per-op
-// table) dispatch, where current.kind is always instr.KindAny. Fused
-// dispatch routes through constantGuard instead.
 func (l loader) constant(result *value, current step) error {
 	if !l.standalone {
 		return l.constantGuard(result, current)
@@ -439,12 +393,6 @@ func (l loader) constant(result *value, current step) error {
 	return nil
 }
 
-// constantGuard emits a call to the threader constant accessor for a
-// fused CONST_GET source, replacing the decode+bounds+kind boilerplate
-// (including the I64 heap-spill dual check) with one helper call. The
-// Ref-typed heap type-assert guard for except[T]/constant[T] patterns
-// stays inline: it targets a different concrete Go type per pattern and
-// has too few variants to be worth a generic helper.
 func (l loader) constantGuard(result *value, current step) error {
 	name, ok := kindName(current.kind)
 	if !ok {
@@ -676,7 +624,7 @@ func source(state *state, current step) (value, error) {
 	if state.standalone {
 		if current.op == instr.CONST_GET {
 			result.handler = constHandler(current, result)
-		} else if field, ok := slotField(current.op); ok {
+		} else if field, _, ok := slotInfo(current.op); ok {
 			result.handler = slotHandler(current, result, field)
 		} else {
 			result.handler = handler(current.op, result.compile, result.push)
@@ -1857,7 +1805,7 @@ func load(current step, slot, offset int, label string, standalone bool) (value,
 	result := value{op: current.op, head: current.op, boxed: jen.Id(loader.boxed)}
 	result.check = append(result.check, overflow())
 
-	field, indexed := slotField(current.op)
+	_, _, indexed := slotInfo(current.op)
 	loader.decode(&result, current.op)
 	if standalone && (indexed || current.op == instr.CONST_GET) {
 		result.compile = append(result.compile, jen.Id("c").Dot("ip").Op("+=").Lit(loader.width))
@@ -1866,7 +1814,7 @@ func load(current step, slot, offset int, label string, standalone bool) (value,
 	var err error
 	switch current.op {
 	case instr.LOCAL_GET, instr.GLOBAL_GET, instr.UPVAL_GET:
-		err = loader.read(&result, current, field)
+		err = loader.read(&result, current)
 	case instr.CONST_GET:
 		err = loader.constant(&result, current)
 	case instr.I32_CONST, instr.I64_CONST, instr.F32_CONST, instr.F64_CONST:
@@ -1880,16 +1828,17 @@ func load(current step, slot, offset int, label string, standalone bool) (value,
 	return loader.finish(result, current, indexed)
 }
 
-// slotField reports the threader kind-slice field backing op's static kind
-// check for the three indexed slot sources (LOCAL_GET/GLOBAL_GET/UPVAL_GET).
-// CONST_GET is excluded: its constants field holds boxed values, not kinds,
-// and its guard logic lives in loader.constant.
-func slotField(op instr.Opcode) (string, bool) {
-	a, ok := accessors[op]
-	if !ok || a.read == nil {
-		return "", false
+func slotInfo(op instr.Opcode) (field, method string, ok bool) {
+	switch op {
+	case instr.LOCAL_GET:
+		return "locals", "local", true
+	case instr.GLOBAL_GET:
+		return "globals", "global", true
+	case instr.UPVAL_GET:
+		return "captures", "upval", true
+	default:
+		return "", "", false
 	}
-	return a.field, true
 }
 
 func overflow() jen.Code {
